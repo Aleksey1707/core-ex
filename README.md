@@ -17,7 +17,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Repo`, `Core.Repo.Pg*`, `Core.Repo.Sc` | контракт репозитория, реализация на Ecto/Postgres, shadow copy |
 | `Core.Es.*` | доменные события, event store, маппинг в outbox |
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
-| `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub |
+| `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub (клиенты — опциональные зависимости, см. ниже) |
 | `Core.Helper.*` | транзакции, savepoint, advisory-локи, after-commit хуки |
 | `Core.*.PromEx` | плагины метрик для outbox, MQ, кешей, воркеров, cgroup |
 
@@ -27,6 +27,35 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 # mix.exs потребителя
 {:core, git: "https://github.com/Aleksey1707/core-ex", tag: "v0.1.0"}
 ```
+
+## Опциональные зависимости: адаптеры брокеров
+
+Клиентские библиотеки брокеров объявлены `optional: true` и **не приходят потребителю
+транзитивно**. Приложению, которому нужен только RabbitMQ Stream, не придётся собирать
+`klife` с его нативными зависимостями (`crc32cer`, `snappyer` — NIF, требуют C-toolchain
+в образе сборки), и наоборот.
+
+| Нужен адаптер | Объявите у себя | Появятся модули |
+|---|---|---|
+| RabbitMQ Stream | `{:rabbitmq_stream, "~> 0.4.2"}` | `Core.Mq.Stream.Connection`, `Core.Mq.Stream.Reader` |
+| Kafka | `{:klife, "~> 1.2"}` | `Core.Mq.Kafka.Writer` |
+| ни одного | — | остальное работает как обычно |
+
+Всё, что не зависит от конкретного клиента, компилируется всегда: `Core.Mq.Writer` /
+`Core.Mq.Reader` (behaviour), `Core.Mq.Stream.Writer` (получает connection-модуль в `opts`),
+`Core.Mq.Stream.Credentials`, `Core.Mq.Codec`, `Core.Outbox.Delivery.Mq`, `Core.PubSub.*`,
+`Core.Mq.PromEx`. Свой адаптер под другой брокер подключается реализацией behaviour —
+менять библиотеку для этого не нужно.
+
+Модули адаптеров объявлены под `if Code.ensure_loaded?/1`: без клиента их просто нет,
+и обращение к ним даёт `UndefinedFunctionError`, а не ошибку компиляции библиотеки.
+
+> **Клиент, добавленный после первой сборки, требует пересборки библиотеки.** Mix не
+> пересобирает уже собранную зависимость из-за появления её optional-зависимости:
+> ```bash
+> mix deps.get && mix deps.compile core --force
+> ```
+> Иначе адаптер останется отсутствующим, хотя клиент уже в `deps`.
 
 ## Конфигурация
 

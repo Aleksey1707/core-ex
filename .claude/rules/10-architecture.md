@@ -80,6 +80,18 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 Адаптеры брокеров (`Mq.Writer` / `Mq.Reader`: `Mq.Stream.*`, `Mq.Kafka.Writer`) живут
 в библиотеке — конкретный клиент/коннекшн приходит им аргументом или через `opts`.
+
+Клиентские библиотеки объявлены `optional: true`, а модули, которым нужен клиент
+на этапе компиляции (`use RabbitMQStream.Connection`, структуры `%OsirisChunk{}`,
+`%Klife.Record{}`), обёрнуты в `if Code.ensure_loaded?/1`. Потребитель платит только
+за тот брокер, который использует. Правила при добавлении нового адаптера:
+
+- всё, что не требует клиента на этапе компиляции, MUST оставаться вне условия
+  (`Mq.Stream.Writer` работает с любым connection-модулем и компилируется всегда);
+- ссылки на условные модули из безусловных (`Mq.PromEx` → `Mq.Stream.Reader`)
+  MUST попадать в `elixirc_options: [no_warn_undefined: [...]]` в `mix.exs`;
+- новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.Reader` —
+  как в библиотеке, так и на стороне потребителя.
 Сконфигурированные клиенты с compile-time привязкой к OTP-приложению
 (например, Kafka `use Klife.Client, otp_app: :my_app`), их supervision, runtime-тумблеры
 и реестры доменных процессов остаются в app-слое потребителя.

@@ -13,6 +13,9 @@ defmodule Core.MixProject do
       aliases: aliases(),
       deps: deps(),
       dialyzer: [plt_add_apps: [:mix], ignore_warnings: "dialyzer.ignore.exs"],
+      # Адаптеры брокеров компилируются условно (см. deps): без клиента модуля нет,
+      # и ссылка на него из Mq.PromEx — не ошибка, а осознанный no-op.
+      elixirc_options: [no_warn_undefined: [Core.Mq.Stream.Reader, Core.Mq.Kafka.Writer]],
       description: "Shared-фундамент приложений: Prim, Codec, Repo, Es, Outbox, MQ, PubSub",
       docs: docs()
     ]
@@ -40,9 +43,10 @@ defmodule Core.MixProject do
       {:telemetry, "~> 1.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:prom_ex, "~> 1.11"},
-      # Брокеры
-      {:rabbitmq_stream, "~> 0.4.2"},
-      {:klife, "~> 1.2"},
+      # Брокеры: клиенты опциональны — адаптер компилируется только у тех
+      # потребителей, кто объявил соответствующий клиент у себя (см. README).
+      {:rabbitmq_stream, "~> 0.4.2", optional: true},
+      {:klife, "~> 1.2", optional: true},
       # Криптография
       {:argon2_elixir, "~> 4.1"},
       {:fernetex, "~> 0.5"},
