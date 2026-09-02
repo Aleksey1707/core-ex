@@ -91,7 +91,13 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 - ссылки на условные модули из безусловных (`Mq.PromEx` → `Mq.Stream.Reader`)
   MUST попадать в `elixirc_options: [no_warn_undefined: [...]]` в `mix.exs`;
 - новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.Reader` —
-  как в библиотеке, так и на стороне потребителя.
+  как в библиотеке, так и на стороне потребителя;
+- у адаптера MUST быть `ensure_available!/0` (образец — `Core.Mq.Stream`): отличает
+  «клиента нет в deps» от «клиент есть, но `core` собран без него»;
+- инвариант «библиотека собирается без клиентов» проверяет `make compile-no-optional`
+  (`mix compile --no-optional-deps --warnings-as-errors`, часть `make`). Собственные
+  тесты библиотеки его не ловят: в них оба клиента есть всегда. Тот же приём —
+  у `ecto_sql` (`if Code.ensure_loaded?(Postgrex) do` вокруг `Ecto.Adapters.Postgres.Connection`).
 Сконфигурированные клиенты с compile-time привязкой к OTP-приложению
 (например, Kafka `use Klife.Client, otp_app: :my_app`), их supervision, runtime-тумблеры
 и реестры доменных процессов остаются в app-слое потребителя.

@@ -10,7 +10,7 @@ repos:
       - id: check-symlinks
 
   # Порядок как у `make` (Makefile default):
-  #   format-check → compile → deps-clean → xref → dialyzer → test → credo → audit
+  #   format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
   - repo: local
     hooks:
       - id: mix-format
@@ -23,6 +23,13 @@ repos:
       - id: mix-compile
         name: "Elixir: mix compile"
         entry: mix compile --warnings-as-errors
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-compile-no-optional
+        name: "Elixir: mix compile --no-optional-deps"
+        entry: mix compile --no-optional-deps --warnings-as-errors
         language: system
         require_serial: true
         pass_filenames: false

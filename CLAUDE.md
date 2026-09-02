@@ -41,8 +41,9 @@ rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib
 
 Клиенты брокеров (`rabbitmq_stream`, `klife`) — `optional: true`; модули адаптеров,
 которым клиент нужен на этапе компиляции, обёрнуты в `if Code.ensure_loaded?/1`
-(`10-architecture.md`). Проверять изменения в `lib/core/mq/**` нужно не только
-`mix test`, но и сборкой у потребителя без клиентов.
+(`10-architecture.md`). Сборку без клиентов проверяет `make compile-no-optional`
+(`mix compile --no-optional-deps`) — он входит в `make` и обязателен после любой
+правки в `lib/core/mq/**`.
 
 ## Правила проекта
 
@@ -63,7 +64,8 @@ rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib
 ## Команды
 
 ```bash
-make                     # format-check → compile → deps-clean → xref → dialyzer → test → credo → audit
+make                     # format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
+make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
 make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
 make infra-down
 mix test                 # :rabbit_stream исключены по умолчанию

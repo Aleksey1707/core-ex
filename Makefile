@@ -2,7 +2,7 @@ DOCKER ?= podman
 
 # Порядок совпадает с .pre-commit-config.yaml.
 .PHONY: default
-default: format-check compile deps-clean xref dialyzer test credo audit
+default: format-check compile compile-no-optional deps-clean xref dialyzer test credo audit
 
 .PHONY: iex
 iex:
@@ -24,6 +24,14 @@ format-check:
 .PHONY: compile
 compile:
 	mix compile --warnings-as-errors
+
+# Сборка без optional-клиентов брокеров (rabbitmq_stream, klife) — так библиотека
+# собирается у потребителя, которому они не нужны. Ловит ссылку на клиента из
+# безусловного модуля раньше, чем её увидит потребитель. Флаг форсирует полную
+# пересборку, следующий обычный `mix compile` возвращает полную сборку сам.
+.PHONY: compile-no-optional
+compile-no-optional:
+	mix compile --no-optional-deps --warnings-as-errors
 
 .PHONY: test
 test: infra-up

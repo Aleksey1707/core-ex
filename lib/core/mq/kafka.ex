@@ -7,22 +7,30 @@ defmodule Core.Mq.Kafka do
   """
 
   @doc """
-  Проверить, что клиент `:klife` присутствует в сборке.
+  Проверить, что клиент `:klife` присутствует и адаптер собран с ним.
 
   Звать из `start/2` приложения-потребителя, если оно использует `Kafka.Writer` —
-  тогда отсутствие клиента даёт понятную ошибку при старте, а не `UndefinedFunctionError`
-  на первом вызове `put`/`put_many` (по образцу
-  `Core.Security.Secret.ensure_configured!/0`).
+  тогда проблема всплывает понятной ошибкой при старте, а не `UndefinedFunctionError`
+  на первом вызове `put`/`put_many` (по образцу `Core.Security.Secret.ensure_configured!/0`).
+  Различает два случая: клиента нет в сборке вовсе, и клиент есть, но библиотека была
+  собрана без него и не пересобрана.
   """
   @spec ensure_available!() :: :ok
 
   def ensure_available! do
-    if Code.ensure_loaded?(Core.Mq.Kafka.Writer) do
-      :ok
-    else
-      raise ArgumentError,
-            "Core.Mq.Kafka: клиент :klife не найден — добавьте {:klife, \"~> 1.2\"} " <>
-              "в deps приложения (README)"
+    cond do
+      not Code.ensure_loaded?(Klife.Record) ->
+        raise ArgumentError,
+              "Core.Mq.Kafka: клиент :klife не найден — добавьте {:klife, \"~> 1.2\"} " <>
+                "в deps приложения (README)"
+
+      not Code.ensure_loaded?(Core.Mq.Kafka.Writer) ->
+        raise ArgumentError,
+              "Core.Mq.Kafka: клиент :klife есть, но библиотека собрана без него — " <>
+                "пересоберите: mix deps.compile core --force (README)"
+
+      true ->
+        :ok
     end
   end
 end

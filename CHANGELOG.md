@@ -26,8 +26,10 @@ namespace `<App>.Core.*`.
   объявлены `optional: true`; `Core.Mq.Stream.{Connection,Reader}` и `Core.Mq.Kafka.Writer`
   компилируются только у тех потребителей, кто объявил соответствующий клиент. Приложению
   с одним брокером больше не нужно тянуть второй (в случае `klife` — вместе с NIF-пакетами
-  `crc32cer` / `snappyer`). Клиент, добавленный после первой сборки, требует
-  `mix deps.compile core --force`.
+  `crc32cer` / `snappyer`). `Core.Mq.Stream.ensure_available!/0` и
+  `Core.Mq.Kafka.ensure_available!/0` — проверки на старте для тех, кто адаптер использует:
+  отличают «клиента нет в deps» от «клиент есть, но `core` собран без него»
+  (`mix deps.compile core --force`).
 - **Boundary-декларация удалена.** Инвариант «Core не знает про домен, приложение
   и web» теперь обеспечен границей OTP-приложений, а не аннотацией.
 
