@@ -114,12 +114,21 @@ config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYP
 def start(_type, _args) do
   Core.Config.validate!()
   Core.Security.Secret.ensure_configured!()
+  # опционально — только если приложение действительно поднимает адаптер:
+  Core.Mq.Stream.ensure_available!()
+  Core.Mq.Kafka.ensure_available!()
   ...
 end
 ```
 
 `validate!/0` проверяет, что обязательные ключи заданы, `dao` и `codec` загружаются
 и экспортируют нужные функции, а `tz` известен базе часовых поясов.
+
+`Core.Mq.Stream.ensure_available!/0` / `Core.Mq.Kafka.ensure_available!/0` — опциональные
+проверки для тех, кто использует соответствующий адаптер: без клиента в `deps` дают понятную
+ошибку при старте приложения, а не `UndefinedFunctionError` на первом вызове адаптера
+где-то в глубине supervisor-дерева. Звать только если адаптер действительно используется —
+для остальных обеих проверка не нужна и не имеет смысла.
 
 ## Что предоставляет потребитель
 
