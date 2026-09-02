@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    env_file: .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  rabbitmq:
+    image: rabbitmq:4.3-management-alpine
+    env_file: .env
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      - "${RABBITMQ_STREAM_PORT:-5552}:5552"
+    expose:
+      # rabbitmq_prometheus: метрики только внутри сети compose (job "rabbitmq")
+      - "15692"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    command: >
+      bash -c "rabbitmq-plugins enable --offline rabbitmq_stream rabbitmq_stream_management
+      rabbitmq_prometheus && rabbitmq-server"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "rabbitmq-diagnostics -q ping && rabbitmq-plugins is_enabled rabbitmq_stream >/dev/null"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 256M
+
+volumes:
+  postgres_data:
+  rabbitmq_data:

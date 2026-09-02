@@ -17,3 +17,62 @@
 
 - Если чего-то не хватает в задаче — явно укажи: «допущение: <кратко, 1 строка>, риск: <низкий/средний/высокий>».
 - Если риск средний/высокий — не применяй допущение без подтверждения пользователя.
+
+## Что это
+
+Библиотека `:core` — shared-фундамент приложений (см. `README.md`). Она подключается
+git-зависимостью к нескольким разным приложениям, поэтому **главный инвариант**:
+в коде библиотеки не должно быть ни одной завязки на конкретное приложение-потребителя.
+
+Проверки инварианта (обязаны быть пустыми):
+
+```bash
+rg 'Mix\.Project' lib                      # имя приложения не выводится из mix-проекта
+rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib
+```
+
+Второй грep должен показывать только чтения `:core`, `:argon2_elixir` и единственное
+обращение через `Core.Config.otp_app()` в `Core.Repo.Pg.Es` (резолв DI доменных
+репозиториев потребителя — задокументировано там же).
+
+Компиляция библиотеки не имеет права требовать конфигурацию потребителя: значения
+`Core.Config` резолвятся в рантайме, а макросы, которым нужен фасад или репозиторий,
+подставляют вызов, а не запечённый модуль.
+
+## Правила проекта
+
+В `.claude/rules/*.md` лежит свод правил. Они обязательны к соблюдению; перед правкой
+соответствующего слоя читай нужный файл.
+
+| Файл | Тема |
+|---|---|
+| `10-architecture.md` | границы библиотеки, `Core.Config`, способы получения зависимостей |
+| `11-domain.md` | `Prim`, `Enum`, `Codec`, `Context`, `Es.Event`, `Version` |
+| `12-errors.md` | `%Error{}` (`:domain` / `:app`), каталоги ошибок, cause-цепочки |
+| `13-repos.md` | `Repo` behaviour / `Repo.Pg` / `Schema` / `Specs`, read vs write |
+| `14-events-outbox.md` | domain events, flush в одной TX, outbox lifecycle |
+| `17-otp-concurrency.md` | дерево процессов, `init/1`/`handle_continue`, таймауты, mailbox |
+| `19-testing.md` | case-модули, round-trip кодеков, golden-фикстуры событий |
+| `20-agreements.md` | CQS, логирование, `@spec`/`@doc`, guards, алиасы, safe vs bang |
+
+## Команды
+
+```bash
+make                     # format-check → compile → deps-clean → xref → dialyzer → test → credo → audit
+make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
+make infra-down
+mix test                 # :rabbit_stream исключены по умолчанию
+make test-stream         # включая тесты живого RabbitMQ Stream
+mix test path/to/file_test.exs:42
+mix credo --strict
+mix dialyzer
+mix docs
+```
+
+Тестовая инфраструктура живёт в самой библиотеке: `Core.TestRepo`, `Core.DataCase`,
+Codec-фикстуры и Prim-фикстуры — в `test/support`, таблица `outbox` — в
+`priv/repo/migrations`. Процессы, которые в приложении поднимает его supervisor,
+стартуют в `test/test_helper.exs`.
+
+Максимальная длина строки — 120 (Credo); длинные литералы `Logger.*` разбивать
+конкатенацией `<>`, а не heredoc.

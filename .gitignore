@@ -22,3 +22,10 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 core-*.tar
 
+# Deploy local env
+deploy/**/.env
+deploy/**/*.env
+!deploy/**/*.env.example
+
+# Dialyzer PLT
+/priv/plts/

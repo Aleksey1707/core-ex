@@ -1,0 +1,70 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: check-executables-have-shebangs
+      - id: check-symlinks
+
+  # Порядок как у `make` (Makefile default):
+  #   format-check → compile → deps-clean → xref → dialyzer → test → credo → audit
+  - repo: local
+    hooks:
+      - id: mix-format
+        name: "Elixir: mix format"
+        entry: mix format --check-formatted
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-compile
+        name: "Elixir: mix compile"
+        entry: mix compile --warnings-as-errors
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-deps-clean
+        name: "Elixir: mix deps.clean --unused"
+        entry: mix deps.clean --unused
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-xref
+        name: "Elixir: mix xref (циклы)"
+        entry: mix xref graph --format cycles --fail-above 0
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-dialyzer
+        name: "Elixir: mix dialyzer"
+        entry: mix dialyzer
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-test
+        name: "Elixir: mix test"
+        entry: make test
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-credo
+        name: "Elixir: mix credo"
+        entry: mix credo --strict
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: mix-audit
+        name: "Elixir: mix deps.audit"
+        entry: mix deps.audit
+        language: system
+        require_serial: true
+        pass_filenames: false
