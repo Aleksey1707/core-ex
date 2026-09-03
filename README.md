@@ -208,24 +208,3 @@ make infra-down
 ```
 
 Свод правил, которым следует код библиотеки, — в `.claude/rules/`.
-
-## Миграция приложения на библиотеку
-
-Чек-лист для приложения, у которого Core лежит внутри (`MyApp.Core.*`):
-
-1. Добавить `{:core, git: ..., tag: ...}` в `deps`.
-2. Удалить `lib/my_app/core/`, `lib/my_app/core.ex` и `test/my_app/core/`.
-3. Переименовать `MyApp.Core.*` → `Core.*` по всему дереву
-   (`grep -rl 'MyApp\.Core' | xargs sed -i 's/\bMyApp\.Core\b/Core/g'`).
-4. Перенести настройки: `config :my_app, MyApp.Core, dao:/codec:/tz:` →
-   `config :core, otp_app: :my_app, dao:, codec:, tz:`;
-   `config :my_app, MyApp.Core.Outbox*` → `config :core, Core.Outbox*`;
-   `config :my_app, MyApp.Core.Security.Secret` → `config :core, Core.Security.Secret`.
-   DI-ключи доменных репозиториев остаются под `:my_app`.
-5. Задать `telemetry_prefix: [:my_app]`, если имена метрик должны сохраниться.
-6. Снять boundary-декларацию `MyApp.Core` и убрать её из `deps:` остальных boundary:
-   инвариант «Core абстрактен» теперь обеспечен границей приложений.
-7. Убрать зависимости, ставшие транзитивными (те, что использовал только Core:
-   `argon2_elixir`, `fernetex`, `rabbitmq_stream`, `klife`, …) — сверьтесь с
-   `mix deps.unlock --unused`.
-8. Перемерить храповик `mix xref graph --format cycles`: часть циклов уходит вместе с Core.
