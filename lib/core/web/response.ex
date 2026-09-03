@@ -16,7 +16,10 @@ defmodule Core.Web.Response do
 
       use Core.Enum,
         name: first_line(@moduledoc),
-        codes: Map.merge(Core.Web.Response.Code.codes(), %{not_found: 4, conflict: 5})
+        codes: Map.merge(Core.Web.Response.Code.codes(), %{not_found: 10, conflict: 11})
+
+  Свои значения нумеруются любыми целыми кодами вне `Core.Web.Response.Code.reserved_codes/0`
+  (`0..9` — за библиотекой); базовым значениям коды менять нельзя. Нарушение — `CompileError`.
 
   Конверт не зависит ни от Plug, ни от Phoenix: это map, который контроллер отдаёт
   своим `json/2`.
@@ -110,6 +113,7 @@ defmodule Core.Web.Response do
 
     ensure_integer_codes!(codes)
     ensure_covers_base!(codes)
+    ensure_codes_contract!(codes)
 
     codes
   end
@@ -161,6 +165,31 @@ defmodule Core.Web.Response do
           description:
             "#{@label}: codes: словарь #{inspect(codes)} не покрывает базовые значения " <>
               "#{inspect(missing)} — их возвращает Core.Web.ErrorMapper.map/2"
+    end
+  end
+
+  # `0..9` — за библиотекой: в них добавляются новые базовые значения, и код, занятый
+  # потребителем, разошёлся бы со следующей версией `Core`.
+  defp ensure_codes_contract!(codes) do
+    base = Response.Code.codes()
+
+    case Enum.reject(codes.codes(), &allowed_code?(&1, base)) do
+      [] ->
+        :ok
+
+      invalid ->
+        raise CompileError,
+          description:
+            "#{@label}: codes: словарь #{inspect(codes)} нарушает контракт кодов " <>
+              "#{inspect(Map.new(invalid))} — базовым значениям коды менять нельзя, " <>
+              "свои нумеруются вне #{inspect(Response.Code.reserved_codes())}"
+    end
+  end
+
+  defp allowed_code?({value, code}, base) do
+    case Map.fetch(base, value) do
+      {:ok, base_code} -> code == base_code
+      :error -> code not in Response.Code.reserved_codes()
     end
   end
 end

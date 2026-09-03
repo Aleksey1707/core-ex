@@ -17,8 +17,8 @@ defmodule Core.Web.ResponseTest do
     assert Response.Code.to_code(:success) == 0
     assert Response.Code.to_code(:domain_error) == 2
     assert Response.Code.to_code(:diff_version) == 3
-    assert Response.Code.to_code(:auth_error) == 254
-    assert Response.Code.to_code(:critical) == 255
+    assert Response.Code.to_code(:auth_error) == 8
+    assert Response.Code.to_code(:critical) == 9
   end
 
   test "values упорядочены по коду" do
@@ -45,7 +45,7 @@ defmodule Core.Web.ResponseTest do
 
       use Core.Enum,
         name: first_line(@moduledoc),
-        codes: Map.merge(Response.Code.codes(), %{not_found: 4, conflict: 5})
+        codes: Map.merge(Response.Code.codes(), %{not_found: 10, conflict: 11, throttled: 4096})
     end
 
     defmodule CustomResponse do
@@ -56,12 +56,13 @@ defmodule Core.Web.ResponseTest do
 
     test "словарь собирается поверх базового, базовые коды не меняются" do
       assert Code.to_code(:domain_error) == Response.Code.to_code(:domain_error)
-      assert Code.to_code(:not_found) == 4
-      assert Code.values() -- Response.Code.values() == ~w(not_found conflict)a
+      assert Code.to_code(:not_found) == 10
+      assert Code.to_code(:throttled) == 4096
+      assert Code.values() -- Response.Code.values() == ~w(not_found conflict throttled)a
     end
 
     test "конверт отдаёт коды своего словаря" do
-      assert CustomResponse.error(:not_found, "нет") == %{code: 4, messages: ["нет"]}
+      assert CustomResponse.error(:not_found, "нет") == %{code: 10, messages: ["нет"]}
       assert CustomResponse.error(:domain_error, "нельзя") == %{code: 2, messages: ["нельзя"]}
       assert CustomResponse.success(%{id: "1"}) == %{code: 0, messages: [], data: %{id: "1"}}
       assert CustomResponse.success() == %{code: 0, messages: []}
@@ -115,6 +116,42 @@ defmodule Core.Web.ResponseTest do
 
             defmodule Core.Web.ResponseTest.StringsResponse do
               use Core.Web.Response, codes: Core.Web.ResponseTest.Strings
+            end
+          end
+        )
+      end
+    end
+
+    test "свой код из зарезервированного диапазона отвергается на компиляции" do
+      assert_raise CompileError, ~r/нарушает контракт кодов/, fn ->
+        Elixir.Code.eval_quoted(
+          quote do
+            defmodule Core.Web.ResponseTest.Reserved do
+              use Core.Enum,
+                name: "Зарезервированный",
+                codes: Map.merge(Core.Web.Response.Code.codes(), %{not_found: 4})
+            end
+
+            defmodule Core.Web.ResponseTest.ReservedResponse do
+              use Core.Web.Response, codes: Core.Web.ResponseTest.Reserved
+            end
+          end
+        )
+      end
+    end
+
+    test "переопределение кода базового значения отвергается на компиляции" do
+      assert_raise CompileError, ~r/нарушает контракт кодов/, fn ->
+        Elixir.Code.eval_quoted(
+          quote do
+            defmodule Core.Web.ResponseTest.Shifted do
+              use Core.Enum,
+                name: "Сдвинутый",
+                codes: Map.merge(Core.Web.Response.Code.codes(), %{diff_version: 12})
+            end
+
+            defmodule Core.Web.ResponseTest.ShiftedResponse do
+              use Core.Web.Response, codes: Core.Web.ResponseTest.Shifted
             end
           end
         )
