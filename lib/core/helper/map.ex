@@ -4,6 +4,8 @@ defmodule Core.Helper.Map do
 
   `field/2` — чтение значения по atom-или-string ключу: JSON из БД приходит со
   строковыми ключами, домен работает с атомами.
+
+  Смена регистра ключей (camelCase ↔ snake_case) — `Core.Helper.Keys`.
   """
 
   @doc "Значение по atom- или одноимённому string-ключу."
@@ -42,5 +44,20 @@ defmodule Core.Helper.Map do
       {:ok, value} -> value
       :error -> nil
     end
+  end
+
+  @doc """
+  Top-level atom-ключи → строки; регистр не меняется.
+
+  Нужно там, где map собирается кодом (atom-ключи), а уезжает в JSON-колонку или наружу,
+  где ключи обязаны быть строками. Смена регистра — `Core.Helper.Keys`.
+  """
+  @spec stringify_keys(map()) :: map()
+
+  def stringify_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {key, value} when is_atom(key) -> {Atom.to_string(key), value}
+      {key, value} when is_binary(key) -> {key, value}
+    end)
   end
 end

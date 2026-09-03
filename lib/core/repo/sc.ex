@@ -98,9 +98,9 @@ defmodule Core.Repo.Sc do
 
   `nil`, если кэш не включён или записи нет.
   """
-  @spec fetch(Context.t(), module(), term()) :: struct() | nil
+  @spec find(Context.t(), module(), term()) :: struct() | nil
 
-  def fetch(context, module, id) when is_atom(module) do
+  def find(context, module, id) when is_atom(module) do
     case Context.find(context, @context_key) do
       nil -> nil
       table -> lookup(table, {module, id})

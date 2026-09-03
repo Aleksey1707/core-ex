@@ -169,5 +169,5 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 ## Источники `%Error{}` в проекте
 
 - Доменные примитивы (`Prim`) и агрегаты — основной источник `%Error{kind: :domain}` (см. `11-domain.md`); агрегаты — через `<Aggregate>.Errors`.
-- Репозитории (`Repo.Pg`): `not_found` / `version_mismatch` / … → `errors_mod.domain(behaviour, code, detail)`; провал `insert`/`update` → `{:error, Ecto.Changeset.t()}` (не `%Error{}`) — см. `13-repos.md`.
+- Репозитории (`Repo.Pg`): `not_found` / `version_mismatch` / … → `errors_mod.domain(behaviour, code, detail)`; незамапленный constraint и провал `changeset/2` → `%Error{kind: :app}` (`ns: :repo`, `code: :write_failed`) — см. `13-repos.md`.
 - Outbox / инфраструктура — часто `%Error{kind: :app}` (см. `14-events-outbox.md`).

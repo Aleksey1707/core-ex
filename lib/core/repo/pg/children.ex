@@ -22,7 +22,7 @@ defmodule Core.Repo.Pg.Children do
 
   Ошибки БД (`insert_all` идёт мимо changeset) мапятся в доменные по имени constraint'а, если у спека
   задан `constraint_errors`: запись оборачивается в SAVEPOINT, чтобы внешняя транзакция не оказалась
-  в aborted-состоянии и доменная ошибка вела себя как changeset-ошибка из `Repo.Pg`.
+  в aborted-состоянии и доменная ошибка вела себя так же, как ошибка записи из `Repo.Pg`.
   """
 
   import Ecto.Query, only: [dynamic: 2, from: 2]

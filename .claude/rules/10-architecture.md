@@ -7,7 +7,8 @@
 
 `:core` — библиотека, подключаемая git-зависимостью к нескольким разным приложениям.
 Она даёт фундамент (`Prim`, `Codec`, `Repo`, `Es`, `Outbox`, `Mq`, `PubSub`, `Helper`,
-PromEx-плагины); домен, web-слой и композиционный корень остаются у потребителя.
+`Web`, PromEx-плагины); домен, роутер с эндпоинтом и композиционный корень остаются
+у потребителя.
 
 | Namespace | Где живёт |
 |---|---|
@@ -101,6 +102,40 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 Сконфигурированные клиенты с compile-time привязкой к OTP-приложению
 (например, Kafka `use Klife.Client, otp_app: :my_app`), их supervision, runtime-тумблеры
 и реестры доменных процессов остаются в app-слое потребителя.
+
+## Граница HTTP
+
+`Core.Web.*` — то, что на границе HTTP одинаково у всех потребителей и **не** зависит
+ни от Phoenix, ни от OpenApiSpex:
+
+| Модуль | Роль |
+|---|---|
+| `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `version/2` (`If-Match`) |
+| `Core.Web.Response` + `Core.Web.Response.Code` | конверт `%{code, messages[, data]}` и его числовые коды; `use Core.Web.Response, codes:` — конверт на своём словаре |
+| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, код конверта, текст, уровень лога}` |
+| `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
+| `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
+
+`Core.Web.*` возвращает **данные**: map конверта и кортеж ответа. Ни `Plug.Conn`, ни
+`Phoenix.Controller` в них не участвуют (исключение — `MetricsPlug`, он и есть плаг).
+
+У потребителя остаются: роутер, эндпоинт, контроллеры, `FallbackController` (тонкая обёртка
+над `ErrorMapper` + `Logger`), OpenApiSpex-схемы и `ApiSpec`, плаги аутентификации
+(они ходят в его домен), презентеры агрегатов.
+
+Правило 401 живёт в `ErrorMapper`: наружу уходит константный текст независимо от причины,
+причина — только в лог (`Error.format_chain/1`).
+
+Расширение под потребителя — тремя независимыми шагами, каждый нужен только по надобности:
+
+| Нужно | Как |
+|---|---|
+| свой статус/код для конкретной ошибки | свои клозы `map/1` перед делегированием в `Core.Web.ErrorMapper.map/2` |
+| больше кодов конверта | свой `Core.Enum` поверх базового: `codes: Map.merge(Core.Web.Response.Code.codes(), %{...})` |
+| отдать эти коды в конверт | `use Core.Web.Response, codes: MyAppWeb.Response.Code` |
+
+Словарь потребителя MUST покрывать `Core.Web.Response.Code.values/0` — эти значения
+возвращает `ErrorMapper.map/2`. Проверяется на компиляции билдером `Core.Web.Response`.
 
 ## Ссылки
 

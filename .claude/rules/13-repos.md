@@ -194,7 +194,7 @@ use Core.Repo, only: :full | :read | :permanent | [atoms]
 | `get!` | `item`; ошибка → `raise Exc` |
 | `list` / `count` | `[item]` / `non_neg_integer()` |
 | `page` | `Pagination.Result.t(item)` |
-| `insert` / `update` / `save` | `{:ok, entity} \| {:error, Error.t()} \| {:error, Ecto.Changeset.t()}` |
+| `insert` / `update` / `save` | `{:ok, entity} \| {:error, Error.t()}` |
 | `delete` | `:ok \| {:error, Error.t()}` |
 | `exists?` / `exists_all?` | `{:ok, boolean()} \| {:error, Error.t()}` |
 
@@ -279,9 +279,13 @@ Read-репозиторий MUST иметь **собственную** Ecto-сх
 
 - Чтение → domain через bang `to_entity` (опция `use Repo.Pg` — bang-mapper); при `shadow_copy?: true` — `Repo.Sc.put`.
 - Чтение read-репо → View через тотальный `to_view` (`Repo.Sc` не участвует).
-- Эталон Sc ключуется парой `{модуль сущности, id}` (`Repo.Sc.fetch(context, Entity, id)`): разные агрегаты могут делить идентификатор (`User` и `UserRoles`).
+- Эталон Sc ключуется парой `{модуль сущности, id}` (`Repo.Sc.find(context, Entity, id)`): разные агрегаты могут делить идентификатор (`User` и `UserRoles`).
 - `not_found` / `version_mismatch` / `incomplete_result` / `no_ids` → `errors.domain(behaviour, code, detail)`.
-- `insert`/`update`/`save`: замапленный DB-constraint → `{:error, Error.t()}` через `errors.domain(behaviour, code, detail)`; незамапленный → `{:error, Ecto.Changeset.t()}`.
+- `insert`/`update`/`save`: замапленный DB-constraint → `{:error, Error.t()}` через
+  `errors.domain(behaviour, code, detail)`; незамапленный (и любой провал `changeset/2`) →
+  `%Error{kind: :app, ns: :repo, code: :write_failed}`, который строит сам `Repo.Pg`:
+  в `detail` — `%{schema:, errors: %{поле => [текст]}}` (`Repo.Pg.changeset_errors/1`).
+  `Ecto.Changeset` наружу не выходит — контракт репозитория не знает про Ecto.
 - `delete` — hard `delete_all` по scope; soft-delete — через update entity.
 - Scope: `read_scope` = query + `default_filters`; `write_scope` = без order/preload/select.
 - `write_insert/4` / `write_update/4` — те же записи, но без decode строки обратно в domain

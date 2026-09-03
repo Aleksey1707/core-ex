@@ -151,6 +151,22 @@ defmodule Core.Repo.PgTest do
     def update(changeset, _opts), do: {:ok, Ecto.Changeset.apply_changes(changeset)}
   end
 
+  defmodule FailingDao do
+    def insert(changeset, _opts), do: {:error, %{changeset | errors: failure(), valid?: false}}
+
+    def one(_query, _opts), do: %WriteSchema{id: "1", name: "старое"}
+
+    def update(changeset, _opts), do: {:error, %{changeset | errors: failure(), valid?: false}}
+
+    defp failure do
+      [
+        {:name,
+         {"should be at least %{count} character(s)",
+          [count: 3, validation: :length, kind: :min, type: :string]}}
+      ]
+    end
+  end
+
   defmodule SampleView do
     defstruct [:id, :name, :version]
 
@@ -441,6 +457,33 @@ defmodule Core.Repo.PgTest do
                      end
                    )
                  end
+  end
+
+  test "незамапленный провал записи становится прикладной ошибкой, а не changeset'ом" do
+    pg = %{write_pg(raising_to_entity()) | dao: FailingDao}
+    entity = %{id: "1", name: "но"}
+
+    assert {:error, %Error{kind: :app, ns: :repo, code: :write_failed} = error} =
+             Core.Repo.Pg.insert(pg, entity, Context.new())
+
+    assert error.detail.schema == WriteSchema
+    assert error.detail.errors == %{name: ["should be at least 3 character(s)"]}
+
+    assert {:error, %Error{kind: :app, code: :write_failed}} =
+             Core.Repo.Pg.update(pg, entity, Context.new())
+
+    assert {:error, %Error{kind: :app, code: :write_failed}} =
+             Core.Repo.Pg.write_insert(pg, entity, Context.new())
+  end
+
+  test "changeset_errors подставляет опции в шаблон сообщения" do
+    changeset = %Ecto.Changeset{
+      errors: [{:name, {"should be at least %{count} character(s)", [count: 3]}}],
+      valid?: false
+    }
+
+    assert %{name: ["should be at least 3 character(s)"]} =
+             Core.Repo.Pg.changeset_errors(changeset)
   end
 
   test "match_constraint_error находит unique по полю" do

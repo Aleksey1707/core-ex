@@ -17,7 +17,7 @@ defmodule Core.Repo.ScTest do
     entity = %Entity{id: "1", name: "a"}
 
     assert ^entity = Repo.Sc.put(ctx, entity)
-    assert %Entity{id: "1", name: "a"} = Repo.Sc.fetch(ctx, Entity, "1")
+    assert %Entity{id: "1", name: "a"} = Repo.Sc.find(ctx, Entity, "1")
   end
 
   test "разные сущности с одинаковым id не подменяют друг друга" do
@@ -28,8 +28,8 @@ defmodule Core.Repo.ScTest do
     Repo.Sc.put(ctx, entity)
     Repo.Sc.put(ctx, other)
 
-    assert Repo.Sc.fetch(ctx, Entity, "1") == entity
-    assert Repo.Sc.fetch(ctx, OtherEntity, "1") == other
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
+    assert Repo.Sc.find(ctx, OtherEntity, "1") == other
   end
 
   test "повторный put перезаписывает эталон" do
@@ -40,7 +40,7 @@ defmodule Core.Repo.ScTest do
     Repo.Sc.put(ctx, first)
     Repo.Sc.put(ctx, second)
 
-    assert Repo.Sc.fetch(ctx, Entity, "1") == second
+    assert Repo.Sc.find(ctx, Entity, "1") == second
   end
 
   test "put and fetch no-op without init" do
@@ -48,7 +48,7 @@ defmodule Core.Repo.ScTest do
     entity = %Entity{id: "1", name: "a"}
 
     assert ^entity = Repo.Sc.put(ctx, entity)
-    assert Repo.Sc.fetch(ctx, Entity, "1") == nil
+    assert Repo.Sc.find(ctx, Entity, "1") == nil
   end
 
   test "delete/1 removes ETS table and is idempotent" do
@@ -73,7 +73,7 @@ defmodule Core.Repo.ScTest do
     Repo.Sc.put(ctx, entity)
     tid = Context.find(ctx, :shadow_copy)
 
-    assert Repo.Sc.fetch(ctx, Entity, "1") == entity
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
     assert :ok = Repo.Sc.delete(ctx)
     assert :ets.info(tid) == :undefined
   end
@@ -86,10 +86,10 @@ defmodule Core.Repo.ScTest do
 
     assert :ok = Repo.Sc.clear(ctx)
     assert :ets.info(tid) != :undefined
-    assert Repo.Sc.fetch(ctx, Entity, "1") == nil
+    assert Repo.Sc.find(ctx, Entity, "1") == nil
 
     assert ^entity = Repo.Sc.put(ctx, entity)
-    assert Repo.Sc.fetch(ctx, Entity, "1") == entity
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
   end
 
   test "clear/1 no-op без init и после delete/1" do

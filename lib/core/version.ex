@@ -13,7 +13,14 @@ defmodule Core.Version do
     name: first_line(@moduledoc),
     min: 1
 
-  @doc "Guard: `%Version{} | :current`."
+  @typedoc """
+  Ожидаемая версия: конкретная либо `:current` («любая последняя»).
+
+  Аргумент оптимистичной блокировки в repo-методах и результат `parse/1` (`"*"` → `:current`).
+  """
+  @type expected :: t() | :current
+
+  @doc "Guard: `expected()` — `%Version{} | :current`."
   defguard is_version(version)
            when version == :current or is_struct(version, __MODULE__)
 
@@ -28,13 +35,13 @@ defmodule Core.Version do
   def next(%__MODULE__{value: value}), do: new!(value + 1)
 
   @doc "Парсинг: `\"*\"` → `:current`, иначе — `new/1`."
-  @spec parse(term()) :: {:ok, t() | :current} | {:error, Error.t()}
+  @spec parse(term()) :: {:ok, expected()} | {:error, Error.t()}
 
   def parse("*"), do: {:ok, :current}
   def parse(value), do: new(value)
 
   @doc "Как `parse/1`, при ошибке — `raise Exc`."
-  @spec parse!(term()) :: t() | :current
+  @spec parse!(term()) :: expected()
 
   def parse!(value), do: Result.unwrap!(parse(value))
 end

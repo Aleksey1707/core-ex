@@ -25,9 +25,7 @@ defmodule Core.Repo do
   """
 
   alias Core.Helper
-  alias Core.Version
 
-  @type version :: Version.t() | :current
   @type opts :: keyword()
 
   @read_methods ~w(get get! list page find_many get_many exists? exists_all? count)a
@@ -167,7 +165,7 @@ defmodule Core.Repo do
     quote do
       @callback get(
                   id :: unquote(cfg.id),
-                  version :: Core.Repo.version(),
+                  version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
@@ -179,7 +177,7 @@ defmodule Core.Repo do
     quote do
       @callback get!(
                   id :: unquote(cfg.id),
-                  version :: Core.Repo.version(),
+                  version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) :: unquote(cfg.item)
@@ -209,7 +207,7 @@ defmodule Core.Repo do
   defp callback(:find_many, cfg) do
     quote do
       @callback find_many(
-                  pairs :: [{unquote(cfg.id), Core.Repo.version()}],
+                  pairs :: [{unquote(cfg.id), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) :: {:ok, [unquote(cfg.item)]} | {:error, Core.Error.t()}
@@ -219,7 +217,7 @@ defmodule Core.Repo do
   defp callback(:get_many, cfg) do
     quote do
       @callback get_many(
-                  pairs :: [{unquote(cfg.id), Core.Repo.version()}],
+                  pairs :: [{unquote(cfg.id), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) :: {:ok, [unquote(cfg.item)]} | {:error, Core.Error.t()}
@@ -233,9 +231,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)}
-                  | {:error, Core.Error.t()}
-                  | {:error, Ecto.Changeset.t()}
+                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
     end
   end
 
@@ -246,9 +242,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)}
-                  | {:error, Core.Error.t()}
-                  | {:error, Ecto.Changeset.t()}
+                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
     end
   end
 
@@ -259,9 +253,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)}
-                  | {:error, Core.Error.t()}
-                  | {:error, Ecto.Changeset.t()}
+                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
     end
   end
 
@@ -269,7 +261,7 @@ defmodule Core.Repo do
     quote do
       @callback delete(
                   id :: unquote(cfg.id),
-                  version :: Core.Repo.version(),
+                  version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) :: :ok | {:error, Core.Error.t()}
@@ -280,7 +272,7 @@ defmodule Core.Repo do
     quote do
       @callback exists?(
                   id :: unquote(cfg.id),
-                  version :: Core.Repo.version(),
+                  version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) :: {:ok, boolean()} | {:error, Core.Error.t()}
@@ -290,7 +282,7 @@ defmodule Core.Repo do
   defp callback(:exists_all?, cfg) do
     quote do
       @callback exists_all?(
-                  pairs :: [{unquote(cfg.id), Core.Repo.version()}],
+                  pairs :: [{unquote(cfg.id), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) :: {:ok, boolean()} | {:error, Core.Error.t()}

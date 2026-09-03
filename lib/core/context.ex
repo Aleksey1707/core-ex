@@ -6,7 +6,7 @@ defmodule Core.Context do
   (`Domain.Auth.CurrentUser`), shadow copy (`Repo.Sc`) и подобное. Типизированный
   доступ к ключу — через `Context.Accessor`.
 
-  `fetch/2` отличает сохранённый `nil` от отсутствующего ключа; `find/2` — нет.
+  `get/2` отличает сохранённый `nil` от отсутствующего ключа; `find/2` — нет.
   Последний аргумент публичных usecase/repo-функций — именно `%Context{}`.
   """
 
@@ -35,15 +35,6 @@ defmodule Core.Context do
 
   def exists?(%__MODULE__{data: data}, key), do: Map.has_key?(data, key)
 
-  @doc """
-  Значение по ключу как `{:ok, value}` / `:error`.
-
-  Отличает сохранённый `nil` от отсутствующего ключа — в отличие от `find/2`.
-  """
-  @spec fetch(t(), key()) :: {:ok, term()} | :error
-
-  def fetch(%__MODULE__{data: data}, key), do: Map.fetch(data, key)
-
   @doc "Найти значение по ключу или `nil`."
   @spec find(t(), key()) :: term() | nil
 
@@ -52,10 +43,10 @@ defmodule Core.Context do
   @doc "Получить значение по ключу или `{:error, %Error{}}`."
   @spec get(t(), key()) :: {:ok, term()} | {:error, Error.t()}
 
-  # Через `fetch/2`, а не `find/2`: сохранённый `nil` — это значение, и `exists?/2 == true`
+  # Через `Map.fetch/2`, а не `find/2`: сохранённый `nil` — это значение, и `exists?/2 == true`
   # обязан означать, что `get/2` вернёт `{:ok, _}`.
-  def get(%__MODULE__{} = context, key) do
-    case fetch(context, key) do
+  def get(%__MODULE__{data: data}, key) do
+    case Map.fetch(data, key) do
       {:ok, value} ->
         {:ok, value}
 

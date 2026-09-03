@@ -4,8 +4,8 @@ Shared-фундамент Elixir-приложений: доменные прим
 PostgreSQL, event store, transactional outbox, адаптеры брокеров и PromEx-плагины.
 
 Библиотека **host-agnostic**: она не знает ни имени приложения-потребителя, ни его
-домена, ни web-слоя. Всё, что ей нужно, приходит через конфигурацию (`Core.Config`),
-опции макросов и `opts` OTP-процессов.
+домена, ни его роутера с эндпоинтом. Всё, что ей нужно, приходит через конфигурацию
+(`Core.Config`), опции макросов и `opts` OTP-процессов.
 
 ## Состав
 
@@ -18,6 +18,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Es.*` | доменные события, event store, маппинг в outbox |
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
 | `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub (клиенты — опциональные зависимости, см. ниже) |
+| `Core.Web.*` | граница HTTP: конверт ответа, разбор параметров, `%Error{}` → HTTP-статус, сервер метрик |
 | `Core.Helper.*` | транзакции, savepoint, advisory-локи, after-commit хуки |
 | `Core.*.PromEx` | плагины метрик для outbox, MQ, кешей, воркеров, cgroup |
 

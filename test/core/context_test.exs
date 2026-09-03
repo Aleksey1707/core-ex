@@ -42,10 +42,9 @@ defmodule Core.ContextTest do
     context = Context.new() |> Context.put(:maybe, nil)
 
     assert Context.exists?(context, :maybe)
-    assert Context.fetch(context, :maybe) == {:ok, nil}
     assert Context.get(context, :maybe) == {:ok, nil}
 
-    assert Context.fetch(context, :absent) == :error
+    refute Context.exists?(context, :absent)
     assert {:error, %Core.Error{code: :not_found}} = Context.get(context, :absent)
   end
 end

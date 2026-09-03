@@ -29,6 +29,10 @@ defmodule Core.Repo.Pg do
     `:foreign`, а не `:foreign_key`. Перевод делает макрос (`@error_types`) — иначе маппинг FK
     не совпал бы никогда. Соответствие деклараций `changeset/2` проверяет
     `test/<app>/repo/constraint_errors_test.exs`.
+  - Незамапленный constraint и любой другой провал `changeset/2` — дыра в декларации, то есть
+    ошибка программиста: наружу уходит `%Error{kind: :app, ns: :repo, code: :write_failed}`
+    (в `detail` — `%{schema:, errors:}`), а не `%Ecto.Changeset{}`: контракт репозитория
+    (`Core.Repo`) не знает про Ecto.
 
   ## Декодер строки: `to_entity:` или `to_view:`
 
@@ -55,6 +59,8 @@ defmodule Core.Repo.Pg do
   alias Core.Repo
   alias Core.Result
   alias Core.Version
+
+  require Error
 
   @required_keys ~w(schema behaviour errors)a
   @optional_keys ~w(repo query default_filters to_entity to_model to_view to_id version_field
@@ -453,6 +459,23 @@ defmodule Core.Repo.Pg do
               __STACKTRACE__
   end
 
+  @doc """
+  Ошибки changeset как `%{поле => [текст]}`.
+
+  Подставляет значения опций в шаблоны Ecto (`"should be at least %{count} character(s)"`).
+  """
+  @spec changeset_errors(Ecto.Changeset.t()) :: %{atom() => [String.t()]}
+
+  def changeset_errors(%Ecto.Changeset{} = changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
+      Regex.replace(~r"%{(\w+)}", message, fn _, key ->
+        opts
+        |> Keyword.get(String.to_existing_atom(key), key)
+        |> to_string()
+      end)
+    end)
+  end
+
   @doc false
   @spec match_constraint_error(Ecto.Changeset.t(), %{{atom(), atom()} => atom()}) ::
           {:ok, atom(), atom()} | :error
@@ -475,7 +498,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Получить сущность по id и version."
-  @spec get(map(), term(), Repo.version(), Context.t(), Repo.opts()) ::
+  @spec get(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           {:ok, struct()} | {:error, Error.t()}
 
   def get(pg, id, version, context, opts \\ []) do
@@ -494,7 +517,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Получить сущность; при ошибке — raise."
-  @spec get!(map(), term(), Repo.version(), Context.t(), Repo.opts()) :: struct()
+  @spec get!(map(), term(), Version.expected(), Context.t(), Repo.opts()) :: struct()
 
   def get!(pg, id, version, context, opts \\ []) do
     Result.unwrap!(get(pg, id, version, context, opts))
@@ -510,7 +533,7 @@ defmodule Core.Repo.Pg do
           map(),
           Ecto.Query.dynamic_expr(),
           term(),
-          Repo.version(),
+          Version.expected(),
           Context.t(),
           Repo.opts()
         ) :: {:ok, struct()} | {:error, Error.t()}
@@ -570,7 +593,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Найти сущности по парам id/version (без incomplete)."
-  @spec find_many(map(), [{term(), Repo.version()}], Context.t(), Repo.opts()) ::
+  @spec find_many(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
           {:ok, [struct()]} | {:error, Error.t()}
 
   def find_many(pg, pairs, context, opts \\ []) do
@@ -583,7 +606,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Получить все сущности по парам id/version."
-  @spec get_many(map(), [{term(), Repo.version()}], Context.t(), Repo.opts()) ::
+  @spec get_many(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
           {:ok, [struct()]} | {:error, Error.t()}
 
   def get_many(pg, pairs, context, opts \\ []) do
@@ -603,7 +626,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Проверить существование по id и version."
-  @spec exists?(map(), term(), Repo.version(), Context.t(), Repo.opts()) ::
+  @spec exists?(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           {:ok, boolean()} | {:error, Error.t()}
 
   def exists?(pg, id, version, context, opts \\ [])
@@ -629,7 +652,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Проверить существование всех пар id/version."
-  @spec exists_all?(map(), [{term(), Repo.version()}], Context.t(), Repo.opts()) ::
+  @spec exists_all?(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
           {:ok, boolean()} | {:error, Error.t()}
 
   def exists_all?(pg, pairs, context, opts \\ []) do
@@ -652,7 +675,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Вставить сущность."
   @spec insert(map(), struct(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, struct()} | {:error, Error.t()}
 
   def insert(pg, entity, context, opts \\ []) do
     case raw_insert(pg, entity, context, opts) do
@@ -663,7 +686,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Обновить сущность."
   @spec update(map(), struct(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, struct()} | {:error, Error.t()}
 
   def update(pg, entity, context, opts \\ []) do
     case raw_update(pg, entity, context, opts) do
@@ -682,7 +705,7 @@ defmodule Core.Repo.Pg do
   (например «список шагов не может быть пустым»), хотя сама запись прошла успешно.
   """
   @spec write_insert(map(), struct(), Context.t(), Repo.opts()) ::
-          :ok | {:error, Error.t()} | {:error, Ecto.Changeset.t()}
+          :ok | {:error, Error.t()}
 
   def write_insert(pg, entity, context, opts \\ []) do
     case raw_insert(pg, entity, context, opts) do
@@ -721,7 +744,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Обновить сущность без декодирования результата обратно в domain — см. `write_insert/4`."
   @spec write_update(map(), struct(), Context.t(), Repo.opts()) ::
-          :ok | {:error, Error.t()} | {:error, Ecto.Changeset.t()}
+          :ok | {:error, Error.t()}
 
   def write_update(pg, entity, context, opts \\ []) do
     case raw_update(pg, entity, context, opts) do
@@ -732,7 +755,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Удалить сущность по id и version."
-  @spec delete(map(), term(), Repo.version(), Context.t(), Repo.opts()) ::
+  @spec delete(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           :ok | {:error, Error.t()}
 
   def delete(pg, id, version, context, opts \\ []) do
@@ -753,7 +776,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Сохранить сущность (insert или update)."
   @spec save(map(), struct(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, struct()} | {:error, Error.t()}
 
   def save(pg, entity, context, opts \\ []) do
     case known_to_exist?(pg, entity, context, opts) do
@@ -763,7 +786,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Ошибка несовпадения версии строки с ожидаемой, либо `nil`."
-  @spec version_error(map(), term(), struct(), Repo.version()) :: Error.t() | nil
+  @spec version_error(map(), term(), struct(), Version.expected()) :: Error.t() | nil
 
   def version_error(pg, id, row, version) do
     if version_matches?(pg, row, version) do
@@ -800,7 +823,7 @@ defmodule Core.Repo.Pg do
   @spec baseline(map(), struct(), Context.t()) :: struct() | nil
 
   def baseline(%{shadow_copy?: false}, _entity, _context), do: nil
-  def baseline(%{shadow_copy?: true}, %mod{id: id}, context), do: Repo.Sc.fetch(context, mod, id)
+  def baseline(%{shadow_copy?: true}, %mod{id: id}, context), do: Repo.Sc.find(context, mod, id)
 
   @doc """
   Положить сущность эталоном в `Repo.Sc` и вернуть её.
@@ -935,8 +958,20 @@ defmodule Core.Repo.Pg do
         {:error, pg.errors.domain(pg.module, code, constraint_input(entity, changeset, field))}
 
       :error ->
-        {:error, changeset}
+        {:error, write_failed_error(pg, changeset)}
     end
+  end
+
+  # Незамапленный constraint или провал `changeset/2` — дыра в декларации `constraint_errors:`
+  # либо в `to_model`, то есть ошибка программиста: наружу уходит `%Error{kind: :app}`,
+  # а не `%Ecto.Changeset{}` — контракт репозитория не знает про Ecto.
+  defp write_failed_error(pg, changeset) do
+    Error.app(pg.module,
+      code: :write_failed,
+      ns: :repo,
+      message: "Запись не выполнена",
+      detail: %{schema: pg.schema, errors: changeset_errors(changeset)}
+    )
   end
 
   defp constraint_input(entity, changeset, field) do

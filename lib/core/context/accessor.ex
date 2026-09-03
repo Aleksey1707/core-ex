@@ -2,8 +2,8 @@ defmodule Core.Context.Accessor do
   @moduledoc """
   Билдер типизированного доступа к одному ключу `Context`.
 
-  `use Context.Accessor, key: :current_user_id` генерирует `exists?/1`, `fetch/1`,
-  `find/1`, `get/1`, `get!/1`, `put/2`, `delete/1` поверх `Context`.
+  `use Context.Accessor, key: :current_user_id` генерирует `exists?/1`, `find/1`,
+  `get/1`, `get!/1`, `put/2`, `delete/1` поверх `Context`.
   """
 
   alias Core.Helper
@@ -29,11 +29,6 @@ defmodule Core.Context.Accessor do
       @spec exists?(Context.t()) :: boolean()
 
       def exists?(context), do: Context.exists?(context, @context_key)
-
-      @doc "Значение как `{:ok, value}` / `:error` (отличает сохранённый `nil`)."
-      @spec fetch(Context.t()) :: {:ok, term()} | :error
-
-      def fetch(context), do: Context.fetch(context, @context_key)
 
       @doc "Найти значение или `nil`."
       @spec find(Context.t()) :: term() | nil

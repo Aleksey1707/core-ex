@@ -32,4 +32,17 @@ defmodule Core.Helper.MapTest do
   test "field/2 отдаёт приоритет atom-ключу" do
     assert Helper.Map.field(%{:attempt => :atom, "attempt" => :string}, :attempt) == :atom
   end
+
+  test "stringify_keys/1 переводит atom-ключи в строки, не меняя регистр" do
+    assert Helper.Map.stringify_keys(%{:createdAt => 1, "b" => 2}) == %{
+             "createdAt" => 1,
+             "b" => 2
+           }
+
+    assert Helper.Map.stringify_keys(%{}) == %{}
+  end
+
+  test "stringify_keys/1 обрабатывает только верхний уровень" do
+    assert Helper.Map.stringify_keys(%{outer: %{inner: 1}}) == %{"outer" => %{inner: 1}}
+  end
 end
