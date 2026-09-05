@@ -6,6 +6,7 @@ defmodule Core.Codec.Helper do
   который плагин получил аргументом.
   """
 
+  alias Core.Codec
   alias Core.Error
   alias Core.Result
 
@@ -23,11 +24,26 @@ defmodule Core.Codec.Helper do
 
   def dump_many(list, codec) when is_list(list), do: Enum.map(list, &codec.dump/1)
 
-  @doc "Dump raw-значения по kind (значение без Prim-обёртки): `nil` → `nil`."
-  @spec dump_raw_optional(term() | nil, atom(), codec()) :: term() | nil
+  @doc """
+  Dump значения **без** Prim-обёртки в формате Prim `mod` (read-модели).
 
-  def dump_raw_optional(nil, _kind, _codec), do: nil
-  def dump_raw_optional(value, kind, codec), do: codec.dump_raw(kind, value)
+  Значение приводится к своему Prim (`Core.Codec.coerce/2`) и уходит в обычный
+  `codec.dump/1` — поэтому формат совпадает с агрегатным путём вплоть до tz, precision
+  и переопределений `dump/1` в профиле.
+
+  Тотальна: `nil`, неприводимое значение и Prim, которому приведение не нужно
+  (`:string`, `:integer`, кастомный kind), проходят как есть — read-путь не валидирует.
+  """
+  @spec dump_raw(module(), term(), codec()) :: term()
+
+  def dump_raw(_mod, nil, _codec), do: nil
+
+  def dump_raw(mod, raw, codec) when is_atom(mod) and is_atom(codec) do
+    case Codec.coerce(mod, raw) do
+      {:ok, prim} -> codec.dump(prim)
+      :error -> raw
+    end
+  end
 
   @doc "Load опционального Prim: `nil` → `{:ok, nil}`."
   @spec load_optional(term(), module(), codec()) :: {:ok, term()} | {:error, Error.t()}

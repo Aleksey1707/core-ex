@@ -51,8 +51,10 @@ rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib    # только :cor
 
 - значения `Core.Config` резолвятся **в рантайме**, а не модульными атрибутами;
 - макрос, которому нужен фасад или репозиторий, при отсутствии явной опции подставляет
-  **вызов** (`Core.Config.codec()`), а не запечённый модуль
-  (см. `codec!/1` в `Core.Repo.Pg.Schema`);
+  **вызов** (`Core.Config.codec()` / `Core.Config.dao()`), а не запечённый модуль:
+  резолв делает `Core.Helper.Opts.module_or_config!/4` (`Repo.Pg.Schema`, `Repo.Pg`,
+  `Repo.Pg.Es`, `Es.Outbox`, `Es.Event.Repo.Pg{,.Schema}`); проверка —
+  `test/core/macro_config_test.exs`, он компилирует эти макросы со снятыми ключами `:core`;
 - имена telemetry-событий строятся вызовом `Core.Telemetry.event/1`, а не атрибутом:
   префикс задаёт потребитель (`config :core, telemetry_prefix: [...]`).
 

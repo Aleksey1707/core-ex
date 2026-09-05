@@ -86,18 +86,11 @@ defmodule Core.Repo.Pg.Schema do
       mode: mode,
       item: item,
       id: Helper.Opts.module!(opts, :id, @label, exports: [new: 1]),
-      codec: codec!(opts)
+      # Без явного `codec:` фасад резолвится в рантайме, а не запекается макросом:
+      # библиотека компилируется раньше конфигурации приложения (и раньше `runtime.exs`),
+      # поэтому требовать `Config.codec()` на этапе компиляции нельзя.
+      codec: Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
     }
-  end
-
-  # Без явного `codec:` фасад резолвится в рантайме, а не запекается макросом:
-  # библиотека компилируется раньше конфигурации приложения (и раньше `runtime.exs`),
-  # поэтому требовать `Config.codec()` на этапе компиляции нельзя.
-  defp codec!(opts) do
-    case Keyword.get(opts, :codec) do
-      nil -> quote(do: Core.Config.codec())
-      _module -> Helper.Opts.module!(opts, :codec, @label)
-    end
   end
 
   defp mode!(opts) do

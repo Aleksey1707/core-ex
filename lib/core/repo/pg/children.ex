@@ -133,7 +133,7 @@ defmodule Core.Repo.Pg.Children do
   defp guarded(_pg, %{constraint_errors: mapping}, fun) when map_size(mapping) == 0, do: fun.()
 
   defp guarded(pg, spec, fun) do
-    Helper.Savepoint.run(pg.dao, fn -> rescue_constraint(pg, spec, fun) end)
+    Helper.Savepoint.run(Repo.Pg.dao(pg), fn -> rescue_constraint(pg, spec, fun) end)
   end
 
   defp rescue_constraint(pg, spec, fun) do
@@ -174,7 +174,7 @@ defmodule Core.Repo.Pg.Children do
   end
 
   defp delete_all(pg, spec, where, opts) do
-    {_deleted, _} = pg.dao.delete_all(from(c in spec.schema, where: ^where), opts)
+    {_deleted, _} = Repo.Pg.dao(pg).delete_all(from(c in spec.schema, where: ^where), opts)
 
     :ok
   end
@@ -215,7 +215,7 @@ defmodule Core.Repo.Pg.Children do
   defp insert_all(pg, schema, rows, opts) do
     rows
     |> Enum.chunk_every(@chunk_size)
-    |> Enum.each(fn chunk -> {_count, _} = pg.dao.insert_all(schema, chunk, opts) end)
+    |> Enum.each(fn chunk -> {_count, _} = Repo.Pg.dao(pg).insert_all(schema, chunk, opts) end)
 
     :ok
   end

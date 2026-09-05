@@ -17,8 +17,8 @@ defmodule Core.Config do
   - `otp_app` — приложение, в app-env которого потребитель держит свои DI-ключи
     «behaviour → реализация». Нужно только `use Core.Repo.Pg.Es` (резолв `event_repo:`).
   - `dao` — `Ecto.Repo` приложения.
-  - `codec` — entity-фасад Codec для внутреннего wire (БД / outbox); Prim-профиль
-    доступен как `codec().prim()`, но Core ходит только через фасад.
+  - `codec` — entity-фасад Codec для внутреннего wire (БД / outbox); Core ходит только
+    через него (`dump/1`, `load/2`, `load!/2`).
 
   ## Опциональные
 
@@ -86,7 +86,7 @@ defmodule Core.Config do
     _ = otp_app()
 
     ensure_exports!(dao(), :dao, transact: 1, in_transaction?: 0)
-    ensure_exports!(codec(), :codec, dump: 1, load: 2, prim: 0)
+    ensure_exports!(codec(), :codec, dump: 1, load: 2, load!: 2)
     ensure_tz!(tz())
 
     :ok

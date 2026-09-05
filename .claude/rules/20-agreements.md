@@ -279,7 +279,7 @@ alias MyApp.Codec.External, as: OutCodec
 
 `InCodec`/`OutCodec` — entity-фасады (Prim + plugins). Явный Prim-only: `alias MyApp.Codec.Prim.Internal, as: PrimInCodec`.
 
-Кастомные Prim `dump/1` / `dump_kind/2` / `load_kind/3` — с `@impl true` (`@behaviour Core.Codec`). Entity-плагины — `Core.Codec.Plugin` (dump-only: `loadable: false`; для `tagged: true` — обязательные уникальные `tags:`); фасад — `use Core.Codec.Facade`.
+Кастомные Prim `dump/1` / `dump_kind/2` / `load_kind/3` — с `@impl true` (`@behaviour Core.Codec`). Entity-плагины — `Core.Codec.Plugin` (dump-only: `loadable: false`; полиморфный wire — `union:` с модулем-семейством); фасад — `use Core.Codec.Facade` (`dump/1`, `load/2`, `load!/2` — весь его интерфейс).
 
 ### Dump/load только через фасад
 
@@ -300,7 +300,7 @@ load_many(Step, list, codec)
 InCodec.dump(step)
 ```
 
-Исключение: реконструкция события — `<Aggregate>.Event.Codec.load_event!/8` (dump-only плагин, см. `11-domain.md`). Не вводить обходные `load_for_channel` / обёртки, которые зовут соседний `*.Codec` в обход фасада.
+События исключением не являются: `InCodec.dump(event)` отдаёт конверт, `InCodec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу (`11-domain.md`). Не вводить обходные `load_for_channel` / обёртки, которые зовут соседний `*.Codec` в обход фасада.
 
 При коллизии короткого имени (например `<BC>.Repo` и `Core.Repo` в одном файле) — полный путь или `as:` только для одного из конфликтующих; правило про родителя при этом не отменяется.
 
@@ -383,11 +383,11 @@ end
 
 В application-flow с контрактом `:ok | {:error, _}` / `{:ok, T} | {:error, _}` предпочитать safe API (`get`, `new`, `from_events`, …), а не bang.
 
-Bang (`get!`, `new!`, `raise Exc`, …) — только на явных bang-границах. Исключения: Schema bang-mappers (`to_entity!` / `to_model!`) на call site своих строк / persist валидного domain; реконструкция `*.Event.load_event!` (как bang `to_entity!` для event store); Specs/ACL `CurrentUser.get!`; compile-time константы (`Namespace.new!` в module attribute и т.п.); OTP/config init.
+Bang (`get!`, `new!`, `raise Exc`, …) — только на явных bang-границах. Исключения: Schema bang-mappers (`to_entity!` / `to_model!`) на call site своих строк / persist валидного domain; реконструкция события `InCodec.load!` (как bang `to_entity!` для event store); Specs/ACL `CurrentUser.get!`; compile-time константы (`Namespace.new!` в module attribute и т.п.); OTP/config init.
 
 Schema mappers: dual API — safe `to_entity`/`to_model` (Result) и bang `to_entity!`/`to_model!` (`raise Exc`). Dirty/infra (Outbox reserve) → safe; `use Repo.Pg` / write-path → bang. Детали — `13-repos.md`.
 
-Event store: bang (`to_entity!` / `load_event!`) — только на write-path. **Read-path истории
+Event store: bang (`to_entity!` / `InCodec.load!`) — только на write-path. **Read-path истории
 (`list_by_aggregate` / `page_by_aggregate`, HTTP GET) MUST быть safe**: строки в event store
 живут вечно, и одно событие с типом, который кодек больше не знает, обязано дать доменную
 ошибку `:unknown_event_type`, а не 500 на всю страницу истории.

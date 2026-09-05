@@ -1,20 +1,22 @@
 defmodule Core.Es.OutboxTest do
   use ExUnit.Case, async: true
 
+  alias Core.CodecFixture.Internal, as: InCodec
+  alias Core.EventFixture
+  alias Core.Outbox
+
+  defmodule Fixture do
+    @moduledoc false
+
+    use Core.Es.Outbox,
+      topic: "fakes",
+      event: Core.EventFixture.Event
+  end
+
   defmodule FakeEvent do
     @moduledoc false
 
     defstruct ~w(id aggregate_id aggregate_version at by)a
-
-    @type t :: %__MODULE__{}
-
-    def name(%__MODULE__{}), do: "faked"
-  end
-
-  defmodule NoName do
-    @moduledoc false
-
-    defstruct []
 
     @type t :: %__MODULE__{}
   end
@@ -78,17 +80,28 @@ defmodule Core.Es.OutboxTest do
     end
   end
 
-  test "требует у event функцию name/1" do
-    assert_raise CompileError, ~r/должен экспортировать name\/1/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.Es.OutboxTest.BadEvent do
-            use Core.Es.Outbox,
-              topic: "fakes",
-              event: Core.Es.OutboxTest.NoName
-          end
-        end
-      )
+  describe "запись из события" do
+    test "payload — конверт события целиком" do
+      event = EventFixture.created()
+
+      assert {:ok, record} = Fixture.from_event(event)
+      assert record.payload == InCodec.dump(event)
+    end
+
+    test "ключ, имя и заголовки берутся из того же конверта" do
+      event = EventFixture.created()
+      data = InCodec.dump(event)
+
+      assert {:ok, record} = Fixture.from_event(event)
+
+      assert Outbox.Key.value(record.key) == data["aggregate_id"]
+      assert Outbox.Name.value(record.name) == data["type"]
+
+      assert record.headers == %{
+               "name" => data["type"],
+               "aggr_id" => data["aggregate_id"],
+               "event_id" => data["event_id"]
+             }
     end
   end
 end

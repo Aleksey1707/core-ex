@@ -13,7 +13,7 @@
 | `name/1` | wire-type через `<Aggregate>.Event.Codec` |
 | `names/0` | множество wire-type через Codec |
 
-Dump/load — только через `InCodec`/`OutCodec.dump(event)` и `<Aggregate>.Event.Codec.load_event!/8`. Неизвестный wire-type → `:unknown_event_type` из каталога `<Aggregate>.Errors`. Момент постановки в outbox: `Outbox.CreatedAt.now()` (usec); `event.at` — только в wire-payload (`"at"`), не в `Record.created_at`.
+Dump/load — только через фасад: `InCodec`/`OutCodec.dump(event)` отдаёт **весь конверт**, `InCodec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу внутри конверта (модуль событий агрегата — это семейство, `union:` у плагина; `codec.load(Mod, data)` — когда конкретный тип известен). Неизвестный тег → `:unknown_event_type` кодека агрегата (`ns: :es`). Момент постановки в outbox: `Outbox.CreatedAt.now()` (usec); `event.at` — только в конверте (`"at"`), не в `Record.created_at`.
 
 Правила:
 
@@ -22,8 +22,17 @@ Dump/load — только через `InCodec`/`OutCodec.dump(event)` и `<Aggr
 - Flush руками не пишется: его генерирует `use Core.Repo.Pg.Es` по опциям `event_repo:` и
   `outbox:` (см. `13-repos.md`). Порядок внутри транзакции:
   `Outbox.from_events` → `Event.Repo.append` → `Outbox.Repo.append`, затем `events` очищаются.
-- Кодек событий агрегата — `use Core.Es.Event.Codec` (`tags:` + `dump_payload/2` и
-  `load_payload/4`); обвязка `dump/2`, `load_event/8`, `load_event!/8` генерируется.
+- Кодек событий агрегата — `use Core.Es.Event.Codec` (`event:` + `tags:`, плюс колбэки
+  `dump_payload/2` и `load_payload/3`); конверт, выбор типа по тегу и сборку события
+  генерирует билдер, наружу кодек виден только через фасад. `load_payload/3` возвращает
+  `%Payload{}`, а не событие; событиям без нагрузки клоузы не нужны вовсе.
+- Prim агрегата и автора билдер выводит из самих событий (`__es_aggregate_id__/0`,
+  `__es_by__/0`) — опциями они не задаются, расхождение между событиями одного кодека
+  ловится на компиляции.
+- Wire-тег уникален **внутри своего кодека** (дубль — `CompileError`), но квалифицировать
+  его именем агрегата (`acceptance.created`, а не `created`) MUST: тег виден в брокере и в
+  event store рядом с чужими. Кодек событий MUST быть в `Codec.plugins()` — иначе фасад не
+  знает ни события, ни его семейства.
 
 Конкурентная запись ловится unique-индексом `(aggregate_id, aggregate_version)` в таблице событий:
 `Event.Repo.append/2` отдаёт доменный `:version_mismatch` из `<Aggregate>.Errors`. На строке агрегата
@@ -55,15 +64,28 @@ API:
 
 Заголовки задаёт продюсер записи. Для событий агрегата — `<Aggregate>.Outbox.from_event/1`: `name` (= event name), `aggr_id` (= aggregate id), `event_id`.
 
-Wire-payload envelope (минимум):
+Wire-payload — конверт события целиком:
 
 - `event_id`, `type`, `aggregate_id`, `aggregate_version`, `at`, `by`
-- плюс payload события
+- плюс payload события (`payload`; у событий без нагрузки — `nil`)
+
+Обе стороны формата — в `Core.Es.Event.Codec`: конверт собирает `dump/2` кодека агрегата
+(его зовёт `<Aggregate>.Outbox` при постановке события в очередь), разбирает — `load/3`,
+до которого подписчика доводит фасад по тегу. Разносить стороны формата по разным модулям
+MUST NOT: переименованный ключ обнаружится не тестом, а подписчиком в проде. Транспорту,
+который хранит поля врозь (event store — по колонкам), их отдаёт пара `to_fields/1` /
+`from_fields/1`: строковые ключи конверта не покидают кодека.
+
+Разбор **safe**: событие с типом, которого кодек больше не знает, становится доменной
+ошибкой у подписчика (`:unknown_event_type`), а отсутствующее обязательное поле конверта —
+`:invalid_envelope` (обе — `ns: :es`); сообщение из брокера переживает код, который его
+писал, и уронить подписчика не вправе.
 
 ## Совместимость событий
 
 Строки в event store живут вечно и читаются текущим кодом. Единственный источник wire-имён —
 `@tag_by_mod` в `<Aggregate>.Event.Codec`; формат payload задаёт `dump_payload/2`.
+Оттуда же его берут запись outbox и её заголовки (`Core.Es.Event.Codec.to_fields/1`).
 Любое несовместимое изменение обнаружится не в тесте, а на проде — при чтении истории.
 
 | Изменение | Статус |
@@ -85,7 +107,7 @@ Wire-payload envelope (минимум):
 
 1. у каждого тега из `Event.Codec.types/0` есть фикстура — новый тип не добавить,
    не зафиксировав формат;
-2. каждая фикстура грузится через `load_event/8` — переименование тега или поля,
+2. каждая фикстура грузится через `InCodec.load(<Aggregate>.Event, _)` — переименование тега или поля,
    удаление поля и смена типа значения ломают тест.
 
 Добавили событие — добавьте фикстуру (дамп реального события, не выдуманный JSON).
@@ -218,6 +240,12 @@ Tunables (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) — *
   `x-dlq-source-topic` / `x-dlq-attempts` / `x-dlq-error`), коммитит offset и эмитит
   `[:mq, :subscriber, :dlq]` (алерт `MqSubscriberDlq`). Без настроенного `dlq_writer`
   сообщение не выбрасывается — повторы продолжаются, в лог идёт `error`.
+- Поэтому дерево подписчика MUST поднимать **свой** `Mq.Stream.Writer` и передавать его
+  каждому `MqSubscriberReliable` (`dlq_writer` + `dlq_handle`). Свой, а не writer outbox:
+  тот выключается вместе с outbox (`OUTBOX_ENABLED=false`), а выход для «ядовитого»
+  сообщения обязан работать независимо от публикации событий. `reference_prefix` у него
+  отдельный — общий с outbox пересёк бы счётчики подтверждений по одноимённым топикам.
+  Writer идёт **первым** ребёнком при `:rest_for_one`.
 
 ### Runbook: сообщения в DLQ
 

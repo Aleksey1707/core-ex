@@ -1,7 +1,7 @@
 defmodule Core.Codec.PluginTest do
   use ExUnit.Case, async: true
 
-  defmodule TagsMapPlugin do
+  defmodule DumpOnlyPlugin do
     defmodule A do
       defstruct [:x]
     end
@@ -11,7 +11,7 @@ defmodule Core.Codec.PluginTest do
     end
 
     use Core.Codec.Plugin,
-      tags: %{A => "a", B => "b"},
+      types: [A, B],
       loadable: false
 
     @impl true
@@ -19,41 +19,38 @@ defmodule Core.Codec.PluginTest do
     def dump(%B{}, _codec), do: :b
   end
 
-  defmodule TaggedPlugin do
+  defmodule UnionPlugin do
+    defmodule Family do
+    end
+
     defmodule X do
       defstruct []
     end
 
     use Core.Codec.Plugin,
-      tags: %{X => "x"},
-      tagged: true,
-      loadable: false
+      types: [X],
+      union: Family
 
     @impl true
-    def dump(%X{}, _codec), do: {"x", %{}}
+    def dump(%X{}, _codec), do: %{}
 
     @impl true
-    def load_tagged("x", _payload, _codec), do: {:ok, %X{}}
-    def load_tagged(_type, _payload, _codec), do: {:error, :unknown}
+    def load(Family, _raw, _codec), do: {:ok, %X{}}
+    def load(X, _raw, _codec), do: {:ok, %X{}}
   end
 
-  test "tags map generates type/1, types/0, mod_by_tag/1" do
-    assert TagsMapPlugin.type(TagsMapPlugin.A) == "a"
-    assert TagsMapPlugin.type(%TagsMapPlugin.A{x: 1}) == "a"
-    assert MapSet.equal?(TagsMapPlugin.types(), MapSet.new(["a", "b"]))
-    assert {:ok, TagsMapPlugin.A} = TagsMapPlugin.mod_by_tag("a")
-    assert :error = TagsMapPlugin.mod_by_tag("nope")
+  test "types объявляют обслуживаемые модули" do
+    assert Enum.sort(DumpOnlyPlugin.__codec_types__()) ==
+             Enum.sort([DumpOnlyPlugin.A, DumpOnlyPlugin.B])
 
-    assert Enum.sort(TagsMapPlugin.__codec_types__()) ==
-             Enum.sort([TagsMapPlugin.A, TagsMapPlugin.B])
-
-    assert Enum.sort(TagsMapPlugin.__codec_tags__()) == ["a", "b"]
+    refute DumpOnlyPlugin.__codec_loadable__()
+    assert DumpOnlyPlugin.__codec_union__() == nil
   end
 
-  test "tagged plugin with tags map" do
-    assert TaggedPlugin.__codec_tagged__()
-    assert TaggedPlugin.type(TaggedPlugin.X) == "x"
-    assert {:ok, %TaggedPlugin.X{}} = TaggedPlugin.load_tagged("x", %{}, __MODULE__)
+  test "union объявляет модуль-семейство" do
+    assert UnionPlugin.__codec_union__() == UnionPlugin.Family
+    assert UnionPlugin.__codec_types__() == [UnionPlugin.X]
+    assert {:ok, %UnionPlugin.X{}} = UnionPlugin.load(UnionPlugin.Family, %{}, __MODULE__)
   end
 
   test "loadable true without load/3 raises CompileError" do
@@ -75,18 +72,18 @@ defmodule Core.Codec.PluginTest do
     end
   end
 
-  test "tagged true without load_tagged/3 raises CompileError" do
-    assert_raise CompileError, ~r/must define load_tagged\/3/, fn ->
+  test "union с loadable: false — CompileError" do
+    assert_raise CompileError, ~r/union: requires loadable: true/, fn ->
       Code.eval_quoted(
         quote do
-          defmodule Core.Codec.PluginTest.NoLoadTagged do
+          defmodule Core.Codec.PluginTest.DumpOnlyUnion do
             defmodule X do
               defstruct []
             end
 
             use Core.Codec.Plugin,
-              tags: %{X => "x"},
-              tagged: true,
+              types: [X],
+              union: Core.Codec.PluginTest.DumpOnlyUnion,
               loadable: false
 
             @impl true
@@ -97,44 +94,48 @@ defmodule Core.Codec.PluginTest do
     end
   end
 
-  test "tagged true without tags map raises CompileError" do
-    assert_raise CompileError, ~r/tagged: true requires tags:/, fn ->
+  test "union не модуль — CompileError" do
+    assert_raise CompileError, ~r/union: must be a module/, fn ->
       Code.eval_quoted(
         quote do
-          defmodule Core.Codec.PluginTest.TaggedNoMap do
+          defmodule Core.Codec.PluginTest.BadUnion do
             defmodule X do
               defstruct []
             end
 
             use Core.Codec.Plugin,
               types: [X],
-              tagged: true,
-              loadable: false
+              union: "family"
 
             @impl true
             def dump(%X{}, _codec), do: :ok
+
+            @impl true
+            def load(X, _raw, _codec), do: {:ok, %X{}}
           end
         end
       )
     end
   end
 
-  test "types and tags are mutually exclusive" do
-    assert_raise CompileError, ~r/mutually exclusive/, fn ->
+  test "types обязательны и непусты" do
+    assert_raise CompileError, ~r/missing required option\(s\): \[:types\]/, fn ->
       Code.eval_quoted(
         quote do
-          defmodule Core.Codec.PluginTest.XorFail do
-            defmodule X do
-              defstruct []
-            end
+          defmodule Core.Codec.PluginTest.NoTypes do
+            use Core.Codec.Plugin, loadable: false
+          end
+        end
+      )
+    end
 
+    assert_raise CompileError, ~r/types: must be a non-empty list/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.EmptyTypes do
             use Core.Codec.Plugin,
-              types: [X],
-              tags: %{X => "x"},
+              types: [],
               loadable: false
-
-            @impl true
-            def dump(%X{}, _codec), do: :ok
           end
         end
       )

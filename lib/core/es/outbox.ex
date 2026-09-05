@@ -6,20 +6,22 @@ defmodule Core.Es.Outbox do
         topic: "roles",
         event: MyApp.Domain.<BC>.Common.Role.Event
 
-  Генерирует `from_events/1` и `from_event/1`. Wire-payload — envelope события
-  (`event_id`, `type`, `payload`, `aggregate_id`, `aggregate_version`, `at`, `by`),
-  заголовки — `name` / `aggr_id` / `event_id`.
+  Генерирует `from_events/1` и `from_event/1`. Wire-payload — конверт события целиком
+  (`codec.dump(event)`, формат — `Core.Es.Event.Codec`); топик, ключ, имя и заголовки
+  (`name` / `aggr_id` / `event_id`) читаются из того же конверта через
+  `Core.Es.Event.Codec.to_fields/1` — второго источника wire-имени события нет.
 
   ## Opts
 
   - `topic:` — имя топика (строка); валидируется `Outbox.Topic` на этапе компиляции
-  - `event:` — объединяющий модуль событий агрегата (должен экспортировать `name/1`)
-  - `codec:` — entity-фасад Codec; по умолчанию `Core.Config.codec()`
+  - `event:` — объединяющий модуль событий агрегата (нужен для `@type event`)
+  - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
+    через `Core.Config.codec()`
 
-  Макрос занимает в вызывающем модуле имена `@es_topic`, `@es_event`, `@es_codec`.
+  Макрос занимает в вызывающем модуле имена `@es_topic`, `@es_event` и приватную
+  `es_codec/0`.
   """
 
-  alias Core.Config
   alias Core.Helper
   alias Core.Outbox
 
@@ -37,7 +39,6 @@ defmodule Core.Es.Outbox do
     quote do
       @es_topic unquote(Macro.escape(topic))
       @es_event unquote(event)
-      @es_codec unquote(codec)
 
       @typedoc "Событие агрегата, отображаемое в запись outbox."
       @type event :: unquote(event).t()
@@ -55,43 +56,23 @@ defmodule Core.Es.Outbox do
               {:ok, Core.Outbox.Record.t()} | {:error, Core.Error.t()}
 
       def from_event(event) do
-        aggregate_id = @es_codec.dump(event.aggregate_id)
-        event_id = @es_codec.dump(event.id)
-        event_name = @es_event.name(event)
+        payload = es_codec().dump(event)
+        fields = Core.Es.Event.Codec.to_fields(payload)
 
-        with {:ok, key} <- Core.Outbox.Key.new(aggregate_id),
-             {:ok, name} <- Core.Outbox.Name.new(event_name),
+        with {:ok, key} <- Core.Outbox.Key.new(fields.aggregate_id),
+             {:ok, name} <- Core.Outbox.Name.new(fields.type),
              {:ok, created_at} <- Core.Outbox.CreatedAt.now() do
-          Core.Outbox.Record.new(
-            @es_topic,
-            key,
-            name,
-            wire_payload(event, aggregate_id, event_id),
-            headers(event_name, aggregate_id, event_id),
-            created_at
-          )
+          Core.Outbox.Record.new(@es_topic, key, name, payload, headers(fields), created_at)
         end
       end
 
-      defp wire_payload(event, aggregate_id, event_id) do
-        {type, payload} = @es_codec.dump(event)
+      defp es_codec, do: unquote(codec)
 
+      defp headers(fields) do
         %{
-          "event_id" => event_id,
-          "type" => type,
-          "payload" => payload,
-          "aggregate_id" => aggregate_id,
-          "aggregate_version" => Core.Version.value(event.aggregate_version),
-          "at" => @es_codec.dump(event.at),
-          "by" => @es_codec.dump(event.by)
-        }
-      end
-
-      defp headers(event_name, aggregate_id, event_id) do
-        %{
-          "name" => event_name,
-          "aggr_id" => aggregate_id,
-          "event_id" => event_id
+          "name" => fields.type,
+          "aggr_id" => fields.aggregate_id,
+          "event_id" => fields.id
         }
       end
     end
@@ -114,8 +95,8 @@ defmodule Core.Es.Outbox do
 
     {
       validate_topic!(opts),
-      Helper.Opts.module!(opts, :event, @label, exports: [name: 1]),
-      Keyword.get(opts, :codec) || Config.codec()
+      Helper.Opts.module!(opts, :event, @label),
+      Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
     }
   end
 

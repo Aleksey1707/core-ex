@@ -85,7 +85,7 @@ defmodule Core.Repo.Pg.Es do
     lit = Macro.expand_literals(opts, __CALLER__)
     cfg = validate_opts!(lit)
     pg_opts = Keyword.drop(opts, @own_keys)
-    dao = Keyword.get(lit, :repo) || Config.dao()
+    dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
 
     quote do
       use Core.Repo.Pg, unquote(pg_opts)

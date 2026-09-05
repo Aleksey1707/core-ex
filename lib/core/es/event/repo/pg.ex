@@ -22,13 +22,14 @@ defmodule Core.Es.Event.Repo.Pg do
   - `schema:` — Ecto-схема таблицы событий (`Core.Es.Event.Repo.Pg.Schema`)
   - `aggregate_id:` — Prim идентификатора агрегата
   - `errors:` — каталог доменных ошибок агрегата (нужен clause `:version_mismatch`)
-  - `repo:` — Ecto.Repo; по умолчанию `Core.Config.dao()`
-  - `codec:` — entity-фасад Codec; по умолчанию `Core.Config.codec()`
+  - `repo:` — Ecto.Repo; по умолчанию резолвится в рантайме через `Core.Config.dao()`
+  - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
+    через `Core.Config.codec()`
 
-  Макрос занимает имена `@es_behaviour`, `@es_schema`, `@es_dao`, `@es_errors`, `@es_codec`.
+  Макрос занимает имена `@es_behaviour`, `@es_schema`, `@es_errors` и приватные
+  `es_dao/0`, `es_codec/0`.
   """
 
-  alias Core.Config
   alias Core.Helper
 
   @label "Es.Event.Repo.Pg"
@@ -51,9 +52,7 @@ defmodule Core.Es.Event.Repo.Pg do
 
       @es_behaviour unquote(opts.behaviour)
       @es_schema unquote(opts.schema)
-      @es_dao unquote(opts.dao)
       @es_errors unquote(opts.errors)
-      @es_codec unquote(opts.codec)
 
       @doc "Добавить события агрегата в store."
       @impl true
@@ -75,7 +74,7 @@ defmodule Core.Es.Event.Repo.Pg do
       @doc "Число событий агрегата."
       @impl true
       def count_by_aggregate(%unquote(opts.aggregate_id){} = id, %Core.Context{}) do
-        {:ok, @es_dao.aggregate(base_query(id), :count)}
+        {:ok, es_dao().aggregate(base_query(id), :count)}
       end
 
       @doc """
@@ -97,7 +96,7 @@ defmodule Core.Es.Event.Repo.Pg do
         id
         |> base_query()
         |> version_range(opts)
-        |> @es_dao.all()
+        |> es_dao().all()
         |> Core.Result.traverse(&@es_schema.to_entity/1)
       end
 
@@ -116,10 +115,10 @@ defmodule Core.Es.Event.Repo.Pg do
             limit: ^Core.Pagination.Limit.value(limit),
             offset: ^Core.Pagination.Offset.value(offset)
           )
-          |> @es_dao.all()
+          |> es_dao().all()
 
         with {:ok, items} <- Core.Result.traverse(rows, &@es_schema.to_entity/1) do
-          {:ok, Core.Pagination.Result.new(items, @es_dao.aggregate(scope, :count))}
+          {:ok, Core.Pagination.Result.new(items, es_dao().aggregate(scope, :count))}
         end
       end
 
@@ -133,7 +132,7 @@ defmodule Core.Es.Event.Repo.Pg do
             conflict_target: [:aggregate_id, :aggregate_version]
           )
 
-        case @es_dao.insert_all(@es_schema, rows, insert_opts) do
+        case es_dao().insert_all(@es_schema, rows, insert_opts) do
           {^expected, _} -> {:ok, expected}
           {_inserted, _} -> {:error, version_conflict(chunk)}
         end
@@ -160,7 +159,7 @@ defmodule Core.Es.Event.Repo.Pg do
       end
 
       defp base_query(id) do
-        db_id = @es_codec.dump(id)
+        db_id = es_codec().dump(id)
 
         Ecto.Query.from(e in @es_schema,
           where: e.aggregate_id == ^db_id,
@@ -170,10 +169,14 @@ defmodule Core.Es.Event.Repo.Pg do
 
       defp version_conflict([event | _] = events) do
         @es_errors.domain(@es_behaviour, :version_mismatch, %{
-          aggregate_id: @es_codec.dump(event.aggregate_id),
+          aggregate_id: es_codec().dump(event.aggregate_id),
           versions: Enum.map(events, &Core.Version.value(&1.aggregate_version))
         })
       end
+
+      defp es_dao, do: unquote(opts.dao)
+
+      defp es_codec, do: unquote(opts.codec)
     end
   end
 
@@ -223,8 +226,8 @@ defmodule Core.Es.Event.Repo.Pg do
       schema: Helper.Opts.module!(opts, :schema, @label),
       aggregate_id: Helper.Opts.module!(opts, :aggregate_id, @label, exports: [new: 1]),
       errors: errors!(opts),
-      dao: Keyword.get(opts, :repo) || Config.dao(),
-      codec: Keyword.get(opts, :codec) || Config.codec()
+      dao: Helper.Opts.module_or_config!(opts, :repo, :dao, @label),
+      codec: Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
     }
   end
 

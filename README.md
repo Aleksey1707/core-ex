@@ -15,7 +15,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Codec`, `Core.Codec.Facade`, `Core.Codec.Plugin`, `Core.Codec.Redump` | wire-профили и entity-фасады (dump/load) |
 | `Core.Context`, `Core.Error`, `Core.Exc`, `Core.Result`, `Core.Option` | сквозные контракты вызова и ошибок |
 | `Core.Repo`, `Core.Repo.Pg*`, `Core.Repo.Sc` | контракт репозитория, реализация на Ecto/Postgres, shadow copy |
-| `Core.Es.*` | доменные события, event store, маппинг в outbox |
+| `Core.Es.*` | доменные события и их wire-конверт, event store, маппинг в outbox |
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
 | `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub (клиенты — опциональные зависимости, см. ниже) |
 | `Core.Web.*` | граница HTTP: конверт ответа, разбор параметров, `%Error{}` → HTTP-статус, сервер метрик |

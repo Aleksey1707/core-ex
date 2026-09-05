@@ -98,30 +98,81 @@ defmodule Core.Prim.UUID do
     raise ArgumentError, "unsupported UUID version for generation: #{inspect(version)}"
   end
 
-  @doc "Отформатировать UUID-строку (`:full` / `:hex` / `:urn`)."
+  @doc """
+  Отформатировать UUID-строку (`:full` / `:hex` / `:urn`).
+
+  Каноническая форма — та, в которой Prim хранит значение (её отдаёт `cast/1`), — переводится
+  срезкой: `:full` возвращается как есть, остальные собираются из её же кусков. Разбор строки
+  в 16 байт и обратная сборка библиотекой — самая дорогая часть дампа uuid на read-пути,
+  а из канонической формы результат получается копированием.
+
+  Прочие формы (hex, urn, верхний регистр) приводит библиотека.
+  """
   @spec format(String.t(), :full | :hex | :urn) :: String.t()
 
   def format(uuid, fmt) when is_binary(uuid) and fmt in ~w(full hex urn)a do
-    uuid
-    |> UUID.string_to_binary!()
-    |> UUID.binary_to_string!(to_uuid_format(fmt))
+    if canonical?(uuid),
+      do: from_canonical(uuid, fmt),
+      else: convert(uuid, fmt)
   end
-
-  # ---
-
-  defp to_uuid_format(:full), do: :default
-  defp to_uuid_format(:hex), do: :hex
-  defp to_uuid_format(:urn), do: :urn
 
   @doc false
   @spec cast(term()) :: {:ok, String.t()} | {:error, {:invalid_uuid, String.t()}}
 
   def cast(value) when is_binary(value) do
-    case UUID.info(value) do
-      {:ok, _} -> {:ok, format(value, :full)}
-      {:error, _} -> {:error, {:invalid_uuid, "невалидное значение"}}
-    end
+    {:ok, normalize(value)}
+  rescue
+    # `string_to_binary!/1` — единственный разбор на этом пути: отдельная проверка
+    # библиотекой (`UUID.info/1`) означала бы разбор той же строки дважды.
+    ArgumentError -> {:error, {:invalid_uuid, "невалидное значение"}}
   end
 
   def cast(_), do: {:error, {:invalid_uuid, "невалидное значение"}}
+
+  # ---
+
+  defp normalize(uuid) do
+    if canonical?(uuid), do: uuid, else: convert(uuid, :full)
+  end
+
+  defp convert(uuid, fmt) do
+    uuid
+    |> UUID.string_to_binary!()
+    |> UUID.binary_to_string!(to_uuid_format(fmt))
+  end
+
+  defp from_canonical(uuid, :full), do: uuid
+
+  defp from_canonical(uuid, :urn), do: "urn:uuid:" <> uuid
+
+  defp from_canonical(
+         <<a::binary-size(8), ?-, b::binary-size(4), ?-, c::binary-size(4), ?-, d::binary-size(4),
+           ?-, e::binary-size(12)>>,
+         :hex
+       ) do
+    a <> b <> c <> d <> e
+  end
+
+  # Каноническая форма: 36 символов, дефисы на своих местах, шестнадцатеричные цифры
+  # в нижнем регистре. Верхний регистр канону не соответствует — его нормализует `cast/1`.
+  defp canonical?(
+         <<a::binary-size(8), ?-, b::binary-size(4), ?-, c::binary-size(4), ?-, d::binary-size(4),
+           ?-, e::binary-size(12)>>
+       ) do
+    lower_hex?(a) and lower_hex?(b) and lower_hex?(c) and lower_hex?(d) and lower_hex?(e)
+  end
+
+  defp canonical?(_uuid), do: false
+
+  defp lower_hex?(<<>>), do: true
+
+  defp lower_hex?(<<char, rest::binary>>) when char in ?0..?9 or char in ?a..?f do
+    lower_hex?(rest)
+  end
+
+  defp lower_hex?(_binary), do: false
+
+  defp to_uuid_format(:full), do: :default
+  defp to_uuid_format(:hex), do: :hex
+  defp to_uuid_format(:urn), do: :urn
 end

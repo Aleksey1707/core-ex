@@ -2,6 +2,7 @@ defmodule Core.CodecTest do
   use ExUnit.Case, async: true
 
   alias Core.Codec
+  alias Core.Codec.Helper
   alias Core.Exc
   alias Core.Prim
 
@@ -127,10 +128,10 @@ defmodule Core.CodecTest do
       decimal: :string
 
     @impl true
-    def dump_raw(:uuid, value), do: "raw:" <> Prim.UUID.format(value, :hex)
+    def dump_kind(prim, :uuid), do: "raw:" <> Prim.UUID.format(Codec.value(prim), :hex)
 
     @impl true
-    def dump_raw(kind, value), do: super(kind, value)
+    def dump_kind(prim, kind), do: super(prim, kind)
   end
 
   defmodule IsoUtcProfile do
@@ -221,7 +222,7 @@ defmodule Core.CodecTest do
 
   test "dump datetime :iso8601 + :app shifts raw UTC into the app timezone" do
     utc = ~U[2026-08-31 10:00:00Z]
-    iso = AppTzProfile.dump_raw(:datetime, utc)
+    iso = Helper.dump_raw(SampleDateTime, utc, AppTzProfile)
 
     assert {:ok, _, offset} = DateTime.from_iso8601(iso)
     assert offset == tz_offset_seconds(@app_tz, utc)
@@ -231,7 +232,7 @@ defmodule Core.CodecTest do
     utc = ~U[2026-08-31 10:00:00Z]
     prim = SampleDateTime.new!(utc)
 
-    assert AppTzProfile.dump_raw(:datetime, utc) == AppTzProfile.dump(prim)
+    assert Helper.dump_raw(SampleDateTime, utc, AppTzProfile) == AppTzProfile.dump(prim)
     assert {:ok, ^prim} = AppTzProfile.load(SampleDateTime, AppTzProfile.dump(prim))
   end
 
@@ -246,42 +247,51 @@ defmodule Core.CodecTest do
     assert BuiltinProfile.dump(date) == @date
   end
 
-  test "dump_raw formats raw value like dump of the same prim" do
-    id = SampleUUID.new!(@uuid)
-    price = SampleDecimal.new!(Decimal.new("10.5"))
-    date = SampleDate.new!(@date)
-    dt = SampleDateTime.now!()
-
-    for profile <- [
-          BuiltinProfile,
-          InternalLike,
-          DateIsoProfile,
-          IsoOffsetTzProfile,
-          AppTzProfile
-        ] do
-      assert profile.dump_raw(:uuid, Codec.value(id)) == profile.dump(id)
-      assert profile.dump_raw(:decimal, Codec.value(price)) == profile.dump(price)
-      assert profile.dump_raw(:date, Codec.value(date)) == profile.dump(date)
-      assert profile.dump_raw(:datetime, Codec.value(dt)) == profile.dump(dt)
-    end
-  end
-
-  test "dump_raw covers only formatted kinds" do
-    assert_raise FunctionClauseError, fn -> BuiltinProfile.dump_raw(:string, "ab") end
-    assert_raise FunctionClauseError, fn -> BuiltinProfile.dump_raw(:integer, 3) end
-    assert_raise FunctionClauseError, fn -> BuiltinProfile.dump_raw(:label, @uuid) end
-  end
-
-  test "dump_raw override applies to prim dump as well" do
+  test "переопределение dump_kind применяется и к raw-пути" do
     id = SampleUUID.new!(@uuid)
     raw = "raw:550e8400e29b41d4a716446655440000"
 
-    assert RawOverrideProfile.dump_raw(:uuid, Codec.value(id)) == raw
     assert RawOverrideProfile.dump(id) == raw
-    assert RawOverrideProfile.dump_raw(:decimal, Decimal.new("10.5")) == "10.5"
+    assert Helper.dump_raw(SampleUUID, Codec.value(id), RawOverrideProfile) == raw
   end
 
-  describe "dump_raw_as/2" do
+  describe "coerce/2" do
+    test "приводит значение к своему Prim" do
+      assert {:ok, %SampleUUID{}} = Codec.coerce(SampleUUID, @uuid)
+      assert {:ok, %SampleDate{}} = Codec.coerce(SampleDate, @date)
+      assert {:ok, %SampleDecimal{}} = Codec.coerce(SampleDecimal, Decimal.new("10.5"))
+      assert {:ok, %SampleDateTime{}} = Codec.coerce(SampleDateTime, DateTime.utc_now())
+    end
+
+    test "точность и tz берутся у Prim, а не у значения" do
+      raw = ~U[2024-06-01 12:00:00.123456Z]
+
+      assert {:ok, second} = Codec.coerce(SampleDateTime, raw)
+      assert {:ok, micro} = Codec.coerce(MicroAt, raw)
+      assert Codec.value(second).microsecond == {0, 0}
+      assert Codec.value(micro).microsecond == {123_456, 6}
+
+      assert {:ok, moscow} = Codec.coerce(MoscowAt, ~U[2024-06-01 12:00:00Z])
+      assert Codec.value(moscow).time_zone == "Europe/Moscow"
+    end
+
+    test "восстанавливает цепочку Prim.Compose" do
+      assert {:ok, %ApproverID{value: %SampleUUID{}} = composed} = Codec.coerce(ApproverID, @uuid)
+      assert composed == ApproverID.new!(@uuid)
+    end
+
+    test "приведению не подлежит: nil, не-Prim, неформатируемый kind, кривое значение" do
+      assert :error = Codec.coerce(SampleDateTime, nil)
+      assert :error = Codec.coerce(DateTime, @uuid)
+      assert :error = Codec.coerce(SampleString, "Иван")
+      assert :error = Codec.coerce(SampleInteger, 3)
+      assert :error = Codec.coerce(LabelID, @uuid)
+      assert :error = Codec.coerce(SampleUUID, "zz")
+      assert :error = Codec.coerce(SampleDateTime, "не дата")
+    end
+  end
+
+  describe "Codec.Helper.dump_raw/3" do
     test "формат совпадает с дампом того же Prim" do
       id = SampleUUID.new!(@uuid)
       price = SampleDecimal.new!(Decimal.new("10.5"))
@@ -289,62 +299,44 @@ defmodule Core.CodecTest do
       dt = SampleDateTime.now!()
 
       for profile <- [BuiltinProfile, InternalLike, DateIsoProfile, AppTzProfile] do
-        assert profile.dump_raw_as(SampleUUID, Codec.value(id)) == profile.dump(id)
-        assert profile.dump_raw_as(SampleDecimal, Codec.value(price)) == profile.dump(price)
-        assert profile.dump_raw_as(SampleDate, Codec.value(date)) == profile.dump(date)
-        assert profile.dump_raw_as(SampleDateTime, Codec.value(dt)) == profile.dump(dt)
+        assert Helper.dump_raw(SampleUUID, Codec.value(id), profile) == profile.dump(id)
+        assert Helper.dump_raw(SampleDecimal, Codec.value(price), profile) == profile.dump(price)
+        assert Helper.dump_raw(SampleDate, Codec.value(date), profile) == profile.dump(date)
+        assert Helper.dump_raw(SampleDateTime, Codec.value(dt), profile) == profile.dump(dt)
       end
-    end
-
-    test "точность берётся у Prim, а не у значения" do
-      raw = ~U[2024-06-01 12:00:00.123456Z]
-
-      assert AppTzProfile.dump_raw_as(SampleDateTime, raw) ==
-               AppTzProfile.dump(SampleDateTime.new!(raw))
-
-      assert AppTzProfile.dump_raw_as(MicroAt, raw) == AppTzProfile.dump(MicroAt.new!(raw))
-      refute AppTzProfile.dump_raw_as(SampleDateTime, raw) =~ "123456"
-      assert AppTzProfile.dump_raw_as(MicroAt, raw) =~ "123456"
-    end
-
-    test "tz берётся у Prim" do
-      raw = ~U[2024-06-01 12:00:00Z]
-
-      assert IsoUtcProfile.dump_raw_as(MoscowAt, raw) == IsoUtcProfile.dump(MoscowAt.new!(raw))
-      assert AppTzProfile.dump_raw_as(MoscowAt, raw) == AppTzProfile.dump(MoscowAt.new!(raw))
     end
 
     test "принимает wire-форму значения (строку из jsonb)" do
       iso = "2024-06-01T12:00:00Z"
       hex = "550e8400e29b41d4a716446655440000"
 
-      assert AppTzProfile.dump_raw_as(SampleDateTime, iso) ==
+      assert Helper.dump_raw(SampleDateTime, iso, AppTzProfile) ==
                AppTzProfile.dump(SampleDateTime.new!(iso))
 
-      assert BuiltinProfile.dump_raw_as(SampleUUID, hex) ==
+      assert Helper.dump_raw(SampleUUID, hex, BuiltinProfile) ==
                BuiltinProfile.dump(SampleUUID.new!(hex))
 
-      assert BuiltinProfile.dump_raw_as(SampleDecimal, 10.5) ==
+      assert Helper.dump_raw(SampleDecimal, 10.5, BuiltinProfile) ==
                BuiltinProfile.dump(SampleDecimal.new!(10.5))
 
-      assert DateIsoProfile.dump_raw_as(SampleDate, "2024-06-01") ==
+      assert Helper.dump_raw(SampleDate, "2024-06-01", DateIsoProfile) ==
                DateIsoProfile.dump(SampleDate.new!(@date))
     end
 
     test "рекурсия по Prim.Compose до базового Prim" do
       id = ApproverID.new!(@uuid)
 
-      assert BuiltinProfile.dump_raw_as(ApproverID, @uuid) == BuiltinProfile.dump(id)
+      assert Helper.dump_raw(ApproverID, @uuid, BuiltinProfile) == BuiltinProfile.dump(id)
     end
 
     test "тотальность: nil, неприводимое значение и неформатируемый kind — как есть" do
-      assert nil == BuiltinProfile.dump_raw_as(SampleDateTime, nil)
-      assert "не дата" = BuiltinProfile.dump_raw_as(SampleDateTime, "не дата")
-      assert "zz" = BuiltinProfile.dump_raw_as(SampleUUID, "zz")
-      assert "Иван" = BuiltinProfile.dump_raw_as(SampleString, "Иван")
-      assert 3 = BuiltinProfile.dump_raw_as(SampleInteger, 3)
-      assert @uuid == BuiltinProfile.dump_raw_as(LabelID, @uuid)
-      assert @uuid == BuiltinProfile.dump_raw_as(DateTime, @uuid)
+      assert nil == Helper.dump_raw(SampleDateTime, nil, BuiltinProfile)
+      assert "не дата" = Helper.dump_raw(SampleDateTime, "не дата", BuiltinProfile)
+      assert "zz" = Helper.dump_raw(SampleUUID, "zz", BuiltinProfile)
+      assert "Иван" = Helper.dump_raw(SampleString, "Иван", BuiltinProfile)
+      assert 3 = Helper.dump_raw(SampleInteger, 3, BuiltinProfile)
+      assert @uuid == Helper.dump_raw(LabelID, @uuid, BuiltinProfile)
+      assert @uuid == Helper.dump_raw(DateTime, @uuid, BuiltinProfile)
     end
   end
 
@@ -509,7 +501,7 @@ defmodule Core.CodecTest do
     assert {:module, _} = Code.ensure_loaded(Core.CodecFixture.External)
     assert function_exported?(Core.CodecFixture.Internal, :dump, 1)
     assert function_exported?(Core.CodecFixture.Internal, :load, 2)
-    assert function_exported?(Core.CodecFixture.Internal, :load_tagged, 2)
+    assert function_exported?(Core.CodecFixture.Internal, :load!, 2)
     assert function_exported?(Core.CodecFixture.External, :dump, 1)
   end
 

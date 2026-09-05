@@ -1,21 +1,15 @@
 defmodule Core.Codec.Facade.Behaviour do
   @moduledoc """
-  Контракт entity-фасада (`dump` / `load` / `load_tagged` + Prim-профиль).
+  Контракт entity-фасада: `dump/1`, `load/2`, `load!/2` — и больше ничего.
 
-  `dump_raw/2` — делегат в `dump_raw/2` Prim-профиля: тот же wire-формат для значения
-  без Prim-обёртки (read-модели, `<Aggregate>View.Codec`). `dump_raw_as/2` — то же с
-  форматом конкретного Prim (kind + tz/precision из его опций типа).
+  Единственная ось диспетчеризации — модуль: `dump/1` выбирает плагин по `__struct__`,
+  `load/2` — по первому аргументу. Полиморфный wire (тег внутри данных) грузится через
+  модуль-семейство (`union:` у `Core.Codec.Plugin`), а не отдельной функцией фасада.
   """
 
   alias Core.Error
 
-  @callback prim() :: module()
   @callback dump(struct()) :: term()
-  @callback dump_raw(atom(), term()) :: term()
-  @callback dump_raw_as(module(), term()) :: term()
   @callback load(module(), term()) :: {:ok, term()} | {:error, Error.t()}
   @callback load!(module(), term()) :: term()
-  @callback dump_tagged(struct()) :: {term(), term()}
-  @callback load_tagged(term(), term()) :: {:ok, term()} | {:error, Error.t()}
-  @callback load_tagged!(term(), term()) :: term()
 end

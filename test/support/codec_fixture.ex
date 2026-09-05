@@ -4,8 +4,9 @@ defmodule Core.CodecFixture do
 
   Повторяют роль, которую в приложении-потребителе играют `MyApp.Codec.*`:
   Prim-профили задают wire-форматы примитивов, фасады добавляют плагины сущностей.
-  Доменных плагинов у библиотеки нет — только `Core.Outbox.Codec`, без которого
-  `Outbox.Repo.Pg.Schema` не смог бы писать и читать записи очереди.
+  Доменных плагинов у библиотеки нет: в списке — `Core.Outbox.Codec`, без которого
+  `Outbox.Repo.Pg.Schema` не смог бы писать и читать записи очереди, и
+  `Core.EventFixture.Codec` — кодек событий фейкового агрегата тестов.
   """
 
   defmodule Prim.Internal do
@@ -30,7 +31,7 @@ defmodule Core.CodecFixture do
       decimal: :string
   end
 
-  @plugins [Core.Outbox.Codec]
+  @plugins [Core.Outbox.Codec, Core.EventFixture.Codec]
 
   @doc "Плагины entity-фасадов."
   @spec plugins() :: [module()]

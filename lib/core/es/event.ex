@@ -2,7 +2,10 @@ defmodule Core.Es.Event do
   @moduledoc """
   Базовый builder отдельного события версионированного агрегата (`use`).
 
-  Wire-имя события задаётся в `<Aggregate>.Event.Codec`, не здесь.
+  Wire-имя события задаётся в `<Aggregate>.Event.Codec`, не здесь. Оттуда же читается
+  интроспекция события — `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`:
+  кодек выводит по ней Prim агрегата и автора, а событиям без нагрузки не требует
+  клоуз `dump_payload/2` и `load_payload/3`.
   """
 
   import Core.Helper.String, only: [first_line: 1]
@@ -67,6 +70,21 @@ defmodule Core.Es.Event do
 
       @enforce_keys ~w(id payload aggregate_id aggregate_version at by)a
       defstruct @enforce_keys
+
+      @doc false
+      @spec __es_payload__() :: module() | nil
+
+      def __es_payload__, do: unquote(payload_mod)
+
+      @doc false
+      @spec __es_aggregate_id__() :: module()
+
+      def __es_aggregate_id__, do: unquote(aggregate_id_mod)
+
+      @doc false
+      @spec __es_by__() :: module()
+
+      def __es_by__, do: unquote(by_mod)
 
       if is_nil(payload_mod) do
         @type t :: %__MODULE__{
