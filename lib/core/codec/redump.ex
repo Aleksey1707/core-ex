@@ -15,8 +15,8 @@ defmodule Core.Codec.Redump do
   типа проходят как есть — страница списка не должна падать из-за одной строки. Спека
   же строга: не описанная здесь форма — ошибка программиста, а не данных.
 
-  Envelope `{:tagged, _}` — map-представление пары `{тег, нагрузка}` (`Facade.dump_tagged/1`):
-  ключи `type` и `fields`.
+  Envelope `{:tagged, _}` — map-представление полиморфной нагрузки: тег в ключе `type`,
+  значения в `fields`.
   """
 
   alias Core.Helper
@@ -38,7 +38,9 @@ defmodule Core.Codec.Redump do
 
   def run(nil, _spec, _codec), do: nil
 
-  def run(value, {:prim, mod}, codec) when is_atom(mod), do: codec.dump_raw_as(mod, value)
+  def run(value, {:prim, mod}, codec) when is_atom(mod) do
+    Core.Codec.Helper.dump_raw(mod, value, codec)
+  end
 
   def run(value, {:list, spec}, codec) when is_list(value) do
     Enum.map(value, &run(&1, spec, codec))

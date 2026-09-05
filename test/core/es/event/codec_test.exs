@@ -4,140 +4,273 @@ defmodule Core.Es.Event.CodecTest do
   alias Core.CodecFixture.Internal, as: InCodec
   alias Core.Error
   alias Core.Es
+  alias Core.EventFixture
   alias Core.Version
-  require Error
 
-  defmodule FakeId do
-    @moduledoc false
+  @envelope_keys ~w(aggregate_id aggregate_version at by event_id payload type)
 
-    use Core.Prim.UUID,
-      name: "Идентификатор",
-      version: 7
-  end
+  describe "dump/2" do
+    test "отдаёт конверт события целиком" do
+      event = EventFixture.created()
 
-  defmodule Event do
-    @moduledoc false
+      dumped = EventFixture.Codec.dump(event, InCodec)
 
-    defmodule Created do
-      @moduledoc false
+      keys =
+        dumped
+        |> Map.keys()
+        |> Enum.sort()
 
-      use Core.Es.Event,
-        aggregate_id: Core.Es.Event.CodecTest.FakeId,
-        by: Core.Es.Event.CodecTest.FakeId,
-        payload: nil
+      assert keys == @envelope_keys
+      assert dumped["type"] == "fixture.created"
+      assert dumped["payload"] == %{"name" => "Приёмка"}
+      assert dumped["event_id"] == InCodec.dump(event.id)
+      assert dumped["aggregate_id"] == InCodec.dump(event.aggregate_id)
+      assert dumped["aggregate_version"] == Version.value(event.aggregate_version)
+      assert dumped["at"] == InCodec.dump(event.at)
+      assert dumped["by"] == InCodec.dump(event.by)
     end
 
-    @type t :: Created.t()
-  end
+    test "у события без нагрузки payload равен nil" do
+      dumped = EventFixture.Codec.dump(EventFixture.closed(), InCodec)
 
-  defmodule Errors do
-    @moduledoc false
-
-    def domain(module, :unknown_event_type = code, detail) do
-      Error.domain(module,
-        code: code,
-        ns: :fake,
-        message: "Неизвестный тип события",
-        detail: detail
-      )
+      assert dumped["type"] == "fixture.closed"
+      assert dumped["payload"] == nil
     end
   end
 
-  defmodule NoUnknownErrors do
-    @moduledoc false
+  describe "load/3" do
+    test "восстанавливает событие по модулю" do
+      event = EventFixture.created()
 
-    def domain(module, :not_found = code, detail) do
-      Error.domain(module, code: code, ns: :fake, message: "Не найдено", detail: detail)
+      assert {:ok, ^event} =
+               EventFixture.Codec.load(
+                 EventFixture.Event.Created,
+                 InCodec.dump(event),
+                 InCodec
+               )
+    end
+
+    test "по модулю-семейству выбирает тип события тегом" do
+      created = EventFixture.created()
+      closed = EventFixture.closed()
+
+      assert {:ok, ^created} = InCodec.load(EventFixture.Event, InCodec.dump(created))
+      assert {:ok, ^closed} = InCodec.load(EventFixture.Event, InCodec.dump(closed))
+    end
+
+    test "неизвестный тег — доменная ошибка кодека агрегата" do
+      data =
+        EventFixture.created()
+        |> InCodec.dump()
+        |> Map.put("type", "fixture.gone")
+
+      assert {:error, %Error{kind: :domain, code: :unknown_event_type, ns: :es} = error} =
+               InCodec.load(EventFixture.Event, data)
+
+      assert error.module == EventFixture.Codec
+      assert error.detail == "fixture.gone"
+    end
+
+    test "не-map вместо конверта — доменная ошибка формата" do
+      assert {:error, %Error{code: :invalid_envelope, ns: :es, detail: %{field: :type}}} =
+               InCodec.load(EventFixture.Event, "не конверт")
+    end
+
+    test "конверт без тега — доменная ошибка формата" do
+      data =
+        EventFixture.created()
+        |> InCodec.dump()
+        |> Map.delete("type")
+
+      assert {:error, %Error{code: :invalid_envelope, ns: :es, detail: %{field: :type}}} =
+               InCodec.load(EventFixture.Event, data)
+    end
+
+    test "round-trip через JSON: событие с нагрузкой" do
+      event = EventFixture.created()
+
+      assert {:ok, ^event} = load(json_roundtrip(InCodec.dump(event)))
+    end
+
+    test "round-trip через JSON: событие без нагрузки — payload вправе отсутствовать" do
+      event = EventFixture.closed()
+
+      data =
+        event
+        |> InCodec.dump()
+        |> json_roundtrip()
+        |> Map.delete("payload")
+
+      assert {:ok, ^event} = InCodec.load(EventFixture.Event.Closed, data)
+    end
+
+    test "отсутствующее обязательное поле — доменная ошибка с именем поля" do
+      data =
+        EventFixture.created()
+        |> InCodec.dump()
+        |> json_roundtrip()
+        |> Map.delete("aggregate_version")
+
+      assert {:error, %Error{kind: :domain, code: :invalid_envelope, ns: :es} = error} =
+               load(data)
+
+      assert error.module == EventFixture.Codec
+      assert error.detail == %{field: :aggregate_version}
+    end
+
+    test "неприводимое значение поля — доменная ошибка приведения" do
+      data =
+        EventFixture.created()
+        |> InCodec.dump()
+        |> json_roundtrip()
+        |> Map.put("aggregate_id", "не uuid")
+
+      assert {:error, %Error{kind: :domain}} = load(data)
     end
   end
 
-  defmodule Codec do
-    @moduledoc false
+  describe "to_fields/1 и from_fields/1" do
+    test "переносят поля конверта врозь и обратно" do
+      event = EventFixture.created()
+      dumped = InCodec.dump(event)
 
-    alias Core.Es
-    alias Core.Es.Event.CodecTest.Errors
-    alias Core.Es.Event.CodecTest.Event
-    alias Core.Es.Event.CodecTest.FakeId
+      fields = Es.Event.Codec.to_fields(dumped)
 
-    @tag_by_mod %{Event.Created => "created"}
-
-    use Es.Event.Codec,
-      tags: @tag_by_mod,
-      event: Event,
-      aggregate_id: FakeId,
-      by: FakeId,
-      errors: Errors
-
-    defp dump_payload(%Event.Created{}, _codec), do: nil
-
-    defp load_payload(Event.Created, nil, envelope, _codec),
-      do: {:ok, event(Event.Created, envelope)}
+      assert fields.id == dumped["event_id"]
+      assert fields.by == dumped["by"]
+      assert fields.type == "fixture.created"
+      assert Es.Event.Codec.from_fields(fields) == dumped
+    end
   end
 
-  setup do
-    {:ok,
-     %{
-       envelope:
-         {FakeId.new(), Version.new(), FakeId.new(), Es.Event.At.now!(), Es.Event.ID.new()}
-     }}
-  end
-
-  test "dump/2 отдаёт {type, payload}", ctx do
-    {aggregate_id, version, by, at, id} = ctx.envelope
-    event = Event.Created.new(aggregate_id, version, by, at, id)
-
-    assert {"created", nil} == Codec.dump(event, InCodec)
-  end
-
-  test "load_event/8 собирает событие из envelope", ctx do
-    {aggregate_id, version, by, at, id} = ctx.envelope
-    event = Event.Created.new(aggregate_id, version, by, at, id)
-
-    assert {:ok, ^event} =
-             Codec.load_event("created", nil, aggregate_id, version, by, at, id, InCodec)
-
-    assert ^event = Codec.load_event!("created", nil, aggregate_id, version, by, at, id, InCodec)
-  end
-
-  test "неизвестный wire-type — доменная ошибка из каталога агрегата", ctx do
-    {aggregate_id, version, by, at, id} = ctx.envelope
-
-    assert {:error, %Error{code: :unknown_event_type, ns: :fake} = error} =
-             Codec.load_event("nope", nil, aggregate_id, version, by, at, id, InCodec)
-
-    assert error.detail == %{type: "nope", payload: nil}
-  end
-
-  test "требует обязательные опции" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:errors\]/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.Es.Event.CodecTest.MissingErrors do
-            use Core.Es.Event.Codec,
-              tags: %{Core.Es.Event.CodecTest.Event.Created => "created"},
-              event: Core.Es.Event.CodecTest.Event,
-              aggregate_id: Core.Es.Event.CodecTest.FakeId,
-              by: Core.Es.Event.CodecTest.FakeId
+  describe "опции" do
+    test "требует обязательные" do
+      assert_raise CompileError, ~r/missing required option\(s\): \[:tags\]/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.MissingTags do
+              use Core.Es.Event.Codec, event: Core.EventFixture.Event
+            end
           end
-        end
-      )
+        )
+      end
+    end
+
+    test "отклоняет неизвестную опцию" do
+      assert_raise CompileError, ~r/unknown option\(s\): \[:aggregate_id\]/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.UnknownOpt do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{Core.EventFixture.Event.Closed => "unknown_opt.closed"},
+                aggregate_id: Core.EventFixture.AggID
+            end
+          end
+        )
+      end
+    end
+
+    test "выводит Prim агрегата и автора из самих событий" do
+      assert {:ok, _} =
+               InCodec.load(EventFixture.Event.Closed, InCodec.dump(EventFixture.closed()))
+    end
+
+    test "события с разными Prim агрегата — CompileError" do
+      assert_raise CompileError, ~r/разными __es_aggregate_id__/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.OtherEvent do
+              use Core.Es.Event,
+                aggregate_id: Core.EventFixture.ActorID,
+                by: Core.EventFixture.ActorID,
+                payload: nil
+            end
+
+            defmodule Core.Es.Event.CodecTest.MixedCodec do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{
+                  Core.EventFixture.Event.Closed => "mixed.closed",
+                  Core.Es.Event.CodecTest.OtherEvent => "mixed.other"
+                }
+            end
+          end
+        )
+      end
+    end
+
+    test "тег, объявленный дважды, — CompileError" do
+      assert_raise CompileError, ~r/дубликат тега/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.DupTag do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{
+                  Core.EventFixture.Event.Created => "dup.tag",
+                  Core.EventFixture.Event.Closed => "dup.tag"
+                }
+            end
+          end
+        )
+      end
+    end
+
+    test "не событие в tags — CompileError" do
+      assert_raise CompileError, ~r/не объявлен через `use Core.Es.Event`/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.NotAnEvent do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{Core.Version => "not_an_event.version"}
+            end
+          end
+        )
+      end
+    end
+
+    test "событие с нагрузкой без dump_payload/2 — CompileError" do
+      assert_raise CompileError, ~r/обязан объявить dump_payload\/2/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.NoPayloadClauses do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{Core.EventFixture.Event.Created => "no_clauses.created"}
+            end
+          end
+        )
+      end
+    end
+
+    test "кодек событий без нагрузки клоуз не требует" do
+      {mod, _} =
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.PayloadlessCodec do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{Core.EventFixture.Event.Closed => "payloadless.closed"}
+            end
+
+            Core.Es.Event.CodecTest.PayloadlessCodec
+          end
+        )
+
+      assert mod.type(Core.EventFixture.Event.Closed) == "payloadless.closed"
+      refute function_exported?(mod, :dump_payload, 2)
     end
   end
 
-  test "требует clause :unknown_event_type в каталоге ошибок" do
-    assert_raise CompileError, ~r/отсутствует clause для :unknown_event_type/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.Es.Event.CodecTest.BadErrors do
-            use Core.Es.Event.Codec,
-              tags: %{Core.Es.Event.CodecTest.Event.Created => "created"},
-              event: Core.Es.Event.CodecTest.Event,
-              aggregate_id: Core.Es.Event.CodecTest.FakeId,
-              by: Core.Es.Event.CodecTest.FakeId,
-              errors: Core.Es.Event.CodecTest.NoUnknownErrors
-          end
-        end
-      )
-    end
+  # ---
+
+  defp load(data), do: InCodec.load(EventFixture.Event.Created, data)
+
+  defp json_roundtrip(map) do
+    map
+    |> Jason.encode!()
+    |> Jason.decode!()
   end
 end

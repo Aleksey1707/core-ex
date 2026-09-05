@@ -111,7 +111,7 @@ defmodule Core.Repo.Pg do
       @entity_type Keyword.get(opts, :entity)
 
       @pg %{
-        dao: Keyword.get(opts, :repo) || Core.Config.dao(),
+        dao: Keyword.get(opts, :repo),
         module: behaviour,
         schema: schema,
         query: Keyword.get(opts, :query, schema),
@@ -497,6 +497,17 @@ defmodule Core.Repo.Pg do
     end)
   end
 
+  @doc """
+  Ecto-репозиторий конфига: явный `repo:` либо `Core.Config.dao()`.
+
+  Резолв рантаймовый: без `repo:` макрос не имеет права требовать конфигурацию
+  потребителя на этапе компиляции (`10-architecture.md`).
+  """
+  @spec dao(map()) :: module()
+
+  def dao(%{dao: nil}), do: Core.Config.dao()
+  def dao(%{dao: dao}), do: dao
+
   @doc "Получить сущность по id и version."
   @spec get(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           {:ok, struct()} | {:error, Error.t()}
@@ -504,7 +515,7 @@ defmodule Core.Repo.Pg do
   def get(pg, id, version, context, opts \\ []) do
     db_id = pg.to_id.(id)
 
-    case pg.dao.one(from(x in read_scope(pg, context), where: x.id == ^db_id), opts) do
+    case dao(pg).one(from(x in read_scope(pg, context), where: x.id == ^db_id), opts) do
       nil ->
         {:error, pg.errors.domain(pg.module, :not_found, id)}
 
@@ -539,7 +550,7 @@ defmodule Core.Repo.Pg do
         ) :: {:ok, struct()} | {:error, Error.t()}
 
   def get_by(pg, filter, detail, version, context, opts \\ []) do
-    case pg.dao.one(from(x in read_scope(pg, context), where: ^filter), opts) do
+    case dao(pg).one(from(x in read_scope(pg, context), where: ^filter), opts) do
       nil ->
         {:error, pg.errors.domain(pg.module, :not_found, detail)}
 
@@ -555,7 +566,7 @@ defmodule Core.Repo.Pg do
   @spec list(map(), Context.t(), Repo.opts()) :: [struct()]
 
   def list(pg, context, opts \\ []) do
-    pg.dao.all(read_scope(pg, context), opts)
+    dao(pg).all(read_scope(pg, context), opts)
     |> Enum.map(&put_baseline(pg, pg.to_entity.(&1), context))
   end
 
@@ -570,7 +581,7 @@ defmodule Core.Repo.Pg do
 
   def list_by(pg, filter, context, opts \\ []) do
     from(x in read_scope(pg, context), where: ^filter)
-    |> then(&pg.dao.all(&1, opts))
+    |> then(&dao(pg).all(&1, opts))
     |> Enum.map(&put_baseline(pg, pg.to_entity.(&1), context))
   end
 
@@ -584,10 +595,10 @@ defmodule Core.Repo.Pg do
         limit: ^Pagination.Limit.value(limit),
         offset: ^Pagination.Offset.value(offset)
       )
-      |> then(&pg.dao.all(&1, opts))
+      |> then(&dao(pg).all(&1, opts))
       |> Enum.map(&put_baseline(pg, pg.to_entity.(&1), context))
 
-    count = pg.dao.aggregate(write_scope(pg, context), :count, opts)
+    count = dao(pg).aggregate(write_scope(pg, context), :count, opts)
 
     Pagination.Result.new(items, count)
   end
@@ -633,13 +644,13 @@ defmodule Core.Repo.Pg do
 
   def exists?(pg, id, :current, context, opts) when is_list(opts) do
     db_id = pg.to_id.(id)
-    {:ok, pg.dao.exists?(from(x in write_scope(pg, context), where: x.id == ^db_id), opts)}
+    {:ok, dao(pg).exists?(from(x in write_scope(pg, context), where: x.id == ^db_id), opts)}
   end
 
   def exists?(pg, id, %Version{} = version, context, opts) when is_list(opts) do
     db_id = pg.to_id.(id)
 
-    case pg.dao.one(from(x in write_scope(pg, context), where: x.id == ^db_id), opts) do
+    case dao(pg).one(from(x in write_scope(pg, context), where: x.id == ^db_id), opts) do
       nil ->
         {:ok, false}
 
@@ -671,7 +682,7 @@ defmodule Core.Repo.Pg do
   @spec count(map(), Context.t(), Repo.opts()) :: non_neg_integer()
 
   def count(pg, context, opts \\ []),
-    do: pg.dao.aggregate(write_scope(pg, context), :count, opts)
+    do: dao(pg).aggregate(write_scope(pg, context), :count, opts)
 
   @doc "Вставить сущность."
   @spec insert(map(), struct(), Context.t(), Repo.opts()) ::
@@ -762,7 +773,7 @@ defmodule Core.Repo.Pg do
     db_id = pg.to_id.(id)
     scope = from(x in write_scope(pg, context), where: x.id == ^db_id)
 
-    case pg.dao.one(scope, opts) do
+    case dao(pg).one(scope, opts) do
       nil ->
         {:error, pg.errors.domain(pg.module, :not_found, id)}
 
@@ -840,7 +851,7 @@ defmodule Core.Repo.Pg do
   defp raw_insert(pg, entity, _context, opts) do
     changeset = pg.schema.changeset(struct(pg.schema), pg.to_model.(entity))
 
-    case pg.dao.insert(changeset, opts) do
+    case dao(pg).insert(changeset, opts) do
       {:ok, row} -> {:ok, row}
       {:error, %Ecto.Changeset{} = failed} -> map_constraint_error(pg, failed, entity)
     end
@@ -858,7 +869,7 @@ defmodule Core.Repo.Pg do
   defp verify_unchanged(pg, entity, context, opts) do
     db_id = pg.to_id.(entity.id)
 
-    case pg.dao.one(from(x in write_scope(pg, context), where: x.id == ^db_id), opts) do
+    case dao(pg).one(from(x in write_scope(pg, context), where: x.id == ^db_id), opts) do
       nil -> {:error, pg.errors.domain(pg.module, :not_found, entity.id)}
       base -> unchanged_or_stale(pg, entity, base, context)
     end
@@ -874,7 +885,7 @@ defmodule Core.Repo.Pg do
   defp do_raw_update(pg, entity, context, opts) do
     attrs = pg.to_model.(entity)
 
-    case pg.dao.one(from(x in write_scope(pg, context), where: x.id == ^attrs.id), opts) do
+    case dao(pg).one(from(x in write_scope(pg, context), where: x.id == ^attrs.id), opts) do
       nil -> {:error, pg.errors.domain(pg.module, :not_found, entity.id)}
       base -> update_checked(pg, entity, base, attrs, context, opts)
     end
@@ -917,7 +928,7 @@ defmodule Core.Repo.Pg do
   end
 
   defp persist_update(pg, entity, changeset, opts) do
-    case pg.dao.update(changeset, opts) do
+    case dao(pg).update(changeset, opts) do
       {:ok, row} ->
         {:ok, row}
 
@@ -940,7 +951,7 @@ defmodule Core.Repo.Pg do
   end
 
   defp delete_scope(pg, id, scope, version, opts) do
-    case pg.dao.delete_all(scope, opts) do
+    case dao(pg).delete_all(scope, opts) do
       {0, _} -> {:error, delete_miss_error(pg, id, version)}
       {_deleted, _} -> :ok
     end
@@ -988,7 +999,7 @@ defmodule Core.Repo.Pg do
       |> Enum.uniq()
 
     rows_by_db_id =
-      pg.dao.all(from(x in scope, where: x.id in ^db_ids), opts)
+      dao(pg).all(from(x in scope, where: x.id in ^db_ids), opts)
       |> Map.new(&{&1.id, &1})
 
     {resolved, not_found, mismatched} =
@@ -1018,7 +1029,7 @@ defmodule Core.Repo.Pg do
   # уникальном индексе: повторная строка конфликтует по нему, а не по `id`.
   defp insert_chunk(pg, chunk, opts) do
     rows = Enum.map(chunk, &insert_many_row(pg, &1))
-    {count, _} = pg.dao.insert_all(pg.schema, rows, [on_conflict: :nothing] ++ opts)
+    {count, _} = dao(pg).insert_all(pg.schema, rows, [on_conflict: :nothing] ++ opts)
 
     count
   end

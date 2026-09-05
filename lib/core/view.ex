@@ -14,10 +14,10 @@ defmodule Core.View do
   ```
 
   Поле объявляется тем **Prim**, которым оно живёт в домене, — из него берутся и тип
-  (`String.t()`, `DateTime.t()`, `Decimal.t()`), и wire-формат (`Codec.dump_raw_as/2`:
-  kind плюс tz и precision этого Prim). Поэтому read-путь не может разойтись с
-  агрегатным, а поле, добавленное в структуру, не может остаться недампленным: и то и
-  другое порождает одна и та же строка декларации.
+  (`String.t()`, `DateTime.t()`, `Decimal.t()`), и wire-формат: значение приводится к
+  своему Prim и дампится обычным `codec.dump/1` (`Core.Codec.Helper.dump_raw/3`). Поэтому
+  read-путь не может разойтись с агрегатным, а поле, добавленное в структуру, не может
+  остаться недампленным: и то и другое порождает одна и та же строка декларации.
 
   Значения во View — примитивные (`13-repos.md`): Prim в спеке задаёт формат, но в
   структуру не попадает. Sensitive Prim отвергается — чувствительному значению не место
@@ -27,7 +27,7 @@ defmodule Core.View do
 
   | Ключ | Значение | Дамп |
   |---|---|---|
-  | `prim:` | Prim-модуль | `codec.dump_raw_as/2` (kind `:string` / `:integer` — как есть) |
+  | `prim:` | Prim-модуль | `Codec.Helper.dump_raw/3` (kind `:string` / `:integer` — как есть) |
   | `enum:` | модуль `Core.Enum` | атом как есть |
   | `type:` | `:string` / `:boolean` / `:integer` / `:pos_integer` / `:non_neg_integer` | как есть |
   | `view:` | вложенный View | его кодеком через фасад |
@@ -220,7 +220,9 @@ defmodule Core.View do
   end
 
   defp dump_ast({:prim, mod, kind}, value, codec, _depth) when kind in @formattable_kinds do
-    quote(do: unquote(codec).dump_raw_as(unquote(mod), unquote(value)))
+    quote do
+      Core.Codec.Helper.dump_raw(unquote(mod), unquote(value), unquote(codec))
+    end
   end
 
   defp dump_ast({:prim, _mod, _plain_kind}, value, _codec, _depth), do: value

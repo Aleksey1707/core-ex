@@ -89,11 +89,13 @@ defmodule Core.Outbox do
     Имя (тип) сообщения outbox.
     """
 
+    # Тот же набор символов, что у `Topic`: для событий агрегата имя — это wire-тег
+    # (`<Aggregate>.Event.Codec`), а он квалифицирован именем агрегата — `acceptance.created`.
     use Core.Prim.String,
       name: first_line(@moduledoc),
       min_len: 1,
       max_len: 100,
-      re: ~r/^[a-zA-Z0-9_]+$/
+      re: ~r/^[a-zA-Z0-9._-]+$/
   end
 
   defmodule Attempts do

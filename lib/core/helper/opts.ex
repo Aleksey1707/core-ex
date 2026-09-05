@@ -5,6 +5,8 @@ defmodule Core.Helper.Opts do
   `validate!/4` проверяет обязательные и неизвестные ключи, `module!/4` — что значение
   является модулем (и, при `exports:`, что он экспортирует нужные функции).
   Опечатка в опции даёт `CompileError`, а не сбой в рантайме.
+
+  `module_or_config!/4` — опция-модуль с дефолтом из `Core.Config`, резолвимым в рантайме.
   """
 
   @doc """
@@ -79,6 +81,25 @@ defmodule Core.Helper.Opts do
     opts
     |> fetch!(key, label, checks)
     |> ensure_module!("#{label}: #{key}", Keyword.get(checks, :exports, []))
+  end
+
+  @doc """
+  Опция-модуль либо AST рантайм-резолва значения из `Core.Config`.
+
+  Результат подставляется в `quote` вызывающего макроса: без явной опции туда уходит
+  **вызов** (`Core.Config.codec()`), а не запечённый модуль. Библиотека компилируется
+  раньше конфигурации приложения-потребителя (и раньше `runtime.exs`), поэтому требовать
+  значение `Core.Config` на этапе компиляции нельзя (`10-architecture.md`).
+
+  `config_fun` — имя функции `Core.Config`: `:codec` или `:dao`.
+  """
+  @spec module_or_config!(keyword(), atom(), atom(), String.t()) :: module() | Macro.t()
+
+  def module_or_config!(opts, key, config_fun, label) when config_fun in ~w(codec dao)a do
+    case Keyword.get(opts, key) do
+      nil -> quote(do: Core.Config.unquote(config_fun)())
+      _module -> module!(opts, key, label)
+    end
   end
 
   @doc "Прочитать опцию-строку."

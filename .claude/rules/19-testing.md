@@ -68,7 +68,8 @@ MUST равняться `entity |> OutCodec.dump() |> json_roundtrip()`.
 
 ## Совместимость событий
 
-`use MyApp.EventCompatCase, codec:, aggregate_id:, fixtures:` — один тест-модуль на агрегат.
+`use MyApp.EventCompatCase, codec:, event:, aggregate_id:, fixtures:` — один тест-модуль на
+агрегат (`event:` — модуль-семейство: через него фикстура грузится фасадом).
 Golden-фикстуры `test/support/fixtures/events/<aggregate>/<wire_tag>.json` не перегенерируются.
 Новый тип события → добавить фикстуру. Правила эволюции — `14-events-outbox.md`.
 

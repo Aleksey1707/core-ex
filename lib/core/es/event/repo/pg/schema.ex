@@ -5,13 +5,17 @@ defmodule Core.Es.Event.Repo.Pg.Schema do
       use Core.Es.Event.Repo.Pg.Schema,
         table: "role_events",
         event: MyApp.Domain.<BC>.Common.Role.Event,
-        aggregate_id: MyApp.Domain.<BC>.Common.Role.ID,
-        by: MyApp.Domain.Users.Common.User.ID,
         by_schema: MyApp.Domain.Users.Common.User.Repo.Pg.Schema,
         payload_type: MyApp.DAO.Types.JSON
 
   Колонки таблицы фиксированы: `id`, `type`, `payload`, `aggregate_id`, `aggregate_version`,
   `at`, `by_id`. Генерирует схему, `to_model/1`, `to_model!/1`, `to_entity/1`, `to_entity!/1`.
+
+  Событие переводится в строку и обратно через фасад (`codec.dump/1` и `codec.load/2` по
+  модулю событий агрегата), а поля конверта раскладываются по колонкам парой
+  `Core.Es.Event.Codec.to_fields/1` и `from_fields/1`: имена колонок остаются здесь, ключи
+  конверта — в кодеке. Конкретный тип события кодек выбирает по тегу, поэтому схеме не
+  нужны ни он сам, ни Prim агрегата.
 
   `changeset/2` не генерируется: события пишутся только через `insert_all` (см.
   `Core.Es.Event.Repo.Pg`), конфликт `(aggregate_id, aggregate_version)` обрабатывает `append/2`.
@@ -20,22 +24,19 @@ defmodule Core.Es.Event.Repo.Pg.Schema do
 
   - `table:` — имя таблицы событий
   - `event:` — объединяющий модуль событий агрегата
-  - `aggregate_id:` — Prim идентификатора агрегата
-  - `by:` — Prim идентификатора автора события
   - `by_schema:` — Ecto-схема таблицы пользователей (для `belongs_to :by`)
   - `payload_type:` — Ecto-тип колонки `payload`
-  - `event_codec:` — кодек событий; по умолчанию `<event>.Codec`
-  - `codec:` — entity-фасад Codec; по умолчанию `Core.Config.codec()`
+  - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
+    через `Core.Config.codec()`
 
-  Макрос занимает имена `@es_event`, `@es_event_codec`, `@es_aggregate_id`, `@es_by`, `@es_codec`.
+  Макрос занимает имя `@es_event` и приватную `es_codec/0`.
   """
 
-  alias Core.Config
   alias Core.Helper
 
   @label "Es.Event.Repo.Pg.Schema"
-  @required_keys ~w(table event aggregate_id by by_schema payload_type)a
-  @optional_keys ~w(event_codec codec)a
+  @required_keys ~w(table event by_schema payload_type)a
+  @optional_keys ~w(codec)a
 
   @doc "Объявить Ecto-схему таблицы событий агрегата."
   defmacro __using__(opts) do
@@ -48,10 +49,6 @@ defmodule Core.Es.Event.Repo.Pg.Schema do
       use Ecto.Schema
 
       @es_event unquote(opts.event)
-      @es_event_codec unquote(opts.event_codec)
-      @es_aggregate_id unquote(opts.aggregate_id)
-      @es_by unquote(opts.by)
-      @es_codec unquote(opts.codec)
 
       @primary_key {:id, :binary_id, autogenerate: false}
       @foreign_key_type :binary_id
@@ -75,17 +72,20 @@ defmodule Core.Es.Event.Repo.Pg.Schema do
       @spec to_model(event()) :: {:ok, map()} | {:error, Core.Error.t()}
 
       def to_model(event) do
-        {type, payload} = @es_codec.dump(event)
+        fields =
+          event
+          |> es_codec().dump()
+          |> Core.Es.Event.Codec.to_fields()
 
         {:ok,
          %{
-           id: @es_codec.dump(event.id),
-           type: type,
-           payload: payload,
-           aggregate_id: @es_codec.dump(event.aggregate_id),
-           aggregate_version: Core.Version.value(event.aggregate_version),
-           at: @es_codec.dump(event.at),
-           by_id: @es_codec.dump(event.by)
+           id: fields.id,
+           type: fields.type,
+           payload: fields.payload,
+           aggregate_id: fields.aggregate_id,
+           aggregate_version: fields.aggregate_version,
+           at: fields.at,
+           by_id: fields.by
          }}
       end
 
@@ -98,28 +98,25 @@ defmodule Core.Es.Event.Repo.Pg.Schema do
       @spec to_entity(t()) :: {:ok, event()} | {:error, Core.Error.t()}
 
       def to_entity(%__MODULE__{} = row) do
-        with {:ok, aggregate_id} <- @es_aggregate_id.new(row.aggregate_id),
-             {:ok, version} <- Core.Version.new(row.aggregate_version),
-             {:ok, by} <- @es_by.new(row.by_id),
-             {:ok, at} <- Core.Es.Event.At.new(row.at),
-             {:ok, id} <- Core.Es.Event.ID.new(row.id) do
-          @es_event_codec.load_event(
-            row.type,
-            row.payload,
-            aggregate_id,
-            version,
-            by,
-            at,
-            id,
-            @es_codec
-          )
-        end
+        %{
+          id: row.id,
+          type: row.type,
+          payload: row.payload,
+          aggregate_id: row.aggregate_id,
+          aggregate_version: row.aggregate_version,
+          at: row.at,
+          by: row.by_id
+        }
+        |> Core.Es.Event.Codec.from_fields()
+        |> then(&es_codec().load(@es_event, &1))
       end
 
       @doc "Строка БД → доменное событие или `Exc`."
       @spec to_entity!(t()) :: event()
 
       def to_entity!(%__MODULE__{} = row), do: Core.Result.unwrap!(to_entity(row))
+
+      defp es_codec, do: unquote(opts.codec)
     end
   end
 
@@ -138,23 +135,12 @@ defmodule Core.Es.Event.Repo.Pg.Schema do
   defp validate_opts!(opts) do
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
 
-    event = Helper.Opts.module!(opts, :event, @label)
-
     %{
       table: Helper.Opts.binary!(opts, :table, @label),
-      event: event,
-      # Компайл-тайм резолв дефолтного кодека: модуль ещё не загружен, safe_concat непригоден.
-      # credo:disable-for-lines:5 Credo.Check.Warning.UnsafeToAtom
-      event_codec:
-        Helper.Opts.module!(opts, :event_codec, @label,
-          default: Module.concat(event, Codec),
-          exports: [load_event: 8]
-        ),
-      aggregate_id: Helper.Opts.module!(opts, :aggregate_id, @label, exports: [new: 1]),
-      by: Helper.Opts.module!(opts, :by, @label, exports: [new: 1]),
+      event: Helper.Opts.module!(opts, :event, @label),
       by_schema: Helper.Opts.module!(opts, :by_schema, @label),
       payload_type: Helper.Opts.module!(opts, :payload_type, @label),
-      codec: Keyword.get(opts, :codec) || Config.codec()
+      codec: Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
     }
   end
 end

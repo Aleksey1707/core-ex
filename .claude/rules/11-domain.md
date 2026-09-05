@@ -32,7 +32,7 @@ use Core.Prim,
 | `new!/1` | `t()`; при ошибке — `raise Exc, error` |
 | `value/1` | внутреннее значение |
 | `__domain_kind__/0` | атом kind для Codec |
-| `__domain_type_opts__/0` | опции типа (`precision`, `tz`, границы) — их читает `Codec.dump_raw_as/2` на read-пути |
+| `__domain_type_opts__/0` | опции типа (`precision`, `tz`, границы) — их читает `Codec.coerce/2` на read-пути |
 | `Prim.prim?/1` | модуль объявлен через `use Prim` (`__domain_kind__/0` + `value/1`); при необходимости загружает модуль |
 
 В function heads: обязательный Prim — `%Mod{}` (default); композиция в `when` — `Core.Guard.is/2` / `is_opt/2` (`import`, не guards на самом Prim).
@@ -196,8 +196,8 @@ Wire: atom или binary (`Atom.to_string/1`). Schema: `Ecto.Enum, values: Statu
 | App Prim | `Codec.Prim.{Internal,External}` | профили примитивов |
 | App Facade | `Codec.{Internal,External}` | единая точка вызова (Prim + entity) |
 | Domain | `<Aggregate>.Codec` | кодек агрегата и вложенных сущностей (`dump`/`load`) |
-| Domain | `<Aggregate>.Event.Codec` | кодек событий (dump в фасаде; load_event с envelope) |
-| Domain | `<Aggregate>.Cmd.Codec` | кодек команд (`tagged: true`) |
+| Domain | `<Aggregate>.Event.Codec` | кодек событий: `dump` отдаёт конверт, `load` восстанавливает событие по тегу внутри него |
+| Domain | `<Aggregate>.Cmd.Codec` | кодек команд (семейство через `union:`) |
 | Domain | `<Aggregate>.View.Codec` | кодек представления read-пути (dump-only, `loadable: false`) |
 
 Prim-профили:
@@ -224,14 +224,16 @@ use Core.Codec.Facade,
   plugins: [MyApp.Domain.<BC>.Common.<Aggregate>.Codec]
 ```
 
+**Весь интерфейс фасада — `dump/1`, `load/2`, `load!/2`.** Единственная ось диспетчеризации — модуль: `dump/1` выбирает плагин по `__struct__`, `load/2` — по первому аргументу. Функций «на случай» (raw-путь, теги) у фасада нет — то, что раньше жило в нём частностями View и событий, ушло в `Core.Codec.Helper` и в сам плагин.
+
 - `dump/1` / `load/2` / `load!/2` — plugin clauses, иначе делегат в `prim` (только `struct()`; не-Prim без плагина → `ArgumentError`)
-- `dump_raw/2` — делегат в `prim.dump_raw(kind, raw)`: тот же wire-формат для значения **без** Prim-обёртки (`:uuid` / `:datetime` / `:date` / `:decimal`). Для read-моделей (`<Aggregate>.View.Codec`); внутри плагина — `dump_raw_optional/3`
-- `dump_raw_as/2` — то же, но формат берётся у **конкретного Prim**: kind плюс его `__domain_type_opts__/0` (tz и precision). Одного kind мало — значение из колонки `utc_datetime_usec` отдало бы дробные секунды там, где Prim с `precision: :second` их обрезает. Тотальна: `nil` и неприводимое значение проходят как есть. На неё опираются `Core.View` и `Core.Codec.Redump`
-- `load_tagged/2` есть у фасада всегда; lookup по `tags:` map tagged-плагинов; неизвестный тег → `:unknown_tagged_type`, некорректный вход → `:invalid_tagged_input`; коллизии тегов/types между плагинами — `CompileError`
-- Plugin: `use Core.Codec.Plugin, types: [...]` **или** `tags: %{Mod => "tag"}` (XOR); `loadable: true|false`; `tagged: true` требует `tags:` map + `load_tagged/3`; `loadable: true` требует `load/3` (compile-time)
-- Из `tags:` map генерируются `__codec_types__/0`, `__codec_tags__/0`, `type/1`, `types/0`, `mod_by_tag/1`
-- `loadable: false` — dump-only (как `<Aggregate>.Event.Codec`: load через `load_event!/8`)
-- Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по atom-или-string ключу, доступен любому коду); `dump_optional/2` / `load_optional/3` / `load_many/3` — из `Core.Codec.Helper`. В Ecto-схемах `field/2` **не** импортировать (конфликт с `Ecto.Schema`) — звать `Helper.Map.field/2`
+- Полиморфный wire (тег внутри данных) грузится через **модуль-семейство**: `InCodec.load(<Aggregate>.Event, data)`. Семейство объявляет плагин опцией `union:`, конкретный тип выбирает он же — фасад про теги не знает
+- Модули типов и семейств уникальны между плагинами (`CompileError` на компиляции фасада); теги уникальны **внутри своего плагина**, а не приложения
+- Plugin: `use Core.Codec.Plugin, types: [...]`; `loadable: true|false`; `union: Мод` (требует `loadable: true`); `loadable: true` требует `load/3` (compile-time)
+- Генерируются `__codec_types__/0`, `__codec_union__/0`, `__codec_loadable__/0`
+- `loadable: false` — dump-only (как `<Aggregate>.View.Codec`: у read-модели обратного пути нет)
+- Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` / `load_optional/3` / `load_many/3` — из `Core.Codec.Helper`. В Ecto-схемах `field/2` **не** импортировать (конфликт с `Ecto.Schema`) — звать `Helper.Map.field/2`
+- `Codec.Helper.dump_raw(Prim, raw, codec)` — дамп значения **без** Prim-обёртки (read-модели): значение приводится к своему Prim (`Core.Codec.coerce/2` — kind плюс его `__domain_type_opts__/0`: tz и precision) и уходит в обычный `codec.dump/1`. Отдельного raw-формата, который мог бы разойтись с агрегатным, больше нет. Тотальна: `nil`, неприводимое значение и неформатируемый kind (`:string`, `:integer`, кастомный) проходят как есть. На неё опираются `Core.View` и `Core.Codec.Redump`
 - Enum-поля кодек не сериализует (атомы как есть)
 - `<Aggregate>.Codec` MUST предоставлять `dump`/`load` для самого агрегата и его вложенных сущностей (если есть). Поле `events` в dump/load агрегата **не** участвует (события — только через `<Aggregate>.Event.Codec`). `Repo.Pg.Schema` **обязан** вызывать фасад (`InCodec.load` / `InCodec.dump`) сущности; Presenter может мапить поля вручную под shape API. Core entity-codecs (например `Outbox.Codec`) регистрируются в app `Codec.plugins()` наравне с Domain.
 
@@ -260,8 +262,8 @@ use Core.Codec.Facade,
   доменную ошибку там, где её обработать нечем — валидировать значение, уже прошедшее
   запись, поздно и незачем.
 - При этом **формат** значения задаёт именно Prim: поля View объявляются Prim-модулями
-  (`use Core.View`), и по ним `Codec.dump_raw_as/2` берёт kind, tz и precision. Prim
-  участвует в декларации, но в структуру не попадает.
+  (`use Core.View`), и по ним `Codec.Helper.dump_raw/3` приводит значение к Prim с его
+  kind, tz и precision. Prim участвует в декларации, но в структуру не попадает.
 - Обратного пути нет: собрать агрегат из View запрещено (`13-repos.md`).
 
 Полные правила View, его кодека и read-схемы — «View (read-модель)» в `13-repos.md`.
@@ -300,6 +302,8 @@ defmodule Created do
 end
 ```
 
+`use Es.Event` дополнительно генерирует интроспекцию (`__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`) — по ней `<Aggregate>.Event.Codec` выводит Prim агрегата и автора и обслуживает события без нагрузки сам.
+
 Объединяющий модуль событий агрегата (`<Aggregate>.Event`) обязан предоставлять:
 
 | Функция | Назначение |
@@ -307,7 +311,9 @@ end
 | `name/1` | wire-type через `Event.Codec.type/1` |
 | `names/0` | множество через `Event.Codec.types/0` |
 
-Dump/load событий — только через `InCodec`/`OutCodec.dump(event)` и `<Aggregate>.Event.Codec.load_event/8` (bang-вариант — только write-path; не обёртки на `<Aggregate>.Event`).
+Dump/load событий — только через фасад: `InCodec.dump(event)` (весь конверт) и `InCodec.load(<Aggregate>.Event, data)` — модуль событий агрегата объявлен семейством (`union:`), и конкретный тип кодек выбирает по тегу. `InCodec.load(Mod, data)` — когда тип известен. Обёрток на `<Aggregate>.Event` не заводить.
+
+Wire-тег события — SSOT; уникален он **внутри своего кодека** (дубль — `CompileError`). Квалифицировать его именем агрегата (`acceptance.created`, а не `created`) всё равно MUST: тег виден в брокере и в event store рядом с чужими. Кодек событий MUST быть в `Codec.plugins()` — иначе фасад не знает ни события, ни его семейства.
 
 Wire-формат события неизменяем: переименование тега или поля payload ломает чтение истории. Правила и golden-фикстуры — «Совместимость событий» в `14-events-outbox.md`.
 

@@ -131,8 +131,8 @@ end
 Правила:
 
 - Поле объявляется **тем Prim, которым оно живёт в домене**. Prim задаёт тип поля и его
-  wire-формат (`Codec.dump_raw_as/2`: kind плюс tz и precision этого Prim) — но в структуру
-  не попадает. Поэтому read-путь не может разойтись с агрегатным, а поле, добавленное в
+  wire-формат (`Codec.Helper.dump_raw/3`: значение приводится к этому Prim с его kind, tz
+  и precision, и дампится как обычный Prim) — но в структуру не попадает. Поэтому read-путь не может разойтись с агрегатным, а поле, добавленное в
   структуру, не может остаться недампленным: и то и другое порождает одна строка декларации.
 - Поля — **только** примитивные значения и атомы `Core.Enum`. Prim во View — **MUST NOT**:
   read-путь не валидирует, а `Prim.new/1` на строке из БД поднял бы доменную ошибку там,
@@ -494,7 +494,7 @@ Diff считается по обеим сторонам от одной и то
 | `page_by_aggregate` | `{:ok, Pagination.Result.t(event)} \| {:error, Error.t()}` |
 
 Чтение истории — **safe** (`Schema.to_entity/1` + `Result.traverse/2`), не `to_entity!`:
-событие с неизвестным кодеку типом обязано стать доменным `:unknown_event_type`
+событие с неизвестным кодеку типом обязано стать доменной ошибкой `:unknown_event_type`
 (HTTP 400), а не уронить весь GET истории в 500. Bang-реконструкция остаётся на
 write-path (`append`, восстановление агрегата).
 
@@ -521,8 +521,6 @@ defmodule …<Aggregate>.Event.Repo.Pg.Schema do
   use Es.Event.Repo.Pg.Schema,
     table: "<aggregate>_events",
     event: Agg.Event,
-    aggregate_id: Agg.ID,
-    by: User.ID,
     by_schema: User.Repo.Pg.Schema,
     payload_type: Types.JSON
 end
@@ -530,6 +528,10 @@ end
 
 - Колонки таблицы фиксированы: `id`, `type`, `payload`, `aggregate_id`, `aggregate_version`, `at`,
   `by_id`; индексы — `unique_index(aggregate_id, aggregate_version)` и индекс по `aggregate_id`.
+- Схема не знает ни кодека агрегата, ни его Prim: событие переводится в строку и обратно фасадом
+  (`codec.dump/1` / `codec.load(<Aggregate>.Event, wire)`), а поля конверта раскладываются по
+  колонкам парой `Core.Es.Event.Codec.to_fields/1` / `from_fields/1` — конкретный тип события
+  кодек агрегата выбирает по тегу.
 - `changeset/2` у event-схемы **не** нужен: запись идёт только через `insert_all` + `to_model!`.
 - `append/2` возвращает `:ok | {:error, Error.t()}`: конфликт по `(aggregate_id, aggregate_version)`
   (конкурентная запись) отдаётся доменным `:version_mismatch` из `<Aggregate>.Errors`, а не

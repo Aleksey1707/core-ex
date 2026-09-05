@@ -108,6 +108,60 @@ defmodule Core.Prim.UUIDTest do
     assert from_urn == id
   end
 
+  describe "нормализация и формат" do
+    test "все формы ввода дают одно каноническое значение" do
+      canonical = Id.new!(@uuid4)
+
+      assert Id.new!("550E8400-E29B-41D4-A716-446655440000") == canonical
+      assert Id.new!("550e8400e29b41d4a716446655440000") == canonical
+      assert Id.new!("550E8400E29B41D4A716446655440000") == canonical
+      assert Id.new!("urn:uuid:550e8400-e29b-41d4-a716-446655440000") == canonical
+      assert Id.new!("urn:uuid:550E8400-E29B-41D4-A716-446655440000") == canonical
+    end
+
+    test "format/2 не зависит от формы, в которой значение пришло" do
+      for raw <- [
+            @uuid4,
+            "550E8400-E29B-41D4-A716-446655440000",
+            "550e8400e29b41d4a716446655440000",
+            "urn:uuid:550e8400-e29b-41d4-a716-446655440000"
+          ] do
+        id = Id.new!(raw)
+
+        assert Id.format(id, :full) == @uuid4
+        assert Id.format(id, :hex) == "550e8400e29b41d4a716446655440000"
+        assert Id.format(id, :urn) == "urn:uuid:" <> @uuid4
+      end
+    end
+
+    test "Prim.UUID.format/2 принимает и неканоническую строку" do
+      for raw <- [
+            "550E8400-E29B-41D4-A716-446655440000",
+            "550e8400e29b41d4a716446655440000",
+            "urn:uuid:550e8400-e29b-41d4-a716-446655440000"
+          ] do
+        assert Core.Prim.UUID.format(raw, :full) == @uuid4
+        assert Core.Prim.UUID.format(raw, :hex) == "550e8400e29b41d4a716446655440000"
+      end
+    end
+
+    test "cast отвергает строку канонической длины с не-hex символами" do
+      assert {:error, {:invalid_uuid, _}} =
+               Core.Prim.UUID.cast("550e8400-e29b-41d4-a716-44665544zzzz")
+
+      assert {:error, {:invalid_uuid, _}} =
+               Core.Prim.UUID.cast("550e8400+e29b+41d4+a716+446655440000")
+
+      assert {:error, {:invalid_uuid, _}} = Core.Prim.UUID.cast("")
+      assert {:error, {:invalid_uuid, _}} = Core.Prim.UUID.cast(@uuid4 <> "0")
+      assert {:error, {:invalid_uuid, _}} = Core.Prim.UUID.cast(:not_a_binary)
+    end
+
+    test "cast сохраняет каноническое значение как есть" do
+      assert {:ok, @uuid4} = Core.Prim.UUID.cast(@uuid4)
+    end
+  end
+
   test "generate/0 — UUID v4 без аргумента" do
     uuid = Core.Prim.UUID.generate()
 

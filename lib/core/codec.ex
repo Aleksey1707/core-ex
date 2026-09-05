@@ -19,15 +19,10 @@ defmodule Core.Codec do
   Опция `date:` — форма даты без времени (`:date` → `%Date{}`, `:iso8601` → строка);
   необязательна, по умолчанию `:date`.
 
-  `dump_raw(kind, raw)` — тот же формат для значения **без** Prim-обёртки (read-модели,
-  `<Aggregate>View.Codec`). Builtin `dump_kind` реализован через него, поэтому формат
-  Prim-пути и раw-пути не расходится даже при `defoverridable`.
-
-  `dump_raw_as(mod, raw)` — то же, но формат берётся у **конкретного Prim**: kind плюс его
-  `__domain_type_opts__/0` (tz и precision у datetime). Одного kind мало: значение из
-  колонки `utc_datetime_usec` отдало бы дробные секунды там, где агрегатный путь через
-  Prim с `precision: :second` их обрезает. Операция тотальна — read-путь не валидирует:
-  `nil` и неприводимое значение проходят как есть.
+  Значение **без** Prim-обёртки (read-модели, `<Aggregate>.View.Codec`) приводится к своему
+  Prim функцией `coerce/2`, после чего дампится обычным `dump/1`: отдельного raw-пути,
+  который мог бы разойтись с Prim-путём, у профиля нет. Обёртка для потребителей —
+  `Core.Codec.Helper.dump_raw/3`.
   """
 
   alias Core.Config
@@ -51,8 +46,6 @@ defmodule Core.Codec do
 
   @callback dump(struct()) :: term()
   @callback dump_kind(struct(), atom()) :: term()
-  @callback dump_raw(atom(), term()) :: term()
-  @callback dump_raw_as(module(), term()) :: term()
   @callback load(module(), term()) :: {:ok, term()} | {:error, Error.t()}
   @callback load_kind(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
   @callback load!(module(), term()) :: term()
@@ -111,23 +104,27 @@ defmodule Core.Codec do
   def dump_decimal(%Decimal{} = value, :string), do: Decimal.to_string(value)
 
   @doc """
-  Dump raw-значения в формате Prim `mod`: kind и опции типа берутся у самого Prim.
+  Значение без Prim-обёртки → Prim `mod`, годный для `dump/1`.
 
-  Leaf-модуль ищется рекурсивно через `__domain_base__/0` (`Prim.Compose`), значение
-  приводится тем же `cast`/`mutate`, что и в конвейере Prim — поэтому datetime попадает
-  в tz и precision своего Prim, а не остаётся в форме, записанной в колонку.
+  Read-путь не валидирует: значение уже прошло запись, и `new/1` поднял бы доменную
+  ошибку там, где обработать её нечем. Поэтому применяются только `cast` и `mutate`
+  leaf-примитива (его `__domain_type_opts__/0` — tz и precision), а `validate` — нет,
+  и struct собирается напрямую. Единственное место, где Prim строится в обход `new/1`.
 
-  Тотальна: `nil`, не-Prim модуль, неприводимое значение и kind, для которого у профиля
-  нет `dump_raw/2` (кастомный, `:string`, `:integer`), возвращаются как есть.
+  Цепочка `Prim.Compose` восстанавливается целиком (`%Mod{value: %Base{}}`), поэтому
+  `dump/1` видит тот же композит, что и на агрегатном пути.
+
+  `:error` — если `mod` не Prim, значение неприводимо или его kind не форматируемый
+  (`:string`, `:integer`, кастомный): такому значению приведение не нужно.
   """
-  @spec dump_raw_as(module(), term(), module()) :: term()
+  @spec coerce(module(), term()) :: {:ok, struct()} | :error
 
-  def dump_raw_as(_mod, nil, _profile), do: nil
+  def coerce(_mod, nil), do: :error
 
-  def dump_raw_as(mod, value, profile) when is_atom(mod) and is_atom(profile) do
-    case leaf_prim(mod) do
-      nil -> value
-      leaf -> dump_leaf(leaf, value, profile)
+  def coerce(mod, value) when is_atom(mod) do
+    case prim_chain(mod) do
+      [] -> :error
+      chain -> coerce_chain(chain, value)
     end
   end
 
@@ -186,8 +183,16 @@ defmodule Core.Codec do
 
       @doc "Dump Prim по kind (builtin-форматы профиля)."
       @impl true
-      def dump_kind(prim, kind) when kind in ~w(uuid datetime date decimal)a do
-        dump_raw(kind, Core.Codec.value(prim))
+      def dump_kind(prim, :uuid), do: Core.Codec.dump_uuid(Core.Codec.value(prim), @codec_uuid)
+
+      def dump_kind(prim, :datetime) do
+        Core.Codec.dump_datetime(Core.Codec.value(prim), @codec_datetime, @codec_datetime_tz)
+      end
+
+      def dump_kind(prim, :date), do: Core.Codec.dump_date(Core.Codec.value(prim), @codec_date)
+
+      def dump_kind(prim, :decimal) do
+        Core.Codec.dump_decimal(Core.Codec.value(prim), @codec_decimal)
       end
 
       def dump_kind(prim, kind) when kind in ~w(integer string)a do
@@ -202,38 +207,6 @@ defmodule Core.Codec do
         Core.Codec.unsupported_kind!(__MODULE__, prim, kind)
       end
 
-      @doc """
-      Dump raw-значения по kind — в том же формате, что и Prim этого kind.
-
-      Для потребителей, у которых значение уже без Prim-обёртки: read-модели и
-      dump-only плагины представлений (`<Aggregate>View.Codec`).
-
-      Домен — форматируемые kinds: `:uuid`, `:datetime`, `:date`, `:decimal`.
-      `:integer` / `:string` уже в wire-форме и сюда не передаются; кастомный kind
-      профиль добавляет своей клоузой (`defoverridable`).
-      """
-      @impl true
-      def dump_raw(:uuid, value), do: Core.Codec.dump_uuid(value, @codec_uuid)
-
-      def dump_raw(:datetime, value) do
-        Core.Codec.dump_datetime(value, @codec_datetime, @codec_datetime_tz)
-      end
-
-      def dump_raw(:date, value), do: Core.Codec.dump_date(value, @codec_date)
-
-      def dump_raw(:decimal, value), do: Core.Codec.dump_decimal(value, @codec_decimal)
-
-      @doc """
-      Dump raw-значения в формате Prim `mod`: kind и опции типа берутся у самого Prim.
-
-      Для read-моделей, где значение лежит без Prim-обёртки, но формат обязан совпасть
-      с агрегатным путём (tz и precision datetime, форма uuid и decimal).
-      """
-      @impl true
-      def dump_raw_as(mod, value) when is_atom(mod) do
-        Core.Codec.dump_raw_as(mod, value, __MODULE__)
-      end
-
       @doc "Load Prim по kind (builtin или composite)."
       @impl true
       def load_kind(mod, raw, :composite) do
@@ -244,7 +217,7 @@ defmodule Core.Codec do
         Core.Codec.load_builtin(mod, raw, kind)
       end
 
-      defoverridable dump_kind: 2, dump_raw: 2, dump_raw_as: 2, load_kind: 3
+      defoverridable dump_kind: 2, load_kind: 3
 
       @before_compile Core.Codec
     end
@@ -275,21 +248,28 @@ defmodule Core.Codec do
 
   # ---
 
-  defp leaf_prim(mod) do
+  # Цепочка от `mod` до leaf-примитива: `[Mod, Base, ..., Leaf]`; `[]` — не Prim.
+  defp prim_chain(mod) do
     cond do
-      not Prim.prim?(mod) -> nil
-      Prim.composed?(mod) -> leaf_prim(mod.__domain_base__())
-      true -> mod
+      not Prim.prim?(mod) -> []
+      Prim.composed?(mod) -> [mod | prim_chain(mod.__domain_base__())]
+      true -> [mod]
     end
   end
 
-  defp dump_leaf(leaf, value, profile) do
-    kind = leaf.__domain_kind__()
+  defp coerce_chain(chain, value) do
+    leaf = List.last(chain)
 
-    case normalize_raw(kind, value, leaf.__domain_type_opts__()) do
-      {:ok, normalized} -> profile.dump_raw(kind, normalized)
-      :passthrough -> value
+    case normalize_raw(leaf.__domain_kind__(), value, leaf.__domain_type_opts__()) do
+      {:ok, normalized} -> {:ok, wrap_chain(chain, normalized)}
+      :error -> :error
     end
+  end
+
+  defp wrap_chain(chain, value) do
+    chain
+    |> Enum.reverse()
+    |> Enum.reduce(value, &struct!(&1, value: &2))
   end
 
   defp normalize_raw(:datetime, value, type_opts) do
@@ -297,17 +277,17 @@ defmodule Core.Codec do
          {:ok, shifted} <- Prim.DateTime.mutate(datetime, type_opts) do
       {:ok, shifted}
     else
-      {:error, _} -> :passthrough
+      {:error, _} -> :error
     end
   end
 
   defp normalize_raw(:date, value, _type_opts), do: normalized(Prim.Date.cast(value))
   defp normalize_raw(:uuid, value, _type_opts), do: normalized(Prim.UUID.cast(value))
   defp normalize_raw(:decimal, value, _type_opts), do: normalized(Prim.Decimal.cast(value))
-  defp normalize_raw(_kind, _value, _type_opts), do: :passthrough
+  defp normalize_raw(_kind, _value, _type_opts), do: :error
 
   defp normalized({:ok, value}), do: {:ok, value}
-  defp normalized({:error, _}), do: :passthrough
+  defp normalized({:error, _}), do: :error
 
   defp fetch_fmt(opts, key) when is_map_key(@default_fmts, key) do
     Keyword.get(opts, key, Map.fetch!(@default_fmts, key))

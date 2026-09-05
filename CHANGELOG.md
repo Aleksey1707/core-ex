@@ -4,6 +4,84 @@
 
 ### Ломающие изменения контракта
 
+- **Интерфейс фасада Codec сведён к `dump/1`, `load/2` и `load!/2`.** Удалены `prim/0`,
+  `dump_raw/2`, `dump_raw_as/2`, `load/1`, `load!/1`, `dump_tagged/1`, `load_tagged/2`,
+  `load_tagged!/2`: в фасад проникли частности View (raw-путь) и событий (самотегированный
+  wire), и он перестал быть тем, чем задумывался. Осталась одна ось диспетчеризации — модуль.
+  Prim-профиль (`use Core.Codec`) симметрично лишился `dump_raw/2` и `dump_raw_as/2`.
+- **Полиморфный wire грузится через модуль-семейство.** У плагина появилась опция `union:`;
+  фасад заводит на этот модуль клоузу `load/2`, а какой тип лежит в данных — решает сам плагин:
+  `InCodec.load(<Aggregate>.Event, data)` вместо `InCodec.load(data)`. Реестра тегов у фасада
+  больше нет, и требование глобальной уникальности тега снято — тег уникален внутри своего
+  кодека. Квалифицированные имена (`order.created`) остаются конвенцией: тег виден в
+  брокере и в event store рядом с чужими.
+- **`Core.Codec.Plugin`: `types:` вместо `tags:`, `union:` вместо `tagged:`.** Механизм
+  `tagged: true` / `dump_tagged` / `load_tagged` удалён целиком. `types:` стала обязательной;
+  `union:` требует `loadable: true`. Генерация `type/1`, `types/0`, `mod_by_tag/1`,
+  `__codec_tags__/0`, `__codec_tagged__/0`, `fetch_type/1` из плагина ушла — `type/1`, `types/0`
+  и `mod_by_tag/1` теперь генерирует `Core.Es.Event.Codec` (контракт
+  `<Aggregate>.Event.name/1` и `names/0` не изменился).
+- **`Core.Es.Event.Codec`: колбэки вместо приватных клоуз, опции `event:` + `tags:`.**
+  `dump_payload/2` и `load_payload/3` стали callback'ами behaviour (`@impl true`, `def`, не
+  `defp`), и `load_payload` возвращает `%Payload{}`, а не собранное событие: конверт разбирает
+  и событие собирает билдер. Аргумент `envelope` и хелперы `event/2` / `event/3` пропали вместе
+  с модулем `Core.Es.Event.Codec.Helper`. События без нагрузки клоуз не требуют вовсе. Опции
+  `aggregate_id:` и `by:` сняты — билдер выводит их из самих событий; разные Prim у событий
+  одного кодека — `CompileError`. Неизвестный тег теперь `:unknown_event_type` (`ns: :es`,
+  модуль — кодек агрегата) вместо `:unknown_tagged_type` фасада.
+- **`Core.Es.Outbox.Envelope` удалён** (был добавлен в этом же невыпущенном цикле): обе стороны
+  формата конверта живут в `Core.Es.Event.Codec`. Наружу отдаётся только пара `to_fields/1` /
+  `from_fields/1` — для транспорта, который хранит поля события врозь. Оттуда же `Es.Outbox`
+  берёт ключ, имя и заголовки записи, поэтому у его опции `event:` снято требование `name/1`.
+- **Опции макросов:** у `Core.Es.Event.Repo.Pg.Schema` сняты `event_codec:`, `aggregate_id:`
+  и `by:` (схема больше не знает ни кодека агрегата, ни его Prim). Clause `:unknown_event_type`
+  в каталогах `<Aggregate>.Errors` больше не вызывается — ошибку строит кодек.
+- **`Core.Outbox.Name`** принимает тот же набор символов, что `Topic` (`[a-zA-Z0-9._-]`): имя
+  сообщения — это wire-тег события, а он квалифицирован. Расширение множества значений,
+  старые имена проходят.
+- **`Core.Config.validate!/0`** проверяет у фасада `dump/1`, `load/2` и `load!/2` (было
+  `dump/1`, `load/2`, `prim/0`).
+
+  Форма конверта события, колонки таблиц событий и outbox не изменились — данные мигрировать
+  не нужно. Миграция кода потребителя:
+
+  ```elixir
+  # кодек событий: было
+  use Es.Event.Codec,
+    tags: @tag_by_mod, event: User.Event, aggregate_id: User.ID, by: User.ID, errors: User.Errors
+
+  defp dump_payload(%Event.Blocked{}, _codec), do: nil
+  defp load_payload(Event.Blocked, nil, envelope, _), do: {:ok, event(Event.Blocked, envelope)}
+
+  defp load_payload(Event.Created, payload, envelope, codec) do
+    with {:ok, login} <- load_optional(field(payload, :login), User.Login, codec) do
+      {:ok, event(Event.Created, Event.Created.Payload.new(login), envelope)}
+    end
+  end
+
+  # стало — события без нагрузки не упоминаются вовсе
+  use Es.Event.Codec,
+    event: User.Event,
+    tags: @tag_by_mod
+
+  @impl true
+  def load_payload(Event.Created, payload, codec) do
+    with {:ok, login} <- load_optional(field(payload, :login), User.Login, codec) do
+      {:ok, Event.Created.Payload.new(login)}
+    end
+  end
+
+  # чтение события: было → стало
+  InCodec.load(data)                    → InCodec.load(User.Event, data)
+  InCodec.load!(data)                   → InCodec.load!(User.Event, data)
+
+  # read-модели, написанные руками: было → стало
+  codec.dump_raw(:uuid, view.fias_id)   → dump_raw(Object.FiasID, view.fias_id, codec)
+  dump_raw_optional(v, :datetime, codec) → dump_raw(Agg.ClosedAt, v, codec)
+  ```
+
+  `EventCompatCase` грузит фикстуру целиком через семейство:
+  `InCodec.load(<Aggregate>.Event, fixture)`.
 - **Тип версии переехал в `Core.Version`.** `Core.Repo.version()` удалён — вместо него
   `Core.Version.expected()` (`%Version{} | :current`). Тип версии принадлежит `Version`,
   а не модулю репозитория; в `@spec` потребителя замена механическая.
@@ -22,6 +100,29 @@
 
 ### Новое
 
+- **Конверт доменного события** (`Core.Es.Event.Codec`): `dump_envelope/4` собирает его при
+  постановке события в очередь и при записи в event store, разбор идёт через фасад
+  (`codec.load(<Aggregate>.Event, data)` → `load/3` плагина). Разбор **safe**: неизвестный тег
+  даёт `:unknown_event_type`, отсутствующее обязательное поле — `:invalid_envelope`
+  (обе — `ns: :es`), а не падение подписчика. `to_fields/1` / `from_fields/1` — мост к
+  транспортам, хранящим поля события врозь.
+- **`Core.Prim.UUID` перестал разбирать строку дважды.** `cast/1` больше не зовёт `UUID.info/1`
+  перед конверсией: разбор делает сам `string_to_binary!/1`, а невалидное значение по-прежнему
+  становится `{:error, {:invalid_uuid, _}}`. `format/2` переводит **каноническую** форму срезкой
+  (`:full` — тождественно), к библиотеке обращаясь только для hex, urn и верхнего регистра.
+  Поведение не изменилось: любая форма ввода по-прежнему нормализуется, — изменилась цена.
+  На поле `uuid` уходит 142 слова вместо 1383 и 0.3 мкс вместо 3.5 мкс; дамп страницы из
+  1000 строк с четырьмя форматируемыми полями оставляет 5 МБ мусора вместо 14.5 МБ и вызывает
+  1 minor GC вместо 130.
+- **`Core.Codec.coerce/2`** — значение без Prim-обёртки → Prim (`cast` + `mutate` leaf-примитива,
+  цепочка `Prim.Compose` целиком), и **`Core.Codec.Helper.dump_raw/3`** поверх него: read-путь
+  дампит значение обычным `codec.dump/1`, поэтому разойтись с агрегатным путём ему больше нечем.
+- **`union:` у `Core.Codec.Plugin`** — модуль-семейство типов для `codec.load/2`; `Core.Es.Event`
+  генерирует интроспекцию `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`.
+- **`Core.Helper.Opts.module_or_config!/4`** — опция-модуль с дефолтом из `Core.Config`,
+  подставляемым как **вызов** в рантайме.
+- **`Core.Repo.Pg.dao/1`** — Ecto-репозиторий из конфига `@pg`: явный `repo:` либо
+  `Core.Config.dao()`.
 - **`Core.Web.*` — общая часть границы HTTP** (без новых зависимостей: `plug` и `prom_ex`
   уже были в `deps`, Phoenix и OpenApiSpex не добавляются):
   `Core.Web.Params` (`find` / `get` / `get!` по atom-или-string ключу, `page/2`, `version/2`
@@ -39,6 +140,18 @@
 - **`Core.Helper.Map.stringify_keys/1`** — atom-ключи в строки без смены регистра
   (смена регистра — задача `Core.Helper.Keys`).
 - **`Core.Repo.Pg.changeset_errors/1`** — ошибки changeset как `%{поле => [текст]}`.
+
+### Изменения контракта макросов
+
+- **`codec:` и `repo:` без явной опции резолвятся в рантайме.** `Es.Outbox`, `Repo.Pg`,
+  `Repo.Pg.Es`, `Es.Event.Repo.Pg` и `Es.Event.Repo.Pg.Schema` больше не читают
+  `Core.Config` в момент разворачивания макроса — как это уже делал `Repo.Pg.Schema`.
+  Потребитель, задающий `dao:` / `codec:` в `runtime.exs`, компилируется без обходных
+  путей; поведение при явно заданной опции не изменилось.
+- **Снятые атрибуты макросов.** `Es.Outbox` больше не занимает `@es_codec`,
+  `Es.Event.Repo.Pg` — `@es_dao` и `@es_codec`, `Es.Event.Repo.Pg.Schema` — `@es_codec`:
+  вместо них генерируются приватные `es_codec/0` и `es_dao/0`. Правка нужна только тому,
+  кто ссылался на эти атрибуты из собственного кода модуля.
 
 ## 0.1.0
 

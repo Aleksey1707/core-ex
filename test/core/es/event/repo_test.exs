@@ -105,22 +105,24 @@ defmodule Core.Es.Event.RepoTest do
     end
   end
 
-  test "Schema требует у event_codec функцию load_event/8" do
-    assert_raise CompileError, ~r/должен экспортировать load_event\/8/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.Es.Event.RepoTest.BadCodec do
-            use Core.Es.Event.Repo.Pg.Schema,
-              table: "fake_events",
-              event: Core.Es.Event.RepoTest.FakeEvent,
-              event_codec: Core.Es.Event.RepoTest.FakeEvent,
-              aggregate_id: Core.Es.Event.RepoTest.FakeId,
-              by: Core.Es.Event.RepoTest.FakeId,
-              by_schema: Core.EventFixture.BySchema,
-              payload_type: Core.TestTypes.JSON
-          end
-        end
-      )
-    end
+  test "Schema не принимает кодек и Prim агрегата: событие грузится фасадом по тегу" do
+    assert_raise CompileError,
+                 ~r/unknown option\(s\): \[:event_codec, :aggregate_id, :by\]/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Es.Event.RepoTest.BadCodec do
+                         use Core.Es.Event.Repo.Pg.Schema,
+                           table: "fake_events",
+                           event: Core.Es.Event.RepoTest.FakeEvent,
+                           event_codec: Core.Es.Event.RepoTest.FakeEvent,
+                           aggregate_id: Core.Es.Event.RepoTest.FakeId,
+                           by: Core.Es.Event.RepoTest.FakeId,
+                           by_schema: Core.EventFixture.BySchema,
+                           payload_type: Core.TestTypes.JSON
+                       end
+                     end
+                   )
+                 end
   end
 end

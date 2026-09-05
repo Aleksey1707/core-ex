@@ -2,44 +2,42 @@ defmodule Core.Codec.Plugin.Opts do
   @moduledoc """
   Валидация опций `use Core.Codec.Plugin` и проверка контракта после компиляции.
 
-  Проверяет XOR `types:` / `tags:`, обязательность `load/3` при `loadable: true`
-  и `load_tagged/3` при `tagged: true`.
+  Проверяет форму `types:` и `union:` и обязательность `load/3` при `loadable: true`.
   """
 
   @doc false
-  @spec normalize!(keyword()) :: {[module()], [String.t()], map() | nil, boolean()}
+  @spec types!(keyword()) :: [module()]
 
-  def normalize!(opts) do
-    normalize_types_or_tags!(Keyword.get(opts, :types), Keyword.get(opts, :tags))
+  def types!(opts) do
+    case Keyword.get(opts, :types) do
+      types when is_list(types) and types != [] ->
+        validate_modules!(types)
+
+      other ->
+        raise CompileError,
+          description: "types: must be a non-empty list of modules, got: #{inspect(other)}"
+    end
   end
 
   @doc false
-  @spec validate_flags!(boolean(), boolean()) :: :ok
+  @spec union!(keyword(), boolean()) :: module() | nil
 
-  def validate_flags!(true, false) do
-    raise CompileError, description: "tagged: true requires tags: %{mod => tag}"
+  def union!(opts, loadable?) do
+    case Keyword.get(opts, :union) do
+      nil -> nil
+      union -> validate_union!(union, loadable?)
+    end
   end
-
-  def validate_flags!(_tagged?, _from_tags_map?), do: :ok
 
   @doc false
   @spec after_compile!(Macro.Env.t(), binary()) :: :ok
 
   def after_compile!(env, _bytecode) do
     mod = env.module
-    loadable? = Module.get_attribute(mod, :codec_loadable)
-    tagged? = Module.get_attribute(mod, :codec_tagged)
 
-    if loadable? and not Module.defines?(mod, {:load, 3}) do
+    if Module.get_attribute(mod, :codec_loadable) and not Module.defines?(mod, {:load, 3}) do
       raise CompileError,
         description: "#{inspect(mod)} with loadable: true must define load/3",
-        file: env.file,
-        line: env.line
-    end
-
-    if tagged? and not Module.defines?(mod, {:load_tagged, 3}) do
-      raise CompileError,
-        description: "#{inspect(mod)} with tagged: true must define load_tagged/3",
         file: env.file,
         line: env.line
     end
@@ -49,48 +47,23 @@ defmodule Core.Codec.Plugin.Opts do
 
   # ---
 
-  defp normalize_types_or_tags!(types, tags) when is_map(tags) and not is_nil(types) do
-    raise CompileError, description: "types: and tags: are mutually exclusive"
-  end
-
-  defp normalize_types_or_tags!(_types, tags) when is_map(tags), do: normalize_tags_map!(tags)
-
-  defp normalize_types_or_tags!(types, nil) when is_list(types) and types != [] do
-    normalize_types_list!(types)
-  end
-
-  defp normalize_types_or_tags!(types, tags) when is_list(types) and not is_nil(tags) do
-    raise CompileError,
-      description: "tags: must be %{mod => tag}; do not pass tags: with types:"
-  end
-
-  defp normalize_types_or_tags!(_types, _tags) do
-    raise CompileError,
-      description: "provide types: (non-empty list) or tags: (%{mod => tag})"
-  end
-
-  defp normalize_tags_map!(tags) when map_size(tags) == 0 do
-    raise CompileError, description: "tags: must be a non-empty map"
-  end
-
-  defp normalize_tags_map!(tags) do
-    Enum.each(tags, fn
-      {mod, tag} when is_atom(mod) and is_binary(tag) ->
-        :ok
-
-      other ->
-        raise CompileError,
-          description: "tags: entries must be {module, String.t()}, got: #{inspect(other)}"
-    end)
-
-    {Map.keys(tags), Map.values(tags), tags, true}
-  end
-
-  defp normalize_types_list!(types) do
-    if not Enum.all?(types, &is_atom/1) do
+  defp validate_modules!(types) do
+    if not Enum.all?(types, &(is_atom(&1) and not is_nil(&1))) do
       raise CompileError, description: "types: must be a non-empty list of modules"
     end
 
-    {types, [], nil, false}
+    types
+  end
+
+  # Семейство существует ради `load/3`: у dump-only плагина восстанавливать нечем,
+  # и клоуза фасада для него была бы обещанием, которого плагин не выполняет.
+  defp validate_union!(union, false) when is_atom(union) do
+    raise CompileError, description: "union: requires loadable: true"
+  end
+
+  defp validate_union!(union, _loadable?) when is_atom(union) and not is_nil(union), do: union
+
+  defp validate_union!(other, _loadable?) do
+    raise CompileError, description: "union: must be a module, got: #{inspect(other)}"
   end
 end

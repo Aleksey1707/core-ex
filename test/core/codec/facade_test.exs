@@ -28,6 +28,10 @@ defmodule Core.Codec.FacadeTest do
     defstruct [:x]
   end
 
+  defmodule SampleAt do
+    use Prim.DateTime, name: "Момент"
+  end
+
   defmodule SampleView do
     defstruct [:id, :created_at, :closed_at]
   end
@@ -37,12 +41,15 @@ defmodule Core.Codec.FacadeTest do
       types: [SampleView],
       loadable: false
 
+    alias Core.Codec.FacadeTest.SampleAt
+    alias Core.Codec.FacadeTest.SampleUUID
+
     @impl true
     def dump(%SampleView{} = view, codec) do
       %{
-        id: codec.dump_raw(:uuid, view.id),
-        created_at: codec.dump_raw(:datetime, view.created_at),
-        closed_at: dump_raw_optional(view.closed_at, :datetime, codec)
+        id: dump_raw(SampleUUID, view.id, codec),
+        created_at: dump_raw(SampleAt, view.created_at, codec),
+        closed_at: dump_raw(SampleAt, view.closed_at, codec)
       }
     end
   end
@@ -53,27 +60,13 @@ defmodule Core.Codec.FacadeTest do
       plugins: [SampleViewCodec]
   end
 
-  test "load_tagged exists without tagged plugins" do
-    assert function_exported?(EmptyFacade, :load_tagged, 2)
+  test "фасад отдаёт только dump/1, load/2 и load!/2" do
+    exported =
+      EmptyFacade.__info__(:functions)
+      |> Enum.reject(fn {name, _arity} -> match?("__" <> _, Atom.to_string(name)) end)
+      |> Enum.sort()
 
-    assert {:error, %Error{code: :unknown_tagged_type, module: EmptyFacade}} =
-             EmptyFacade.load_tagged("any", %{})
-  end
-
-  test "load_tagged rejects non-binary type and non-map payload" do
-    assert {:error, %Error{code: :invalid_tagged_input, module: InCodec}} =
-             InCodec.load_tagged(nil, %{})
-
-    assert {:error, %Error{code: :invalid_tagged_input, module: InCodec}} =
-             InCodec.load_tagged(123, %{})
-
-    assert {:error, %Error{code: :invalid_tagged_input, module: InCodec}} =
-             InCodec.load_tagged("create", "not-a-map")
-  end
-
-  test "unknown tagged type uses facade as error module" do
-    assert {:error, %Error{code: :unknown_tagged_type, module: InCodec}} =
-             InCodec.load_tagged("nope", %{})
+    assert exported == [dump: 1, load: 2, load!: 2]
   end
 
   test "dump unknown non-prim struct raises ArgumentError" do
@@ -87,17 +80,6 @@ defmodule Core.Codec.FacadeTest do
     assert is_binary(InCodec.dump(SampleString.new!("ab")))
   end
 
-  test "dump_raw delegates to the prim profile of the facade" do
-    uuid = "550e8400-e29b-41d4-a716-446655440000"
-    dt = DateTime.utc_now()
-
-    assert ViewFacade.dump_raw(:uuid, uuid) ==
-             Core.CodecFixture.Prim.External.dump_raw(:uuid, uuid)
-
-    assert InCodec.dump_raw(:uuid, uuid) == Core.CodecFixture.Prim.Internal.dump_raw(:uuid, uuid)
-    assert ViewFacade.dump_raw(:datetime, dt) == local_iso(dt)
-  end
-
   test "dump-only view plugin formats raw values like the prim path" do
     uuid = "550e8400-e29b-41d4-a716-446655440000"
     dt = DateTime.utc_now()
@@ -106,12 +88,21 @@ defmodule Core.Codec.FacadeTest do
              ViewFacade.dump(%SampleView{id: uuid, created_at: dt})
 
     assert id == ViewFacade.dump(SampleUUID.new!(uuid))
-    assert created_at == local_iso(dt)
+    assert created_at == ViewFacade.dump(SampleAt.new!(dt))
 
     assert %{closed_at: closed_at} =
              ViewFacade.dump(%SampleView{id: uuid, created_at: dt, closed_at: dt})
 
-    assert closed_at == local_iso(dt)
+    assert closed_at == ViewFacade.dump(SampleAt.new!(dt))
+  end
+
+  test "raw-путь наследует precision своего Prim, а не форму значения" do
+    dt = DateTime.utc_now()
+
+    assert %{created_at: created_at} = ViewFacade.dump(%SampleView{id: nil, created_at: dt})
+
+    refute created_at =~ "."
+    assert created_at == local_iso(DateTime.truncate(dt, :second))
   end
 
   test "view struct is dump-only: load raises" do
@@ -139,6 +130,57 @@ defmodule Core.Codec.FacadeTest do
     refute :erlang.module_loaded(mod)
 
     assert is_binary(InCodec.dump(id))
+  end
+
+  describe "load/2 по модулю-семейству" do
+    test "восстанавливает событие по тегу внутри данных" do
+      event = Core.EventFixture.created()
+      data = InCodec.dump(event)
+
+      assert {:ok, ^event} = InCodec.load(Core.EventFixture.Event, data)
+      assert ^event = InCodec.load!(Core.EventFixture.Event, data)
+    end
+
+    test "неизвестный тег — доменная ошибка кодека агрегата" do
+      assert {:error,
+              %Error{
+                code: :unknown_event_type,
+                ns: :es,
+                module: Core.EventFixture.Codec,
+                detail: "nope"
+              }} = InCodec.load(Core.EventFixture.Event, %{"type" => "nope"})
+    end
+
+    test "данные без тега — доменная ошибка кодека агрегата" do
+      assert {:error, %Error{code: :invalid_envelope, ns: :es, detail: %{field: :type}}} =
+               InCodec.load(Core.EventFixture.Event, %{})
+    end
+  end
+
+  test "семейство в двух плагинах — CompileError" do
+    assert_raise CompileError, ~r/duplicate codec type/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.DupUnionA do
+            use Core.Codec.Plugin,
+              types: [Core.Codec.FacadeTest.UnknownStruct],
+              union: Core.EventFixture.Event
+
+            @impl true
+            def dump(%Core.Codec.FacadeTest.UnknownStruct{}, _codec), do: %{}
+
+            @impl true
+            def load(_mod, _raw, _codec), do: {:ok, nil}
+          end
+
+          defmodule Core.Codec.FacadeTest.DupUnionFacade do
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: [Core.EventFixture.Codec, Core.Codec.FacadeTest.DupUnionA]
+          end
+        end
+      )
+    end
   end
 
   test "duplicate codec types raise CompileError" do
