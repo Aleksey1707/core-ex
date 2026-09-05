@@ -14,6 +14,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Prim.*`, `Core.Enum`, `Core.Validator.*` | доменные примитивы с валидацией и типами |
 | `Core.Codec`, `Core.Codec.Facade`, `Core.Codec.Plugin`, `Core.Codec.Redump` | wire-профили и entity-фасады (dump/load) |
 | `Core.Context`, `Core.Error`, `Core.Exc`, `Core.Result`, `Core.Option` | сквозные контракты вызова и ошибок |
+| `Core.DAO` | билдер `Ecto.Repo` потребителя (обёртка транзакций под after-commit хуки) |
 | `Core.Repo`, `Core.Repo.Pg*`, `Core.Repo.Sc` | контракт репозитория, реализация на Ecto/Postgres, shadow copy |
 | `Core.Es.*` | доменные события и их wire-конверт, event store, маппинг в outbox |
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
@@ -138,20 +139,20 @@ end
 
 ## Что предоставляет потребитель
 
-1. **`Ecto.Repo`** — с `transact`, обёрнутым в `Core.Helper.AfterCommit.wrap/1`,
-   иначе не сработают after-commit хуки:
+1. **`Ecto.Repo`** — через `Core.DAO`: это `use Ecto.Repo` плюс обёртка `transact/1,2`
+   и `transaction/1,2` в `Core.Helper.AfterCommit.wrap/1`, без которой after-commit хуки
+   (wake поллера outbox, эталон `Repo.Sc` в `Repo.Pg.Es`) молча не выполняются:
 
    ```elixir
    defmodule MyApp.DAO do
-     use Ecto.Repo, otp_app: :my_app, adapter: Ecto.Adapters.Postgres
-
-     defoverridable transact: 1, transact: 2
-
-     def transact(fun_or_multi, opts \\ []) do
-       Core.Helper.AfterCommit.wrap(fn -> super(fun_or_multi, opts) end)
-     end
+     use Core.DAO,
+       otp_app: :my_app,
+       adapter: Ecto.Adapters.Postgres
    end
    ```
+
+   Опции идут в `use Ecto.Repo` как есть; `otp_app:` и `adapter:` обязательны
+   (`CompileError` при отсутствии).
 
 2. **Codec-профили и фасады** — `use Core.Codec` для Prim-профилей, `use Core.Codec.Facade`
    для entity-фасадов. В список плагинов фасада **обязан** входить `Core.Outbox.Codec`,

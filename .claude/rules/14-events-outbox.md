@@ -152,7 +152,7 @@ Tunables (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) — *
 - Если во время цикла пришли `:wake` и результат `:idle` / error — `schedule(0)` (не полный backoff).
 - Входящие `:wake` coalesce'ятся (`flush_wakes` в начале/конце цикла) — mailbox не растёт пропорционально RPS `append`.
 - `Outbox.Repo.append` регистрирует `Poller.wake/0` через `Helper.AfterCommit` (после outermost commit; вне TX — сразу). Same-VM only; другие ноды — safety poll.
-- `DAO.transact` обёрнут в `AfterCommit.wrap` (depth / rollback-safe).
+- `DAO` объявляется через `use Core.DAO`: `transact` / `transaction` обёрнуты в `AfterCommit.wrap` (depth / rollback-safe).
 
 ### Порядок доставки
 
