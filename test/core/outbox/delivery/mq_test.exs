@@ -1,11 +1,19 @@
 defmodule Core.Outbox.Delivery.MqTest do
-  use ExUnit.Case, async: true
+  # Экспортёр span'ов — глобальный ресурс SDK.
+  use ExUnit.Case, async: false
 
   alias Core.Error
   alias Core.Mq
+  alias Core.Otel
+  alias Core.OtelFixture
   alias Core.Outbox
   alias Core.Outbox.Delivery
   alias Core.Outbox.Record
+
+  setup do
+    :ok = OtelFixture.attach()
+    :ok
+  end
 
   defmodule StopWriter do
     @moduledoc false
@@ -73,11 +81,14 @@ defmodule Core.Outbox.Delivery.MqTest do
     @moduledoc false
 
     def put_many(agent, messages) do
-      Agent.update(agent, fn calls -> calls ++ [Enum.map(messages, & &1.body)] end)
+      Agent.update(agent, fn calls -> calls ++ [messages] end)
       :ok
     end
 
-    def calls(agent), do: Agent.get(agent, & &1)
+    def calls(agent),
+      do: Enum.map(Agent.get(agent, & &1), fn call -> Enum.map(call, & &1.body) end)
+
+    def messages(agent), do: List.flatten(Agent.get(agent, & &1))
   end
 
   defmodule FailingWriter do
@@ -140,15 +151,94 @@ defmodule Core.Outbox.Delivery.MqTest do
     assert {:error, 0, %Error{code: :boom}} = Delivery.Mq.publish_many(delivery, records)
   end
 
+  describe "трассировка" do
+    test "заголовки сообщения несут контекст create-span'а с родителем из записи" do
+      command_headers = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "created"}) end)
+      {:ok, agent} = Agent.start_link(fn -> [] end)
+      delivery = Delivery.Mq.new(RecordingWriter, agent)
+
+      assert :ok = Delivery.Mq.publish_many(delivery, [record("a", command_headers)])
+
+      spans = OtelFixture.drain()
+      command = OtelFixture.find(spans, "cmd")
+      create = OtelFixture.find(spans, "create products")
+
+      assert create.kind == :producer
+      assert create.trace_id == command.trace_id
+      assert create.parent_span_id == command.span_id
+      assert create.attributes["messaging.operation.type"] == "create"
+      assert create.attributes["messaging.destination.name"] == "products"
+      assert create.attributes["messaging.message.id"] == "agg-1"
+
+      assert [%{headers: headers}] = RecordingWriter.messages(agent)
+      assert headers["name"] == "created"
+      assert headers["traceparent"] != command_headers["traceparent"]
+      assert headers["traceparent"] =~ hex_span_id(create.span_id)
+    end
+
+    test "пачка даёт один send-span со ссылками на create-спаны" do
+      {:ok, agent} = Agent.start_link(fn -> [] end)
+      delivery = Delivery.Mq.new(RecordingWriter, agent)
+
+      assert :ok = Delivery.Mq.publish_many(delivery, [record("a"), record("b")])
+
+      spans = OtelFixture.drain()
+      send_span = OtelFixture.find(spans, "send products")
+      creates = Enum.filter(spans, &(&1.name == "create products"))
+
+      assert send_span.kind == :producer
+      assert send_span.attributes["messaging.operation.type"] == "send"
+      assert send_span.attributes["messaging.operation.name"] == "publish"
+      assert send_span.attributes["messaging.batch.message_count"] == 2
+
+      assert length(creates) == 2
+      assert Enum.sort(send_span.links) == Enum.sort(Enum.map(creates, &OtelFixture.ref/1))
+      assert Enum.all?(creates, &(&1.parent_span_id != send_span.span_id))
+    end
+
+    test "пачка из разных топиков — span без назначения в имени" do
+      {:ok, agent} = Agent.start_link(fn -> [] end)
+      delivery = Delivery.Mq.new(RecordingWriter, agent)
+
+      records = [record("a"), %{record("b") | topic: Outbox.Topic.new!("orders")}]
+      assert :ok = Delivery.Mq.publish_many(delivery, records)
+
+      send_span = OtelFixture.drain() |> OtelFixture.find("send")
+
+      assert send_span.attributes["messaging.batch.message_count"] == 2
+      refute Map.has_key?(send_span.attributes, "messaging.destination.name")
+    end
+
+    test "провал публикации отмечается на send-span'е" do
+      delivery = Delivery.Mq.new(StopWriter, :unused)
+
+      assert {:error, 1, %Error{}} =
+               Delivery.Mq.publish_many(delivery, [record("a"), record("b")])
+
+      send_span = OtelFixture.drain() |> OtelFixture.find("send products")
+
+      assert {:error, "second"} = send_span.status
+      assert send_span.attributes["error.type"] == "outbox/boom"
+    end
+  end
+
   # ---
 
-  defp record(name) do
+  defp hex_span_id(span_id) do
+    span_id
+    |> Integer.to_string(16)
+    |> String.downcase()
+    |> String.pad_leading(16, "0")
+  end
+
+  defp record(name, headers \\ nil) do
     {:ok, record} =
       Record.new(
         Outbox.Topic.new!("products"),
         Outbox.Key.new!("agg-1"),
         Outbox.Name.new!(name),
-        %{"n" => name}
+        %{"n" => name},
+        headers
       )
 
     record

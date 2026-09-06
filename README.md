@@ -20,6 +20,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
 | `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub (клиенты — опциональные зависимости, см. ниже) |
 | `Core.Web.*` | граница HTTP: конверт ответа, разбор параметров, `%Error{}` → HTTP-статус, сервер метрик |
+| `Core.Otel`, `Core.Otel.Messaging`, `Core.Otel.LogFilter` | пропагация OpenTelemetry через outbox и брокер, `trace_id` в metadata логов |
 | `Core.Helper.*` | транзакции, savepoint, advisory-локи, after-commit хуки |
 | `Core.*.PromEx` | плагины метрик для outbox, MQ, кешей, воркеров, cgroup |
 
@@ -196,6 +197,65 @@ end
 События Core называются `telemetry_prefix ++ suffix`. По умолчанию префикс — `[otp_app()]`,
 то есть `[:my_app, :outbox, :poller, :cycle]`. Если приложение переезжает на библиотеку
 с уже работающими дашбордами, задайте `telemetry_prefix` явно и сверьтесь с ними.
+
+## Трассировка
+
+Библиотека зависит только от `opentelemetry_api`. Без установленного SDK её вызовы —
+no-op: span'ы не создаются, заголовки не меняются, экспортёров и сетевых соединений
+не появляется. SDK, exporter и автоинструментирование подключает потребитель.
+
+Core закрывает то, чего не закрывает ни одна готовая интеграция, — **собственный
+асинхронный транспорт**. Событие пишется в outbox внутри HTTP-запроса, публикуется
+поллером через секунду в другом процессе, читается подписчиком в третьем; контекст
+OTel живёт в process dictionary и сам туда не попадает. Переносит его `Core.Otel`:
+
+Имена и структура спанов — по semantic conventions messaging (`Core.Otel.Messaging`):
+
+| Точка | Что происходит |
+|---|---|
+| `Core.Es.Outbox.from_event/1` | `traceparent` текущего трейса кладётся в `headers` записи |
+| `Core.Outbox.Delivery.Mq`, на сообщение | span `"create <topic>"` с родителем из записи; его контекст уходит в заголовки сообщения |
+| `Core.Outbox.Delivery.Mq`, на пачку | span `"send <topic>"` (`kind: :producer`) со **ссылками** на create-спаны |
+| `Core.PubSub.MqSubscriberReliable` | span `"process <topic>"` (`kind: :consumer`) с родителем из заголовков сообщения |
+
+Собственный код потребителя, вызывающий `Core.Otel` напрямую, передаёт
+`scope: <свой модуль>` — иначе его span'ы будут приписаны библиотеке.
+
+Обязанности потребителя:
+
+```elixir
+# mix.exs
+{:opentelemetry, "~> 1.5"},
+{:opentelemetry_exporter, "~> 1.8"},
+{:opentelemetry_phoenix, "~> 2.0"},
+{:opentelemetry_ecto, "~> 1.2"},
+{:opentelemetry_oban, "~> 1.1"},
+```
+
+```elixir
+# MyApp.Application.start/2 — до старта supervision tree
+OpentelemetryPhoenix.setup(adapter: :bandit)
+OpentelemetryEcto.setup([:my_app, :dao], db_statement: :enabled)
+OpentelemetryOban.setup()
+
+# корреляция логов
+:logger.add_primary_filter(:otel_trace, {&Core.Otel.LogFilter.filter/2, []})
+```
+
+```elixir
+# config/config.exs
+config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
+```
+
+Логи в OTLP **не** уходят: экспортёр логов для BEAM не выпущен в hex
+(`otel_log_handler` лежит в `opentelemetry_experimental` без экспортёра). Логи
+остаются в stdout и собираются агентом (otel-collector `filelog`, Alloy, Vector);
+с трейсом их связывает `trace_id` в metadata, который кладёт `Core.Otel.LogFilter`.
+Метрики остаются в Prometheus через PromEx — OTel-метрики библиотека не вводит.
+
+Пропагаторы выбирает потребитель. По умолчанию SDK ставит `[:trace_context, :baggage]`,
+и тогда вместе с трейсом в строку outbox и в брокер уходит baggage целиком. Если это
+нежелательно — `config :opentelemetry, text_map_propagators: [:trace_context]`.
 
 ## Разработка
 

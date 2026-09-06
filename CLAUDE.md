@@ -60,6 +60,7 @@ rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib
 | `17-otp-concurrency.md` | дерево процессов, `init/1`/`handle_continue`, таймауты, mailbox |
 | `19-testing.md` | case-модули, round-trip кодеков, golden-фикстуры событий |
 | `20-agreements.md` | CQS, логирование, `@spec`/`@doc`, guards, алиасы, safe vs bang |
+| `21-observability.md` | метрики / трейсы / логи, `Core.Otel`, где ставить span |
 
 ## Команды
 

@@ -1,5 +1,6 @@
 defmodule Core.PubSub.MqSubscriberReliableTest do
-  use ExUnit.Case, async: true
+  # Экспортёр span'ов — глобальный ресурс SDK.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
@@ -8,6 +9,8 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.MqFake
+  alias Core.Otel
+  alias Core.OtelFixture
   alias Core.PubSub.MqSubscriberReliable
   alias Core.Repo
 
@@ -365,6 +368,78 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     refute_receive :handled, 200
   end
 
+  describe "трассировка" do
+    setup do
+      :ok = OtelFixture.attach()
+      :ok
+    end
+
+    test "span обработки продолжает трейс из заголовков", %{topic: topic, context: context} do
+      headers = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "product_created"}) end)
+      reader = MqFake.QueueReader.new([message(topic, "body", headers)])
+
+      sub = start_sub(reader, topic, "sub-trace", fn _m, _d, _c -> :ok end)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+      assert :processed = MqSubscriberReliable.run_once(sub)
+
+      spans = OtelFixture.drain()
+      command = OtelFixture.find(spans, "cmd")
+      process = OtelFixture.find(spans, "process products")
+
+      assert process.kind == :consumer
+      assert process.trace_id == command.trace_id
+      assert process.parent_span_id == command.span_id
+      assert process.attributes["messaging.operation.type"] == "process"
+      assert process.attributes["messaging.destination.name"] == "products"
+      assert process.attributes["messaging.message.id"] == "agg-1"
+      assert process.attributes["core.pubsub.attempt"] == 1
+    end
+
+    test "ошибка обработчика — статус span'а :error", %{
+      reader: reader,
+      topic: topic,
+      context: context
+    } do
+      on = fn _m, _d, _c ->
+        {:error, Error.app(__MODULE__, code: :fail, ns: :pubsub, message: "boom")}
+      end
+
+      sub = start_sub(reader, topic, "sub-trace-error", on)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+      process = OtelFixture.drain() |> OtelFixture.find("process products")
+
+      assert {:error, "boom"} = process.status
+      assert process.attributes["error.type"] == "pubsub/fail"
+      assert process.attributes["core.error.kind"] == "app"
+    end
+
+    test "уход в DLQ отмечается на span'е", %{reader: reader, topic: topic, context: context} do
+      writer = MqFake.Writer.new()
+
+      on = fn _m, _d, _c ->
+        {:error, Error.app(__MODULE__, code: :fail, ns: :pubsub, message: "boom")}
+      end
+
+      sub =
+        start_sub(reader, topic, "sub-trace-dlq", on,
+          max_attempts: 1,
+          dlq_writer: MqFake.Writer,
+          dlq_handle: writer
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      capture_log(fn -> assert :dlq = MqSubscriberReliable.run_once(sub) end)
+
+      process = OtelFixture.drain() |> OtelFixture.find("process products")
+
+      assert process.attributes["core.pubsub.dlq_topic"] == "products.dlq"
+    end
+  end
+
   # ---
 
   defp start_sub(reader, topic, name, on_message, opts \\ []) do
@@ -384,9 +459,8 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     sub
   end
 
-  defp message(topic, body) do
-    {:ok, message} =
-      Message.new(topic, %{"name" => "product_created"}, body, Mq.Key.new!("agg-1"))
+  defp message(topic, body, headers \\ %{"name" => "product_created"}) do
+    {:ok, message} = Message.new(topic, headers, body, Mq.Key.new!("agg-1"))
 
     message
   end
