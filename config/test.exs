@@ -43,6 +43,12 @@ config :core, Core.Mq.Stream,
 
 config :argon2_elixir, t_cost: 1, m_cost: 8
 
+# SDK трейсинга нужен только тестам библиотеки: экспортёр подменяет `Core.OtelFixture`
+# на pid-экспортёр, а простой процессор отдаёт span сразу по закрытию.
+config :opentelemetry,
+  traces_exporter: :none,
+  processors: [{:otel_simple_processor, %{}}]
+
 config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
 
 config :logger, level: :warning

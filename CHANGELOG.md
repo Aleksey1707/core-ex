@@ -100,6 +100,23 @@
 
 ### Новое
 
+- **Трассировка OpenTelemetry на транспорте библиотеки** (`Core.Otel`,
+  `Core.Otel.Messaging`, `Core.Otel.LogFilter`). Зависимость — только
+  `opentelemetry_api`: без SDK у потребителя все вызовы no-op. Готовые интеграции
+  (Phoenix / Ecto / Oban) рвутся на outbox — событие пишется в одном процессе,
+  публикуется поллером в другом, читается подписчиком в третьем, — поэтому контекст
+  переносится заголовками: `<Aggregate>.Outbox.from_event/1` кладёт `traceparent`
+  команды в `Record.headers`, `Delivery.Mq` открывает `"create <topic>"` на каждое
+  сообщение и `"send <topic>"` на пачку со ссылками на них, `MqSubscriberReliable` —
+  `"process <topic>"` с родителем из заголовков. Имена и структура — по semantic
+  conventions messaging; `Core.Otel` при этом предметно нейтрален, словарь semconv
+  живёт в `Core.Otel.Messaging`. `Core.Otel.LogFilter.filter/2` — primary-фильтр
+  `:logger`, кладущий `trace_id` / `span_id` в metadata (OTLP-экспорт логов для BEAM
+  не выпущен). Метрики остаются в PromEx. Подключение — раздел «Трассировка» в README,
+  правила — `.claude/rules/21-observability.md`.
+- **`Delivery.Mq` добавляет к сообщению `traceparent`** — единственный заголовок, который
+  доставка ставит от себя. Прикладные заголовки по-прежнему целиком задаёт продюсер записи,
+  а `to_message/1` остаётся чистым преобразованием и заголовков не трогает.
 - **Конверт доменного события** (`Core.Es.Event.Codec`): `dump_envelope/4` собирает его при
   постановке события в очередь и при записи в event store, разбор идёт через фасад
   (`codec.load(<Aggregate>.Event, data)` → `load/3` плагина). Разбор **safe**: неизвестный тег

@@ -15,6 +15,11 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   После `:processed` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
   После `:idle` — `poll_interval_ms`, после `:error` — текущий backoff.
+
+  Обработка сообщения идёт в span'е `"process <topic>"` (`kind: :consumer`),
+  родитель которого извлекается из заголовков сообщения (`Core.Otel.Messaging`):
+  трейс команды, записавшей событие в outbox, продолжается здесь, а не начинается
+  заново.
   """
 
   @behaviour Core.PubSub.Subscriber
@@ -25,12 +30,16 @@ defmodule Core.PubSub.MqSubscriberReliable do
   alias Core.Error
   alias Core.Mq
   alias Core.Mq.Message
+  alias Core.Otel
   alias Core.PubSub
   alias Core.Repo
   alias Core.Telemetry
 
   require Logger
   require Error
+
+  @attr_attempt "core.pubsub.attempt"
+  @attr_dlq_topic "core.pubsub.dlq_topic"
 
   @shutdown_ms 30_000
   @call_timeout 5_000
@@ -232,13 +241,30 @@ defmodule Core.PubSub.MqSubscriberReliable do
     %{state | pending_raw: raw, attempts: 1, retry_ms: state.poll_interval_ms}
   end
 
+  # Span покрывает и декод, и обработчик: родитель берётся из заголовков сообщения
+  # (контекст создания записи outbox), поэтому обработка продолжает трейс команды,
+  # а не начинает свой. Номер попытки — собственный атрибут подписчика: в semconv
+  # его нет, а в пространство `messaging.*` чужие имена класть нельзя.
   defp handle_raw(state, raw) do
+    opts = [attributes: %{@attr_attempt => state.attempts}]
+
+    Otel.Messaging.process(raw.headers, state.topic, message_id(raw), opts, fn ->
+      consume_raw(state, raw)
+    end)
+  end
+
+  defp message_id(%Message{key: nil}), do: nil
+
+  defp message_id(%Message{key: key}), do: Mq.Key.value(key)
+
+  defp consume_raw(state, raw) do
     case safe_from_message(state, raw) do
       {:ok, message} ->
         dispatch(state, raw, message)
 
       {:error, %Error{} = error} ->
         Logger.warning("pubsub reliable from_message: #{error.message}")
+        Otel.record_error(error)
         fail_attempt(state, raw, error)
     end
   end
@@ -272,11 +298,14 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
       {:error, %Error{} = error} ->
         Logger.warning("pubsub reliable on_message: #{error.message}")
+        Otel.record_error(error)
         fail_attempt(state, raw, error)
 
       other ->
         Logger.warning("pubsub reliable on_message: unexpected result #{inspect(other)}")
-        fail_attempt(state, raw, unexpected_result_error(other))
+        error = unexpected_result_error(other)
+        Otel.record_error(error)
+        fail_attempt(state, raw, error)
     end
   end
 
@@ -313,6 +342,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
         commit(state)
         log_dlq(state, error)
         emit_dlq(state)
+        Otel.set_attributes(%{@attr_dlq_topic => state.dlq_topic})
         {:dlq, clear_pending(state)}
 
       {:error, %Error{} = dlq_error} ->

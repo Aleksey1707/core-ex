@@ -3,6 +3,7 @@ defmodule Core.Es.OutboxTest do
 
   alias Core.CodecFixture.Internal, as: InCodec
   alias Core.EventFixture
+  alias Core.Otel
   alias Core.Outbox
 
   defmodule Fixture do
@@ -102,6 +103,14 @@ defmodule Core.Es.OutboxTest do
                "aggr_id" => data["aggregate_id"],
                "event_id" => data["event_id"]
              }
+    end
+
+    test "traceparent команды попадает в заголовки записи" do
+      event = EventFixture.created()
+
+      assert {:ok, record} = Otel.span("cmd", [], fn -> Fixture.from_event(event) end)
+      assert %{"traceparent" => traceparent} = record.headers
+      assert traceparent =~ ~r/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/
     end
   end
 end

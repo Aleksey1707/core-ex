@@ -11,6 +11,10 @@ defmodule Core.Es.Outbox do
   (`name` / `aggr_id` / `event_id`) читаются из того же конверта через
   `Core.Es.Event.Codec.to_fields/1` — второго источника wire-имени события нет.
 
+  К заголовкам добавляется `traceparent` текущего трейса (`Core.Otel.inject/1`):
+  запись публикуется поллером в другом процессе и через секунду, поэтому контекст
+  команды переносится в строке outbox, а не в process dictionary.
+
   ## Opts
 
   - `topic:` — имя топика (строка); валидируется `Outbox.Topic` на этапе компиляции
@@ -69,11 +73,11 @@ defmodule Core.Es.Outbox do
       defp es_codec, do: unquote(codec)
 
       defp headers(fields) do
-        %{
+        Core.Otel.inject(%{
           "name" => fields.type,
           "aggr_id" => fields.aggregate_id,
           "event_id" => fields.id
-        }
+        })
       end
     end
   end
