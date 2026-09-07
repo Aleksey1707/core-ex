@@ -8,7 +8,7 @@ defmodule Core.Outbox.PromExTest do
   defmodule DownRepo do
     @moduledoc false
 
-    def counts_by_status, do: exit({:noproc, {DBConnection, :checkout, []}})
+    def queue_counts, do: exit({:noproc, {DBConnection, :checkout, []}})
   end
 
   test "event_metrics и polling_metrics непусты" do

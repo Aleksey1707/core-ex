@@ -56,7 +56,7 @@ defmodule Core.Outbox.Repo.Pg.Schema do
     field :payload, :map, default: %{}
     field :status, Ecto.Enum, values: Outbox.Status.values()
     field :attempts, :integer, default: 0
-    field :locked_until, :utc_datetime
+    field :locked_until, :utc_datetime_usec
     field :lease_id, :binary_id
     field :errors, JsonList, default: []
     field :created_at, :utc_datetime_usec

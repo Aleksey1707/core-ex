@@ -1,6 +1,14 @@
-defmodule Core.Mq.Codec do
+defmodule Core.Mq.Stream.Codec do
   @moduledoc """
-  Кодирование `Message` в binary для RabbitMQ Stream (и обратно).
+  Wire-представление `Mq.Message` для RabbitMQ Stream: JSON-конверт с base64-телом.
+
+  Конверт — не выбор формата, а обход клиента: `:rabbitmq_stream` публикует голый бинарь
+  и не даёт положить заголовки нативно. Поэтому `headers`, `key` и `topic` переносятся
+  полями JSON, а `body` — base64 внутри него.
+
+  Формат принадлежит **адаптеру**, а не контракту `Mq.Writer` (`10-architecture.md`):
+  `Mq.Kafka.Writer` пишет то же сообщение нативно и этот кодек не зовёт. Потребители
+  одного топика обязаны читать тем же адаптером, каким он написан.
   """
 
   alias Core.Error

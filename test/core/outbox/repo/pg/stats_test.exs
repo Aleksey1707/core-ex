@@ -25,16 +25,11 @@ defmodule Core.Outbox.Repo.Pg.StatsTest do
     record
   end
 
-  test "counts_by_status возвращает нули на пустой таблице" do
-    assert Stats.counts_by_status() == %{
-             new: 0,
-             in_work: 0,
-             published: 0,
-             failed: 0
-           }
+  test "queue_counts возвращает нули на пустой таблице" do
+    assert Stats.queue_counts() == %{new: 0, in_work: 0, failed: 0}
   end
 
-  test "counts_by_status считает по статусам", %{context: context} do
+  test "queue_counts считает по статусам и не включает published", %{context: context} do
     r1 = build_record("a")
     r2 = build_record("b")
     assert :ok = @repo.append([r1, r2], context)
@@ -51,12 +46,7 @@ defmodule Core.Outbox.Repo.Pg.StatsTest do
 
     :ok = @repo.save_results([published], context)
 
-    assert Stats.counts_by_status() == %{
-             new: 1,
-             in_work: 0,
-             published: 1,
-             failed: 0
-           }
+    assert Stats.queue_counts() == %{new: 1, in_work: 0, failed: 0}
   end
 
   test "oldest_age_seconds для :new", %{context: context} do

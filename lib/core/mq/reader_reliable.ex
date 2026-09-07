@@ -1,6 +1,10 @@
 defmodule Core.Mq.ReaderReliable do
   @moduledoc """
   Контракт надёжного чтения: `commit` фиксирует offset/cursor.
+
+  Единственный контракт чтения в библиотеке: `Core.PubSub.MqSubscriberReliable` работает
+  только с ним, и подписчику без commit'а подключиться некуда. Как и у `Mq.Writer`,
+  представление на проводе задаёт адаптер (`10-architecture.md`).
   """
 
   alias Core.Error

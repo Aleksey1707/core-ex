@@ -150,6 +150,10 @@ defmodule Core.Outbox.Repo.Pg do
 
   Порядок доставки для возвращённых записей не восстанавливается: они встают в очередь
   по своему исходному `created_at`, а всё, что было опубликовано после них, уже ушло.
+
+  История ошибок очищается вместе со счётчиком попыток: `attempts` стартует с нуля, и
+  сохранённая история пронумеровалась бы заново поверх старой. Причину читают до
+  requeue — это шаг 1 runbook'а (`14-events-outbox.md`).
   """
   @spec requeue_failed(:all | [Outbox.ID.t()], Context.t()) :: non_neg_integer()
 
@@ -159,17 +163,24 @@ defmodule Core.Outbox.Repo.Pg do
       from(r in Schema, where: r.status == :failed)
       |> filter_ids(target)
       |> Config.dao().update_all(
-        set: [status: :new, attempts: 0, locked_until: nil, updated_at: utc_now()]
+        set: [
+          status: :new,
+          attempts: 0,
+          errors: [],
+          locked_until: nil,
+          lease_id: nil,
+          updated_at: utc_now()
+        ]
       )
 
     count
   end
 
-  @doc "Число записей по каждому статусу."
-  @spec counts_by_status() :: %{Outbox.Status.t() => non_neg_integer()}
+  @doc "Число невыполненных записей по статусам `:new` / `:in_work` / `:failed`."
+  @spec queue_counts() :: %{Outbox.Status.t() => non_neg_integer()}
 
   @impl true
-  defdelegate counts_by_status(), to: Stats
+  defdelegate queue_counts(), to: Stats
 
   @doc "Возраст самой старой записи статуса в секундах."
   @spec oldest_age_seconds(Outbox.Status.t()) :: non_neg_integer() | nil
@@ -196,23 +207,67 @@ defmodule Core.Outbox.Repo.Pg do
 
   defp reserve_batch(batch_size, now_utc, topics, lease) do
     Config.dao().transact(fn ->
-      rows =
-        from(r in Schema,
-          where:
-            r.status == :new or
-              (r.status == :in_work and r.locked_until <= ^now_utc),
-          order_by: [asc: r.created_at, asc: r.id],
-          limit: ^Outbox.BatchSize.value(batch_size),
-          lock: "FOR UPDATE SKIP LOCKED"
-        )
-        |> apply_topics_filter(topics)
-        |> Config.dao().all()
+      rows = fetch_candidates(Outbox.BatchSize.value(batch_size), now_utc, topics)
 
       {records, poisoned} = reserve_rows(rows, lease)
       fail_poisoned(poisoned, lease.updated_at)
-      persist_all!(records)
+      mark_reserved!(records, lease)
       {:ok, records}
     end)
+  end
+
+  # Два индексных запроса вместо одного с `OR`. `OR` не даёт планировщику взять частичный
+  # индекс под `ORDER BY`, и `LIMIT` применяется уже после сортировки всего подходящего
+  # множества: на забитой очереди это seq scan таблицы и сортировка на диске, тем дороже,
+  # чем больше backlog. Порознь обе ветки ложатся на `ix_outbox_new_ordered` и
+  # `ix_outbox_in_work_ordered`, и `LIMIT` реально ограничивает работу.
+  #
+  # Слияние двух отсортированных выборок по `limit` строк и взятие первых `limit` даёт тот
+  # же глобальный порядок, что и один `ORDER BY` поверх объединения: `limit` наименьших
+  # элементов объединения не может лежать вне `limit` наименьших каждой из частей.
+  defp fetch_candidates(limit, now_utc, topics) do
+    fresh =
+      from(r in Schema,
+        where: r.status == :new,
+        order_by: [asc: r.created_at, asc: r.id],
+        limit: ^limit,
+        lock: "FOR UPDATE SKIP LOCKED"
+      )
+      |> apply_topics_filter(topics)
+      |> Config.dao().all()
+
+    expired =
+      from(r in Schema,
+        where: r.status == :in_work and r.locked_until <= ^now_utc,
+        order_by: [asc: r.created_at, asc: r.id],
+        limit: ^limit,
+        lock: "FOR UPDATE SKIP LOCKED"
+      )
+      |> apply_topics_filter(topics)
+      |> Config.dao().all()
+
+    merge_candidates(fresh, expired, limit)
+  end
+
+  # Просроченная аренда — редкость: в штатном режиме вторая выборка пуста, и сортировать
+  # нечего.
+  defp merge_candidates(fresh, [], _limit), do: fresh
+
+  defp merge_candidates(fresh, expired, limit) do
+    (fresh ++ expired)
+    |> Enum.sort(&candidate_before?/2)
+    |> Enum.take(limit)
+  end
+
+  # Термовое сравнение `%DateTime{}` идёт по структуре, а не по времени, — порядок пачки
+  # задаётся `DateTime.compare/2`; при равенстве микросекунды tiebreaker — UUIDv7 `id`
+  # (его текстовая форма сортируется так же, как `uuid` в Postgres).
+  defp candidate_before?(a, b) do
+    case DateTime.compare(a.created_at, b.created_at) do
+      :lt -> true
+      :gt -> false
+      :eq -> a.id <= b.id
+    end
   end
 
   defp apply_topics_filter(query, :all), do: query
@@ -313,6 +368,34 @@ defmodule Core.Outbox.Repo.Pg do
     :ok
   end
 
+  # Резервация меняет только lifecycle-поля. Upsert строки целиком переписывал бы
+  # `payload` и `errors` на каждую попытку публикации — write amplification на самой
+  # горячей таблице очереди. Инкремент `attempts` в строке совпадает с инкрементом в
+  # структуре (`Record.reserve/4`): обе получены из одной строки под `FOR UPDATE SKIP LOCKED`.
+  defp mark_reserved!([], _lease), do: :ok
+
+  defp mark_reserved!(records, lease) do
+    codec = Config.codec()
+
+    set = [
+      status: :in_work,
+      locked_until: codec.dump(lease.locked_until),
+      lease_id: codec.dump(lease.lease_id),
+      updated_at: codec.dump(lease.updated_at)
+    ]
+
+    records
+    |> Enum.map(&dump_id/1)
+    |> Enum.chunk_every(@persist_chunk_size)
+    |> Enum.each(fn ids ->
+      {_count, _} =
+        from(r in Schema, where: r.id in ^ids)
+        |> Config.dao().update_all(set: set, inc: [attempts: 1])
+    end)
+
+    :ok
+  end
+
   # Записи с одинаковым набором устанавливаемых значений и одной арендой пишутся
   # одним UPDATE: при fail-stop это published-префикс, released-хвост и одна
   # проваленная запись — три запроса вместо построчных.
@@ -363,16 +446,6 @@ defmodule Core.Outbox.Repo.Pg do
     )
   end
 
-  defp persist_all!([]), do: :ok
-
-  defp persist_all!(records) when is_list(records) do
-    records
-    |> Enum.chunk_every(@persist_chunk_size)
-    |> Enum.each(&persist_upsert_chunk!/1)
-
-    :ok
-  end
-
   defp persist_insert_all!(records, opts) do
     records
     |> Enum.chunk_every(@persist_chunk_size)
@@ -380,32 +453,6 @@ defmodule Core.Outbox.Repo.Pg do
       rows = Enum.map(chunk, &Schema.to_model!/1)
       {_count, _} = Config.dao().insert_all(Schema, rows, opts)
     end)
-  end
-
-  defp persist_upsert_chunk!(chunk) do
-    rows = Enum.map(chunk, &Schema.to_model!/1)
-
-    {_count, _} =
-      Config.dao().insert_all(Schema, rows,
-        on_conflict:
-          {:replace,
-           [
-             :topic,
-             :key,
-             :name,
-             :payload,
-             :status,
-             :attempts,
-             :locked_until,
-             :lease_id,
-             :errors,
-             :updated_at,
-             :published_at
-           ]},
-        conflict_target: [:id]
-      )
-
-    :ok
   end
 
   defp utc_now, do: DateTime.utc_now()

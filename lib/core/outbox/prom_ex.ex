@@ -163,7 +163,7 @@ defmodule Core.Outbox.PromEx do
   defp emit_queue_metrics do
     repo = repo()
 
-    repo.counts_by_status()
+    repo.queue_counts()
     |> Enum.each(fn {status, count} ->
       :telemetry.execute(
         @queue_count_event,

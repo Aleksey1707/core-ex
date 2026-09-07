@@ -76,6 +76,9 @@ API:
 `Delivery.Mq`: body = `Jason.encode(payload)`. Headers — `Record.headers` как есть (`nil` → без
 заголовков); delivery MUST NOT достраивать **прикладные** заголовки из `name` / `key` / payload.
 
+Во что `Mq.Message` превращается на проводе, задаёт адаптер `Mq.Writer`, а не delivery —
+`10-architecture.md`, «Wire-формат принадлежит адаптеру».
+
 Заголовки задаёт продюсер записи. Для событий агрегата — `<Aggregate>.Outbox.from_event/1`: `name`
 (= event name), `aggr_id` (= aggregate id), `event_id`.
 
@@ -141,8 +144,8 @@ MUST NOT: переименованный ключ обнаружится не т
 
 | Компонент | Назначение |
 |---|---|
-| `Poller` | reserve (под токеном аренды `lease_id`) → `publish_many` → save_results; один sequential publisher; drain после `:processed`; idle/error — adaptive backoff; `wake/1` (имя обязательно) после commit `append` (coalesce `:wake` в mailbox) |
-| `Delivery.Mq` | JSON body + `Record.headers` как есть; `publish_many` → `Writer.put_many` (stop-on-first-error). Единственный Delivery: брокер подключается адаптером `Mq.Writer` (`Mq.Stream.Writer`, `Mq.Kafka.Writer`), не отдельным `Delivery.*` |
+| `Poller` | reserve (под токеном аренды `lease_id`) → `publish_many` → save_results; один sequential publisher; drain после `:processed`; `:retry` / idle / error — adaptive backoff; `wake/1` (имя обязательно) после commit `append` (coalesce `:wake` в mailbox) |
+| `Delivery.Mq` | JSON body + `Record.headers` как есть; `publish_many` → `Writer.put_many` (stop-on-first-error). Единственный Delivery: брокер подключается адаптером `Mq.Writer` (`Mq.Stream.Writer`, `Mq.Kafka.Writer`), не отдельным `Delivery.*`. Модуль реализации поллер берёт из опции `:delivery_module`; выводить его из `__struct__` handle MUST NOT — `Delivery.t()` структуры не требует |
 | `Cleaner` | TTL published |
 | `Outbox.Supervisor` | OTP-сборщик; `enabled: true` в dev/prod, `false` в test |
 
@@ -177,16 +180,37 @@ overlay в `config/test.exs` (runtime-блок Outbox пропускается).
 
 ### Poller scheduling
 
+Исход цикла — `:processed` (вся пачка опубликована) / `:retry` (хоть одна запись пачки
+не опубликована) / `:idle` / `{:error, _}`.
+
 - После `:processed` — немедленный следующий цикл (`schedule(0)`, drain очереди).
+- После `:retry` — backoff **всегда**, в том числе при пришедшем во время цикла `:wake`:
+  новые записи не делают публикуемой ту голову очереди, на которой цикл споткнулся.
 - После `:idle` / ошибки цикла — backoff: `idle_min_ms`, ×2, …, cap = `poll_interval_ms`.
 - Если во время цикла пришли `:wake` и результат `:idle` / error — `schedule(0)` (не полный
   backoff).
+- Сброс backoff'а MUST делать `reschedule_after/2` по исходу цикла, а не `handle_info(:wake, …)`
+  заранее: иначе непрерывный `append` при лежащем брокере держит интервал на минимуме.
 - Входящие `:wake` coalesce'ятся (`flush_wakes` в начале/конце цикла) — mailbox не растёт
   пропорционально RPS `append`.
 - `Outbox.Repo.append` регистрирует `Poller.wake/0` через `Helper.AfterCommit` (после outermost
   commit; вне TX — сразу). Same-VM only; другие ноды — safety poll.
 - `DAO` объявляется через `use Core.DAO`: `transact` / `transaction` обёрнуты в `AfterCommit.wrap`
   (depth / rollback-safe).
+
+`retry` и `failed` в исходе цикла считаются по **записям пачки**, а не по повторам доставки:
+при fail-stop в `:new` возвращается и сбойная запись, и весь хвост после неё. Читать как
+«не опубликовано в этом цикле». Те же измерения уходят в метрику (README, «Имена метрик»).
+
+`Delivery.publish_many/2` MUST возвращать индекс **внутри** пачки; индекс за границей поллер
+трактует как провал с нулевого и пишет `error` с `index=` и `size=`. Досчитать такую пачку
+до конца нельзя: записи ушли бы в `published`, не побывав в брокере.
+
+Окно до `:failed` — это `max_attempts` × backoff; оно MUST превышать время рестарта брокера
+и задаётся тройкой `OUTBOX_IDLE_MIN` / `OUTBOX_POLL_INTERVAL` / `OUTBOX_MAX_ATTEMPTS`.
+
+Почему backoff общий для очереди, а не отложенный retry на запись, и таблица окон —
+ADR-0002.
 
 ### Порядок доставки
 
@@ -198,7 +222,24 @@ overlay в `config/test.exs` (runtime-блок Outbox пропускается).
 
 `Outbox.Repo` API: `append`, `fetch_and_reserve`, `save_results`, `release`,
 `delete_published_before` (возвращает `non_neg_integer()` — число удалённых), `requeue_failed`,
-статистика для метрик (`counts_by_status`, `oldest_age_seconds`, `expired_lock_count`).
+статистика для метрик (`queue_counts`, `oldest_age_seconds`, `expired_lock_count`).
+
+### Запросы очереди — только по индексу
+
+- `fetch_and_reserve` MUST брать кандидатов **двумя** индексными запросами (`:new` и
+  просроченные `:in_work`) со своим `LIMIT` у каждого и сливать результаты. Один запрос
+  с `OR` MUST NOT: `LIMIT` применяется после сортировки всего подходящего множества.
+- Порядок при слиянии MUST задавать `DateTime.compare/2`. Термовое сравнение `%DateTime{}`
+  идёт по ключам структуры (`:day` раньше `:month`) — 1 февраля оказалось бы «раньше»
+  31 января. Tiebreaker — `id`.
+- `queue_counts/0` MUST считать только `:new` / `:in_work` / `:failed` — статусы, ограниченные
+  по природе и покрытые частичными индексами. `:published` MUST NOT: он растёт неограниченно,
+  и точный счёт по нему стоит скана всей таблицы на каждый опрос метрик.
+- Новый запрос к `outbox`, идущий по таймеру или в цикле поллера, MUST ложиться на частичный
+  индекс. Проверять `EXPLAIN (ANALYZE, BUFFERS)` на объёме, а не на пустой таблице: планы
+  расходятся на три порядка только под данными.
+
+Почему так и чем платим — ADR-0003 (выборка пачки) и ADR-0005 (метрики очереди).
 
 **Fencing аренды.** `fetch_and_reserve` выдаёт пачке общий `lease_id` и пишет его в строку;
 `save_results` / `release` обновляют строки `UPDATE ... WHERE id IN (...) AND lease_id = ?`.
@@ -221,6 +262,10 @@ PostgreSQL при больших batch).
   (`Outbox.Supervisor.check_singleton!/0`, `ArgumentError` с инструкцией).
 - `OUTBOX_ALLOW_CLUSTER=true` — осознанный отказ от гарантии порядка: старт разрешён,
   в лог уходит `warning`. Ставить только там, где порядок не важен.
+- Несколько поллеров **на одной ноде** (конфиг `pollers`) MUST разбивать топики без
+  пересечений, и потребитель MUST проверять это на старте — `Outbox.validate_partition!/1`
+  рядом с `check_singleton!/0`. Без проверки пересекающиеся фильтры стартуют молча.
+  Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`.
 - Переход на несколько нод без потери порядка требует лидер-элекции (`:global` /
   advisory-lock на топик-группу) — отдельная задача, не покрыта.
 
@@ -232,10 +277,13 @@ PostgreSQL при больших batch).
 `Cleaner` удаляет только `published` — `:failed` копятся, пока их не разберёт оператор:
 
 1. Причина — колонка `errors` таблицы `outbox` (список `{attempt, message}`) и логи
-   `"Outbox окончательно провален: id=..."`.
+   `"Outbox окончательно провален: id=..."`. Читать MUST до шага 3: requeue историю
+   очищает.
 2. Починить источник отказа (брокер, топик, права, формат payload).
 3. Вернуть в очередь: `mix outbox.requeue --all` или `mix outbox.requeue --id <uuid>`
-   (`Outbox.Repo.requeue_failed/2`: `:failed` → `:new`, `attempts` = 0, аренда снята).
+   (`Outbox.Repo.requeue_failed/2`: `:failed` → `:new`, `attempts` = 0, аренда снята,
+   `errors` очищены — счётчик попыток стартует с нуля, и сохранённая история
+   пронумеровалась бы заново поверх старой).
 
 Порядок доставки для возвращённых записей **не восстанавливается**: сообщения, шедшие за ними,
 уже опубликованы. Если порядок критичен — вместе с requeue нужен пересчёт состояния получателем.

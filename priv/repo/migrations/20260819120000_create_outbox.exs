@@ -55,5 +55,13 @@ defmodule Core.TestRepo.Migrations.CreateOutbox do
              name: :ix_outbox_published,
              where: "status = 'published'"
            )
+
+    # `:failed` копятся до разбора оператором (`Cleaner` их не трогает), а читают их
+    # gauge очереди, `oldest_age_seconds/1` и `requeue_failed/2`. Без частичного индекса
+    # каждый такой запрос — seq scan всей таблицы ради почти всегда пустого ответа.
+    create index(:outbox, [:created_at, :id],
+             name: :ix_outbox_failed,
+             where: "status = 'failed'"
+           )
   end
 end

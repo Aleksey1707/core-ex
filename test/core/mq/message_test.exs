@@ -2,7 +2,6 @@ defmodule Core.Mq.MessageTest do
   use ExUnit.Case, async: true
 
   alias Core.Mq
-  alias Core.Mq.Codec
   alias Core.Mq.Message
 
   test "new нормализует headers в lowercase" do
@@ -26,22 +25,5 @@ defmodule Core.Mq.MessageTest do
                %{"bad key!" => "x"},
                "body"
              )
-  end
-
-  test "codec round-trip" do
-    assert {:ok, msg} =
-             Message.new(
-               Mq.Topic.new!("products"),
-               %{"name" => "created"},
-               <<1, 2, 3>>,
-               Mq.Key.new!("k1")
-             )
-
-    assert {:ok, encoded} = Codec.encode(msg)
-    assert {:ok, decoded} = Codec.decode(encoded)
-    assert decoded.topic == msg.topic
-    assert decoded.headers == msg.headers
-    assert decoded.body == msg.body
-    assert decoded.key == msg.key
   end
 end

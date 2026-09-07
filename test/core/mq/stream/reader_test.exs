@@ -133,6 +133,31 @@ defmodule Core.Mq.Stream.ReaderTest do
     assert :empty = Stream.Reader.get(reader, 0)
   end
 
+  test "чанк с sub-entry batching дропается целиком", %{reader: reader, topic: topic} do
+    drops = self()
+
+    :ok =
+      :telemetry.attach(
+        "#{inspect(drops)}-sub-batch-drop",
+        [:core, :mq, :stream, :decode_drop],
+        fn _event, %{count: count}, _meta, pid -> send(pid, {:drop, count}) end,
+        drops
+      )
+
+    on_exit(fn -> :telemetry.detach("#{inspect(drops)}-sub-batch-drop") end)
+
+    log =
+      capture_log(fn ->
+        deliver_sub_batched(reader, 0, [encoded(topic, "ok")], 5)
+      end)
+
+    assert log =~ "чанк с sub-entry batching пропущен"
+    assert_received {:drop, 5}
+    assert :empty = Stream.Reader.get(reader, 0)
+    assert Stream.Reader.info(reader).buffer_len == 0
+    assert FakeConn.credits() == [{1, 1}]
+  end
+
   test "чанк из битых entries: get :empty и один credit", %{reader: reader} do
     deliver(reader, 0, ["bad-1", "bad-2", "bad-3"])
 
@@ -255,8 +280,27 @@ defmodule Core.Mq.Stream.ReaderTest do
 
   defp encoded(topic, body) do
     {:ok, message} = Mq.Message.new(topic, %{"name" => "n"}, body, Mq.Key.new!("agg-1"))
-    {:ok, binary} = Mq.Codec.encode(message)
+    {:ok, binary} = Stream.Codec.encode(message)
     binary
+  end
+
+  defp deliver_sub_batched(reader, chunk_id, entries, num_records) do
+    chunk = %OsirisChunk{
+      chunk_type: :chunk_user,
+      num_entries: length(entries),
+      num_records: num_records,
+      timestamp: 0,
+      epoch: 1,
+      chunk_id: chunk_id,
+      chunk_crc: 0,
+      data_length: 0,
+      trailer_length: 0,
+      data_entries: entries
+    }
+
+    send(reader, {:deliver, %DeliverData{subscription_id: 1, osiris_chunk: chunk}})
+    _ = Stream.Reader.info(reader)
+    :ok
   end
 
   defp deliver(reader, chunk_id, entries) do

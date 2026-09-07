@@ -27,8 +27,8 @@ defmodule Core.Mq.Stream.Writer do
   alias Core.Error
   alias Core.Helper.Transact
   alias Core.Mq
-  alias Core.Mq.Codec
   alias Core.Mq.Message
+  alias Core.Mq.Stream.Codec
   alias Core.Telemetry
 
   require Error
