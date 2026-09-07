@@ -84,3 +84,17 @@ Codec-фикстуры и Prim-фикстуры — в `test/support`, табл�
 
 Максимальная длина строки — 120 (Credo); длинные литералы `Logger.*` разбивать
 конкатенацией `<>`, а не heredoc.
+
+## Agent skills
+
+### Issue tracker
+
+Задачи и спеки — markdown-файлы в `.scratch/<feature>/`. См. `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Пять канонических ролей, имена меток совпадают с ролями. См. `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` и `docs/adr/` в корне. См. `docs/agents/domain.md`.
