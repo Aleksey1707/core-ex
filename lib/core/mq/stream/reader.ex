@@ -17,7 +17,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     Entries в `buffer` хранятся сырыми; `Codec.decode` — в `get`.
 
     Подписка устанавливается не в `init/1`, а в `handle_continue/2`: сетевые вызовы в `init`
-    блокировали бы старт всего дерева супервизии (см. `.claude/rules/17-otp-concurrency.md`).
+    блокировали бы старт всего дерева супервизии (см. `docs/rules/17-otp-concurrency.md`).
     Сбой подписки не роняет процесс — он повторяет попытку с backoff от `:retry_min_ms`
     до `:retry_max_ms`. Пока подписки нет, `get` отдаёт `:empty`: подписчики опрашивают
     reader каждые ~100 мс, и ошибка на каждом цикле залила бы лог. Недоступность видна

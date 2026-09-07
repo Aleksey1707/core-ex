@@ -1,6 +1,10 @@
 # События и Outbox
 
-Плейсхолдеры: `<Aggregate>` — см. `10-architecture.md`.
+- **Область.** `lib/core/es/**`, `lib/core/outbox/**`, `lib/core/pubsub/**`; у потребителя —
+  `<Aggregate>.Event`, `<Aggregate>.Outbox`, подписчики и воркеры.
+- **Читать перед.** Новым событием или правкой его wire-формата, изменением outbox (поллер,
+  delivery, cleaner), разбором записей в `:failed` и сообщений в DLQ.
+- **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Domain events
 
@@ -13,7 +17,12 @@
 | `name/1` | wire-type через `<Aggregate>.Event.Codec` |
 | `names/0` | множество wire-type через Codec |
 
-Dump/load — только через фасад: `InCodec`/`OutCodec.dump(event)` отдаёт **весь конверт**, `InCodec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу внутри конверта (модуль событий агрегата — это семейство, `union:` у плагина; `codec.load(Mod, data)` — когда конкретный тип известен). Неизвестный тег → `:unknown_event_type` кодека агрегата (`ns: :es`). Момент постановки в outbox: `Outbox.CreatedAt.now()` (usec); `event.at` — только в конверте (`"at"`), не в `Record.created_at`.
+Dump/load — только через фасад: `InCodec`/`OutCodec.dump(event)` отдаёт **весь конверт**,
+`InCodec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу внутри конверта (модуль
+событий агрегата — это семейство, `union:` у плагина; `codec.load(Mod, data)` — когда конкретный тип
+известен). Неизвестный тег → `:unknown_event_type` кодека агрегата (`ns: :es`). Момент постановки в
+outbox: `Outbox.CreatedAt.now()` (usec); `event.at` — только в конверте (`"at"`), не в
+`Record.created_at`.
 
 Правила:
 
@@ -35,8 +44,9 @@ Dump/load — только через фасад: `InCodec`/`OutCodec.dump(event
   знает ни события, ни его семейства.
 
 Конкурентная запись ловится unique-индексом `(aggregate_id, aggregate_version)` в таблице событий:
-`Event.Repo.append/2` отдаёт доменный `:version_mismatch` из `<Aggregate>.Errors`. На строке агрегата
-`optimistic_lock` не используется — `version` проверяется на чтении, а расходится он именно здесь.
+`Event.Repo.append/2` отдаёт доменный `:version_mismatch` из `<Aggregate>.Errors`. На строке
+агрегата `optimistic_lock` не используется — `version` проверяется на чтении, а расходится он именно
+здесь.
 
 ## Aggregate → Outbox.Record
 
@@ -56,13 +66,18 @@ API:
 - `from_event/1` → `{:ok, Record.t()} | {:error, Error.t()}`
 - `from_events/1` → `{:ok, [Record.t()]} | {:error, Error.t()}`
 
-Поля Record: topic / key (= aggregate id) / name (= event name) / payload (JSON-объект) / headers (MQ-заголовки | `nil`) / lifecycle-поля (`status`, `attempts`, `locked_until`, `lease_id`, …).
+Поля Record: topic / key (= aggregate id) / name (= event name) / payload (JSON-объект) / headers
+(MQ-заголовки | `nil`) / lifecycle-поля (`status`, `attempts`, `locked_until`, `lease_id`, …).
 
-`payload` — **только map**: колонка `payload` имеет тип `:map`, и list / binary / скаляр не дампятся (падение на записи). Нужен не-JSON body — это отдельная колонка и отдельное решение, а не расширение типа.
+`payload` — **только map**: колонка `payload` имеет тип `:map`, и list / binary / скаляр не дампятся
+(падение на записи). Нужен не-JSON body — это отдельная колонка и отдельное решение, а не расширение
+типа.
 
-`Delivery.Mq`: body = `Jason.encode(payload)`. Headers — `Record.headers` как есть (`nil` → без заголовков); delivery MUST NOT достраивать **прикладные** заголовки из `name` / `key` / payload.
+`Delivery.Mq`: body = `Jason.encode(payload)`. Headers — `Record.headers` как есть (`nil` → без
+заголовков); delivery MUST NOT достраивать **прикладные** заголовки из `name` / `key` / payload.
 
-Заголовки задаёт продюсер записи. Для событий агрегата — `<Aggregate>.Outbox.from_event/1`: `name` (= event name), `aggr_id` (= aggregate id), `event_id`.
+Заголовки задаёт продюсер записи. Для событий агрегата — `<Aggregate>.Outbox.from_event/1`: `name`
+(= event name), `aggr_id` (= aggregate id), `event_id`.
 
 Единственное исключение — **транспортный** `traceparent` (`Core.Otel.Messaging`):
 он не несёт предметного смысла и обязан описывать то звено, в котором сообщение
@@ -114,8 +129,8 @@ MUST NOT: переименованный ключ обнаружится не т
 
 1. у каждого тега из `Event.Codec.types/0` есть фикстура — новый тип не добавить,
    не зафиксировав формат;
-2. каждая фикстура грузится через `InCodec.load(<Aggregate>.Event, _)` — переименование тега или поля,
-   удаление поля и смена типа значения ломают тест.
+2. каждая фикстура грузится через `InCodec.load(<Aggregate>.Event, _)` — переименование тега или
+   поля, удаление поля и смена типа значения ломают тест.
 
 Добавили событие — добавьте фикстуру (дамп реального события, не выдуманный JSON).
 Понадобилось несовместимое изменение — это новый тип события, а не правка старого.
@@ -131,9 +146,12 @@ MUST NOT: переименованный ключ обнаружится не т
 | `Cleaner` | TTL published |
 | `Outbox.Supervisor` | OTP-сборщик; `enabled: true` в dev/prod, `false` в test |
 
-Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyApp.Outbox`): Core (`Outbox.Repo.Pg`) и app-обвязка (`Outbox.Supervisor`) читают один ключ.
+Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyApp.Outbox`): Core (`Outbox.Repo.Pg`)
+и app-обвязка (`Outbox.Supervisor`) читают один ключ.
 
-Tunables (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) — **только** `config/runtime.exs` + env `OUTBOX_*` (SSOT). MUST NOT дублировать в `config.exs`. В `:test` — overlay в `config/test.exs` (runtime-блок Outbox пропускается).
+Tunables (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) — **только**
+`config/runtime.exs` + env `OUTBOX_*` (SSOT). MUST NOT дублировать в `config.exs`. В `:test` —
+overlay в `config/test.exs` (runtime-блок Outbox пропускается).
 
 | Env | Назначение |
 |---|---|
@@ -148,35 +166,50 @@ Tunables (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) — *
 | `OUTBOX_REFERENCE_PREFIX` | producer reference для `Stream.Writer` |
 | `OUTBOX_ALLOW_CLUSTER` | разрешить старт при `DNS_CLUSTER_QUERY` (ценой порядка доставки) |
 
-Длительности (`OUTBOX_POLL_INTERVAL`, `OUTBOX_IDLE_MIN`, `OUTBOX_LOCK_DURATION`, `OUTBOX_PUBLISHED_TTL`, `OUTBOX_CLEANER_INTERVAL`) задаются строкой вида `"1s"` / `"50ms"` / `"1h30m"` / `"7d"` и разбираются `Core.DurationParser.parse!/2` в единицу ключа конфига (`*_ms` / `*_seconds`). Голое число без единицы и неточная конвертация (`"1500ms"` → секунды) — ошибка старта, а не тихое усечение.
+Длительности (`OUTBOX_POLL_INTERVAL`, `OUTBOX_IDLE_MIN`, `OUTBOX_LOCK_DURATION`,
+`OUTBOX_PUBLISHED_TTL`, `OUTBOX_CLEANER_INTERVAL`) задаются строкой вида `"1s"` / `"50ms"` /
+`"1h30m"` / `"7d"` и разбираются `Core.DurationParser.parse!/2` в единицу ключа конфига (`*_ms` /
+`*_seconds`). Голое число без единицы и неточная конвертация (`"1500ms"` → секунды) — ошибка старта,
+а не тихое усечение.
 
-Дополнительно в config Outbox: `poller_name` (atom имени GenServer; в test — `nil`, wake no-op) и `pollers` (`[[name:, topics:], …]` — таргеты `Poller.wake/1` после commit `append`).
+Дополнительно в config Outbox: `poller_name` (atom имени GenServer; в test — `nil`, wake no-op) и
+`pollers` (`[[name:, topics:], …]` — таргеты `Poller.wake/1` после commit `append`).
 
 ### Poller scheduling
 
 - После `:processed` — немедленный следующий цикл (`schedule(0)`, drain очереди).
 - После `:idle` / ошибки цикла — backoff: `idle_min_ms`, ×2, …, cap = `poll_interval_ms`.
-- Если во время цикла пришли `:wake` и результат `:idle` / error — `schedule(0)` (не полный backoff).
-- Входящие `:wake` coalesce'ятся (`flush_wakes` в начале/конце цикла) — mailbox не растёт пропорционально RPS `append`.
-- `Outbox.Repo.append` регистрирует `Poller.wake/0` через `Helper.AfterCommit` (после outermost commit; вне TX — сразу). Same-VM only; другие ноды — safety poll.
-- `DAO` объявляется через `use Core.DAO`: `transact` / `transaction` обёрнуты в `AfterCommit.wrap` (depth / rollback-safe).
+- Если во время цикла пришли `:wake` и результат `:idle` / error — `schedule(0)` (не полный
+  backoff).
+- Входящие `:wake` coalesce'ятся (`flush_wakes` в начале/конце цикла) — mailbox не растёт
+  пропорционально RPS `append`.
+- `Outbox.Repo.append` регистрирует `Poller.wake/0` через `Helper.AfterCommit` (после outermost
+  commit; вне TX — сразу). Same-VM only; другие ноды — safety poll.
+- `DAO` объявляется через `use Core.DAO`: `transact` / `transaction` обёрнуты в `AfterCommit.wrap`
+  (depth / rollback-safe).
 
 ### Порядок доставки
 
 - Один Poller + один `Stream.Writer`; concurrency > 1 запрещён (порядок в stream).
 - Порядок publish = `order_by: created_at` при `fetch_and_reserve`.
-- Ошибка на index `i` в батче — fail-stop: `0..i-1` published, `i` failure/retry, `i+1..` → `Record.release` (`:new`, без инкремента attempts).
+- Ошибка на index `i` в батче — fail-stop: `0..i-1` published, `i` failure/retry, `i+1..` →
+  `Record.release` (`:new`, без инкремента attempts).
 - `Mq.Writer.put_many/2` / `Delivery.publish_many/2` — sequential publish в одном call.
 
-`Outbox.Repo` API: `append`, `fetch_and_reserve`, `save_results`, `release`, `delete_published_before` (возвращает `non_neg_integer()` — число удалённых), `requeue_failed`, статистика для метрик (`counts_by_status`, `oldest_age_seconds`, `expired_lock_count`).
+`Outbox.Repo` API: `append`, `fetch_and_reserve`, `save_results`, `release`,
+`delete_published_before` (возвращает `non_neg_integer()` — число удалённых), `requeue_failed`,
+статистика для метрик (`counts_by_status`, `oldest_age_seconds`, `expired_lock_count`).
 
 **Fencing аренды.** `fetch_and_reserve` выдаёт пачке общий `lease_id` и пишет его в строку;
 `save_results` / `release` обновляют строки `UPDATE ... WHERE id IN (...) AND lease_id = ?`.
 Перехваченная после истечения аренды запись и удалённая `Cleaner` строка не обновляются и
 не воскресают (upsert здесь запрещён) — расхождение уходит в `warning`.
 
-**Порядок внутри пачки** — `order_by: [created_at, id]`: `created_at` ставится на каждое
-событие отдельно и может совпасть в микросекунде, `id` (UUIDv7) даёт tiebreaker. Часть ошибок — `Error.app` + `raise Exc`. Persist `Record` в Schema — через `Outbox.Codec` / `InCodec.load`/`dump` (remap JSON errors string↔atom keys). `persist_all!` / `append` чанкуют `insert_all` (лимит параметров PostgreSQL при больших batch).
+**Порядок внутри пачки** — `order_by: [created_at, id]`: `created_at` ставится на каждое событие
+отдельно и может совпасть в микросекунде, `id` (UUIDv7) даёт tiebreaker. Часть ошибок — `Error.app`
++ `raise Exc`. Persist `Record` в Schema — через `Outbox.Codec` / `InCodec.load`/`dump` (remap JSON
+errors string↔atom keys). `persist_all!` / `append` чанкуют `insert_all` (лимит параметров
+PostgreSQL при больших batch).
 
 ### Единственность поллера
 
@@ -260,8 +293,7 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
 
   ```elixir
   # Workers.SendMessage — args либо %{"message_ids" => [...]}, либо %{"message_id" => id}
-  unique: [period: 60, states: :incomplete, keys: [:message_ids, :message_id]]
-  ```
+  unique: [period: 60, states: :incomplete, keys: [:message_ids, :message_id]] ```
 
   `unique` защищает от дублирующего **enqueue** (два прогона `DrainPending`), а не от
   повторного выполнения ретрая: от него защищает переход статуса агрегата под

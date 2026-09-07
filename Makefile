@@ -2,7 +2,12 @@ DOCKER ?= podman
 
 # Порядок совпадает с .pre-commit-config.yaml.
 .PHONY: default
-default: format-check compile compile-no-optional deps-clean xref dialyzer test credo audit
+default: rules-check format-check compile compile-no-optional deps-clean xref dialyzer test credo audit
+
+# Свод правил `docs/rules` против стандарта из `docs/rules/00-index.md`.
+.PHONY: rules-check
+rules-check:
+	elixir scripts/rules_lint.exs
 
 .PHONY: iex
 iex:

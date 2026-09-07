@@ -1,7 +1,10 @@
 # Архитектура библиотеки
 
-Плейсхолдеры: `MyApp` — корневой namespace приложения-потребителя; `:my_app` — его OTP app atom;
-`<BC>` — bounded context; `<Actor>` — actor/role-срез; `<Aggregate>` — агрегат.
+- **Область.** Границы библиотеки целиком: `Core.Config`, резолв зависимостей в макросах, адаптеры
+  брокеров, `Core.Web.*`, `mix.exs`.
+- **Читать перед.** Правкой конфигурации и её резолва, добавлением адаптера брокера или
+  `optional`-зависимости, правкой границы HTTP; любой ссылкой из `lib/` на приложение-потребителя.
+- **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Что это
 
@@ -53,13 +56,15 @@ rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib    # только :cor
 - макрос, которому нужен фасад или репозиторий, при отсутствии явной опции подставляет
   **вызов** (`Core.Config.codec()` / `Core.Config.dao()`), а не запечённый модуль:
   резолв делает `Core.Helper.Opts.module_or_config!/4` (`Repo.Pg.Schema`, `Repo.Pg`,
-  `Repo.Pg.Es`, `Es.Outbox`, `Es.Event.Repo.Pg{,.Schema}`); проверка —
-  `test/core/macro_config_test.exs`, он компилирует эти макросы со снятыми ключами `:core`;
+  `Repo.Pg.Es`, `Es.Outbox`, `Es.Event.Repo.Pg{,.Schema}`);
 - имена telemetry-событий строятся вызовом `Core.Telemetry.event/1`, а не атрибутом:
   префикс задаёт потребитель (`config :core, telemetry_prefix: [...]`).
 
 Нарушение выглядит одинаково: `mix deps.compile core` падает с
 `Core.Config: не задан config :core, ...` у любого потребителя.
+
+Проверяется: `test/core/macro_config_test.exs` — компилирует эти макросы со снятыми
+ключами `:core`.
 
 ## Контракт конфигурации
 
@@ -97,10 +102,13 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   как в библиотеке, так и на стороне потребителя;
 - у адаптера MUST быть `ensure_available!/0` (образец — `Core.Mq.Stream`): отличает
   «клиента нет в deps» от «клиент есть, но `core` собран без него»;
-- инвариант «библиотека собирается без клиентов» проверяет `make compile-no-optional`
-  (`mix compile --no-optional-deps --warnings-as-errors`, часть `make`). Собственные
-  тесты библиотеки его не ловят: в них оба клиента есть всегда. Тот же приём —
+- инвариант «библиотека собирается без клиентов» держится на сборке без них: собственные
+  тесты библиотеки его не ловят, в них оба клиента есть всегда. Тот же приём —
   у `ecto_sql` (`if Code.ensure_loaded?(Postgrex) do` вокруг `Ecto.Adapters.Postgres.Connection`).
+
+Проверяется: `make compile-no-optional` (`mix compile --no-optional-deps
+--warnings-as-errors`, часть `make`).
+
 Сконфигурированные клиенты с compile-time привязкой к OTP-приложению
 (например, Kafka `use Klife.Client, otp_app: :my_app`), их supervision, runtime-тумблеры
 и реестры доменных процессов остаются в app-слое потребителя.
@@ -137,9 +145,11 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 | отдать эти коды в конверт | `use Core.Web.Response, codes: MyAppWeb.Response.Code` |
 
 Словарь потребителя MUST покрывать `Core.Web.Response.Code.values/0` — эти значения
-возвращает `ErrorMapper.map/2`. Проверяется на компиляции билдером `Core.Web.Response`.
+возвращает `ErrorMapper.map/2`.
 
-## Ссылки
+Проверяется: компиляция — билдер `Core.Web.Response`.
+
+## Связанные правила
 
 - Домен, `Prim`, `Codec` — `11-domain.md`
 - Ошибки — `12-errors.md`
@@ -148,3 +158,4 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 - OTP — `17-otp-concurrency.md`
 - Тесты — `19-testing.md`
 - Соглашения по коду — `20-agreements.md`
+- Метрики, трейсы, логи — `21-observability.md`
