@@ -12,11 +12,12 @@ defmodule Core.Repo.Pg do
 
   ## Намеренное поведение
 
-  - `insert/4` не применяет `default_filters` (в `INSERT` нет `WHERE`) и не пишет результат в
-    `Repo.Sc` — в отличие от `get`/`list`/`page`. Для агрегата с дочерними таблицами строка,
-    вернувшаяся из `insert`, содержит непрогруженные `has_many`, и её захват сделал бы эталон
-    `Sc` неверным. Эталон после записи кладёт call site — `Repo.Pg.Es` зовёт `put_baseline/3`
-    с входным domain-агрегатом (он полный, с детьми).
+  - `insert/4` не применяет `default_filters`: в `INSERT` нет `WHERE`.
+  - `insert/4` / `update/4` возвращают **входной** агрегат, а не декодированную строку. Сразу
+    после записи у строки не прогружены `has_many`: её decode потерял бы детей, а на доменной
+    валидации («список шагов не может быть пустым») мог бы упасть уже после успешной записи.
+    Входной агрегат уходит и эталоном в `Repo.Sc` — регистрацией после commit, а не сразу:
+    при откате транзакции эталон остался бы «как будто записано».
   - `find_many/4` отдаёт только найденные записи: и `not_found`, и `version_mismatch`
     отбрасываются молча. Строгий вариант — `get_many/4`.
   - `save/4` вызывает `insert/4` и `update/4` **этого** модуля, а не переопределённые в
@@ -684,43 +685,25 @@ defmodule Core.Repo.Pg do
   def count(pg, context, opts \\ []),
     do: dao(pg).aggregate(write_scope(pg, context), :count, opts)
 
-  @doc "Вставить сущность."
+  @doc "Вставить сущность; вернуть её же и положить эталоном в `Repo.Sc` после commit."
   @spec insert(map(), struct(), Context.t(), Repo.opts()) ::
           {:ok, struct()} | {:error, Error.t()}
 
   def insert(pg, entity, context, opts \\ []) do
     case raw_insert(pg, entity, context, opts) do
-      {:ok, row} -> {:ok, pg.to_entity.(row)}
+      {:ok, _row} -> {:ok, put_baseline_after_commit(pg, entity, context)}
       {:error, _} = error -> error
     end
   end
 
-  @doc "Обновить сущность."
+  @doc "Обновить сущность; вернуть её же и положить эталоном в `Repo.Sc` после commit."
   @spec update(map(), struct(), Context.t(), Repo.opts()) ::
           {:ok, struct()} | {:error, Error.t()}
 
   def update(pg, entity, context, opts \\ []) do
     case raw_update(pg, entity, context, opts) do
-      {:ok, row} -> {:ok, pg.to_entity.(row)}
+      {:ok, _row} -> {:ok, put_baseline_after_commit(pg, entity, context)}
       :unchanged -> {:ok, entity}
-      {:error, _} = error -> error
-    end
-  end
-
-  @doc """
-  Вставить сущность без декодирования результата обратно в domain — для `Repo.Pg.Es`.
-
-  Возвращаемая `Repo.Pg.insert/4`/`update/4` сущность там всё равно отбрасывается (агрегат
-  с детьми и событиями возвращает входной `entity`, см. `Repo.Pg.Es`), а строка сразу после
-  `insert` содержит непрогруженные `has_many` — decode мог бы упасть на доменной валидации
-  (например «список шагов не может быть пустым»), хотя сама запись прошла успешно.
-  """
-  @spec write_insert(map(), struct(), Context.t(), Repo.opts()) ::
-          :ok | {:error, Error.t()}
-
-  def write_insert(pg, entity, context, opts \\ []) do
-    case raw_insert(pg, entity, context, opts) do
-      {:ok, _row} -> :ok
       {:error, _} = error -> error
     end
   end
@@ -751,18 +734,6 @@ defmodule Core.Repo.Pg do
     entities
     |> Enum.chunk_every(chunk_size)
     |> Enum.reduce(0, fn chunk, acc -> acc + insert_chunk(pg, chunk, query_opts) end)
-  end
-
-  @doc "Обновить сущность без декодирования результата обратно в domain — см. `write_insert/4`."
-  @spec write_update(map(), struct(), Context.t(), Repo.opts()) ::
-          :ok | {:error, Error.t()}
-
-  def write_update(pg, entity, context, opts \\ []) do
-    case raw_update(pg, entity, context, opts) do
-      {:ok, _row} -> :ok
-      :unchanged -> :ok
-      {:error, _} = error -> error
-    end
   end
 
   @doc "Удалить сущность по id и version."
@@ -847,6 +818,14 @@ defmodule Core.Repo.Pg do
   def put_baseline(%{shadow_copy?: true}, entity, context), do: Repo.Sc.put(context, entity)
 
   # ---
+
+  # Эталон кладётся после commit: при откате транзакции он остался бы «как будто записано»,
+  # и следующая запись по этому контексту считала бы diff от несуществующего состояния.
+  defp put_baseline_after_commit(pg, entity, context) do
+    Helper.AfterCommit.register(fn -> put_baseline(pg, entity, context) end)
+
+    entity
+  end
 
   defp raw_insert(pg, entity, _context, opts) do
     changeset = pg.schema.changeset(struct(pg.schema), pg.to_model.(entity))

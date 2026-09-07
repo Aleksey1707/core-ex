@@ -33,10 +33,10 @@ defmodule Core.Repo.Pg.Es do
   | `update/3` с эталоном (shadow copy) | 0..2: `delete_all` исчезнувших ключей + upsert новых и изменившихся |
   | `update/3` без эталона | 2: `delete_all` всего, чего нет в наборе, + upsert набора |
 
-  Возвращается **входной** агрегат с очищенными событиями: строка из БД после `insert` не
-  содержит прогруженных `has_many`, и вернуть её означало бы потерять детей. Он же кладётся
-  эталоном в `Repo.Sc` (`Repo.Pg.put_baseline/3`) — иначе следующая запись считала бы diff
-  дочерних строк от устаревшей копии.
+  Возвращается **входной** агрегат с очищенными событиями. Он собирается до записи строки и
+  дальше идёт везде вместо исходного: `Repo.Pg.insert/4` / `update/4` кладут эталоном в
+  `Repo.Sc` именно то, что им передали, и очистка событий после записи разошлась бы с
+  эталоном. В `flush_events/3` уходит исходный агрегат — события нужны там непустыми.
 
   `save/3` переопределяется обязательно: `Repo.Pg.save/4` зовёт `Repo.Pg.insert/update`,
   а не переопределённые в модуле, то есть записал бы строку без детей и без событий.
@@ -110,10 +110,12 @@ defmodule Core.Repo.Pg.Es do
         Core.Helper.Transact.run(
           unquote(dao),
           fn ->
-            with :ok <- Core.Repo.Pg.write_insert(@pg, entity, context, opts),
-                 :ok <- Core.Repo.Pg.Children.insert(@pg, @es_children, entity, opts),
+            written = %{entity | events: Core.Es.Events.clear(entity.events)}
+
+            with {:ok, _} <- Core.Repo.Pg.insert(@pg, written, context, opts),
+                 :ok <- Core.Repo.Pg.Children.insert(@pg, @es_children, written, opts),
                  :ok <- flush_events(entity, context, opts) do
-              persisted(entity, context)
+              {:ok, written}
             end
           end,
           opts
@@ -129,12 +131,13 @@ defmodule Core.Repo.Pg.Es do
           fn ->
             baseline = Core.Repo.Pg.baseline(@pg, entity, context)
             check_events_for_change!(entity, baseline)
+            written = %{entity | events: Core.Es.Events.clear(entity.events)}
 
-            with :ok <- Core.Repo.Pg.write_update(@pg, entity, context, opts),
+            with {:ok, _} <- Core.Repo.Pg.update(@pg, written, context, opts),
                  :ok <-
-                   Core.Repo.Pg.Children.sync(@pg, @es_children, entity, baseline, opts),
+                   Core.Repo.Pg.Children.sync(@pg, @es_children, written, baseline, opts),
                  :ok <- flush_events(entity, context, opts) do
-              persisted(entity, context)
+              {:ok, written}
             end
           end,
           opts
@@ -160,18 +163,6 @@ defmodule Core.Repo.Pg.Es do
       end
 
       defoverridable insert: 2, insert: 3, update: 2, update: 3, save: 2, save: 3
-
-      # Эталон кладётся после commit: при откате транзакции он остался бы «как будто
-      # записано», и следующая запись по этому контексту молча пропустила бы детей.
-      defp persisted(entity, context) do
-        written = %{entity | events: Core.Es.Events.clear(entity.events)}
-
-        Core.Helper.AfterCommit.register(fn ->
-          Core.Repo.Pg.put_baseline(@pg, written, context)
-        end)
-
-        {:ok, written}
-      end
 
       defp known_to_exist?(entity, context, opts) do
         if Core.Repo.Pg.baseline(@pg, entity, context) != nil,
