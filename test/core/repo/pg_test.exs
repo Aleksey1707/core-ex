@@ -167,6 +167,10 @@ defmodule Core.Repo.PgTest do
     end
   end
 
+  defmodule WriteEntity do
+    defstruct [:id, :name]
+  end
+
   defmodule SampleView do
     defstruct [:id, :name, :version]
 
@@ -208,6 +212,10 @@ defmodule Core.Repo.PgTest do
       errors: Errors,
       constraint_errors: %{}
     }
+  end
+
+  defp shadow_pg do
+    %{write_pg(raising_to_entity()) | shadow_copy?: true, to_model: &Map.from_struct/1}
   end
 
   defp raising_to_entity, do: fn _row -> raise "to_entity не должен вызываться" end
@@ -471,9 +479,6 @@ defmodule Core.Repo.PgTest do
 
     assert {:error, %Error{kind: :app, code: :write_failed}} =
              Core.Repo.Pg.update(pg, entity, Context.new())
-
-    assert {:error, %Error{kind: :app, code: :write_failed}} =
-             Core.Repo.Pg.write_insert(pg, entity, Context.new())
   end
 
   test "changeset_errors подставляет опции в шаблон сообщения" do
@@ -647,30 +652,36 @@ defmodule Core.Repo.PgTest do
     end
   end
 
-  test "write_insert пишет строку и не декодирует её обратно в domain" do
+  test "insert возвращает входной агрегат и не декодирует строку обратно в domain" do
     pg = write_pg(raising_to_entity())
+    entity = %{id: "1", name: "новое"}
 
-    assert :ok = Core.Repo.Pg.write_insert(pg, %{id: "1", name: "новое"}, Context.new())
+    assert {:ok, ^entity} = Core.Repo.Pg.insert(pg, entity, Context.new())
   end
 
-  test "insert декодирует вставленную строку в domain" do
-    pg = write_pg(&%{decoded: &1.name})
-
-    assert {:ok, %{decoded: "новое"}} =
-             Core.Repo.Pg.insert(pg, %{id: "1", name: "новое"}, Context.new())
-  end
-
-  test "write_update пишет строку и не декодирует её обратно в domain" do
+  test "update возвращает входной агрегат и не декодирует строку обратно в domain" do
     pg = write_pg(raising_to_entity())
+    entity = %{id: "1", name: "новое"}
 
-    assert :ok = Core.Repo.Pg.write_update(pg, %{id: "1", name: "новое"}, Context.new())
+    assert {:ok, ^entity} = Core.Repo.Pg.update(pg, entity, Context.new())
   end
 
-  test "update декодирует обновлённую строку в domain" do
-    pg = write_pg(&%{decoded: &1.name})
+  test "insert кладёт входной агрегат эталоном в Repo.Sc" do
+    pg = shadow_pg()
+    context = Core.Repo.Sc.init(Context.new())
+    entity = %WriteEntity{id: "1", name: "новое"}
 
-    assert {:ok, %{decoded: "новое"}} =
-             Core.Repo.Pg.update(pg, %{id: "1", name: "новое"}, Context.new())
+    assert {:ok, ^entity} = Core.Repo.Pg.insert(pg, entity, context)
+    assert Core.Repo.Sc.find(context, WriteEntity, "1") == entity
+  end
+
+  test "update кладёт входной агрегат эталоном в Repo.Sc" do
+    pg = shadow_pg()
+    context = Core.Repo.Sc.init(Context.new())
+    entity = %WriteEntity{id: "1", name: "новое"}
+
+    assert {:ok, ^entity} = Core.Repo.Pg.update(pg, entity, context)
+    assert Core.Repo.Sc.find(context, WriteEntity, "1") == entity
   end
 
   describe "конкурентная запись" do
