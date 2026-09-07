@@ -1,6 +1,10 @@
 # OTP и конкурентность
 
-Плейсхолдеры: `MyApp` — см. `10-architecture.md`. Процессы outbox — `14-events-outbox.md`.
+- **Область.** `lib/core/outbox/{poller,cleaner}.ex`, `lib/core/mq/stream/**`, `lib/core/pubsub/**`;
+  у потребителя — его дерево супервизии.
+- **Читать перед.** Новым `GenServer` или супервизором, правкой `init/1` / `handle_continue/2`,
+  таймаутов `call`, backoff, mailbox, `terminate/2` и graceful shutdown.
+- **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Дерево процессов
 
@@ -99,11 +103,8 @@
 
 ## Тесты процессов
 
-- Порождённым процессам нужен доступ к sandbox: `Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), pid)`.
-- Тест, меняющий глобальный конфиг или именованный синглтон, — `async: false` с восстановлением
-  в `on_exit`.
-- Синхронная проверка цикла — отдельный `call` (`run_once/1` у `Poller` / `Cleaner`), а не
-  `sleep` в ожидании таймера.
+Правила тестов OTP-процессов — sandbox для порождённых процессов, синхронный `run_once/1`
+вместо `sleep`, `async: false` у теста с именованным синглтоном — `19-testing.md`.
 
 ## Связанные правила
 

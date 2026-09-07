@@ -1,6 +1,10 @@
 # Репозитории
 
-Плейсхолдеры: `MyApp`, `:my_app`, `<BC>`, `<Actor>`, `<Aggregate>` — см. `10-architecture.md`.
+- **Область.** `lib/core/repo/**`, `lib/core/es/**`; у потребителя — `<role>/<aggregate>/repo*`,
+  `read_repo*`, `view.ex`, Ecto-схемы и Specs.
+- **Читать перед.** Новым репозиторием, Ecto-схемой или View; правкой `use Repo.Pg` / `Repo.Pg.Es`,
+  `constraint_errors`, `default_filters`; разделением read- и write-пути.
+- **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Слои и пути
 
@@ -17,7 +21,7 @@
 Структура путей (target) — всё, что относится к сущности, лежит **внутри** её каталога;
 файлов вида `<aggregate>_repo.ex` и модулей вида `<Aggregate>Repo` не бывает:
 
-```
+```text
 <role>/<aggregate>/repo.ex                   # write behaviour
 <role>/<aggregate>/repo/pg.ex                # use Repo.Pg.Es (или Repo.Pg — агрегат без событий)
 <role>/<aggregate>/repo/pg/schema.ex
@@ -62,9 +66,15 @@ Schema MUST жить под `Repo.Pg.Schema`, не под `Repo.Schema`.
 
 - `get` / `get!` — load одного агрегата перед mutate (`shadow_copy?: true` при необходимости).
 - `insert` / `update` / `save` / `delete`.
-- Опционально `list` / `find_many` / `get_many`, если команда мутирует **множество** агрегатов сразу (bulk: загрузить пачку → замутировать каждый → сохранить). Критерий: метод — источник данных для `mutate`, а не отдача наружу (HTTP/презентер). Загрузка пачки и её сохранение — в теле одной функции (см. «Load/save агрегата — в одной функции» в `20-agreements.md`).
+- Опционально `list` / `find_many` / `get_many`, если команда мутирует **множество** агрегатов сразу
+  (bulk: загрузить пачку → замутировать каждый → сохранить). Критерий: метод — источник данных для
+  `mutate`, а не отдача наружу (HTTP/презентер). Загрузка пачки и её сохранение — в теле одной
+  функции (см. «Load/save агрегата — в одной функции» в `20-agreements.md`).
 
-- Кастомный `get_by_*` (резолв alternate key — `owner_id`, `login`, `external_id`) MUST принимать `version` (`%Version{} | :current`) и проверять её сам. Иначе call site вынужден делать второй `get(id, version)` — два SELECT ради одной проверки. Тело — один вызов `Repo.Pg.get_by/6` (`read_scope` + фильтр → `not_found` → `version_error` → capture):
+- Кастомный `get_by_*` (резолв alternate key — `owner_id`, `login`, `external_id`) MUST принимать
+  `version` (`%Version{} | :current`) и проверять её сам. Иначе call site вынужден делать второй
+  `get(id, version)` — два SELECT ради одной проверки. Тело — один вызов `Repo.Pg.get_by/6`
+  (`read_scope` + фильтр → `not_found` → `version_error` → capture):
 
   ```elixir
   @impl true
@@ -74,16 +84,20 @@ Schema MUST жить под `Repo.Pg.Schema`, не под `Repo.Schema`.
   end
   ```
 
-Обычно **не** входят: `count` / `page` / `exists?` / `exists_all?` — это отдача наружу, место в ReadRepo.
+Обычно **не** входят: `count` / `page` / `exists?` / `exists_all?` — это отдача наружу, место в
+ReadRepo.
 
 ### Read (`<Aggregate>.ReadRepo`)
 
-- `use Core.Repo, only: :read, view: <Aggregate>.View` — read-репо отдаёт **представление**, не агрегат.
+- `use Core.Repo, only: :read, view: <Aggregate>.View` — read-репо отдаёт **представление**, не
+  агрегат.
 - `shadow_copy?: false` в `Repo.Pg` (не участвует в optimistic-lock цепочке команд).
 - Декодер строки — `to_view: &Schema.to_view/1`; `to_model:` read-репо не нужен.
-- Собственная Ecto-схема `<Aggregate>.ReadRepo.Pg.Schema` (MUST, см. «Generic `use Core.Repo.Pg`») и свои `Specs`.
+- Собственная Ecto-схема `<Aggregate>.ReadRepo.Pg.Schema` (MUST, см. «Generic `use Core.Repo.Pg`») и
+  свои `Specs`.
 - Usecases запросов (`get`/`list`/`page`, HTTP GET) вызывают **ReadRepo**.
-- Usecases команд вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть команды, не query).
+- Usecases команд вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть команды, не
+  query).
 
 Кеш — только на ReadRepo; см. `16-caching.md` свода приложения.
 
@@ -130,10 +144,11 @@ end
 
 Правила:
 
-- Поле объявляется **тем Prim, которым оно живёт в домене**. Prim задаёт тип поля и его
-  wire-формат (`Codec.Helper.dump_raw/3`: значение приводится к этому Prim с его kind, tz
-  и precision, и дампится как обычный Prim) — но в структуру не попадает. Поэтому read-путь не может разойтись с агрегатным, а поле, добавленное в
-  структуру, не может остаться недампленным: и то и другое порождает одна строка декларации.
+- Поле объявляется **тем Prim, которым оно живёт в домене**. Prim задаёт тип поля и его wire-формат
+  (`Codec.Helper.dump_raw/3`: значение приводится к этому Prim с его kind, tz и precision, и
+  дампится как обычный Prim) — но в структуру не попадает. Поэтому read-путь не может разойтись с
+  агрегатным, а поле, добавленное в структуру, не может остаться недампленным: и то и другое
+  порождает одна строка декларации.
 - Поля — **только** примитивные значения и атомы `Core.Enum`. Prim во View — **MUST NOT**:
   read-путь не валидирует, а `Prim.new/1` на строке из БД поднял бы доменную ошибку там,
   где обработать её нечем (страница списка не должна падать из-за одной строки).
@@ -147,9 +162,9 @@ end
   actor-срезу, а не репозиторию: его видят behaviour, usecase, презентер и кеш. Форма View
   роле-специфична — набор полей у разных акторов разный.
 - Генерируются `@enforce_keys`, `defstruct`, `@type t` (точный: `String.t()`, `DateTime.t()`,
-  `Decimal.t()`, `pos_integer()`, `<Enum>.t()`), именованные `@type` форм, `new/1` (keyword)
-  и вложенный `<Aggregate>.View.Codec` — dump-only плагин (`loadable: false`), который
-  регистрируется в `Codec.plugins()`. Презентер зовёт `OutCodec.dump(view)` (`15-web-api.md` свода приложения).
+  `Decimal.t()`, `pos_integer()`, `<Enum>.t()`), именованные `@type` форм, `new/1` (keyword) и
+  вложенный `<Aggregate>.View.Codec` — dump-only плагин (`loadable: false`), который регистрируется
+  в `Codec.plugins()`. Презентер зовёт `OutCodec.dump(view)` (`15-web-api.md` свода приложения).
 - Enum-поля кодек не сериализует (атомы как есть) — как и в `<Aggregate>.Codec`.
 - Дополнительные конструкторы (`empty/2` и т.п.) пишутся руками после `use` и зовут `new/1`.
 
@@ -186,7 +201,8 @@ use Core.Repo, only: :full | :read | :permanent | [atoms]
 | `:read` | только чтение |
 | list | явный список |
 
-Тип элемента — `item` в таблице ниже — задаёт опция: `entity:` (агрегат) или `view:` (представление).
+Тип элемента — `item` в таблице ниже — задаёт опция: `entity:` (агрегат) или `view:`
+(представление).
 
 | Метод | Возврат |
 |---|---|
@@ -234,9 +250,11 @@ use Repo.Pg,
   ]
 ```
 
-`errors:` — модуль через родителя агрегата (`Draft.Errors`, `Product.Errors`, `User.Errors`), не leaf-alias `Errors`. Role `*.Repo.Pg` MUST NOT дублировать тексты ошибок.
+`errors:` — модуль через родителя агрегата (`Draft.Errors`, `Product.Errors`, `User.Errors`), не
+leaf-alias `Errors`. Role `*.Repo.Pg` MUST NOT дублировать тексты ошибок.
 
-`constraint_errors:` — опционально; keyword `[constraint_type: [field: error_code]]`. Типы: `unique` / `foreign_key` / `check` / `exclusion`. Коды проверяются compile-time через `errors.domain/3`.
+`constraint_errors:` — опционально; keyword `[constraint_type: [field: error_code]]`. Типы: `unique`
+/ `foreign_key` / `check` / `exclusion`. Коды проверяются compile-time через `errors.domain/3`.
 
 Поле MUST соответствовать `*_constraint` в `changeset/2`: сверка идёт с `error_type` ошибки
 changeset, а не с типом ограничения (`foreign_key_constraint/3` пишет `:foreign`) — перевод
@@ -277,10 +295,13 @@ Read-репозиторий MUST иметь **собственную** Ecto-сх
 
 Семантики:
 
-- Чтение → domain через bang `to_entity` (опция `use Repo.Pg` — bang-mapper); при `shadow_copy?: true` — `Repo.Sc.put`.
+- Чтение → domain через bang `to_entity` (опция `use Repo.Pg` — bang-mapper); при
+  `shadow_copy?: true` — `Repo.Sc.put`.
 - Чтение read-репо → View через тотальный `to_view` (`Repo.Sc` не участвует).
-- Эталон Sc ключуется парой `{модуль сущности, id}` (`Repo.Sc.find(context, Entity, id)`): разные агрегаты могут делить идентификатор (`User` и `UserRoles`).
-- `not_found` / `version_mismatch` / `incomplete_result` / `no_ids` → `errors.domain(behaviour, code, detail)`.
+- Эталон Sc ключуется парой `{модуль сущности, id}` (`Repo.Sc.find(context, Entity, id)`): разные
+  агрегаты могут делить идентификатор (`User` и `UserRoles`).
+- `not_found` / `version_mismatch` / `incomplete_result` / `no_ids` →
+  `errors.domain(behaviour, code, detail)`.
 - `insert`/`update`/`save`: замапленный DB-constraint → `{:error, Error.t()}` через
   `errors.domain(behaviour, code, detail)`; незамапленный (и любой провал `changeset/2`) →
   `%Error{kind: :app, ns: :repo, code: :write_failed}`, который строит сам `Repo.Pg`:
@@ -327,7 +348,8 @@ use Repo.Pg.Schema,
   id: Agg.ID
 ```
 
-`id:` — отдельная опция, не обязательно `<entity>.ID`: у `UserRoles` идентификатор агрегата — `User.ID`.
+`id:` — отдельная опция, не обязательно `<entity>.ID`: у `UserRoles` идентификатор агрегата —
+`User.ID`.
 
 Режим `view:` — схема read-репозитория (`entity:` и `view:` взаимоисключающие):
 
@@ -351,18 +373,26 @@ use Repo.Pg.Schema,
 который разворачивала бы bang-обёртка. Отсутствие `to_view/1` — `CompileError` (проверка после
 компиляции схемы). `changeset/2` в read-схеме не объявляется: писать через неё нечего.
 
-Safe — источник истины: при наличии entity-codec (`<Aggregate>.Codec` / `Outbox.Codec`) — **MUST** `InCodec.load(Entity, attrs)` / `InCodec.dump(entity)`; Schema только remap колонок ↔ wire-ключи (+ DB-only FK / JSON string-keys). Без `Prim.new` / ручной сборки struct. Bang — `Result.unwrap!(to_entity/to_model(...))` (`%Error{}` → `Exc`).
+Safe — источник истины: при наличии entity-codec (`<Aggregate>.Codec` / `Outbox.Codec`) — **MUST**
+`InCodec.load(Entity, attrs)` / `InCodec.dump(entity)`; Schema только remap колонок ↔ wire-ключи (+
+DB-only FK / JSON string-keys). Без `Prim.new` / ручной сборки struct. Bang —
+`Result.unwrap!(to_entity/to_model(...))` (`%Error{}` → `Exc`).
 
 Когда какой вызов:
 
-- Свои строки / persist валидного domain (`use Repo.Pg`, Event.Repo, Draft write, …) → bang (`to_entity!` / `to_model!`).
+- Свои строки / persist валидного domain (`use Repo.Pg`, Event.Repo, Draft write, …) → bang
+  (`to_entity!` / `to_model!`).
 - Dirty/infra (например Outbox `reserve_rows`) → safe (`to_entity` / `to_model`).
 
-Опции `use Repo.Pg` `to_entity:` / `to_model:` — **bang-функции** (возврат entity/map): `&Schema.to_entity!/1`, `&Schema.to_model!/1`.
+Опции `use Repo.Pg` `to_entity:` / `to_model:` — **bang-функции** (возврат entity/map):
+`&Schema.to_entity!/1`, `&Schema.to_model!/1`.
 
-В `to_entity`/`to_model` — `alias MyApp.Codec.Internal, as: InCodec` → полный `InCodec.load(Entity, map)` / `InCodec.dump(entity)` через entity-codec; Schema remaps root-поля под колонки БД (`created_by_id` ↔ `created_by`, …).
+В `to_entity`/`to_model` — `alias MyApp.Codec.Internal, as: InCodec` → полный
+`InCodec.load(Entity, map)` / `InCodec.dump(entity)` через entity-codec; Schema remaps root-поля под
+колонки БД (`created_by_id` ↔ `created_by`, …).
 
-Changeset: `@required` / `@optional` через `~w(...)a` → `cast` → `validate_required` → `foreign_key_constraint` (и `unique_constraint` при необходимости).
+Changeset: `@required` / `@optional` через `~w(...)a` → `cast` → `validate_required` →
+`foreign_key_constraint` (и `unique_constraint` при необходимости).
 
 В `to_entity` поле `events: []` — события читаются из Event.Repo, не из строки агрегата.
 
@@ -463,7 +493,8 @@ Diff считается по обеим сторонам от одной и то
 
 Требования к дочерней схеме:
 
-- `to_models/1` возвращает **все** колонки таблицы — пропущенную обнулит `on_conflict: {:replace, …}`;
+- `to_models/1` возвращает **все** колонки таблицы — пропущенную обнулит
+  `on_conflict: {:replace, …}`;
 - ключ уникален внутри набора: дубль — `ArgumentError` (при upsert он был бы тихим затиранием);
 - `query:` агрегата прогружает дочерние ассоциации целиком и без фильтров — эталон в `Repo.Sc`
   это прочитанный агрегат, и неполный эталон даст diff с пропущенными удалениями.
@@ -483,7 +514,8 @@ Diff считается по обеим сторонам от одной и то
 
 - Role Repo **делегирует write** в common `Repo.Pg`, но имеет свои `default_filters` под ACL.
 - Узкий actor-repo может не иметь `insert` (только update/save).
-- Плоский агрегат с событиями: common write-репо — `use Core.Repo.Pg.Es` (отдельный ручной модуль не нужен).
+- Плоский агрегат с событиями: common write-репо — `use Core.Repo.Pg.Es` (отдельный ручной модуль не
+  нужен).
 - Identity/simple BC: часто один `Common.Repo` без role wrapper.
 - Event.Repo API: `append/2`, `list_by_aggregate/2`, `page_by_aggregate/4`.
 

@@ -263,9 +263,12 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
 mix test                 # тесты; :rabbit_stream исключены по умолчанию
 make test-stream         # включая тесты живого RabbitMQ Stream
-make                     # format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
+make                     # rules-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
 make compile-no-optional # сборка без optional-клиентов брокеров — так библиотеку видит потребитель без них
 make infra-down
 ```
 
-Свод правил, которым следует код библиотеки, — в `.claude/rules/`.
+Свод правил, которым следует код библиотеки, — в `docs/rules/`: карта свода и стандарт его
+оформления — `docs/rules/00-index.md`, осознанные отступления — `docs/rules/DEBT.md`,
+проверка формы — `make rules-check`. Для агентов своды подключаются скиллами
+`.claude/skills/*/SKILL.md`, точка входа — `AGENTS.md` (`CLAUDE.md` — симлинк на него).

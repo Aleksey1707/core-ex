@@ -113,7 +113,7 @@
   живёт в `Core.Otel.Messaging`. `Core.Otel.LogFilter.filter/2` — primary-фильтр
   `:logger`, кладущий `trace_id` / `span_id` в metadata (OTLP-экспорт логов для BEAM
   не выпущен). Метрики остаются в PromEx. Подключение — раздел «Трассировка» в README,
-  правила — `.claude/rules/21-observability.md`.
+  правила — `docs/rules/21-observability.md`.
 - **`Delivery.Mq` добавляет к сообщению `traceparent`** — единственный заголовок, который
   доставка ставит от себя. Прикладные заголовки по-прежнему целиком задаёт продюсер записи,
   а `to_message/1` остаётся чистым преобразованием и заголовков не трогает.

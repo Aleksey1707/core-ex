@@ -1,12 +1,24 @@
 # Домен
 
-Плейсхолдеры: `MyApp`, `<BC>`, `<Aggregate>` — см. `10-architecture.md`.
+- **Область.** `lib/core/prim/**`, `lib/core/enum.ex`, `lib/core/validator/**`, `lib/core/codec/**`,
+  `lib/core/view.ex`, `lib/core/context*`, `lib/core/es/**`; у потребителя — агрегаты, профили Codec
+  и entity-фасады.
+- **Читать перед.** Новым Prim, Enum, кодеком, событием или View; правкой агрегата, профиля Codec,
+  `Core.View`; выбором между агрегатом и представлением.
+- **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
-Строительные блоки: `core/prim`, `core/enum`, `core/validator`, `core/codec` (+ `core/codec/redump`), `core/view`, `core/context`, `core/es`, `Version`, `Pagination`, `Result`/`Option`, `MyApp.Codec.Prim.{Internal,External}`, `MyApp.Codec.{Internal,External}` (entity-фасады).
+Строительные блоки:
+
+- примитивы и множества — `core/prim`, `core/enum`, `core/validator`;
+- сериализация — `core/codec` (+ `core/codec/redump`), профили
+  `MyApp.Codec.Prim.{Internal,External}` и entity-фасады `MyApp.Codec.{Internal,External}`;
+- модели и контекст вызова — `core/view`, `core/context`, `core/es`;
+- сквозные типы — `Version`, `Pagination`, `Result` / `Option`.
 
 ## Prim (value object)
 
-`Core.Prim` — макрос value object: `%Mod{value:}`, `new/1`, `new!/1`, `value/1`, `__domain_kind__/0`, `__domain_type_opts__/0`, `prim?/1` (модуль).
+`Core.Prim` — макрос value object: `%Mod{value:}`, `new/1`, `new!/1`, `value/1`,
+`__domain_kind__/0`, `__domain_type_opts__/0`, `prim?/1` (модуль).
 
 ```elixir
 use Core.Prim,
@@ -35,21 +47,35 @@ use Core.Prim,
 | `__domain_type_opts__/0` | опции типа (`precision`, `tz`, границы) — их читает `Codec.coerce/2` на read-пути |
 | `Prim.prim?/1` | модуль объявлен через `use Prim` (`__domain_kind__/0` + `value/1`); при необходимости загружает модуль |
 
-В function heads: обязательный Prim — `%Mod{}` (default); композиция в `when` — `Core.Guard.is/2` / `is_opt/2` (`import`, не guards на самом Prim).
+В function heads: обязательный Prim — `%Mod{}` (default); композиция в `when` — `Core.Guard.is/2` /
+`is_opt/2` (`import`, не guards на самом Prim).
 
-Ошибки валидации: `{:error, {code, detail}}` → `Error.domain(module, code: code, ns: :prim, message: "#{name}: #{detail}", detail: raw)` (в `Error.detail` — исходный raw; `detail` в кортеже — текст валидации).
+Ошибки валидации: `{:error, {code, detail}}` →
+`Error.domain(module, code: code, ns: :prim, message: "#{name}: #{detail}", detail: raw)` (в
+`Error.detail` — исходный raw; `detail` в кортеже — текст валидации).
 
 ### Типизированные обёртки
 
-`Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose` + `Core.Validator.*` (sibling, не под Prim).
+`Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose` +
+`Core.Validator.*` (sibling, не под Prim).
 
-`Prim.DateTime` дополнительно: `now/0` / `now!/0`, `from/1` / `from!/1` — конверсия **из другого datetime-Prim** (явный API; `new/1` принимает только raw `%DateTime{}` / ISO8601, не другой Prim).
+`Prim.DateTime` дополнительно: `now/0` / `now!/0`, `from/1` / `from!/1` — конверсия **из другого
+datetime-Prim** (явный API; `new/1` принимает только raw `%DateTime{}` / ISO8601, не другой Prim).
 
-`Prim.Date` — дата без времени: `today/0` / `today!/0` (в `tz:` модуля или `Core.Config.tz/0`), `from/1` / `from!/1` — конверсия **из другого date- или datetime-Prim** (datetime приводится к дате в том же tz). `new/1` принимает только raw `%Date{}` / ISO8601 — ни `%DateTime{}`, ни другой Prim. Опции: `after:` / `before:` (`%Date{}`), `tz:`; `precision:` нет.
+`Prim.Date` — дата без времени: `today/0` / `today!/0` (в `tz:` модуля или `Core.Config.tz/0`),
+`from/1` / `from!/1` — конверсия **из другого date- или datetime-Prim** (datetime приводится к дате
+в том же tz). `new/1` принимает только raw `%Date{}` / ISO8601 — ни `%DateTime{}`, ни другой Prim.
+Опции: `after:` / `before:` (`%Date{}`), `tz:`; `precision:` нет.
 
-`Prim.Compose` — обёртка над другим Prim (`of:`): `%Mod{value: %Base{}}`. Kind по умолчанию `:composite` (`Prim.reserved_kinds/0`). Дополнительно: `__domain_base__/0`, `raw/1` (через `Prim.unwrap/1`). `new/1` принимает raw базы, `%Base{}` или `%Mod{}` (идемпотентно). Вложенная композиция допустима (`of:` может быть Compose).
+`Prim.Compose` — обёртка над другим Prim (`of:`): `%Mod{value: %Base{}}`. Kind по умолчанию
+`:composite` (`Prim.reserved_kinds/0`). Дополнительно: `__domain_base__/0`, `raw/1` (через
+`Prim.unwrap/1`). `new/1` принимает raw базы, `%Base{}` или `%Mod{}` (идемпотентно). Вложенная
+композиция допустима (`of:` может быть Compose).
 
-Native kinds: `:string`, `:integer`, `:decimal`, `:uuid`, `:datetime`, `:date` (`Prim.native_kinds/0`). Reserved: native + `:composite`. Опциональный `kind:` — свой атом (не чужой reserved; проверка `Prim.validate_kind!/2`); тогда в профилях Codec нужны `dump(%Mod{})` и/или `dump_kind(prim, kind)`.
+Native kinds: `:string`, `:integer`, `:decimal`, `:uuid`, `:datetime`, `:date`
+(`Prim.native_kinds/0`). Reserved: native + `:composite`. Опциональный `kind:` — свой атом (не чужой
+reserved; проверка `Prim.validate_kind!/2`); тогда в профилях Codec нужны `dump(%Mod{})` и/или
+`dump_kind(prim, kind)`.
 
 Правило `name:`: брать из первой строки `@moduledoc` через `Helper.String.first_line/1`.
 
@@ -72,7 +98,8 @@ end
 
 ## Enum (закрытое множество атомов)
 
-`Core.Enum` — макрос enum: значение — **голый атом** (не `%Mod{value:}`), SSOT для Dialyzer (`@type t`) и runtime.
+`Core.Enum` — макрос enum: значение — **голый атом** (не `%Mod{value:}`), SSOT для Dialyzer
+(`@type t`) и runtime.
 
 ```elixir
 defmodule Status do
@@ -179,11 +206,14 @@ when is_enum(status, Status)
 when in_enum(status, Status, ~w(new failed)a)
 ```
 
-`is_enum/2` / `in_enum/3` — макросы (compile-time `mod.values()` / проверка subset ⊆ values). Guard форсирует `Code.ensure_compiled/1` для enum-модуля (чистая сборка). Опечатка в subset → `CompileError`.
+`is_enum/2` / `in_enum/3` — макросы (compile-time `mod.values()` / проверка subset ⊆ values). Guard
+форсирует `Code.ensure_compiled/1` для enum-модуля (чистая сборка). Опечатка в subset →
+`CompileError`.
 
-Wire: atom или binary (`Atom.to_string/1`). Schema: `Ecto.Enum, values: Status.values()`. Агрегат: `status: Status.t()`.
+Wire: atom или binary (`Atom.to_string/1`). Schema: `Ecto.Enum, values: Status.values()`. Агрегат:
+`status: Status.t()`.
 
-### Codec (Prim и Entity)
+## Codec (Prim и Entity)
 
 Слои (Core **не** ссылается на Domain; Domain/app ссылаются на Core):
 
@@ -207,14 +237,20 @@ Prim-профили:
 | `Codec.Prim.Internal` | `:full` | `:datetime` | `"Etc/UTC"` | `:date` | `:decimal` |
 | `Codec.Prim.External` | `:hex` | `:iso8601` | `:app` | `:iso8601` | `:string` |
 
-Оси datetime: `datetime:` — форма (`:datetime` → `%DateTime{}`, `:iso8601` → строка); `datetime_tz:` — `:keep`, `:app` (tz приложения из `Core.Config.tz/0`, резолв в рантайме) или IANA binary (`DateTime.shift_zone!/2` на dump); точность — `precision: :second | :millisecond | :microsecond` (default `:second`) в `use Prim.DateTime` (как у `DateTime.truncate/2`), не кодек.
+Оси datetime: `datetime:` — форма (`:datetime` → `%DateTime{}`, `:iso8601` → строка); `datetime_tz:`
+— `:keep`, `:app` (tz приложения из `Core.Config.tz/0`, резолв в рантайме) или IANA binary
+(`DateTime.shift_zone!/2` на dump); точность — `precision: :second | :millisecond | :microsecond`
+(default `:second`) в `use Prim.DateTime` (как у `DateTime.truncate/2`), не кодек.
 
-`date:` — форма даты без времени (`:date` → `%Date{}`, `:iso8601` → строка). Единственная **необязательная** опция профиля (default `:date`): профили, объявленные без неё, продолжают работать.
+`date:` — форма даты без времени (`:date` → `%Date{}`, `:iso8601` → строка). Единственная
+**необязательная** опция профиля (default `:date`): профили, объявленные без неё, продолжают
+работать.
 
-Приоритет Prim dump: `dump(%Mod{})` → `dump_kind(prim, kind)` → builtin.
-Приоритет Prim load: `load(mod, raw)` → `load_kind` → builtin → `mod.new/1`.
-Kind `:composite` (`Prim.Compose`): dump → `dump(value)` (рекурсия до leaf); load → `load(base, raw)` + `mod.new(inner)`. Wire-формат композита = формат базового Prim.
-Профиль влияет только на dump; load формат-агностичен (приведение — `cast` примитива).
+Приоритет Prim dump: `dump(%Mod{})` → `dump_kind(prim, kind)` → builtin. Приоритет Prim load:
+`load(mod, raw)` → `load_kind` → builtin → `mod.new/1`. Kind `:composite` (`Prim.Compose`): dump →
+`dump(value)` (рекурсия до leaf); load → `load(base, raw)` + `mod.new(inner)`. Wire-формат композита
+= формат базового Prim. Профиль влияет только на dump; load формат-агностичен (приведение — `cast`
+примитива).
 
 Entity-фасад (`alias Codec.Internal, as: InCodec`):
 
@@ -224,20 +260,68 @@ use Core.Codec.Facade,
   plugins: [MyApp.Domain.<BC>.Common.<Aggregate>.Codec]
 ```
 
-**Весь интерфейс фасада — `dump/1`, `load/2`, `load!/2`.** Единственная ось диспетчеризации — модуль: `dump/1` выбирает плагин по `__struct__`, `load/2` — по первому аргументу. Функций «на случай» (raw-путь, теги) у фасада нет — то, что раньше жило в нём частностями View и событий, ушло в `Core.Codec.Helper` и в сам плагин.
+**Весь интерфейс фасада — `dump/1`, `load/2`, `load!/2`.** Единственная ось диспетчеризации —
+модуль: `dump/1` выбирает плагин по `__struct__`, `load/2` — по первому аргументу. Функций «на
+случай» (raw-путь, теги) у фасада нет — то, что раньше жило в нём частностями View и событий, ушло в
+`Core.Codec.Helper` и в сам плагин.
 
-- `dump/1` / `load/2` / `load!/2` — plugin clauses, иначе делегат в `prim` (только `struct()`; не-Prim без плагина → `ArgumentError`)
-- Полиморфный wire (тег внутри данных) грузится через **модуль-семейство**: `InCodec.load(<Aggregate>.Event, data)`. Семейство объявляет плагин опцией `union:`, конкретный тип выбирает он же — фасад про теги не знает
-- Модули типов и семейств уникальны между плагинами (`CompileError` на компиляции фасада); теги уникальны **внутри своего плагина**, а не приложения
-- Plugin: `use Core.Codec.Plugin, types: [...]`; `loadable: true|false`; `union: Мод` (требует `loadable: true`); `loadable: true` требует `load/3` (compile-time)
+- `dump/1` / `load/2` / `load!/2` — plugin clauses, иначе делегат в `prim` (только `struct()`;
+  не-Prim без плагина → `ArgumentError`)
+- Полиморфный wire (тег внутри данных) грузится через **модуль-семейство**:
+  `InCodec.load(<Aggregate>.Event, data)`. Семейство объявляет плагин опцией `union:`, конкретный
+  тип выбирает он же — фасад про теги не знает
+- Модули типов и семейств уникальны между плагинами (`CompileError` на компиляции фасада); теги
+  уникальны **внутри своего плагина**, а не приложения
+- Plugin: `use Core.Codec.Plugin, types: [...]`; `loadable: true|false`; `union: Мод` (требует
+  `loadable: true`); `loadable: true` требует `load/3` (compile-time)
 - Генерируются `__codec_types__/0`, `__codec_union__/0`, `__codec_loadable__/0`
 - `loadable: false` — dump-only (как `<Aggregate>.View.Codec`: у read-модели обратного пути нет)
-- Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` / `load_optional/3` / `load_many/3` — из `Core.Codec.Helper`. В Ecto-схемах `field/2` **не** импортировать (конфликт с `Ecto.Schema`) — звать `Helper.Map.field/2`
-- `Codec.Helper.dump_raw(Prim, raw, codec)` — дамп значения **без** Prim-обёртки (read-модели): значение приводится к своему Prim (`Core.Codec.coerce/2` — kind плюс его `__domain_type_opts__/0`: tz и precision) и уходит в обычный `codec.dump/1`. Отдельного raw-формата, который мог бы разойтись с агрегатным, больше нет. Тотальна: `nil`, неприводимое значение и неформатируемый kind (`:string`, `:integer`, кастомный) проходят как есть. На неё опираются `Core.View` и `Core.Codec.Redump`
+- Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по
+  atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` /
+  `load_optional/3` / `load_many/3` — из `Core.Codec.Helper`. В Ecto-схемах `field/2` **не**
+  импортировать (конфликт с `Ecto.Schema`) — звать `Helper.Map.field/2`
+- `Codec.Helper.dump_raw(Prim, raw, codec)` — дамп значения **без** Prim-обёртки (read-модели):
+  значение приводится к своему Prim (`Core.Codec.coerce/2` — kind плюс его `__domain_type_opts__/0`:
+  tz и precision) и уходит в обычный `codec.dump/1`. Отдельного raw-формата, который мог бы
+  разойтись с агрегатным, больше нет. Тотальна: `nil`, неприводимое значение и неформатируемый kind
+  (`:string`, `:integer`, кастомный) проходят как есть. На неё опираются `Core.View` и
+  `Core.Codec.Redump`
 - Enum-поля кодек не сериализует (атомы как есть)
-- `<Aggregate>.Codec` MUST предоставлять `dump`/`load` для самого агрегата и его вложенных сущностей (если есть). Поле `events` в dump/load агрегата **не** участвует (события — только через `<Aggregate>.Event.Codec`). `Repo.Pg.Schema` **обязан** вызывать фасад (`InCodec.load` / `InCodec.dump`) сущности; Presenter может мапить поля вручную под shape API. Core entity-codecs (например `Outbox.Codec`) регистрируются в app `Codec.plugins()` наравне с Domain.
+- `<Aggregate>.Codec` MUST предоставлять `dump`/`load` для самого агрегата и его вложенных сущностей
+  (если есть). Поле `events` в dump/load агрегата **не** участвует (события — только через
+  `<Aggregate>.Event.Codec`). `Repo.Pg.Schema` **обязан** вызывать фасад (`InCodec.load` /
+  `InCodec.dump`) сущности; Presenter может мапить поля вручную под shape API. Core entity-codecs
+  (например `Outbox.Codec`) регистрируются в app `Codec.plugins()` наравне с Domain.
 
-Кастом Prim в профиле: `@impl true def dump(%Agg.ID{})`, optional `dump_kind` / `load_kind` + `super`.
+Кастом Prim в профиле: `@impl true def dump(%Agg.ID{})`, optional `dump_kind` / `load_kind` +
+`super`.
+
+### Dump/load только через фасад
+
+Entity-кодек (`use Core.Codec.Plugin`) MUST быть в `Codec.plugins()`. Вложенные сущности и
+соседние типы — **только** через фасад, не через модуль чужого плагина.
+
+Внутри плагина — аргумент `codec` (`dump/2`, `load/3`) и хелперы `load_optional/3`,
+`load_many/3`. Снаружи плагина — `InCodec` / `OutCodec`.
+
+```elixir
+# плохо
+Step.Codec.dump(step, codec)
+Content.Codec.load(Content.Sms, raw, codec)
+Step.Codec.dump(step, InCodec)
+
+# хорошо
+codec.dump(step)
+codec.load(Step, raw)
+load_many(Step, list, codec)
+InCodec.dump(step)
+```
+
+События исключением не являются: `InCodec.dump(event)` отдаёт конверт,
+`InCodec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу. Не вводить обходные
+`load_for_channel` / обёртки, которые зовут соседний `*.Codec` в обход фасада.
+
+Алиасы профилей и коллизии коротких имён — `20-agreements.md`.
 
 ## Aggregates
 
@@ -245,11 +329,14 @@ use Core.Codec.Facade,
 
 - Версионируются через `Version` (optimistic lock).
 - Soft-delete: `deleted_at` / `deleted_by`.
-- При мутациях копят uncommitted `events: []` (prepend / append — единообразно в агрегате; flush делает `Enum.reverse` при необходимости).
+- При мутациях копят uncommitted `events: []` (prepend / append — единообразно в агрегате; flush
+  делает `Enum.reverse` при необходимости).
 - Мутации возвращают `{:ok, %Agg{}} | {:error, Error.t()}`.
-- Domain MUST NOT писать в БД / MQ / outbox — только менять struct и копить события. Persist — задача Repo.
+- Domain MUST NOT писать в БД / MQ / outbox — только менять struct и копить события. Persist —
+  задача Repo.
 
-Аудит-поля (`created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`, `deleted_by`) — порядок как в `20-agreements.md`.
+Аудит-поля (`created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`, `deleted_by`) —
+порядок как в `20-agreements.md`.
 
 ### Агрегат vs View
 
@@ -272,11 +359,14 @@ use Core.Codec.Facade,
 
 `%Context{data: map}` + `find` / `get` / `get!` / `put` / `delete`.
 
-`Context.Accessor` — типизированный доступ к ключу (пример: `Domain.Auth.CurrentUser` → `:current_user_id`).
+`Context.Accessor` — типизированный доступ к ключу (пример: `Domain.Auth.CurrentUser` →
+`:current_user_id`).
 
 Последний аргумент публичных usecase/repo-функций — `%Context{}`.
 
-App-код собирает context через `MyApp.ContextFactory`: `sc/0`, `as_user/1`, `anonymous/0`, `system/0` (в т.ч. фоновые воркеры — один раз в `init`), `empty/0`. `Context.new` — низкоуровнево / default в Core.
+App-код собирает context через `MyApp.ContextFactory`: `sc/0`, `as_user/1`, `anonymous/0`,
+`system/0` (в т.ч. фоновые воркеры — один раз в `init`), `empty/0`. `Context.new` — низкоуровнево /
+default в Core.
 
 ## Es.Event
 
@@ -284,7 +374,8 @@ App-код собирает context через `MyApp.ContextFactory`: `sc/0`, `
 
 Сгенерированные поля: `id`, `payload`, `aggregate_id`, `aggregate_version`, `at`, `by`.
 
-Wire-имя события (**единственный источник**) — в `<Aggregate>.Event.Codec` (`type/1`, `types/0`, `@tag_by_mod`).
+Wire-имя события (**единственный источник**) — в `<Aggregate>.Event.Codec` (`type/1`, `types/0`,
+`@tag_by_mod`).
 
 `payload:` — модуль `Payload` или `nil` (событие без нагрузки).
 
@@ -302,7 +393,9 @@ defmodule Created do
 end
 ```
 
-`use Es.Event` дополнительно генерирует интроспекцию (`__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`) — по ней `<Aggregate>.Event.Codec` выводит Prim агрегата и автора и обслуживает события без нагрузки сам.
+`use Es.Event` дополнительно генерирует интроспекцию (`__es_payload__/0`, `__es_aggregate_id__/0`,
+`__es_by__/0`) — по ней `<Aggregate>.Event.Codec` выводит Prim агрегата и автора и обслуживает
+события без нагрузки сам.
 
 Объединяющий модуль событий агрегата (`<Aggregate>.Event`) обязан предоставлять:
 
@@ -311,11 +404,18 @@ end
 | `name/1` | wire-type через `Event.Codec.type/1` |
 | `names/0` | множество через `Event.Codec.types/0` |
 
-Dump/load событий — только через фасад: `InCodec.dump(event)` (весь конверт) и `InCodec.load(<Aggregate>.Event, data)` — модуль событий агрегата объявлен семейством (`union:`), и конкретный тип кодек выбирает по тегу. `InCodec.load(Mod, data)` — когда тип известен. Обёрток на `<Aggregate>.Event` не заводить.
+Dump/load событий — только через фасад: `InCodec.dump(event)` (весь конверт) и
+`InCodec.load(<Aggregate>.Event, data)` — модуль событий агрегата объявлен семейством (`union:`), и
+конкретный тип кодек выбирает по тегу. `InCodec.load(Mod, data)` — когда тип известен. Обёрток на
+`<Aggregate>.Event` не заводить.
 
-Wire-тег события — SSOT; уникален он **внутри своего кодека** (дубль — `CompileError`). Квалифицировать его именем агрегата (`acceptance.created`, а не `created`) всё равно MUST: тег виден в брокере и в event store рядом с чужими. Кодек событий MUST быть в `Codec.plugins()` — иначе фасад не знает ни события, ни его семейства.
+Wire-тег события — SSOT; уникален он **внутри своего кодека** (дубль — `CompileError`).
+Квалифицировать его именем агрегата (`acceptance.created`, а не `created`) всё равно MUST: тег виден
+в брокере и в event store рядом с чужими. Кодек событий MUST быть в `Codec.plugins()` — иначе фасад
+не знает ни события, ни его семейства.
 
-Wire-формат события неизменяем: переименование тега или поля payload ломает чтение истории. Правила и golden-фикстуры — «Совместимость событий» в `14-events-outbox.md`.
+Wire-формат события неизменяем: переименование тега или поля payload ломает чтение истории. Правила
+и golden-фикстуры — «Совместимость событий» в `14-events-outbox.md`.
 
 Детали flush / outbox — `14-events-outbox.md`.
 
@@ -337,7 +437,8 @@ Repo-методы `page/4` возвращают `Pagination.Result`.
 
 ## Result / Option
 
-Combinators под CQS (`Result.and_then/2`, `Option.map/2` и т.п.). Использовать на границах (web → Prim, nullable FK → Prim).
+Combinators под CQS (`Result.and_then/2`, `Option.map/2` и т.п.). Использовать на границах (web →
+Prim, nullable FK → Prim).
 
 ## Связанные правила
 

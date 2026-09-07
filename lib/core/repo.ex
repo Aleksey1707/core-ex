@@ -90,7 +90,7 @@ defmodule Core.Repo do
 
   # `only:` разбирается по AST, а не через `bind_quoted`, поэтому `~w(get save)a` доезжает
   # сюда невычисленным вызовом макроса `sigil_w`. Список атомов — предписанная проектом
-  # форма записи (`.claude/rules/20-agreements.md`), так что разворачивать её обязан билдер.
+  # форма записи (`docs/rules/20-agreements.md`), так что разворачивать её обязан билдер.
   defp expand_only!(opts, env) do
     case Keyword.fetch(opts, :only) do
       {:ok, value} -> Keyword.put(opts, :only, Macro.expand(value, env))

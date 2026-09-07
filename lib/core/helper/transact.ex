@@ -27,7 +27,7 @@ defmodule Core.Helper.Transact do
 
   Вызывается на границах, которые ходят по сети (HTTP-клиенты интеграторов, publish в брокер).
   Внутри транзакции такой вызов удерживает соединение из пула на всё время сетевого запроса
-  и растягивает блокировки строк — см. `.claude/rules/10-architecture.md`.
+  и растягивает блокировки строк — см. `docs/rules/10-architecture.md`.
   """
   @spec warn_in_transaction(String.t()) :: :ok
 

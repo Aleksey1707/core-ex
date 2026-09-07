@@ -1,6 +1,9 @@
 # Тесты
 
-Плейсхолдеры: `MyApp`, `<Aggregate>` — см. `10-architecture.md`.
+- **Область.** `test/**` библиотеки; у потребителя — его case-модули, фикстуры и тесты.
+- **Читать перед.** Новым тестом или case-модулем; тестом кодека, репозитория, процесса, Enum или
+  события; правкой тестовой обвязки в `test/support`.
+- **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Case-модули
 
@@ -22,8 +25,8 @@
 в `on_exit`. Явный `async:` требует `Credo.Check.Refactor.PassAsyncInTestCases`.
 
 Фикстуры — доменные конструкторы (`<Aggregate>.new`, `test/support/prim_fixture.ex`), не Ecto
-fixtures. Репозитории тестируются через behaviour: `@repo Application.compile_env!(:core, Behaviour)`
-(в приложении-потребителе — под его `:my_app`).
+fixtures. Репозитории тестируются через behaviour:
+`@repo Application.compile_env!(:core, Behaviour)` (в приложении-потребителе — под его `:my_app`).
 При `shadow_copy?: true` контекст готовится как `Context.new() |> Repo.Sc.init()`.
 
 ## Codec: round-trip
@@ -154,8 +157,11 @@ end
 ## Процессы
 
 - `Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), pid)` для порождённых процессов.
-- Циклы OTP проверять синхронным `run_once/1`, а не `sleep`.
-- Подробности — `17-otp-concurrency.md`.
+- Циклы OTP проверять синхронным `run_once/1` (`Poller` / `Cleaner`), а не `sleep`
+  в ожидании таймера.
+- Тест, меняющий глобальный конфиг или именованный синглтон, — `async: false` с
+  восстановлением в `on_exit`.
+- Устройство самих процессов — `17-otp-concurrency.md`.
 
 ## Чувствительные данные
 
