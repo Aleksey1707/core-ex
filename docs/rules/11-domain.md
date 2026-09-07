@@ -362,7 +362,7 @@ InCodec.dump(step)
 `Context.Accessor` — типизированный доступ к ключу (пример: `Domain.Auth.CurrentUser` →
 `:current_user_id`).
 
-Последний аргумент публичных usecase/repo-функций — `%Context{}`.
+Позиция `%Context{}` в сигнатуре публичных usecase/repo-функций — `20-agreements.md`.
 
 App-код собирает context через `MyApp.ContextFactory`: `sc/0`, `as_user/1`, `anonymous/0`,
 `system/0` (в т.ч. фоновые воркеры — один раз в `init`), `empty/0`. `Context.new` — низкоуровнево /
