@@ -49,8 +49,13 @@ defmodule Core.Outbox.Repo do
   """
   @callback requeue_failed(:all | [Outbox.ID.t()], Context.t()) :: non_neg_integer()
 
-  @doc "Число записей по каждому статусу (отсутствующие статусы → 0)."
-  @callback counts_by_status() :: %{Outbox.Status.t() => non_neg_integer()}
+  @doc """
+  Число невыполненных записей по статусам `:new` / `:in_work` / `:failed`.
+
+  `:published` не входит: это архив, ждущий TTL, и единственный статус, растущий
+  неограниченно — точный счёт по нему стоит скана всей таблицы на каждый опрос метрик.
+  """
+  @callback queue_counts() :: %{Outbox.Status.t() => non_neg_integer()}
 
   @doc "Возраст самой старой записи статуса в секундах; `nil`, если записей нет."
   @callback oldest_age_seconds(Outbox.Status.t()) :: non_neg_integer() | nil

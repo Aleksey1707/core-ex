@@ -100,6 +100,73 @@ defmodule Core.Outbox.Repo.PgTest do
     assert Outbox.Attempts.value(reclaimed.attempts) == 2
   end
 
+  test "fetch_and_reserve сливает просроченный in_work и new в общем порядке", %{
+    context: context
+  } do
+    # Через границу месяца: термовое сравнение `%DateTime{}` идёт по ключам структуры
+    # в алфавитном порядке (`:day` раньше `:month`), поэтому 1 февраля оказалось бы
+    # «раньше» 31 января. Порядок обязан задавать `DateTime.compare/2`.
+    old = build_record("old", Outbox.CreatedAt.new!(~U[2026-01-31 23:59:00.000000Z]))
+    mid = build_record("mid", Outbox.CreatedAt.new!(~U[2026-02-01 00:00:00.000000Z]))
+    fresh = build_record("fresh", Outbox.CreatedAt.new!(~U[2026-02-01 00:01:00.000000Z]))
+
+    assert :ok = @repo.append([old, mid, fresh], context)
+
+    # `old` уже брали в работу, аренда протухла — он старше обоих `:new`
+    [reserved] =
+      @repo.fetch_and_reserve(
+        Outbox.BatchSize.new!(1),
+        Outbox.LockDuration.new!(30),
+        context
+      )
+
+    assert reserved.id == old.id
+    :ok = expire_lease(reserved)
+
+    batch =
+      @repo.fetch_and_reserve(
+        Outbox.BatchSize.new!(10),
+        Outbox.LockDuration.new!(30),
+        context
+      )
+
+    assert Enum.map(batch, &Outbox.Name.value(&1.name)) == ~w(old mid fresh)
+  end
+
+  test "fetch_and_reserve не отдаёт больше batch_size, когда обе ветки непусты", %{
+    context: context
+  } do
+    at = fn shift -> Outbox.CreatedAt.new!(DateTime.add(DateTime.utc_now(), shift, :second)) end
+
+    stale = Enum.map(1..3, fn i -> build_record("stale#{i}", at.(-100 + i)) end)
+    assert :ok = @repo.append(stale, context)
+
+    reserved =
+      @repo.fetch_and_reserve(
+        Outbox.BatchSize.new!(3),
+        Outbox.LockDuration.new!(30),
+        context
+      )
+
+    assert length(reserved) == 3
+    Enum.each(reserved, &expire_lease/1)
+
+    fresh = Enum.map(1..3, fn i -> build_record("fresh#{i}", at.(-10 + i)) end)
+    assert :ok = @repo.append(fresh, context)
+
+    # ветка `:new` и ветка просроченных `:in_work` отдают по `batch_size` записей каждая;
+    # слияние обязано отрезать пачку обратно до `batch_size`
+    batch =
+      @repo.fetch_and_reserve(
+        Outbox.BatchSize.new!(3),
+        Outbox.LockDuration.new!(30),
+        context
+      )
+
+    assert length(batch) == 3
+    assert Enum.map(batch, &Outbox.Name.value(&1.name)) == ~w(stale1 stale2 stale3)
+  end
+
   test "save_results published и failed", %{context: context} do
     record = build_record("pub")
     assert :ok = @repo.append([record], context)
@@ -111,9 +178,17 @@ defmodule Core.Outbox.Repo.PgTest do
         context
       )
 
+    assert row_of(reserved).lease_id != nil
+
     at = Outbox.UpdatedAt.now!()
     published = Record.mark_published(reserved, Outbox.PublishedAt.now!(), at)
     assert :ok = @repo.save_results([published], context)
+
+    # запись результата снимает аренду — иначе строка осталась бы с чужим токеном
+    published_row = row_of(record)
+    assert published_row.status == :published
+    assert published_row.lease_id == nil
+    assert published_row.locked_until == nil
 
     assert [] ==
              @repo.fetch_and_reserve(
@@ -144,6 +219,10 @@ defmodule Core.Outbox.Repo.PgTest do
 
     assert failed.status == :failed
     assert :ok = @repo.save_results([failed], context)
+
+    failed_row = row_of(failed_src)
+    assert failed_row.status == :failed
+    assert failed_row.lease_id == nil
 
     assert [] ==
              @repo.fetch_and_reserve(
@@ -487,11 +566,75 @@ defmodule Core.Outbox.Repo.PgTest do
 
       assert @repo.requeue_failed(:all, context) == 0
     end
+
+    test "снимает аренду и очищает историю ошибок", %{context: context} do
+      failed = fail_record("f1", context)
+
+      # `fail_poisoned/2` помечает строку `:failed` мимо кодека и аренду не снимает —
+      # именно такая строка доживает до requeue с непустым `lease_id`.
+      {1, _} =
+        from(r in Schema, where: r.id == ^dump_id(failed))
+        |> TestRepo.update_all(set: [lease_id: Ecto.UUID.generate()])
+
+      row = row_of(failed)
+      assert row.lease_id != nil
+      assert [%{"attempt" => 1}] = row.errors
+
+      assert @repo.requeue_failed(:all, context) == 1
+
+      row = row_of(failed)
+      assert row.status == :new
+      assert row.attempts == 0
+      assert row.lease_id == nil
+      assert row.locked_until == nil
+      assert row.errors == []
+    end
+  end
+
+  test "fetch_and_reserve меняет только lifecycle-поля", %{context: context} do
+    {:ok, record} =
+      Record.new(
+        Outbox.Topic.new!("products"),
+        Outbox.Key.new!("agg-1"),
+        Outbox.Name.new!("created"),
+        %{"n" => "created", "nested" => %{"a" => [1, 2, 3]}},
+        %{"name" => "created", "aggr_id" => "agg-1"}
+      )
+
+    assert :ok = @repo.append([record], context)
+    before = row_of(record)
+
+    [reserved] =
+      @repo.fetch_and_reserve(
+        Outbox.BatchSize.new!(10),
+        Outbox.LockDuration.new!(30),
+        context
+      )
+
+    after_reserve = row_of(record)
+
+    assert after_reserve.payload == before.payload
+    assert after_reserve.headers == before.headers
+    assert after_reserve.topic == before.topic
+    assert after_reserve.key == before.key
+    assert after_reserve.name == before.name
+    assert after_reserve.created_at == before.created_at
+    assert after_reserve.errors == before.errors
+
+    assert after_reserve.status == :in_work
+    assert after_reserve.attempts == before.attempts + 1
+    assert after_reserve.lease_id != nil
+    assert after_reserve.locked_until != nil
+    assert Outbox.Attempts.value(reserved.attempts) == after_reserve.attempts
   end
 
   # ---
 
   defp dump_id(%Record{id: id}), do: Outbox.ID.format(id, :full)
+
+  defp row_of(%Record{} = record) do
+    TestRepo.one(from(r in Schema, where: r.id == ^dump_id(record)))
+  end
 
   defp status_of(%Outbox.ID{} = id) do
     TestRepo.one(from(r in Schema, where: r.id == ^Outbox.ID.format(id, :full), select: r.status))

@@ -23,6 +23,81 @@ defmodule Core.Outbox do
     Enum.any?(topics, fn topic -> topic not in listed end)
   end
 
+  @doc """
+  Проверить, что фильтры топиков поллеров не пересекаются.
+
+  Порядок доставки держится на одном поллере на топик-группу
+  (`14-events-outbox.md`). `FOR UPDATE SKIP LOCKED` защищает от дублей, но не от
+  перестановки: два поллера с пересекающимися фильтрами разложат общий топик в брокер
+  вперемешку — молча, без единой ошибки. Отказ старта при `DNS_CLUSTER_QUERY` ловит ту же
+  ошибку между нодами; эта проверка — внутри одной.
+
+  Звать из `start/2` приложения-потребителя рядом с `check_singleton!/0`, передавая
+  конфигурацию `:pollers` как есть.
+
+      Core.Outbox.validate_partition!(
+        Application.get_env(:core, Core.Outbox, [])[:pollers] || []
+      )
+
+  Раскладка на один поллер (`pollers` не задан) проверки не требует.
+  """
+  @spec validate_partition!([keyword()]) :: :ok
+
+  def validate_partition!(pollers) when is_list(pollers) do
+    pollers
+    |> Enum.map(&{Keyword.fetch!(&1, :name), Keyword.fetch!(&1, :topics)})
+    |> overlapping_pair()
+    |> case do
+      nil -> :ok
+      {a, b} -> raise ArgumentError, partition_error(a, b)
+    end
+  end
+
+  @doc """
+  Пересекаются ли два фильтра топиков.
+
+  Множество топиков открыто, поэтому два `{:except, _}` пересекаются всегда: их общий
+  остаток непуст при любых конечных списках исключений.
+  """
+  @spec topics_overlap?(topics_filter(), topics_filter()) :: boolean()
+
+  def topics_overlap?(:all, other), do: not empty_filter?(other)
+
+  def topics_overlap?(other, :all), do: not empty_filter?(other)
+
+  def topics_overlap?({:only, a}, {:only, b}), do: Enum.any?(a, &(&1 in b))
+
+  def topics_overlap?({:only, a}, {:except, b}), do: Enum.any?(a, &(&1 not in b))
+
+  def topics_overlap?({:except, b}, {:only, a}), do: Enum.any?(a, &(&1 not in b))
+
+  def topics_overlap?({:except, _}, {:except, _}), do: true
+
+  # ---
+
+  defp overlapping_pair(targets) do
+    targets
+    |> pairs()
+    |> Enum.find(fn {{_, a}, {_, b}} -> topics_overlap?(a, b) end)
+  end
+
+  defp pairs([]), do: []
+
+  defp pairs([head | tail]) do
+    Enum.map(tail, &{head, &1}) ++ pairs(tail)
+  end
+
+  defp empty_filter?({:only, []}), do: true
+
+  defp empty_filter?(_filter), do: false
+
+  defp partition_error({a_name, a_topics}, {b_name, b_topics}) do
+    "Core.Outbox: фильтры топиков поллеров пересекаются, порядок доставки не гарантирован: " <>
+      "#{inspect(a_name)} #{inspect(a_topics)} и #{inspect(b_name)} #{inspect(b_topics)}. " <>
+      "Разведите топики по поллерам через {:only, [...]} без общих элементов " <>
+      "(docs/rules/14-events-outbox.md, «Единственность поллера»)"
+  end
+
   defmodule Status do
     @moduledoc """
     Статус записи outbox.
@@ -178,7 +253,8 @@ defmodule Core.Outbox do
     """
 
     use Core.Prim.DateTime,
-      name: first_line(@moduledoc)
+      name: first_line(@moduledoc),
+      precision: :microsecond
   end
 
   defmodule PublishedAt do

@@ -24,6 +24,21 @@ defmodule Core.Outbox.PollerTest do
       do: exit({:noproc, {GenServer, :call, [:writer, :put_many]}})
   end
 
+  defmodule BadIndexWriter do
+    @moduledoc false
+
+    alias Core.Error
+
+    require Error
+
+    def put(writer, message), do: put_many(writer, [message])
+
+    def put_many(_writer, messages) when is_list(messages) do
+      {:error, length(messages),
+       Error.app(__MODULE__, code: :bad_index, ns: :mq, message: "индекс вне пачки")}
+    end
+  end
+
   defmodule SlowWriter do
     @moduledoc false
 
@@ -69,6 +84,7 @@ defmodule Core.Outbox.PollerTest do
     child_opts =
       [
         repo: @repo,
+        delivery_module: Delivery.Mq,
         delivery: delivery,
         poll_interval_ms: poll_interval_ms,
         idle_min_ms: idle_min_ms,
@@ -155,7 +171,7 @@ defmodule Core.Outbox.PollerTest do
 
     log =
       capture_log(fn ->
-        assert :processed = Poller.run_once(poller)
+        assert :retry = Poller.run_once(poller)
       end)
 
     assert status_of(record.id) == :new
@@ -166,13 +182,13 @@ defmodule Core.Outbox.PollerTest do
                     %{outcome: :retry, topic: "products"}}
 
     assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :processed}}
+                    %{result: :retry}}
 
     assert measurements.retry == 1
 
     _ =
       capture_log(fn ->
-        assert :processed = Poller.run_once(poller)
+        assert :retry = Poller.run_once(poller)
       end)
 
     assert status_of(record.id) == :new
@@ -185,7 +201,7 @@ defmodule Core.Outbox.PollerTest do
 
     log =
       capture_module_logs(Poller, :debug, fn ->
-        assert :processed = Poller.run_once(poller)
+        assert :retry = Poller.run_once(poller)
       end)
 
     assert status_of(record.id) == :failed
@@ -196,9 +212,44 @@ defmodule Core.Outbox.PollerTest do
                     %{outcome: :failed, topic: "products"}}
 
     assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :processed}}
+                    %{result: :retry}}
 
     assert measurements.failed == 1
+  end
+
+  test "delivery вернул индекс вне пачки: ничего не помечено published", %{context: context} do
+    r1 = append_record(context, "a")
+    r2 = append_record(context, "b")
+
+    delivery = Delivery.Mq.new(BadIndexWriter, :unused)
+    poller = start_poller(delivery, max_attempts: 3)
+
+    log =
+      capture_log(fn ->
+        assert :retry = Poller.run_once(poller)
+      end)
+
+    assert log =~ "delivery вернул индекс вне пачки"
+    assert log =~ "index=2 size=2"
+    assert status_of(r1.id) == :new
+    assert status_of(r2.id) == :new
+  end
+
+  test "провал доставки уводит следующий цикл в backoff", %{context: context} do
+    _record = append_record(context, "backoff")
+    delivery = Delivery.Mq.new(MqFake.Writer, MqFake.Writer.new(fail_at: 0))
+
+    capture_log(fn ->
+      _poller =
+        start_poller(delivery, max_attempts: 10, idle_min_ms: 60, poll_interval_ms: 60_000)
+
+      assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], _, %{result: :retry}}, 1000
+
+      # без backoff следующий цикл шёл бы через `schedule(0)` — сразу
+      refute_receive {:telemetry, [:core, :outbox, :poller, :cycle], _, _}, 30
+
+      assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], _, %{result: :retry}}, 1000
+    end)
   end
 
   test "пустой outbox → idle", %{writer: writer} do
@@ -266,7 +317,7 @@ defmodule Core.Outbox.PollerTest do
 
     _ =
       capture_log(fn ->
-        assert :processed = Poller.run_once(poller)
+        assert :retry = Poller.run_once(poller)
       end)
 
     assert status_of(r1.id) == :published
@@ -277,7 +328,7 @@ defmodule Core.Outbox.PollerTest do
     assert msg1.body == Jason.encode!(%{"n" => "ok1"})
 
     assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :processed}}
+                    %{result: :retry}}
 
     assert measurements.published == 1
     assert measurements.retry == 2

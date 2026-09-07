@@ -41,14 +41,22 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | Нужен адаптер | Объявите у себя | Появятся модули |
 |---|---|---|
 | RabbitMQ Stream | `{:rabbitmq_stream, "~> 0.4.2"}` | `Core.Mq.Stream.Connection`, `Core.Mq.Stream.Reader` |
-| Kafka | `{:klife, "~> 1.2"}` | `Core.Mq.Kafka.Writer` |
+| Kafka | `{:klife, "~> 1.2"}` | `Core.Mq.Kafka.Writer` (только публикация) |
 | ни одного | — | остальное работает как обычно |
 
 Всё, что не зависит от конкретного клиента, компилируется всегда: `Core.Mq.Writer` /
-`Core.Mq.Reader` (behaviour), `Core.Mq.Stream.Writer` (получает connection-модуль в `opts`),
-`Core.Mq.Stream.Credentials`, `Core.Mq.Codec`, `Core.Outbox.Delivery.Mq`, `Core.PubSub.*`,
-`Core.Mq.PromEx`. Свой адаптер под другой брокер подключается реализацией behaviour —
-менять библиотеку для этого не нужно.
+`Core.Mq.ReaderReliable` (behaviour), `Core.Mq.Stream.Writer` (получает connection-модуль
+в `opts`), `Core.Mq.Stream.Credentials`, `Core.Mq.Stream.Codec`, `Core.Outbox.Delivery.Mq`,
+`Core.PubSub.*`, `Core.Mq.PromEx`. Свой адаптер под другой брокер подключается реализацией
+behaviour — менять библиотеку для этого не нужно.
+
+Контракты задают порядок и обработку ошибок, но **не** представление на проводе: оно —
+свойство адаптера (`Core.Mq.Stream.Codec` заворачивает сообщение в JSON с base64-телом,
+`Core.Mq.Kafka.Writer` пишет нативно). Потребители одного топика обязаны читать тем же
+адаптером, каким он написан; подробности — `docs/rules/10-architecture.md`.
+
+Читателя для Kafka в библиотеке нет: `Core.PubSub.MqSubscriberReliable` и путь DLQ
+работают только поверх RabbitMQ Stream (`docs/rules/DEBT.md`).
 
 Модули адаптеров объявлены под `if Code.ensure_loaded?/1`: без клиента их просто нет,
 и обращение к ним даёт `UndefinedFunctionError`, а не ошибку компиляции библиотеки.
@@ -124,12 +132,20 @@ def start(_type, _args) do
   # опционально — только если приложение действительно поднимает адаптер:
   Core.Mq.Stream.ensure_available!()
   Core.Mq.Kafka.ensure_available!()
+  # обязательно, если поллеров несколько (конфиг `pollers`):
+  Core.Outbox.validate_partition!(
+    Application.get_env(:core, Core.Outbox, [])[:pollers] || []
+  )
   ...
 end
 ```
 
 `validate!/0` проверяет, что обязательные ключи заданы, `dao` и `codec` загружаются
 и экспортируют нужные функции, а `tz` известен базе часовых поясов.
+
+`Core.Outbox.validate_partition!/1` отказывает в старте, если фильтры топиков двух
+поллеров пересекаются: `FOR UPDATE SKIP LOCKED` защищает от дублей, но не от перестановки,
+и общий топик у двух поллеров ломает порядок доставки молча.
 
 `Core.Mq.Stream.ensure_available!/0` / `Core.Mq.Kafka.ensure_available!/0` — опциональные
 проверки для тех, кто использует соответствующий адаптер. Различают два случая и дают
@@ -167,6 +183,10 @@ end
    спецификация: колонки и состав индексов обязаны совпадать, имена индексов — нет.
    Таблицы событий агрегатов создаёт потребитель (`table:` у `Core.Es.Event.Repo.Pg.Schema`).
 
+   Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
+   `:failed` в очередь (runbook в `docs/rules/14-events-outbox.md`). Задача поднимает
+   приложение потребителя и берёт репозиторий из `config :core, Core.Outbox.Repo`.
+
 5. **DI-ключи под своим `otp_app`** — реализации доменных behaviour:
 
    ```elixir
@@ -177,6 +197,20 @@ end
 6. **Supervision.** Библиотека не имеет своего OTP-приложения: `Core.Outbox.Poller`,
    `Core.Outbox.Cleaner`, `Core.Mq.Stream.Connection`, `Core.PubSub.MqSubscriberReliable`
    поднимает supervisor потребителя. Пример старта — `test/test_helper.exs`.
+
+   Модуль доставки поллер берёт из опций, а не выводит из handle:
+
+   ```elixir
+   {Core.Outbox.Poller,
+    repo: Core.Outbox.Repo.Pg,
+    delivery_module: Core.Outbox.Delivery.Mq,
+    delivery: Core.Outbox.Delivery.Mq.new(Core.Mq.Stream.Writer, MyApp.Outbox.Writer),
+    poll_interval_ms: 1_000,
+    idle_min_ms: 50,
+    batch_size: Core.Outbox.BatchSize.new!(100),
+    lock_duration: Core.Outbox.LockDuration.new!(60),
+    max_attempts: Core.Outbox.Attempts.new!(10)}
+   ```
 
 7. **Регистрация PromEx-плагинов** в модуле `use PromEx`:
 
@@ -197,6 +231,23 @@ end
 События Core называются `telemetry_prefix ++ suffix`. По умолчанию префикс — `[otp_app()]`,
 то есть `[:my_app, :outbox, :poller, :cycle]`. Если приложение переезжает на библиотеку
 с уже работающими дашбордами, задайте `telemetry_prefix` явно и сверьтесь с ними.
+
+У `[:outbox, :poller, :cycle]` метка `result` принимает значения `:processed` / `:retry` /
+`:idle` / `:error`. `:retry` — цикл дошёл до конца, но хоть одна запись пачки не
+опубликована. Дашборд, считающий пропускную способность как `result="processed"`, частично
+опубликованные пачки не увидит — суммируйте по `:processed` и `:retry`, а долю неудач
+берите из `outbox_poller_retry_total` / `outbox_poller_failed_total`.
+
+Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_work` и `:failed`.
+`:published` не считается намеренно: это архив, ждущий TTL, единственный статус, растущий
+неограниченно, и точный счёт по нему стоит скана всей таблицы на каждый опрос метрик
+(замер на 400k строк: 28–40 мс против 0,14 мс по трём частичным индексам). Про запас
+опубликованных говорят `outbox_cleaner_deleted_total` и размер таблицы.
+
+Измерения `retry` и `failed` считаются по **записям пачки**, а не по повторам доставки:
+при fail-stop весь хвост после сбойной записи возвращается в очередь и попадает в `retry`
+(батч из 100 с ошибкой на первой записи даёт `retry = 100`). Это «не опубликовано в этом
+цикле», а не «столько раз повторяли».
 
 ## Трассировка
 

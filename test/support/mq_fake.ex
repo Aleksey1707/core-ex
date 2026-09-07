@@ -3,7 +3,7 @@ defmodule Core.MqFake do
   Тестовые дублёры MQ: writer, копящий опубликованное, и reliable-reader поверх очереди.
 
   Заменяют прежний in-memory брокер: он жил в `lib/`, но использовался только тестами
-  и расходился с реальным адаптером (`put_many` всегда `:ok`, обход `Mq.Codec`).
+  и расходился с реальным адаптером (`put_many` всегда `:ok`, обход `Mq.Stream.Codec`).
   Дублёры держат контракт `Mq.Writer` / `Mq.ReaderReliable` буквально, включая
   stop-on-first-error с индексом.
   """

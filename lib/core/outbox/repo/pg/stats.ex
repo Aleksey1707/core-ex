@@ -10,16 +10,21 @@ defmodule Core.Outbox.Repo.Pg.Stats do
   alias Core.Outbox
   alias Core.Outbox.Repo.Pg.Schema
 
-  @doc "Число записей по каждому статусу (отсутствующие статусы → 0)."
-  @spec counts_by_status() :: %{Outbox.Status.t() => non_neg_integer()}
+  @queue_statuses ~w(new in_work failed)a
 
-  def counts_by_status do
-    rows =
-      from(r in Schema, group_by: r.status, select: {r.status, count(r.id)})
-      |> Config.dao().all()
-      |> Map.new()
+  @doc """
+  Число невыполненных записей по статусам `:new` / `:in_work` / `:failed`.
 
-    Map.new(Outbox.Status.values(), fn status -> {status, Map.get(rows, status, 0)} end)
+  `:published` не считается намеренно: это архив, ждущий TTL, и он единственный растёт
+  неограниченно. `GROUP BY status` по всей таблице — seq scan на каждый опрос метрик
+  (замер на 400k строк: 28–40 мс), тогда как счёт по трём частичным индексам —
+  Index Only Scan (0,14 мс на здоровой очереди, 23 мс на забитой). Про запас
+  опубликованных говорят метрики `Cleaner` и размер таблицы.
+  """
+  @spec queue_counts() :: %{Outbox.Status.t() => non_neg_integer()}
+
+  def queue_counts do
+    Map.new(@queue_statuses, fn status -> {status, count_status(status)} end)
   end
 
   @doc "Возраст самой старой записи статуса в секундах; `nil` если записей нет."
@@ -49,6 +54,13 @@ defmodule Core.Outbox.Repo.Pg.Stats do
       where: r.status == :in_work and r.locked_until <= ^now,
       select: count(r.id)
     )
+    |> Config.dao().one()
+  end
+
+  # ---
+
+  defp count_status(status) do
+    from(r in Schema, where: r.status == ^status, select: count(r.id))
     |> Config.dao().one()
   end
 end

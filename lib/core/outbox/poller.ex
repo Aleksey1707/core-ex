@@ -5,12 +5,13 @@ defmodule Core.Outbox.Poller do
   Один sequential publisher: порядок в брокере = `order_by: created_at` reserve.
   При ошибке в середине батча — fail-stop (хвост `release` без attempts).
 
-  После `:processed` — drain (`schedule(0)`). При idle/error — adaptive backoff
-  от `idle_min_ms` до `poll_interval_ms`. `wake/1` будит цикл досрочно
-  (после commit `append`); входящие `:wake` coalesce'ятся (`flush_wakes/0`).
+  После `:processed` — drain (`schedule(0)`). При `:retry` (хоть одна запись пачки не
+  опубликована), idle или ошибке цикла — adaptive backoff от `idle_min_ms` до
+  `poll_interval_ms`. `wake/1` будит цикл досрочно (после commit `append`); входящие
+  `:wake` coalesce'ятся (`flush_wakes/0`).
 
-  Обязательные opts: `:repo`, `:delivery`, `:poll_interval_ms`, `:idle_min_ms`,
-  `:batch_size`, `:lock_duration`, `:max_attempts`.
+  Обязательные opts: `:repo`, `:delivery_module`, `:delivery`, `:poll_interval_ms`,
+  `:idle_min_ms`, `:batch_size`, `:lock_duration`, `:max_attempts`.
   Опционально: `:topics` (`Outbox.topics_filter()`, default `:all`),
   `:context_factory` (`()-> Context.t()`, вызывается один раз в `init`,
   default `Context.new/0`), `:name`.
@@ -33,6 +34,7 @@ defmodule Core.Outbox.Poller do
 
   defstruct [
     :repo,
+    :delivery_module,
     :delivery,
     :context,
     :poll_interval_ms,
@@ -45,8 +47,17 @@ defmodule Core.Outbox.Poller do
     :topics
   ]
 
+  @typedoc """
+  Исход одного цикла опроса.
+
+  `:retry` — пачка обработана, но хоть одна запись не опубликована: следующий цикл
+  идёт через backoff, иначе провалившаяся голова очереди повторяется без паузы.
+  """
+  @type cycle_result :: :processed | :retry | :idle | {:error, Error.t()}
+
   @type t :: %__MODULE__{
           repo: module(),
+          delivery_module: module(),
           delivery: Delivery.t(),
           context: Context.t(),
           poll_interval_ms: pos_integer(),
@@ -109,7 +120,7 @@ defmodule Core.Outbox.Poller do
   end
 
   @doc "Выполнить один цикл (для тестов)."
-  @spec run_once(GenServer.server()) :: :processed | :idle | {:error, Error.t()}
+  @spec run_once(GenServer.server()) :: cycle_result()
 
   def run_once(server) do
     GenServer.call(server, :run_once, 60_000)
@@ -126,6 +137,7 @@ defmodule Core.Outbox.Poller do
 
     state = %__MODULE__{
       repo: Keyword.fetch!(opts, :repo),
+      delivery_module: Keyword.fetch!(opts, :delivery_module),
       delivery: Keyword.fetch!(opts, :delivery),
       context: Keyword.get(opts, :context_factory, &Context.new/0).(),
       poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
@@ -157,14 +169,11 @@ defmodule Core.Outbox.Poller do
     {:noreply, reschedule_after(state, result)}
   end
 
+  # Backoff сбрасывает `reschedule_after/2` по исходу цикла, а не сам факт `wake`:
+  # при недоступном брокере непрерывный `append` иначе держал бы интервал на `idle_min_ms`.
   def handle_info(:wake, state) do
     _ = flush_wakes()
-
-    state =
-      state
-      |> cancel_timer()
-      |> Map.put(:idle_ms, state.idle_min_ms)
-
+    state = cancel_timer(state)
     result = process(state)
     {:noreply, reschedule_after(state, result)}
   end
@@ -256,13 +265,21 @@ defmodule Core.Outbox.Poller do
   defp deliver_and_save(records, %__MODULE__{context: context} = state, start) do
     at = Outbox.UpdatedAt.now!()
     published_at = Outbox.PublishedAt.now!()
-    results = deliver_batch(records, state.delivery, state.max_attempts, published_at, at)
+    results = deliver_batch(records, state, published_at, at)
     {published, retry, failed} = outcome_counts(results)
     log_batch_summary(length(results), published, retry, failed)
     :ok = state.repo.save_results(results, context)
-    emit_poller_cycle(start, :processed, length(results), published, retry, failed)
-    :processed
+    outcome = cycle_outcome(retry, failed)
+    emit_poller_cycle(start, outcome, length(results), published, retry, failed)
+    outcome
   end
+
+  # Непроуспевшая запись возвращается в `:new` и по `order_by: created_at` попадает в
+  # следующую же пачку. Без отдельного исхода цикл планировался бы как `:processed` —
+  # `schedule(0)`, и недоступный брокер сжигал бы `max_attempts` за миллисекунды.
+  defp cycle_outcome(0, 0), do: :processed
+
+  defp cycle_outcome(_retry, _failed), do: :retry
 
   defp release_reserved(records, %__MODULE__{context: context} = state) do
     state.repo.release(records, context)
@@ -279,33 +296,44 @@ defmodule Core.Outbox.Poller do
       :ok
   end
 
-  defp deliver_batch(records, delivery, max_attempts, published_at, at) do
-    delivery_mod = delivery.__struct__
-
-    case delivery_mod.publish_many(delivery, records) do
+  defp deliver_batch(records, %__MODULE__{} = state, published_at, at) do
+    case state.delivery_module.publish_many(state.delivery, records) do
       :ok ->
         Enum.map(records, &mark_published_one(&1, published_at, at))
 
-      {:error, index, %Error{} = error} when is_integer(index) and index >= 0 ->
-        apply_fail_stop(records, index, error, max_attempts, published_at, at)
+      {:error, index, %Error{} = error}
+      when is_integer(index) and index >= 0 and index < length(records) ->
+        apply_fail_stop(records, index, error, state.max_attempts, published_at, at)
+
+      {:error, index, %Error{} = error} ->
+        log_bad_index(state.delivery_module, index, length(records), error)
+        apply_fail_stop(records, 0, error, state.max_attempts, published_at, at)
     end
   end
 
+  # `Delivery` и стоящий за ним `Mq.Writer` — точка расширения потребителя (README):
+  # чужая реализация может вернуть индекс вне пачки. Досчитать такую пачку до конца
+  # нельзя — записи ушли бы в `published`, не побывав в брокере, без строки в логе.
+  # Трактуем как провал с нулевого индекса: опубликованным не считается ничего.
+  defp log_bad_index(module, index, size, %Error{} = error) do
+    Logger.error(
+      "Outbox: delivery вернул индекс вне пачки, пачка считается непроуспевшей: " <>
+        "delivery=#{inspect(module)} index=#{inspect(index)} size=#{size} " <>
+        "ошибка=#{error.message}"
+    )
+  end
+
+  # `index` в границах пачки гарантирует вызывающий, пачка непуста (`run_cycle/2`):
+  # промах match'а уйдёт в общий rescue цикла — с backoff и снятием аренды.
   defp apply_fail_stop(records, index, error, max_attempts, published_at, at) do
-    {before, rest} = Enum.split(records, index)
+    {before, [failed | tail]} = Enum.split(records, index)
 
-    case rest do
-      [failed | tail] ->
-        published = Enum.map(before, &mark_published_one(&1, published_at, at))
-        failed_rec = record_delivery_failure(failed, error, max_attempts, at)
-        log_delivery_failure(failed_rec, error, max_attempts)
-        emit_delivery(failed_rec)
-        released = Enum.map(tail, &Record.release(&1, at))
-        published ++ [failed_rec | released]
-
-      [] ->
-        Enum.map(before, &mark_published_one(&1, published_at, at))
-    end
+    published = Enum.map(before, &mark_published_one(&1, published_at, at))
+    failed_rec = record_delivery_failure(failed, error, max_attempts, at)
+    log_delivery_failure(failed_rec, error, max_attempts)
+    emit_delivery(failed_rec)
+    released = Enum.map(tail, &Record.release(&1, at))
+    published ++ [failed_rec | released]
   end
 
   defp mark_published_one(record, published_at, at) do
@@ -404,6 +432,11 @@ defmodule Core.Outbox.Poller do
     had_wake = flush_wakes()
 
     case {result, had_wake} do
+      # Провал доставки уводит в backoff и при пришедшем `:wake`: новые записи не делают
+      # публикуемой ту голову очереди, на которой цикл только что споткнулся.
+      {:retry, _} ->
+        schedule_backoff(state)
+
       {:processed, _} ->
         schedule(%{state | idle_ms: state.idle_min_ms}, 0)
 

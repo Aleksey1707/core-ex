@@ -4,6 +4,11 @@ defmodule Core.Mq.Kafka do
 
   Клиент `:klife` объявлен в библиотеке `optional: true` (`10-architecture.md`):
   `Kafka.Writer` компилируется только у потребителей, добавивших его в свои `deps`.
+
+  Адаптер — **только на запись**: реализации `Mq.ReaderReliable` для Kafka нет, поэтому
+  `Core.PubSub.MqSubscriberReliable` и путь DLQ работают только поверх RabbitMQ Stream.
+  Outbox публиковать в Kafka может, читать опубликованное средствами библиотеки — нет
+  (`DEBT.md`).
   """
 
   @doc """

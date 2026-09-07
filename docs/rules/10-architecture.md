@@ -86,8 +86,8 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 ## Адаптеры и абстракции
 
-Адаптеры брокеров (`Mq.Writer` / `Mq.Reader`: `Mq.Stream.*`, `Mq.Kafka.Writer`) живут
-в библиотеке — конкретный клиент/коннекшн приходит им аргументом или через `opts`.
+Адаптеры брокеров (`Mq.Writer` / `Mq.ReaderReliable`: `Mq.Stream.*`, `Mq.Kafka.Writer`)
+живут в библиотеке — конкретный клиент/коннекшн приходит им аргументом или через `opts`.
 
 Клиентские библиотеки объявлены `optional: true`, а модули, которым нужен клиент
 на этапе компиляции (`use RabbitMQStream.Connection`, структуры `%OsirisChunk{}`,
@@ -98,7 +98,7 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   (`Mq.Stream.Writer` работает с любым connection-модулем и компилируется всегда);
 - ссылки на условные модули из безусловных (`Mq.PromEx` → `Mq.Stream.Reader`)
   MUST попадать в `elixirc_options: [no_warn_undefined: [...]]` в `mix.exs`;
-- новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.Reader` —
+- новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.ReaderReliable` —
   как в библиотеке, так и на стороне потребителя;
 - у адаптера MUST быть `ensure_available!/0` (образец — `Core.Mq.Stream`): отличает
   «клиента нет в deps» от «клиент есть, но `core` собран без него»;
@@ -108,6 +108,26 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 Проверяется: `make compile-no-optional` (`mix compile --no-optional-deps
 --warnings-as-errors`, часть `make`).
+
+### Wire-формат принадлежит адаптеру
+
+`Mq.Message` — внутренняя модель, а не контракт провода: `Mq.Writer` / `Mq.ReaderReliable`
+задают порядок публикации и обработку ошибок, но не то, во что сообщение превращается
+на проводе.
+
+- представление MAY различаться между адаптерами (`Mq.Stream.Codec` — JSON с base64-телом,
+  `Mq.Kafka.Writer` — нативно);
+- адаптер MUST документировать своё представление в `@moduledoc` и держать кодек в
+  собственном пространстве имён (`Mq.Stream.Codec`, а не `Mq.Codec`): общее имя врёт о том,
+  что формат один на всех;
+- продюсер и потребитель одного топика MUST использовать один адаптер;
+- адаптер MUST отбрасывать то, чью позицию в потоке он не может назвать, а не отдавать
+  наверх с догадкой (чанк с sub-entry batching в `Mq.Stream.Reader` — `error` и
+  `decode_drop` на весь чанк);
+- unified wire-формат между брокерами — отдельная задача с dual-read на переходный период,
+  а не побочный эффект правки адаптера.
+
+Почему формат не унифицирован и чем платим — ADR-0004.
 
 Сконфигурированные клиенты с compile-time привязкой к OTP-приложению
 (например, Kafka `use Klife.Client, otp_app: :my_app`), их supervision, runtime-тумблеры

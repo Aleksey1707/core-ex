@@ -34,8 +34,8 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     alias Core.Error
     alias Core.Mq
-    alias Core.Mq.Codec
     alias Core.Mq.Message
+    alias Core.Mq.Stream.Codec
     alias Core.Telemetry
     alias RabbitMQStream.Message.Types.DeliverData
     alias RabbitMQStream.OsirisChunk
@@ -222,7 +222,11 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       {:noreply, subscribe(state)}
     end
 
-    def handle_info({:deliver, %DeliverData{osiris_chunk: %OsirisChunk{} = chunk}}, state) do
+    def handle_info(
+          {:deliver,
+           %DeliverData{osiris_chunk: %OsirisChunk{num_records: n, num_entries: n} = chunk}},
+          state
+        ) do
       topic = Mq.Topic.value(state.topic)
 
       :telemetry.execute(
@@ -241,6 +245,27 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
         end)
 
       {:noreply, register_chunk(state, length(entries))}
+    end
+
+    # Offset записи считается как `chunk_id + idx`, и это верно, только пока entry несёт
+    # ровно одну запись. При sub-entry batching (`num_records > num_entries`) клиент entry
+    # не распаковывает, и `store_offset` коммитил бы чужой offset. Такой чанк дропается
+    # целиком: молча разъехавшийся курсор хуже потерянных сообщений.
+    def handle_info({:deliver, %DeliverData{osiris_chunk: %OsirisChunk{} = chunk}}, state) do
+      topic = Mq.Topic.value(state.topic)
+
+      Logger.error(
+        "stream reader: чанк с sub-entry batching пропущен, offset'ы не восстановимы: " <>
+          "topic=#{topic} num_entries=#{chunk.num_entries} num_records=#{chunk.num_records}"
+      )
+
+      :telemetry.execute(
+        Telemetry.event([:mq, :stream, :decode_drop]),
+        %{count: chunk.num_records},
+        %{topic: topic}
+      )
+
+      {:noreply, register_chunk(state, 0)}
     end
 
     # `subscription_id` действителен только в рамках выдавшего его соединения: без этой
