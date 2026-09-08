@@ -23,6 +23,11 @@ defmodule Core.Codec do
   Prim функцией `coerce/2`, после чего дампится обычным `dump/1`: отдельного raw-пути,
   который мог бы разойтись с Prim-путём, у профиля нет. Обёртка для потребителей —
   `Core.Codec.Helper.dump_raw/3`.
+
+  Переопределение `dump/1` / `dump_kind/2` для plain-kind (`:string`, `:integer`) MUST быть
+  идемпотентным: на read-пути оно применяется к значению, уже прошедшему dump профиля
+  записи, а нормализовать его нечем. У форматируемых kind эту роль играет `cast` в
+  `coerce/2` — там значение возвращается к каноническому виду до dump.
   """
 
   alias Core.Config
@@ -44,6 +49,10 @@ defmodule Core.Codec do
 
   @default_fmts %{date: :date}
 
+  @formattable_kinds Enum.sort(Map.keys(@allowed_fmts))
+  @plain_kinds ~w(integer string)a
+  @coercible_kinds @formattable_kinds ++ @plain_kinds
+
   @callback dump(struct()) :: term()
   @callback dump_kind(struct(), atom()) :: term()
   @callback load(module(), term()) :: {:ok, term()} | {:error, Error.t()}
@@ -52,114 +61,7 @@ defmodule Core.Codec do
 
   @optional_callbacks dump_kind: 2, load_kind: 3
 
-  @doc "Достать value из Prim-struct."
-  @spec value(%{__struct__: module(), value: term()}) :: term()
-
-  def value(%_{value: value}), do: value
-
-  @doc false
-  @spec validate_profile_opts!(keyword()) :: :ok
-
-  def validate_profile_opts!(opts) do
-    Enum.each(@allowed_fmts, fn {key, allowed} ->
-      value = fetch_fmt(opts, key)
-
-      if value not in allowed,
-        do: raise(ArgumentError, "неизвестное значение #{key}: #{inspect(value)}")
-    end)
-
-    validate_datetime_tz!(Keyword.fetch!(opts, :datetime_tz))
-  end
-
-  @doc false
-  @spec default_fmt(atom()) :: atom()
-
-  def default_fmt(key) when is_map_key(@default_fmts, key), do: Map.fetch!(@default_fmts, key)
-
-  @doc false
-  @spec dump_uuid(String.t(), atom()) :: String.t()
-
-  def dump_uuid(uuid, fmt) when is_binary(uuid), do: Prim.UUID.format(uuid, fmt)
-
-  @doc false
-  @spec dump_datetime(DateTime.t(), atom(), :keep | :app | String.t()) ::
-          DateTime.t() | String.t()
-
-  def dump_datetime(%DateTime{} = dt, fmt, tz) do
-    dt
-    |> shift_tz(tz)
-    |> to_datetime_fmt(fmt)
-  end
-
-  @doc false
-  @spec dump_date(Date.t(), atom()) :: Date.t() | String.t()
-
-  def dump_date(%Date{} = value, :date), do: value
-  def dump_date(%Date{} = value, :iso8601), do: Date.to_iso8601(value)
-
-  @doc false
-  @spec dump_decimal(Decimal.t(), atom()) :: Decimal.t() | String.t()
-
-  def dump_decimal(%Decimal{} = value, :decimal), do: value
-  def dump_decimal(%Decimal{} = value, :string), do: Decimal.to_string(value)
-
-  @doc """
-  Значение без Prim-обёртки → Prim `mod`, годный для `dump/1`.
-
-  Read-путь не валидирует: значение уже прошло запись, и `new/1` поднял бы доменную
-  ошибку там, где обработать её нечем. Поэтому применяются только `cast` и `mutate`
-  leaf-примитива (его `__domain_type_opts__/0` — tz и precision), а `validate` — нет,
-  и struct собирается напрямую. Единственное место, где Prim строится в обход `new/1`.
-
-  Цепочка `Prim.Compose` восстанавливается целиком (`%Mod{value: %Base{}}`), поэтому
-  `dump/1` видит тот же композит, что и на агрегатном пути.
-
-  `:error` — если `mod` не Prim, значение неприводимо или его kind не форматируемый
-  (`:string`, `:integer`, кастомный): такому значению приведение не нужно.
-  """
-  @spec coerce(module(), term()) :: {:ok, struct()} | :error
-
-  def coerce(_mod, nil), do: :error
-
-  def coerce(mod, value) when is_atom(mod) do
-    case prim_chain(mod) do
-      [] -> :error
-      chain -> coerce_chain(chain, value)
-    end
-  end
-
-  @doc """
-  Builtin load: `mod.new/1` (cast Prim принимает допустимые wire-формы).
-
-  Кастомный `kind` обслуживается тем же `mod.new/1`: load формат-агностичен, приведение
-  делает сам примитив. Профиль может переопределить `load_kind/3`.
-  """
-  @spec load_builtin(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
-
-  def load_builtin(mod, raw, kind) when is_atom(mod) and is_atom(kind) do
-    mod.new(raw)
-  end
-
-  @doc """
-  Ошибка dump для kind, который профиль не обслуживает.
-
-  Кастомный `kind` (не из `Prim.native_kinds/0`) допустим, но профиль обязан объявить
-  для него `dump/1` или `dump_kind/2` — иначе неясно, в какой wire-формат его писать.
-  """
-  @spec unsupported_kind!(module(), struct(), atom()) :: no_return()
-
-  def unsupported_kind!(profile, prim, kind) do
-    raise ArgumentError,
-          "#{inspect(profile)}: нет правила dump для kind #{inspect(kind)} " <>
-            "(#{inspect(prim.__struct__)}); объявите dump/1 или dump_kind/2 в профиле"
-  end
-
-  @doc "Load композита: `load(base, raw)` → `mod.new(inner)`."
-  @spec load_composite(module(), term(), module()) :: {:ok, term()} | {:error, Error.t()}
-
-  def load_composite(mod, raw, codec) when is_atom(mod) and is_atom(codec) do
-    with {:ok, inner} <- codec.load(mod.__domain_base__(), raw), do: mod.new(inner)
-  end
+  # ===== билдер =====
 
   @doc "Объявить Prim-профиль кодека (`uuid` / `datetime` / `datetime_tz` / `decimal`)."
   defmacro __using__(opts) do
@@ -246,48 +148,28 @@ defmodule Core.Codec do
     end
   end
 
+  # ===== опции профиля =====
+
+  @doc false
+  @spec validate_profile_opts!(keyword()) :: :ok
+
+  def validate_profile_opts!(opts) do
+    Enum.each(@allowed_fmts, fn {key, allowed} ->
+      value = fetch_fmt(opts, key)
+
+      if value not in allowed,
+        do: raise(ArgumentError, "неизвестное значение #{key}: #{inspect(value)}")
+    end)
+
+    validate_datetime_tz!(Keyword.fetch!(opts, :datetime_tz))
+  end
+
+  @doc false
+  @spec default_fmt(atom()) :: atom()
+
+  def default_fmt(key) when is_map_key(@default_fmts, key), do: Map.fetch!(@default_fmts, key)
+
   # ---
-
-  # Цепочка от `mod` до leaf-примитива: `[Mod, Base, ..., Leaf]`; `[]` — не Prim.
-  defp prim_chain(mod) do
-    cond do
-      not Prim.prim?(mod) -> []
-      Prim.composed?(mod) -> [mod | prim_chain(mod.__domain_base__())]
-      true -> [mod]
-    end
-  end
-
-  defp coerce_chain(chain, value) do
-    leaf = List.last(chain)
-
-    case normalize_raw(leaf.__domain_kind__(), value, leaf.__domain_type_opts__()) do
-      {:ok, normalized} -> {:ok, wrap_chain(chain, normalized)}
-      :error -> :error
-    end
-  end
-
-  defp wrap_chain(chain, value) do
-    chain
-    |> Enum.reverse()
-    |> Enum.reduce(value, &struct!(&1, value: &2))
-  end
-
-  defp normalize_raw(:datetime, value, type_opts) do
-    with {:ok, datetime} <- Prim.DateTime.cast(value),
-         {:ok, shifted} <- Prim.DateTime.mutate(datetime, type_opts) do
-      {:ok, shifted}
-    else
-      {:error, _} -> :error
-    end
-  end
-
-  defp normalize_raw(:date, value, _type_opts), do: normalized(Prim.Date.cast(value))
-  defp normalize_raw(:uuid, value, _type_opts), do: normalized(Prim.UUID.cast(value))
-  defp normalize_raw(:decimal, value, _type_opts), do: normalized(Prim.Decimal.cast(value))
-  defp normalize_raw(_kind, _value, _type_opts), do: :error
-
-  defp normalized({:ok, value}), do: {:ok, value}
-  defp normalized({:error, _}), do: :error
 
   defp fetch_fmt(opts, key) when is_map_key(@default_fmts, key) do
     Keyword.get(opts, key, Map.fetch!(@default_fmts, key))
@@ -325,10 +207,192 @@ defmodule Core.Codec do
       else: raise(ArgumentError, "неизвестная зона datetime_tz: #{inspect(tz)}")
   end
 
+  # ===== dump =====
+
+  @doc "Достать value из Prim-struct."
+  @spec value(%{__struct__: module(), value: term()}) :: term()
+
+  def value(%_{value: value}), do: value
+
+  @doc false
+  @spec dump_uuid(String.t(), atom()) :: String.t()
+
+  def dump_uuid(uuid, fmt) when is_binary(uuid), do: Prim.UUID.format(uuid, fmt)
+
+  @doc false
+  @spec dump_datetime(DateTime.t(), atom(), :keep | :app | String.t()) ::
+          DateTime.t() | String.t()
+
+  def dump_datetime(%DateTime{} = dt, fmt, tz) do
+    dt
+    |> shift_tz(tz)
+    |> to_datetime_fmt(fmt)
+  end
+
+  @doc false
+  @spec dump_date(Date.t(), atom()) :: Date.t() | String.t()
+
+  def dump_date(%Date{} = value, :date), do: value
+  def dump_date(%Date{} = value, :iso8601), do: Date.to_iso8601(value)
+
+  @doc false
+  @spec dump_decimal(Decimal.t(), atom()) :: Decimal.t() | String.t()
+
+  def dump_decimal(%Decimal{} = value, :decimal), do: value
+  def dump_decimal(%Decimal{} = value, :string), do: Decimal.to_string(value)
+
+  @doc """
+  Ошибка dump для kind, который профиль не обслуживает.
+
+  Кастомный `kind` (не из `Prim.native_kinds/0`) допустим, но профиль обязан объявить
+  для него `dump/1` или `dump_kind/2` — иначе неясно, в какой wire-формат его писать.
+  """
+  @spec unsupported_kind!(module(), struct(), atom()) :: no_return()
+
+  def unsupported_kind!(profile, prim, kind) do
+    raise ArgumentError,
+          "#{inspect(profile)}: нет правила dump для kind #{inspect(kind)} " <>
+            "(#{inspect(prim.__struct__)}); объявите dump/1 или dump_kind/2 в профиле"
+  end
+
+  # ---
+
   defp shift_tz(%DateTime{} = dt, :keep), do: dt
   defp shift_tz(%DateTime{} = dt, :app), do: DateTime.shift_zone!(dt, Config.tz())
   defp shift_tz(%DateTime{} = dt, tz) when is_binary(tz), do: DateTime.shift_zone!(dt, tz)
 
   defp to_datetime_fmt(%DateTime{} = dt, :datetime), do: dt
   defp to_datetime_fmt(%DateTime{} = dt, :iso8601), do: DateTime.to_iso8601(dt)
+
+  # ===== load =====
+
+  @doc """
+  Builtin load: `mod.new/1` (cast Prim принимает допустимые wire-формы).
+
+  Кастомный `kind` обслуживается тем же `mod.new/1`: load формат-агностичен, приведение
+  делает сам примитив. Профиль может переопределить `load_kind/3`.
+  """
+  @spec load_builtin(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
+
+  def load_builtin(mod, raw, _kind) when is_atom(mod) do
+    mod.new(raw)
+  end
+
+  @doc "Load композита: `load(base, raw)` → `mod.new(inner)`."
+  @spec load_composite(module(), term(), module()) :: {:ok, term()} | {:error, Error.t()}
+
+  def load_composite(mod, raw, codec) when is_atom(mod) and is_atom(codec) do
+    with {:ok, inner} <- codec.load(mod.__domain_base__(), raw), do: mod.new(inner)
+  end
+
+  # ===== coerce =====
+
+  @doc """
+  Kinds, значение которых `coerce/2` приводит к Prim: форматируемые профилем и plain.
+
+  Единственный источник этого списка: `Core.View` типизирует по нему поля `prim:`,
+  `Core.Codec.Redump` — проверяет спеку формы.
+  """
+  @spec coercible_kinds() :: [atom()]
+
+  def coercible_kinds, do: @coercible_kinds
+
+  @doc """
+  Значения `mod` приводимы к Prim (`coerce/2`): kind leaf-примитива — из
+  `coercible_kinds/0`.
+
+  Цепочка `Prim.Compose` резолвится до leaf: wire-формат композита задаёт его база.
+  Kind самого композита при этом может быть кастомным — правило dump для него объявляет
+  профиль, ровно как на агрегатном пути.
+  """
+  @spec coercible?(module()) :: boolean()
+
+  def coercible?(mod) when is_atom(mod) do
+    case prim_chain(mod) do
+      [] -> false
+      chain -> leaf_kind(List.last(chain)) in @coercible_kinds
+    end
+  end
+
+  @doc """
+  Значение без Prim-обёртки → Prim `mod`, годный для `dump/1`.
+
+  Read-путь не валидирует: значение уже прошло запись, и `new/1` поднял бы доменную
+  ошибку там, где обработать её нечем. Поэтому применяются только `cast` и `mutate`
+  leaf-примитива (его `__domain_type_opts__/0` — tz и precision), а `validate` — нет,
+  и struct собирается напрямую. Единственное место, где Prim строится в обход `new/1`.
+
+  Значение plain-kind (`:string`, `:integer`) оборачивается как есть: приводить его
+  не к чему, но обёртка нужна — иначе переопределение `dump/1` в профиле осталось бы
+  только на агрегатном пути, и wire-формы разошлись бы.
+
+  Цепочка `Prim.Compose` восстанавливается целиком (`%Mod{value: %Base{}}`), поэтому
+  `dump/1` видит тот же композит, что и на агрегатном пути.
+
+  `:error` — если `mod` не Prim, значение неприводимо или kind leaf-примитива не из
+  `coercible_kinds/0` (кастомный kind: правило dump для него объявляет профиль, а из
+  raw-значения собрать его Prim здесь нечем).
+  """
+  @spec coerce(module(), term()) :: {:ok, struct()} | :error
+
+  def coerce(_mod, nil), do: :error
+
+  def coerce(mod, value) when is_atom(mod) do
+    case prim_chain(mod) do
+      [] -> :error
+      chain -> coerce_chain(chain, value)
+    end
+  end
+
+  # ---
+
+  # Цепочка от `mod` до leaf-примитива: `[Mod, Base, ..., Leaf]`; `[]` — не Prim.
+  defp prim_chain(mod) do
+    cond do
+      not Prim.prim?(mod) -> []
+      has_base?(mod) -> [mod | prim_chain(mod.__domain_base__())]
+      true -> [mod]
+    end
+  end
+
+  # `Prim.composed?/1` повторил бы `prim?/1`, уже проверенный веткой выше: на read-пути
+  # `coerce/2` зовётся на каждое поле каждой строки.
+  defp has_base?(mod), do: function_exported?(mod, :__domain_base__, 0)
+
+  defp leaf_kind(leaf), do: leaf.__domain_kind__()
+
+  defp coerce_chain(chain, value) do
+    leaf = List.last(chain)
+
+    case normalize_raw(leaf_kind(leaf), value, leaf.__domain_type_opts__()) do
+      {:ok, normalized} -> {:ok, wrap_chain(chain, normalized)}
+      :error -> :error
+    end
+  end
+
+  defp wrap_chain([mod], value), do: struct!(mod, value: value)
+
+  defp wrap_chain(chain, value) do
+    chain
+    |> Enum.reverse()
+    |> Enum.reduce(value, &struct!(&1, value: &2))
+  end
+
+  defp normalize_raw(:datetime, value, type_opts) do
+    with {:ok, datetime} <- Prim.DateTime.cast(value),
+         {:ok, shifted} <- Prim.DateTime.mutate(datetime, type_opts) do
+      {:ok, shifted}
+    else
+      {:error, _} -> :error
+    end
+  end
+
+  defp normalize_raw(:date, value, _type_opts), do: normalized(Prim.Date.cast(value))
+  defp normalize_raw(:uuid, value, _type_opts), do: normalized(Prim.UUID.cast(value))
+  defp normalize_raw(:decimal, value, _type_opts), do: normalized(Prim.Decimal.cast(value))
+  defp normalize_raw(kind, value, _type_opts) when kind in @plain_kinds, do: {:ok, value}
+  defp normalize_raw(_kind, _value, _type_opts), do: :error
+
+  defp normalized({:ok, value}), do: {:ok, value}
+  defp normalized({:error, _}), do: :error
 end

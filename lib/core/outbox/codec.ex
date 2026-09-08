@@ -59,13 +59,13 @@ defmodule Core.Outbox.Codec do
          {:ok, status} <- Outbox.Status.cast(field(map, :status)),
          {:ok, attempts} <- codec.load(Outbox.Attempts, field(map, :attempts)),
          {:ok, locked_until} <-
-           load_optional(field(map, :locked_until), Outbox.LockedUntil, codec),
-         {:ok, lease_id} <- load_optional(field(map, :lease_id), Outbox.LeaseID, codec),
+           load_optional(Outbox.LockedUntil, field(map, :locked_until), codec),
+         {:ok, lease_id} <- load_optional(Outbox.LeaseID, field(map, :lease_id), codec),
          {:ok, published_at} <-
-           load_optional(field(map, :published_at), Outbox.PublishedAt, codec),
+           load_optional(Outbox.PublishedAt, field(map, :published_at), codec),
          {:ok, errors} <- load_many(Outbox.RecordError, field(map, :errors) || [], codec),
          {:ok, created_at} <- codec.load(Outbox.CreatedAt, field(map, :created_at)),
-         {:ok, updated_at} <- load_optional(field(map, :updated_at), Outbox.UpdatedAt, codec) do
+         {:ok, updated_at} <- load_optional(Outbox.UpdatedAt, field(map, :updated_at), codec) do
       {:ok,
        %Record{
          id: id,

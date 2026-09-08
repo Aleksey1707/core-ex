@@ -53,6 +53,24 @@ defmodule Core.Codec.PluginTest do
     assert {:ok, %UnionPlugin.X{}} = UnionPlugin.load(UnionPlugin.Family, %{}, __MODULE__)
   end
 
+  test "плагин без dump/2 — CompileError" do
+    assert_raise CompileError, ~r/требуется dump\/2/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.NoDump do
+            defmodule X do
+              defstruct []
+            end
+
+            use Core.Codec.Plugin,
+              types: [X],
+              loadable: false
+          end
+        end
+      )
+    end
+  end
+
   test "loadable true without load/3 raises CompileError" do
     assert_raise CompileError, ~r/требуется load\/3/, fn ->
       Code.eval_quoted(
