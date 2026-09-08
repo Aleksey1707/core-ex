@@ -126,7 +126,7 @@ defmodule Core.Repo do
 
   defp item_type([:view], opts, only) do
     reject_write_methods!(only)
-    remote_type(opts, :view)
+    remote_type(opts, :view, exports: [__view__: 0])
   end
 
   defp item_type(_entity_and_view, _opts, _only) do
@@ -153,8 +153,8 @@ defmodule Core.Repo do
     end
   end
 
-  defp remote_type(opts, key) do
-    mod = Helper.Opts.module!(opts, key, @label)
+  defp remote_type(opts, key, checks \\ []) do
+    mod = Helper.Opts.module!(opts, key, @label, checks)
 
     quote(do: unquote(mod).t())
   end

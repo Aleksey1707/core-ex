@@ -172,9 +172,12 @@ defmodule Core.Repo.PgTest do
   end
 
   defmodule SampleView do
-    defstruct [:id, :name, :version]
-
-    @type t :: %__MODULE__{id: String.t(), name: String.t(), version: pos_integer()}
+    use Core.View,
+      fields: [
+        id: [type: :string],
+        name: [type: :string],
+        version: [type: :pos_integer]
+      ]
   end
 
   def to_view(%VersionedSchema{} = row) do
@@ -277,6 +280,28 @@ defmodule Core.Repo.PgTest do
               schema: Core.Repo.PgTest.FakeSchema,
               to_view: &Function.identity/1,
               to_model: &Function.identity/1,
+              default_filters: &Core.Repo.PgTest.always_true/1,
+              errors: Core.Repo.PgTest.Errors
+          end
+        end
+      )
+    end
+  end
+
+  test "shadow_copy? недопустим с to_view" do
+    assert_raise CompileError, ~r/shadow_copy\?: недопустим с to_view:/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Repo.PgTest.ViewShadowBehaviour do
+            use Core.Repo, only: :read
+          end
+
+          defmodule Core.Repo.PgTest.ViewShadow do
+            use Core.Repo.Pg,
+              behaviour: Core.Repo.PgTest.ViewShadowBehaviour,
+              schema: Core.Repo.PgTest.FakeSchema,
+              to_view: &Function.identity/1,
+              shadow_copy?: true,
               default_filters: &Core.Repo.PgTest.always_true/1,
               errors: Core.Repo.PgTest.Errors
           end

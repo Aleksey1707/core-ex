@@ -171,6 +171,20 @@ defmodule Core.Enum do
 
   def optional_keys, do: @optional_keys
 
+  @doc """
+  Модуль объявлен через `use Core.Enum` (есть `values/0` и `name/0`).
+
+  При необходимости загружает модуль: `function_exported?/3` отвечает только
+  про уже загруженный код (lazy loading, purge при code reload).
+  """
+  @spec enum?(module()) :: boolean()
+
+  def enum?(mod) when is_atom(mod) do
+    (:erlang.module_loaded(mod) or match?({:module, _}, Code.ensure_compiled(mod))) and
+      function_exported?(mod, :values, 0) and
+      function_exported?(mod, :name, 0)
+  end
+
   @typedoc "Тип внешних кодов enum: целые или строки."
   @type code_kind :: :integer | :string
 

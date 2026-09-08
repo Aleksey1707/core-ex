@@ -31,7 +31,7 @@ defmodule Core.View do
   | `enum:` | модуль `Core.Enum` | атом как есть |
   | `type:` | `:string` / `:boolean` / `:integer` / `:pos_integer` / `:non_neg_integer` | как есть |
   | `view:` | вложенный View | его кодеком через фасад |
-  | `form:` | имя формы из `forms:` | сгенерированным `dump_<форма>/2` |
+  | `form:` | имя формы из `forms:` | дампером формы (`dump_form/3`) |
   | `list:` | вложенная спека | поэлементно |
   | `jsonb:` | `{Модуль, :функция}` спеки `Core.Codec.Redump` | пере-дампом нагрузки |
 
@@ -40,50 +40,66 @@ defmodule Core.View do
   `forms:` объявляет именованные map-формы вложенных значений (`stage`, `item_progress`):
   у них появляется свой `@type`, на который могут ссылаться read-схемы.
 
-  Генерируются `@enforce_keys`, `defstruct`, `@type t`, `new/1` (keyword) и вложенный
-  `Codec` — dump-only плагин фасада (`loadable: false`), который регистрируется в
-  `Codec.plugins()` наравне с остальными.
+  Генерируются `@enforce_keys`, `defstruct`, `@type t`, `new/1` (keyword), маркер
+  `__view__/0` и вложенный `Codec` — dump-only плагин фасада (`loadable: false`),
+  который регистрируется в `Codec.plugins()` наравне с остальными.
+
+  `jsonb:` типизируется `map()`; jsonb-массив объявляется `list: [jsonb: {Мод, :спека}]` —
+  тогда и тип (`[map()]`), и пере-дамп идут поэлементно.
+
+  Собирать представление в `to_view/1` SHOULD литералом `%View{...}` — неизвестный ключ там
+  ловит компилятор. `new/1` — для динамической сборки: он отвергает ключ, которого нет в
+  декларации (`KeyError`), иначе опечатка в имени необязательного поля ушла бы в API как `nil`.
   """
 
   alias Core.Helper
+  alias Core.View.Dumper
   alias Core.View.Opts
 
-  @formattable_kinds ~w(uuid datetime date decimal)a
-  @item_vars ~w(item_0 item_1 item_2 item_3)a
+  @label "View"
+  @required_keys ~w(fields)a
+  @optional_keys ~w(forms)a
 
   @doc "Объявить представление read-пути (`fields:` + опционально `forms:`)."
   defmacro __using__(opts) do
     view = __CALLER__.module
     opts = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(opts, ~w(fields)a, ~w(forms)a, "View")
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
 
     forms = Opts.forms!(Keyword.get(opts, :forms, []))
     fields = Opts.fields!(Keyword.fetch!(opts, :fields), Keyword.keys(forms))
     check_forms_used!(fields, forms)
 
     quote do
+      unquote(marker_ast())
       unquote(struct_ast(fields))
       unquote(forms_types_ast(forms))
       unquote(type_t_ast(fields))
       unquote(new_ast(fields))
-      unquote(codec_ast(view, fields, forms))
+      unquote(Dumper.codec_ast(view, fields, forms))
     end
   end
 
   @doc false
-  @spec map_list(term(), (term() -> term())) :: term()
+  @spec check_keys!(module(), keyword(), [atom()]) :: :ok
 
-  def map_list(nil, _fun), do: nil
-  def map_list(list, fun) when is_list(list), do: Enum.map(list, fun)
-  def map_list(other, _fun), do: other
+  def check_keys!(view, opts, declared) do
+    case Enum.uniq(Keyword.keys(opts)) -- declared do
+      [] ->
+        :ok
+
+      [key | _] = unknown ->
+        raise KeyError,
+          key: key,
+          term: view,
+          message: "#{inspect(view)}: поля #{inspect(unknown)} не объявлены в представлении"
+    end
+  end
 
   # ---
 
   defp check_forms_used!(fields, forms) do
-    used =
-      Enum.reduce(forms, Opts.used_forms(fields), fn {_name, form_fields}, acc ->
-        MapSet.union(acc, Opts.used_forms(form_fields))
-      end)
+    used = reachable_forms(Opts.used_forms(fields), forms)
 
     case Enum.reject(Keyword.keys(forms), &MapSet.member?(used, &1)) do
       [] ->
@@ -91,7 +107,29 @@ defmodule Core.View do
 
       unused ->
         raise CompileError,
-          description: "View: формы #{inspect(unused)} объявлены, но не используются"
+          description: "#{@label}: формы #{inspect(unused)} объявлены, но не используются"
+    end
+  end
+
+  # Достижимость считается от `fields:`, а не объединением всех форм: форма, на которую
+  # ссылается только другая мёртвая форма, тоже мертва.
+  defp reachable_forms(used, forms) do
+    next =
+      Enum.reduce(used, used, fn name, acc ->
+        MapSet.union(acc, Opts.used_forms(Keyword.fetch!(forms, name)))
+      end)
+
+    if MapSet.equal?(next, used),
+      do: used,
+      else: reachable_forms(next, forms)
+  end
+
+  defp marker_ast do
+    quote do
+      @doc false
+      @spec __view__() :: true
+
+      def __view__, do: true
     end
   end
 
@@ -116,6 +154,7 @@ defmodule Core.View do
 
   defp type_t_ast(fields) do
     quote do
+      @typedoc "Представление read-пути."
       @type t :: %__MODULE__{unquote_splicing(type_pairs(fields))}
     end
   end
@@ -145,11 +184,15 @@ defmodule Core.View do
   defp type_ast({:jsonb, _spec_ref}), do: quote(do: map())
 
   defp new_ast(fields) do
+    declared = Enum.map(fields, fn {name, _spec, _optional?} -> name end)
+
     quote do
       @doc "Собрать представление из keyword-списка полей."
       @spec new(keyword()) :: t()
 
       def new(opts) when is_list(opts) do
+        Core.View.check_keys!(__MODULE__, opts, unquote(declared))
+
         %__MODULE__{unquote_splicing(new_pairs(fields))}
       end
     end
@@ -161,116 +204,4 @@ defmodule Core.View do
       {name, _spec, true} -> {name, quote(do: Keyword.get(opts, unquote(name)))}
     end)
   end
-
-  defp codec_ast(view, fields, forms) do
-    codec = codec_var(fields_need_codec?(fields))
-    value = Macro.var(:view, __MODULE__)
-
-    pairs =
-      Enum.map(fields, fn {name, spec, _optional?} ->
-        {name, dump_ast(spec, field_access(value, name), codec, 0)}
-      end)
-
-    quote do
-      defmodule Codec do
-        @moduledoc unquote("Кодек представления `#{inspect(view)}` (dump-only).")
-
-        use Core.Codec.Plugin,
-          types: [unquote(view)],
-          loadable: false
-
-        @doc "Представление → map полей."
-        @spec dump(unquote(view).t(), module()) :: map()
-
-        @impl true
-        def dump(%unquote(view){} = unquote(value), unquote(codec)) do
-          unquote({:%{}, [], pairs})
-        end
-
-        unquote_splicing(form_dumpers_ast(forms))
-      end
-    end
-  end
-
-  # Формы дампятся одной функцией с именем формы аргументом, а не функцией на форму:
-  # имя формы — атом из декларации, а `:"dump_#{name}"` собирал бы атом в рантайме.
-  defp form_dumpers_ast([]), do: []
-
-  defp form_dumpers_ast(forms) do
-    [
-      quote(do: defp(dump_form(_name, nil, _codec), do: nil))
-      | Enum.map(forms, &form_dumper_ast/1)
-    ]
-  end
-
-  defp form_dumper_ast({name, fields}) do
-    codec = codec_var(fields_need_codec?(fields))
-    form = Macro.var(:form, __MODULE__)
-
-    pairs =
-      Enum.map(fields, fn {field, spec, optional?} ->
-        {field, dump_ast(spec, form_access(form, field, optional?), codec, 0)}
-      end)
-
-    quote do
-      defp dump_form(unquote(name), unquote(form), unquote(codec)) when is_map(unquote(form)) do
-        unquote({:%{}, [], pairs})
-      end
-    end
-  end
-
-  defp dump_ast({:prim, mod, kind}, value, codec, _depth) when kind in @formattable_kinds do
-    quote do
-      Core.Codec.Helper.dump_raw(unquote(mod), unquote(value), unquote(codec))
-    end
-  end
-
-  defp dump_ast({:prim, _mod, _plain_kind}, value, _codec, _depth), do: value
-  defp dump_ast({:enum, _mod}, value, _codec, _depth), do: value
-  defp dump_ast({:type, _type}, value, _codec, _depth), do: value
-
-  defp dump_ast({:view, _mod}, value, codec, _depth) do
-    quote(do: Core.Codec.Helper.dump_optional(unquote(value), unquote(codec)))
-  end
-
-  defp dump_ast({:form, name}, value, codec, _depth) do
-    quote(do: dump_form(unquote(name), unquote(value), unquote(codec)))
-  end
-
-  defp dump_ast({:jsonb, {mod, fun}}, value, codec, _depth) do
-    quote do
-      Core.Codec.Redump.run(unquote(value), unquote(mod).unquote(fun)(), unquote(codec))
-    end
-  end
-
-  defp dump_ast({:list, inner}, value, codec, depth) do
-    item = Macro.var(item_var!(depth), __MODULE__)
-
-    quote do
-      Core.View.map_list(unquote(value), fn unquote(item) ->
-        unquote(dump_ast(inner, item, codec, depth + 1))
-      end)
-    end
-  end
-
-  defp fields_need_codec?(fields) do
-    Enum.any?(fields, fn {_name, spec, _optional?} -> Opts.needs_codec?(spec) end)
-  end
-
-  defp codec_var(true), do: Macro.var(:codec, __MODULE__)
-  defp codec_var(false), do: Macro.var(:_codec, __MODULE__)
-
-  # Имена переменных элементов перечислены заранее: собирать их интерполяцией значило бы
-  # заводить атомы в рантайме. Вложенность глубже — не форма представления, а недосмотр.
-  defp item_var!(depth) when depth < length(@item_vars), do: Enum.at(@item_vars, depth)
-
-  defp item_var!(depth) do
-    raise CompileError,
-      description: "View: вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})"
-  end
-
-  defp field_access(value, name), do: {{:., [], [value, name]}, [no_parens: true], []}
-
-  defp form_access(form, field, false), do: quote(do: Map.fetch!(unquote(form), unquote(field)))
-  defp form_access(form, field, true), do: quote(do: Map.get(unquote(form), unquote(field)))
 end

@@ -14,29 +14,30 @@ defmodule Core.ViewTest do
   end
 
   defp view(overrides \\ []) do
-    ViewFixture.Sample.new(
-      Keyword.merge(
-        [
-          id: @uuid,
-          name: "Образец",
-          status: :new,
-          version: 1,
-          active: true,
-          weight: Decimal.new("10.5"),
-          day: ~D[2024-06-01],
-          nested: nested(),
-          children: [nested()],
-          tags: ~w(a b),
-          payload: %{"measured_at" => "2024-06-01T12:00:00.123456Z"},
-          marks: [%{code: "m1", at: @at, by: @uuid}],
-          created_at: @at
-        ],
-        overrides
-      )
-    )
+    ViewFixture.Sample.new(Keyword.merge(sample_opts(), overrides))
+  end
+
+  defp sample_opts do
+    [
+      id: @uuid,
+      name: "Образец",
+      status: :new,
+      version: 1,
+      active: true,
+      weight: Decimal.new("10.5"),
+      day: ~D[2024-06-01],
+      nested: nested(),
+      children: [nested()],
+      tags: ~w(a b),
+      payload: payload(),
+      marks: [%{code: "m1", at: @at, by: @uuid}],
+      created_at: @at
+    ]
   end
 
   defp dump(view, codec \\ OutCodec), do: ViewFixture.Sample.Codec.dump(view, codec)
+
+  defp payload, do: %{"measured_at" => "2024-06-01T12:00:00.123456Z"}
 
   describe "структура" do
     test "обязательные поля в @enforce_keys, optional — нет" do
@@ -57,6 +58,12 @@ defmodule Core.ViewTest do
 
     test "пропуск обязательного поля — ошибка" do
       assert_raise KeyError, fn -> ViewFixture.Sample.new(id: @uuid) end
+    end
+
+    test "неизвестное поле — ошибка" do
+      assert_raise KeyError, ~r/не объявлены в представлении/, fn ->
+        ViewFixture.Sample.new(Keyword.put(sample_opts(), :nmae, "Образец"))
+      end
     end
 
     test "состав полей структуры равен объявленному" do
@@ -118,9 +125,42 @@ defmodule Core.ViewTest do
       assert [%{code: "m1", by: nil}] = dump(view(marks: [%{code: "m1", at: @at}])).marks
     end
 
+    test "форма со строковыми ключами дампится как с атомными" do
+      string_keys = %{"code" => "m1", "at" => @at, "by" => @uuid}
+
+      assert dump(view(marks: [string_keys])).marks == dump(view()).marks
+    end
+
     test "jsonb переводится по спеке redump с точностью Prim" do
       assert %{"measured_at" => measured} = dump(view()).payload
       assert measured == OutCodec.dump(ViewFixture.MeasuredAt.new!(@measured_at))
+    end
+
+    test "не-map на месте формы уходит как есть" do
+      assert dump(view(marks: ["m1"])).marks == ["m1"]
+    end
+
+    test "не-список на месте list: уходит как есть" do
+      assert dump(view(tags: "a,b")).tags == "a,b"
+    end
+
+    test "jsonb-массив дампится поэлементно" do
+      listy = ViewFixture.Listy.new(payloads: [payload(), payload()], marks: [])
+
+      assert [%{"measured_at" => measured}, %{"measured_at" => same}] =
+               ViewFixture.Listy.Codec.dump(listy, OutCodec).payloads
+
+      assert measured == OutCodec.dump(ViewFixture.MeasuredAt.new!(@measured_at))
+      assert same == measured
+    end
+
+    test "форма внутри формы дампится своим набором полей" do
+      listy = ViewFixture.Listy.new(payloads: [], marks: [%{code: "m1", inner: %{at: @at}}])
+
+      assert [%{code: "m1", inner: %{at: at}}] =
+               ViewFixture.Listy.Codec.dump(listy, OutCodec).marks
+
+      assert at == OutCodec.dump(ViewFixture.CreatedAt.new!(@at))
     end
 
     test "плагин остаётся dump-only" do
@@ -152,6 +192,14 @@ defmodule Core.ViewTest do
       assert "[mark()]" = fields[:marks]
     end
 
+    test "jsonb-массив и вложенная форма типизированы точно" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Listy)
+      fields = struct_type_fields(types)
+
+      assert "[map()]" = fields[:payloads]
+      assert "[mark()]" = fields[:marks]
+    end
+
     test "форма получает именованный тип" do
       {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Sample)
 
@@ -169,6 +217,18 @@ defmodule Core.ViewTest do
     test "sensitive Prim не допускается" do
       assert_raise CompileError, ~r/sensitive/, fn ->
         define(fields: [secret: [prim: Core.PrimFixture.Sensitive]])
+      end
+    end
+
+    test "не-Enum в enum: не допускается" do
+      assert_raise CompileError, ~r/не Core.Enum/, fn ->
+        define(fields: [status: [enum: DateTime]])
+      end
+    end
+
+    test "не-модуль в prim: не допускается" do
+      assert_raise CompileError, ~r/ожидался модуль/, fn ->
+        define(fields: [id: [prim: "Core.ViewFixture.ID"]])
       end
     end
 
@@ -215,6 +275,24 @@ defmodule Core.ViewTest do
       end
     end
 
+    test "форма, достижимая только из неиспользуемой формы, тоже неиспользуема" do
+      assert_raise CompileError, ~r/\[:outer, :inner\]/, fn ->
+        define(
+          fields: [id: [prim: Core.ViewFixture.ID]],
+          forms: [
+            outer: [inner: [form: :inner]],
+            inner: [code: [type: :string]]
+          ]
+        )
+      end
+    end
+
+    test "не-View в view: не допускается" do
+      assert_raise CompileError, ~r/не Core.View/, fn ->
+        define(fields: [nested: [view: DateTime]])
+      end
+    end
+
     test "jsonb требует ссылку на функцию-спеку" do
       assert_raise CompileError, ~r/спеки redump/, fn ->
         define(fields: [payload: [jsonb: :spec]])
@@ -222,6 +300,35 @@ defmodule Core.ViewTest do
 
       assert_raise CompileError, ~r/не объявлена/, fn ->
         define(fields: [payload: [jsonb: {Core.ViewFixture.Specs, :missing_spec}]])
+      end
+    end
+
+    test "forms: — keyword-список без дублей" do
+      assert_raise CompileError, ~r/forms: должен быть keyword-списком/, fn ->
+        define(fields: [id: [prim: Core.ViewFixture.ID]], forms: :mark)
+      end
+
+      assert_raise CompileError, ~r/дубли ключей/, fn ->
+        define(
+          fields: [mark: [form: :mark]],
+          forms: [mark: [code: [type: :string]], mark: [code: [type: :string]]]
+        )
+      end
+    end
+
+    test "optional: — boolean и задаётся у самого поля" do
+      assert_raise CompileError, ~r/optional: — boolean/, fn ->
+        define(fields: [id: [prim: Core.ViewFixture.ID, optional: "да"]])
+      end
+
+      assert_raise CompileError, ~r/optional: задаётся у самого поля/, fn ->
+        define(fields: [tags: [list: [type: :string, optional: true]]])
+      end
+    end
+
+    test "вложенность списков глубже допустимой" do
+      assert_raise CompileError, ~r/вложенность списков/, fn ->
+        define(fields: [deep: [list: [list: [list: [list: [list: [type: :string]]]]]]])
       end
     end
 

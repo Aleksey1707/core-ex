@@ -62,9 +62,11 @@ defmodule Core.Repo.Pg.SchemaTest do
   defmodule View do
     @moduledoc false
 
-    defstruct ~w(id name)a
-
-    @type t :: %__MODULE__{id: String.t(), name: String.t()}
+    use Core.View,
+      fields: [
+        id: [type: :string],
+        name: [type: :string]
+      ]
   end
 
   defmodule ReadSchema do
