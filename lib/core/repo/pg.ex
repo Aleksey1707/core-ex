@@ -87,7 +87,7 @@ defmodule Core.Repo.Pg do
 
       shadow_copy? = Keyword.get(opts, :shadow_copy?, false)
 
-      Helper.Opts.allowed!(shadow_copy?, [true, false], "shadow_copy?", "Repo.Pg")
+      Helper.Opts.allowed!(shadow_copy?, [true, false], "значения shadow_copy?", "Repo.Pg")
 
       behaviour = Keyword.fetch!(opts, :behaviour)
       Code.ensure_compiled!(behaviour)

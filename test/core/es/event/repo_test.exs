@@ -63,7 +63,7 @@ defmodule Core.Es.Event.RepoTest do
   end
 
   test "behaviour требует обязательные опции" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:aggregate_id\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:aggregate_id\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Es.Event.RepoTest.MissingId do
@@ -75,7 +75,7 @@ defmodule Core.Es.Event.RepoTest do
   end
 
   test "behaviour отклоняет неизвестную опцию" do
-    assert_raise CompileError, ~r/unknown option\(s\): \[:table\]/, fn ->
+    assert_raise CompileError, ~r/неизвестные опции: \[:table\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Es.Event.RepoTest.UnknownOpt do
@@ -107,7 +107,7 @@ defmodule Core.Es.Event.RepoTest do
 
   test "Schema не принимает кодек и Prim агрегата: событие грузится фасадом по тегу" do
     assert_raise CompileError,
-                 ~r/unknown option\(s\): \[:event_codec, :aggregate_id, :by\]/,
+                 ~r/неизвестные опции: \[:event_codec, :aggregate_id, :by\]/,
                  fn ->
                    Code.eval_quoted(
                      quote do

@@ -159,7 +159,7 @@ defmodule Core.Web.ResponseTest do
     end
 
     test "неизвестная опция билдера отвергается на компиляции" do
-      assert_raise CompileError, ~r/unknown option\(s\): \[:foo\]/, fn ->
+      assert_raise CompileError, ~r/неизвестные опции: \[:foo\]/, fn ->
         Elixir.Code.eval_quoted(
           quote do
             defmodule Core.Web.ResponseTest.BadOpts do

@@ -302,7 +302,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
         fail_attempt(state, raw, error)
 
       other ->
-        Logger.warning("pubsub reliable on_message: unexpected result #{inspect(other)}")
+        Logger.warning("pubsub reliable on_message: неожиданный результат #{inspect(other)}")
         error = unexpected_result_error(other)
         Otel.record_error(error)
         fail_attempt(state, raw, error)

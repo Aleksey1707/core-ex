@@ -167,7 +167,7 @@ defmodule Core.RepoTest do
   end
 
   test "use rejects unknown method" do
-    assert_raise CompileError, ~r/unknown method\(s\): \[:foo\]/, fn ->
+    assert_raise CompileError, ~r/неизвестные метод\(ы\): \[:foo\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.RepoTest.BadMethod do
@@ -179,7 +179,7 @@ defmodule Core.RepoTest do
   end
 
   test "use rejects unknown repository kind" do
-    assert_raise CompileError, ~r/unknown repository kind: :weird/, fn ->
+    assert_raise CompileError, ~r/неизвестный вид репозитория: :weird/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.RepoTest.BadKind do

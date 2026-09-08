@@ -29,7 +29,7 @@ defmodule Core.Helper.Opts do
       |> Enum.reject(&(&1 in allowed))
 
     if unknown != [] do
-      raise CompileError, description: "#{label}: unknown option(s): #{inspect(unknown)}"
+      raise CompileError, description: "#{label}: неизвестные опции: #{inspect(unknown)}"
     end
 
     :ok
@@ -48,7 +48,7 @@ defmodule Core.Helper.Opts do
     missing = Enum.reject(required, &Keyword.has_key?(opts, &1))
 
     if missing != [] do
-      raise CompileError, description: "#{label}: missing required option(s): #{inspect(missing)}"
+      raise CompileError, description: "#{label}: нет обязательных опций: #{inspect(missing)}"
     end
 
     :ok
@@ -64,7 +64,7 @@ defmodule Core.Helper.Opts do
       |> Enum.reject(&(&1 in allowed))
 
     if unknown != [] do
-      raise CompileError, description: "#{label}: unknown #{subject}: #{inspect(unknown)}"
+      raise CompileError, description: "#{label}: неизвестные #{subject}: #{inspect(unknown)}"
     end
 
     :ok
@@ -133,7 +133,7 @@ defmodule Core.Helper.Opts do
         default
 
       :error ->
-        raise CompileError, description: "#{label}: missing required option(s): #{inspect([key])}"
+        raise CompileError, description: "#{label}: нет обязательных опций: #{inspect([key])}"
     end
   end
 

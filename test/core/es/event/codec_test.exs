@@ -145,7 +145,7 @@ defmodule Core.Es.Event.CodecTest do
 
   describe "опции" do
     test "требует обязательные" do
-      assert_raise CompileError, ~r/missing required option\(s\): \[:tags\]/, fn ->
+      assert_raise CompileError, ~r/нет обязательных опций: \[:tags\]/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Es.Event.CodecTest.MissingTags do
@@ -157,7 +157,7 @@ defmodule Core.Es.Event.CodecTest do
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/unknown option\(s\): \[:aggregate_id\]/, fn ->
+      assert_raise CompileError, ~r/неизвестные опции: \[:aggregate_id\]/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Es.Event.CodecTest.UnknownOpt do

@@ -34,11 +34,11 @@ defmodule Core.Codec.Facade do
       @plugins Keyword.get(opts, :plugins, [])
 
       if not is_atom(@prim) do
-        raise CompileError, description: "prim: must be a module"
+        raise CompileError, description: "prim: ожидается модуль"
       end
 
       if not is_list(@plugins) do
-        raise CompileError, description: "plugins: must be a list of modules"
+        raise CompileError, description: "plugins: ожидается список модулей"
       end
 
       _ = Core.Codec.Facade.build_type_map!(@plugins)
@@ -137,7 +137,7 @@ defmodule Core.Codec.Facade do
   defp ensure_plugins!(plugins) do
     Enum.each(plugins, fn plugin ->
       if not is_atom(plugin) do
-        raise CompileError, description: "plugin #{inspect(plugin)} must be a module"
+        raise CompileError, description: "плагин #{inspect(plugin)}: ожидается модуль"
       end
 
       try do
@@ -145,7 +145,7 @@ defmodule Core.Codec.Facade do
       rescue
         UndefinedFunctionError ->
           reraise CompileError,
-                  [description: "plugin #{inspect(plugin)} must implement Codec.Plugin"],
+                  [description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"],
                   __STACKTRACE__
       end
     end)
@@ -164,7 +164,7 @@ defmodule Core.Codec.Facade do
       {:ok, other} ->
         raise CompileError,
           description:
-            "duplicate codec type #{inspect(mod)} in #{inspect(plugin)} and #{inspect(other)}"
+            "тип #{inspect(mod)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
 
       :error ->
         Map.put(acc, mod, plugin)

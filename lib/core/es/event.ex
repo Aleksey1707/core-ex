@@ -65,7 +65,7 @@ defmodule Core.Es.Event do
       by_mod = Keyword.fetch!(opts, :by)
 
       unless is_nil(payload_mod) or is_atom(payload_mod) do
-        raise CompileError, description: "option :payload must be a module or nil"
+        raise CompileError, description: "Es.Event: :payload должен быть модулем или nil"
       end
 
       @enforce_keys ~w(id payload aggregate_id aggregate_version at by)a

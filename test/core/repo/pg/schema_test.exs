@@ -114,7 +114,7 @@ defmodule Core.Repo.Pg.SchemaTest do
   end
 
   test "требует обязательные опции" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Schema: missing required option\(s\): \[:id\]/, fn ->
+    assert_raise CompileError, ~r/Repo\.Pg\.Schema: нет обязательных опций: \[:id\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.Pg.SchemaTest.MissingId do
@@ -171,7 +171,7 @@ defmodule Core.Repo.Pg.SchemaTest do
   end
 
   test "требует entity или view" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:entity\] или \[:view\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:entity\] или \[:view\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.Pg.SchemaTest.NoMode do
@@ -185,7 +185,7 @@ defmodule Core.Repo.Pg.SchemaTest do
   end
 
   test "отклоняет неизвестную опцию" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Schema: unknown option\(s\): \[:table\]/, fn ->
+    assert_raise CompileError, ~r/Repo\.Pg\.Schema: неизвестные опции: \[:table\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.Pg.SchemaTest.UnknownOpt do

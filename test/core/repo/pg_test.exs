@@ -353,7 +353,7 @@ defmodule Core.Repo.PgTest do
   end
 
   test "требует опцию behaviour" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:behaviour\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:behaviour\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.PgTest.MissingBehaviour do
@@ -369,7 +369,7 @@ defmodule Core.Repo.PgTest do
   end
 
   test "отклоняет недопустимый shadow_copy?" do
-    assert_raise CompileError, ~r/unknown shadow_copy\?: \[:maybe\]/, fn ->
+    assert_raise CompileError, ~r/неизвестные значения shadow_copy\?: \[:maybe\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.PgTest.ShadowBehaviour do

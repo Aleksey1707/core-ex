@@ -77,7 +77,7 @@ defmodule Core.PrimTest do
   end
 
   test "requires :cast, :name and :kind" do
-    assert_raise CompileError, ~r/missing required option\(s\)/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.PrimTest.NoCast do
@@ -98,14 +98,14 @@ defmodule Core.PrimTest do
     end
 
     assert_raise ArgumentError,
-                 ~r/domain error must be \{:error, \{code, detail\}\} or \{:error, %Error\{\}\}/,
+                 ~r/доменная ошибка: ожидается \{:error, \{code, detail\}\}/,
                  fn ->
                    BadValidate.new(1)
                  end
   end
 
   test "wrapper rejects foreign builtin kind" do
-    assert_raise ArgumentError, ~r/builtin kind/, fn ->
+    assert_raise ArgumentError, ~r/— встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.PrimTest.BadKind do
@@ -160,7 +160,7 @@ defmodule Core.PrimTest do
   end
 
   test "wrapper rejects reserved kind :composite" do
-    assert_raise ArgumentError, ~r/builtin kind/, fn ->
+    assert_raise ArgumentError, ~r/— встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.PrimTest.CompositeKind do

@@ -54,7 +54,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "loadable true without load/3 raises CompileError" do
-    assert_raise CompileError, ~r/must define load\/3/, fn ->
+    assert_raise CompileError, ~r/требуется load\/3/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.NoLoad do
@@ -73,7 +73,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "union с loadable: false — CompileError" do
-    assert_raise CompileError, ~r/union: requires loadable: true/, fn ->
+    assert_raise CompileError, ~r/union: требует loadable: true/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.DumpOnlyUnion do
@@ -95,7 +95,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "union не модуль — CompileError" do
-    assert_raise CompileError, ~r/union: must be a module/, fn ->
+    assert_raise CompileError, ~r/union: ожидается модуль/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.BadUnion do
@@ -119,7 +119,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "types обязательны и непусты" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:types\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:types\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.NoTypes do
@@ -129,7 +129,7 @@ defmodule Core.Codec.PluginTest do
       )
     end
 
-    assert_raise CompileError, ~r/types: must be a non-empty list/, fn ->
+    assert_raise CompileError, ~r/types: ожидается непустой список/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.EmptyTypes do

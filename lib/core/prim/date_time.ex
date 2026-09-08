@@ -130,7 +130,7 @@ defmodule Core.Prim.DateTime do
 
   def validate_precision!(precision) do
     raise ArgumentError,
-          "unknown precision: #{inspect(precision)}; expected one of #{inspect(@precisions)}"
+          "неизвестное precision: #{inspect(precision)}; допустимые: #{inspect(@precisions)}"
   end
 
   @doc false

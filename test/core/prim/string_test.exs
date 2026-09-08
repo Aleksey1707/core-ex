@@ -89,7 +89,7 @@ defmodule Core.Prim.StringTest do
   end
 
   test "requires name at compile time" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:name\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:name\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.StringTest.NoName do

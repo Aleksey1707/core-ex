@@ -355,7 +355,7 @@ defmodule Core.CodecTest do
   end
 
   test "profile rejects missing datetime_tz" do
-    assert_raise CompileError, ~r/missing required option/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.MissingTz do
@@ -370,7 +370,7 @@ defmodule Core.CodecTest do
   end
 
   test "profile rejects unknown datetime_tz and legacy :raw" do
-    assert_raise ArgumentError, ~r/unknown datetime_tz/, fn ->
+    assert_raise ArgumentError, ~r/неизвестная зона datetime_tz/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.BadTz do
@@ -384,7 +384,7 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/datetime_tz must be :keep/, fn ->
+    assert_raise ArgumentError, ~r/datetime_tz: ожидается :keep/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.LegacyUtc do
@@ -398,7 +398,7 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/unknown datetime/, fn ->
+    assert_raise ArgumentError, ~r/неизвестное значение datetime/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.LegacyDatetimeRaw do
@@ -412,7 +412,7 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/unknown date: :raw/, fn ->
+    assert_raise ArgumentError, ~r/неизвестное значение date: :raw/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.BadDate do
@@ -427,7 +427,7 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/unknown decimal/, fn ->
+    assert_raise ArgumentError, ~r/неизвестное значение decimal/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.LegacyDecimalRaw do

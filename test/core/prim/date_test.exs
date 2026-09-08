@@ -158,7 +158,7 @@ defmodule Core.Prim.DateTest do
   end
 
   test "rejects unknown option at compile time" do
-    assert_raise CompileError, ~r/unknown option/, fn ->
+    assert_raise CompileError, ~r/неизвестные опции/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTest.BadOption do
@@ -172,7 +172,7 @@ defmodule Core.Prim.DateTest do
   end
 
   test "rejects builtin kind of another wrapper" do
-    assert_raise ArgumentError, ~r/is a builtin kind/, fn ->
+    assert_raise ArgumentError, ~r/— встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTest.BadKind do

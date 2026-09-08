@@ -95,7 +95,7 @@ defmodule Core.Prim.UUID do
   def generate(7), do: UUIDv7.generate()
 
   def generate(version) do
-    raise ArgumentError, "unsupported UUID version for generation: #{inspect(version)}"
+    raise ArgumentError, "неподдерживаемая версия UUID для генерации: #{inspect(version)}"
   end
 
   @doc """

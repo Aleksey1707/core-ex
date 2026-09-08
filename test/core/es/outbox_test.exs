@@ -41,7 +41,7 @@ defmodule Core.Es.OutboxTest do
   end
 
   test "требует обязательные опции" do
-    assert_raise CompileError, ~r/missing required option\(s\): \[:event\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:event\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Es.OutboxTest.MissingEvent do
@@ -53,7 +53,7 @@ defmodule Core.Es.OutboxTest do
   end
 
   test "отклоняет неизвестную опцию" do
-    assert_raise CompileError, ~r/unknown option\(s\): \[:weird\]/, fn ->
+    assert_raise CompileError, ~r/неизвестные опции: \[:weird\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Es.OutboxTest.UnknownOpt do

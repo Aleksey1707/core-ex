@@ -205,7 +205,7 @@ defmodule Core.Error do
     parent = fields[:parent]
 
     if not is_nil(parent) and not match?(%__MODULE__{}, parent) do
-      raise ArgumentError, "parent must be %Error{} or nil, got: #{inspect(parent)}"
+      raise ArgumentError, "parent должен быть %Error{} или nil, получено: #{inspect(parent)}"
     end
 
     %__MODULE__{
@@ -234,7 +234,7 @@ defmodule Core.Error do
   defp validate_filter_key!({key, _value}) when key in ~w(ns code kind module)a, do: :ok
 
   defp validate_filter_key!({key, _value}) do
-    raise ArgumentError, "unknown has? filter key: #{inspect(key)}"
+    raise ArgumentError, "неизвестный ключ фильтра has?: #{inspect(key)}"
   end
 
   defp literal_keyword_ast?(attrs) when is_list(attrs) do
@@ -258,7 +258,7 @@ defmodule Core.Error do
       raise CompileError,
         file: caller.file,
         line: caller.line,
-        description: "missing required option(s): #{inspect(missing)}"
+        description: "нет обязательных опций: #{inspect(missing)}"
     end
 
     allowed = required ++ optional
@@ -272,7 +272,7 @@ defmodule Core.Error do
       raise CompileError,
         file: caller.file,
         line: caller.line,
-        description: "unknown option(s): #{inspect(unknown)}"
+        description: "неизвестные опции: #{inspect(unknown)}"
     end
 
     :ok

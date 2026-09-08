@@ -83,7 +83,7 @@ defmodule Core.Repo do
   def expand_only(list) when is_list(list), do: list
 
   def expand_only(other) do
-    raise CompileError, description: "unknown repository kind: #{inspect(other)}"
+    raise CompileError, description: "неизвестный вид репозитория: #{inspect(other)}"
   end
 
   # ---
@@ -107,7 +107,7 @@ defmodule Core.Repo do
       |> expand_only()
       |> Enum.uniq()
 
-    Helper.Opts.allowed!(only, @known_methods, "method(s)", @label)
+    Helper.Opts.allowed!(only, @known_methods, "метод(ы)", @label)
 
     %{only: only, item: item_type!(opts, only), id: id_type!(opts)}
   end
