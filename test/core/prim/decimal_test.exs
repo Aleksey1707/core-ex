@@ -17,6 +17,25 @@ defmodule Core.Prim.DecimalTest do
     use Core.Prim.Decimal, name: "Без границ"
   end
 
+  defmodule Tight do
+    use Core.Prim.Decimal, name: "Узкая", min: 0, sec_max_len: 4
+  end
+
+  defmodule Rate do
+    use Core.Prim.Decimal,
+      name: "Ставка",
+      scale: 2,
+      kind: :rate,
+      mutate: &Decimal.abs/1,
+      validate: &Core.Prim.DecimalTest.not_zero/1
+  end
+
+  def not_zero(value) do
+    if Decimal.eq?(value, 0),
+      do: {:error, {:zero, "не может быть нулём"}},
+      else: :ok
+  end
+
   test "casts Decimal, integer, float, binary" do
     assert {:ok, %Amount{value: %Decimal{}}} = Amount.new(Decimal.new("10.5"))
     assert {:ok, %Amount{}} = Amount.new(10)
@@ -92,5 +111,94 @@ defmodule Core.Prim.DecimalTest do
   test "Prim без min/max тоже не пропускает не-финитные" do
     assert {:error, %Core.Error{code: :invalid_decimal}} = Unbounded.new("NaN")
     assert {:error, %Core.Error{code: :invalid_decimal}} = Unbounded.new("Infinity")
+  end
+
+  test "custom mutate применяется до validate" do
+    assert {:ok, %Rate{} = rate} = Rate.new("-1.50")
+    assert Decimal.eq?(Rate.value(rate), Decimal.new("1.50"))
+  end
+
+  test "custom validate возвращает свой код ошибки" do
+    assert {:error,
+            %Core.Error{kind: :domain, code: :zero, message: "Ставка: не может быть нулём"}} =
+             Rate.new(0)
+  end
+
+  test "custom kind сохраняется" do
+    assert Rate.__domain_kind__() == :rate
+  end
+
+  describe "байтовая граница строкового ввода" do
+    test "огромная строка цифр отсекается до разбора" do
+      huge = String.duplicate("9", 2_000_000)
+
+      assert {:error, %Core.Error{kind: :domain, message: "Сумма: невалидное значение"}} =
+               Amount.new(huge)
+    end
+
+    test "default учитывает max и scale" do
+      assert Core.Prim.Decimal.sec_max_len(min: 0, max: 100, scale: 2) == 13
+      assert Core.Prim.Decimal.sec_max_len(min: 0) == 64
+
+      assert {:ok, %Amount{}} = Amount.new("100.00")
+      assert {:ok, %Amount{}} = Amount.new("1.0e2")
+    end
+
+    test "явный sec_max_len перебивает выведенный" do
+      assert {:ok, %Tight{}} = Tight.new("9.99")
+      assert {:error, %Core.Error{message: "Узкая: невалидное значение"}} = Tight.new("99.999")
+    end
+
+    test "%Decimal{} на входе границей не ограничен" do
+      assert {:ok, %Amount{}} = Amount.new(Decimal.new("99.99"))
+    end
+  end
+
+  test "rejects sec_max_len below own max at compile time" do
+    assert_raise CompileError, ~r/sec_max_len \(2\) меньше записи границ со scale/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DecimalTest.TooTight do
+            use Core.Prim.Decimal, name: "X", max: 1000, scale: 2, sec_max_len: 2
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects negative scale at compile time" do
+    assert_raise CompileError, ~r/scale: ожидается целое ≥ 0/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DecimalTest.BadScale do
+            use Core.Prim.Decimal, name: "X", scale: -1
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects non-decimal bound at compile time" do
+    assert_raise CompileError, ~r/min: ожидается число, строку или %Decimal\{\}/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DecimalTest.BadBound do
+            use Core.Prim.Decimal, name: "X", min: :zero
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects min > max at compile time" do
+    assert_raise CompileError, ~r/min \("10"\) больше max \(1\)/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DecimalTest.BadBounds do
+            use Core.Prim.Decimal, name: "X", min: "10", max: 1
+          end
+        end
+      )
+    end
   end
 end

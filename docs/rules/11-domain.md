@@ -17,8 +17,9 @@
 
 ## Prim (value object)
 
-`Core.Prim` — макрос value object: `%Mod{value:}`, `new/1`, `new!/1`, `value/1`,
-`__domain_kind__/0`, `__domain_type_opts__/0`, `prim?/1` (модуль).
+`Core.Prim` — макрос value object: `%Mod{value:}`, `new/1`, `new!/1`, `value/1`, `name/0`,
+`__domain_kind__/0`, `__domain_type_opts__/0`, `__domain_sensitive__/0`; на модуле —
+`prim?/1`, `composed?/1`, `unwrap/1`.
 
 ```elixir
 use Core.Prim,
@@ -29,14 +30,27 @@ use Core.Prim,
   validate: ...,
   custom_mutate: ...,
   custom_validate: ...,
+  type_opts: ...,
+  pipeline_opts: ...,
   sensitive: ...
 ```
 
 `kind` обязателен. Конвейер: `cast → mutate → custom_mutate → validate → custom_validate`.
 
+`type_opts:` — опции **типа** (`precision`, `tz`, границы): их отдаёт
+`__domain_type_opts__/0` и получают validate-шаги. `pipeline_opts:` (default —
+`type_opts`) получают cast/mutate-шаги: опциям обработки (`trim`, `sec_max_len`)
+в контракте типа места нет, а шагам они нужны.
+
+Формы шагов у mutate и validate одни и те же — `{Module, opts}`, `fun/1`, `fun/2`
+или список любой из них; `cast:` — `fun/1` либо `fun/2`. Контракт модульной формы:
+`Core.Mutator` (`@callback mutate/2`) и `Core.Validator` (`@callback validate/2`) —
+зеркальные behaviour, мутатор меняет значение, валидатор только проверяет его.
+
 `sensitive: true` (default `false`) — значение Prim скрыто от `inspect/1`, а в `Error.detail`
 вместо raw уходит `{:redacted, byte_size}`. Обязательна для паролей, токенов, ключей, ПДн;
-`Prim.Compose` наследует её от базового Prim. Детали и чек-лист — `12-errors.md`.
+`Prim.Compose` наследует её от базового Prim, и понизить её (`sensitive: false` поверх
+чувствительной базы) нельзя — `CompileError`. Детали и чек-лист — `12-errors.md`.
 
 | Функция | Возврат |
 |---|---|
@@ -45,7 +59,11 @@ use Core.Prim,
 | `value/1` | внутреннее значение |
 | `__domain_kind__/0` | атом kind для Codec |
 | `__domain_type_opts__/0` | опции типа (`precision`, `tz`, границы) — их читает `Codec.coerce/2` на read-пути |
+| `__domain_sensitive__/0` | Prim объявлен `sensitive: true` (наследуется `Prim.Compose`) |
+| `name/0` | имя Prim из `name:` — уходит в message доменной ошибки |
 | `Prim.prim?/1` | модуль объявлен через `use Prim` (`__domain_kind__/0` + `value/1`); при необходимости загружает модуль |
+| `Prim.composed?/1` | Prim объявлен через `Prim.Compose` (есть `__domain_base__/0`) |
+| `Prim.unwrap/1` | рекурсивно достать самое внутреннее не-Prim значение |
 
 В function heads: обязательный Prim — `%Mod{}` (default); композиция в `when` — `Core.Guard.is/2` /
 `is_opt/2` (`import`, не guards на самом Prim).
@@ -58,6 +76,32 @@ use Core.Prim,
 
 `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose` +
 `Core.Validator.*` (sibling, не под Prim).
+
+Порядок проверок у всех обёрток один — `Core.Prim.Opts.prepare!/2` (набор ключей →
+`kind:` → значения опций); метаданные билдера объявляет `use Core.Prim.Wrapper`.
+
+**Значения** опций обёрток проверяются на компиляции (`Core.Prim.Opts`, `CompileError`):
+границы и их порядок, `%Regex{}`, `%Date{}` / `%DateTime{}`, IANA-зона `tz:`, версия UUID,
+boolean-опции. Проверять их в рантайме нельзя: там ошибка конфигурации приходит доменной
+ошибкой первого `new/1` и неотличима от невалидного ввода пользователя.
+
+Строковый ввод MUST быть ограничен по байтам **до разбора**: разбор (`String.valid?/1`,
+`Integer.parse/1`, `Decimal.new/1`) обходит ввод целиком, а `min:` / `max:` / `min_len:`
+проверяются уже после него и от стоимости разбора не защищают. У `Prim.Integer` на ~2 млн
+цифр разбор к тому же поднимает `SystemLimitError` мимо контракта `new/1`.
+
+| Обёртка | `sec_max_len` по умолчанию | Без границ |
+|---|---|---|
+| `Prim.String` | `max_len * 4 + 50` | `CompileError` — примитив без границы принимает ввод любого размера |
+| `Prim.Integer` | десятичная запись `max:` + 4 | 40 байт |
+| `Prim.Decimal` | запись `max:` + `scale:` + 8 | 64 байта |
+
+Явный `sec_max_len:`, в который не влезает собственный `max:`, — `CompileError`.
+Ввод, уже разобранный вызывающим (`integer()`, `%Decimal{}`), границей не ограничен.
+
+`Prim.UUID` дополнительно: `new/0` (генерация в версии `version:` — 1 / 4 / 7, default 4),
+`format/2` (`:full` / `:hex` / `:urn` — для логов и ключей, wire-форму задаёт профиль кодека);
+`check_version: false` снимает проверку версии на разборе, оставляя генерацию.
 
 `Prim.DateTime` дополнительно: `now/0` / `now!/0`, `from/1` / `from!/1` — конверсия **из другого
 datetime-Prim** (явный API; `new/1` принимает только raw `%DateTime{}` / ISO8601, не другой Prim).

@@ -26,4 +26,11 @@ defmodule Core.PaginationTest do
     assert {:error, %Error{kind: :domain, message: "Смещение страницы: минимум 0"}} =
              Pagination.Offset.new(-1)
   end
+
+  test "Offset.new/1 отсекает огромную строку цифр доменной ошибкой" do
+    # У `Offset` нет `max:`, а строка приходит прямо из query (`Core.Web.Params.page/2`):
+    # без байтовой границы `Integer.parse/1` поднял бы `SystemLimitError`.
+    assert {:error, %Error{kind: :domain, message: "Смещение страницы: невалидное значение"}} =
+             Pagination.Offset.new(String.duplicate("9", 2_000_000))
+  end
 end

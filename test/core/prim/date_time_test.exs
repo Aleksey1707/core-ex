@@ -203,4 +203,43 @@ defmodule Core.Prim.DateTimeTest do
               message: "Дата события: невалидное значение"
             }} = EventAt.from(fake)
   end
+
+  test "rejects unknown tz at compile time" do
+    assert_raise CompileError, ~r/tz: ожидается известную IANA-зону/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DateTimeTest.BadTz do
+            use Core.Prim.DateTime, name: "Дата", tz: "Mars/Olympus"
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects non-datetime bound at compile time" do
+    assert_raise CompileError, ~r/after: ожидается %DateTime\{\}/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DateTimeTest.BadBound do
+            use Core.Prim.DateTime, name: "Дата", after: "2020-01-01T00:00:00Z"
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects after > before at compile time" do
+    assert_raise CompileError, ~r/after .* больше before/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DateTimeTest.BadBounds do
+            use Core.Prim.DateTime,
+              name: "Дата",
+              after: ~U[2030-01-01 00:00:00Z],
+              before: ~U[2020-01-01 00:00:00Z]
+          end
+        end
+      )
+    end
+  end
 end

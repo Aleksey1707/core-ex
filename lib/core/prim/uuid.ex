@@ -3,31 +3,29 @@ defmodule Core.Prim.UUID do
   Билдер uuid-Prim: генерация (`new/0`) и валидация UUID-строки.
 
   Опции: `name:` (обязательна), `kind:`, `version:` (1 / 4 / 7; default 4),
-  `mutate:` / `validate:`, `sensitive:`. Wire-форму (`:full` / `:hex` / `:urn`)
-  задаёт профиль кодека, не Prim.
+  `check_version:` (default `true`), `mutate:` / `validate:`, `sensitive:`.
+  Wire-форму (`:full` / `:hex` / `:urn`) задаёт профиль кодека, не Prim.
+
+  `version:` задаёт версию для `new/0` и ожидаемую версию для `new/1`; `check_version:
+  false` оставляет генерацию, но снимает проверку версии на разборе — для Prim, куда
+  приходят чужие идентификаторы.
   """
 
-  alias Core.Helper
   alias Core.Prim
   alias Core.Validator
 
-  @native_kind :uuid
-  @required_keys ~w(name)a
-  @optional_keys ~w(kind version check_version mutate validate sensitive)a
+  use Core.Prim.Wrapper,
+    label: "Prim.UUID",
+    native_kind: :uuid,
+    required: ~w(name)a,
+    optional: ~w(kind version check_version mutate validate sensitive)a
+
+  @versions [1, 4, 7]
 
   @doc "Объявить UUID-Prim (`name:` + опции version)."
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Prim.UUID.required_keys(),
-        Core.Prim.UUID.optional_keys(),
-        "Prim.UUID"
-      )
-
-      native = Core.Prim.UUID.native_kind()
-      kind = Keyword.get(opts, :kind, native)
-      Prim.validate_kind!(native, kind)
+      kind = Prim.Opts.prepare!(opts, Core.Prim.UUID)
 
       type_opts = Keyword.take(opts, ~w(version)a)
       version = Keyword.get(type_opts, :version, 4)
@@ -48,7 +46,8 @@ defmodule Core.Prim.UUID do
         name: Keyword.fetch!(opts, :name),
         kind: kind,
         type_opts: type_opts,
-        sensitive: Keyword.get(opts, :sensitive, false)
+        sensitive: Keyword.get(opts, :sensitive, false),
+        value_type: String.t()
 
       @uuid_version version
 
@@ -67,19 +66,17 @@ defmodule Core.Prim.UUID do
   end
 
   @doc false
-  @spec required_keys() :: [atom()]
+  @spec versions() :: [pos_integer()]
 
-  def required_keys, do: @required_keys
+  def versions, do: @versions
 
-  @doc false
-  @spec optional_keys() :: [atom()]
+  @doc "Проверить значения опций билдера на этапе компиляции."
+  @spec validate_opts!(keyword()) :: :ok
 
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec native_kind() :: atom()
-
-  def native_kind, do: @native_kind
+  def validate_opts!(opts) do
+    Prim.Opts.allowed!(opts, :version, [nil | @versions], label())
+    Prim.Opts.boolean!(opts, ~w(check_version sensitive)a, label())
+  end
 
   @doc "Сгенерировать UUID v4 (дефолтная версия)."
   @spec generate() :: String.t()
@@ -89,14 +86,12 @@ defmodule Core.Prim.UUID do
   @doc false
   @spec generate(pos_integer() | nil) :: String.t()
 
+  # Домен версии сужен на компиляции (`validate_opts!/1`): defensive-clause с `raise`
+  # только расширила бы его обратно.
   def generate(nil), do: generate(4)
   def generate(4), do: UUID.uuid4()
   def generate(1), do: UUID.uuid1()
   def generate(7), do: UUIDv7.generate()
-
-  def generate(version) do
-    raise ArgumentError, "неподдерживаемая версия UUID для генерации: #{inspect(version)}"
-  end
 
   @doc """
   Отформатировать UUID-строку (`:full` / `:hex` / `:urn`).
@@ -122,8 +117,9 @@ defmodule Core.Prim.UUID do
   def cast(value) when is_binary(value) do
     {:ok, normalize(value)}
   rescue
-    # `string_to_binary!/1` — единственный разбор на этом пути: отдельная проверка
-    # библиотекой (`UUID.info/1`) означала бы разбор той же строки дважды.
+    # Каноническую строку `cast/1` не разбирает вовсе, неканоническую — один раз через
+    # `string_to_binary!/1`; версию и формат проверяет `Core.Validator.UUID` своим
+    # `UUID.info/1` уже на нормализованном значении.
     ArgumentError -> {:error, {:invalid_uuid, "невалидное значение"}}
   end
 

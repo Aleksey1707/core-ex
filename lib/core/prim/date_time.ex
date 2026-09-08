@@ -8,34 +8,26 @@ defmodule Core.Prim.DateTime do
   (конверсия из другого datetime-Prim).
   """
 
+  @behaviour Core.Mutator
+
   alias Core.Config
   alias Core.Error
-  alias Core.Helper
   alias Core.Prim
   alias Core.Result
   alias Core.Validator
 
-  @native_kind :datetime
-  @required_keys ~w(name)a
-  @optional_keys ~w(kind after before tz precision mutate validate sensitive)a
+  use Core.Prim.Wrapper,
+    label: "Prim.DateTime",
+    native_kind: :datetime,
+    required: ~w(name)a,
+    optional: ~w(kind after before tz precision mutate validate sensitive)a
+
   @precisions ~w(second millisecond microsecond)a
 
   @doc "Объявить datetime-Prim (`name:` + опции tz/precision/bounds)."
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Prim.DateTime.required_keys(),
-        Core.Prim.DateTime.optional_keys(),
-        "Prim.DateTime"
-      )
-
-      native = Core.Prim.DateTime.native_kind()
-      kind = Keyword.get(opts, :kind, native)
-      Prim.validate_kind!(native, kind)
-
-      precision = Keyword.get(opts, :precision, :second)
-      Core.Prim.DateTime.validate_precision!(precision)
+      kind = Prim.Opts.prepare!(opts, Core.Prim.DateTime)
 
       type_opts = Keyword.take(opts, ~w(after before tz precision)a)
 
@@ -48,7 +40,8 @@ defmodule Core.Prim.DateTime do
         name: Keyword.fetch!(opts, :name),
         kind: kind,
         type_opts: type_opts,
-        sensitive: Keyword.get(opts, :sensitive, false)
+        sensitive: Keyword.get(opts, :sensitive, false),
+        value_type: DateTime.t()
 
       @tz Keyword.get(type_opts, :tz)
 
@@ -104,24 +97,19 @@ defmodule Core.Prim.DateTime do
   end
 
   @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec native_kind() :: atom()
-
-  def native_kind, do: @native_kind
-
-  @doc false
   @spec precisions() :: [atom()]
 
   def precisions, do: @precisions
+
+  @doc "Проверить значения опций билдера на этапе компиляции."
+  @spec validate_opts!(keyword()) :: :ok
+
+  def validate_opts!(opts) do
+    Prim.Opts.struct_bounds!(opts, :after, :before, DateTime, label())
+    Prim.Opts.tz!(opts, :tz, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    validate_precision!(Keyword.get(opts, :precision, :second))
+  end
 
   @doc "Проверить `precision:` — атом как у `DateTime.truncate/2`."
   @spec validate_precision!(atom()) :: :ok
@@ -151,6 +139,7 @@ defmodule Core.Prim.DateTime do
   @spec mutate(DateTime.t(), keyword()) ::
           {:ok, DateTime.t()} | {:error, {:invalid_datetime, String.t()}}
 
+  @impl true
   def mutate(%DateTime{} = value, opts) do
     tz = Keyword.get(opts, :tz) || Config.tz()
     precision = Keyword.get(opts, :precision, :second)
