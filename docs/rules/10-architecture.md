@@ -30,22 +30,27 @@
 | Что | Как получает зависимость |
 |---|---|
 | Инфра-синглтоны (`dao`, `codec`, `tz`, ключ шифрования, реализация `Outbox.Repo`) | `Core.Config` — `config :core, ...` |
+| Реализации репозиториев (доменных и `Outbox.Repo`) | конвенция `<Behaviour>.Pg`; ключ конфигурации — только при подмене |
 | OTP-процессы (`Outbox.Poller`, `Outbox.Cleaner`, `Mq.Stream.*`, `PubSub.MqSubscriberReliable`) | `opts` от supervisor'а потребителя |
 | Макросы (`Repo.Pg`, `Repo.Pg.Schema`, `Prim.DateTime`, `Codec.Facade`) | `use`-опция, fallback → `Core.Config` |
 | PromEx-плагины | списки процессов / размеров — MFA-провайдер в `opts` плагина |
 
-**Контроль — греп, а не компилятор** (boundary здесь бесполезен: приложение одно):
+**Контроль — линтер, а не компилятор** (boundary здесь бесполезен: приложение одно).
+`scripts/boundary_lint.exs` (цель `make boundary-check`, первый шаг цепочки) разбирает
+AST `lib/**/*.ex` и проверяет три правила:
 
-```bash
-rg 'Mix\.Project' lib                                       # пусто
-rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib    # только :core и :argon2_elixir
-```
+| # | Правило | Почему |
+|---|---|---|
+| 1 | `Mix.Project` в `lib/` MUST NOT встречаться | сборочный контекст принадлежит потребителю |
+| 2 | `Application.{get_env,fetch_env,fetch_env!,compile_env,compile_env!}` с **литеральным** именем приложения MUST называть только `:core` или `:argon2_elixir` | чужое имя в библиотеке не зашивается |
+| 3 | `Core.Config.otp_app/0` MUST NOT вызываться вне `lib/core/config.ex` | имя потребителя приходит переменной, и правило 2 его не видит: единственный источник — `otp_app/0`, и звать его вправе только `Core.Config` |
 
-Единственное исключение из «только `:core`» — `Core.Repo.Pg.Es`: он резолвит
-`event_repo:` через `Application.compile_env!(Core.Config.otp_app(), <behaviour>)`,
-то есть в app-env потребителя. DI доменных репозиториев — контракт хоста, и жить он
-обязан под его именем. Исключение задокументировано в moduledoc `Repo.Pg.Es` и README;
-расширять список — только с такой же аргументацией.
+Разбор идёт по AST, а не грепом: `Application.compile_env!` внутри `@moduledoc` — строковый
+литерал, а не обращение. Чтение app-env по имени в **переменной** правилом 2 не ограничено
+(`Mq.Stream.Credentials.from_env/2`): имя даёт вызывающий, библиотека его не знает.
+
+Доступ к app-env потребителя целиком живёт в `Core.Config` (`repo!/1`) — правило 3 и есть
+машинная форма этого инварианта.
 
 ## Компиляция не имеет права требовать конфиг потребителя
 
@@ -54,9 +59,9 @@ rg 'Application\.(get_env|fetch_env!?|compile_env!?)' lib    # только :cor
 
 - значения `Core.Config` резолвятся **в рантайме**, а не модульными атрибутами;
 - макрос, которому нужен фасад или репозиторий, при отсутствии явной опции подставляет
-  **вызов** (`Core.Config.codec()` / `Core.Config.dao()`), а не запечённый модуль:
-  резолв делает `Core.Helper.Opts.module_or_config!/4` (`Repo.Pg.Schema`, `Repo.Pg`,
-  `Repo.Pg.Es`, `Es.Outbox`, `Es.Event.Repo.Pg{,.Schema}`);
+  **вызов** (`Core.Config.codec()` / `Core.Config.dao()` / `Core.Config.outbox_repo()`),
+  а не запечённый модуль: резолв делает `Core.Helper.Opts.module_or_config!/4`
+  (`Repo.Pg.Schema`, `Repo.Pg`, `Repo.Pg.Es`, `Es.Outbox`, `Es.Event.Repo.Pg{,.Schema}`);
 - имена telemetry-событий строятся вызовом `Core.Telemetry.event/1`, а не атрибутом:
   префикс задаёт потребитель (`config :core, telemetry_prefix: [...]`).
 
@@ -76,10 +81,13 @@ config :core,
   tz: "Etc/UTC",             # опционален, дефолт "Etc/UTC"
   telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]
 
-config :core, Core.Outbox.Repo, Core.Outbox.Repo.Pg
 config :core, Core.Outbox, poller_name: MyApp.Outbox.Poller
 config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 ```
+
+Реализации репозиториев в контракт не входят: `Core.Config.repo!/1` и
+`Core.Config.outbox_repo/0` выводят их из имени behaviour по конвенции `<Behaviour>.Pg`,
+и ключ нужен только при подмене (`13-repos.md`, «DI»; ADR-0006).
 
 Полное описание, включая обязанности потребителя, — в `README.md`.
 `Core.Config.validate!/0` проверяет контракт на старте приложения.

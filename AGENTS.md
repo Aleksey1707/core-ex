@@ -27,9 +27,9 @@ git-зависимостью к нескольким разным приложе
 в коде библиотеки не должно быть ни одной завязки на конкретное приложение-потребителя,
 а её компиляция не имеет права требовать конфигурацию потребителя.
 
-Формулировка инварианта, проверяющие его грепы и правила optional-клиентов брокеров —
-`docs/rules/10-architecture.md`. После любой правки в `lib/core/mq/**` обязателен
-`make compile-no-optional`.
+Формулировка инварианта, проверяющий его линтер (`make boundary-check`) и правила
+optional-клиентов брокеров — `docs/rules/10-architecture.md`. После любой правки
+в `lib/core/mq/**` обязателен `make compile-no-optional`.
 
 ## Правила проекта
 
@@ -62,7 +62,8 @@ git-зависимостью к нескольким разным приложе
 ## Команды
 
 ```bash
-make                     # rules-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
+make                     # boundary-check → rules-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
+make boundary-check      # главный инвариант: библиотека не знает потребителя
 make rules-check         # свод docs/rules против стандарта 00-index.md
 make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
 make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)

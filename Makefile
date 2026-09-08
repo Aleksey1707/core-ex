@@ -2,7 +2,13 @@ DOCKER ?= podman
 
 # Порядок совпадает с .pre-commit-config.yaml.
 .PHONY: default
-default: rules-check format-check compile compile-no-optional deps-clean xref dialyzer test credo audit
+default: boundary-check rules-check format-check compile compile-no-optional deps-clean xref \
+         dialyzer test credo audit
+
+# Главный инвариант: библиотека не знает приложения-потребителя (`10-architecture.md`).
+.PHONY: boundary-check
+boundary-check:
+	elixir scripts/boundary_lint.exs
 
 # Свод правил `docs/rules` против стандарта из `docs/rules/00-index.md`.
 .PHONY: rules-check

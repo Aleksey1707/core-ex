@@ -471,7 +471,7 @@ use Repo.Pg.Es,
 
 | Опция | Обяз. | Значение |
 |---|---|---|
-| `event_repo:` | да | модуль **behaviour** Event.Repo; реализацию макрос резолвит через `compile_env!` |
+| `event_repo:` | да | модуль **behaviour** Event.Repo; реализацию макрос резолвит через `Core.Config.repo!/1` |
 | `outbox:` | да | `<Aggregate>.Outbox` |
 | `children:` | нет | `[[schema:, fk:, key:, constraint_errors:], …]`; строки — из `Schema.Child.to_models/1` |
 | `entity:` | да | в `Repo.Pg` опциональна, здесь обязательна (по ней строятся заголовки) |
@@ -606,24 +606,50 @@ def insert(%Agg{} = agg, %Context{} = context, opts \\ []),
 
 ## DI
 
-Доменные behaviour → реализация живут в app-env **потребителя**; `use Core.Repo.Pg.Es`
-резолвит `event_repo:` там же, беря имя приложения из `config :core, otp_app:`
-(`10-architecture.md`). Инфраструктурные реализации самой библиотеки — под `:core`.
+Реализация репозитория выводится из имени behaviour по конвенции **`<Behaviour>.Pg`**.
+Ключ в конфигурации нужен только тому, кто подменяет реализацию. Мотивация и цена —
+ADR-0006.
+
+Call site MUST резолвить реализацию через `Core.Config.repo!/1`; прямой
+`Application.compile_env!/2` на доменный behaviour — MUST NOT (две легальные формы
+возвращают тот же разнобой, только в коде вместо конфига):
 
 ```elixir
-# config/config.exs потребителя
-config :my_app, BehaviourModule, ImplModule
-config :core, Core.Outbox.Repo, Core.Outbox.Repo.Pg
+alias Core.Config
 
-# потребитель
-@repo Application.compile_env!(:my_app, BehaviourModule)
+require Config
+
+@repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
+```
+
+Реализация репозитория MUST лежать в `<Behaviour>.Pg` — это та же раскладка, что задаёт
+«Структура» ниже. Нестандартная реализация объявляется в app-env **потребителя**, под
+именем приложения из `config :core, otp_app:` (`10-architecture.md`):
+
+```elixir
+# config/config.exs потребителя — только при подмене
+config :my_app, MyApp.Domain.Orders.Order.Repo, MyApp.Domain.Orders.Order.Repo.Memory
+```
+
+Модуль-реализация проверяется на компиляции call site — и выведенный по конвенции, и
+заданный ключом: отсутствие даёт `CompileError`, а не `UndefinedFunctionError` на первом
+вызове. Цена — ребро в графе компиляции call site → реализация.
+
+Инфраструктурный репозиторий самой библиотеки живёт по той же конвенции:
+`Core.Config.outbox_repo/0` (`config :core, Core.Outbox.Repo` — только при подмене).
+
+Норму проверяет линтер библиотеки в режиме потребителя — ключ-модуль в `compile_env`
+и есть связывание руками:
+
+```bash
+elixir deps/core/scripts/boundary_lint.exs --consumer lib test
 ```
 
 ## Тесты
 
 - `use Core.DataCase, async: true` (в приложении — его `MyApp.DataCase`)
 - Sandbox: `Ecto.Adapters.SQL.Sandbox.start_owner!(repo, ...)` (в DataCase)
-- `@repo Application.compile_env!(app, Behaviour)` — тестировать через behaviour env
+- `@repo Config.repo!(Behaviour)` — тестировать через behaviour, а не реализацию
 - При `shadow_copy?: true`: `Context.new() |> Repo.Sc.init()`
 - Доменные фабрики (`<Actor>.User.new`, `<Aggregate>.new`, …), не Ecto fixtures
 - Outbox/процессы: при необходимости `Sandbox.allow(repo, self(), pid)`

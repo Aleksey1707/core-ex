@@ -13,12 +13,13 @@ defmodule Mix.Tasks.Outbox.Requeue do
   Порядок доставки для возвращённых записей не восстанавливается: сообщения, шедшие за
   ними, уже опубликованы.
 
-  Репозиторий берётся из `config :core, Core.Outbox.Repo`; задача поднимает приложение
+  Репозиторий берётся из `Core.Config.outbox_repo/0`; задача поднимает приложение
   потребителя (`app.start`), поэтому запускается из его корня.
   """
 
   use Mix.Task
 
+  alias Core.Config
   alias Core.Context
   alias Core.Outbox
 
@@ -30,7 +31,7 @@ defmodule Mix.Tasks.Outbox.Requeue do
     target = parse_target!(argv)
     Mix.Task.run("app.start")
 
-    repo = Application.fetch_env!(:core, Outbox.Repo)
+    repo = Config.outbox_repo()
     count = repo.requeue_failed(target, Context.new())
 
     Mix.shell().info("Возвращено в очередь: #{count}")

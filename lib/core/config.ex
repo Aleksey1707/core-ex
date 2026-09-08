@@ -15,7 +15,8 @@ defmodule Core.Config do
   ```
 
   - `otp_app` — приложение, в app-env которого потребитель держит свои DI-ключи
-    «behaviour → реализация». Нужно только `use Core.Repo.Pg.Es` (резолв `event_repo:`).
+    «behaviour → реализация». Читается на компиляции call site (`repo!/1`), поэтому
+    задаётся в `config.exs`, а не в `runtime.exs`.
   - `dao` — `Ecto.Repo` приложения.
   - `codec` — entity-фасад Codec для внутреннего wire (БД / outbox); Core ходит только
     через него (`dump/1`, `load/2`, `load!/2`).
@@ -35,10 +36,15 @@ defmodule Core.Config do
   ## Подсистемы
 
   ```elixir
-  config :core, Core.Outbox.Repo, Core.Outbox.Repo.Pg
   config :core, Core.Outbox, enabled: true, poll_interval_ms: 1_000, ...
   config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   ```
+
+  ## DI репозиториев
+
+  Реализация резолвится по конвенции `<Behaviour>.Pg` (`repo!/1`, `outbox_repo/0`);
+  ключ в конфигурации нужен только тому, кто подменяет реализацию. Решение и его
+  цена — `docs/adr/0006-repo-impl-resolved-by-convention.md`.
   """
 
   @app :core
@@ -58,6 +64,62 @@ defmodule Core.Config do
   @spec codec() :: module()
 
   def codec, do: fetch!(:codec)
+
+  @doc """
+  Реализация репозитория для доменного behaviour: из app-env потребителя, иначе `<Behaviour>.Pg`.
+
+      @repo Config.repo!(MyApp.Domain.Users.Common.User.Repo)
+
+  Разворачивается в `Application.compile_env/3` по ключу `behaviour` в приложении `otp_app/0`:
+  значение запекается на компиляции call site, а правка ключа заставляет его перекомпилировать.
+  Ключ нужен только нестандартной реализации:
+
+      config :my_app, MyApp.Domain.Users.Common.User.Repo, MyApp.Domain....User.Repo.Memory
+
+  Модуль-реализация проверяется на компиляции — и выведенный по конвенции, и заданный ключом.
+  """
+  @spec repo!(Macro.t()) :: Macro.t()
+
+  defmacro repo!(behaviour) do
+    app = otp_app()
+    module = Macro.expand_literals(behaviour, __CALLER__)
+
+    quote do
+      Core.Config.ensure_repo!(
+        Application.compile_env(unquote(app), unquote(module), unquote(default_repo(module))),
+        unquote(module),
+        unquote(app)
+      )
+    end
+  end
+
+  @doc false
+  @spec ensure_repo!(module(), module(), atom()) :: module()
+
+  def ensure_repo!(impl, behaviour, app) do
+    case Code.ensure_compiled(impl) do
+      {:module, module} ->
+        module
+
+      {:error, reason} ->
+        raise CompileError,
+          description:
+            "Core.Config.repo!(#{inspect(behaviour)}): реализация #{inspect(impl)} недоступна " <>
+              "(#{inspect(reason)}); задайте `config #{inspect(app)}, #{inspect(behaviour)}, <Impl>`"
+    end
+  end
+
+  @doc """
+  Реализация репозитория outbox: по той же конвенции, что и `repo!/1`, — `Core.Outbox.Repo.Pg`.
+
+  Резолвится в рантайме, а не на компиляции: ключ читают и PromEx-плагин, и mix-задача,
+  и макрос `Repo.Pg.Es` — запекание развело бы их по разным моментам чтения. Имя реализации
+  при этом не упоминается статически: `Core.Outbox.Repo.Pg` ходит в `Core.Config` за `dao/0`,
+  и ссылка отсюда замкнула бы цикл компиляции.
+  """
+  @spec outbox_repo() :: module()
+
+  def outbox_repo, do: Application.get_env(@app, Core.Outbox.Repo, default_repo(Core.Outbox.Repo))
 
   @doc "Часовой пояс приложения по умолчанию."
   @spec tz() :: String.t()
@@ -85,14 +147,26 @@ defmodule Core.Config do
   def validate! do
     _ = otp_app()
 
-    ensure_exports!(dao(), :dao, transact: 1, in_transaction?: 0)
-    ensure_exports!(codec(), :codec, dump: 1, load: 2, load!: 2)
+    ensure_exports!(dao(), "config :core, dao:", transact: 1, in_transaction?: 0)
+    ensure_exports!(codec(), "config :core, codec:", dump: 1, load: 2, load!: 2)
+
+    ensure_exports!(
+      outbox_repo(),
+      "config :core, Core.Outbox.Repo,",
+      Core.Outbox.Repo.behaviour_info(:callbacks)
+    )
+
     ensure_tz!(tz())
 
     :ok
   end
 
   # ---
+
+  # Имя реализации вычисляется на компиляции из имени behaviour: `safe_concat` непригоден —
+  # реализация компилируется позже call site, и атома её имени ещё может не быть.
+  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
+  defp default_repo(behaviour), do: Module.concat(behaviour, Pg)
 
   defp fetch!(key) do
     case Application.fetch_env(@app, key) do
@@ -106,15 +180,14 @@ defmodule Core.Config do
     end
   end
 
-  defp ensure_exports!(module, key, funs) do
+  defp ensure_exports!(module, where, funs) do
     Code.ensure_loaded?(module) ||
-      raise ArgumentError,
-            "Core.Config: `config :core, #{key}:` — модуль #{inspect(module)} не найден"
+      raise ArgumentError, "Core.Config: `#{where}` — модуль #{inspect(module)} не найден"
 
     Enum.each(funs, fn {fun, arity} ->
       function_exported?(module, fun, arity) ||
         raise ArgumentError,
-              "Core.Config: `config :core, #{key}:` — #{inspect(module)} " <>
+              "Core.Config: `#{where}` — #{inspect(module)} " <>
                 "не экспортирует #{fun}/#{arity}"
     end)
   end

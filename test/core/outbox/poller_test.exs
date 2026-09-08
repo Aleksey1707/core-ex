@@ -13,7 +13,7 @@ defmodule Core.Outbox.PollerTest do
   alias Core.Outbox.Record
   alias Core.Outbox.Repo.Pg.Schema
 
-  @repo Application.compile_env!(:core, Core.Outbox.Repo)
+  @repo Core.Config.outbox_repo()
 
   defmodule ExitingWriter do
     @moduledoc false

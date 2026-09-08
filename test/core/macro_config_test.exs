@@ -52,6 +52,12 @@ defmodule Core.MacroConfigTest do
     def append(_events, _context, _opts \\ []), do: :ok
   end
 
+  defmodule EventRepo.Pg do
+    @moduledoc false
+
+    def append(_events, _context, _opts \\ []), do: :ok
+  end
+
   defmodule Outbox do
     @moduledoc false
 
@@ -62,8 +68,9 @@ defmodule Core.MacroConfigTest do
     codec = Application.fetch_env!(:core, :codec)
     dao = Application.fetch_env!(:core, :dao)
 
-    # DI доменного репозитория событий — единственный ключ, который `Repo.Pg.Es` читает
-    # на компиляции (`Application.compile_env!`, документированное исключение).
+    # DI доменного репозитория событий: `Repo.Pg.Es` резолвит его через `Config.repo!/1`
+    # в app-env потребителя. Здесь ключ задан явно — ветку конвенции проверяет
+    # отдельный тест ниже.
     Application.put_env(:core, EventRepo, EventRepoImpl)
 
     on_exit(fn ->
@@ -137,6 +144,22 @@ defmodule Core.MacroConfigTest do
 
     test "Repo.Pg.Es — без dao" do
       assert_compiles(RepoPgEs, """
+        use Core.Repo.Pg.Es,
+          behaviour: Core.MacroConfigTest.Behaviour,
+          schema: Core.MacroConfigTest.Entity,
+          to_entity: &Function.identity/1,
+          to_model: &Function.identity/1,
+          entity: Core.MacroConfigTest.Entity,
+          errors: Core.MacroConfigTest.Errors,
+          event_repo: Core.MacroConfigTest.EventRepo,
+          outbox: Core.MacroConfigTest.Outbox
+      """)
+    end
+
+    test "Repo.Pg.Es — без DI-ключа: реализация event_repo по конвенции" do
+      Application.delete_env(:core, EventRepo)
+
+      assert_compiles(RepoPgEsByConvention, """
         use Core.Repo.Pg.Es,
           behaviour: Core.MacroConfigTest.Behaviour,
           schema: Core.MacroConfigTest.Entity,

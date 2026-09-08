@@ -22,8 +22,6 @@ config :core, Core.TestRepo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
-config :core, Core.Outbox.Repo, Core.Outbox.Repo.Pg
-
 config :core, Core.Outbox,
   enabled: false,
   poll_interval_ms: 60_000,

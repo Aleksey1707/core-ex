@@ -7,7 +7,7 @@ defmodule Core.Outbox.Repo.Pg.StatsTest do
   alias Core.Outbox.Repo.Pg.Schema
   alias Core.Outbox.Repo.Pg.Stats
 
-  @repo Application.compile_env!(:core, Core.Outbox.Repo)
+  @repo Core.Config.outbox_repo()
 
   setup do
     {:ok, context: Context.new()}
