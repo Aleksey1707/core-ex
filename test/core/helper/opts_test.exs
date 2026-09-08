@@ -103,4 +103,16 @@ defmodule Core.Helper.OptsTest do
       Opts.binary!([topic: :roles], :topic, "T")
     end
   end
+
+  test "atom! читает опцию-атом" do
+    assert :shadow_copy == Opts.atom!([key: :shadow_copy], :key, "T")
+
+    assert_raise CompileError, ~r/T: key: ожидается атом, получено "shadow_copy"/, fn ->
+      Opts.atom!([key: "shadow_copy"], :key, "T")
+    end
+
+    assert_raise CompileError, ~r/T: key: ожидается атом, получено nil/, fn ->
+      Opts.atom!([key: nil], :key, "T")
+    end
+  end
 end

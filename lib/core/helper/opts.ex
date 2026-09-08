@@ -3,7 +3,8 @@ defmodule Core.Helper.Opts do
   Валидация опций `__using__`-макросов на этапе компиляции.
 
   `validate!/4` проверяет обязательные и неизвестные ключи, `module!/4` — что значение
-  является модулем (и, при `exports:`, что он экспортирует нужные функции).
+  является модулем (и, при `exports:`, что он экспортирует нужные функции), `binary!/3` /
+  `atom!/3` — что значение нужного типа.
   Опечатка в опции даёт `CompileError`, а не сбой в рантайме.
 
   `module_or_config!/4` — опция-модуль с дефолтом из `Core.Config`, резолвимым в рантайме.
@@ -113,6 +114,20 @@ defmodule Core.Helper.Opts do
       value ->
         raise CompileError,
           description: "#{label}: #{key}: ожидается строка, получено #{inspect(value)}"
+    end
+  end
+
+  @doc "Прочитать опцию-атом (не `nil`)."
+  @spec atom!(keyword(), atom(), String.t()) :: atom()
+
+  def atom!(opts, key, label) do
+    case fetch!(opts, key, label, []) do
+      value when is_atom(value) and not is_nil(value) ->
+        value
+
+      value ->
+        raise CompileError,
+          description: "#{label}: #{key}: ожидается атом, получено #{inspect(value)}"
     end
   end
 

@@ -51,20 +51,24 @@ defmodule Core.Repo.ScTest do
     assert Repo.Sc.find(ctx, Entity, "1") == nil
   end
 
-  test "delete/1 removes ETS table and is idempotent" do
+  test "delete/1 удаляет таблицу, снимает ключ и идемпотентен" do
     ctx = Context.new() |> Repo.Sc.init()
     tid = Context.find(ctx, :shadow_copy)
 
     assert is_reference(tid)
     assert :ets.info(tid) != :undefined
 
-    assert :ok = Repo.Sc.delete(ctx)
+    ctx = Repo.Sc.delete(ctx)
+
     assert :ets.info(tid) == :undefined
-    assert :ok = Repo.Sc.delete(ctx)
+    refute Context.exists?(ctx, :shadow_copy)
+    assert ^ctx = Repo.Sc.delete(ctx)
   end
 
   test "delete/1 no-op without init" do
-    assert :ok = Repo.Sc.delete(Context.new())
+    ctx = Context.new()
+
+    assert ^ctx = Repo.Sc.delete(ctx)
   end
 
   test "delete/1 makes stored snapshot unavailable" do
@@ -74,8 +78,12 @@ defmodule Core.Repo.ScTest do
     tid = Context.find(ctx, :shadow_copy)
 
     assert Repo.Sc.find(ctx, Entity, "1") == entity
-    assert :ok = Repo.Sc.delete(ctx)
+
+    ctx = Repo.Sc.delete(ctx)
+
     assert :ets.info(tid) == :undefined
+    assert ^entity = Repo.Sc.put(ctx, entity)
+    assert Repo.Sc.find(ctx, Entity, "1") == nil
   end
 
   test "clear/1 забывает эталоны, оставляя кэш рабочим" do
@@ -84,7 +92,7 @@ defmodule Core.Repo.ScTest do
     entity = %Entity{id: "1", name: "a"}
     Repo.Sc.put(ctx, entity)
 
-    assert :ok = Repo.Sc.clear(ctx)
+    assert ^ctx = Repo.Sc.clear(ctx)
     assert :ets.info(tid) != :undefined
     assert Repo.Sc.find(ctx, Entity, "1") == nil
 
@@ -92,11 +100,25 @@ defmodule Core.Repo.ScTest do
     assert Repo.Sc.find(ctx, Entity, "1") == entity
   end
 
-  test "clear/1 no-op без init и после delete/1" do
-    ctx = Context.new() |> Repo.Sc.init()
+  test "put/find на старой копии контекста после delete/1 — no-op" do
+    stale = Context.new() |> Repo.Sc.init()
+    entity = %Entity{id: "1", name: "a"}
+    Repo.Sc.put(stale, entity)
+    Repo.Sc.delete(stale)
 
-    assert :ok = Repo.Sc.clear(Context.new())
-    assert :ok = Repo.Sc.delete(ctx)
-    assert :ok = Repo.Sc.clear(ctx)
+    assert ^entity = Repo.Sc.put(stale, entity)
+    assert Repo.Sc.find(stale, Entity, "1") == nil
+  end
+
+  test "clear/1 no-op без init и снимает мёртвый ключ после delete/1" do
+    empty = Context.new()
+
+    assert ^empty = Repo.Sc.clear(empty)
+
+    stale = Context.new() |> Repo.Sc.init()
+    Repo.Sc.delete(stale)
+
+    assert Context.exists?(stale, :shadow_copy)
+    refute Context.exists?(Repo.Sc.clear(stale), :shadow_copy)
   end
 end

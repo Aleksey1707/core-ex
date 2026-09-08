@@ -43,7 +43,7 @@
   (`CompileError`).
 - Динамический attrs (переменная) / внутренние `__domain__/2` / `__app__/2` → `Keyword.fetch!` на
   runtime (`KeyError`).
-- Не путать с `Helper.Keyword.check_opts!` (для `__using__` / compile opts модулей).
+- Не путать с `Helper.Opts.validate!` (для `__using__` / compile opts модулей).
 
 | Kind | Обязательные attrs | Опциональные attrs |
 |---|---|---|
