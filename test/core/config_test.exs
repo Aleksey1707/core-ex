@@ -5,6 +5,22 @@ defmodule Core.ConfigTest do
 
   alias Core.Config
 
+  defmodule Behaviour do
+    @moduledoc false
+  end
+
+  defmodule Behaviour.Pg do
+    @moduledoc false
+  end
+
+  defmodule Custom do
+    @moduledoc false
+  end
+
+  defmodule Orphan do
+    @moduledoc false
+  end
+
   setup do
     saved = Application.get_all_env(:core)
 
@@ -64,6 +80,50 @@ defmodule Core.ConfigTest do
     end
   end
 
+  describe "repo!/1" do
+    test "без ключа — реализация по конвенции `<Behaviour>.Pg`" do
+      Application.delete_env(:core, Behaviour)
+
+      assert compile_repo!(ByConvention, Behaviour) == Behaviour.Pg
+    end
+
+    test "ключ в app-env потребителя переопределяет конвенцию" do
+      Application.put_env(:core, Behaviour, Custom)
+
+      assert compile_repo!(ByConfig, Behaviour) == Custom
+    end
+
+    test "несуществующая реализация по конвенции — CompileError" do
+      Application.delete_env(:core, Orphan)
+
+      assert_raise CompileError, ~r/реализация #{inspect(Orphan.Pg)} недоступна/, fn ->
+        compile_repo!(NoConventionImpl, Orphan)
+      end
+    end
+
+    test "несуществующая реализация из конфига — CompileError" do
+      Application.put_env(:core, Behaviour, Core.NoSuchRepo)
+
+      assert_raise CompileError, ~r/реализация Core\.NoSuchRepo недоступна/, fn ->
+        compile_repo!(NoConfiguredImpl, Behaviour)
+      end
+    end
+  end
+
+  describe "outbox_repo/0" do
+    test "без ключа — Core.Outbox.Repo.Pg" do
+      Application.delete_env(:core, Core.Outbox.Repo)
+
+      assert Config.outbox_repo() == Core.Outbox.Repo.Pg
+    end
+
+    test "ключ переопределяет дефолт" do
+      Application.put_env(:core, Core.Outbox.Repo, Custom)
+
+      assert Config.outbox_repo() == Custom
+    end
+  end
+
   describe "validate!/0" do
     test "на рабочем конфиге проходит" do
       assert :ok = Config.validate!()
@@ -92,5 +152,31 @@ defmodule Core.ConfigTest do
         Config.validate!()
       end
     end
+
+    test "ловит подмену репозитория outbox модулем без колбэков" do
+      Application.put_env(:core, Core.Outbox.Repo, Core.Version)
+
+      assert_raise ArgumentError, ~r/Core\.Outbox\.Repo,` — Core\.Version не экспортирует/, fn ->
+        Config.validate!()
+      end
+    end
+  end
+
+  defp compile_repo!(name, behaviour) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_string("""
+    defmodule #{inspect(module)} do
+      @moduledoc false
+
+      require Core.Config
+
+      @repo Core.Config.repo!(#{inspect(behaviour)})
+
+      def repo, do: @repo
+    end
+    """)
+
+    module.repo()
   end
 end

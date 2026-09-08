@@ -9,7 +9,7 @@ defmodule Core.Outbox.CleanerTest do
   alias Core.Outbox.Record
   alias Core.Outbox.Repo.Pg.Schema
 
-  @repo Application.compile_env!(:core, Core.Outbox.Repo)
+  @repo Core.Config.outbox_repo()
 
   defmodule FailingRepo do
     @moduledoc false

@@ -43,11 +43,8 @@ defmodule Core.Repo.Pg.Es do
 
   ## Opts (сверх опций `Repo.Pg`)
 
-  - `event_repo:` — модуль **behaviour** репозитория событий; реализация резолвится
-    макросом через `Application.compile_env!(Core.Config.otp_app(), <behaviour>)`,
-    то есть в app-env приложения-потребителя (`config :core, otp_app: :my_app`).
-    Это единственное место, где Core читает конфигурацию не из `:core`: DI доменных
-    репозиториев — контракт хоста, и жить он должен под его именем
+  - `event_repo:` — модуль **behaviour** репозитория событий; реализацию резолвит
+    `Core.Config.repo!/1` — из app-env потребителя, иначе `<behaviour>.Pg`
   - `outbox:` — `<Aggregate>.Outbox` (маппинг событий в записи outbox)
   - `children:` — список описаний дочерних таблиц:
     - `schema:` — Ecto-схема с `to_models/1` (обязательно)
@@ -69,10 +66,9 @@ defmodule Core.Repo.Pg.Es do
   Опция `entity:` обязательна (в `Repo.Pg` она опциональна) — по ней строятся заголовки
   переопределённых функций.
 
-  Макрос занимает имена `@es_event_repo`, `@es_outbox`, `@es_outbox_repo`, `@es_children`.
+  Макрос занимает имена `@es_event_repo`, `@es_outbox`, `@es_children`.
   """
 
-  alias Core.Config
   alias Core.Helper
 
   @label "Repo.Pg.Es"
@@ -90,12 +86,10 @@ defmodule Core.Repo.Pg.Es do
     quote do
       use Core.Repo.Pg, unquote(pg_opts)
 
-      @es_event_repo Application.compile_env!(
-                       unquote(Config.otp_app()),
-                       unquote(cfg.event_repo)
-                     )
+      require Core.Config
+
+      @es_event_repo Core.Config.repo!(unquote(cfg.event_repo))
       @es_outbox unquote(cfg.outbox)
-      @es_outbox_repo Application.compile_env!(:core, Core.Outbox.Repo)
       @es_children unquote(Macro.escape(cfg.children))
 
       @doc false
@@ -194,7 +188,7 @@ defmodule Core.Repo.Pg.Es do
       defp do_flush_events(events, context, opts) do
         with {:ok, records} <- @es_outbox.from_events(events),
              :ok <- @es_event_repo.append(events, context, opts) do
-          @es_outbox_repo.append(records, context, opts)
+          Core.Config.outbox_repo().append(records, context, opts)
         end
       end
     end

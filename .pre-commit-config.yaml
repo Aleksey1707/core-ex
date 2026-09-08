@@ -10,10 +10,17 @@ repos:
       - id: check-symlinks
 
   # Порядок как у `make` (Makefile default):
-  #   rules-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer →
-  #   test → credo → audit
+  #   boundary-check → rules-check → format-check → compile → compile-no-optional → deps-clean →
+  #   xref → dialyzer → test → credo → audit
   - repo: local
     hooks:
+      - id: boundary-lint
+        name: "Boundary: библиотека не знает потребителя"
+        entry: elixir scripts/boundary_lint.exs
+        language: system
+        require_serial: true
+        pass_filenames: false
+
       - id: rules-lint
         name: "Rules: свод .claude/rules"
         entry: elixir scripts/rules_lint.exs

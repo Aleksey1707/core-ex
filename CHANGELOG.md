@@ -169,6 +169,25 @@
 
 ### Изменения контракта макросов
 
+- **Реализация репозитория выводится из имени behaviour.** `Core.Config.repo!/1` резолвит
+  `<Behaviour>` → `<Behaviour>.Pg`, если в app-env потребителя не задано другое; тот же
+  дефолт у `Core.Config.outbox_repo/0`. Из `config/config.exs` уходит по строке на каждый
+  репозиторий, включая обязательную прежде
+  `config :core, Core.Outbox.Repo, Core.Outbox.Repo.Pg` — старые ключи продолжают работать
+  и нужны только при подмене реализации. Call site переводится на
+  `@repo Config.repo!(Behaviour)`: прямой `Application.compile_env!/2` на доменный
+  behaviour стал нарушением свода (`13-repos.md`, «DI»). Модуль-реализация проверяется на
+  компиляции — отсутствие даёт `CompileError`, а не `UndefinedFunctionError` на первом
+  вызове, ценой ребра call site → реализация в графе компиляции. `otp_app` теперь читает
+  любой call site, поэтому он обязан лежать в `config.exs`, а не в `runtime.exs`.
+  Мотивация, отвергнутые варианты и цена — `docs/adr/0006-repo-impl-resolved-by-convention.md`.
+- **`Repo.Pg.Es` больше не читает конфигурацию на компиляции.** `event_repo:` резолвится
+  через `Core.Config.repo!/1`, реализация outbox — вызовом `Core.Config.outbox_repo/0`
+  в момент flush; атрибут `@es_outbox_repo` снят. Доступ к app-env потребителя целиком
+  сжат в `Core.Config`, и главный инвариант из `10-architecture.md` проверяется линтером
+  `make boundary-check` (`scripts/boundary_lint.exs`), а не грепом на ревью. Тот же скрипт
+  проверяет и сторону потребителя — `boundary_lint.exs --consumer lib test` ловит прямой
+  `compile_env` на модуль-behaviour; потребитель зовёт его из `deps/core/scripts/`.
 - **`codec:` и `repo:` без явной опции резолвятся в рантайме.** `Es.Outbox`, `Repo.Pg`,
   `Repo.Pg.Es`, `Es.Event.Repo.Pg` и `Es.Event.Repo.Pg.Schema` больше не читают
   `Core.Config` в момент разворачивания макроса — как это уже делал `Repo.Pg.Schema`.

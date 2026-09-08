@@ -5,7 +5,7 @@ defmodule Core.Outbox.PromEx do
 
   use PromEx.Plugin
 
-  alias Core.Outbox
+  alias Core.Config
   alias Core.PromEx.Safe
   alias Core.Telemetry
 
@@ -187,7 +187,7 @@ defmodule Core.Outbox.PromEx do
 
   # Реализация берётся из DI, а не прибивается к Pg: метрики читают ту же очередь,
   # что и поллер.
-  defp repo, do: Application.fetch_env!(:core, Outbox.Repo)
+  defp repo, do: Config.outbox_repo()
 
   defp result_tag_values(%{result: result}) do
     %{result: to_string(result)}

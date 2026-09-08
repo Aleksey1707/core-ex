@@ -47,7 +47,7 @@ defmodule Core.Outbox.PromExTest do
         self()
       )
 
-    configured = Application.fetch_env!(:core, Core.Outbox.Repo)
+    configured = Core.Config.outbox_repo()
 
     on_exit(fn ->
       :telemetry.detach(handler_id)

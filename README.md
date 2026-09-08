@@ -87,7 +87,7 @@ config :core,
 
 | Ключ | Тип | Назначение |
 |---|---|---|
-| `otp_app` | `atom()` | приложение, в app-env которого потребитель держит свои DI-ключи «behaviour → реализация». Читается только макросом `use Core.Repo.Pg.Es` при резолве `event_repo:`. Единственное место, где Core обращается к конфигурации не под `:core` |
+| `otp_app` | `atom()` | приложение, в app-env которого потребитель держит свои DI-ключи «behaviour → реализация». Читается `Core.Config.repo!/1` на компиляции call site, поэтому задаётся в `config.exs`, а не в `runtime.exs`. Единственное место, где Core обращается к конфигурации не под `:core` |
 | `dao` | `module()` | `Ecto.Repo` приложения |
 | `codec` | `module()` | entity-фасад Codec для внутреннего wire (БД / outbox) |
 
@@ -101,9 +101,6 @@ config :core,
 ### Подсистемы
 
 ```elixir
-# Реализация репозитория outbox. Обязателен, если используются Outbox или Repo.Pg.Es.
-config :core, Core.Outbox.Repo, Core.Outbox.Repo.Pg
-
 # Читается Core только ради `Poller.wake/1` после записи в очередь.
 # Либо один поллер:
 config :core, Core.Outbox, poller_name: MyApp.Outbox.Poller
@@ -122,6 +119,13 @@ config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYP
 Остальные настройки outbox (интервалы, размер батча, TTL) библиотека не читает: они
 приходят `opts`-ами в `Core.Outbox.Poller` / `Core.Outbox.Cleaner` от supervisor'а
 потребителя, поэтому храните их там, где вам удобно.
+
+### Реализации репозиториев
+
+Ключа не требуют: реализация выводится из имени behaviour по конвенции `<Behaviour>.Pg`
+(`Core.Config.repo!/1`, `Core.Config.outbox_repo/0`). `config :core, Core.Outbox.Repo`
+и `config :my_app, <Behaviour>` нужны только при подмене реализации — например тестовой
+или in-memory. Решение и его цена — `docs/adr/0006-repo-impl-resolved-by-convention.md`.
 
 ### Проверка конфигурации на старте
 
@@ -200,13 +204,32 @@ end
 
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
    `:failed` в очередь (runbook в `docs/rules/14-events-outbox.md`). Задача поднимает
-   приложение потребителя и берёт репозиторий из `config :core, Core.Outbox.Repo`.
+   приложение потребителя и берёт репозиторий из `Core.Config.outbox_repo/0`.
 
-5. **DI-ключи под своим `otp_app`** — реализации доменных behaviour:
+5. **DI репозиториев** — по конвенции, а не по конфигурации. Call site резолвит реализацию
+   через `Core.Config.repo!/1`:
 
    ```elixir
-   config :my_app, MyApp.Domain.Orders.Order.Event.Repo,
-          MyApp.Domain.Orders.Order.Event.Repo.Pg
+   alias Core.Config
+
+   require Config
+
+   @repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
+   ```
+
+   Без ключа берётся `MyApp.Domain.Orders.Order.Repo.Pg`. Ключ под своим `otp_app` нужен
+   только при подмене:
+
+   ```elixir
+   config :my_app, MyApp.Domain.Orders.Order.Repo,
+          MyApp.Domain.Orders.Order.Repo.Memory
+   ```
+
+   Прямой `Application.compile_env!/2` на доменный behaviour — нарушение
+   (`docs/rules/13-repos.md`, «DI»). Проверяется линтером библиотеки, шагом вашего `make`:
+
+   ```bash
+   elixir deps/core/scripts/boundary_lint.exs --consumer lib test
    ```
 
 6. **Supervision.** Библиотека не имеет своего OTP-приложения: `Core.Outbox.Poller`,

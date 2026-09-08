@@ -25,8 +25,9 @@
 в `on_exit`. Явный `async:` требует `Credo.Check.Refactor.PassAsyncInTestCases`.
 
 Фикстуры — доменные конструкторы (`<Aggregate>.new`, `test/support/prim_fixture.ex`), не Ecto
-fixtures. Репозитории тестируются через behaviour:
-`@repo Application.compile_env!(:core, Behaviour)` (в приложении-потребителе — под его `:my_app`).
+fixtures. Репозитории тестируются через behaviour: `@repo Config.repo!(Behaviour)`
+(`13-repos.md`, «DI»). Подмена реализации на тестовую — ключом в `config/test.exs`, а не
+другим call site.
 При `shadow_copy?: true` контекст готовится как `Context.new() |> Repo.Sc.init()`.
 
 ## Codec: round-trip
