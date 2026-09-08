@@ -174,7 +174,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @impl true
   def handle_call({:subscribe, _data}, _from, %__MODULE__{subscribed?: true} = state) do
     error =
-      Error.app(__MODULE__, code: :already_subscribed, ns: :pubsub, message: "Уже подписан")
+      Error.app(code: :already_subscribed, ns: :pubsub, message: "Уже подписан")
 
     {:reply, {:error, error}, state}
   end
@@ -370,7 +370,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp dlq_publish_error(detail) do
-    Error.app(__MODULE__,
+    Error.app(
       code: :dlq_publish_failed,
       ns: :pubsub,
       message: "Не удалось опубликовать сообщение в DLQ",
@@ -398,7 +398,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp handler_crash_error(handler, exception, stacktrace) do
-    Error.app(__MODULE__,
+    Error.app(
       code: :handler_crashed,
       ns: :pubsub,
       message: "#{handler} завершился исключением",
@@ -407,7 +407,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp unexpected_result_error(other) do
-    Error.app(__MODULE__,
+    Error.app(
       code: :unexpected_handler_result,
       ns: :pubsub,
       message: "on_message вернул неожиданный результат",

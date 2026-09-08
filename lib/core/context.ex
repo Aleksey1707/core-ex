@@ -61,7 +61,7 @@ defmodule Core.Context do
 
       :error ->
         {:error,
-         Error.domain(__MODULE__,
+         Error.domain(
            code: :not_found,
            ns: :context,
            message: "Значение не найдено",

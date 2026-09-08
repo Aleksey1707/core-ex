@@ -186,7 +186,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     def handle_call(:commit, _from, %{reliable?: false} = state) do
       {:reply,
        {:error,
-        Error.app(__MODULE__,
+        Error.app(
           code: :not_reliable,
           ns: :mq,
           message: "Reader не в reliable-режиме"
@@ -196,7 +196,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     def handle_call(:commit, _from, %{pending: nil} = state) do
       {:reply,
        {:error,
-        Error.app(__MODULE__,
+        Error.app(
           code: :nothing_to_commit,
           ns: :mq,
           message: "Нет сообщения для commit"
@@ -346,7 +346,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
         )
 
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :commit_failed,
            ns: :mq,
            message: "Не удалось сохранить offset",

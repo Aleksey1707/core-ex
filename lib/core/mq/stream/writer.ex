@@ -268,7 +268,7 @@ defmodule Core.Mq.Stream.Writer do
       "stream writer: публикация не подтверждена topic=#{topic} причина=#{inspect(reason)}"
     )
 
-    Error.app(__MODULE__,
+    Error.app(
       code: :publish_unconfirmed,
       ns: :mq,
       message: "Брокер не подтвердил публикацию",
@@ -316,7 +316,7 @@ defmodule Core.Mq.Stream.Writer do
   end
 
   defp producer_setup_error(reason) do
-    Error.app(__MODULE__,
+    Error.app(
       code: :producer_setup_failed,
       ns: :mq,
       message: "Не удалось подготовить producer stream",

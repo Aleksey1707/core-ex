@@ -115,7 +115,7 @@ defmodule Core.Mq do
       case find_header(message, key) do
         nil ->
           {:error,
-           Error.domain(__MODULE__,
+           Error.domain(
              code: :header_not_found,
              ns: :mq,
              message: "Заголовок не найден",
@@ -143,7 +143,7 @@ defmodule Core.Mq do
         {k, v}, _acc ->
           {:halt,
            {:error,
-            Error.domain(__MODULE__,
+            Error.domain(
               code: :invalid_header_value,
               ns: :mq,
               message: "Значение заголовка должно быть строкой",
