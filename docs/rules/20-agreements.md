@@ -317,12 +317,12 @@ def parse({:ok, data}, opts), do: do_parse(data, opts)
 
 ```elixir
 # плохо
-alias Core.Helper.Keyword, as: OptKeyword
-OptKeyword.check_opts!(...)
+alias Core.Helper.Opts, as: UseOpts
+UseOpts.validate!(...)
 
 # хорошо
 alias Core.Helper
-Helper.Keyword.check_opts!(...)
+Helper.Opts.validate!(...)
 ```
 
 То же для `Prim` (`Prim.String`, …) и `Validator` (`Validator.String`, …), `Repo` (`Repo.Pg`,

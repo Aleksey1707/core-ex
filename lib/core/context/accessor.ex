@@ -3,15 +3,28 @@ defmodule Core.Context.Accessor do
   Билдер типизированного доступа к одному ключу `Context`.
 
   `use Context.Accessor, key: :current_user_id` генерирует `exists?/1`, `find/1`,
-  `get/1`, `get!/1`, `put/2`, `delete/1` поверх `Context`.
+  `get/1`, `get!/1`, `put/2`, `delete/1` поверх `Context`; каждая — `defoverridable`.
+
+  `type:` — модуль значения (Prim, агрегат, ...): спеки сужаются с `term()` до `<Mod>.t()`,
+  а `put/2` принимает только `%<Mod>{}` — чужое значение отсекается на компиляции, а не
+  всплывает в репозитории.
+
+  Макрос инжектирует в модуль-потребитель `alias Core.Context` и `alias Core.Error`:
+  на них ссылаются сгенерированные спеки.
+
+      defmodule CurrentUser do
+        use Core.Context.Accessor,
+          key: :current_user_id,
+          type: User.ID
+      end
   """
 
   alias Core.Helper
 
   @required_keys ~w(key)a
-  @optional_keys ~w()a
+  @optional_keys ~w(type)a
 
-  @doc "Типизированный accessor ключа Context (`key:`)."
+  @doc "Типизированный accessor ключа Context (`key:` + опциональный `type:`)."
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
       Helper.Opts.validate!(
@@ -21,39 +34,61 @@ defmodule Core.Context.Accessor do
         "Context.Accessor"
       )
 
-      @context_key Keyword.fetch!(opts, :key)
       alias Core.Context
       alias Core.Error
+
+      @context_accessor_key Helper.Opts.atom!(opts, :key, "Context.Accessor")
+
+      context_accessor_type =
+        if Keyword.has_key?(opts, :type),
+          do: Helper.Opts.module!(opts, :type, "Context.Accessor"),
+          else: nil
+
+      context_accessor_value =
+        if is_nil(context_accessor_type),
+          do: quote(do: term()),
+          else: quote(do: unquote(context_accessor_type).t())
 
       @doc "Есть ли значение по ключу."
       @spec exists?(Context.t()) :: boolean()
 
-      def exists?(context), do: Context.exists?(context, @context_key)
+      def exists?(%Context{} = context), do: Context.exists?(context, @context_accessor_key)
 
       @doc "Найти значение или `nil`."
-      @spec find(Context.t()) :: term() | nil
+      @spec find(Context.t()) :: unquote(context_accessor_value) | nil
 
-      def find(context), do: Context.find(context, @context_key)
+      def find(%Context{} = context), do: Context.find(context, @context_accessor_key)
 
       @doc "Получить значение; при отсутствии — ошибка."
-      @spec get(Context.t()) :: {:ok, term()} | {:error, Error.t()}
+      @spec get(Context.t()) :: {:ok, unquote(context_accessor_value)} | {:error, Error.t()}
 
-      def get(context), do: Context.get(context, @context_key)
+      def get(%Context{} = context), do: Context.get(context, @context_accessor_key)
 
       @doc "Получить значение; при отсутствии — raise."
-      @spec get!(Context.t()) :: term()
+      @spec get!(Context.t()) :: unquote(context_accessor_value)
 
-      def get!(context), do: Context.get!(context, @context_key)
+      def get!(%Context{} = context), do: Context.get!(context, @context_accessor_key)
 
-      @doc "Записать значение по ключу."
-      @spec put(Context.t(), term()) :: Context.t()
+      if is_nil(context_accessor_type) do
+        @doc "Записать значение по ключу."
+        @spec put(Context.t(), term()) :: Context.t()
 
-      def put(context, value), do: Context.put(context, @context_key, value)
+        def put(%Context{} = context, value),
+          do: Context.put(context, @context_accessor_key, value)
+      else
+        @doc "Записать значение по ключу."
+        @spec put(Context.t(), unquote(context_accessor_type).t()) :: Context.t()
+
+        def put(%Context{} = context, %unquote(context_accessor_type){} = value),
+          do: Context.put(context, @context_accessor_key, value)
+      end
 
       @doc "Удалить значение по ключу."
       @spec delete(Context.t()) :: Context.t()
 
-      def delete(context), do: Context.delete(context, @context_key)
+      def delete(%Context{} = context), do: Context.delete(context, @context_accessor_key)
+
+      defoverridable exists?: 1, find: 1, get: 1, get!: 1, put: 2, delete: 1
     end
   end
 

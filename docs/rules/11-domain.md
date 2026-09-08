@@ -413,10 +413,18 @@ InCodec.dump(step)
 
 ## Context
 
-`%Context{data: map}` + `find` / `get` / `get!` / `put` / `delete`.
+`%Context{data: map}` + `find` / `get` / `get!` / `put` / `delete`. Ключ — атом: словарь ключей
+закрыт кодом, а не приходит извне. `inspect/1` печатает только список ключей — контекст целиком
+уходит в crash-репорты OTP-процессов, а его значения чувствительны (`12-errors.md`).
 
 `Context.Accessor` — типизированный доступ к ключу (пример: `Domain.Auth.CurrentUser` →
-`:current_user_id`).
+`:current_user_id`):
+
+- `key:` (обязательна) — атом ключа;
+- `type:` — модуль значения; спеки сужаются до `<Mod>.t()`, а `put/2` принимает только
+  `%<Mod>{}`. Без `type:` значение остаётся `term()`;
+- сгенерированные `exists?/1`, `find/1`, `get/1`, `get!/1`, `put/2`, `delete/1` —
+  `defoverridable`; макрос инжектирует `alias Core.Context` и `alias Core.Error`.
 
 Позиция `%Context{}` в сигнатуре публичных usecase/repo-функций — `20-agreements.md`.
 

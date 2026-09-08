@@ -45,6 +45,12 @@ defmodule Core.ContextTest do
     assert Context.get(context, :maybe) == {:ok, nil}
 
     refute Context.exists?(context, :absent)
-    assert {:error, %Core.Error{code: :not_found}} = Context.get(context, :absent)
+    assert {:error, %Error{code: :not_found}} = Context.get(context, :absent)
+  end
+
+  test "inspect печатает только ключи" do
+    context = Context.new(%{token: "s3cret", current_user_id: "u-1"})
+
+    assert inspect(context) == "#Context<keys: [:current_user_id, :token]>"
   end
 end

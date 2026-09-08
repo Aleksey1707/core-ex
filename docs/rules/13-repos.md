@@ -317,6 +317,9 @@ Read-репозиторий MUST иметь **собственную** Ecto-сх
 - Чтение read-репо → View через тотальный `to_view` (`Repo.Sc` не участвует).
 - Эталон Sc ключуется парой `{модуль сущности, id}` (`Repo.Sc.find(context, Entity, id)`): разные
   агрегаты могут делить идентификатор (`User` и `UserRoles`).
+- `Repo.Sc.init/1` / `clear/1` / `delete/1` возвращают контекст, и дальше работать нужно с
+  возвращённым: контекст неизменяем, а старая копия держит уже удалённую ETS-таблицу (`put` / `find`
+  по ней — no-op).
 - `not_found` / `version_mismatch` / `incomplete_result` / `no_ids` →
   `errors.domain(behaviour, code, detail)`.
 - `insert`/`update`/`save`: замапленный DB-constraint → `{:error, Error.t()}` через
