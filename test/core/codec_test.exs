@@ -134,6 +134,17 @@ defmodule Core.CodecTest do
     def dump_kind(prim, kind), do: super(prim, kind)
   end
 
+  defmodule PlainOverrideProfile do
+    use Core.Codec,
+      uuid: :hex,
+      datetime: :iso8601,
+      datetime_tz: :keep,
+      decimal: :string
+
+    @impl true
+    def dump(%SampleString{} = prim), do: "str:" <> Codec.value(prim)
+  end
+
   defmodule IsoUtcProfile do
     use Core.Codec,
       uuid: :hex,
@@ -280,14 +291,56 @@ defmodule Core.CodecTest do
       assert composed == ApproverID.new!(@uuid)
     end
 
-    test "приведению не подлежит: nil, не-Prim, неформатируемый kind, кривое значение" do
+    test "plain-kind оборачивается как есть: приводить нечего, но dump/1 профиля нужен" do
+      assert {:ok, %SampleString{value: "Иван"}} = Codec.coerce(SampleString, "Иван")
+      assert {:ok, %SampleInteger{value: 3}} = Codec.coerce(SampleInteger, 3)
+    end
+
+    test "приведению не подлежит: nil, не-Prim, кастомный kind, кривое значение" do
       assert :error = Codec.coerce(SampleDateTime, nil)
       assert :error = Codec.coerce(DateTime, @uuid)
-      assert :error = Codec.coerce(SampleString, "Иван")
-      assert :error = Codec.coerce(SampleInteger, 3)
       assert :error = Codec.coerce(LabelID, @uuid)
       assert :error = Codec.coerce(SampleUUID, "zz")
       assert :error = Codec.coerce(SampleDateTime, "не дата")
+    end
+  end
+
+  describe "coercible?/1" do
+    test "kind leaf-примитива из coercible_kinds" do
+      assert Codec.coercible?(SampleUUID)
+      assert Codec.coercible?(SampleString)
+      assert Codec.coercible?(SampleInteger)
+      assert Codec.coercible?(ApproverID)
+    end
+
+    test "не Prim или кастомный kind leaf-примитива — нет" do
+      refute Codec.coercible?(DateTime)
+      refute Codec.coercible?(LabelID)
+    end
+
+    test "кастомный kind самого композита приводимости не отменяет" do
+      assert Codec.coercible?(WrappedLabelID)
+      assert {:ok, %WrappedLabelID{}} = Codec.coerce(WrappedLabelID, @uuid)
+    end
+
+    test "coercible_kinds — форматируемые профилем плюс plain" do
+      assert Codec.coercible_kinds() == ~w(date datetime decimal uuid integer string)a
+    end
+  end
+
+  describe "Codec.Helper.dump_many/2 и dump_optional/2" do
+    test "дампит каждый элемент списка профилем" do
+      ids = [SampleUUID.new!(@uuid), SampleUUID.new!(@uuid)]
+
+      assert Helper.dump_many(ids, BuiltinProfile) == Enum.map(ids, &BuiltinProfile.dump/1)
+      assert [] == Helper.dump_many([], BuiltinProfile)
+    end
+
+    test "опциональное значение: nil проходит, Prim дампится" do
+      id = SampleUUID.new!(@uuid)
+
+      assert nil == Helper.dump_optional(nil, BuiltinProfile)
+      assert Helper.dump_optional(id, BuiltinProfile) == BuiltinProfile.dump(id)
     end
   end
 
@@ -329,7 +382,16 @@ defmodule Core.CodecTest do
       assert Helper.dump_raw(ApproverID, @uuid, BuiltinProfile) == BuiltinProfile.dump(id)
     end
 
-    test "тотальность: nil, неприводимое значение и неформатируемый kind — как есть" do
+    test "переопределение dump/1 профиля применяется и к plain-kind на raw-пути" do
+      name = SampleString.new!("Иван")
+
+      assert Helper.dump_raw(SampleString, "Иван", PlainOverrideProfile) ==
+               PlainOverrideProfile.dump(name)
+
+      assert "str:Иван" = Helper.dump_raw(SampleString, "Иван", PlainOverrideProfile)
+    end
+
+    test "тотальность: nil, неприводимое значение и кастомный kind — как есть" do
       assert nil == Helper.dump_raw(SampleDateTime, nil, BuiltinProfile)
       assert "не дата" = Helper.dump_raw(SampleDateTime, "не дата", BuiltinProfile)
       assert "zz" = Helper.dump_raw(SampleUUID, "zz", BuiltinProfile)

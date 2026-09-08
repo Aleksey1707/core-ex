@@ -29,6 +29,10 @@ defmodule Core.Codec.RedumpTest do
     use Prim.Date, name: "Дата"
   end
 
+  defmodule Label do
+    use Prim.UUID, name: "Метка", version: 4, kind: :label
+  end
+
   @uuid "550e8400-e29b-41d4-a716-446655440000"
   @hex "550e8400e29b41d4a716446655440000"
 
@@ -180,6 +184,18 @@ defmodule Core.Codec.RedumpTest do
     test "отвергает не-Prim модуль" do
       assert_raise ArgumentError, ~r/требует Prim-модуль/, fn ->
         Redump.validate!({:prim, Enum})
+      end
+    end
+
+    test "отвергает Prim, значение которого не привести из wire" do
+      assert_raise ArgumentError, ~r/не приводится из wire-значения/, fn ->
+        Redump.validate!({:prim, Label})
+      end
+    end
+
+    test "отвергает sensitive-Prim — как и Core.View" do
+      assert_raise ArgumentError, ~r/объявлен sensitive/, fn ->
+        Redump.validate!({:map, %{token: {:prim, Core.PrimFixture.Sensitive}}})
       end
     end
 

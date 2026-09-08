@@ -13,12 +13,15 @@ defmodule Core.Codec.Redump do
 
   Тотальна по значению: отсутствующий ключ, неизвестный тег и значение неподходящего
   типа проходят как есть — страница списка не должна падать из-за одной строки. Спека
-  же строга: не описанная здесь форма — ошибка программиста, а не данных.
+  же строга: не описанная здесь форма, Prim, значение которого профилю не привести
+  (`Core.Codec.coercible?/1`), и sensitive-Prim (read-путь чувствительных значений не
+  возит — как и `Core.View`) — ошибка программиста, а не данных.
 
   Envelope `{:tagged, _}` — map-представление полиморфной нагрузки: тег в ключе `type`,
   значения в `fields`.
   """
 
+  alias Core.Codec
   alias Core.Helper
   alias Core.Prim
 
@@ -39,7 +42,7 @@ defmodule Core.Codec.Redump do
   def run(nil, _spec, _codec), do: nil
 
   def run(value, {:prim, mod}, codec) when is_atom(mod) do
-    Core.Codec.Helper.dump_raw(mod, value, codec)
+    Codec.Helper.dump_raw(mod, value, codec)
   end
 
   def run(value, {:list, spec}, codec) when is_list(value) do
@@ -90,11 +93,23 @@ defmodule Core.Codec.Redump do
   @spec validate!(term()) :: spec()
 
   def validate!({:prim, mod} = spec) when is_atom(mod) do
-    if not Prim.prim?(mod) do
-      raise ArgumentError, "спека {:prim, _} требует Prim-модуль, получено: #{inspect(mod)}"
-    end
+    cond do
+      not Prim.prim?(mod) ->
+        raise ArgumentError, "спека {:prim, _} требует Prim-модуль, получено: #{inspect(mod)}"
 
-    spec
+      not Codec.coercible?(mod) ->
+        raise ArgumentError,
+              "спека {:prim, #{inspect(mod)}}: kind #{inspect(mod.__domain_kind__())} " <>
+                "не приводится из wire-значения — переводить такое поле нечем"
+
+      mod.__domain_sensitive__() ->
+        raise ArgumentError,
+              "спека {:prim, #{inspect(mod)}}: Prim объявлен sensitive — " <>
+                "чувствительному значению не место на read-пути"
+
+      true ->
+        spec
+    end
   end
 
   def validate!({:list, inner} = spec) do

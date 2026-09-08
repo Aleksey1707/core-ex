@@ -2,7 +2,8 @@ defmodule Core.Codec.Plugin.Opts do
   @moduledoc """
   Валидация опций `use Core.Codec.Plugin` и проверка контракта после компиляции.
 
-  Проверяет форму `types:` и `union:` и обязательность `load/3` при `loadable: true`.
+  Проверяет форму `types:` и `union:`, наличие `dump/2` и обязательность `load/3`
+  при `loadable: true`.
   """
 
   @doc false
@@ -34,6 +35,15 @@ defmodule Core.Codec.Plugin.Opts do
 
   def after_compile!(env, _bytecode) do
     mod = env.module
+
+    # `dump/2` обязателен для любого плагина: фасад уже завёл clause на каждый его тип,
+    # и без функции она упала бы `UndefinedFunctionError` на первом дампе.
+    if not Module.defines?(mod, {:dump, 2}) do
+      raise CompileError,
+        description: "#{inspect(mod)}: плагину требуется dump/2",
+        file: env.file,
+        line: env.line
+    end
 
     if Module.get_attribute(mod, :codec_loadable) and not Module.defines?(mod, {:load, 3}) do
       raise CompileError,

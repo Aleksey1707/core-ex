@@ -81,13 +81,9 @@ defmodule Core.View.Dumper do
     end
   end
 
-  defp dump_ast({:prim, mod, _kind} = spec, value, codec, _depth) do
-    if Opts.needs_codec?(spec) do
-      quote do
-        Core.Codec.Helper.dump_raw(unquote(mod), unquote(value), unquote(codec))
-      end
-    else
-      value
+  defp dump_ast({:prim, mod, _kind}, value, codec, _depth) do
+    quote do
+      Core.Codec.Helper.dump_raw(unquote(mod), unquote(value), unquote(codec))
     end
   end
 

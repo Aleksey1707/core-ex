@@ -27,7 +27,7 @@ defmodule Core.View do
 
   | Ключ | Значение | Дамп |
   |---|---|---|
-  | `prim:` | Prim-модуль | `Codec.Helper.dump_raw/3` (kind `:string` / `:integer` — как есть) |
+  | `prim:` | Prim-модуль | `Codec.Helper.dump_raw/3` (в формате профиля кодека) |
   | `enum:` | модуль `Core.Enum` | атом как есть |
   | `type:` | `:string` / `:boolean` / `:integer` / `:pos_integer` / `:non_neg_integer` | как есть |
   | `view:` | вложенный View | его кодеком через фасад |
@@ -170,11 +170,7 @@ defmodule Core.View do
   defp optional_type_ast(type, false), do: type
   defp optional_type_ast(type, true), do: quote(do: unquote(type) | nil)
 
-  defp type_ast({:prim, _mod, kind}) when kind in ~w(uuid string)a, do: quote(do: String.t())
-  defp type_ast({:prim, _mod, :datetime}), do: quote(do: DateTime.t())
-  defp type_ast({:prim, _mod, :date}), do: quote(do: Date.t())
-  defp type_ast({:prim, _mod, :decimal}), do: quote(do: Decimal.t())
-  defp type_ast({:prim, _mod, :integer}), do: quote(do: integer())
+  defp type_ast({:prim, _mod, kind}), do: Opts.prim_type_ast(kind)
   defp type_ast({:enum, mod}), do: quote(do: unquote(mod).t())
   defp type_ast({:view, mod}), do: quote(do: unquote(mod).t())
   defp type_ast({:type, :string}), do: quote(do: String.t())

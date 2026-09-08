@@ -218,6 +218,44 @@ defmodule Core.Codec.FacadeTest do
     end
   end
 
+  test "prim: не модуль — CompileError" do
+    assert_raise CompileError, ~r/ожидается модуль/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.BadPrimFacade do
+            use Core.Codec.Facade, prim: "профиль"
+          end
+        end
+      )
+    end
+  end
+
+  test "prim: модуль без интерфейса профиля — CompileError" do
+    assert_raise CompileError, ~r/должен экспортировать dump\/1/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.NotProfileFacade do
+            use Core.Codec.Facade, prim: String
+          end
+        end
+      )
+    end
+  end
+
+  test "не-модуль в plugins — CompileError" do
+    assert_raise CompileError, ~r/плагин .*ожидается модуль/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.NotModulePluginFacade do
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: ["строка"]
+          end
+        end
+      )
+    end
+  end
+
   test "non-plugin in plugins list raises CompileError" do
     assert_raise CompileError, ~r/должен реализовывать Codec.Plugin/, fn ->
       Code.eval_quoted(

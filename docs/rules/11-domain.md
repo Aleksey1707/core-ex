@@ -329,14 +329,17 @@ use Core.Codec.Facade,
 - `loadable: false` — dump-only (как `<Aggregate>.View.Codec`: у read-модели обратного пути нет)
 - Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по
   atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` /
-  `load_optional/3` / `load_many/3` — из `Core.Codec.Helper`. В Ecto-схемах `field/2` **не**
+  `load_optional/3` / `load_many/3` — из `Core.Codec.Helper`. У load-хелперов и `dump_raw/3`
+  Prim-модуль идёт первым аргументом — как у `codec.load/2`. В Ecto-схемах `field/2` **не**
   импортировать (конфликт с `Ecto.Schema`) — звать `Helper.Map.field/2`
 - `Codec.Helper.dump_raw(Prim, raw, codec)` — дамп значения **без** Prim-обёртки (read-модели):
   значение приводится к своему Prim (`Core.Codec.coerce/2` — kind плюс его `__domain_type_opts__/0`:
   tz и precision) и уходит в обычный `codec.dump/1`. Отдельного raw-формата, который мог бы
-  разойтись с агрегатным, больше нет. Тотальна: `nil`, неприводимое значение и неформатируемый kind
-  (`:string`, `:integer`, кастомный) проходят как есть. На неё опираются `Core.View` и
-  `Core.Codec.Redump`
+  разойтись с агрегатным, больше нет — переопределение `dump/1` в профиле действует и здесь,
+  включая plain-kind (`:string`, `:integer`): значение такого Prim не приводится, но обёртка
+  строится, иначе wire-формы путей разошлись бы. Тотальна по значению: `nil`, неприводимое
+  значение и Prim вне `Core.Codec.coercible_kinds/0` (кастомный kind) проходят как есть.
+  На неё опираются `Core.View` и `Core.Codec.Redump`
 - Enum-поля кодек не сериализует (атомы как есть)
 - `<Aggregate>.Codec` MUST предоставлять `dump`/`load` для самого агрегата и его вложенных сущностей
   (если есть). Поле `events` в dump/load агрегата **не** участвует (события — только через
@@ -345,7 +348,9 @@ use Core.Codec.Facade,
   (например `Outbox.Codec`) регистрируются в app `Codec.plugins()` наравне с Domain.
 
 Кастом Prim в профиле: `@impl true def dump(%Agg.ID{})`, optional `dump_kind` / `load_kind` +
-`super`.
+`super`. Для plain-kind (`:string`, `:integer`) такое переопределение MUST быть идемпотентным:
+на read-пути (`dump_raw/3`) оно ложится на значение, уже прошедшее dump профиля записи, а
+нормализовать его нечем — у форматируемых kind эту роль играет `cast` в `Codec.coerce/2`.
 
 ### Dump/load только через фасад
 

@@ -30,18 +30,16 @@ defmodule Core.Codec.Facade do
 
       @behaviour Core.Codec.Facade.Behaviour
 
-      @prim Keyword.fetch!(opts, :prim)
+      @prim Helper.Opts.module!(opts, :prim, "Codec.Facade",
+              exports: [dump: 1, load: 2, load!: 2]
+            )
       @plugins Keyword.get(opts, :plugins, [])
-
-      if not is_atom(@prim) do
-        raise CompileError, description: "prim: ожидается модуль"
-      end
 
       if not is_list(@plugins) do
         raise CompileError, description: "plugins: ожидается список модулей"
       end
 
-      _ = Core.Codec.Facade.build_type_map!(@plugins)
+      Core.Codec.Facade.validate_mods!(@plugins)
 
       @doc "Dump: entity-плагин или Prim."
       for plugin <- @plugins,
@@ -119,38 +117,43 @@ defmodule Core.Codec.Facade do
   end
 
   @doc """
-  Реестр `модуль => плагин` по типам и семействам всех плагинов.
+  Проверить модули типов и семейств всех плагинов (compile-time).
 
   Модуль — единственный ключ диспетчеризации фасада, поэтому он обязан быть уникальным:
   дубль между плагинами — `CompileError`.
   """
-  @spec build_type_map!([module()]) :: %{optional(module()) => module()}
+  @spec validate_mods!([module()]) :: :ok
 
-  def build_type_map!(plugins) when is_list(plugins) do
-    plugins
-    |> ensure_plugins!()
-    |> Enum.reduce(%{}, &merge_plugin_mods!/2)
+  def validate_mods!(plugins) when is_list(plugins) do
+    _by_mod =
+      plugins
+      |> ensure_plugins!()
+      |> Enum.reduce(%{}, &merge_plugin_mods!/2)
+
+    :ok
   end
 
   # ---
 
   defp ensure_plugins!(plugins) do
-    Enum.each(plugins, fn plugin ->
-      if not is_atom(plugin) do
-        raise CompileError, description: "плагин #{inspect(plugin)}: ожидается модуль"
-      end
-
-      try do
-        _ = plugin.__codec_types__()
-      rescue
-        UndefinedFunctionError ->
-          reraise CompileError,
-                  [description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"],
-                  __STACKTRACE__
-      end
-    end)
+    Enum.each(plugins, &ensure_plugin!/1)
 
     plugins
+  end
+
+  # `ensure_compiled!` отделяет «модуль ещё не собран» от «собран, но не плагин»: без него
+  # обе причины приходили бы одной `UndefinedFunctionError` на `__codec_types__/0`.
+  defp ensure_plugin!(plugin) when is_atom(plugin) and not is_nil(plugin) do
+    Code.ensure_compiled!(plugin)
+
+    if not function_exported?(plugin, :__codec_types__, 0) do
+      raise CompileError,
+        description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"
+    end
+  end
+
+  defp ensure_plugin!(plugin) do
+    raise CompileError, description: "плагин #{inspect(plugin)}: ожидается модуль"
   end
 
   defp merge_plugin_mods!(plugin, acc) do

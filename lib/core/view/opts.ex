@@ -8,12 +8,31 @@ defmodule Core.View.Opts do
   (кастомный kind Prim, неизвестная форма), отвергается на этапе компиляции.
   """
 
+  alias Core.Codec
   alias Core.Prim
 
   @label "View"
   @scalar_types ~w(string boolean integer pos_integer non_neg_integer)a
-  @formattable_kinds ~w(uuid datetime date decimal)a
-  @plain_kinds ~w(string integer)a
+
+  @prim_type_asts %{
+    uuid: quote(do: String.t()),
+    string: quote(do: String.t()),
+    datetime: quote(do: DateTime.t()),
+    date: quote(do: Date.t()),
+    decimal: quote(do: Decimal.t()),
+    integer: quote(do: integer())
+  }
+
+  @coercible_kinds Codec.coercible_kinds()
+
+  # Kind, приводимый профилем, обязан быть и типизируем: поле объявляется Prim-модулем, а
+  # значит новый native kind в `Core.Codec` без typespec оставил бы структуру без типа.
+  @untyped_kinds @coercible_kinds -- Map.keys(@prim_type_asts)
+
+  if @untyped_kinds != [] do
+    raise CompileError,
+      description: "#{@label}: нет typespec для kinds #{inspect(@untyped_kinds)}"
+  end
 
   @typedoc "Нормализованная спека значения поля."
   @type spec ::
@@ -64,10 +83,15 @@ defmodule Core.View.Opts do
     end)
   end
 
+  @doc "Typespec значения поля `prim:` по kind его Prim."
+  @spec prim_type_ast(atom()) :: Macro.t()
+
+  def prim_type_ast(kind) when is_atom(kind), do: Map.fetch!(@prim_type_asts, kind)
+
   @doc "Спека требует `codec` для дампа (иначе значение уходит как есть)."
   @spec needs_codec?(spec()) :: boolean()
 
-  def needs_codec?({:prim, _mod, kind}), do: kind in @formattable_kinds
+  def needs_codec?({:prim, _mod, _kind}), do: true
   def needs_codec?({:list, inner}), do: needs_codec?(inner)
   def needs_codec?({:enum, _mod}), do: false
   def needs_codec?({:type, _type}), do: false
@@ -202,7 +226,7 @@ defmodule Core.View.Opts do
   defp prim_kind!(mod, name, label) do
     kind = mod.__domain_kind__()
 
-    if kind not in (@formattable_kinds ++ @plain_kinds) do
+    if kind not in @coercible_kinds do
       raise CompileError,
         description:
           "#{@label}: #{label}, поле #{name}: у #{inspect(mod)} kind #{inspect(kind)} — " <>
