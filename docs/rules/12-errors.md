@@ -87,7 +87,10 @@ use Core.Prim.String,
 | `Error.detail` не содержит raw | `{:redacted, byte_size}` для binary, `:redacted` для остального |
 | Флаг доступен коду | `__domain_sensitive__/0` |
 
-`Prim.Compose` наследует чувствительность базового Prim; явный `sensitive:` перебивает наследование.
+`Prim.Compose` наследует чувствительность базового Prim; явный `sensitive: true` перебивает
+наследование, а **понижение** (`sensitive: false` поверх чувствительной базы) — `CompileError`:
+композит строит внешнюю ошибку сам, и без флага raw ушёл бы в её `detail` целым — база
+успевает защитить только свой `detail` внутри `parent`.
 Опция есть у всех обёрток (`Prim.String` / `Integer` / `UUID` / `Decimal` / `Date` / `DateTime` /
 `Compose`).
 

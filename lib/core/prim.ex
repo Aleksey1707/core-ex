@@ -4,15 +4,31 @@ defmodule Core.Prim do
   validate → custom_validate`.
 
   Опции `use`: `cast:`, `mutate:`, `validate:`, `custom_mutate:`, `custom_validate:`,
-  `name:`, `kind:` (обязателен), `type_opts:`, `sensitive:`. Типизированные обёртки —
-  `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose`.
+  `name:`, `kind:` (обязателен), `type_opts:`, `pipeline_opts:`, `sensitive:`.
+  Типизированные обёртки — `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` /
+  `Date` / `Compose`.
 
-  Генерирует `new/1`, `new!/1`, `value/1`, `__domain_kind__/0`, `__domain_type_opts__/0`.
-  `sensitive: true` скрывает значение от `inspect/1` и редактирует его в `Error.detail`.
+  Генерирует `new/1`, `new!/1`, `value/1`, `name/0`, `__domain_kind__/0`,
+  `__domain_type_opts__/0`, `__domain_sensitive__/0`. `sensitive: true` скрывает значение
+  от `inspect/1` и редактирует его в `Error.detail`.
+
+  Формы шагов конвейера:
+
+  | Опция | Формы |
+  |---|---|
+  | `cast:` | `fun/1`, `fun/2` (второй аргумент — `pipeline_opts`) |
+  | `mutate:`, `custom_mutate:` | `{Module, opts}` (`Core.Mutator`), `fun/1`, `fun/2` или список любой из форм |
+  | `validate:`, `custom_validate:` | `{Module, opts}` (`Core.Validator`), `fun/1`, `fun/2` или список любой из форм |
+
+  `type_opts:` — опции **типа** (`precision`, `tz`, границы); их отдаёт
+  `__domain_type_opts__/0` и получают validate-шаги. `pipeline_opts:` (default —
+  `type_opts`) получают cast/mutate-шаги: обёртке нужны там и опции обработки
+  (`trim`, `sec_max_len`), которым в контракте типа места нет.
   """
 
   alias Core.Error
   alias Core.Helper
+  alias Core.Mutator
   alias Core.Result
   alias Core.Validator
 
@@ -33,6 +49,7 @@ defmodule Core.Prim do
       @custom_mutate Keyword.get(opts, :custom_mutate)
       @custom_validate Keyword.get(opts, :custom_validate)
       @type_opts Keyword.get(opts, :type_opts, [])
+      @pipeline_opts Keyword.get(opts, :pipeline_opts, @type_opts)
       @sensitive Keyword.get(opts, :sensitive, false)
 
       @enforce_keys ~w(value)a
@@ -49,13 +66,13 @@ defmodule Core.Prim do
       @spec new(term()) :: {:ok, t()} | {:error, Error.t()}
 
       def new(raw) do
-        with {:ok, value} <- Core.Prim.normalize_ok(@cast.(raw)),
+        with {:ok, value} <- Core.Prim.run_cast(@cast, raw, @pipeline_opts),
              {:ok, value} <-
-               Core.Prim.run_mutates(@mutate, value, @type_opts),
+               Core.Prim.run_mutates(@mutate, value, @pipeline_opts),
              {:ok, value} <-
-               Core.Prim.run_mutates(@custom_mutate, value, @type_opts),
+               Core.Prim.run_mutates(@custom_mutate, value, @pipeline_opts),
              :ok <-
-               Core.Prim.normalize_validate(Validator.run(@validate, value, @type_opts)),
+               Core.Prim.run_validates(@validate, value, @type_opts),
              :ok <-
                Core.Prim.run_validates(@custom_validate, value, @type_opts) do
           {:ok, %__MODULE__{value: value}}
@@ -81,7 +98,7 @@ defmodule Core.Prim do
       def new!(raw), do: Result.unwrap!(new(raw))
 
       @doc "Достать внутреннее значение."
-      @spec value(t()) :: term()
+      @spec value(t()) :: unquote(value_type)
 
       def value(%__MODULE__{value: value}), do: value
 
@@ -114,6 +131,10 @@ defmodule Core.Prim do
   end
 
   @type error :: {:error, {atom(), String.t()}} | {:error, Error.t()}
+  @type cast_result :: {:ok, term()} | error()
+  @type cast_spec :: (term() -> cast_result()) | (term(), keyword() -> cast_result())
+  @type mutate_spec :: Mutator.mutate_spec() | [Mutator.mutate_spec()]
+  @type validate_spec :: Validator.validate_spec() | [Validator.validate_spec()]
 
   @native_kinds ~w(uuid datetime date decimal integer string)a
   @composite_kind :composite
@@ -245,7 +266,7 @@ defmodule Core.Prim do
   end
 
   @doc false
-  @spec normalize_ok({:ok, term()} | error()) :: {:ok, term()} | error()
+  @spec normalize_ok(cast_result()) :: cast_result()
 
   def normalize_ok({:ok, value}), do: {:ok, value}
 
@@ -277,16 +298,39 @@ defmodule Core.Prim do
   end
 
   @doc false
-  @spec run_mutates(term(), term(), keyword()) :: {:ok, term()} | error()
+  @spec check_byte_limit(binary(), pos_integer() | nil, atom()) :: :ok | error()
+
+  # Граница по байтам, а не по символам или цифрам: любой разбор ввода (`String.valid?/1`,
+  # `Integer.parse/1`, `Decimal.new/1`) обходит его целиком, то есть делает ровно ту
+  # работу, от которой security-лимит должен защищать. Поэтому лимит — первый шаг `cast`.
+  def check_byte_limit(_value, nil, _code), do: :ok
+
+  def check_byte_limit(value, limit, code) when is_binary(value) and is_integer(limit) do
+    if byte_size(value) <= limit,
+      do: :ok,
+      else: {:error, {code, "невалидное значение"}}
+  end
+
+  @doc false
+  @spec run_cast(cast_spec(), term(), keyword()) :: cast_result()
+
+  # Обёртке, которой для cast нужны опции (байтовая отсечка `Prim.String`), передаётся
+  # `fun/2`; остальным хватает `fun/1`.
+  def run_cast(fun, raw, opts) when is_function(fun, 2), do: normalize_ok(fun.(raw, opts))
+
+  def run_cast(fun, raw, _opts) when is_function(fun, 1), do: normalize_ok(fun.(raw))
+
+  @doc false
+  @spec run_mutates(mutate_spec(), term(), keyword()) :: cast_result()
 
   def run_mutates(nil, value, _opts), do: {:ok, value}
 
-  def run_mutates(fun, value, opts) when is_function(fun, 2) do
-    normalize_mutate(fun.(value, opts))
+  def run_mutates({module, module_opts}, value, _opts) when is_atom(module) do
+    normalize_mutate(Mutator.run({module, module_opts}, value, []))
   end
 
-  def run_mutates(fun, value, _opts) when is_function(fun, 1) do
-    normalize_mutate(fun.(value))
+  def run_mutates(fun, value, opts) when is_function(fun, 1) or is_function(fun, 2) do
+    normalize_mutate(Mutator.run(fun, value, opts))
   end
 
   def run_mutates(funs, value, opts) when is_list(funs) do
@@ -320,22 +364,16 @@ defmodule Core.Prim do
   defp normalize_mutate(value), do: {:ok, value}
 
   @doc false
-  @spec run_validates(term(), term(), keyword()) :: :ok | error()
+  @spec run_validates(validate_spec(), term(), keyword()) :: :ok | error()
 
-  # Формы те же, что у `custom_mutate` и встроенного `validate:`: `fun/1`, `fun/2`,
-  # `{Module, opts}` и список любого из них.
   def run_validates(nil, _value, _opts), do: :ok
 
   def run_validates({module, module_opts}, value, _opts) when is_atom(module) do
-    normalize_validate(module.validate(value, module_opts))
+    normalize_validate(Validator.run({module, module_opts}, value, []))
   end
 
-  def run_validates(fun, value, opts) when is_function(fun, 2) do
-    normalize_validate(fun.(value, opts))
-  end
-
-  def run_validates(fun, value, _opts) when is_function(fun, 1) do
-    normalize_validate(fun.(value))
+  def run_validates(fun, value, opts) when is_function(fun, 1) or is_function(fun, 2) do
+    normalize_validate(Validator.run(fun, value, opts))
   end
 
   def run_validates(validators, value, opts) when is_list(validators) do

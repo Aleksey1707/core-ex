@@ -83,6 +83,32 @@ defmodule Core.Prim.SensitiveTest do
     test "Compose наследует чувствительность базового Prim" do
       assert @secretish_ref.__domain_sensitive__()
     end
+
+    test "Compose не даёт понизить чувствительность базы" do
+      assert_raise CompileError, ~r/sensitive: false поверх чувствительного/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Prim.SensitiveTest.Downgraded do
+              use Core.Prim.Compose,
+                name: "Понижение",
+                of: Core.PrimFixture.Sensitive,
+                sensitive: false
+            end
+          end
+        )
+      end
+    end
+
+    test "sensitive: false поверх обычной базы допустим" do
+      defmodule PlainRef do
+        use Core.Prim.Compose,
+          name: "Обычная ссылка",
+          of: Core.PrimFixture.Plain,
+          sensitive: false
+      end
+
+      refute PlainRef.__domain_sensitive__()
+    end
   end
 
   describe "несенситивный Prim" do

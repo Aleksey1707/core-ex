@@ -184,4 +184,31 @@ defmodule Core.Prim.DateTest do
       )
     end
   end
+
+  test "rejects unknown tz at compile time" do
+    assert_raise CompileError, ~r/tz: ожидается известную IANA-зону/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DateTest.BadTz do
+            use Core.Prim.Date, name: "Дата", tz: "Mars/Olympus"
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects after > before at compile time" do
+    assert_raise CompileError, ~r/after .* больше before/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.DateTest.BadBounds do
+            use Core.Prim.Date,
+              name: "Дата",
+              after: ~D[2030-01-01],
+              before: ~D[2020-01-01]
+          end
+        end
+      )
+    end
+  end
 end

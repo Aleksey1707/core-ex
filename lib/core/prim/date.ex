@@ -8,28 +8,20 @@ defmodule Core.Prim.Date do
   """
 
   alias Core.Error
-  alias Core.Helper
   alias Core.Prim
   alias Core.Result
   alias Core.Validator
 
-  @native_kind :date
-  @required_keys ~w(name)a
-  @optional_keys ~w(kind after before tz mutate validate sensitive)a
+  use Core.Prim.Wrapper,
+    label: "Prim.Date",
+    native_kind: :date,
+    required: ~w(name)a,
+    optional: ~w(kind after before tz mutate validate sensitive)a
 
   @doc "Объявить date-Prim (`name:` + опции tz/bounds)."
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Prim.Date.required_keys(),
-        Core.Prim.Date.optional_keys(),
-        "Prim.Date"
-      )
-
-      native = Core.Prim.Date.native_kind()
-      kind = Keyword.get(opts, :kind, native)
-      Prim.validate_kind!(native, kind)
+      kind = Prim.Opts.prepare!(opts, Core.Prim.Date)
 
       bounds = Keyword.take(opts, ~w(after before)a)
       type_opts = Keyword.take(opts, ~w(after before tz)a)
@@ -42,7 +34,8 @@ defmodule Core.Prim.Date do
         name: Keyword.fetch!(opts, :name),
         kind: kind,
         type_opts: type_opts,
-        sensitive: Keyword.get(opts, :sensitive, false)
+        sensitive: Keyword.get(opts, :sensitive, false),
+        value_type: Date.t()
 
       @tz Keyword.get(opts, :tz)
 
@@ -80,20 +73,8 @@ defmodule Core.Prim.Date do
       """
       @spec from(term()) :: {:ok, t()} | {:error, Error.t()}
 
-      def from(%mod{value: %Date{}} = prim) when is_atom(mod) do
-        with {:ok, date} <-
-               Core.Prim.Date.extract(
-                 __MODULE__,
-                 name(),
-                 mod,
-                 prim,
-                 @tz || Core.Config.tz()
-               ) do
-          new(date)
-        end
-      end
-
-      def from(%mod{value: %DateTime{}} = prim) when is_atom(mod) do
+      def from(%mod{value: value} = prim)
+          when is_atom(mod) and (is_struct(value, Date) or is_struct(value, DateTime)) do
         with {:ok, date} <-
                Core.Prim.Date.extract(
                  __MODULE__,
@@ -113,20 +94,14 @@ defmodule Core.Prim.Date do
     end
   end
 
-  @doc false
-  @spec native_kind() :: atom()
+  @doc "Проверить значения опций билдера на этапе компиляции."
+  @spec validate_opts!(keyword()) :: :ok
 
-  def native_kind, do: @native_kind
-
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
+  def validate_opts!(opts) do
+    Prim.Opts.struct_bounds!(opts, :after, :before, Date, label())
+    Prim.Opts.tz!(opts, :tz, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+  end
 
   @doc false
   @spec cast(term()) :: {:ok, Date.t()} | {:error, {:invalid_date, String.t()}}

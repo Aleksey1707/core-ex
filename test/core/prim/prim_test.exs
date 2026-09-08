@@ -11,6 +11,32 @@ defmodule Core.PrimTest do
       custom_validate: &Core.PrimTest.validate_even/1
   end
 
+  defmodule OddMutate do
+    use Core.Prim,
+      name: "Число",
+      kind: :integer,
+      cast: &Core.PrimTest.cast_int/1,
+      custom_mutate: &Core.PrimTest.reject_odd/1
+  end
+
+  defmodule PipelineCast do
+    use Core.Prim,
+      name: "Конвейер",
+      kind: :integer,
+      cast: &Core.PrimTest.factor_cast/2,
+      validate: {Core.Validator.Integer, [min: 10]},
+      type_opts: [min: 10],
+      pipeline_opts: [factor: 10]
+  end
+
+  defmodule DefaultPipeline do
+    use Core.Prim,
+      name: "Дефолт",
+      kind: :integer,
+      cast: &Core.PrimTest.factor_cast/2,
+      type_opts: [factor: 2]
+  end
+
   def cast_int(n) when is_integer(n), do: {:ok, n}
   def cast_int(_), do: {:error, {:invalid_integer, "невалидное значение"}}
 
@@ -173,11 +199,74 @@ defmodule Core.PrimTest do
     end
   end
 
+  test "cast/2 получает pipeline_opts, validate — type_opts" do
+    assert {:ok, %PipelineCast{value: 30}} = PipelineCast.new(3)
+    assert {:error, %Core.Error{message: "Конвейер: минимум 10"}} = PipelineCast.new(0)
+  end
+
+  test "pipeline_opts по умолчанию — type_opts" do
+    assert {:ok, %DefaultPipeline{value: 8}} = DefaultPipeline.new(4)
+  end
+
   def identity_cast(v), do: {:ok, v}
+
+  def factor_cast(raw, opts), do: {:ok, raw * Keyword.fetch!(opts, :factor)}
+
+  def reject_odd(value) when rem(value, 2) == 0, do: {:ok, value}
+  def reject_odd(_value), do: {:error, {:odd, "только чётное"}}
   def bad_validate(_), do: {:error, :oops}
 
   def error_cast(_raw) do
     {:error, Core.Prim.wrap_error(__MODULE__, "внутренняя", :boom, "причина", :detail)}
+  end
+
+  describe "custom_mutate" do
+    defmodule PadMutator do
+      @moduledoc false
+
+      @behaviour Core.Mutator
+
+      @impl true
+      def mutate(value, opts) do
+        String.pad_leading(value, Keyword.fetch!(opts, :width), "0")
+      end
+    end
+
+    defmodule WithModuleMutator do
+      @moduledoc "Значение с модульным мутатором"
+
+      use Core.Prim.String,
+        name: "Значение",
+        max_len: 20,
+        mutate: {PadMutator, width: 5}
+    end
+
+    defmodule WithMutatorChain do
+      @moduledoc "Значение с цепочкой мутаторов разных форм"
+
+      use Core.Prim.String,
+        name: "Значение",
+        max_len: 20,
+        mutate: [{PadMutator, width: 4}, &String.upcase/1, &__MODULE__.suffix/2]
+
+      # второй аргумент mutate-шага — `pipeline_opts`, а не `type_opts`
+      @doc false
+      def suffix(value, opts),
+        do: value <> "-" <> Integer.to_string(Keyword.fetch!(opts, :sec_max_len))
+    end
+
+    test "принимает {Module, opts}" do
+      assert {:ok, %WithModuleMutator{value: "000ab"}} = WithModuleMutator.new("ab")
+    end
+
+    test "список смешанных форм применяется по порядку" do
+      assert {:ok, %WithMutatorChain{value: "00AB-130"}} = WithMutatorChain.new("ab")
+    end
+
+    test "ошибка мутатора становится доменной" do
+      assert {:error, %Core.Error{kind: :domain, code: :odd, message: "Число: только чётное"}} =
+               OddMutate.new(3)
+    end
   end
 
   describe "custom_validate" do

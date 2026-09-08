@@ -13,10 +13,6 @@ defmodule Core.Prim.UUIDTest do
     use Core.Prim.UUID, name: "ID v7", version: 7
   end
 
-  defmodule IdV3 do
-    use Core.Prim.UUID, name: "ID v3", version: 3
-  end
-
   defmodule AnyVersion do
     use Core.Prim.UUID, name: "ID", version: nil
   end
@@ -26,6 +22,10 @@ defmodule Core.Prim.UUIDTest do
       name: "ID v7",
       version: 7,
       check_version: false
+  end
+
+  defmodule Ref do
+    use Core.Prim.UUID, name: "Ссылка", kind: :ref
   end
 
   @uuid4 "550e8400-e29b-41d4-a716-446655440000"
@@ -82,8 +82,33 @@ defmodule Core.Prim.UUIDTest do
     assert Keyword.get(info, :version) == 7
   end
 
-  test "new/0 raises for unsupported version" do
-    assert_raise ArgumentError, ~r/неподдерживаемая версия UUID/, fn -> IdV3.new() end
+  test "custom kind сохраняется" do
+    assert Ref.__domain_kind__() == :ref
+    assert {:ok, %Ref{value: @uuid4}} = Ref.new(@uuid4)
+  end
+
+  test "rejects unsupported version at compile time" do
+    assert_raise CompileError, ~r/version: ожидается одно из/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.UUIDTest.IdV3 do
+            use Core.Prim.UUID, name: "ID v3", version: 3
+          end
+        end
+      )
+    end
+  end
+
+  test "rejects non-boolean check_version at compile time" do
+    assert_raise CompileError, ~r/check_version: ожидается true или false/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.UUIDTest.BadCheck do
+            use Core.Prim.UUID, name: "ID", check_version: "нет"
+          end
+        end
+      )
+    end
   end
 
   test "new/0 with version nil generates v4" do

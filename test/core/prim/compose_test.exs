@@ -123,4 +123,19 @@ defmodule Core.Prim.ComposeTest do
       )
     end
   end
+
+  test "rejects non-boolean sensitive at compile time" do
+    assert_raise CompileError, ~r/sensitive: ожидается true или false/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Prim.ComposeTest.BadSensitive do
+            use Core.Prim.Compose,
+              name: "X",
+              of: Core.Prim.ComposeTest.BaseID,
+              sensitive: :yes
+          end
+        end
+      )
+    end
+  end
 end

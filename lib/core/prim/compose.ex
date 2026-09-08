@@ -5,42 +5,28 @@ defmodule Core.Prim.Compose do
   Kind по умолчанию `:composite`; wire-формат композита совпадает с форматом базового
   Prim. `new/1` принимает raw базы, `%Base{}` или `%Mod{}` (идемпотентно), вложенная
   композиция допустима. Дополнительно: `__domain_base__/0`, `raw/1`.
-  Чувствительность наследуется от базового Prim, если не задана явно.
+
+  Чувствительность наследуется от базового Prim, если не задана явно; понизить её
+  (`sensitive: false` поверх чувствительной базы) нельзя — `CompileError`.
   """
 
   alias Core.Error
-  alias Core.Helper
   alias Core.Prim
 
-  @native_kind :composite
-  @required_keys ~w(name of)a
-  @optional_keys ~w(kind mutate validate sensitive)a
+  use Core.Prim.Wrapper,
+    label: "Prim.Compose",
+    native_kind: :composite,
+    required: ~w(name of)a,
+    optional: ~w(kind mutate validate sensitive)a
 
   @doc "Объявить Compose-Prim поверх базового (`of:` / `name:`)."
   defmacro __using__(opts) do
     base = Keyword.fetch!(opts, :of)
 
     quote bind_quoted: [opts: opts], unquote: true do
-      Helper.Opts.validate!(
-        opts,
-        Core.Prim.Compose.required_keys(),
-        Core.Prim.Compose.optional_keys(),
-        "Prim.Compose"
-      )
+      kind = Prim.Opts.prepare!(opts, Core.Prim.Compose)
 
-      base = Keyword.fetch!(opts, :of)
-      Code.ensure_compiled!(base)
-
-      if not Prim.prim?(base) do
-        raise CompileError,
-          description: "of: ожидается Prim-модуль, получено: #{inspect(base)}"
-      end
-
-      native = Core.Prim.Compose.native_kind()
-      kind = Keyword.get(opts, :kind, native)
-      Prim.validate_kind!(native, kind)
-
-      @base base
+      @base Keyword.fetch!(opts, :of)
 
       @doc false
       @spec __compose_cast__(term()) :: {:ok, term()} | {:error, Error.t()}
@@ -70,40 +56,13 @@ defmodule Core.Prim.Compose do
     end
   end
 
-  @doc """
-  Чувствительность композита: явная опция или наследование от базового Prim.
-  """
-  @spec sensitive?(keyword(), module()) :: boolean()
+  @doc "Проверить значения опций билдера на этапе компиляции."
+  @spec validate_opts!(keyword()) :: :ok
 
-  def sensitive?(opts, base) when is_list(opts) and is_atom(base) do
-    case Keyword.fetch(opts, :sensitive) do
-      {:ok, sensitive} -> sensitive
-      :error -> base_sensitive?(base)
-    end
+  def validate_opts!(opts) do
+    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    ensure_base!(Keyword.fetch!(opts, :of))
   end
-
-  # ---
-
-  defp base_sensitive?(base) do
-    (:erlang.module_loaded(base) or Code.ensure_loaded?(base)) and
-      function_exported?(base, :__domain_sensitive__, 0) and
-      base.__domain_sensitive__()
-  end
-
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec native_kind() :: atom()
-
-  def native_kind, do: @native_kind
 
   @doc "Cast: базовый Prim / себя / raw через `base.new/1`."
   @spec cast(term(), module(), module()) :: {:ok, term()} | {:error, Error.t()}
@@ -113,4 +72,51 @@ defmodule Core.Prim.Compose do
   def cast(%self{value: value}, _base, self), do: {:ok, value}
 
   def cast(raw, base, _self) when is_atom(base), do: base.new(raw)
+
+  @doc """
+  Чувствительность композита: явная опция или наследование от базового Prim.
+
+  Понижение запрещено: `sensitive: false` поверх чувствительной базы отменил бы
+  редактирование `Error.detail` на уровне композита, и raw ушёл бы в лог целым —
+  база успевает защитить только свой собственный `detail` внутри `parent`.
+  """
+  @spec sensitive?(keyword(), module()) :: boolean()
+
+  def sensitive?(opts, base) when is_list(opts) and is_atom(base) do
+    case Keyword.fetch(opts, :sensitive) do
+      {:ok, false} -> refuse_downgrade!(base)
+      {:ok, sensitive} -> sensitive
+      :error -> base_sensitive?(base)
+    end
+  end
+
+  # ---
+
+  defp ensure_base!(base) do
+    Code.ensure_compiled!(base)
+
+    if not Prim.prim?(base) do
+      raise CompileError,
+        description: "#{label()}: of: ожидается Prim-модуль, получено: #{inspect(base)}"
+    end
+
+    :ok
+  end
+
+  defp refuse_downgrade!(base) do
+    if base_sensitive?(base) do
+      raise CompileError,
+        description:
+          "#{label()}: sensitive: false поверх чувствительного #{inspect(base)} — " <>
+            "композит открыл бы raw базы в Error.detail; уберите опцию"
+    end
+
+    false
+  end
+
+  defp base_sensitive?(base) do
+    (:erlang.module_loaded(base) or Code.ensure_loaded?(base)) and
+      function_exported?(base, :__domain_sensitive__, 0) and
+      base.__domain_sensitive__()
+  end
 end
