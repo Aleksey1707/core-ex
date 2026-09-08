@@ -179,8 +179,23 @@ end
 3. **Ecto-тип jsonb** для колонки `payload` в схемах событий (`payload_type:`) —
    см. `test/support/test_types.ex`.
 
-4. **Миграции.** Таблица `outbox` описана в `priv/repo/migrations` — это исполняемая
-   спецификация: колонки и состав индексов обязаны совпадать, имена индексов — нет.
+4. **Миграции.** DDL таблицы `outbox` живёт в `Core.Outbox.Migration`; потребитель заводит
+   миграцию со своим timestamp и делегирует туда:
+
+   ```elixir
+   defmodule MyApp.Repo.Migrations.CreateOutbox do
+     use Ecto.Migration
+
+     defdelegate up, to: Core.Outbox.Migration
+     defdelegate down, to: Core.Outbox.Migration
+   end
+   ```
+
+   `mix ecto.migrate` работает без дополнительных путей, а изменение схемы приезжает с
+   обновлением зависимости: миграция самой библиотеки (`priv/repo/migrations`) делегирует
+   туда же, поэтому у потребителя накатывается ровно та схема, против которой гоняются её
+   тесты. Колонки и состав индексов — контракт, имена индексов — нет.
+
    Таблицы событий агрегатов создаёт потребитель (`table:` у `Core.Es.Event.Repo.Pg.Schema`).
 
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
