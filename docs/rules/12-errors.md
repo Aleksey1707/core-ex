@@ -30,7 +30,7 @@
 | `ns` | атом предметной категории ошибки (обязателен); **не** `Domain.Perms.Namespace` |
 | `module` | модуль-источник (кто создал) |
 | `code` | атом кода ошибки |
-| `message` | текст для клиента / логов; **обязателен для `:domain`**, опционален для `:app` (`nil` → `String.Chars` fallback `"#{ns}/#{code}"`) |
+| `message` | текст для клиента / логов; **обязателен для `:domain`**, опционален для `:app` (`nil` или `""` → `String.Chars` fallback `"#{ns}/#{code}"`) |
 | `detail` | произвольный контекст ошибки (`term()`) — без фиксированной формы; `nil`, map, struct, exception, … |
 | `parent` | опциональная внутренняя ошибка (cause); default `nil` |
 
@@ -39,11 +39,13 @@
 
 - `/1` — только attrs; `module` = `__CALLER__.module` (прямые call site'ы).
 - `/2` — явный `module` + attrs (каталоги `*.Errors`, чужой источник).
-- Литеральный kwlist attrs → compile-time проверка ключей (required / unknown) в макросе
+- Литеральный kwlist attrs → compile-time проверка ключей (required / unknown / дубли) в макросе
   (`CompileError`).
-- Динамический attrs (переменная) / внутренние `__domain__/2` / `__app__/2` → `Keyword.fetch!` на
-  runtime (`KeyError`).
+- Динамический attrs (переменная) / внутренние `__domain__/2` / `__app__/2` → проверка на runtime:
+  отсутствие обязательного — `KeyError` (`Keyword.fetch!`), лишний ключ — `ArgumentError`.
 - Не путать с `Helper.Opts.validate!` (для `__using__` / compile opts модулей).
+- `parent:` принимает только `%Error{}` или `nil`; иное — `FunctionClauseError` (ошибка
+  программиста), как и у `wrap/2`.
 
 | Kind | Обязательные attrs | Опциональные attrs |
 |---|---|---|
@@ -135,20 +137,23 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 | `unwrap/1` | parent или `nil` |
 | `root/1` | самая внутренняя |
 | `chain/1` | `[outer, …, root]` |
-| `has?/2` | есть ли в цепочке узел по keyword (`ns:`, `code:`, `kind:`, `module:`) |
+| `has?/2` | есть ли в цепочке узел по keyword (`ns:`, `code:`, `kind:`, `module:`); критерий непустой, иной ключ или не keyword-пара — `ArgumentError` |
 | `find/2` | первый узел по предикату |
 | `format_chain/1` | `"outer: …: root"` по `message` (или fallback `ns/code`) — для логов |
 
 Правила:
 
 - `wrap` **не** меняет `message` автоматически.
+- `wrap` поверх ошибки, у которой `parent` уже есть, подцепляет новый cause в **конец** цепочки —
+  он становится `root/1`; ничего из существующей цепочки не теряется.
 - Domain → клиенту по-прежнему **outer** `message` (`String.Chars` / HTTP); цепочку не отдавать.
 - App / логи — `inspect(err)` или `Error.format_chain/1`.
 - Wrap уместен на app-слое поверх domain/infra cause.
 - Иерархии классов нет: linked list через `parent`; группировка по `{ns, code}` на нужном уровне
   через `has?`/`find`.
 - `%Error{}` — `Enumerable`: итерация = `[outer, …, root]`
-  (`Enum.any?(err, &(&1.code == :not_found))` / `Error.has?(err, code: :not_found)`).
+  (`Enum.any?(err, &(&1.code == :not_found))` / `Error.has?(err, code: :not_found)`). Обратная
+  сторона: `%Error{}` вместо списка проходит через `Enum.*` молча — форму проверять до итерации.
 
 ## Матрица категорий
 

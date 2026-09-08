@@ -17,6 +17,13 @@ defmodule Core.Web.ErrorMapperTest do
              Web.ErrorMapper.map(domain(:version_mismatch, "версия не та"))
   end
 
+  test "прикладная ошибка без message → fallback ns/code, а не nil" do
+    assert {412, :diff_version, "test/version_mismatch", nil} =
+             Web.ErrorMapper.map(app(:version_mismatch))
+
+    assert {403, :error, "test/access_denied", nil} = Web.ErrorMapper.map(app(:access_denied))
+  end
+
   test "коды авторизации → 401 с константой и debug-логом" do
     for code <- ~w(unauthorized auth_failed invalid_token session_not_found)a do
       assert {401, :auth_error, "Не авторизован", :debug} =
