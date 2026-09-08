@@ -207,8 +207,15 @@ when in_enum(status, Status, ~w(new failed)a)
 ```
 
 `is_enum/2` / `in_enum/3` — макросы (compile-time `mod.values()` / проверка subset ⊆ values). Guard
-форсирует `Code.ensure_compiled/1` для enum-модуля (чистая сборка). Опечатка в subset →
+форсирует `Code.ensure_compiled/1` для enum-модуля (чистая сборка). Опечатка или дубль в subset →
 `CompileError`.
+
+Значения инлайнятся в guard литералом, а компилятор этой связи не видит: `Code.ensure_compiled/1`
+даёт максимум export-ребро, и правка `values:` не пересобрала бы каллер (guard остался бы на старом
+множестве). Поэтому `Core.Guard` регистрирует исходник enum-модуля как `@external_resource`
+каллера. Следствие для потребителя: enum, используемый в guard, MUST компилироваться на той же
+машине, что и каллер (сборка с `+deterministic` теряет `:source` — тогда инкрементальная пересборка
+каллера не гарантирована).
 
 Wire: atom или binary (`Atom.to_string/1`). Schema: `Ecto.Enum, values: Status.values()`. Агрегат:
 `status: Status.t()`.
