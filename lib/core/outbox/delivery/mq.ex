@@ -167,7 +167,7 @@ defmodule Core.Outbox.Delivery.Mq do
 
       {:error, reason} ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :encode_payload_failed,
            ns: :outbox,
            message: "Не удалось закодировать payload outbox",

@@ -28,7 +28,7 @@ defmodule Core.Security.Secret do
 
       {:error, reason} ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :encrypt_failed,
            ns: :secret,
            message: "Не удалось зашифровать секрет",
@@ -59,7 +59,7 @@ defmodule Core.Security.Secret do
 
       {:error, reason} ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :decrypt_failed,
            ns: :secret,
            message: "Не удалось расшифровать секрет",

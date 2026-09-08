@@ -138,7 +138,7 @@ defmodule Core.Outbox.Cleaner do
           )
 
           {:error,
-           Error.app(__MODULE__,
+           Error.app(
              code: :cycle_failed,
              ns: :outbox,
              message: "Сбой цикла outbox cleaner",
@@ -150,7 +150,7 @@ defmodule Core.Outbox.Cleaner do
           Logger.error("Сбой цикла очистки outbox: exit reason=#{inspect(reason)}")
 
           {:error,
-           Error.app(__MODULE__,
+           Error.app(
              code: :cycle_exit,
              ns: :outbox,
              message: "Цикл outbox cleaner прерван exit",

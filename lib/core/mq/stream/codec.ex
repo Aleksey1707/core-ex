@@ -35,7 +35,7 @@ defmodule Core.Mq.Stream.Codec do
 
       {:error, reason} ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :encode_failed,
            ns: :mq,
            message: "Не удалось закодировать MQ message",
@@ -66,7 +66,7 @@ defmodule Core.Mq.Stream.Codec do
 
       {:ok, other} ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :invalid_payload,
            ns: :mq,
            message: "Некорректный payload MQ",
@@ -75,7 +75,7 @@ defmodule Core.Mq.Stream.Codec do
 
       {:error, reason} ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :invalid_payload,
            ns: :mq,
            message: "Некорректный payload MQ",
@@ -91,7 +91,7 @@ defmodule Core.Mq.Stream.Codec do
 
       :error ->
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :invalid_body,
            ns: :mq,
            message: "Некорректный body MQ",
@@ -102,7 +102,7 @@ defmodule Core.Mq.Stream.Codec do
 
   defp decode_body(other) do
     {:error,
-     Error.app(__MODULE__,
+     Error.app(
        code: :invalid_body,
        ns: :mq,
        message: "Некорректный body MQ",
@@ -114,7 +114,7 @@ defmodule Core.Mq.Stream.Codec do
 
   defp decode_topic(other) do
     {:error,
-     Error.app(__MODULE__,
+     Error.app(
        code: :invalid_topic,
        ns: :mq,
        message: "Некорректный topic MQ",
@@ -127,7 +127,7 @@ defmodule Core.Mq.Stream.Codec do
 
   defp decode_key(other) do
     {:error,
-     Error.app(__MODULE__,
+     Error.app(
        code: :invalid_key,
        ns: :mq,
        message: "Некорректный key MQ",
@@ -140,7 +140,7 @@ defmodule Core.Mq.Stream.Codec do
       {:ok, headers}
     else
       {:error,
-       Error.app(__MODULE__,
+       Error.app(
          code: :invalid_headers,
          ns: :mq,
          message: "Некорректные headers MQ",
@@ -151,7 +151,7 @@ defmodule Core.Mq.Stream.Codec do
 
   defp decode_headers(other) do
     {:error,
-     Error.app(__MODULE__,
+     Error.app(
        code: :invalid_headers,
        ns: :mq,
        message: "Некорректные headers MQ",

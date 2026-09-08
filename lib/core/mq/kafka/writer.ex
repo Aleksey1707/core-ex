@@ -112,7 +112,7 @@ if Code.ensure_loaded?(Klife.Record) do
 
     defp kafka_error(reason) do
       {:error,
-       Error.app(__MODULE__,
+       Error.app(
          code: :kafka_publish_failed,
          ns: :mq,
          message: "Не удалось опубликовать сообщение в Kafka",

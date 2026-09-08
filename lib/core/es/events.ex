@@ -196,7 +196,7 @@ defmodule Core.Es.Events do
   # ---
 
   defp not_found(detail) do
-    Error.domain(__MODULE__,
+    Error.domain(
       code: :not_found,
       ns: :events,
       message: "Событие не найдено",

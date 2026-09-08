@@ -205,7 +205,7 @@ defmodule Core.Outbox.Poller do
         emit_poller_cycle(start, :error, 0, 0, 0, 0)
 
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :cycle_failed,
            ns: :outbox,
            message: "Сбой цикла outbox poller",
@@ -220,7 +220,7 @@ defmodule Core.Outbox.Poller do
         emit_poller_cycle(start, :error, 0, 0, 0, 0)
 
         {:error,
-         Error.app(__MODULE__,
+         Error.app(
            code: :cycle_exit,
            ns: :outbox,
            message: "Цикл outbox poller прерван exit",
