@@ -83,7 +83,7 @@ defmodule Core.Prim.UUIDTest do
   end
 
   test "new/0 raises for unsupported version" do
-    assert_raise ArgumentError, ~r/unsupported UUID version/, fn -> IdV3.new() end
+    assert_raise ArgumentError, ~r/неподдерживаемая версия UUID/, fn -> IdV3.new() end
   end
 
   test "new/0 with version nil generates v4" do

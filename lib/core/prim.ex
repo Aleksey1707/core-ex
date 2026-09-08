@@ -139,7 +139,7 @@ defmodule Core.Prim do
 
       kind in reserved_kinds() ->
         raise ArgumentError,
-              "kind #{inspect(kind)} is a builtin kind; use native #{inspect(native)} or a custom kind"
+              "kind #{inspect(kind)} — встроенный; используйте нативный #{inspect(native)} либо свой kind"
 
       true ->
         :ok
@@ -172,7 +172,7 @@ defmodule Core.Prim do
 
   def unwrap(%mod{value: value}) when is_atom(mod) do
     if not prim?(mod) do
-      raise ArgumentError, "expected Prim struct, got: #{inspect(mod)}"
+      raise ArgumentError, "ожидается struct Prim, получено: #{inspect(mod)}"
     end
 
     case value do
@@ -257,7 +257,7 @@ defmodule Core.Prim do
 
   def normalize_ok(other) do
     raise ArgumentError,
-          "domain error must be {:error, {code, detail}} or {:error, %Error{}}, got: #{inspect(other)}"
+          "доменная ошибка: ожидается {:error, {code, detail}} или {:error, %Error{}}, получено: #{inspect(other)}"
   end
 
   @doc false
@@ -273,7 +273,7 @@ defmodule Core.Prim do
 
   def normalize_validate(other) do
     raise ArgumentError,
-          "domain error must be {:error, {code, detail}} or {:error, %Error{}}, got: #{inspect(other)}"
+          "доменная ошибка: ожидается {:error, {code, detail}} или {:error, %Error{}}, получено: #{inspect(other)}"
   end
 
   @doc false
@@ -314,7 +314,7 @@ defmodule Core.Prim do
 
   defp normalize_mutate({:error, _} = err) do
     raise ArgumentError,
-          "domain error must be {:error, {code, detail}} or {:error, %Error{}}, got: #{inspect(err)}"
+          "доменная ошибка: ожидается {:error, {code, detail}} или {:error, %Error{}}, получено: #{inspect(err)}"
   end
 
   defp normalize_mutate(value), do: {:ok, value}

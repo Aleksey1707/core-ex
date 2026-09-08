@@ -158,7 +158,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "семейство в двух плагинах — CompileError" do
-    assert_raise CompileError, ~r/duplicate codec type/, fn ->
+    assert_raise CompileError, ~r/объявлен дважды/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.DupUnionA do
@@ -184,7 +184,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "duplicate codec types raise CompileError" do
-    assert_raise CompileError, ~r/duplicate codec type/, fn ->
+    assert_raise CompileError, ~r/объявлен дважды/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.DupA do
@@ -219,7 +219,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "non-plugin in plugins list raises CompileError" do
-    assert_raise CompileError, ~r/must implement Codec.Plugin/, fn ->
+    assert_raise CompileError, ~r/должен реализовывать Codec.Plugin/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.BadPluginFacade do

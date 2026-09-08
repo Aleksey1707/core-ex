@@ -33,7 +33,7 @@ defmodule Core.Prim.Compose do
 
       if not Prim.prim?(base) do
         raise CompileError,
-          description: "of: must be a Prim module, got: #{inspect(base)}"
+          description: "of: ожидается Prim-модуль, получено: #{inspect(base)}"
       end
 
       native = Core.Prim.Compose.native_kind()

@@ -59,17 +59,17 @@ defmodule Core.ErrorTest do
     end
 
     test "domain без обязательного attr в литерале → CompileError" do
-      assert_raise CompileError, ~r/missing required option\(s\): \[:message\]/, fn ->
+      assert_raise CompileError, ~r/нет обязательных опций: \[:message\]/, fn ->
         compile_error_factory("code: :x, ns: :test")
       end
 
-      assert_raise CompileError, ~r/missing required option\(s\): \[:code\]/, fn ->
+      assert_raise CompileError, ~r/нет обязательных опций: \[:code\]/, fn ->
         compile_error_factory("ns: :test, message: \"x\"")
       end
     end
 
     test "domain с unknown attr в литерале → CompileError" do
-      assert_raise CompileError, ~r/unknown option\(s\): \[:extra\]/, fn ->
+      assert_raise CompileError, ~r/неизвестные опции: \[:extra\]/, fn ->
         compile_error_factory("code: :x, ns: :test, message: \"x\", extra: true")
       end
     end
@@ -109,7 +109,7 @@ defmodule Core.ErrorTest do
     end
 
     test "parent: не-Error → ArgumentError" do
-      assert_raise ArgumentError, ~r/parent must be %Error\{\}/, fn ->
+      assert_raise ArgumentError, ~r/parent должен быть %Error\{\}/, fn ->
         Error.domain(__MODULE__,
           code: :x,
           ns: :test,

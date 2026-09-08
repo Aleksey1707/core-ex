@@ -84,7 +84,7 @@ defmodule Core.EnumTest do
   end
 
   test "compile-time: пустой values" do
-    assert_raise CompileError, ~r/non-empty list of atoms/, fn ->
+    assert_raise CompileError, ~r/непустым списком атомов/, fn ->
       Code.compile_quoted(
         quote do
           defmodule Core.EnumTest.EmptyValues do
@@ -98,7 +98,7 @@ defmodule Core.EnumTest do
   end
 
   test "compile-time: дубликаты в values" do
-    assert_raise CompileError, ~r/duplicates/, fn ->
+    assert_raise CompileError, ~r/дублей/, fn ->
       Code.compile_quoted(
         quote do
           defmodule Core.EnumTest.DupValues do
@@ -152,7 +152,7 @@ defmodule Core.EnumTest do
   end
 
   test "compile-time: дубликаты кодов" do
-    assert_raise CompileError, ~r/duplicate codes/, fn ->
+    assert_raise CompileError, ~r/повторяющихся кодов/, fn ->
       Code.compile_quoted(
         quote do
           defmodule Core.EnumTest.DupCodes do
@@ -267,7 +267,7 @@ defmodule Core.EnumTest do
 
   describe "compile-time проверки codes:" do
     test "смешанные типы кодов" do
-      assert_raise CompileError, ~r/one type/, fn ->
+      assert_raise CompileError, ~r/коды одного типа/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.MixedCodes do
@@ -281,7 +281,7 @@ defmodule Core.EnumTest do
     end
 
     test "пустая строка как код" do
-      assert_raise CompileError, ~r/one type/, fn ->
+      assert_raise CompileError, ~r/коды одного типа/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.EmptyStringCode do
@@ -295,7 +295,7 @@ defmodule Core.EnumTest do
     end
 
     test "код неподходящего типа" do
-      assert_raise CompileError, ~r/one type/, fn ->
+      assert_raise CompileError, ~r/коды одного типа/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.AtomCode do
@@ -309,7 +309,7 @@ defmodule Core.EnumTest do
     end
 
     test "дубликаты строковых кодов" do
-      assert_raise CompileError, ~r/duplicate codes/, fn ->
+      assert_raise CompileError, ~r/повторяющихся кодов/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.DupStringCodes do

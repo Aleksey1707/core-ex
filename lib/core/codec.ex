@@ -65,7 +65,7 @@ defmodule Core.Codec do
       value = fetch_fmt(opts, key)
 
       if value not in allowed,
-        do: raise(ArgumentError, "unknown #{key}: #{inspect(value)}")
+        do: raise(ArgumentError, "неизвестное значение #{key}: #{inspect(value)}")
     end)
 
     validate_datetime_tz!(Keyword.fetch!(opts, :datetime_tz))
@@ -303,21 +303,26 @@ defmodule Core.Codec do
   # полностью, иначе только форма имени, а неизвестная зона всплывёт на первом dump.
   defp validate_datetime_tz!(tz) when is_binary(tz) do
     case DateTime.shift_zone(DateTime.utc_now(), tz) do
-      {:ok, _} -> :ok
-      {:error, :time_zone_not_found} -> raise ArgumentError, "unknown datetime_tz: #{inspect(tz)}"
-      {:error, _no_tz_database} -> validate_tz_shape!(tz)
+      {:ok, _} ->
+        :ok
+
+      {:error, :time_zone_not_found} ->
+        raise ArgumentError, "неизвестная зона datetime_tz: #{inspect(tz)}"
+
+      {:error, _no_tz_database} ->
+        validate_tz_shape!(tz)
     end
   end
 
   defp validate_datetime_tz!(other) do
     raise ArgumentError,
-          "datetime_tz must be :keep, :app or an IANA timezone string, got: #{inspect(other)}"
+          "datetime_tz: ожидается :keep, :app или строка IANA-зоны, получено: #{inspect(other)}"
   end
 
   defp validate_tz_shape!(tz) do
     if Regex.match?(~r{^[A-Za-z][A-Za-z0-9+\-_]*(/[A-Za-z0-9+\-_]+)*$}, tz),
       do: :ok,
-      else: raise(ArgumentError, "unknown datetime_tz: #{inspect(tz)}")
+      else: raise(ArgumentError, "неизвестная зона datetime_tz: #{inspect(tz)}")
   end
 
   defp shift_tz(%DateTime{} = dt, :keep), do: dt

@@ -27,7 +27,7 @@ defmodule Core.Context.AccessorTest do
   end
 
   test "rejects unknown options at compile time" do
-    assert_raise CompileError, ~r/unknown option\(s\): \[:foo\]/, fn ->
+    assert_raise CompileError, ~r/неизвестные опции: \[:foo\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Context.AccessorTest.Bad do

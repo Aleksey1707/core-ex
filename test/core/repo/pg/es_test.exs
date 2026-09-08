@@ -129,19 +129,19 @@ defmodule Core.Repo.Pg.EsTest do
   end
 
   test "требует event_repo и outbox" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Es: missing required option\(s\): \[:outbox\]/, fn ->
+    assert_raise CompileError, ~r/Repo\.Pg\.Es: нет обязательных опций: \[:outbox\]/, fn ->
       compile!(NoOutbox, outbox: :__drop__)
     end
   end
 
   test "отклоняет неизвестную собственную опцию" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Es: unknown option\(s\): \[:childrens\]/, fn ->
+    assert_raise CompileError, ~r/Repo\.Pg\.Es: неизвестные опции: \[:childrens\]/, fn ->
       compile!(BadOwnOpt, childrens: [])
     end
   end
 
   test "требует entity" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Es: missing required option\(s\): \[:entity\]/, fn ->
+    assert_raise CompileError, ~r/Repo\.Pg\.Es: нет обязательных опций: \[:entity\]/, fn ->
       compile!(NoEntity, entity: :__drop__)
     end
   end
@@ -163,7 +163,7 @@ defmodule Core.Repo.Pg.EsTest do
   end
 
   test "отклоняет неизвестную опцию внутри children" do
-    assert_raise CompileError, ~r/children: unknown option\(s\): \[:keys\]/, fn ->
+    assert_raise CompileError, ~r/children: неизвестные опции: \[:keys\]/, fn ->
       compile!(BadChildOpt, children: [[schema: Child, fk: :role_id, keys: [:code]]])
     end
   end

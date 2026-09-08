@@ -71,7 +71,7 @@ defmodule Core.DAOTest do
 
   describe "опции" do
     test "отсутствие обязательного ключа — CompileError" do
-      assert_raise CompileError, ~r/DAO: missing required option\(s\): \[:adapter\]/, fn ->
+      assert_raise CompileError, ~r/DAO: нет обязательных опций: \[:adapter\]/, fn ->
         Code.compile_string("""
         defmodule Core.DAOTest.NoAdapter do
           use Core.DAO, otp_app: :core

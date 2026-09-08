@@ -131,7 +131,7 @@ defmodule Core.Prim.DateTimeTest do
   end
 
   test "rejects unknown precision at compile time" do
-    assert_raise ArgumentError, ~r/unknown precision: :nanosecond/, fn ->
+    assert_raise ArgumentError, ~r/неизвестное precision: :nanosecond/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTimeTest.BadPrecision do

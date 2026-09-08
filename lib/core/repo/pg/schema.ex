@@ -109,7 +109,7 @@ defmodule Core.Repo.Pg.Schema do
 
   defp mode([], _opts) do
     raise CompileError,
-      description: "#{@label}: missing required option(s): [:entity] или [:view]"
+      description: "#{@label}: нет обязательных опций: [:entity] или [:view]"
   end
 
   defp mode(_entity_and_view, _opts) do

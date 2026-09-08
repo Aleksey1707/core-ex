@@ -15,7 +15,7 @@ defmodule Core.Codec.Plugin.Opts do
 
       other ->
         raise CompileError,
-          description: "types: must be a non-empty list of modules, got: #{inspect(other)}"
+          description: "types: ожидается непустой список модулей, получено: #{inspect(other)}"
     end
   end
 
@@ -37,7 +37,7 @@ defmodule Core.Codec.Plugin.Opts do
 
     if Module.get_attribute(mod, :codec_loadable) and not Module.defines?(mod, {:load, 3}) do
       raise CompileError,
-        description: "#{inspect(mod)} with loadable: true must define load/3",
+        description: "#{inspect(mod)}: при loadable: true требуется load/3",
         file: env.file,
         line: env.line
     end
@@ -49,7 +49,7 @@ defmodule Core.Codec.Plugin.Opts do
 
   defp validate_modules!(types) do
     if not Enum.all?(types, &(is_atom(&1) and not is_nil(&1))) do
-      raise CompileError, description: "types: must be a non-empty list of modules"
+      raise CompileError, description: "types: ожидается непустой список модулей"
     end
 
     types
@@ -58,12 +58,12 @@ defmodule Core.Codec.Plugin.Opts do
   # Семейство существует ради `load/3`: у dump-only плагина восстанавливать нечем,
   # и клоуза фасада для него была бы обещанием, которого плагин не выполняет.
   defp validate_union!(union, false) when is_atom(union) do
-    raise CompileError, description: "union: requires loadable: true"
+    raise CompileError, description: "union: требует loadable: true"
   end
 
   defp validate_union!(union, _loadable?) when is_atom(union) and not is_nil(union), do: union
 
   defp validate_union!(other, _loadable?) do
-    raise CompileError, description: "union: must be a module, got: #{inspect(other)}"
+    raise CompileError, description: "union: ожидается модуль, получено: #{inspect(other)}"
   end
 end

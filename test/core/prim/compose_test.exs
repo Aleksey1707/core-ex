@@ -96,7 +96,7 @@ defmodule Core.Prim.ComposeTest do
   end
 
   test "rejects of: non-Prim at compile time" do
-    assert_raise CompileError, ~r/of: must be a Prim module/, fn ->
+    assert_raise CompileError, ~r/of: ожидается Prim-модуль/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.ComposeTest.BadOf do
@@ -110,7 +110,7 @@ defmodule Core.Prim.ComposeTest do
   end
 
   test "rejects reserved kind :uuid" do
-    assert_raise ArgumentError, ~r/builtin kind/, fn ->
+    assert_raise ArgumentError, ~r/— встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.ComposeTest.BadKind do

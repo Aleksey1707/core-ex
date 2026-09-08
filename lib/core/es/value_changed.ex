@@ -25,11 +25,11 @@ defmodule Core.Es.ValueChanged do
       nilable? = Keyword.get(opts, :nilable, false)
 
       unless is_atom(type_mod) do
-        raise CompileError, description: "option :type must be a module"
+        raise CompileError, description: "Es.ValueChanged: :type должен быть модулем"
       end
 
       unless is_boolean(nilable?) do
-        raise CompileError, description: "option :nilable must be a boolean"
+        raise CompileError, description: "Es.ValueChanged: :nilable должен быть boolean"
       end
 
       @enforce_keys ~w(old_value new_value)a

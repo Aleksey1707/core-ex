@@ -122,7 +122,7 @@ defmodule Core.Result do
   def unwrap!({:error, %Error{} = error}), do: raise(Exc, error)
 
   def unwrap!({:error, reason}) do
-    raise ArgumentError, "called Result.unwrap!/1 on error: #{inspect(reason)}"
+    raise ArgumentError, "Result.unwrap!/1 вызван на ошибке: #{inspect(reason)}"
   end
 
   @doc "Извлечь значение или raise message."

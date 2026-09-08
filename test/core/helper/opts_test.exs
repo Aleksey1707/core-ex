@@ -42,7 +42,7 @@ defmodule Core.Helper.OptsTest do
   end
 
   test "require! сообщает об отсутствующих ключах с label" do
-    assert_raise CompileError, ~r/WithRequire: missing required option\(s\): \[:b\]/, fn ->
+    assert_raise CompileError, ~r/WithRequire: нет обязательных опций: \[:b\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Helper.OptsTest.RequireMissing do
@@ -54,7 +54,7 @@ defmodule Core.Helper.OptsTest do
   end
 
   test "validate! отклоняет неизвестные ключи с label" do
-    assert_raise CompileError, ~r/WithValidate: unknown option\(s\): \[:foo\]/, fn ->
+    assert_raise CompileError, ~r/WithValidate: неизвестные опции: \[:foo\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Helper.OptsTest.ValidateUnknown do
@@ -72,10 +72,10 @@ defmodule Core.Helper.OptsTest do
   end
 
   test "allowed! проверяет подмножество" do
-    assert :ok == Opts.allowed!([:get, :insert], ~w(get insert)a, "method(s)", "T")
+    assert :ok == Opts.allowed!([:get, :insert], ~w(get insert)a, "метод(ы)", "T")
 
-    assert_raise CompileError, ~r/T: unknown method\(s\): \[:foo\]/, fn ->
-      Opts.allowed!([:get, :foo], ~w(get insert)a, "method(s)", "T")
+    assert_raise CompileError, ~r/T: неизвестные метод\(ы\): \[:foo\]/, fn ->
+      Opts.allowed!([:get, :foo], ~w(get insert)a, "метод(ы)", "T")
     end
   end
 
@@ -91,7 +91,7 @@ defmodule Core.Helper.OptsTest do
       Opts.module!([mod: "x"], :mod, "T")
     end
 
-    assert_raise CompileError, ~r/T: missing required option\(s\): \[:mod\]/, fn ->
+    assert_raise CompileError, ~r/T: нет обязательных опций: \[:mod\]/, fn ->
       Opts.module!([], :mod, "T")
     end
   end

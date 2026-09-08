@@ -34,7 +34,7 @@ defmodule Core.Enum do
       values = Core.Enum.values!(Keyword.get(opts, :values), codes)
 
       unless is_binary(name) do
-        raise CompileError, description: "option :name must be a binary"
+        raise CompileError, description: "Enum: :name должен быть строкой"
       end
 
       alias Core.Error
@@ -246,7 +246,7 @@ defmodule Core.Enum do
 
   defp code_kind!(codes) do
     raise CompileError,
-      description: "option :codes must be a non-empty map, got: #{inspect(codes)}"
+      description: "Enum: :codes должен быть непустой картой, получено: #{inspect(codes)}"
   end
 
   @doc false
@@ -299,11 +299,11 @@ defmodule Core.Enum do
 
   defp validate_values!(values) do
     unless is_list(values) and values != [] and Elixir.Enum.all?(values, &is_atom/1) do
-      raise CompileError, description: "option :values must be a non-empty list of atoms"
+      raise CompileError, description: "Enum: :values должен быть непустым списком атомов"
     end
 
     unless length(values) == length(Elixir.Enum.uniq(values)) do
-      raise CompileError, description: "option :values must not contain duplicates"
+      raise CompileError, description: "Enum: :values не должен содержать дублей"
     end
 
     values
@@ -315,8 +315,8 @@ defmodule Core.Enum do
   defp valid_pair?({value, code}, :string), do: is_atom(value) and is_binary(code) and code != ""
 
   defp code_kind_error(codes) do
-    "option :codes must map atoms to codes of one type — either all integers or all " <>
-      "non-empty strings, got: #{inspect(codes)}"
+    "Enum: :codes должен сопоставлять атомам коды одного типа — либо все целые, либо все " <>
+      "непустые строки, получено: #{inspect(codes)}"
   end
 
   defp validate_unique!(codes) do
@@ -326,7 +326,7 @@ defmodule Core.Enum do
       |> Elixir.Enum.uniq()
 
     unless length(unique) == map_size(codes) do
-      raise CompileError, description: "option :codes must not contain duplicate codes"
+      raise CompileError, description: "Enum: :codes не должен содержать повторяющихся кодов"
     end
 
     :ok
