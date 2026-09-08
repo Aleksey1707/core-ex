@@ -20,25 +20,20 @@ defmodule Core.Error do
   - `domain`: обязательны `code:`, `ns:`, `message:`; опциональны `detail:`, `parent:`
   - `app`: обязательны `code:`, `ns:`; опциональны `message:`, `detail:`, `parent:`
 
-  Литеральный keyword-список attrs проверяется на этапе компиляции (required / unknown keys).
-  Динамический attrs (переменная) — без compile-check; runtime через `__domain__/2` / `__app__/2`
-  и `Keyword.fetch!`.
+  Литеральный keyword-список attrs проверяется на этапе компиляции (required / unknown / дубли).
+  Динамический attrs (переменная) — без compile-check; runtime через `__domain__/2` / `__app__/2`:
+  отсутствие обязательного — `KeyError`, лишний ключ — `ArgumentError`.
 
   Оборачивание: `wrap/2` или `parent:` в attrs.
   Обход цепочки: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2`, `format_chain/1`.
 
   `%Error{}` реализует `Enumerable`: итерация = cause-цепочка `[outer, …, root]`
-  (`Enum.find/2`, `for`, `in` и т.п.).
+  (`Enum.find/2`, `for`, `in` и т.п.). Обратная сторона: `%Error{}`, попавший в `Enum.*`
+  вместо списка, не упадёт, а вернёт цепочку — проверять форму до итерации.
   """
 
-  @enforce_keys ~w(kind ns code module detail)a
-  defstruct kind: nil,
-            ns: nil,
-            module: nil,
-            code: nil,
-            message: nil,
-            detail: nil,
-            parent: nil
+  @enforce_keys ~w(kind ns code module message detail)a
+  defstruct [:kind, :ns, :module, :code, :message, :detail, parent: nil]
 
   @type kind :: :domain | :app
   @type t :: %__MODULE__{
@@ -50,6 +45,10 @@ defmodule Core.Error do
           detail: term(),
           parent: t() | nil
         }
+
+  @type filter :: [{:ns | :code | :kind | :module, term()}, ...]
+
+  @filter_keys ~w(ns code kind module)a
 
   @domain_required ~w(code ns message)a
   @domain_optional ~w(detail parent)a
@@ -122,36 +121,27 @@ defmodule Core.Error do
   @spec __domain__(module(), keyword()) :: t()
 
   def __domain__(module, attrs) when is_atom(module) and is_list(attrs) do
-    build(:domain, module,
-      code: Keyword.fetch!(attrs, :code),
-      ns: Keyword.fetch!(attrs, :ns),
-      message: Keyword.fetch!(attrs, :message),
-      detail: Keyword.get(attrs, :detail),
-      parent: Keyword.get(attrs, :parent)
-    )
+    build(:domain, module, take_attrs(attrs, @domain_required, @domain_optional))
   end
 
   @doc false
   @spec __app__(module(), keyword()) :: t()
 
   def __app__(module, attrs) when is_atom(module) and is_list(attrs) do
-    build(:app, module,
-      code: Keyword.fetch!(attrs, :code),
-      ns: Keyword.fetch!(attrs, :ns),
-      message: Keyword.get(attrs, :message),
-      detail: Keyword.get(attrs, :detail),
-      parent: Keyword.get(attrs, :parent)
-    )
+    build(:app, module, take_attrs(attrs, @app_required, @app_optional))
   end
 
-  @doc "Обернуть ошибку: установить `parent` (cause)."
+  @doc """
+  Обернуть ошибку: установить `parent` (cause).
+
+  Если у `error` уже есть цепочка, новый cause подцепляется в её **конец** и становится
+  `root/1`: иначе `wrap` молча терял бы всё, что ниже.
+  """
   @spec wrap(t(), t()) :: t()
 
   def wrap(%__MODULE__{parent: nil} = error, %__MODULE__{} = parent),
     do: %{error | parent: parent}
 
-  # У outer уже есть cause: подцепляем новый в конец цепочки, иначе `wrap` молча терял бы
-  # всё, что ниже (и вместе с ним — `root/1`, `chain/1`, `has?/2`).
   def wrap(%__MODULE__{parent: existing} = error, %__MODULE__{} = parent) do
     %{error | parent: wrap(existing, parent)}
   end
@@ -176,12 +166,14 @@ defmodule Core.Error do
   Есть ли в цепочке узел, совпадающий с keyword-критерием.
 
   Ключи: `ns:`, `code:`, `kind:`, `module:` (все указанные должны совпасть).
-  Неизвестный ключ — `ArgumentError` сразу: проверка на каждом узле срабатывала бы
-  лениво и опечатка выглядела бы как «не нашли».
-  """
-  @spec has?(t(), keyword()) :: boolean()
+  Неизвестный ключ или не keyword-пара — `ArgumentError` сразу: проверка на каждом узле
+  срабатывала бы лениво и опечатка выглядела бы как «не нашли».
 
-  def has?(%__MODULE__{} = error, opts) when is_list(opts) do
+  Список критериев непустой: пустой совпал бы с любой ошибкой.
+  """
+  @spec has?(t(), filter()) :: boolean()
+
+  def has?(%__MODULE__{} = error, [_ | _] = opts) do
     Enum.each(opts, &validate_filter_key!/1)
 
     find(error, &match_opts?(&1, opts)) != nil
@@ -201,40 +193,58 @@ defmodule Core.Error do
 
   # ---
 
-  defp build(kind, module, fields) do
-    parent = fields[:parent]
+  defp take_attrs(attrs, required, optional) do
+    validate_attr_keys!(attrs, required ++ optional)
 
-    if not is_nil(parent) and not match?(%__MODULE__{}, parent) do
-      raise ArgumentError, "parent должен быть %Error{} или nil, получено: #{inspect(parent)}"
-    end
+    fields = Map.new(required, &{&1, Keyword.fetch!(attrs, &1)})
 
-    %__MODULE__{
+    Enum.into(optional, fields, &{&1, Keyword.get(attrs, &1)})
+  end
+
+  defp validate_attr_keys!(attrs, allowed) do
+    unknown =
+      attrs
+      |> Keyword.keys()
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in allowed))
+
+    if unknown != [], do: raise(ArgumentError, "неизвестные опции: #{inspect(unknown)}")
+  end
+
+  defp build(kind, module, %{code: code, ns: ns, message: message} = fields) do
+    %{detail: detail, parent: parent} = fields
+
+    error = %__MODULE__{
       kind: kind,
       module: module,
-      code: fields[:code],
-      ns: fields[:ns],
-      message: fields[:message],
-      detail: fields[:detail],
-      parent: parent
+      code: code,
+      ns: ns,
+      message: message,
+      detail: detail,
+      parent: nil
     }
+
+    put_parent(error, parent)
   end
+
+  defp put_parent(error, nil), do: error
+  defp put_parent(error, %__MODULE__{} = parent), do: %{error | parent: parent}
 
   defp do_chain(%__MODULE__{parent: nil} = error, acc), do: Enum.reverse([error | acc])
   defp do_chain(%__MODULE__{parent: parent} = error, acc), do: do_chain(parent, [error | acc])
 
   defp match_opts?(error, opts) do
-    Enum.all?(opts, fn
-      {:ns, ns} -> error.ns == ns
-      {:code, code} -> error.code == code
-      {:kind, kind} -> error.kind == kind
-      {:module, module} -> error.module == module
-    end)
+    Enum.all?(opts, fn {key, value} -> Map.fetch!(error, key) == value end)
   end
 
-  defp validate_filter_key!({key, _value}) when key in ~w(ns code kind module)a, do: :ok
+  defp validate_filter_key!({key, _value}) when key in @filter_keys, do: :ok
 
   defp validate_filter_key!({key, _value}) do
     raise ArgumentError, "неизвестный ключ фильтра has?: #{inspect(key)}"
+  end
+
+  defp validate_filter_key!(other) do
+    raise ArgumentError, "критерий has? должен быть keyword-парой, получено: #{inspect(other)}"
   end
 
   defp literal_keyword_ast?(attrs) when is_list(attrs) do
@@ -261,6 +271,19 @@ defmodule Core.Error do
         description: "нет обязательных опций: #{inspect(missing)}"
     end
 
+    duplicated =
+      keys
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_key, count} -> count > 1 end)
+      |> Enum.map(fn {key, _count} -> key end)
+
+    if duplicated != [] do
+      raise CompileError,
+        file: caller.file,
+        line: caller.line,
+        description: "дублирующиеся опции: #{inspect(duplicated)}"
+    end
+
     allowed = required ++ optional
 
     unknown =
@@ -279,30 +302,26 @@ defmodule Core.Error do
   end
 
   defimpl String.Chars do
-    @doc false
     @impl true
-    def to_string(%{message: message}) when is_binary(message), do: message
+    def to_string(%Core.Error{message: message}) when is_binary(message) and message != "",
+      do: message
 
-    def to_string(%{ns: ns, code: code}), do: "#{ns}/#{code}"
+    def to_string(%Core.Error{ns: ns, code: code}), do: "#{ns}/#{code}"
   end
 
   defimpl Enumerable do
-    @doc false
     @impl true
     def reduce(error, acc, fun),
       do: Enumerable.List.reduce(Core.Error.chain(error), acc, fun)
 
-    @doc false
     @impl true
     def count(error),
       do: {:ok, length(Core.Error.chain(error))}
 
-    @doc false
     @impl true
     def member?(error, element),
       do: {:ok, element in Core.Error.chain(error)}
 
-    @doc false
     @impl true
     def slice(error) do
       list = Core.Error.chain(error)

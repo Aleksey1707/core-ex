@@ -33,6 +33,13 @@ defmodule Core.ErrorTest do
       assert to_string(err) == "test/fail"
     end
 
+    test "пустой message → fallback ns/code" do
+      err = Error.domain(__MODULE__, code: :bad, ns: :test, message: "")
+
+      assert to_string(err) == "test/bad"
+      assert Error.format_chain(err) == "test/bad"
+    end
+
     test "domain/1 и app/1 берут module из __CALLER__" do
       err =
         Error.domain(
@@ -68,9 +75,29 @@ defmodule Core.ErrorTest do
       end
     end
 
+    test "app и /1-формы тоже проверяются на compile-time" do
+      assert_raise CompileError, ~r/нет обязательных опций: \[:ns\]/, fn ->
+        compile_factory("Core.Error.app(__MODULE__, code: :x)")
+      end
+
+      assert_raise CompileError, ~r/неизвестные опции: \[:extra\]/, fn ->
+        compile_factory("Core.Error.app(code: :x, ns: :test, extra: 1)")
+      end
+
+      assert_raise CompileError, ~r/нет обязательных опций: \[:message\]/, fn ->
+        compile_factory("Core.Error.domain(code: :x, ns: :test)")
+      end
+    end
+
     test "domain с unknown attr в литерале → CompileError" do
       assert_raise CompileError, ~r/неизвестные опции: \[:extra\]/, fn ->
         compile_error_factory("code: :x, ns: :test, message: \"x\", extra: true")
+      end
+    end
+
+    test "domain с дублирующимся attr в литерале → CompileError" do
+      assert_raise CompileError, ~r/дублирующиеся опции: \[:code\]/, fn ->
+        compile_error_factory("code: :x, ns: :test, message: \"x\", code: :y")
       end
     end
 
@@ -85,6 +112,14 @@ defmodule Core.ErrorTest do
 
       assert_raise KeyError, fn ->
         Error.__domain__(__MODULE__, opts)
+      end
+    end
+
+    test "domain с динамическим attrs и лишним ключом → ArgumentError" do
+      opts = [code: :x, ns: :test, message: "x", typo: 1]
+
+      assert_raise ArgumentError, ~r/неизвестные опции: \[:typo\]/, fn ->
+        Error.domain(__MODULE__, opts)
       end
     end
 
@@ -108,13 +143,17 @@ defmodule Core.ErrorTest do
       assert outer.parent == inner
     end
 
-    test "parent: не-Error → ArgumentError" do
-      assert_raise ArgumentError, ~r/parent должен быть %Error\{\}/, fn ->
+    test "parent: не-Error → FunctionClauseError" do
+      # Process.get/1 → dynamic(); намеренный misuse без type warning
+      Process.put({__MODULE__, :bad_parent}, :nope)
+      bad = Process.get({__MODULE__, :bad_parent})
+
+      assert_raise FunctionClauseError, fn ->
         Error.domain(__MODULE__,
           code: :x,
           ns: :test,
           message: "x",
-          parent: :nope
+          parent: bad
         )
       end
     end
@@ -202,6 +241,37 @@ defmodule Core.ErrorTest do
       refute Error.has?(outer, ns: :product, code: :read_only)
     end
 
+    test "has? с пустым критерием → FunctionClauseError", %{outer: outer} do
+      # Process.get/1 → dynamic(); намеренный misuse без type warning
+      Process.put({__MODULE__, :empty_opts}, [])
+      empty = Process.get({__MODULE__, :empty_opts})
+
+      assert_raise FunctionClauseError, fn ->
+        Error.has?(outer, empty)
+      end
+    end
+
+    test "has? с неизвестным ключом → ArgumentError", %{outer: outer} do
+      assert_raise ArgumentError, ~r/неизвестный ключ фильтра has\?: :nope/, fn ->
+        Error.has?(outer, nope: 1)
+      end
+    end
+
+    test "has? с не-keyword критерием → ArgumentError", %{outer: outer} do
+      assert_raise ArgumentError, ~r/критерий has\? должен быть keyword-парой/, fn ->
+        Error.has?(outer, [:ns])
+      end
+    end
+
+    test "has? по kind и module", %{outer: outer, root: root} do
+      assert Error.has?(outer, kind: :app)
+      assert Error.has?(outer, kind: :domain)
+      assert Error.has?(outer, module: __MODULE__)
+      refute Error.has?(outer, module: Core.Error)
+      assert Error.has?(root, kind: :domain, module: __MODULE__)
+      refute Error.has?(root, kind: :app)
+    end
+
     test "find возвращает узел из середины", %{outer: outer, mid: mid} do
       assert Error.find(outer, &(&1.code == :read_only)) == mid
       assert Error.find(outer, &(&1.code == :nope)) == nil
@@ -260,6 +330,10 @@ defmodule Core.ErrorTest do
   end
 
   defp compile_error_factory(attrs) do
+    compile_factory("Core.Error.domain(__MODULE__, #{attrs})")
+  end
+
+  defp compile_factory(call) do
     mod = Module.concat([__MODULE__, :"C#{System.unique_integer([:positive])}"])
 
     Code.compile_string("""
@@ -267,7 +341,7 @@ defmodule Core.ErrorTest do
       require Core.Error
 
       def go do
-        Core.Error.domain(__MODULE__, #{attrs})
+        #{call}
       end
     end
     """)

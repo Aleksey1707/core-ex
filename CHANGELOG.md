@@ -106,6 +106,24 @@
   (`Core.Repo.Pg.changeset_errors/1`). Контракт `errors:` потребителя не меняется — ошибку
   строит сам `Repo.Pg`. В `FallbackController` потребителя clause `{:error, %Ecto.Changeset{}}`
   надо удалить: ситуация приходит веткой `%Error{kind: :app}` (500 + лог), а не 400.
+- **`Core.Error`: контракт конструирования и `has?/2` ужесточён.** Нарушение контракта перестало
+  маскироваться под нормальный результат:
+  - `%Error{}` требует `message` при прямом конструировании структурой (`@enforce_keys`); для
+    `:app` допустим `nil`, но ключ обязан быть указан. Фабрики `Error.domain/1|2` и
+    `Error.app/1|2` не затронуты.
+  - `parent:` не `%Error{}` и не `nil` → `FunctionClauseError` вместо `ArgumentError` — как у
+    `wrap/2`; `rescue ArgumentError` вокруг конструирования надо снять.
+  - `Error.has?(err, [])` → `FunctionClauseError` вместо `true`: пустой критерий совпадал с
+    любой ошибкой. Элемент критерия не keyword-парой → `ArgumentError`.
+  - Дублирующийся ключ в литеральных attrs → `CompileError`; лишний ключ в динамическом attrs
+    (переменная) → `ArgumentError` вместо молчаливого игнора.
+  - `message: ""` больше не печатается пустотой: `String.Chars` и `format_chain/1` отдают
+    fallback `"ns/code"`, как при `message: nil`.
+- **`Core.Web.ErrorMapper` берёт текст через `String.Chars`, а не `error.message`.** Ошибка без
+  текста (у `:app` `message` опционален) отдавала клиенту `null` в поле сообщения при 412 и 403,
+  нарушая собственный `@type result` (`String.t()`); теперь в ответ уходит fallback `"ns/code"`.
+  Затронуты клозы `:version_mismatch`, `:access_denied` и `kind: :domain`. `Core.Prim.wrap_parent`
+  перестал дублировать то же правило своим `parent.message || "ns/code"`.
 
 ### Новое
 

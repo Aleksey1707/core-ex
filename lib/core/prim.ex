@@ -242,7 +242,7 @@ defmodule Core.Prim do
   def wrap_parent(module, name, %Error{} = parent, raw, sensitive)
       when is_binary(name) and is_boolean(sensitive) do
     parent = redact_chain(parent, sensitive)
-    parent_message = parent.message || "#{parent.ns}/#{parent.code}"
+    parent_message = to_string(parent)
 
     Error.domain(module,
       code: parent.code,

@@ -39,7 +39,7 @@ defmodule Core.Web.ErrorMapper do
 
   | Ошибка | Статус | Код | Текст | Лог |
   |---|---|---|---|---|
-  | `%Error{code: :version_mismatch}` | 412 | `:diff_version` | `message` | — |
+  | `%Error{code: :version_mismatch}` | 412 | `:diff_version` | `message` (fallback `ns/code`) | — |
   | `%Error{code: c}`, `c` в `auth_codes:` | 401 | `:auth_error` | константа | `:debug` |
   | `%Error{code: :access_denied}` | 403 | `:error` | `message` | — |
   | `%Error{kind: :domain}` | 400 | `:domain_error` | `message` | — |
@@ -57,10 +57,10 @@ defmodule Core.Web.ErrorMapper do
   def map(error, opts \\ [])
 
   def map(%Error{code: :version_mismatch} = error, _opts),
-    do: {412, :diff_version, error.message, nil}
+    do: {412, :diff_version, to_string(error), nil}
 
   def map(%Error{code: :access_denied} = error, _opts),
-    do: {403, :error, error.message, nil}
+    do: {403, :error, to_string(error), nil}
 
   def map(%Error{code: code} = error, opts) do
     if code in Keyword.get(opts, :auth_codes, @auth_codes),
@@ -72,7 +72,9 @@ defmodule Core.Web.ErrorMapper do
 
   # ---
 
-  defp by_kind(%Error{kind: :domain} = error, _opts), do: {400, :domain_error, error.message, nil}
+  defp by_kind(%Error{kind: :domain} = error, _opts),
+    do: {400, :domain_error, to_string(error), nil}
+
   defp by_kind(%Error{kind: :app}, opts), do: critical(opts)
 
   defp critical(opts), do: {500, :critical, critical_message(opts), :error}
