@@ -103,7 +103,9 @@ defmodule Core.Repo.Pg.Schema do
 
   defp mode([:entity], opts), do: {:entity, Helper.Opts.module!(opts, :entity, @label)}
 
-  defp mode([:view], opts), do: {:view, Helper.Opts.module!(opts, :view, @label)}
+  defp mode([:view], opts) do
+    {:view, Helper.Opts.module!(opts, :view, @label, exports: [__view__: 0])}
+  end
 
   defp mode([], _opts) do
     raise CompileError,

@@ -303,6 +303,7 @@ defmodule Core.Repo.Pg do
 
     validate_decoder!(opts)
     validate_encoder!(opts, write?)
+    validate_shadow_copy!(opts)
   end
 
   # ---
@@ -326,6 +327,19 @@ defmodule Core.Repo.Pg do
   defp ensure_single_decoder!(_entity_and_view) do
     raise CompileError,
       description: "to_entity/to_view: взаимоисключающие (write — агрегат, read — View)"
+  end
+
+  # Эталон в `Repo.Sc` — механизм write-пути: на чтении он получил бы представление
+  # (`Repo.Sc.put/2` требует `id`), а сверять его при записи всё равно не с чем.
+  defp validate_shadow_copy!(opts) do
+    if Keyword.has_key?(opts, :to_view) and Keyword.get(opts, :shadow_copy?) == true do
+      raise CompileError,
+        description:
+          "shadow_copy?: недопустим с to_view: — read-путь не кладёт представление " <>
+            "эталоном в Repo.Sc"
+    end
+
+    :ok
   end
 
   defp validate_encoder!(opts, true) do

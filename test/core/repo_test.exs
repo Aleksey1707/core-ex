@@ -6,9 +6,12 @@ defmodule Core.RepoTest do
 
   defmodule SampleView do
     @moduledoc false
-    defstruct [:id, :name]
 
-    @type t :: %__MODULE__{id: String.t(), name: String.t()}
+    use Core.View,
+      fields: [
+        id: [type: :string],
+        name: [type: :string]
+      ]
   end
 
   defmodule SampleEntity do

@@ -102,6 +102,25 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule Listy do
+    @moduledoc false
+
+    use Core.View,
+      fields: [
+        payloads: [list: [jsonb: {Core.ViewFixture.Specs, :payload_spec}]],
+        marks: [list: [form: :mark]]
+      ],
+      forms: [
+        mark: [
+          code: [type: :string],
+          inner: [form: :inner]
+        ],
+        inner: [
+          at: [prim: Core.ViewFixture.CreatedAt]
+        ]
+      ]
+  end
+
   defmodule Plain do
     @moduledoc false
 
@@ -120,6 +139,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.External,
       plugins: [
+        Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
         Core.ViewFixture.Sample.Codec
@@ -132,6 +152,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.Internal,
       plugins: [
+        Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
         Core.ViewFixture.Sample.Codec
