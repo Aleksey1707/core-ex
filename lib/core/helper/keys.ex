@@ -5,7 +5,7 @@ defmodule Core.Helper.Keys do
   Нужно на границе HTTP: наружу API отдаёт camelCase, домен и wire-профили кодеков
   работают со snake_case.
 
-  `camelize/1` и `snakify/1` — зеркальная пара: обе рекурсивны по map и спискам, обе
+  `camelize/2` и `snakify/2` — зеркальная пара: обе рекурсивны по map и спискам, обе
   принимают atom- и string-ключи. Ключ на выходе всегда строка: atom не восстанавливается
   обратно, потому что `String.to_atom/1` на данных с границы запрещён (`20-agreements.md`).
 
@@ -13,32 +13,31 @@ defmodule Core.Helper.Keys do
   map: разбирать `%DateTime{}` на ключи бессмысленно, а `Map.new/2` на нём падает
   (`Enumerable` не реализован ни у `DateTime`, ни у `Decimal`).
 
+  Опция `except:` — список ключей (atom или строка), которые не преобразуются: регистр ключа
+  сохраняется как есть, значение под ним не обходится вовсе. Так проходит free-form нагрузка
+  (`metadata`, `payload`), где ключи задаёт не контракт API. Ключ сравнивается со своим
+  строковым видом, поэтому `:metadata` в `except:` покрывает и `"metadata"` в данных.
+
   Перевод atom-ключей в строки без смены регистра — `Core.Helper.Map.stringify_keys/1`.
   """
 
-  @doc "Рекурсивно перевести ключи map в camelCase."
-  @spec camelize(term()) :: term()
+  @doc """
+  Рекурсивно перевести ключи map в camelCase.
 
-  def camelize(%_{} = struct), do: struct
+  Опции: `except:` — ключи, чьи поддеревья проходят нетронутыми.
+  """
+  @spec camelize(term(), keyword()) :: term()
 
-  def camelize(map) when is_map(map) do
-    Map.new(map, fn {key, value} -> {camelize_key(key), camelize(value)} end)
-  end
+  def camelize(term, opts \\ []), do: convert(term, &camelize_key/1, except(opts))
 
-  def camelize(list) when is_list(list), do: Enum.map(list, &camelize/1)
-  def camelize(other), do: other
+  @doc """
+  Рекурсивно перевести ключи map в snake_case.
 
-  @doc "Рекурсивно перевести ключи map в snake_case."
-  @spec snakify(term()) :: term()
+  Опции: `except:` — ключи, чьи поддеревья проходят нетронутыми.
+  """
+  @spec snakify(term(), keyword()) :: term()
 
-  def snakify(%_{} = struct), do: struct
-
-  def snakify(map) when is_map(map) do
-    Map.new(map, fn {key, value} -> {snakify_key(key), snakify(value)} end)
-  end
-
-  def snakify(list) when is_list(list), do: Enum.map(list, &snakify/1)
-  def snakify(other), do: other
+  def snakify(term, opts \\ []), do: convert(term, &snakify_key/1, except(opts))
 
   @doc "Один ключ → camelCase-строка."
   @spec camelize_key(atom() | String.t()) :: String.t()
@@ -69,5 +68,32 @@ defmodule Core.Helper.Keys do
     |> String.replace(~r/([A-Z])/, "_\\1")
     |> String.downcase()
     |> String.trim_leading("_")
+  end
+
+  # ---
+
+  @spec convert(term(), (atom() | String.t() -> String.t()), MapSet.t(String.t())) :: term()
+
+  defp convert(%_{} = struct, _fun, _except), do: struct
+
+  defp convert(map, fun, except) when is_map(map) do
+    Map.new(map, fn {key, value} ->
+      if MapSet.member?(except, to_string(key)),
+        do: {to_string(key), value},
+        else: {fun.(key), convert(value, fun, except)}
+    end)
+  end
+
+  defp convert(list, fun, except) when is_list(list),
+    do: Enum.map(list, &convert(&1, fun, except))
+
+  defp convert(other, _fun, _except), do: other
+
+  @spec except(keyword()) :: MapSet.t(String.t())
+
+  defp except(opts) do
+    opts
+    |> Keyword.get(:except, [])
+    |> MapSet.new(&to_string/1)
   end
 end

@@ -57,6 +57,20 @@ defmodule Core.Helper.KeysTest do
     assert Helper.Keys.snakify(camelized) == source
   end
 
+  test "except исключает ключ и его поддерево из преобразования" do
+    source = %{"aggregate_id" => 1, "raw_data" => %{"user_name" => 2}, :metadata => %{"a_b" => 3}}
+
+    assert Helper.Keys.camelize(source, except: ["raw_data", :metadata]) == %{
+             "aggregateId" => 1,
+             "raw_data" => %{"user_name" => 2},
+             "metadata" => %{"a_b" => 3}
+           }
+
+    assert Helper.Keys.snakify(%{"aggregateId" => 1, "rawData" => %{"userName" => 2}},
+             except: ["rawData"]
+           ) == %{"aggregate_id" => 1, "rawData" => %{"userName" => 2}}
+  end
+
   test "преобразование одного ключа принимает atom и строку" do
     assert Helper.Keys.camelize_key(:aggregate_id) == "aggregateId"
     assert Helper.Keys.camelize_key("aggregate_id") == "aggregateId"
