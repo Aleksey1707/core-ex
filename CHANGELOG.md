@@ -124,6 +124,67 @@
   нарушая собственный `@type result` (`String.t()`); теперь в ответ уходит fallback `"ns/code"`.
   Затронуты клозы `:version_mismatch`, `:access_denied` и `kind: :domain`. `Core.Prim.wrap_parent`
   перестал дублировать то же правило своим `parent.message || "ns/code"`.
+- **`Core.Context`: ключ — атом.** `@type key` сужен с `term()` до `atom()`, guard стоит на каждой
+  функции: словарь ключей закрыт кодом (`Context.Accessor`, `Repo.Sc`), а не приходит извне.
+  `Context.new/1` принимает только plain map — struct контекстом больше не притворится.
+- **`inspect(%Context{})` печатает только ключи** — `#Context<keys: [...]>`. Контекст лежит в state
+  OTP-процессов (`Outbox.Poller`, `Outbox.Cleaner`) и целиком уходит в crash-репорты, а его
+  значения — текущий пользователь и прочие чувствительные данные (`12-errors.md`).
+- **Функции `Context.Accessor` требуют `%Context{}`.** Сгенерированные `exists?/1`, `find/1`,
+  `get/1`, `get!/1`, `put/2`, `delete/1` матчат struct в заголовке: чужой аргумент даёт
+  `FunctionClauseError` на месте вызова, а не ошибку ключа внутри `Context`.
+- **`Core.Repo.Sc.clear/1` и `delete/1` возвращают `%Context{}`, а не `:ok`.** Обе снимают ключ
+  таблицы с контекста, и дальше работать нужно с возвращённым: жизненный цикл
+  `init/1` → `clear/1` → `delete/1` стал однородным. Обращение по уже удалённой таблице (старая
+  копия контекста) — no-op: `put/2` и `find/3` молчат, `clear/1` отдаёт контекст без мёртвого
+  ключа, вместо `ArgumentError` из ETS.
+- **`Core.Guard.is_error/1` удалён** — обёртка над `is_struct(value, Core.Error)`, а тривиальные
+  Kernel-guards свод оборачивать запрещает (`20-agreements.md`). Замена — `is(err, Error)` из того
+  же `Core.Guard` либо прямой `is_struct/2`.
+- **`Core.Guard.in_enum/3`: дубль в subset — `CompileError`** (принимался молча). Compile-time
+  хелперы `expand_mod!/2`, `enum_values!/2`, `literal_atom_list!/2` и `validate_subset!/4` стали
+  приватными: это внутренности макросов, а не API.
+- **`Core.Prim.String` обязан иметь верхнюю границу.** Без `max_len:` и без `sec_max_len:` —
+  `CompileError`: примитив без границы принимает ввод любого размера, а по `min_len:` / `re:`
+  вывести её не из чего. Сама отсечка переехала из `mutate` в `cast` (до `String.valid?/1`),
+  поэтому её код ошибки теперь `:invalid_string`, а не `:invalid_value`.
+- **`Prim.Integer` и `Prim.Decimal` ограничивают строковый ввод по байтам.** `Integer.parse/1` и
+  `Decimal.new/1` обходят ввод целиком (у `Prim.Integer` ~2 млн цифр дают `SystemLimitError` мимо
+  контракта `new/1`), а `min:` / `max:` проверяются уже после разбора и от его цены не защищают.
+  Граница — новая опция `sec_max_len:`; default выводится из `max:` (плюс `scale:` у Decimal),
+  без `max:` — 40 байт у Integer и 64 у Decimal. Ввод длиннее — доменная ошибка
+  `:invalid_integer` / `:invalid_decimal`. Явная `sec_max_len:`, в которую не влезает собственный
+  `max:`, — `CompileError`. Уже разобранный ввод (`integer()`, `%Decimal{}`) границей не ограничен.
+- **`__domain_type_opts__/0` строкового Prim больше не содержит `trim:` и `sec_max_len:`.** Опции
+  обработки переехали в новый `pipeline_opts:` (их получают cast/mutate-шаги), а `type_opts:`
+  остался контрактом типа — `min_len:` / `max_len:` / `re:`; его читает `Codec.coerce/2`
+  на read-пути.
+- **`Prim.Compose`: `sensitive: false` поверх чувствительной базы — `CompileError`.** Наследование
+  осталось, запрещено только понижение: без флага композит отдал бы raw базы в свой `Error.detail`
+  целым — база успевает защитить лишь собственный `detail` внутри `parent`.
+- **Read-путь дампит plain-kind Prim профилем кодека, а не «как есть».** `Core.Codec.coerce/2`
+  оборачивает значение `:string` / `:integer`-Prim в его struct (приводить там нечего) и отдаёт
+  в обычный `codec.dump/1`, поэтому переопределение `dump/1` / `dump_kind/2` в профиле действует
+  и на read-пути: `Core.View` с полем `prim:`, `Codec.Redump` и `Codec.Helper.dump_raw/3` раньше
+  проносили такое значение мимо профиля, и wire-формы путей расходились. Цена — требование к
+  профилю: переопределение plain-kind MUST быть идемпотентным, потому что на read-пути оно ложится
+  на значение, уже прошедшее dump профиля записи, а нормализовать его нечем (у форматируемых kind
+  эту роль играет `cast` в `coerce/2`).
+- **`Core.Codec.Redump.validate!/1` отвергает спеку, которую нечем исполнить.** `{:prim, Mod}` с
+  kind вне `Core.Codec.coercible_kinds/0` (кастомный) и с `sensitive: true`-Prim — `ArgumentError`
+  на месте объявления: неприводимое поле переводить нечем, а чувствительному значению не место
+  на read-пути.
+- **`Core.Codec.Helper.load_optional/3` принимает Prim-модуль первым аргументом** —
+  `load_optional(Mod, value, codec)` вместо `load_optional(value, Mod, codec)`. Порядок стал общим
+  у `load_optional/3`, `load_many/3`, `dump_raw/3` и `codec.load/2`. Арность не изменилась, поэтому
+  перестановку компилятор не поймает: `nil`-значение уйдёт в `codec.load(nil, Mod)`, остальное —
+  `FunctionClauseError`. Правка в плагинах кодеков механическая.
+- **Плагину кодека требуется `dump/2`.** Отсутствие — `CompileError` на самом плагине: фасад уже
+  завёл клозу на каждый его тип, и раньше она падала `UndefinedFunctionError` на первом дампе.
+- **`Core.Codec.Facade.build_type_map!/1` → `validate_mods!/1`** (`:ok` вместо реестра). Фасад
+  диспетчеризуется клозами на модуль, реестр никто не читал — от функции оставалась одна проверка
+  уникальности модуля между плагинами. Заодно модуль-не-плагин отличается от несобранного
+  (`Code.ensure_compiled!`), а `prim:` проверяется на экспорт `dump/1`, `load/2` и `load!/2`.
 
 ### Новое
 
@@ -184,6 +245,25 @@
 - **`Core.Helper.Map.stringify_keys/1`** — atom-ключи в строки без смены регистра
   (смена регистра — задача `Core.Helper.Keys`).
 - **`Core.Repo.Pg.changeset_errors/1`** — ошибки changeset как `%{поле => [текст]}`.
+- **`Core.Mutator`** — behaviour (`mutate/2`) и диспетчер мутаторов, зеркало `Core.Validator`.
+  Формы шага у `mutate:` / `custom_mutate:` и `validate:` / `custom_validate:` стали одни и те же:
+  `{Module, opts}`, `fun/1`, `fun/2` или список любой из них (mutate добрал модульную форму,
+  `Core.Validator` — `fun/1`).
+- **`pipeline_opts:` у `use Core.Prim`** — опции для шагов `cast` / `mutate` (default — `type_opts`):
+  обработке (`trim`, `sec_max_len`) в контракте типа места нет, а шагам она нужна.
+- **`Core.Prim.Opts` и `Core.Prim.Wrapper`** — один пролог `use` на все обёртки (набор ключей →
+  `kind:` → значения опций) и compile-time проверка **значений**: границы и их порядок, `%Regex{}`,
+  `%Date{}` / `%DateTime{}`, IANA-зона `tz:`, версия UUID, boolean-опции. Ошибка в опции обязана
+  падать `CompileError` на `use`: в рантайме она приходит доменной ошибкой первого `new/1`, где
+  неотличима от невалидного ввода пользователя.
+- **`Core.Codec.coercible_kinds/0` и `Core.Codec.coercible?/1`** — kinds, значение которых read-путь
+  приводит к Prim (форматируемые профилем плюс `:string` / `:integer`). Единственный источник
+  списка: по нему `Core.View` типизирует поля `prim:`, а `Codec.Redump` проверяет спеку формы.
+- **`type:` у `Core.Context.Accessor`** — модуль значения: спеки сужаются с `term()` до `<Mod>.t()`,
+  а `put/2` принимает только `%<Mod>{}` — чужое значение отсекается на компиляции, а не всплывает
+  в репозитории. Сгенерированные функции стали `defoverridable`.
+- **`Core.Helper.Opts.atom!/3`** — чтение опции-атома (не `nil`) с `CompileError` вместо тихого
+  прохода значения другого типа.
 
 ### Изменения контракта макросов
 
@@ -215,6 +295,12 @@
   `Es.Event.Repo.Pg` — `@es_dao` и `@es_codec`, `Es.Event.Repo.Pg.Schema` — `@es_codec`:
   вместо них генерируются приватные `es_codec/0` и `es_dao/0`. Правка нужна только тому,
   кто ссылался на эти атрибуты из собственного кода модуля.
+- **`Core.Guard.is_enum/2` / `in_enum/3` регистрируют исходник enum-модуля как
+  `@external_resource` каллера.** Значения инлайнятся в guard литералом, а компилятор этой связи
+  не видит: `Code.ensure_compiled/1` даёт максимум export-ребро, и правка `values:` не пересобрала
+  бы модуль с guard — тот остался бы на старом множестве. Следствие для потребителя: enum,
+  используемый в guard, MUST компилироваться на той же машине, что и каллер (сборка
+  с `+deterministic` теряет `:source`, и инкрементальная пересборка каллера не гарантирована).
 
 ## 0.1.0
 
