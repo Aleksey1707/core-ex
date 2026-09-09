@@ -15,17 +15,21 @@ defmodule Core.Mq.Stream.ReaderTest do
     def create_stream(_topic), do: :ok
     def subscribe(_stream, _pid, _offset, _credit), do: {:ok, 1}
     def query_offset(_topic, _sub), do: {:error, :not_found}
-    def store_offset(_topic, _sub, _offset), do: :ok
     def unsubscribe(_id), do: :ok
 
-    def credit(id, n) do
-      Agent.update(__MODULE__, fn credits -> credits ++ [{id, n}] end)
+    def store_offset(_topic, _sub, offset) do
+      Agent.update(__MODULE__, &%{&1 | offsets: &1.offsets ++ [offset]})
       :ok
     end
 
-    def credits do
-      Agent.get(__MODULE__, & &1)
+    def credit(id, n) do
+      Agent.update(__MODULE__, &%{&1 | credits: &1.credits ++ [{id, n}]})
+      :ok
     end
+
+    def credits, do: Agent.get(__MODULE__, & &1.credits)
+
+    def offsets, do: Agent.get(__MODULE__, & &1.offsets)
   end
 
   defmodule FlakyConn do
@@ -50,7 +54,7 @@ defmodule Core.Mq.Stream.ReaderTest do
   setup do
     start_supervised!(%{
       id: FakeConn,
-      start: {Agent, :start_link, [fn -> [] end, [name: FakeConn]]}
+      start: {Agent, :start_link, [fn -> %{credits: [], offsets: []} end, [name: FakeConn]]}
     })
 
     topic = Mq.Topic.new!("reader_test")
@@ -144,7 +148,18 @@ defmodule Core.Mq.Stream.ReaderTest do
         drops
       )
 
-    on_exit(fn -> :telemetry.detach("#{inspect(drops)}-sub-batch-drop") end)
+    :ok =
+      :telemetry.attach(
+        "#{inspect(drops)}-sub-batch-deliver",
+        [:core, :mq, :stream, :deliver],
+        fn _event, %{entries: entries}, _meta, pid -> send(pid, {:deliver, entries}) end,
+        drops
+      )
+
+    on_exit(fn ->
+      :telemetry.detach("#{inspect(drops)}-sub-batch-drop")
+      :telemetry.detach("#{inspect(drops)}-sub-batch-deliver")
+    end)
 
     log =
       capture_log(fn ->
@@ -152,10 +167,137 @@ defmodule Core.Mq.Stream.ReaderTest do
       end)
 
     assert log =~ "чанк с sub-entry batching пропущен"
-    assert_received {:drop, 5}
+
+    # Дропнутый чанк виден и в deliver: drop-rate считается в одних единицах — entries.
+    assert_received {:deliver, 1}
+    assert_received {:drop, 1}
     assert :empty = Stream.Reader.get(reader, 0)
     assert Stream.Reader.info(reader).buffer_len == 0
     assert FakeConn.credits() == [{1, 1}]
+  end
+
+  test "запись с чужим topic'ом в конверте дропается", %{reader: reader} do
+    drops = self()
+
+    :ok =
+      :telemetry.attach(
+        "#{inspect(drops)}-topic-mismatch",
+        [:core, :mq, :stream, :decode_drop],
+        fn _event, %{count: count}, _meta, pid -> send(pid, {:drop, count}) end,
+        drops
+      )
+
+    on_exit(fn -> :telemetry.detach("#{inspect(drops)}-topic-mismatch") end)
+
+    alien = encoded(Mq.Topic.new!("alien_topic"), "body")
+
+    log =
+      capture_log(fn ->
+        deliver(reader, 0, [alien])
+        assert :empty = Stream.Reader.get(reader, 0)
+      end)
+
+    assert log =~ "topic конверта не совпадает с подпиской"
+    assert_received {:drop, 1}
+    assert Stream.Reader.info(reader).buffer_len == 0
+  end
+
+  test "серия дропов сохраняется одним offset", %{reader: reader} do
+    deliver(reader, 7, ["not-json", "also-bad"])
+
+    assert :empty = Stream.Reader.get(reader, 0)
+
+    # Один `store_offset` на серию — с последним дропнутым offset: без него хвост из
+    # нечитаемых записей перебирался бы после каждого рестарта.
+    assert FakeConn.offsets() == [8]
+  end
+
+  test "накопленный дроп виден в info и сохраняется при остановке", %{
+    reader: reader,
+    topic: topic
+  } do
+    deliver(reader, 7, ["not-json", encoded(topic, "ok")])
+
+    assert {:ok, %Mq.Message{body: "ok"}} = Stream.Reader.get(reader, 0)
+    assert Stream.Reader.info(reader).dropped_offset == 7
+    assert FakeConn.offsets() == []
+
+    :ok = stop_supervised!(Stream.Reader)
+
+    # Штатная остановка не отдаёт дроп назад брокеру: иначе тот же хвост переберётся
+    # на следующем старте.
+    assert FakeConn.offsets() == [7]
+  end
+
+  test "при reliable?: false дропы offset не пишут", %{topic: topic} do
+    reader =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Stream.Reader,
+           connection: FakeConn,
+           topic: topic,
+           subscriber_name: Mq.SubscriberName.new!("sub-unreliable"),
+           reliable?: false,
+           initial_offset: :first},
+          id: :unreliable_reader
+        )
+      )
+
+    deliver(reader, 3, ["not-json", "also-bad"])
+
+    assert :empty = Stream.Reader.get(reader, 0)
+    assert Stream.Reader.info(reader).dropped_offset == nil
+    assert FakeConn.offsets() == []
+  end
+
+  test "commit подписчика перекрывает накопленные дропы", %{reader: reader, topic: topic} do
+    deliver(reader, 7, ["not-json", encoded(topic, "ok")])
+
+    assert {:ok, %Mq.Message{body: "ok"}} = Stream.Reader.get(reader, 0)
+    assert :ok = Stream.Reader.commit(reader)
+
+    assert FakeConn.offsets() == [8]
+  end
+
+  test "чужой topic логируется один раз на подписку", %{reader: reader} do
+    alien = encoded(Mq.Topic.new!("alien_topic"), "body")
+
+    log =
+      capture_log(fn ->
+        deliver(reader, 0, [alien, alien, alien])
+        assert :empty = Stream.Reader.get(reader, 0)
+      end)
+
+    assert length(String.split(log, "topic конверта не совпадает")) - 1 == 1
+  end
+
+  test "мусор в :initial_offset — ArgumentError на старте, а не цикл рестартов", %{topic: topic} do
+    Process.flag(:trap_exit, true)
+
+    capture_log(fn ->
+      assert {:error, {%ArgumentError{message: message}, _stack}} =
+               Stream.Reader.start_link(
+                 connection: FakeConn,
+                 topic: topic,
+                 subscriber_name: Mq.SubscriberName.new!("sub"),
+                 initial_offset: :bogus
+               )
+
+      assert message =~ ":initial_offset"
+    end)
+  end
+
+  test "topic не того типа — ArgumentError на старте", %{topic: topic} do
+    Process.flag(:trap_exit, true)
+
+    capture_log(fn ->
+      assert {:error, {%ArgumentError{}, _stack}} =
+               Stream.Reader.start_link(
+                 connection: FakeConn,
+                 topic: Mq.Topic.value(topic),
+                 subscriber_name: Mq.SubscriberName.new!("sub")
+               )
+    end)
   end
 
   test "чанк из битых entries: get :empty и один credit", %{reader: reader} do

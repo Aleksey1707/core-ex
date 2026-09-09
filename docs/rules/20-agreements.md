@@ -312,26 +312,48 @@ def parse({:ok, data}, opts), do: do_parse(data, opts)
 
 ## Алиасы модулей
 
-Алиасить родительский модуль пространства имён, а не лист с `as:`. Вызов — через родителя:
-`Parent.Leaf.fun(...)`.
+Лист MAY алиаситься напрямую — короткое имя стоит рядом с вызовом и читается как имя операции:
+`alias Core.Helper.Transact` → `Transact.warn_in_transaction(...)`.
+
+Условие одно: короткое имя MUST быть свободно в этом файле. Занято модулем стандартной
+библиотеки, зависимости или другим алиасом — leaf-алиас MUST NOT, конфликт разрешается алиасом
+**родителя** и вызовом `Parent.Leaf.fun(...)`. Разводить конфликт через `as:` — SHOULD NOT:
+переименование прячет настоящее имя модуля, а родитель его показывает.
 
 ```elixir
-# плохо
+# плохо — `as:` вместо родителя
 alias Core.Helper.Opts, as: UseOpts
 UseOpts.validate!(...)
 
-# хорошо
-alias Core.Helper
-Helper.Opts.validate!(...)
+# хорошо — имя свободно, лист алиасится напрямую
+alias Core.Helper.Transact
+Transact.warn_in_transaction("публикация пачки в stream")
+
+# хорошо — `String` занят стандартной библиотекой, поэтому через родителя
+alias Core.Prim
+Prim.String.new(value)
 ```
 
-То же для `Prim` (`Prim.String`, …) и `Validator` (`Validator.String`, …), `Repo` (`Repo.Pg`,
-`Repo.Sc`). Детали repo-слоёв — `13-repos.md`.
+Типовые пространства, где лист напрямую не алиасится:
+
+| Пространство | Лист | Что занимает имя |
+|---|---|---|
+| `Core.Prim`, `Core.Validator` | `String`, `Integer`, `Date`, `DateTime`, `Decimal` | одноимённые модули Elixir и `decimal` |
+| `Core.Repo` | `Pg`, `Sc` | рядом нужен сам `Core.Repo` (`use Repo.Pg`, `@behaviour Core.Repo`) |
+| `Core.Codec` | `Facade`, `Plugin`, `Redump` | рядом нужен сам `Core.Codec` (`use Core.Codec`) |
+
+Совпадение со **std-модулем, которого в файле нет**, конфликтом не считается: `alias Core.Version`
+затеняет `Version` из Elixir осознанно — semver в домене не используется. Появилась нужда в
+затенённом модуле — звать его полным путём (`Elixir.Version.match?/2`), а не переименовывать свой.
 
 Репозиторий агрегата (`<Aggregate>.Repo`, `13-repos.md`) MUST адресоваться через алиас
 **агрегата** — `alias MyApp.Domain.<BC>.Common.Delivery` → `Delivery.Repo.Pg.Schema`. Отдельный
 `alias …Common.Delivery.Repo` — **MUST NOT**: короткое имя `Repo` в том же файле почти всегда
 занято `Core.Repo` (`use Repo.Pg`), и такой алиас молча его перебивает.
+
+Когда родитель имена не разводит (`MyApp.Domain.<BC>.Repo` и `Core.Repo` — оба листа зовутся
+`Repo`), остаётся полный путь для одного из двух; `as:` — последнее средство, и только на одном
+из конфликтующих.
 
 Листовые модули без вложенности (`Error`, `Exc`, `Context`) — алиасить напрямую, без `as:`.
 
@@ -355,9 +377,6 @@ Entity-плагины — `Core.Codec.Plugin` (dump-only: `loadable: false`; п�
 Вложенные сущности и соседние типы — **только** через фасад (`InCodec` / `OutCodec`) или через
 аргумент `codec` внутри плагина; звать модуль чужого плагина напрямую — MUST NOT. Правила и
 примеры — `11-domain.md`.
-
-При коллизии короткого имени (например `<BC>.Repo` и `Core.Repo` в одном файле) — полный путь или
-`as:` только для одного из конфликтующих; правило про родителя при этом не отменяется.
 
 ## Правило понижения
 

@@ -7,6 +7,8 @@ defmodule Core.Mq.Stream do
   у потребителей, добавивших его в свои `deps`.
   """
 
+  alias Core.Mq
+
   @doc """
   Проверить, что клиент `:rabbitmq_stream` присутствует и адаптер собран с ним.
 
@@ -19,19 +21,12 @@ defmodule Core.Mq.Stream do
   @spec ensure_available!() :: :ok
 
   def ensure_available! do
-    cond do
-      not Code.ensure_loaded?(RabbitMQStream.Connection) ->
-        raise ArgumentError,
-              "Core.Mq.Stream: клиент :rabbitmq_stream не найден — добавьте " <>
-                "{:rabbitmq_stream, \"~> 0.4\"} в deps приложения (README)"
-
-      not Code.ensure_loaded?(Core.Mq.Stream.Connection) ->
-        raise ArgumentError,
-              "Core.Mq.Stream: клиент :rabbitmq_stream есть, но библиотека собрана без него — " <>
-                "пересоберите: mix deps.compile core --force (README)"
-
-      true ->
-        :ok
-    end
+    Mq.Client.ensure_available!(
+      label: "Core.Mq.Stream",
+      client: RabbitMQStream.Connection,
+      adapter: Core.Mq.Stream.Connection,
+      dep: :rabbitmq_stream,
+      requirement: "~> 0.4"
+    )
   end
 end

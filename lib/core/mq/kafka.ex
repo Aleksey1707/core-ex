@@ -11,6 +11,8 @@ defmodule Core.Mq.Kafka do
   (`DEBT.md`).
   """
 
+  alias Core.Mq
+
   @doc """
   Проверить, что клиент `:klife` присутствует и адаптер собран с ним.
 
@@ -23,19 +25,12 @@ defmodule Core.Mq.Kafka do
   @spec ensure_available!() :: :ok
 
   def ensure_available! do
-    cond do
-      not Code.ensure_loaded?(Klife.Record) ->
-        raise ArgumentError,
-              "Core.Mq.Kafka: клиент :klife не найден — добавьте {:klife, \"~> 1.2\"} " <>
-                "в deps приложения (README)"
-
-      not Code.ensure_loaded?(Core.Mq.Kafka.Writer) ->
-        raise ArgumentError,
-              "Core.Mq.Kafka: клиент :klife есть, но библиотека собрана без него — " <>
-                "пересоберите: mix deps.compile core --force (README)"
-
-      true ->
-        :ok
-    end
+    Mq.Client.ensure_available!(
+      label: "Core.Mq.Kafka",
+      client: Klife.Record,
+      adapter: Core.Mq.Kafka.Writer,
+      dep: :klife,
+      requirement: "~> 1.2"
+    )
   end
 end

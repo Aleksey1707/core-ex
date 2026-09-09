@@ -256,7 +256,7 @@ end
    def plugins do
      [
        {Core.Outbox.PromEx, poll_rate: 5_000},
-       {Core.Mq.PromEx, poll_rate: 5_000, readers: MyApp.PromEx.Workers.readers()},
+       {Core.Mq.PromEx, poll_rate: 5_000, readers: {MyApp.PromEx.Mq, :readers, []}},
        {Core.Workers.PromEx, poll_rate: 5_000, watch: {MyApp.PromEx.Workers, :watch_list, []}},
        {Core.Cache.PromEx, poll_rate: 5_000, sizes: {MyApp.PromEx.Caches, :sizes, []}},
        {Core.Cgroup.PromEx, poll_rate: 5_000}

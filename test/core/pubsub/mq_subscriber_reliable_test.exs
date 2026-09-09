@@ -25,6 +25,26 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
      context: Context.new()}
   end
 
+  defmodule ExitReader do
+    @moduledoc false
+
+    def get(_reader, _timeout), do: exit({:noproc, {GenServer, :call, [:reader, :get]}})
+
+    def commit(_reader), do: :ok
+  end
+
+  test "exit reader'а не роняет подписчика", %{topic: topic, context: context} do
+    sub =
+      start_sub(:unused, topic, "sub-exit", fn _m, _d, _c -> :ok end, reader_module: ExitReader)
+
+    assert :ok = MqSubscriberReliable.subscribe(sub, :data, context)
+
+    log = capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+    assert log =~ "MQ reader недоступен"
+    assert Process.alive?(sub)
+  end
+
   test "два подписчика читают свои очереди независимо", %{topic: topic, context: context} do
     parent = self()
 
