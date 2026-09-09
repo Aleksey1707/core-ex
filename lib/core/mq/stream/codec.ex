@@ -70,7 +70,7 @@ defmodule Core.Mq.Stream.Codec do
            code: :invalid_payload,
            ns: :mq,
            message: "Некорректный payload MQ",
-           detail: other
+           detail: redact(other)
          )}
 
       {:error, reason} ->
@@ -79,7 +79,7 @@ defmodule Core.Mq.Stream.Codec do
            code: :invalid_payload,
            ns: :mq,
            message: "Некорректный payload MQ",
-           detail: reason
+           detail: redact(reason)
          )}
     end
   end
@@ -95,7 +95,7 @@ defmodule Core.Mq.Stream.Codec do
            code: :invalid_body,
            ns: :mq,
            message: "Некорректный body MQ",
-           detail: encoded
+           detail: redact(encoded)
          )}
     end
   end
@@ -106,7 +106,7 @@ defmodule Core.Mq.Stream.Codec do
        code: :invalid_body,
        ns: :mq,
        message: "Некорректный body MQ",
-       detail: other
+       detail: redact(other)
      )}
   end
 
@@ -118,7 +118,7 @@ defmodule Core.Mq.Stream.Codec do
        code: :invalid_topic,
        ns: :mq,
        message: "Некорректный topic MQ",
-       detail: other
+       detail: redact(other)
      )}
   end
 
@@ -131,7 +131,7 @@ defmodule Core.Mq.Stream.Codec do
        code: :invalid_key,
        ns: :mq,
        message: "Некорректный key MQ",
-       detail: other
+       detail: redact(other)
      )}
   end
 
@@ -144,7 +144,7 @@ defmodule Core.Mq.Stream.Codec do
          code: :invalid_headers,
          ns: :mq,
          message: "Некорректные headers MQ",
-         detail: headers
+         detail: redact(headers)
        )}
     end
   end
@@ -155,7 +155,17 @@ defmodule Core.Mq.Stream.Codec do
        code: :invalid_headers,
        ns: :mq,
        message: "Некорректные headers MQ",
-       detail: other
+       detail: redact(other)
      )}
   end
+
+  # Разбираемая запись — чужие данные: объём не ограничен, содержимое библиотеке
+  # неизвестно, а `detail` уходит в лог потребителя целиком. Наружу — форма и размер
+  # (тот же приём, что у sensitive-Prim в `Prim.wrap_error/3`).
+  defp redact(%Jason.DecodeError{position: position, token: token}),
+    do: %{position: position, token: token}
+
+  defp redact(value) when is_binary(value), do: {:redacted, byte_size(value)}
+
+  defp redact(_value), do: :redacted
 end

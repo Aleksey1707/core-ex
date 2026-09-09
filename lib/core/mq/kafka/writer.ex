@@ -9,11 +9,17 @@ if Code.ensure_loaded?(Klife.Record) do
     Handle writer'а — модуль клиента (`use Klife.Client`) из app-слоя;
     собственного состояния нет.
     Публикация строго по порядку, стоп на первой ошибке.
+
+    `detail` ошибки `:kafka_publish_failed` — атом распознанной причины
+    (`:unknown_metadata_for_topic`), `{:error_code, code}` брокера либо текст: klife отдаёт
+    сбои чем придётся, и нормализация сводит их к этим трём формам, чтобы на call site
+    было что разбирать.
     """
 
     @behaviour Core.Mq.Writer
 
     alias Core.Error
+    alias Core.Helper.Transact
     alias Core.Mq
     alias Core.Mq.Message
     alias Core.Telemetry
@@ -36,6 +42,8 @@ if Code.ensure_loaded?(Klife.Record) do
 
     @impl true
     def put_many(client, messages) when is_atom(client) and is_list(messages) do
+      :ok = Transact.warn_in_transaction("публикация пачки в kafka")
+
       messages
       |> Enum.with_index()
       |> Enum.reduce_while(:ok, fn {message, index}, :ok ->
@@ -57,10 +65,6 @@ if Code.ensure_loaded?(Klife.Record) do
           emit_publish(start, :ok, topic)
           :ok
 
-        {:error, %Klife.Record{error_code: code}} ->
-          emit_publish(start, :error, topic)
-          kafka_error(code)
-
         {:error, reason} ->
           emit_publish(start, :error, topic)
           kafka_error(reason)
@@ -75,13 +79,16 @@ if Code.ensure_loaded?(Klife.Record) do
       )
     end
 
+    # Клиент падает исключением там, где контракт ждёт `{:error, _}`: `unkown_metadata_for_topic`
+    # прилетает `RuntimeError`, остальные сбои — чем придётся. Непойманное исключение унесло бы
+    # вызывающего (`Outbox.Poller`), поэтому ловится любое.
     defp produce(client, record) do
       case client.produce(record) do
         {:ok, _} = ok -> ok
         {:error, reason} -> {:error, normalize_klife_reason(reason)}
       end
     rescue
-      e in RuntimeError -> {:error, normalize_klife_reason(e)}
+      exception -> {:error, normalize_klife_reason(exception)}
     end
 
     defp to_klife(%Message{} = message) do
@@ -96,6 +103,9 @@ if Code.ensure_loaded?(Klife.Record) do
     defp key(nil), do: nil
     defp key(%Mq.Key{} = key), do: Mq.Key.value(key)
 
+    # Опечатка в самом klife (~> 1.2): причина приходит как `:unkown_metadata_for_topic`
+    # и в атоме, и внутри текста RuntimeError. Клозы остаются безвредными после её
+    # исправления в апстриме — общая клоза ниже вернёт причину как есть.
     defp normalize_klife_reason(:unkown_metadata_for_topic), do: :unknown_metadata_for_topic
 
     defp normalize_klife_reason({:error, :unkown_metadata_for_topic}),
@@ -108,7 +118,14 @@ if Code.ensure_loaded?(Klife.Record) do
          else: String.replace(message, "unkown", "unknown")
     end
 
-    defp normalize_klife_reason(reason), do: reason
+    defp normalize_klife_reason(%Klife.Record{error_code: code}), do: {:error_code, code}
+
+    defp normalize_klife_reason(exception) when is_exception(exception),
+      do: Exception.message(exception)
+
+    defp normalize_klife_reason(reason) when is_atom(reason) or is_binary(reason), do: reason
+
+    defp normalize_klife_reason(reason), do: inspect(reason)
 
     defp kafka_error(reason) do
       {:error,

@@ -3,8 +3,13 @@ defmodule Core.Mq.PromExTest do
 
   alias Core.Mq.PromEx
 
+  @readers {__MODULE__, :readers, []}
+
+  @doc false
+  def readers, do: [%{component: "orders", name: :missing_reader}]
+
   test "event_metrics и polling_metrics непусты" do
-    opts = [otp_app: :core, poll_rate: 5_000]
+    opts = [otp_app: :core, poll_rate: 5_000, readers: @readers]
 
     assert [%{metrics: event_metrics}] = List.wrap(PromEx.event_metrics(opts))
     assert event_metrics != []
@@ -26,7 +31,12 @@ defmodule Core.Mq.PromExTest do
       |> Enum.map(&Enum.join(&1.name, "."))
 
     assert Enum.any?(poll_names, &String.contains?(&1, "mq.reader.buffer_len"))
+    assert Enum.any?(poll_names, &String.contains?(&1, "mq.reader.chunk_remaining"))
     assert Enum.any?(poll_names, &String.contains?(&1, "mq.reader.pending"))
+  end
+
+  test "без readers polling-группа не строится" do
+    assert [] = PromEx.polling_metrics(otp_app: :core)
   end
 
   test "execute_reader_metrics no-op без живого reader" do
@@ -44,7 +54,7 @@ defmodule Core.Mq.PromExTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    assert :ok = PromEx.execute_reader_metrics([])
+    assert :ok = PromEx.execute_reader_metrics(@readers)
     refute_received {:telemetry, [:prom_ex, :plugin, :mq, :reader, :buffer_len], _, _}
   end
 end

@@ -10,11 +10,14 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     через `store_offset` / `query_offset` (offset_reference = subscriber_name).
 
     Credit — число in-flight **чанков** (не сообщений). Начальный `:credit`
-    (default 2) задаёт prefetch; потолок `buffer` ≈ `credit` чанков. Credit
-    возвращается, когда чанк полностью потреблён (успешный `get` или
-    `decode_drop`). После `deliver` credit **не** выдаётся.
+    (default 2) задаёт prefetch; потолок буфера ≈ `credit` чанков. Сам буфер и учёт
+    кредитов — `Mq.Stream.Buffer`: reader только выдаёт брокеру то, что тот насчитал.
+    Entries хранятся сырыми; `Codec.decode` — в `get`.
 
-    Entries в `buffer` хранятся сырыми; `Codec.decode` — в `get`.
+    Курсор двигает не только `commit/1`: запись, которую адаптер отбросил (нечитаемая,
+    чужой топик, sub-entry batching), возвращаться не будет, поэтому её offset тоже
+    сохраняется — одним `store_offset` на серию дропов, когда за ними не осталось
+    читаемых записей.
 
     Подписка устанавливается не в `init/1`, а в `handle_continue/2`: сетевые вызовы в `init`
     блокировали бы старт всего дерева супервизии (см. `docs/rules/17-otp-concurrency.md`).
@@ -24,8 +27,14 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     по `warning` самого reader'а (их частота ограничена backoff'ом) и по `subscribed?`
     в `info/1` (уходит в метрику).
 
-    Обязательные opts: `:connection`, `:topic`, `:subscriber_name`.
-    При `reliable?: false` cursor не сохраняется (`commit` недоступен).
+    Обязательные opts: `:connection`, `:topic`, `:subscriber_name`. Опциональные:
+    `:reliable?` (default `true`), `:credit`, `:initial_offset`, `:retry_min_ms`,
+    `:retry_max_ms`, `:name`, `:shutdown`. При `reliable?: false` cursor не сохраняется
+    (`commit` недоступен).
+
+    `initial_offset: :stored` (default) без сохранённого offset читает stream с начала
+    (`:first`): новый подписчик на живом топике получит всю его историю. Нужен другой
+    старт — задать `:next` или `:last` явно.
     """
 
     @behaviour Core.Mq.ReaderReliable
@@ -33,8 +42,10 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     use GenServer
 
     alias Core.Error
+    alias Core.Helper.StartOpts
     alias Core.Mq
     alias Core.Mq.Message
+    alias Core.Mq.Stream.Buffer
     alias Core.Mq.Stream.Codec
     alias Core.Telemetry
     alias RabbitMQStream.Message.Types.DeliverData
@@ -47,11 +58,15 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     @call_timeout 5_000
     @retry_min_ms 1_000
     @retry_max_ms 30_000
+    @initial_offsets ~w(stored first next last)a
+    @label "Mq.Stream.Reader"
 
     defstruct [
       :connection,
       :topic,
+      :topic_name,
       :subscriber_name,
+      :subscriber,
       :subscription_id,
       :conn_ref,
       :reliable?,
@@ -60,10 +75,10 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       :retry_min_ms,
       :retry_max_ms,
       :retry_ms,
-      buffer: :queue.new(),
-      chunk_remaining: 0,
-      chunk_remainders: :queue.new(),
-      pending: nil
+      :buffer,
+      pending: nil,
+      dropped_offset: nil,
+      mismatch_logged?: false
     ]
 
     @type t :: GenServer.server()
@@ -114,10 +129,11 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       GenServer.call(server, :commit, @call_timeout)
     end
 
-    @doc "Состояние буфера reader (для метрик)."
+    @doc "Состояние буфера и курсора reader (для метрик и разбора)."
     @spec info(t()) :: %{
             buffer_len: non_neg_integer(),
             chunk_remaining: non_neg_integer(),
+            dropped_offset: non_neg_integer() | nil,
             pending?: boolean(),
             subscribed?: boolean(),
             topic: String.t()
@@ -133,23 +149,8 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       # Подписка в брокере — внешний ресурс: без trap_exit штатная остановка
       # супервизором не вызывает terminate/2, и подписка остаётся висеть.
       Process.flag(:trap_exit, true)
-      retry_min_ms = Keyword.get(opts, :retry_min_ms, @retry_min_ms)
 
-      state = %__MODULE__{
-        connection: Keyword.fetch!(opts, :connection),
-        topic: Keyword.fetch!(opts, :topic),
-        subscriber_name: Keyword.fetch!(opts, :subscriber_name),
-        subscription_id: nil,
-        conn_ref: nil,
-        reliable?: Keyword.get(opts, :reliable?, true),
-        credit: Keyword.get(opts, :credit, 2),
-        initial_offset: Keyword.get(opts, :initial_offset, :stored),
-        retry_min_ms: retry_min_ms,
-        retry_max_ms: Keyword.get(opts, :retry_max_ms, @retry_max_ms),
-        retry_ms: retry_min_ms
-      }
-
-      {:ok, state, {:continue, :subscribe}}
+      {:ok, build_state(opts), {:continue, :subscribe}}
     end
 
     @doc false
@@ -167,17 +168,18 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     def handle_call(:get, _from, state) do
       case pop_message(state) do
         {:ok, message, state} -> {:reply, {:ok, message}, state}
-        {:empty, state} -> {:reply, :empty, state}
+        {:empty, state} -> {:reply, :empty, flush_dropped(state)}
       end
     end
 
     def handle_call(:info, _from, state) do
       info = %{
-        buffer_len: :queue.len(state.buffer),
-        chunk_remaining: state.chunk_remaining,
+        buffer_len: Buffer.len(state.buffer),
+        chunk_remaining: Buffer.remaining(state.buffer),
+        dropped_offset: state.dropped_offset,
         pending?: not is_nil(state.pending),
         subscribed?: not is_nil(state.subscription_id),
-        topic: Mq.Topic.value(state.topic)
+        topic: state.topic_name
       }
 
       {:reply, info, state}
@@ -207,11 +209,8 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     # соединения виден только как exit по таймауту. Потеря offset безопасна (сообщение
     # переедет повторно), а вот падение reader'а на ней — нет.
     def handle_call(:commit, _from, %{pending: {offset, _message}} = state) do
-      topic_s = Mq.Topic.value(state.topic)
-      sub_s = Mq.SubscriberName.value(state.subscriber_name)
-
-      case store_offset(state, topic_s, sub_s, offset) do
-        :ok -> {:reply, :ok, %{state | pending: nil}}
+      case store_offset(state, offset) do
+        :ok -> {:reply, :ok, %{state | pending: nil, dropped_offset: nil}}
         {:error, %Error{} = error} -> {:reply, {:error, error}, state}
       end
     end
@@ -222,29 +221,26 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       {:noreply, subscribe(state)}
     end
 
+    # Чанк, пришедший без подписки (её потеряли между отправкой и доставкой), потреблять
+    # некому: `get` отдаёт `:empty`, а переподписка сбросит буфер. В метрику доставленного
+    # он тоже не идёт — прочитан он не будет.
+    def handle_info({:deliver, %DeliverData{}}, %__MODULE__{subscription_id: nil} = state) do
+      {:noreply, state}
+    end
+
     def handle_info(
           {:deliver,
            %DeliverData{osiris_chunk: %OsirisChunk{num_records: n, num_entries: n} = chunk}},
           state
         ) do
-      topic = Mq.Topic.value(state.topic)
+      emit_deliver(state.topic_name, chunk.num_entries)
 
-      :telemetry.execute(
-        Telemetry.event([:mq, :stream, :deliver]),
-        %{entries: chunk.num_entries},
-        %{topic: topic}
-      )
+      entries =
+        chunk.data_entries
+        |> List.wrap()
+        |> Enum.with_index(fn entry, idx -> {chunk.chunk_id + idx, entry} end)
 
-      entries = List.wrap(chunk.data_entries)
-
-      state =
-        entries
-        |> Enum.with_index()
-        |> Enum.reduce(state, fn {entry, idx}, acc ->
-          enqueue(acc, chunk.chunk_id + idx, entry)
-        end)
-
-      {:noreply, register_chunk(state, length(entries))}
+      {:noreply, put_chunk(state, entries)}
     end
 
     # Offset записи считается как `chunk_id + idx`, и это верно, только пока entry несёт
@@ -252,31 +248,24 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     # не распаковывает, и `store_offset` коммитил бы чужой offset. Такой чанк дропается
     # целиком: молча разъехавшийся курсор хуже потерянных сообщений.
     def handle_info({:deliver, %DeliverData{osiris_chunk: %OsirisChunk{} = chunk}}, state) do
-      topic = Mq.Topic.value(state.topic)
+      emit_deliver(state.topic_name, chunk.num_entries)
 
       Logger.error(
         "stream reader: чанк с sub-entry batching пропущен, offset'ы не восстановимы: " <>
-          "topic=#{topic} num_entries=#{chunk.num_entries} num_records=#{chunk.num_records}"
+          "topic=#{state.topic_name} num_entries=#{chunk.num_entries} " <>
+          "num_records=#{chunk.num_records}"
       )
 
-      :telemetry.execute(
-        Telemetry.event([:mq, :stream, :decode_drop]),
-        %{count: chunk.num_records},
-        %{topic: topic}
-      )
+      emit_decode_drop(state.topic_name, chunk.num_entries)
 
-      {:noreply, register_chunk(state, 0)}
+      {:noreply, put_chunk(state, [])}
     end
 
     # `subscription_id` действителен только в рамках выдавшего его соединения: без этой
     # ветки после рестарта `Stream.Connection` подписка мертва навсегда, а `info/1`
     # продолжает отдавать `subscribed?: true` — алерт молчит.
     def handle_info({:DOWN, ref, :process, _pid, reason}, %__MODULE__{conn_ref: ref} = state) do
-      topic_s = Mq.Topic.value(state.topic)
-      sub_s = Mq.SubscriberName.value(state.subscriber_name)
-
-      {:noreply,
-       schedule_resubscribe(%{state | conn_ref: nil}, topic_s, sub_s, {:connection_down, reason})}
+      {:noreply, schedule_resubscribe(%{state | conn_ref: nil}, {:connection_down, reason})}
     end
 
     def handle_info(_other, state), do: {:noreply, state}
@@ -285,30 +274,76 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     @impl true
     def terminate(_reason, %{subscription_id: nil}), do: :ok
 
-    def terminate(_reason, %{connection: conn, subscription_id: id}) do
+    # Накопленный дроп сохраняется здесь же: иначе штатная остановка отдаёт его назад
+    # брокеру, и хвост нечитаемых записей перебирается заново на следующем старте.
+    def terminate(_reason, %{connection: conn, subscription_id: id} = state) do
+      _ = flush_dropped(state)
       _ = conn.unsubscribe(id)
       :ok
     end
 
-    def terminate(_reason, _state), do: :ok
-
     # ---
 
+    defp build_state(opts) do
+      retry_min_ms = StartOpts.pos_integer!(@label, opts, :retry_min_ms, @retry_min_ms)
+      topic = StartOpts.prim!(@label, opts, :topic, Mq.Topic)
+      subscriber_name = StartOpts.prim!(@label, opts, :subscriber_name, Mq.SubscriberName)
+
+      %__MODULE__{
+        connection: StartOpts.module!(@label, opts, :connection),
+        topic: topic,
+        topic_name: Mq.Topic.value(topic),
+        subscriber_name: subscriber_name,
+        subscriber: Mq.SubscriberName.value(subscriber_name),
+        subscription_id: nil,
+        conn_ref: nil,
+        reliable?: StartOpts.boolean!(@label, opts, :reliable?, true),
+        credit: StartOpts.pos_integer!(@label, opts, :credit, 2),
+        initial_offset: initial_offset!(opts),
+        retry_min_ms: retry_min_ms,
+        retry_max_ms: StartOpts.pos_integer!(@label, opts, :retry_max_ms, @retry_max_ms),
+        retry_ms: retry_min_ms,
+        buffer: Buffer.new()
+      }
+    end
+
+    # `{:offset, n}` не перечислить множеством, поэтому клоза, а не `StartOpts.one_of!/5`:
+    # без проверки такой offset доходит до `resolve_offset/4` и роняет `handle_continue/2`
+    # `FunctionClauseError` — процесс не стартует ни с одной попытки.
+    defp initial_offset!(opts) do
+      case Keyword.get(opts, :initial_offset, :stored) do
+        {:offset, n} = offset when is_integer(n) and n >= 0 ->
+          offset
+
+        named when named in @initial_offsets ->
+          named
+
+        other ->
+          StartOpts.raise_invalid!(
+            @label,
+            :initial_offset,
+            "одно из #{inspect(@initial_offsets)} или {:offset, n}",
+            other
+          )
+      end
+    end
+
     defp subscribe(%__MODULE__{} = state) do
-      topic_s = Mq.Topic.value(state.topic)
-      sub_s = Mq.SubscriberName.value(state.subscriber_name)
-
-      case try_subscribe(state, topic_s, sub_s) do
+      case try_subscribe(state) do
         {:ok, subscription_id} ->
-          Logger.info("stream reader подписан: topic=#{topic_s} subscriber=#{sub_s}")
+          Logger.info(
+            "stream reader подписан: topic=#{state.topic_name} subscriber=#{state.subscriber}"
+          )
 
-          state
-          |> reset_stream_state()
-          |> remonitor()
-          |> Map.merge(%{subscription_id: subscription_id, retry_ms: state.retry_min_ms})
+          state =
+            state
+            |> reset_stream_state()
+            |> remonitor()
+
+          %{state | subscription_id: subscription_id, retry_ms: state.retry_min_ms}
 
         {:error, reason} ->
-          schedule_resubscribe(state, topic_s, sub_s, reason)
+          schedule_resubscribe(state, reason)
       end
     end
 
@@ -319,10 +354,10 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       %{
         state
         | subscription_id: nil,
-          buffer: :queue.new(),
-          chunk_remaining: 0,
-          chunk_remainders: :queue.new(),
-          pending: nil
+          buffer: Buffer.new(),
+          pending: nil,
+          dropped_offset: nil,
+          mismatch_logged?: false
       }
     end
 
@@ -335,14 +370,14 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       end
     end
 
-    defp store_offset(state, topic_s, sub_s, offset) do
-      state.connection.store_offset(topic_s, sub_s, offset)
+    defp store_offset(state, offset) do
+      state.connection.store_offset(state.topic_name, state.subscriber, offset)
       :ok
     catch
       :exit, reason ->
         Logger.warning(
-          "stream reader: commit не доставлен topic=#{topic_s} subscriber=#{sub_s} " <>
-            "reason=#{inspect(reason)}"
+          "stream reader: commit не доставлен topic=#{state.topic_name} " <>
+            "subscriber=#{state.subscriber} reason=#{inspect(reason)}"
         )
 
         {:error,
@@ -359,20 +394,20 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     #
     # Недоступный брокер приходит не как `{:error, _}`, а как exit по таймауту
     # `GenServer.call` к процессу соединения — иначе ретраи бы не сработали.
-    defp try_subscribe(%__MODULE__{} = state, topic_s, sub_s) do
+    defp try_subscribe(%__MODULE__{} = state) do
       with :ok <- state.connection.connect(),
-           :ok <- ensure_stream(state.connection, topic_s),
-           offset <- resolve_offset(state.connection, topic_s, sub_s, state.initial_offset) do
-        state.connection.subscribe(topic_s, self(), offset, state.credit)
+           :ok <- ensure_stream(state.connection, state.topic_name),
+           offset <- resolve_offset(state, state.initial_offset) do
+        state.connection.subscribe(state.topic_name, self(), offset, state.credit)
       end
     catch
       :exit, reason -> {:error, {:exit, reason}}
     end
 
-    defp schedule_resubscribe(%__MODULE__{} = state, topic_s, sub_s, reason) do
+    defp schedule_resubscribe(%__MODULE__{} = state, reason) do
       Logger.warning(
-        "stream reader: подписка не удалась topic=#{topic_s} subscriber=#{sub_s} " <>
-          "reason=#{inspect(reason)} retry_in=#{state.retry_ms}ms"
+        "stream reader: подписка не удалась topic=#{state.topic_name} " <>
+          "subscriber=#{state.subscriber} reason=#{inspect(reason)} retry_in=#{state.retry_ms}ms"
       )
 
       Process.send_after(self(), :resubscribe, state.retry_ms)
@@ -384,20 +419,18 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       min(retry_ms * 2, max_ms)
     end
 
-    defp enqueue(state, offset, entry) do
-      %{state | buffer: :queue.in({offset, entry}, state.buffer)}
+    defp emit_deliver(topic, entries) do
+      :telemetry.execute(
+        Telemetry.event([:mq, :stream, :deliver]),
+        %{entries: entries},
+        %{topic: topic}
+      )
     end
 
-    defp register_chunk(state, 0) do
-      grant_credit(state)
-    end
+    defp put_chunk(state, entries) do
+      {buffer, credits} = Buffer.put_chunk(state.buffer, entries)
 
-    defp register_chunk(%{chunk_remaining: 0} = state, n) do
-      %{state | chunk_remaining: n}
-    end
-
-    defp register_chunk(state, n) do
-      %{state | chunk_remainders: :queue.in(n, state.chunk_remainders)}
+      grant_credits(%{state | buffer: buffer}, credits)
     end
 
     defp pop_message(%{reliable?: true, pending: {_, message}} = state) do
@@ -415,16 +448,38 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     defp yield_or_skip(state, offset, data) do
-      topic = Mq.Topic.value(state.topic)
-
-      case decode_entry(data, topic) do
+      case decode_entry(state, data) do
         {:ok, message} ->
           hold_if_reliable(state, offset, message)
 
-        :drop ->
-          pop_message(state)
+        {:drop, state} ->
+          state
+          |> commit_dropped(offset)
+          |> pop_message()
       end
     end
+
+    # Отброшенная запись не вернётся: повтор даст тот же дроп. Без сохранения её offset
+    # курсор остаётся позади, и если валидных записей за ней не окажется, после рестарта
+    # reader переберёт и отбросит тот же хвост заново. Пишется он не сразу: чанк из
+    # полусотни нечитаемых записей дал бы полсотни cast'ов, а на оборванном соединении —
+    # столько же `warning` из `store_offset/4`. Копится последний offset серии.
+    defp commit_dropped(%{reliable?: true} = state, offset) do
+      %{state | dropped_offset: offset}
+    end
+
+    defp commit_dropped(state, _offset), do: state
+
+    # Серия дропов сохраняется одним вызовом — когда за ней не осталось читаемых записей.
+    # `commit/1` подписчика её перекрывает: его offset всегда выше.
+    defp flush_dropped(%{reliable?: true, dropped_offset: offset} = state)
+         when is_integer(offset) do
+      _ = store_offset(state, offset)
+
+      %{state | dropped_offset: nil}
+    end
+
+    defp flush_dropped(state), do: state
 
     defp hold_if_reliable(%{reliable?: true} = state, offset, message) do
       {:ok, message, %{state | pending: {offset, message}}}
@@ -435,56 +490,67 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     defp take_entry(state) do
-      case :queue.out(state.buffer) do
-        {:empty, _} ->
+      case Buffer.take(state.buffer) do
+        {:empty, _buffer} ->
           :empty
 
-        {{:value, entry}, buffer} ->
-          {:ok, entry, consume_slot(%{state | buffer: buffer})}
+        {:ok, entry, buffer, credits} ->
+          {:ok, entry, grant_credits(%{state | buffer: buffer}, credits)}
       end
     end
 
-    defp decode_entry(data, topic) when is_binary(data) do
+    defp decode_entry(state, data) when is_binary(data) do
       case Codec.decode(data) do
-        {:ok, message} -> {:ok, message}
-        {:error, _} -> drop(topic)
+        {:ok, message} -> ensure_topic(state, message)
+        {:error, _} -> {:drop, drop(state)}
       end
     end
 
-    defp decode_entry(_data, topic), do: drop(topic)
+    # Топик в конверте пишет продюсер, а позицию записи в потоке задаёт подписка: запись
+    # с чужим топиком ушла бы в handler как своя. Адаптер не отдаёт наверх то, чью
+    # принадлежность не может подтвердить, — дроп, как у нечитаемой записи.
+    defp ensure_topic(%{topic_name: topic} = state, %Message{topic: envelope_topic} = message) do
+      case Mq.Topic.value(envelope_topic) do
+        ^topic -> {:ok, message}
+        other -> {:drop, drop(log_mismatch(state, other))}
+      end
+    end
 
-    defp drop(topic) do
-      :telemetry.execute(
-        Telemetry.event([:mq, :stream, :decode_drop]),
-        %{count: 1},
-        %{topic: topic}
+    # Чужой топик в конверте — состояние мисконфигурации, а не разовое событие: поток
+    # таких записей залил бы лог на полной скорости чтения. Пишется первая запись на
+    # подписку, дальше о них говорит только `decode_drop`.
+    defp log_mismatch(%{mismatch_logged?: true} = state, _other), do: state
+
+    defp log_mismatch(state, other) do
+      Logger.warning(
+        "stream reader: topic конверта не совпадает с подпиской, записи пропускаются: " <>
+          "topic=#{state.topic_name} конверт=#{other}"
       )
 
-      :drop
+      %{state | mismatch_logged?: true}
     end
 
-    defp consume_slot(%{chunk_remaining: remaining} = state) when remaining > 1 do
-      %{state | chunk_remaining: remaining - 1}
+    defp drop(state) do
+      emit_decode_drop(state.topic_name, 1)
+      state
     end
 
-    defp consume_slot(%{chunk_remaining: 1} = state) do
-      state = grant_credit(state)
-
-      case :queue.out(state.chunk_remainders) do
-        {:empty, remainders} ->
-          %{state | chunk_remaining: 0, chunk_remainders: remainders}
-
-        {{:value, n}, remainders} ->
-          %{state | chunk_remaining: n, chunk_remainders: remainders}
-      end
+    defp emit_decode_drop(topic, count) do
+      :telemetry.execute(
+        Telemetry.event([:mq, :stream, :decode_drop]),
+        %{count: count},
+        %{topic: topic}
+      )
     end
 
-    # Пустой чанк или последний элемент чанка могут прийти уже после потери подписки:
-    # `credit/3` объявлен с guard'ом `is_integer(subscription_id)` и уронил бы reader.
-    defp grant_credit(%{subscription_id: nil} = state), do: state
+    defp grant_credits(state, 0), do: state
 
-    defp grant_credit(%{connection: conn, subscription_id: id} = state) do
-      _ = conn.credit(id, 1)
+    # Последний элемент чанка может быть выбран уже после потери подписки: `credit/3`
+    # объявлен с guard'ом `is_integer(subscription_id)` и уронил бы reader.
+    defp grant_credits(%{subscription_id: nil} = state, _credits), do: state
+
+    defp grant_credits(%{connection: conn, subscription_id: id} = state, credits) do
+      _ = conn.credit(id, credits)
       state
     end
 
@@ -496,17 +562,17 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       end
     end
 
-    defp resolve_offset(conn, topic, subscriber, :stored) do
-      case conn.query_offset(topic, subscriber) do
+    defp resolve_offset(state, :stored) do
+      case state.connection.query_offset(state.topic_name, state.subscriber) do
         {:ok, offset} -> {:offset, offset + 1}
         {:error, _} -> :first
       end
     end
 
-    defp resolve_offset(_conn, _topic, _subscriber, :first), do: :first
-    defp resolve_offset(_conn, _topic, _subscriber, :next), do: :next
-    defp resolve_offset(_conn, _topic, _subscriber, :last), do: :last
-    defp resolve_offset(_conn, _topic, _subscriber, {:offset, _} = offset), do: offset
+    defp resolve_offset(_state, :first), do: :first
+    defp resolve_offset(_state, :next), do: :next
+    defp resolve_offset(_state, :last), do: :last
+    defp resolve_offset(_state, {:offset, _} = offset), do: offset
 
     defp poll(server, deadline) do
       case get(server, 0) do

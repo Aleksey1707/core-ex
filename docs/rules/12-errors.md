@@ -105,7 +105,10 @@ MUST помечать: пароли (plaintext и хеши), токены и к�
   (`%WithSchema{token: %Token{}}`, `%Settings{password: %Secret{}}`) безопасна автоматически,
   и дублирующий `@derive` на самой обёртке не нужен.
 - Структура, хранящая секрет «голой» строкой (без Prim) — `@derive {Inspect, except: [...]}`
-  либо `defimpl Inspect` (образцы: `Core.Security.Secret`, `Core.Mq.Stream.Credentials`).
+  (образец — `Core.Mq.Stream.Credentials`) либо `defimpl Inspect`, печатающий **не** саму
+  структуру (образец — `Core.Security.Secret`: константа `"#Secret<...>"`). `defimpl`, отдающий
+  `Inspect.Algebra.to_doc/2` от той же структуры с заменённым полем, зовёт сам себя —
+  бесконечная рекурсия, и `inspect/1` вешает процесс.
 - Ecto-колонка с секретом (в т.ч. JSON, где секрет вложен) — `redact: true`:
   `field :data, JSONType, redact: true`.
 

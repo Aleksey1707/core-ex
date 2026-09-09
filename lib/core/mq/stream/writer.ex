@@ -10,14 +10,22 @@ defmodule Core.Mq.Stream.Writer do
 
   Не подтверждённая пачка отдаётся как `{:error, 0, error}`: доказать, что часть
   сообщений всё же дошла, нельзя, поэтому повторяется вся пачка (дубли легальны —
-  потребители идемпотентны).
+  потребители идемпотентны). Дедлайн подтверждения — `:confirm_timeout_ms` на **пачку**,
+  а не на топик, и producer неподтверждённого топика забывается: его локальный
+  `sequence` ушёл вперёд брокерского, и следующая пачка объявляет producer заново.
 
   `producer_id` действителен только в рамках выдавшего его соединения, поэтому writer
   мониторит процесс `:connection` и на `:DOWN` сбрасывает кеш producers.
 
+  Кеш producers ограничен `:max_producers` (default 256): каждый producer занят и в
+  брокере, а снимаются они только в `terminate/2`, по `:DOWN` и при неподтверждении.
+  Переполнение вытесняет топик, в который дольше всех не публиковали, — на границе
+  пачки, а не по ходу: внутри неё кеш только растёт, иначе вытеснение сняло бы producer
+  топика, который эта же пачка ещё подтверждает.
+
   Обязательные opts: `:connection` (модуль `use RabbitMQStream.Connection`),
-  `:reference_prefix` (уникальный префикс producer reference).
-  Опциональные: `:confirm_timeout_ms`, `:confirm_poll_ms`.
+  `:reference_prefix` (уникальный префикс producer reference). Опциональные:
+  `:confirm_timeout_ms`, `:confirm_poll_ms`, `:max_producers`, `:name`, `:shutdown`.
   """
 
   @behaviour Core.Mq.Writer
@@ -25,6 +33,7 @@ defmodule Core.Mq.Stream.Writer do
   use GenServer
 
   alias Core.Error
+  alias Core.Helper.StartOpts
   alias Core.Helper.Transact
   alias Core.Mq
   alias Core.Mq.Message
@@ -37,6 +46,8 @@ defmodule Core.Mq.Stream.Writer do
   @shutdown_ms 30_000
   @confirm_timeout_ms 5_000
   @confirm_poll_ms 20
+  @max_producers 256
+  @label "Mq.Stream.Writer"
 
   defstruct [
     :connection,
@@ -44,18 +55,10 @@ defmodule Core.Mq.Stream.Writer do
     :conn_ref,
     :confirm_timeout_ms,
     :confirm_poll_ms,
-    producers: %{}
+    :max_producers,
+    producers: %{},
+    usage_tick: 0
   ]
-
-  @type producer_state :: {non_neg_integer(), non_neg_integer()}
-  @type state :: %__MODULE__{
-          connection: module(),
-          reference_prefix: String.t(),
-          conn_ref: reference() | nil,
-          confirm_timeout_ms: pos_integer(),
-          confirm_poll_ms: pos_integer(),
-          producers: %{String.t() => producer_state()}
-        }
 
   @doc """
   Спецификация ребёнка супервизора.
@@ -110,24 +113,22 @@ defmodule Core.Mq.Stream.Writer do
     # остановка не вызовет terminate/2, и они останутся висеть до таймаута соединения.
     Process.flag(:trap_exit, true)
 
-    state = %__MODULE__{
-      connection: Keyword.fetch!(opts, :connection),
-      reference_prefix: Keyword.fetch!(opts, :reference_prefix),
-      conn_ref: nil,
-      confirm_timeout_ms: Keyword.get(opts, :confirm_timeout_ms, @confirm_timeout_ms),
-      confirm_poll_ms: Keyword.get(opts, :confirm_poll_ms, @confirm_poll_ms),
-      producers: %{}
-    }
-
-    {:ok, state}
+    {:ok, build_state(opts)}
   end
 
   @doc false
   @impl true
   def handle_call({:put_many, messages}, _from, state) when is_list(messages) do
+    topics = batch_topics(messages)
+
     case do_put_many(state, messages, 0) do
-      {:ok, state} -> {:reply, confirm_batch(state, messages), state}
-      {:error, index, error, state} -> {:reply, {:error, index, error}, state}
+      {:ok, state} ->
+        {result, state} = confirm_batch(state, topics)
+
+        {:reply, result, close_batch(state, topics)}
+
+      {:error, index, error, state} ->
+        {:reply, {:error, index, error}, close_batch(state, topics)}
     end
   end
 
@@ -146,12 +147,26 @@ defmodule Core.Mq.Stream.Writer do
   @doc false
   @impl true
   def terminate(_reason, %__MODULE__{} = state) do
-    Enum.each(state.producers, fn {topic, {producer_id, _sequence}} ->
+    Enum.each(state.producers, fn {topic, {producer_id, _sequence, _used}} ->
       delete_producer(state, topic, producer_id)
     end)
   end
 
   # ---
+
+  defp build_state(opts) do
+    %__MODULE__{
+      connection: StartOpts.module!(@label, opts, :connection),
+      reference_prefix: StartOpts.binary!(@label, opts, :reference_prefix),
+      conn_ref: nil,
+      confirm_timeout_ms:
+        StartOpts.pos_integer!(@label, opts, :confirm_timeout_ms, @confirm_timeout_ms),
+      confirm_poll_ms: StartOpts.pos_integer!(@label, opts, :confirm_poll_ms, @confirm_poll_ms),
+      max_producers: StartOpts.pos_integer!(@label, opts, :max_producers, @max_producers),
+      producers: %{},
+      usage_tick: 0
+    }
+  end
 
   defp delete_producer(state, topic, producer_id) do
     _ = state.connection.delete_producer(producer_id)
@@ -195,14 +210,14 @@ defmodule Core.Mq.Stream.Writer do
   end
 
   defp publish_encoded(state, message, topic, start) do
-    {producer_id, sequence} = Map.fetch!(state.producers, topic)
+    {producer_id, sequence, used} = Map.fetch!(state.producers, topic)
     next_seq = sequence + 1
 
     case Codec.encode(message) do
       {:ok, binary} ->
         :ok = state.connection.publish(producer_id, next_seq, binary)
         emit_publish(start, :ok, topic)
-        producers = Map.put(state.producers, topic, {producer_id, next_seq})
+        producers = Map.put(state.producers, topic, {producer_id, next_seq, used})
         {:ok, %{state | producers: producers}}
 
       {:error, %Error{} = error} ->
@@ -219,20 +234,38 @@ defmodule Core.Mq.Stream.Writer do
     )
   end
 
-  defp confirm_batch(state, messages) do
+  defp batch_topics(messages) do
     messages
     |> Enum.map(&Mq.Topic.value(&1.topic))
     |> Enum.uniq()
-    |> Enum.reduce_while(:ok, fn topic, :ok -> confirm_topic(state, topic) end)
   end
 
-  defp confirm_topic(state, topic) do
-    {_producer_id, sequence} = Map.fetch!(state.producers, topic)
+  # Дедлайн один на всю пачку: `confirm_timeout_ms` на каждый топик давал бы ожидание,
+  # кратное числу топиков, а `:shutdown` writer'а и вызывающего поллера рассчитан на
+  # пачку целиком — супервизор добил бы обоих посреди подтверждения.
+  defp confirm_batch(state, topics) do
     deadline = System.monotonic_time(:millisecond) + state.confirm_timeout_ms
 
+    Enum.reduce_while(topics, {:ok, state}, fn topic, {:ok, state} ->
+      confirm_topic(state, topic, deadline)
+    end)
+  end
+
+  # Кеш снимается только по таймауту: там локальный `sequence` разошёлся с брокерским.
+  # Оборванное соединение (`:exit`) кеш чистит сама ветка `:DOWN` — снимать producer'а
+  # ещё и здесь значило бы пересоздавать его на каждой пачке, пока брокер недоступен.
+  defp confirm_topic(state, topic, deadline) do
+    {_producer_id, sequence, _used} = Map.fetch!(state.producers, topic)
+
     case await_sequence(state, topic, sequence, deadline) do
-      :ok -> {:cont, :ok}
-      {:error, %Error{} = error} -> {:halt, {:error, 0, error}}
+      :ok ->
+        {:cont, {:ok, state}}
+
+      {:error, :timeout, %Error{} = error} ->
+        {:halt, {{:error, 0, error}, forget_producer(state, topic)}}
+
+      {:error, _reason, %Error{} = error} ->
+        {:halt, {{:error, 0, error}, state}}
     end
   end
 
@@ -242,13 +275,13 @@ defmodule Core.Mq.Stream.Writer do
       _not_yet -> retry_sequence(state, topic, sequence, deadline)
     end
   catch
-    :exit, reason -> {:error, confirm_error(topic, {:exit, reason})}
+    :exit, reason -> {:error, :exit, confirm_error(topic, {:exit, reason})}
   end
 
   defp retry_sequence(state, topic, sequence, deadline) do
     if System.monotonic_time(:millisecond) >= deadline do
       emit_publish_unconfirmed(topic)
-      {:error, confirm_error(topic, :timeout)}
+      {:error, :timeout, confirm_error(topic, :timeout)}
     else
       Process.sleep(state.confirm_poll_ms)
       await_sequence(state, topic, sequence, deadline)
@@ -276,6 +309,21 @@ defmodule Core.Mq.Stream.Writer do
     )
   end
 
+  # Кеш producer'а не должен пережить неподтверждённую пачку: локальный `sequence` ушёл
+  # вперёд брокерского, и следующая пачка сверялась бы с числом, которое брокер уже не
+  # подтвердит. Producer снимается и в брокере — иначе он висит до таймаута соединения,
+  # а `terminate/2` о нём больше не знает.
+  defp forget_producer(state, topic) do
+    case Map.pop(state.producers, topic) do
+      {nil, _producers} ->
+        state
+
+      {{producer_id, _sequence, _used}, producers} ->
+        delete_producer(state, topic, producer_id)
+        %{state | producers: producers}
+    end
+  end
+
   defp ensure_producer(%__MODULE__{producers: producers} = state, topic)
        when is_map_key(producers, topic) do
     {:ok, state}
@@ -294,7 +342,8 @@ defmodule Core.Mq.Stream.Writer do
          {:ok, producer_id} <- conn.declare_producer(topic, ref),
          {:ok, sequence} <- conn.producer_sequence(topic, ref) do
       Logger.info("stream writer: producer готов topic=#{topic} ref=#{ref} sequence=#{sequence}")
-      {:ok, %{state | producers: Map.put(state.producers, topic, {producer_id, sequence})}}
+
+      {:ok, put_producer(state, topic, producer_id, sequence)}
     else
       {:error, %Error{} = error} -> {:error, error}
       {:error, reason} -> {:error, producer_setup_error(reason)}
@@ -302,6 +351,44 @@ defmodule Core.Mq.Stream.Writer do
   catch
     :exit, reason -> {:error, producer_setup_error({:exit, reason})}
   end
+
+  defp put_producer(%__MODULE__{} = state, topic, producer_id, sequence) do
+    tick = state.usage_tick + 1
+    producers = Map.put(state.producers, topic, {producer_id, sequence, tick})
+
+    %{state | producers: producers, usage_tick: tick}
+  end
+
+  # Метка свежести ставится раз на пачку, а не на сообщение: внутри одной пачки порядок
+  # топиков между собой не важен, а перестройка карты на каждое сообщение — только мусор.
+  # Топика может уже не быть: его producer снят неподтверждением или пачка была неудачной.
+  defp touch_producers(%__MODULE__{} = state, topics) do
+    Enum.reduce(topics, state, fn topic, state ->
+      case Map.fetch(state.producers, topic) do
+        {:ok, {producer_id, sequence, _used}} -> put_producer(state, topic, producer_id, sequence)
+        :error -> state
+      end
+    end)
+  end
+
+  defp close_batch(%__MODULE__{} = state, topics) do
+    state
+    |> touch_producers(topics)
+    |> evict_producers()
+  end
+
+  # Кеш не может расти вместе с числом топиков: каждый producer занят и в брокере, а
+  # снимались они только в `terminate/2` и по `:DOWN`. Вытесняется тот, в который дольше
+  # всех не публиковали; следующая публикация в него объявит producer заново и перечитает
+  # sequence у брокера — тот же путь, что после неподтверждённой пачки.
+  defp evict_producers(%__MODULE__{producers: producers, max_producers: max} = state)
+       when map_size(producers) > max do
+    {topic, _producer} = Enum.min_by(producers, fn {_topic, {_id, _seq, used}} -> used end)
+
+    evict_producers(forget_producer(state, topic))
+  end
+
+  defp evict_producers(%__MODULE__{} = state), do: state
 
   # Кеш producer_id обязан жить не дольше соединения, выдавшего его: иначе после
   # рестарта `Stream.Connection` publish уходит на мёртвый producer, а сверка

@@ -5,6 +5,7 @@ defmodule Core.Mq.Stream.Credentials do
   Дефолты — стандартные для RabbitMQ Stream protocol, не приложения.
   """
 
+  @derive {Inspect, except: [:password]}
   @enforce_keys ~w(host port vhost username password)a
   defstruct @enforce_keys
 
@@ -49,13 +50,5 @@ defmodule Core.Mq.Stream.Credentials do
       username: creds.username,
       password: creds.password
     ]
-  end
-
-  defimpl Inspect do
-    @doc false
-    @impl true
-    def inspect(%{password: _} = creds, opts) do
-      Inspect.Algebra.to_doc(%{creds | password: "***"}, opts)
-    end
   end
 end

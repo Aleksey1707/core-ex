@@ -1,9 +1,16 @@
 defmodule Core.Mq.PromEx do
   @moduledoc """
-  PromEx plugin: event-метрики MQ Stream publish/deliver и polling buffer reader.
+  PromEx plugin метрик MQ.
 
-  Опция `readers:` — список наблюдаемых stream reader'ов
-  (`[%{component: String.t(), name: atom()}]`), default `[]`.
+  Event-метрики: publish в RabbitMQ Stream и в Kafka, deliver и decode_drop stream
+  reader'а, циклы и выбросы в DLQ reliable-подписчика. Polling-метрики: длина буфера,
+  остаток текущего чанка, pending и наличие подписки у наблюдаемых reader'ов.
+
+  Опция `readers:` — MFA-провайдер списка наблюдаемых stream reader'ов
+  (`{MyApp.PromEx.Mq, :readers, []}` → `[%{component: String.t(), name: atom()}]`),
+  как `watch:` у `Core.Workers.PromEx`: список процессов принадлежит рантайму
+  потребителя, а не моменту сборки метрик (`10-architecture.md`). Без опции
+  polling-группа не строится.
   """
 
   use PromEx.Plugin
@@ -13,6 +20,7 @@ defmodule Core.Mq.PromEx do
   alias Core.Telemetry
 
   @buffer_len_event [:prom_ex, :plugin, :mq, :reader, :buffer_len]
+  @chunk_remaining_event [:prom_ex, :plugin, :mq, :reader, :chunk_remaining]
   @pending_event [:prom_ex, :plugin, :mq, :reader, :pending]
   @subscribed_event [:prom_ex, :plugin, :mq, :reader, :subscribed]
 
@@ -101,55 +109,79 @@ defmodule Core.Mq.PromEx do
   @doc false
   @impl true
   def polling_metrics(opts) do
-    otp_app = Keyword.fetch!(opts, :otp_app)
-    metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :mq))
-    poll_rate = Keyword.get(opts, :poll_rate, 5_000)
-    readers = Keyword.get(opts, :readers, [])
+    case Keyword.get(opts, :readers) do
+      nil ->
+        []
 
-    [
-      Polling.build(
-        :mq_reader_poll_metrics,
-        poll_rate,
-        {__MODULE__, :execute_reader_metrics, [readers]},
+      {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
         [
-          last_value(
-            metric_prefix ++ [:reader, :buffer_len],
-            event_name: @buffer_len_event,
-            description: "Размер буфера stream reader",
-            measurement: :value,
-            tags: [:component, :topic],
-            tag_values: &reader_tag_values/1
-          ),
-          last_value(
-            metric_prefix ++ [:reader, :pending],
-            event_name: @pending_event,
-            description: "Есть ли pending-сообщение у stream reader (0|1)",
-            measurement: :value,
-            tags: [:component, :topic],
-            tag_values: &reader_tag_values/1
-          ),
-          last_value(
-            metric_prefix ++ [:reader, :subscribed],
-            event_name: @subscribed_event,
-            description: "Установлена ли подписка stream reader (0|1)",
-            measurement: :value,
-            tags: [:component, :topic],
-            tag_values: &reader_tag_values/1
-          )
-        ],
-        detach_on_error: false
-      )
-    ]
+          reader_poll_group(opts, {mod, fun, args})
+        ]
+    end
   end
 
+  # Два уровня `Safe.execute/2` делают разное: внешний ловит сбой самого провайдера
+  # (список reader'ов не собрался — цикл пропускается целиком), внутренний —
+  # недоступность одного reader'а, чтобы она не уносила метрики остальных.
   @doc false
-  @spec execute_reader_metrics([map()]) :: :ok
+  @spec execute_reader_metrics({module(), atom(), [term()]}) :: :ok
 
-  def execute_reader_metrics(readers) when is_list(readers) do
-    Enum.each(readers, &emit_reader_metrics/1)
+  def execute_reader_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
+    Safe.execute("mq readers", fn ->
+      mod
+      |> apply(fun, args)
+      |> Enum.each(&emit_reader_metrics/1)
+    end)
   end
 
   # ---
+
+  defp reader_poll_group(opts, readers) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :mq))
+    poll_rate = Keyword.get(opts, :poll_rate, 5_000)
+
+    Polling.build(
+      :mq_reader_poll_metrics,
+      poll_rate,
+      {__MODULE__, :execute_reader_metrics, [readers]},
+      [
+        last_value(
+          metric_prefix ++ [:reader, :buffer_len],
+          event_name: @buffer_len_event,
+          description: "Размер буфера stream reader",
+          measurement: :value,
+          tags: [:component, :topic],
+          tag_values: &reader_tag_values/1
+        ),
+        last_value(
+          metric_prefix ++ [:reader, :chunk_remaining],
+          event_name: @chunk_remaining_event,
+          description: "Записей осталось в текущем чанке stream reader",
+          measurement: :value,
+          tags: [:component, :topic],
+          tag_values: &reader_tag_values/1
+        ),
+        last_value(
+          metric_prefix ++ [:reader, :pending],
+          event_name: @pending_event,
+          description: "Есть ли pending-сообщение у stream reader (0|1)",
+          measurement: :value,
+          tags: [:component, :topic],
+          tag_values: &reader_tag_values/1
+        ),
+        last_value(
+          metric_prefix ++ [:reader, :subscribed],
+          event_name: @subscribed_event,
+          description: "Установлена ли подписка stream reader (0|1)",
+          measurement: :value,
+          tags: [:component, :topic],
+          tag_values: &reader_tag_values/1
+        )
+      ],
+      detach_on_error: false
+    )
+  end
 
   defp emit_reader_metrics(%{component: component, name: name}) do
     Safe.execute("mq reader #{component}", fn ->
@@ -166,6 +198,7 @@ defmodule Core.Mq.PromEx do
     subscribed = if info.subscribed?, do: 1, else: 0
 
     :telemetry.execute(@buffer_len_event, %{value: info.buffer_len}, meta)
+    :telemetry.execute(@chunk_remaining_event, %{value: info.chunk_remaining}, meta)
     :telemetry.execute(@pending_event, %{value: pending}, meta)
     :telemetry.execute(@subscribed_event, %{value: subscribed}, meta)
   end
@@ -190,7 +223,6 @@ defmodule Core.Mq.PromEx do
     %{component: component, topic: topic}
   end
 
-  # ---
   # Имена событий резолвятся в рантайме: префикс задаёт потребитель
   # (`Core.Config.telemetry_prefix/0`), а библиотека компилируется один раз на все приложения.
 

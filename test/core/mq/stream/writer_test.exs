@@ -61,6 +61,52 @@ defmodule Core.Mq.Stream.WriterTest do
     end
   end
 
+  # Брокер подтверждает `slow_a` медленно (45 мс), а `slow_b` — только с четвёртого
+  # опроса: с дедлайном на каждый топик пачка подтвердилась бы, с общим — нет.
+  defmodule SlowConfirmConn do
+    @moduledoc false
+
+    def start_link(_opts), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+
+    def connect, do: :ok
+
+    def create_stream(_topic), do: :ok
+
+    def declare_producer(topic, _ref) do
+      Log.add({:declare, topic})
+      {:ok, topic}
+    end
+
+    def publish(producer_id, publishing_id, _binary) do
+      Agent.update(__MODULE__, &Map.put(&1, producer_id, publishing_id))
+      :ok
+    end
+
+    def producer_sequence("slow_a", _ref) do
+      confirmed = Agent.get(__MODULE__, &Map.get(&1, "slow_a", 0))
+      if confirmed > 0, do: Process.sleep(45)
+
+      {:ok, confirmed}
+    end
+
+    def producer_sequence("slow_b", _ref) do
+      polls =
+        Agent.get_and_update(__MODULE__, fn state ->
+          polls = Map.get(state, :polls, 0) + 1
+          {polls, Map.put(state, :polls, polls)}
+        end)
+
+      if polls > 4,
+        do: {:ok, Agent.get(__MODULE__, &Map.get(&1, "slow_b", 0))},
+        else: {:ok, 0}
+    end
+
+    def delete_producer(producer_id) do
+      Log.add({:delete_producer, producer_id})
+      :ok
+    end
+  end
+
   defmodule ExitingConn do
     @moduledoc false
 
@@ -119,6 +165,159 @@ defmodule Core.Mq.Stream.WriterTest do
     assert log =~ "публикация не подтверждена"
   end
 
+  test "неподтверждённая пачка снимает producer, следующая объявляет его заново" do
+    writer = start_writer(FakeConn, confirm?: false)
+
+    capture_log(fn ->
+      assert {:error, 0, %Error{code: :publish_unconfirmed}} =
+               Stream.Writer.put_many(writer, [message("a")])
+
+      assert {:error, 0, %Error{code: :publish_unconfirmed}} =
+               Stream.Writer.put_many(writer, [message("b")])
+    end)
+
+    # Локальный sequence ушёл вперёд брокерского: кеш producer'а не переживает
+    # неподтверждение, иначе сверка не сошлась бы уже никогда.
+    assert Log.count(:declare) == 2
+    assert Log.count(:delete_producer) == 2
+  end
+
+  test "дедлайн подтверждения — один на пачку, а не на каждый топик" do
+    writer = start_writer(SlowConfirmConn, [])
+
+    log =
+      capture_log(fn ->
+        assert {:error, 0, %Error{code: :publish_unconfirmed}} =
+                 Stream.Writer.put_many(writer, [message("a", "slow_a"), message("b", "slow_b")])
+      end)
+
+    # Первый топик съел почти весь дедлайн пачки — второму осталось меньше, чем нужно
+    # на подтверждение; с таймаутом на каждый топик ожидание было бы кратно их числу.
+    assert log =~ "публикация не подтверждена topic=slow_b"
+  end
+
+  test "кеш producers ограничен: давний топик вытесняется" do
+    start_supervised!(%{id: FakeConn, start: {FakeConn, :start_link, [[confirm?: true]]}})
+
+    writer =
+      start_supervised!(
+        {Stream.Writer,
+         connection: FakeConn,
+         reference_prefix: "test-writer",
+         confirm_timeout_ms: 50,
+         confirm_poll_ms: 5,
+         max_producers: 1}
+      )
+
+    assert :ok = Stream.Writer.put_many(writer, [message("a", "topic_a")])
+    assert :ok = Stream.Writer.put_many(writer, [message("b", "topic_b")])
+
+    capture_log(fn ->
+      assert :ok = Stream.Writer.put_many(writer, [message("c", "topic_a")])
+    end)
+
+    # topic_a вытеснен вторым топиком и объявлен заново третьей пачкой.
+    assert Log.count(:declare) == 3
+    assert Log.count(:delete_producer) == 2
+  end
+
+  # Подтверждение уходит в exit: кеш producer'а при этом не снимается — соединение
+  # чистит его веткой `:DOWN`, а пересоздание на каждой пачке ничего не чинит.
+  defmodule ExitConfirmConn do
+    @moduledoc false
+
+    def start_link(_opts), do: Agent.start_link(fn -> false end, name: __MODULE__)
+
+    def connect, do: :ok
+
+    def create_stream(_topic), do: :ok
+
+    def declare_producer(topic, _ref) do
+      Log.add({:declare, topic})
+      {:ok, 7}
+    end
+
+    def publish(_producer_id, _publishing_id, _binary) do
+      Agent.update(__MODULE__, fn _ -> true end)
+      :ok
+    end
+
+    def producer_sequence(_topic, _ref) do
+      if Agent.get(__MODULE__, & &1),
+        do: exit({:timeout, {GenServer, :call, [__MODULE__, :producer_sequence]}}),
+        else: {:ok, 0}
+    end
+
+    def delete_producer(producer_id) do
+      Log.add({:delete_producer, producer_id})
+      :ok
+    end
+  end
+
+  test "exit при подтверждении не снимает producer" do
+    start_supervised!(%{id: ExitConfirmConn, start: {ExitConfirmConn, :start_link, [[]]}})
+
+    writer =
+      start_supervised!(
+        {Stream.Writer,
+         connection: ExitConfirmConn,
+         reference_prefix: "test-writer",
+         confirm_timeout_ms: 50,
+         confirm_poll_ms: 5}
+      )
+
+    capture_log(fn ->
+      assert {:error, 0, %Error{code: :publish_unconfirmed}} =
+               Stream.Writer.put_many(writer, [message("a")])
+
+      assert {:error, 0, %Error{code: :publish_unconfirmed}} =
+               Stream.Writer.put_many(writer, [message("b")])
+    end)
+
+    assert Log.count(:declare) == 1
+    assert Log.count(:delete_producer) == 0
+  end
+
+  test "пачка из нескольких топиков при тесном кеше подтверждается целиком" do
+    start_supervised!(%{id: FakeConn, start: {FakeConn, :start_link, [[confirm?: true]]}})
+
+    writer =
+      start_supervised!(
+        {Stream.Writer,
+         connection: FakeConn,
+         reference_prefix: "test-writer",
+         confirm_timeout_ms: 50,
+         confirm_poll_ms: 5,
+         max_producers: 1}
+      )
+
+    # Вытеснение идёт на границе пачки: сними оно producer topic_a по ходу — подтверждать
+    # эту публикацию было бы нечем.
+    assert :ok =
+             Stream.Writer.put_many(writer, [message("a", "topic_a"), message("b", "topic_b")])
+
+    assert Log.count(:declare) == 2
+    assert Log.count(:delete_producer) == 1
+  end
+
+  test "мусор в опциях — ArgumentError на старте" do
+    Process.flag(:trap_exit, true)
+
+    capture_log(fn ->
+      assert {:error, {%ArgumentError{message: message}, _stack}} =
+               Stream.Writer.start_link(connection: FakeConn, reference_prefix: 42)
+
+      assert message =~ ":reference_prefix"
+
+      assert {:error, {%ArgumentError{}, _stack}} =
+               Stream.Writer.start_link(
+                 connection: FakeConn,
+                 reference_prefix: "test-writer",
+                 confirm_timeout_ms: 0
+               )
+    end)
+  end
+
   test "падение соединения сбрасывает кеш producers" do
     writer = start_writer(FakeConn, confirm?: true)
 
@@ -173,8 +372,8 @@ defmodule Core.Mq.Stream.WriterTest do
     end
   end
 
-  defp message(body) do
-    {:ok, message} = Message.new(Mq.Topic.new!("writer_test"), %{}, body, Mq.Key.new!("agg-1"))
+  defp message(body, topic \\ "writer_test") do
+    {:ok, message} = Message.new(Mq.Topic.new!(topic), %{}, body, Mq.Key.new!("agg-1"))
     message
   end
 end

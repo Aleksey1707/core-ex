@@ -35,6 +35,19 @@ defmodule Core.Mq.Kafka.WriterTest do
     def produce(record), do: {:ok, record}
   end
 
+  defmodule RaisingClient do
+    @moduledoc false
+
+    def produce(_record), do: raise(ArgumentError, "клиент сломался")
+  end
+
+  test "любое исключение клиента становится ошибкой, а не падением вызывающего" do
+    assert {:error, %Error{code: :kafka_publish_failed, detail: detail}} =
+             Writer.put(RaisingClient, message!(%{}, "body"))
+
+    assert detail =~ "клиент сломался"
+  end
+
   test "publish эмитит телеметрию с результатом и топиком" do
     handler_id = "kafka-writer-#{inspect(self())}"
 
@@ -96,7 +109,7 @@ defmodule Core.Mq.Kafka.WriterTest do
   end
 
   test "put: ошибка клиента" do
-    assert {:error, %Error{code: :kafka_publish_failed, detail: 1}} =
+    assert {:error, %Error{code: :kafka_publish_failed, detail: {:error_code, 1}}} =
              Writer.put(FailClient, message!(%{}, "body"))
   end
 

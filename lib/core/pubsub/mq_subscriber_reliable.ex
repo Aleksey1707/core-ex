@@ -218,7 +218,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   # ---
 
   defp consume_once(state) do
-    case state.reader_module.get(state.reader, 0) do
+    case safe_get(state) do
       :empty ->
         {:idle, state}
 
@@ -229,6 +229,24 @@ defmodule Core.PubSub.MqSubscriberReliable do
         Logger.warning("pubsub reliable get: #{error.message}")
         {:error, state}
     end
+  end
+
+  # За reader'ом стоит процесс: недоступный или упавший приходит `exit` вызова, а не
+  # `{:error, _}` (`Core.Mq.ReaderReliable`). Подписчик от этого не падает — цикл уходит
+  # в backoff и повторяет чтение, когда reader поднимет супервизор.
+  defp safe_get(state) do
+    state.reader_module.get(state.reader, 0)
+  catch
+    :exit, reason -> {:error, reader_unavailable_error(reason)}
+  end
+
+  defp reader_unavailable_error(reason) do
+    Error.app(
+      code: :reader_unavailable,
+      ns: :pubsub,
+      message: "MQ reader недоступен",
+      detail: reason
+    )
   end
 
   # Тот же raw, что и на прошлом цикле, — очередная попытка: reliable-reader отдаёт
@@ -416,13 +434,19 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp commit(state) do
-    case state.reader_module.commit(state.reader) do
+    case safe_commit(state) do
       :ok ->
         :ok
 
       {:error, %Error{} = error} ->
         Logger.warning("pubsub reliable commit: #{error.message}")
     end
+  end
+
+  defp safe_commit(state) do
+    state.reader_module.commit(state.reader)
+  catch
+    :exit, reason -> {:error, reader_unavailable_error(reason)}
   end
 
   defp reschedule(state, result) when result in ~w(processed dlq)a do
