@@ -13,7 +13,7 @@ defmodule Core.Web.ErrorMapper do
   Своя строка таблицы — свои клозы перед делегированием; `map/2` не макрос и не behaviour:
 
       defmodule MyAppWeb.ErrorMapper do
-        @spec map(term()) :: Core.Web.ErrorMapper.result()
+        @spec map(term()) :: Core.Web.ErrorMapper.result(MyAppWeb.Response.Code.t())
 
         def map(%Error{ns: :billing, code: :quota_exceeded} = err),
           do: {429, :error, err.message, :debug}
@@ -31,20 +31,31 @@ defmodule Core.Web.ErrorMapper do
   @unauthorized "Не авторизован"
   @critical "Произошла непредвиденная ошибка"
 
-  @typedoc "Статус, код конверта, текст клиенту и уровень логирования (`nil` — не логировать)."
-  @type result :: {100..599, Response.Code.t(), String.t(), Logger.level() | nil}
+  @typedoc """
+  Статус, код конверта, текст клиенту и уровень логирования (`nil` — не логировать).
+
+  Параметр — тип словаря кодов: у потребителя со своим `Core.Enum` это его `t()`.
+  """
+  @type result(code) :: {100..599, code, String.t(), Logger.level() | nil}
+
+  @typedoc "`result/1` на базовом словаре `Core.Web.Response.Code`."
+  @type result :: result(Response.Code.t())
 
   @doc """
   Разложить ошибку на HTTP-ответ.
 
   | Ошибка | Статус | Код | Текст | Лог |
   |---|---|---|---|---|
-  | `%Error{code: :version_mismatch}` | 412 | `:diff_version` | `message` (fallback `ns/code`) | — |
+  | `%Error{kind: :domain, code: :version_mismatch}` | 412 | `:diff_version` | `message` | — |
+  | `%Error{kind: :domain, code: :access_denied}` | 403 | `:error` | `message` | — |
   | `%Error{code: c}`, `c` в `auth_codes:` | 401 | `:auth_error` | константа | `:debug` |
-  | `%Error{code: :access_denied}` | 403 | `:error` | `message` | — |
   | `%Error{kind: :domain}` | 400 | `:domain_error` | `message` | — |
   | `%Error{kind: :app}` | 500 | `:critical` | шаблон | `:error` |
   | прочее | 500 | `:critical` | шаблон | `:error` |
+
+  Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту
+  показывать нельзя, и она обязана попасть в лог (`12-errors.md`), поэтому `kind: :app`
+  с любым кодом уходит в 500.
 
   Опции: `auth_codes:` (дефолт `#{inspect(@auth_codes)}`), `unauthorized_message:`,
   `critical_message:`.
@@ -56,10 +67,10 @@ defmodule Core.Web.ErrorMapper do
 
   def map(error, opts \\ [])
 
-  def map(%Error{code: :version_mismatch} = error, _opts),
+  def map(%Error{kind: :domain, code: :version_mismatch} = error, _opts),
     do: {412, :diff_version, to_string(error), nil}
 
-  def map(%Error{code: :access_denied} = error, _opts),
+  def map(%Error{kind: :domain, code: :access_denied} = error, _opts),
     do: {403, :error, to_string(error), nil}
 
   def map(%Error{code: code} = error, opts) do

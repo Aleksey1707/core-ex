@@ -14,10 +14,14 @@ defmodule Core.Web.MetricsPlug do
   alias Plug.Conn
 
   @doc false
+  @spec init(keyword()) :: Plug.opts()
+
   @impl true
   def init(opts) when is_list(opts), do: PromEx.Plug.init(opts)
 
   @doc false
+  @spec call(Conn.t(), Plug.opts()) :: Conn.t()
+
   @impl true
   def call(%Conn{} = conn, opts) do
     case PromEx.Plug.call(conn, opts) do

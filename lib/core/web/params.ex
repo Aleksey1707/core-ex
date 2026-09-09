@@ -67,6 +67,9 @@ defmodule Core.Web.Params do
   Разобрать ожидаемую версию агрегата из заголовка `If-Match`.
 
   `"*"` → `:current` (`Version.parse/1`); отсутствие заголовка — `:missing_param`.
+
+  `key` — имя параметра в схеме запроса, а не заголовок `conn`: `Plug` отдаёт имена
+  заголовков в нижнем регистре, и на `Map.new(conn.req_headers)` дефолт не совпадёт.
   """
   @spec version(map(), atom()) :: {:ok, Version.expected()} | {:error, Error.t()}
 
