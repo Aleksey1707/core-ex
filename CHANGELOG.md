@@ -266,6 +266,12 @@
 
 ### Новое
 
+- **`Core.Bind`** — макрос `bind/1`, аналог `use` из Gleam: строки `pattern <- call` разворачиваются
+  в цепочку колбэков вместо лестницы отступов у bracket-функций (`File.open`, `Transact.run`,
+  `:timer.tc`). Слева `x` / `{:ok, x}` — одноарный колбэк, `[]` — нуль-арный, `[a, b]` — двухарный;
+  колбэк дописывается последним аргументом либо встаёт на место маркера `_`
+  (`Transact.run(DAO, _, opts)`). Подключается `import Core.Bind`. Цепочки
+  `{:ok, _} | {:error, _}` он не заменяет — там `with` с `else`.
 - **`Core.Helper.StartOpts`** — проверка опций OTP-процесса в `init/1` (`module!/3`, `atom!/3`,
   `prim!/4`, `binary!/3`, `pos_integer!/4`, `boolean!/4`, `one_of!/5`, `raise_invalid!/4`): `ArgumentError` называет опцию,
   ожидаемое значение и полученное. `Core.Helper.Opts` остаётся про опции `use`-макросов и
