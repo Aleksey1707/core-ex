@@ -641,8 +641,8 @@ config :my_app, MyApp.Domain.Orders.Order.Repo, MyApp.Domain.Orders.Order.Repo.M
 Инфраструктурный репозиторий самой библиотеки живёт по той же конвенции:
 `Core.Config.outbox_repo/0` (`config :core, Core.Outbox.Repo` — только при подмене).
 
-Норму проверяет линтер библиотеки в режиме потребителя — ключ-модуль в `compile_env`
-и есть связывание руками:
+Норму проверяет линтер библиотеки в режиме потребителя — ключ `<...>.Repo` в `compile_env`
+и есть связывание руками (прочие ключи-модули — обычная конфигурация, линтер их не трогает):
 
 ```bash
 elixir deps/core/scripts/boundary_lint.exs --consumer lib test

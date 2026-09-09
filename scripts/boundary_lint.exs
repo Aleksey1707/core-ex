@@ -20,6 +20,7 @@ defmodule BoundaryLint do
   @env_funs ~w(get_env fetch_env fetch_env! compile_env compile_env!)a
   @compile_env_funs ~w(compile_env compile_env!)a
   @own_apps ~w(core argon2_elixir)a
+  @repo_key :Repo
 
   def run(["--consumer" | dirs]) do
     check(:consumer, if(dirs == [], do: @consumer_dirs, else: dirs), @repos)
@@ -106,22 +107,21 @@ defmodule BoundaryLint do
 
   # ===== потребитель: DI репозиториев — через `Core.Config.repo!/1` =====
 
-  # Ключ-модуль в `compile_env` — это связывание «behaviour → реализация» руками.
+  # Ключ-репозиторий в `compile_env` — это связывание «behaviour → реализация» руками.
+  # Прочие ключи-модули (`MyApp.Endpoint`, `MyApp.Mailer`, …) — обычная конфигурация, не DI.
   defp violations(
          {{:., _, [{:__aliases__, _, [:Application]}, fun]}, meta,
-          [_app, {:__aliases__, _, _} = key | _]},
+          [_app, {:__aliases__, _, mods} = key | _]},
          path,
          :consumer
        )
        when fun in @compile_env_funs do
-    [
-      err(
-        path,
-        meta,
-        "`Application.#{fun}` на #{Macro.to_string(key)}: " <>
-          "реализация резолвится `Core.Config.repo!/1`"
-      )
-    ]
+    message =
+      "`Application.#{fun}` на #{Macro.to_string(key)}: реализация резолвится `Core.Config.repo!/1`"
+
+    if List.last(mods) == @repo_key,
+      do: [err(path, meta, message)],
+      else: []
   end
 
   defp violations(_node, _path, _mode), do: []
