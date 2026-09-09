@@ -17,11 +17,12 @@ defmodule Core.Web.ErrorMapperTest do
              Web.ErrorMapper.map(domain(:version_mismatch, "версия не та"))
   end
 
-  test "прикладная ошибка без message → fallback ns/code, а не nil" do
-    assert {412, :diff_version, "test/version_mismatch", nil} =
+  test "прикладная ошибка с доменным кодом → 500 с шаблоном, текст наружу не уходит" do
+    assert {500, :critical, "Произошла непредвиденная ошибка", :error} =
              Web.ErrorMapper.map(app(:version_mismatch))
 
-    assert {403, :error, "test/access_denied", nil} = Web.ErrorMapper.map(app(:access_denied))
+    assert {500, :critical, "Произошла непредвиденная ошибка", :error} =
+             Web.ErrorMapper.map(app(:access_denied))
   end
 
   test "коды авторизации → 401 с константой и debug-логом" do
@@ -48,6 +49,23 @@ defmodule Core.Web.ErrorMapperTest do
   test "не-%Error{} → 500" do
     assert {500, :critical, _, :error} = Web.ErrorMapper.map(:timeout)
     assert {500, :critical, _, :error} = Web.ErrorMapper.map(%RuntimeError{message: "бум"})
+  end
+
+  test "конверт умеет отдать любой код, который вернул map/2" do
+    errors = [
+      domain(:version_mismatch),
+      domain(:access_denied),
+      domain(:unauthorized),
+      domain(:invalid),
+      app(:write_failed),
+      :timeout
+    ]
+
+    for error <- errors do
+      {_status, code, message, _level} = Web.ErrorMapper.map(error)
+
+      assert %{code: _, messages: [^message]} = Web.Response.error(code, message)
+    end
   end
 
   test "auth_codes и тексты переопределяются опциями" do

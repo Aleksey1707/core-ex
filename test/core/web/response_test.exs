@@ -68,6 +68,10 @@ defmodule Core.Web.ResponseTest do
       assert CustomResponse.success() == %{code: 0, messages: []}
     end
 
+    test "код вне словаря — FunctionClauseError" do
+      assert_raise FunctionClauseError, fn -> CustomResponse.error(:unknown_code, "нет") end
+    end
+
     test "конверт принимает результат ErrorMapper" do
       error = Error.domain(code: :boom, ns: :test, message: "бум")
       {_status, code, message, _level} = Core.Web.ErrorMapper.map(error)
@@ -75,10 +79,11 @@ defmodule Core.Web.ResponseTest do
       assert CustomResponse.error(code, message) == %{code: 2, messages: ["бум"]}
     end
 
-    test "page генерируется вместе с остальным конвертом" do
+    test "page_data генерируется вместе с остальным конвертом" do
       page = %Pagination.Result{items: [%{id: 1}], count: 1}
 
-      assert CustomResponse.page(page, &%{"id" => &1.id}) == %{count: 1, items: [%{"id" => 1}]}
+      assert CustomResponse.page_data(page, &%{"id" => &1.id}) ==
+               %{count: 1, items: [%{"id" => 1}]}
     end
 
     test "словарь без базовых значений отвергается на компиляции" do
@@ -174,7 +179,7 @@ defmodule Core.Web.ResponseTest do
   test "page прогоняет элементы через presenter" do
     page = %Pagination.Result{items: [%{id: 1}, %{id: 2}], count: 7}
 
-    assert Response.page(page, &%{"id" => &1.id}) == %{
+    assert Response.page_data(page, &%{"id" => &1.id}) == %{
              count: 7,
              items: [%{"id" => 1}, %{"id" => 2}]
            }

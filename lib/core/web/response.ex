@@ -22,7 +22,8 @@ defmodule Core.Web.Response do
   (`0..9` — за библиотекой); базовым значениям коды менять нельзя. Нарушение — `CompileError`.
 
   Конверт не зависит ни от Plug, ни от Phoenix: это map, который контроллер отдаёт
-  своим `json/2`.
+  своим `json/2`. `page_data/2` — не конверт, а данные под `success/1`:
+  `success(page_data(result, &to_map/1))`.
   """
 
   alias Core.Helper
@@ -46,8 +47,6 @@ defmodule Core.Web.Response do
 
       @response_codes Core.Web.Response.codes_module!(opts)
 
-      alias Core.Pagination
-
       @doc "Успешный ответ без данных."
       @spec success() :: map()
 
@@ -58,15 +57,24 @@ defmodule Core.Web.Response do
 
       def success(data), do: Core.Web.Response.__success__(@response_codes, data)
 
-      @doc "Ответ с ошибкой."
+      @doc """
+      Ответ с ошибкой.
+
+      `code` обязан входить в словарь `codes:`; иначе — `FunctionClauseError` из его
+      `to_code/1`. В `@spec` тип словаря не выразить: модуль приходит опцией `use`.
+      """
       @spec error(atom(), String.t()) :: map()
 
       def error(code, message), do: Core.Web.Response.__error__(@response_codes, code, message)
 
-      @doc "Страница `{count, items}` через presenter."
-      @spec page(Pagination.Result.t(item), (item -> map())) :: map() when item: var
+      @doc """
+      Данные страницы — `%{count, items}` через presenter.
 
-      def page(result, to_map), do: Core.Web.Response.__page__(result, to_map)
+      Не конверт: результат кладётся в `success/1`.
+      """
+      @spec page_data(Pagination.Result.t(item), (item -> map())) :: map() when item: var
+
+      def page_data(result, to_map), do: Core.Web.Response.__page_data__(result, to_map)
     end
   end
 
@@ -85,10 +93,14 @@ defmodule Core.Web.Response do
 
   def error(code, message), do: __error__(Response.Code, code, message)
 
-  @doc "Страница `{count, items}` через presenter."
-  @spec page(Pagination.Result.t(item), (item -> map())) :: map() when item: var
+  @doc """
+  Данные страницы — `%{count, items}` через presenter.
 
-  def page(result, to_map), do: __page__(result, to_map)
+  Не конверт: результат кладётся в `success/1`.
+  """
+  @spec page_data(Pagination.Result.t(item), (item -> map())) :: map() when item: var
+
+  def page_data(result, to_map), do: __page_data__(result, to_map)
 
   @doc false
   @spec required_keys() :: [atom()]
@@ -135,9 +147,9 @@ defmodule Core.Web.Response do
     do: %{code: codes.to_code(code), messages: [message]}
 
   @doc false
-  @spec __page__(Pagination.Result.t(item), (item -> map())) :: map() when item: var
+  @spec __page_data__(Pagination.Result.t(item), (item -> map())) :: map() when item: var
 
-  def __page__(%Pagination.Result{items: items, count: count}, to_map)
+  def __page_data__(%Pagination.Result{items: items, count: count}, to_map)
       when is_function(to_map, 1) do
     %{count: count, items: Enum.map(items, to_map)}
   end
