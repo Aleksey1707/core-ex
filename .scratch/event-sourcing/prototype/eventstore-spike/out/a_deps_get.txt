@@ -1,0 +1,23 @@
+Resolving Hex dependencies...
+Resolution completed in 0.848s
+New:
+  db_connection 2.10.2
+  decimal 3.1.1
+  ecto 3.14.2
+  ecto_sql 3.14.0
+  eventstore 1.4.8
+  fsm 0.3.1
+  gen_stage 1.3.2
+  jason 1.4.5
+  postgrex 0.22.4
+  telemetry 1.4.2
+* Getting eventstore (Hex package)
+* Getting ecto_sql (Hex package)
+* Getting postgrex (Hex package)
+* Getting jason (Hex package)
+* Getting db_connection (Hex package)
+* Getting decimal (Hex package)
+* Getting telemetry (Hex package)
+* Getting ecto (Hex package)
+* Getting fsm (Hex package)
+* Getting gen_stage (Hex package)

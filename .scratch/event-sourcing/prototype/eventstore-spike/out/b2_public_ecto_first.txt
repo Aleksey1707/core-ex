@@ -1,0 +1,35 @@
+### Сценарий A: схема public, сначала Ecto, потом EventStore
+$ mix ecto.create -r EventstoreSpike.PublicRepo
+The database for EventstoreSpike.PublicRepo has been created
+$ mix ecto.migrate -r EventstoreSpike.PublicRepo
+
+15:28:10.769 [info] == Running 20260913000000 EventstoreSpike.Repo.Migrations.CreateSpikeRows.change/0 forward
+
+15:28:10.771 [info] create table spike_rows
+
+15:28:10.777 [info] == Migrated 20260913000000 in 0.0s
+$ mix event_store.init -e EventstoreSpike.PublicStore
+** (Postgrex.Error) ERROR 42P07 (duplicate_table) relation "schema_migrations" already exists
+    (postgrex 0.22.4) lib/postgrex.ex:381: Postgrex.query!/4
+    (elixir 1.20.3) lib/enum.ex:983: Enum."-each/2-lists^foreach/1-0-"/2
+    (db_connection 2.10.2) lib/db_connection.ex:1760: DBConnection.run_transaction/5
+    (eventstore 1.4.8) lib/event_store/tasks/init.ex:47: EventStore.Tasks.Init.exec/2
+    (elixir 1.20.3) lib/enum.ex:983: Enum."-each/2-lists^foreach/1-0-"/2
+    (eventstore 1.4.8) lib/mix/tasks/event_store.init.ex:45: Mix.Tasks.EventStore.Init.run/1
+    (mix 1.20.3) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+    (mix 1.20.3) lib/mix/cli.ex:129: Mix.CLI.run_task/2
+exit=1
+$ psql
+ table_schema |    table_name
+--------------+-------------------
+ public       | schema_migrations
+ public       | spike_rows
+(2 rows)
+
+                       Table "public.schema_migrations"
+   Column    |              Type              | Collation | Nullable | Default
+-------------+--------------------------------+-----------+----------+---------
+ version     | bigint                         |           | not null |
+ inserted_at | timestamp(0) without time zone |           |          |
+Indexes:
+    "schema_migrations_pkey" PRIMARY KEY, btree (version)

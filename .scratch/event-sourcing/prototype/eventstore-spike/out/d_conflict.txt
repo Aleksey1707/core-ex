@@ -1,0 +1,54 @@
+== d1: устаревшая expected_version (поток уже версии 1), fun возвращается нормально
+append expected 0: {:error, :wrong_expected_version}
+DBConnection.status: :transaction
+следующий запрос в TX: {:ok, Postgrex.Result}
+Repo.transaction: {:ok, :fun_returned}
+строк / версия потока: {1, 1}
+
+== d2: гонка, T1 держит TX 1000 мс, T2 (mode=transaction_ok) пишет в тот же поток
+
+15:32:40.321 [warning] Failed to append events to stream "d2-325-1789277559304" due to: :wrong_expected_version
+T2 append (ждал 1010 мс): {:error, :wrong_expected_version}
+T2 DBConnection.status: :error
+T2 следующий запрос в TX: {:error, %Postgrex.Error{message: nil, postgres: %{code: :in_failed_sql_transaction, line: "1493", message: "current transaction is aborted, commands ignored until end of transaction block", file: "postgres.c", routine: "exec_parse_message", unknown: "ERROR", severity: "ERROR", pg_code: "25P02"}, connection_id: 254, query: "select 1"}}
+T1: {:ok, :t1_committed}
+T2 итог транзакции: {:error, :rollback}
+строк T2 / версия потока: {0, 2}
+события потока: [{1, "e-1"}, {2, "t1-1"}]
+
+== d3: гонка, T1 держит TX 1000 мс, T2 (mode=transact_error) пишет в тот же поток
+T2 append (ждал 1003 мс): {:error, :wrong_expected_version}
+
+15:32:41.340 [warning] Failed to append events to stream "d3-4422-1789277560329" due to: :wrong_expected_version
+T2 DBConnection.status: :error
+T2 следующий запрос в TX: {:error, %Postgrex.Error{message: nil, postgres: %{code: :in_failed_sql_transaction, line: "1493", message: "current transaction is aborted, commands ignored until end of transaction block", file: "postgres.c", routine: "exec_parse_message", unknown: "ERROR", severity: "ERROR", pg_code: "25P02"}, connection_id: 258, query: "select 1"}}
+T1: {:ok, :t1_committed}
+T2 итог транзакции: {:error, {:error, :wrong_expected_version}}
+строк T2 / версия потока: {0, 2}
+события потока: [{1, "e-1"}, {2, "t1-1"}]
+
+== d4: гонка, T1 держит TX 1000 мс, T2 (mode=transaction_ok) пишет в тот же поток
+
+15:32:42.351 [warning] Failed to append events to stream "d4-4550-1789277561344" due to: :duplicate_stream_uuid
+T2 append (ждал 1003 мс): {:error, %Postgrex.Error{message: nil, postgres: %{code: :in_failed_sql_transaction, line: "1493", message: "current transaction is aborted, commands ignored until end of transaction block", file: "postgres.c", routine: "exec_parse_message", unknown: "ERROR", severity: "ERROR", pg_code: "25P02"}, connection_id: 256, query: ["SELECT\n  stream_id,\n  stream_uuid,\n  stream_version,\n  created_at,\n  deleted_at\nFROM \"", "event_store", "\".streams\nWHERE stream_uuid = $1;\n"]}}
+T2 DBConnection.status: :error
+T2 следующий запрос в TX: {:error, %Postgrex.Error{message: nil, postgres: %{code: :in_failed_sql_transaction, line: "1493", message: "current transaction is aborted, commands ignored until end of transaction block", file: "postgres.c", routine: "exec_parse_message", unknown: "ERROR", severity: "ERROR", pg_code: "25P02"}, connection_id: 256, query: "select 1"}}
+T1: {:ok, :t1_committed}
+T2 итог транзакции: {:error, :rollback}
+строк T2 / версия потока: {0, 1}
+события потока: [{1, "t1-1"}]
+
+== d5: гонка создания потока без внешней TX у T2 (повтор maybe_retry_once на пуле store)
+
+15:32:43.363 [warning] Failed to append events to stream "d5-4614-1789277562355" due to: :duplicate_stream_uuid
+T2 append :any_version без TX: :ok
+версия потока: 2
+
+== d6: 1000 событий с устаревшей expected_version (Postgrex.rollback во вложенной TX)
+append 1000 expected 0: {:error, :wrong_expected_version}
+DBConnection.status: :error
+следующий запрос в TX: {:error, %DBConnection.ConnectionError{message: "connection is closed because of an error, disconnect or timeout", severity: :error, reason: :error}}
+Repo.transaction: {:error, :rollback}
+
+15:32:43.372 [error] Postgrex.Protocol (#PID<0.224.0> ({Postgrex.Protocol, "eventstore_spike_prototype_wipe_me"})) disconnected: ** (DBConnection.ConnectionError) transaction rolling back
+строк / версия потока: {0, 1}

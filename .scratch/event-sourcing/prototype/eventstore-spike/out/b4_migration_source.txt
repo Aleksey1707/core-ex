@@ -1,0 +1,3 @@
+== b4: EventStore в public уже есть; Ecto с migration_source: "ecto_schema_migrations"
+Ecto.Migrator.run: {:ok, [20260913000000], []}
+таблицы public: ["ecto_schema_migrations", "events", "schema_migrations", "snapshots", "spike_rows", "stream_events", "streams", "subscriptions"]

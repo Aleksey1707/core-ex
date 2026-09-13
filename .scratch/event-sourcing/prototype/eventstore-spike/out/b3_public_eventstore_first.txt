@@ -1,0 +1,30 @@
+### Сценарий B: схема public, сначала EventStore, потом Ecto
+$ mix ecto.drop -r EventstoreSpike.PublicRepo
+The database for EventstoreSpike.PublicRepo has been dropped
+$ mix event_store.create -e EventstoreSpike.PublicStore
+The EventStore database has been created.
+The EventStore schema already exists.
+$ mix event_store.init -e EventstoreSpike.PublicStore
+The EventStore database has been initialized.
+$ mix ecto.migrate -r EventstoreSpike.PublicRepo
+** (Postgrex.Error) ERROR 42703 (undefined_column) column s0.version does not exist
+
+    query: SELECT s0."version" FROM "schema_migrations" AS s0
+    (ecto_sql 3.14.0) lib/ecto/adapters/sql.ex:1121: Ecto.Adapters.SQL.raise_sql_call_error/1
+    (ecto_sql 3.14.0) lib/ecto/adapters/sql.ex:1019: Ecto.Adapters.SQL.execute/6
+    (ecto 3.14.2) lib/ecto/repo/queryable.ex:248: Ecto.Repo.Queryable.execute/4
+    (ecto 3.14.2) lib/ecto/repo/queryable.ex:19: Ecto.Repo.Queryable.all/3
+    (ecto_sql 3.14.0) lib/ecto/migrator.ex:585: anonymous fn/5 in Ecto.Migrator.lock_for_migrations/4
+    (ecto_sql 3.14.0) lib/ecto/adapters/sql.ex:1481: anonymous fn/3 in Ecto.Adapters.SQL.checkout_or_transaction/4
+    (db_connection 2.10.2) lib/db_connection.ex:1760: DBConnection.run_transaction/5
+    (ecto_sql 3.14.0) lib/ecto/adapters/postgres.ex:334: Ecto.Adapters.Postgres.do_lock_for_migrations/5
+exit=1
+    table_name
+-------------------
+ events
+ schema_migrations
+ snapshots
+ stream_events
+ streams
+ subscriptions
+(6 rows)
