@@ -1,0 +1,42 @@
+== c0: способ получить соединение
+conn внутри Repo.transaction: %DBConnection{pool_ref: {:pool_ref, #PID<0.218.0>, #Reference<0.1918601845.1929773059.171918>, #Reference<0.1918601845.1929641987.172370>, #Reference<0.1918601845.1929773059.172322>, #Reference<0.1918601845.1929641987.172369>}, conn_ref: #Reference<0.1918601845.1929641987.172371>, conn_mode: :transaction}
+DBConnection.status: :transaction
+conn из pdict вне транзакции: nil
+conn внутри Repo.checkout (без TX): %DBConnection{pool_ref: {:pool_ref, #PID<0.218.0>, #Reference<0.1918601845.1929773059.171918>, #Reference<0.1918601845.1929641987.172431>, #Reference<0.1918601845.1929773063.168691>, #Reference<0.1918601845.1929641987.172430>}, conn_ref: #Reference<0.1918601845.1929641987.172432>, conn_mode: nil}
+DBConnection.status в checkout: :idle
+
+== c1: commit — строка Ecto + 2 события через conn:
+append: :ok
+до commit, извне: строк / версия потока / $all: {0, nil, 0}
+до commit, в той же TX: read_stream_forward: :ok
+Repo.transaction: {:ok, :done}
+после: строк / версия потока / $all до→после: {1, 2, 0, 2}
+после: read_stream_forward: [{1, 1, %EventstoreSpike.Happened{n: "e-1"}}, {2, 2, %EventstoreSpike.Happened{n: "e-2"}}]
+
+== c2: Repo.rollback после append
+append: :ok
+Repo.transaction: {:error, :boom}
+после: строк / версия потока / $all до→после: {0, nil, 2, 2}
+read_stream_forward: {:error, :stream_not_found}
+
+== c3: Repo.transact (как Transact.run) — fun вернул {:error, _} после append
+append: :ok
+Repo.transact: {:error, :usecase_failed}
+после: строк / версия потока / $all до→после: {0, nil, 2, 2}
+
+== c4: 1000 событий (ветка Postgrex.transaction внутри внешней TX) + Repo.rollback
+append 1000: :ok
+status после append 1000: :transaction
+Repo.transaction: {:error, :boom}
+после: строк / версия потока / $all до→после: {0, nil, 2, 2}
+
+== c5: 1000 событий + commit
+append 1000: :ok
+insert после append 1000: 1
+Repo.transaction: {:ok, :done}
+после: строк / версия потока: {1, 1, 1000}
+
+== c6: conn: из pdict вне транзакции (nil) — куда уходит append
+conn: nil
+append conn: nil: :ok
+версия потока: 1

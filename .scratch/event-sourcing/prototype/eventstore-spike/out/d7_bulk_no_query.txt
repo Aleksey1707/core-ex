@@ -1,0 +1,11 @@
+== d7: 1000 событий с устаревшей expected_version, без последующих запросов в TX
+append 1000 expected 0: {:error, :wrong_expected_version}
+DBConnection.status: :error
+Repo.transaction: {:error, :rollback}
+
+15:34:05.319 [error] Postgrex.Protocol (#PID<0.223.0> ({Postgrex.Protocol, "eventstore_spike_prototype_wipe_me"})) disconnected: ** (DBConnection.ConnectionError) transaction rolling back
+строк / версия потока: {0, 1}
+
+== d8: то же через Repo.transact с {:error, _}
+Repo.transact: {:error, {:error, :wrong_expected_version}}
+строк / версия потока: {0, 1}

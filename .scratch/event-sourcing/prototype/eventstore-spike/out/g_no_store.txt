@@ -1,0 +1,10 @@
+OTP-приложение :eventstore запущено: true
+процесс EventstoreSpike.EventStore: nil
+Store.config() без запуска: [pool_size: 5, schema: "event_store", serializer: EventStore.JsonSerializer]
+append_to_stream с conn: без запущенного store: {:raised, RuntimeError, "could not lookup EventstoreSpike.EventStore because it was not started or it does not exist"}
+read_stream_forward с conn:: {:raised, RuntimeError, "could not lookup EventstoreSpike.EventStore because it was not started or it does not exist"}
+stream_info с conn:: {:raised, RuntimeError, "could not lookup EventstoreSpike.EventStore because it was not started or it does not exist"}
+DBConnection.status после исключений: :transaction
+внутренний EventStore.Streams.Stream.append_to_stream (@moduledoc false): :ok
+Repo.transaction: {:ok, :done}
+строк / версия потока: {1, 1}

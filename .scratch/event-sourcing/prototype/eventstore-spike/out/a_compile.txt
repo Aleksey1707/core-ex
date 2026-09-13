@@ -1,0 +1,160 @@
+==> gen_stage
+Compiling 10 files (.ex)
+     warning: unused require Logger
+     │
+ 103 │   require Logger
+     │   ~
+     │
+     └─ lib/gen_stage/dispatchers/partition_dispatcher.ex:103:3
+
+Generated gen_stage app
+==> decimal
+Compiling 4 files (.ex)
+Generated decimal app
+==> jason
+Compiling 10 files (.ex)
+Generated jason app
+==> eventstore_spike
+===> Analyzing applications...
+===> Compiling telemetry
+==> db_connection
+Compiling 18 files (.ex)
+Generated db_connection app
+==> ecto
+Compiling 56 files (.ex)
+Generated ecto app
+==> fsm
+Compiling 1 file (.ex)
+Generated fsm app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.3) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.3) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.3) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.3) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.3) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.3) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> postgrex
+Compiling 70 files (.ex)
+Generated postgrex app
+==> eventstore
+Compiling 60 files (.ex)
+    warning: <%# is deprecated, use <%!-- or add a space between <% and # instead
+    │
+  1 │ <%#
+    │ ~
+    │
+    └─ lib/event_store/sql/statements/insert_events.sql.eex:1: (file)
+
+    warning: <%# is deprecated, use <%!-- or add a space between <% and # instead
+    │
+ 24 │   <%#
+    │   ~
+    │
+    └─ lib/event_store/sql/statements/insert_events.sql.eex:24: (file)
+
+    warning: unused require Logger
+    │
+  4 │   require Logger
+    │   ~
+    │
+    └─ lib/event_store/storage/lock.ex:4:3
+
+    warning: unused require Logger
+    │
+  4 │   require Logger
+    │   ~
+    │
+    └─ lib/event_store/storage/database.ex:4:3
+
+     warning: a struct for EventStore.RecordedEvent is expected on struct update:
+
+         %EventStore.RecordedEvent{
+           recorded_event
+           | stream_uuid: stream_uuid,
+             stream_version: stream_version + index
+         }
+
+     but got type:
+
+         dynamic()
+
+     where "recorded_event" was given the type:
+
+         # type: dynamic()
+         # from: lib/event_store/streams/stream.ex
+         {recorded_event, index}
+
+     when defining the variable "recorded_event", you must also pattern match on "%EventStore.RecordedEvent{}"
+
+     type warning found at:
+     │
+ 160 │       %RecordedEvent{
+     │       ~
+     │
+     └─ lib/event_store/streams/stream.ex:160:7: EventStore.Streams.Stream.prepare_events/4
+
+    warning: a struct for EventStore.Subscriptions.SubscriptionFsm is expected on struct update:
+
+        %EventStore.Subscriptions.SubscriptionFsm{fsm | data: new_data}
+
+    but got type:
+
+        dynamic()
+
+    where "fsm" (context Fsm) was given the type:
+
+        # type: dynamic()
+        # from: lib/event_store/subscriptions/subscription_fsm.ex:8
+        fsm
+
+    when defining the variable "fsm", you must also pattern match on "%EventStore.Subscriptions.SubscriptionFsm{}"
+
+    type warning found at:
+    │
+  8 │   use Fsm, initial_state: :initial, initial_data: %SubscriptionState{}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/event_store/subscriptions/subscription_fsm.ex:8: EventStore.Subscriptions.SubscriptionFsm.handle_action_response/2
+
+    warning: a struct for EventStore.Subscriptions.SubscriptionFsm is expected on struct update:
+
+        %EventStore.Subscriptions.SubscriptionFsm{fsm | state: next_state}
+
+    but got type:
+
+        dynamic()
+
+    where "fsm" (context Fsm) was given the type:
+
+        # type: dynamic()
+        # from: lib/event_store/subscriptions/subscription_fsm.ex:8
+        fsm
+
+    when defining the variable "fsm", you must also pattern match on "%EventStore.Subscriptions.SubscriptionFsm{}"
+
+    type warning found at:
+    │
+  8 │   use Fsm, initial_state: :initial, initial_data: %SubscriptionState{}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/event_store/subscriptions/subscription_fsm.ex:8: EventStore.Subscriptions.SubscriptionFsm.handle_action_response/2
+
+    warning: this clause of defp change_state/2 is never used (or it will always fail/warn when invoked)
+    │
+  8 │   use Fsm, initial_state: :initial, initial_data: %SubscriptionState{}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/event_store/subscriptions/subscription_fsm.ex:8: EventStore.Subscriptions.SubscriptionFsm.change_state/2
+
+Generated eventstore app
+==> ecto_sql
+Compiling 25 files (.ex)
+Generated ecto_sql app
+==> eventstore_spike
+Compiling 3 files (.ex)
+Generated eventstore_spike app
+
+real	0m16,102s
+user	0m30,330s
+sys	0m5,879s
