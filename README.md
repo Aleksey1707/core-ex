@@ -278,7 +278,10 @@ end
      poll_interval_ms: duration.("ES_PROJECTIONS_POLL_INTERVAL", "1s"),
      retry_min_ms: duration.("ES_PROJECTIONS_RETRY_MIN", "1s"),
      retry_max_ms: duration.("ES_PROJECTIONS_RETRY_MAX", "30s"),
-     shutdown: duration.("ES_PROJECTIONS_SHUTDOWN", "30s")
+     shutdown: duration.("ES_PROJECTIONS_SHUTDOWN", "30s"),
+     await_min_ms: duration.("ES_PROJECTIONS_AWAIT_MIN", "10ms"),
+     await_max_ms: duration.("ES_PROJECTIONS_AWAIT_MAX", "100ms"),
+     notifications: System.get_env("ES_PROJECTIONS_NOTIFICATIONS", "true") == "true"
 
    # lib/my_app/projections.ex
    defmodule MyApp.Projections do
@@ -295,6 +298,12 @@ end
    `enabled: false` — дерево не стартует (`:ignore`); так ставится в `config/test.exs` вместе с
    `await: :inline`: тест прогоняет проекцию сам — `Core.Es.Projection.Test.run_until_idle/2`, а
    `Core.Es.Projection.await/4` в usecase прогоняет её в процессе теста.
+
+   `notifications:` — сигнал чекпоинта между нодами: пачка шлёт `NOTIFY`, слушатель ноды держит
+   по соединению на каждый различный `repo:` проекций — учтите их в лимитах базы и пулера. Одна
+   нода — `false`: сигнала внутри ноды хватает. За pgbouncer в transaction mode `LISTEN` через
+   пулер уведомлений не получает — keyword с прямым хостом, опции соединения поверх
+   `repo.config()`: `notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST")]`.
 
    Процесс event-sourced агрегата (`use Core.Es.Aggregate.Process`) — элемент `{Agg.Process,
    enabled: …}` на агрегат; опции и дефолты — в moduledoc `Core.Es.Aggregate.Process`. `enabled:`

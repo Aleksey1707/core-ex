@@ -11,9 +11,11 @@ defmodule Core.Es.Projection.Supervisor do
       ]
 
   Внутри — `rest_for_one`: `Core.Es.Projection.Registry` → `one_for_one` читателей, по одному на
-  проекцию под именем её модуля. Пачки одной проекции на разных нодах разводит блокировка пачки
-  (`Core.Es.Projection`, «Пачка»), поэтому дерево стоит на всех нодах. Цикл читателя, backoff и
-  telemetry — `Core.Es.Projection.Reader`.
+  проекцию под именем её модуля, → `one_for_one` слушателей канала сигнала чекпоинта
+  (`Core.Es.Projection.Listener`), по одному на каждый различный `repo:` проекций. Падение
+  слушателя читателей не трогает, падение Registry перезапускает всех. Пачки одной проекции на
+  разных нодах разводит блокировка пачки (`Core.Es.Projection`, «Пачка»), поэтому дерево стоит на
+  всех нодах. Цикл читателя, backoff и telemetry — `Core.Es.Projection.Reader`.
 
   ## Opts
 
@@ -25,11 +27,17 @@ defmodule Core.Es.Projection.Supervisor do
   - `retry_min_ms:` — первая задержка повтора после отказа пачки, по умолчанию 1 000
   - `retry_max_ms:` — предел её удвоения, по умолчанию 30 000
   - `shutdown:` — сколько супервизор ждёт конца пачки при остановке читателя, по умолчанию 30 000
-  - `await:` — как ждёт `Core.Es.Projection.await/4`: `:poll` (по умолчанию) — опрос чекпоинта,
+  - `await:` — как ждёт `Core.Es.Projection.await/4`: `:poll` (по умолчанию) — сигнал и шаги чекпоинта,
     `:inline` — прогон проекции в вызывающем процессе, только при `enabled: false` (тестовое дерево)
+  - `await_min_ms:` — первый шаг опроса чекпоинта при `await: :poll`, по умолчанию 10
+  - `await_max_ms:` — предел его удвоения, по умолчанию 100
+  - `notifications:` — сигнал чекпоинта между нодами: `true` (по умолчанию) — слушатели на
+    соединении из `repo.config()`, keyword — опции соединения Postgrex поверх `repo.config()`,
+    `false` — ни слушателей, ни `NOTIFY` пачек ноды
 
   Числа — положительные целые, в миллисекундах. Опции общие на все проекции; config и env
-  библиотека не читает.
+  библиотека не читает. `notifications:` в опции читателей не передаётся: пачка берёт его из
+  отметки.
 
   ## Старт
 
@@ -47,26 +55,41 @@ defmodule Core.Es.Projection.Supervisor do
 
   `Core.Es.Store.append/5` после commit будит читателей типа агрегата пачки через Registry. Нода с
   `enabled: false` не будит: события её записи читатели других нод находят опросом.
+
+  ## Сигнал чекпоинта между нодами
+
+  Пачка шлёт `NOTIFY` в своей транзакции, слушатель каждой ноды переводит уведомление в сигнал
+  чекпоинта для ожидающих на ней (протокол — `Core.Es.Projection.Listener`). Слушатель держит своё
+  соединение: нода открывает по соединению на каждый различный `repo:` проекций, и их учитывают
+  лимиты соединений базы и пулера. `LISTEN` через pgbouncer в transaction mode уведомлений не
+  получает — keyword с прямым хостом ведёт слушателя в обход пулера. Приложению на одной ноде
+  хватает сигнала внутри VM: `notifications: false` снимает и соединение, и блокировку коммита,
+  которую `NOTIFY` берёт и без слушателей (`docs/adr/0013-checkpoint-signal-listen-notify.md`).
+  Нода с `enabled: false` соединений не открывает.
   """
 
   use Supervisor
 
   alias Core.Es.Projection
+  alias Core.Es.Projection.Listener
   alias Core.Es.Projection.Reader
+  alias Core.Es.Projection.Supervisor.Mark
   alias Core.Helper.StartOpts
 
   require Logger
 
   @label "Es.Projection.Supervisor"
-  @mark_key {__MODULE__, :mark}
   @defaults [
     batch_size: 100,
     idle_min_ms: 50,
     poll_interval_ms: 1_000,
     retry_min_ms: 1_000,
     retry_max_ms: 30_000,
-    shutdown: 30_000
+    shutdown: 30_000,
+    await_min_ms: 10,
+    await_max_ms: 100
   ]
+  @reader_keys ~w(batch_size idle_min_ms poll_interval_ms retry_min_ms retry_max_ms shutdown)a
 
   @typedoc "Проверенные опции дерева — они же отметка старта."
   @type options :: %{
@@ -78,7 +101,10 @@ defmodule Core.Es.Projection.Supervisor do
           retry_min_ms: pos_integer(),
           retry_max_ms: pos_integer(),
           shutdown: pos_integer(),
-          await: :poll | :inline
+          await: :poll | :inline,
+          await_min_ms: pos_integer(),
+          await_max_ms: pos_integer(),
+          notifications: boolean() | keyword()
         }
 
   @typedoc "Элемент `watch:` плагина `Core.Workers.PromEx`."
@@ -94,7 +120,7 @@ defmodule Core.Es.Projection.Supervisor do
 
   @impl true
   def init(%{projections: projections} = options) do
-    reader_opts = Map.to_list(Map.drop(options, ~w(projections enabled await)a))
+    reader_opts = Map.to_list(Map.take(options, @reader_keys))
     readers = Enum.map(projections, &{Reader, [projection: &1] ++ reader_opts})
 
     children = [
@@ -104,6 +130,7 @@ defmodule Core.Es.Projection.Supervisor do
         start: {Supervisor, :start_link, [readers, [strategy: :one_for_one]]},
         type: :supervisor
       }
+      | listeners(projections, options.notifications)
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
@@ -125,11 +152,6 @@ defmodule Core.Es.Projection.Supervisor do
     end
   end
 
-  @doc false
-  @spec mark() :: options() | nil
-
-  def mark, do: :persistent_term.get(@mark_key, nil)
-
   # ---
 
   defp options!(opts) do
@@ -137,11 +159,23 @@ defmodule Core.Es.Projection.Supervisor do
     enabled = StartOpts.boolean!(@label, opts, :enabled)
     await = StartOpts.one_of!(@label, opts, :await, ~w(poll inline)a, :poll)
     ensure_await!(enabled, await)
+    notifications = notifications!(Keyword.get(opts, :notifications, true))
     ensure_unique_names!(Enum.map(projections, &declaration!/1))
 
     @defaults
     |> Map.new(fn {key, default} -> {key, StartOpts.pos_integer!(@label, opts, key, default)} end)
-    |> Map.merge(%{projections: projections, enabled: enabled, await: await})
+    |> Map.merge(%{
+      projections: projections,
+      enabled: enabled,
+      await: await,
+      notifications: notifications
+    })
+  end
+
+  defp notifications!(value) do
+    if is_boolean(value) or Keyword.keyword?(value),
+      do: value,
+      else: StartOpts.raise_invalid!(@label, :notifications, "true, false или keyword", value)
   end
 
   defp ensure_await!(true, :inline) do
@@ -180,26 +214,44 @@ defmodule Core.Es.Projection.Supervisor do
   end
 
   defp start(%{enabled: false} = options) do
-    put_mark(options)
+    :ok = Mark.put(options)
     Logger.info("супервизор проекций: отключён: projections=#{names(options.projections)}")
     :ignore
   end
 
   defp start(%{projections: []} = options) do
-    put_mark(options)
+    :ok = Mark.put(options)
     Logger.info("супервизор проекций: пропущен: нет проекций")
     :ignore
   end
 
   defp start(options) do
     with {:ok, _pid} = started <- Supervisor.start_link(__MODULE__, options) do
-      put_mark(options)
+      :ok = Mark.put(options)
       Logger.info("супервизор проекций: запущен: projections=#{names(options.projections)}")
       started
     end
   end
 
-  defp put_mark(options), do: :persistent_term.put(@mark_key, options)
+  defp listeners(_projections, false), do: []
+
+  defp listeners(projections, true), do: listeners(projections, [])
+
+  defp listeners(projections, connection) do
+    listeners =
+      projections
+      |> Enum.map(& &1.__es_projection__().dao)
+      |> Enum.uniq()
+      |> Enum.map(&{Listener, repo: &1, connection: connection})
+
+    [
+      %{
+        id: :listeners,
+        start: {Supervisor, :start_link, [listeners, [strategy: :one_for_one]]},
+        type: :supervisor
+      }
+    ]
+  end
 
   defp names(projections), do: Enum.map_join(projections, ",", &name/1)
 

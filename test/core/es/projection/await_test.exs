@@ -26,13 +26,14 @@ defmodule Core.Es.Projection.AwaitTest do
   @projection EsFixture.Projection
   @account_repo Config.repo!(Account.Repo)
   @entity_repo Config.repo!(StateStoredFixture.Repo)
-  @mark_key {Es.Projection.Supervisor, :mark}
+  @mark_key Es.Projection.Supervisor.Mark
   @quiet [
     idle_min_ms: 60_000,
     poll_interval_ms: 60_000,
     retry_min_ms: 60_000,
     retry_max_ms: 60_000
   ]
+  @distant_steps [await_min_ms: 60_000, await_max_ms: 60_000]
 
   defmodule AccountOnly do
     @moduledoc false
@@ -89,11 +90,14 @@ defmodule Core.Es.Projection.AwaitTest do
     handler_id = "es-projection-await-#{inspect(self())}"
 
     :ok =
-      :telemetry.attach(
+      :telemetry.attach_many(
         handler_id,
-        Telemetry.event([:es, :projection, :await]),
-        fn _event, measurements, metadata, test_pid ->
-          send(test_pid, {:await, metadata, measurements})
+        [
+          Telemetry.event([:es, :projection, :await]),
+          Telemetry.event([:es, :projection, :cycle])
+        ],
+        fn event, measurements, metadata, test_pid ->
+          send(test_pid, {List.last(event), metadata, measurements})
         end,
         self()
       )
@@ -170,15 +174,88 @@ defmodule Core.Es.Projection.AwaitTest do
   end
 
   describe "await: :poll" do
-    test "читатель дерева обрабатывает запись после commit — :ok" do
+    test "запись через репозиторий — сигнал чекпоинта после пачки читателя, :ok без шага ожидания" do
       # Строки чекпоинта нет — ожидание отдало бы пересборку до первой пачки читателя.
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      start_tree!([@projection], @distant_steps)
+      reader = Process.whereis(@projection)
+      account = Account.ID.new()
+
+      # `wake` записи ждёт в очереди читателя, пока ожидание не застало чекпоинт отстающим.
+      :ok = :sys.suspend(reader)
+      write!(@account_repo, account, [open("Счёт")])
+      resumed = after_checkpoint_read(fn -> :sys.resume(reader) end)
+
+      assert :ok = Es.Projection.await(@projection, Account, account, 5_000)
+      assert :ok = Task.await(resumed)
+      assert rows() == [{"account", dump(account), "Счёт", false}]
+
+      # Сигнал пачки после ожидания в mailbox теста не попадает.
+      assert_receive {:cycle, %{result: :processed}, _measurements}, 1_000
+      write!(@account_repo, account, [close()])
+      assert_receive {:cycle, %{result: :processed}, _measurements}, 1_000
+      assert leftovers() == []
+    end
+
+    test "событие без сигнала записи — шаг ожидания будит читателя, :ok" do
       assert :ok = Es.Projection.Test.run_until_idle(@projection)
       start_tree!([@projection])
       account = Account.ID.new()
-      write!(@account_repo, account, [open("Счёт")])
+
+      # Вставка мимо `append`: `wake` нет, а первый тик читателя — через 60 000 мс.
+      {1, nil} = TestRepo.insert_all(Es.Store.Schema, [event_row(account)])
 
       assert :ok = Es.Projection.await(@projection, Account, account, 5_000)
-      assert rows() == [{"account", dump(account), "Счёт", false}]
+    end
+
+    test "таймаут — сигналы во время и после ожидания в mailbox теста не остаются" do
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      start_tree!([@projection], @distant_steps)
+      account = Account.ID.new()
+
+      # Вставка мимо `append`: читателя не будят ни запись, ни шаг ожидания.
+      {1, nil} = TestRepo.insert_all(Es.Store.Schema, [event_row(account)])
+
+      # Сигнал уходит после чтения цели и доставляется, пока ожидание читает чекпоинт, — таймаут 0 его
+      # уже не принимает. На снятый к тому моменту alias runtime отбросил бы его и без вычерпывания.
+      :ok =
+        on_query(~s(FROM "es_events"), fn ->
+          Es.Projection.Registry.signal_checkpoint("es_fixture")
+        end)
+
+      assert {:error, %Error{code: :projection_timeout}} =
+               Es.Projection.await(@projection, Account, account, 0)
+
+      :ok = Es.Projection.Registry.wake("account")
+      assert_receive {:cycle, %{result: :processed}, _measurements}, 1_000
+      assert leftovers() == []
+    end
+
+    @tag :capture_log
+    test "пачка читателя начала пересборку — сигнал чекпоинта, сразу :projection_rebuilding" do
+      assert :ok = Es.Projection.Test.run_until_idle(Failing)
+      account = Account.ID.new()
+      # Дерева ещё нет: `append` читателя не будит.
+      write!(@account_repo, account, [open("Счёт")])
+      start_tree!([Failing], @distant_steps)
+
+      # Строка удаляется, когда ожидание застало её отстающей: пересборку начинает пачка читателя, а
+      # следующая отказывает на событии и чекпоинт не двигает.
+      rebuilt =
+        after_checkpoint_read(fn ->
+          :ok = delete_checkpoint!("await_failing")
+          Es.Projection.Registry.wake("account")
+        end)
+
+      assert {:error, %Error{code: :projection_rebuilding}} =
+               Es.Projection.await(Failing, Account, account, 5_000)
+
+      assert :ok = Task.await(rebuilt)
+
+      assert_receive {:cycle, %{projection: "await_failing", result: :retry}, _measurements},
+                     1_000
+
+      assert leftovers() == []
     end
 
     test "пустой поток и чекпоинт не ниже последнего события потока — :ok без ожидания" do
@@ -211,6 +288,40 @@ defmodule Core.Es.Projection.AwaitTest do
                       %{duration: duration}}
 
       assert duration >= System.convert_time_unit(50, :millisecond, :native)
+    end
+
+    test "шаг опроса — от await_min_ms дерева с удвоением" do
+      mark!([@projection], await_min_ms: 50, await_max_ms: 60_000)
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      write!(@account_repo, account, [close()])
+
+      # Проверки на 0, 50, 150 и 350 мс, следующий шаг — позже таймаута; долгое чтение их сокращает.
+      {result, reads} =
+        count_checkpoint_reads(fn ->
+          Es.Projection.await(@projection, Account, account, 500)
+        end)
+
+      assert {:error, %Error{code: :projection_timeout}} = result
+      assert reads in 2..4
+    end
+
+    test "шаг опроса — удвоение ограничено await_max_ms дерева" do
+      mark!([@projection], await_min_ms: 10, await_max_ms: 10)
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      write!(@account_repo, account, [close()])
+
+      # Шаг 10 мс — до 50 проверок за 500 мс; с пределом удвоения 100 мс их не больше 8.
+      {result, reads} =
+        count_checkpoint_reads(fn ->
+          Es.Projection.await(@projection, Account, account, 500)
+        end)
+
+      assert {:error, %Error{code: :projection_timeout}} = result
+      assert reads > 8
     end
 
     test "пересборка — сразу :projection_rebuilding: строки нет, версия ниже, чекпоинт ниже цели" do
@@ -359,8 +470,8 @@ defmodule Core.Es.Projection.AwaitTest do
     :ok
   end
 
-  defp start_tree!(projections) do
-    opts = [projections: projections, enabled: true] ++ @quiet
+  defp start_tree!(projections, opts \\ []) do
+    opts = [projections: projections, enabled: true] ++ @quiet ++ opts
     {:ok, _pid} = start_supervised({Es.Projection.Supervisor, opts})
     :ok
   end
@@ -424,16 +535,7 @@ defmodule Core.Es.Projection.AwaitTest do
 
   # Событие потока, закоммиченное другим соединением в обход sandbox; строку убирает `on_exit`.
   defp commit_event!(account) do
-    row = %{
-      aggregate_type: "account",
-      aggregate_id: dump(account),
-      aggregate_version: 1,
-      event_id: dump(Es.Event.ID.new()),
-      tag: "account.frozen",
-      payload: nil,
-      by_id: dump(EsFixture.UserID.new()),
-      at: DateTime.utc_now(:second)
-    }
+    row = event_row(account)
 
     in_other_connection(fn -> {1, nil} = TestRepo.insert_all(Es.Store.Schema, [row]) end)
 
@@ -448,14 +550,94 @@ defmodule Core.Es.Projection.AwaitTest do
     :ok
   end
 
+  # Первое событие потока счёта; тег проекция пропускает, но чекпоинт через него проходит.
+  defp event_row(account) do
+    %{
+      aggregate_type: "account",
+      aggregate_id: dump(account),
+      aggregate_version: 1,
+      event_id: dump(Es.Event.ID.new()),
+      tag: "account.frozen",
+      payload: nil,
+      by_id: dump(EsFixture.UserID.new()),
+      at: DateTime.utc_now(:second)
+    }
+  end
+
   defp in_other_connection(fun) do
     Task.async(fn -> Sandbox.unboxed_run(TestRepo, fun) end)
     |> Task.await()
   end
 
+  # Чтения строки чекпоинта процессом теста за время `fun`.
+  defp count_checkpoint_reads(fun) do
+    test = self()
+    ref = make_ref()
+    :ok = on_query("FROM es_checkpoints", fn -> send(test, {ref, :read}) end)
+    {fun.(), drain_reads(ref, 0)}
+  end
+
+  defp drain_reads(ref, count) do
+    receive do
+      {^ref, :read} -> drain_reads(ref, count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  # `fun` в отдельном процессе после первого чтения строки чекпоинта процессом теста: ожидание уже
+  # подписано на сигнал и застало чекпоинт отстающим.
+  defp after_checkpoint_read(fun) do
+    ref = make_ref()
+
+    task =
+      Task.async(fn ->
+        receive do
+          ^ref -> fun.()
+        end
+      end)
+
+    :ok = on_query("FROM es_checkpoints", fn -> send(task.pid, ref) end)
+    task
+  end
+
+  # `fun` в процессе теста после каждого его запроса с `fragment` в тексте — до конца теста.
+  defp on_query(fragment, fun) do
+    test = self()
+    handler = {__MODULE__, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:core, :test_repo, :query],
+        fn _event, _measurements, %{query: query}, _config ->
+          if self() == test and String.contains?(query, fragment), do: fun.()
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+  end
+
+  # Mailbox теста без telemetry ожидания и цикла читателя: всё прочее — сигналы, оставленные await/4.
+  defp leftovers do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    Enum.reject(
+      messages,
+      &match?({event, _metadata, _measurements} when event in ~w(await cycle)a, &1)
+    )
+  end
+
   defp insert_checkpoint!(name, version) do
     sql = "INSERT INTO es_checkpoints (name, version) VALUES ($1, $2)"
     %Postgrex.Result{num_rows: 1} = TestRepo.query!(sql, [name, version])
+    :ok
+  end
+
+  defp delete_checkpoint!(name) do
+    sql = "DELETE FROM es_checkpoints WHERE name = $1"
+    %Postgrex.Result{num_rows: 1} = TestRepo.query!(sql, [name])
     :ok
   end
 end

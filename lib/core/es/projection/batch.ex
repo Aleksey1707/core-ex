@@ -3,12 +3,17 @@ defmodule Core.Es.Projection.Batch do
   Транзакция пачки проекции — тело `Core.Es.Projection.run_once/2` и цикла
   `Core.Es.Projection.Reader`: блокировка, чекпоинт, события после него, `project/1` и CAS
   чекпоинта. Шаги и исходы — в `@moduledoc` `Core.Es.Projection`.
+
+  После сдвига чекпоинта или старта с начала истории пачка в той же транзакции шлёт уведомление в
+  канал сигнала чекпоинта; отказ пачки откатывает и его. Протокол канала и условие отправки — в
+  `@moduledoc` `Core.Es.Projection.Listener`.
   """
 
   alias Core.Error
   alias Core.Es
   alias Core.Es.Projection
   alias Core.Es.Projection.Checkpoint
+  alias Core.Es.Projection.Listener
   alias Core.Helper.Transact
   alias Core.Otel
 
@@ -83,6 +88,7 @@ defmodule Core.Es.Projection.Batch do
       with :ok <- callback(declaration, :clear, nil, fn -> projection.clear() end),
            target = Es.Store.last_position(declaration.dao, Map.keys(declaration.streams)),
            :ok <- Checkpoint.start(declaration, checkpoint, target) do
+        :ok = Listener.notify(declaration)
         log_started(declaration, checkpoint, target)
         {:ok, nil}
       end
@@ -139,6 +145,7 @@ defmodule Core.Es.Projection.Batch do
 
     with :ok <- project_each(projection, declaration, rows),
          :ok <- Checkpoint.move(declaration, checkpoint, to) do
+      :ok = Listener.notify(declaration)
       if reached?(checkpoint, to), do: log_reached(declaration)
       {:ok, to}
     end
