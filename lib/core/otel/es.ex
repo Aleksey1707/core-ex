@@ -43,6 +43,8 @@ defmodule Core.Otel.Es do
   @attr_execute_mode "core.es.execute.mode"
   @attr_retries "core.es.retries"
 
+  # ===== пачка проекции =====
+
   @doc "Выполнить `fun` — пачку проекции — в корневом span'е `project <имя проекции>`."
   @spec project(String.t(), pos_integer(), (-> result)) :: result when result: var
 
@@ -101,6 +103,8 @@ defmodule Core.Otel.Es do
   defp put_event_id(attributes, nil), do: attributes
   defp put_event_id(attributes, event_id), do: Map.put(attributes, @attr_event_id, event_id)
 
+  # ===== ожидание проекции =====
+
   @doc """
   Выполнить `fun` — ожидание проекции после записи — в span'е `await <имя проекции>` внутри
   трейса вызывающего; `{:error, _}` результата отмечается `Core.Otel.record_error/1`.
@@ -128,6 +132,8 @@ defmodule Core.Otel.Es do
     :ok = Otel.record_error(error)
     result
   end
+
+  # ===== команда агрегата =====
 
   @doc """
   Выполнить `fun` — команду `command` агрегата — в span'е `execute <тип>` внутри трейса

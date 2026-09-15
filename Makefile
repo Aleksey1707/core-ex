@@ -2,8 +2,8 @@ DOCKER ?= podman
 
 # Порядок совпадает с .pre-commit-config.yaml.
 .PHONY: default
-default: boundary-check rules-check format-check compile compile-no-optional deps-clean xref \
-         dialyzer test credo audit
+default: boundary-check rules-check layout-check format-check compile compile-no-optional \
+         deps-clean xref dialyzer test credo audit
 
 # Главный инвариант: библиотека не знает приложения-потребителя (`10-architecture.md`).
 .PHONY: boundary-check
@@ -14,6 +14,11 @@ boundary-check:
 .PHONY: rules-check
 rules-check:
 	elixir scripts/rules_lint.exs
+
+# Разделители внутри модуля: `# ---` и `# ===== <имя> =====` (`docs/rules/20-agreements.md`).
+.PHONY: layout-check
+layout-check:
+	elixir scripts/layout_lint.exs
 
 .PHONY: iex
 iex:

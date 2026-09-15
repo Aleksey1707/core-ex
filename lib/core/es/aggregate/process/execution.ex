@@ -22,6 +22,8 @@ defmodule Core.Es.Aggregate.Process.Execution do
   """
   @type outcome :: {:ok, struct()} | {:error, term()} | :expired
 
+  # ===== исполнение =====
+
   @doc """
   Исполнить команду `call` от состояния `cached` (`nil` — прочитать `get`, иначе дочитать
   `refresh`): исход и число повторов после конфликта версии. Дедлайн `nil` не проверяется.
@@ -116,6 +118,8 @@ defmodule Core.Es.Aggregate.Process.Execution do
 
     {{:error, error}, retries}
   end
+
+  # ===== результат =====
 
   @doc "Результат команды для вызывающего: `:ok` или её ошибка."
   @spec result({:ok, struct()} | {:error, term()}) :: :ok | {:error, term()}

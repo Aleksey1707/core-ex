@@ -154,6 +154,8 @@ defmodule Core.Es.Aggregate.Process do
   @typedoc "Элемент `watch:` плагина `Core.Workers.PromEx`."
   @type watch_item :: %{component: String.t(), name: module()}
 
+  # ===== объявление =====
+
   @doc "Объявить процесс event-sourced агрегата."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
@@ -231,6 +233,8 @@ defmodule Core.Es.Aggregate.Process do
   # процесса: `safe_concat` непригоден — это имена процессов, а не модулей, и атомов их ещё нет.
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   defp child_name(process, suffix), do: Module.concat(process, suffix)
+
+  # ===== команда =====
 
   @doc false
   @spec execute(module(), cfg(), call(), keyword()) :: :ok | {:error, Error.t()}
@@ -328,6 +332,8 @@ defmodule Core.Es.Aggregate.Process do
   defp result_tag({:error, %Error{code: :version_mismatch}}), do: :version_mismatch
   defp result_tag({:error, _error}), do: :error
 
+  # ===== запуск =====
+
   @doc false
   @spec child_spec(module(), cfg(), keyword()) :: Supervisor.child_spec()
 
@@ -339,6 +345,21 @@ defmodule Core.Es.Aggregate.Process do
 
   def start_link(process, cfg, opts) when is_atom(process) and is_list(opts),
     do: start(process, cfg, options!(opts))
+
+  @doc false
+  @spec watch_list(module(), cfg(), keyword()) :: [watch_item()]
+
+  def watch_list(process, cfg, opts) when is_atom(process) and is_list(opts) do
+    case options!(opts) do
+      %{enabled: false} -> []
+      %{enabled: true} -> [%{component: "es_aggregate_process:#{cfg.type}", name: process}]
+    end
+  end
+
+  @doc false
+  @spec mark(module()) :: options() | nil
+
+  def mark(process) when is_atom(process), do: :persistent_term.get(mark_key(process), nil)
 
   # ---
 
@@ -369,23 +390,6 @@ defmodule Core.Es.Aggregate.Process do
       started
     end
   end
-
-  @doc false
-  @spec watch_list(module(), cfg(), keyword()) :: [watch_item()]
-
-  def watch_list(process, cfg, opts) when is_atom(process) and is_list(opts) do
-    case options!(opts) do
-      %{enabled: false} -> []
-      %{enabled: true} -> [%{component: "es_aggregate_process:#{cfg.type}", name: process}]
-    end
-  end
-
-  @doc false
-  @spec mark(module()) :: options() | nil
-
-  def mark(process) when is_atom(process), do: :persistent_term.get(mark_key(process), nil)
-
-  # ---
 
   defp mark_key(process), do: {__MODULE__, process}
 end

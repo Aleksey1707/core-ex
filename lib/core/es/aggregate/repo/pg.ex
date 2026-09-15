@@ -121,6 +121,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @optional_keys ~w(repo codec snapshot)a
   @stream_types %{index: :integer, aggregate_id: :binary_id, after_version: :integer}
 
+  # ===== объявление =====
+
   @doc "Реализовать write-репозиторий event-sourced агрегата на хранилище событий."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
@@ -232,6 +234,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     end
   end
 
+  # ===== чтение =====
+
   @doc false
   @spec get(map(), struct(), Version.expected(), Context.t(), keyword()) ::
           {:ok, struct()} | {:error, Error.t()}
@@ -245,6 +249,13 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts),
     do: load(cfg, :get_many, initial_states!(cfg, pairs), opts, &verify_versions(cfg, &1, pairs))
+
+  @doc false
+  @spec refresh(map(), struct(), Version.expected(), Context.t(), keyword()) ::
+          {:ok, struct()} | {:error, Error.t()}
+
+  def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts),
+    do: load_stream(cfg, :refresh, state, version, opts)
 
   # ---
 
@@ -277,36 +288,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       details -> {:error, version_mismatch(cfg, details)}
     end
   end
-
-  @doc false
-  @spec append(map(), [Es.Event.t()], Context.t(), keyword()) :: :ok | {:error, Error.t()}
-
-  def append(cfg, events, context, opts)
-
-  def append(_cfg, [], %Context{}, opts) when is_list(opts), do: :ok
-
-  def append(cfg, [_ | _] = events, %Context{} = context, opts) when is_list(opts),
-    do: Transact.run(cfg.dao, fn -> write(cfg, events, context, opts) end, opts)
-
-  # ---
-
-  defp write(cfg, events, context, opts) do
-    mismatch = &version_mismatch(cfg, &1)
-
-    with {:ok, records} <- cfg.outbox.from_events(events),
-         :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true) do
-      Config.outbox_repo().append(records, context, opts)
-    end
-  end
-
-  @doc false
-  @spec refresh(map(), struct(), Version.expected(), Context.t(), keyword()) ::
-          {:ok, struct()} | {:error, Error.t()}
-
-  def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts),
-    do: load_stream(cfg, :refresh, state, version, opts)
-
-  # ---
 
   defp load_stream(cfg, op, state, version, opts),
     do: load(cfg, op, [state], opts, fn [state] -> verify_version(cfg, state, version) end)
@@ -498,9 +479,34 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     }
   end
 
-  defp version_mismatch(cfg, detail),
-    do: cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)
-
   defp result_tag({:ok, _}), do: :ok
   defp result_tag({:error, %Error{code: :version_mismatch}}), do: :version_mismatch
+
+  # ===== запись =====
+
+  @doc false
+  @spec append(map(), [Es.Event.t()], Context.t(), keyword()) :: :ok | {:error, Error.t()}
+
+  def append(cfg, events, context, opts)
+
+  def append(_cfg, [], %Context{}, opts) when is_list(opts), do: :ok
+
+  def append(cfg, [_ | _] = events, %Context{} = context, opts) when is_list(opts),
+    do: Transact.run(cfg.dao, fn -> write(cfg, events, context, opts) end, opts)
+
+  # ---
+
+  defp write(cfg, events, context, opts) do
+    mismatch = &version_mismatch(cfg, &1)
+
+    with {:ok, records} <- cfg.outbox.from_events(events),
+         :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true) do
+      Config.outbox_repo().append(records, context, opts)
+    end
+  end
+
+  # ===== общее =====
+
+  defp version_mismatch(cfg, detail),
+    do: cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)
 end

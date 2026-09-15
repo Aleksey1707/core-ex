@@ -59,6 +59,8 @@ defmodule Core.Es.Aggregate.Process.Server do
           state: struct() | nil
         }
 
+  # ===== вызов =====
+
   @doc """
   Исполнить команду `call` в процессе агрегата: результат, число повторов и ожидание в очереди.
 
@@ -123,6 +125,8 @@ defmodule Core.Es.Aggregate.Process.Server do
   end
 
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  # ===== процесс =====
 
   @doc """
   Спецификация для `DynamicSupervisor`: `restart: :temporary` — упавший или ушедший процесс не
@@ -238,6 +242,8 @@ defmodule Core.Es.Aggregate.Process.Server do
     end
   end
 
+  # ===== остановка =====
+
   @doc false
   @spec handle_info(term(), t()) :: {:noreply, t(), pos_integer()} | {:stop, :normal, t()}
 
@@ -265,7 +271,7 @@ defmodule Core.Es.Aggregate.Process.Server do
   # Исключение в команде: транзакция откатилась, вызывающий получает exit.
   def terminate(_reason, server), do: emit(server, :stop, %{reason: :error})
 
-  # ---
+  # ===== общее =====
 
   defp emit(server, event, metadata) do
     :telemetry.execute(

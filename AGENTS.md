@@ -76,9 +76,10 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 ## Команды
 
 ```bash
-make                     # boundary-check → rules-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
+make                     # boundary-check → rules-check → layout-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
 make boundary-check      # главный инвариант: библиотека не знает потребителя
 make rules-check         # свод docs/rules против стандарта 00-index.md
+make layout-check        # разделители внутри модуля: # --- и # ===== <имя> =====
 make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
 make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
 make infra-down

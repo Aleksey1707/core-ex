@@ -24,6 +24,8 @@ defmodule Core.Repo.Sc do
 
   @context_key :shadow_copy
 
+  # ===== таблица =====
+
   @doc "Включить снэпшот-кэш для контекста (создаёт приватную ETS-таблицу)."
   @spec init(Context.t()) :: Context.t()
 
@@ -80,6 +82,8 @@ defmodule Core.Repo.Sc do
     end
   end
 
+  # ===== запись =====
+
   @doc """
   Зафиксировать эталон сущности: состояние на момент последнего чтения или успешной записи.
 
@@ -109,6 +113,8 @@ defmodule Core.Repo.Sc do
     :ok
   end
 
+  # ===== чтение =====
+
   @doc """
   Вернуть ранее зафиксированный эталон сущности `module` по id.
 
@@ -135,6 +141,8 @@ defmodule Core.Repo.Sc do
       [] -> nil
     end
   end
+
+  # ===== общее =====
 
   defp alive?(table), do: :ets.info(table) != :undefined
 end

@@ -27,6 +27,8 @@ defmodule Core.EsAggregateRepoContract do
   @query_event [:core, :test_repo, :query]
   @query_kinds ~w(all select insert)a
 
+  # ===== набор =====
+
   @doc "Подключить набор: `use Core.EsAggregateRepoContract, impl: Account.Repo.Pg`."
   defmacro __using__(impl: impl) do
     quote do
@@ -300,6 +302,8 @@ defmodule Core.EsAggregateRepoContract do
     end
   end
 
+  # ===== команды =====
+
   @doc "Команда «открыть счёт»."
   @spec open(String.t()) :: Cmd.Open.t()
 
@@ -326,6 +330,8 @@ defmodule Core.EsAggregateRepoContract do
 
   defp at, do: Es.Event.At.new!(~U[2026-09-01 10:00:00Z])
 
+  # ===== исполнение =====
+
   @doc "Исполнить команду от состояния: события и состояние после них."
   @spec execute!(Account.t(), Cmd.t()) :: {[Es.Event.t()], Account.t()}
 
@@ -345,6 +351,8 @@ defmodule Core.EsAggregateRepoContract do
       state
     end)
   end
+
+  # ===== таблицы =====
 
   @doc "Теги записанных событий потока счёта по возрастанию версии."
   @spec stream_tags(Account.ID.t()) :: [String.t()]
@@ -393,6 +401,8 @@ defmodule Core.EsAggregateRepoContract do
     :ok
   end
 
+  # ===== счёт запросов =====
+
   @doc """
   Результат `fun` и число SQL-запросов, которые процесс теста сделал за время `fun`.
 
@@ -434,6 +444,8 @@ defmodule Core.EsAggregateRepoContract do
       0 -> count
     end
   end
+
+  # ===== dump =====
 
   @doc "Внутренний wire значения — фасадом `Core.Config.codec/0`."
   @spec dump(term()) :: term()

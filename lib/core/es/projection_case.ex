@@ -79,6 +79,8 @@ defmodule Core.Es.ProjectionCase do
           | %{tables: []}
           | %{not_cleared: [{String.t(), pos_integer()}]}
 
+  # ===== объявление =====
+
   @doc "Сгенерировать тесты полноты `project/1` и `clear/0` проекции."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
@@ -133,6 +135,8 @@ defmodule Core.Es.ProjectionCase do
     end
   end
 
+  # ===== полнота project =====
+
   @doc false
   @spec check_project(module(), Path.t()) :: :ok | {:error, missing() | failed() | unhandled()}
 
@@ -145,15 +149,6 @@ defmodule Core.Es.ProjectionCase do
   end
 
   # ---
-
-  # Проверка идёт в транзакции с откатом: savepoint'у нужна явная транзакция — в sandbox вне неё
-  # каждый запрос идёт в своём savepoint Postgrex и снимает вложенные, — а строки read-модели
-  # после проверки не остаются. `run` — `Transact.run/2` или `Savepoint.run/2`: оба откатывают
-  # `{:error, _}`.
-  defp rolled_back(run, dao, fun) do
-    {:error, {:rolled_back, result}} = run.(dao, fn -> {:error, {:rolled_back, fun.()}} end)
-    result
-  end
 
   defp check_clauses(projection, dao, loaded) do
     loaded
@@ -183,6 +178,8 @@ defmodule Core.Es.ProjectionCase do
     _result = projection.project(event)
     true
   end
+
+  # ===== полнота clear =====
 
   @doc false
   @spec check_clear(module(), Path.t()) :: :ok | {:error, missing() | failed() | uncleared()}
@@ -245,6 +242,17 @@ defmodule Core.Es.ProjectionCase do
       [] -> :ok
       not_cleared -> {:error, %{not_cleared: not_cleared}}
     end
+  end
+
+  # ===== общее =====
+
+  # Проверка идёт в транзакции с откатом: savepoint'у нужна явная транзакция — в sandbox вне неё
+  # каждый запрос идёт в своём savepoint Postgrex и снимает вложенные, — а строки read-модели
+  # после проверки не остаются. `run` — `Transact.run/2` или `Savepoint.run/2`: оба откатывают
+  # `{:error, _}`.
+  defp rolled_back(run, dao, fun) do
+    {:error, {:rolled_back, result}} = run.(dao, fn -> {:error, {:rolled_back, fun.()}} end)
+    result
   end
 
   defp load_fixtures(declaration, fixtures) do

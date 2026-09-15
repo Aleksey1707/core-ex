@@ -19,6 +19,8 @@ defmodule Core.Enum do
   @required_keys ~w(name)a
   @optional_keys ~w(values codes)a
 
+  # ===== объявление =====
+
   @doc "Объявить закрытый enum (`name:` + `values:` либо `codes:`)."
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
@@ -234,7 +236,28 @@ defmodule Core.Enum do
     kind
   end
 
+  @doc false
+  @spec type_union([atom()]) :: Macro.t()
+
+  def type_union([first | rest]) do
+    Elixir.Enum.reduce(rest, first, fn atom, acc ->
+      {:|, [], [atom, acc]}
+    end)
+  end
+
   # ---
+
+  defp validate_values!(values) do
+    unless is_list(values) and values != [] and Elixir.Enum.all?(values, &is_atom/1) do
+      raise CompileError, description: "Enum: :values должен быть непустым списком атомов"
+    end
+
+    unless length(values) == length(Elixir.Enum.uniq(values)) do
+      raise CompileError, description: "Enum: :values не должен содержать дублей"
+    end
+
+    values
+  end
 
   defp code_kind!(codes) when is_map(codes) and map_size(codes) > 0 do
     cond do
@@ -249,14 +272,30 @@ defmodule Core.Enum do
       description: "Enum: :codes должен быть непустой картой, получено: #{inspect(codes)}"
   end
 
-  @doc false
-  @spec type_union([atom()]) :: Macro.t()
+  # Коды одного типа: карта, где часть значений целые, а часть строки, делает
+  # `from_code/1` неоднозначным — `"5"` пришлось бы искать и как строку, и как число.
+  defp valid_pair?({value, code}, :integer), do: is_atom(value) and is_integer(code)
+  defp valid_pair?({value, code}, :string), do: is_atom(value) and is_binary(code) and code != ""
 
-  def type_union([first | rest]) do
-    Elixir.Enum.reduce(rest, first, fn atom, acc ->
-      {:|, [], [atom, acc]}
-    end)
+  defp code_kind_error(codes) do
+    "Enum: :codes должен сопоставлять атомам коды одного типа — либо все целые, либо все " <>
+      "непустые строки, получено: #{inspect(codes)}"
   end
+
+  defp validate_unique!(codes) do
+    unique =
+      codes
+      |> Map.values()
+      |> Elixir.Enum.uniq()
+
+    unless length(unique) == map_size(codes) do
+      raise CompileError, description: "Enum: :codes не должен содержать повторяющихся кодов"
+    end
+
+    :ok
+  end
+
+  # ===== разбор кода =====
 
   @doc false
   @spec from_binary_code(module(), String.t(), %{term() => atom()}, code_kind(), String.t()) ::
@@ -295,40 +334,5 @@ defmodule Core.Enum do
       {:ok, value} -> {:ok, value}
       :error -> invalid(module, name, code)
     end
-  end
-
-  defp validate_values!(values) do
-    unless is_list(values) and values != [] and Elixir.Enum.all?(values, &is_atom/1) do
-      raise CompileError, description: "Enum: :values должен быть непустым списком атомов"
-    end
-
-    unless length(values) == length(Elixir.Enum.uniq(values)) do
-      raise CompileError, description: "Enum: :values не должен содержать дублей"
-    end
-
-    values
-  end
-
-  # Коды одного типа: карта, где часть значений целые, а часть строки, делает
-  # `from_code/1` неоднозначным — `"5"` пришлось бы искать и как строку, и как число.
-  defp valid_pair?({value, code}, :integer), do: is_atom(value) and is_integer(code)
-  defp valid_pair?({value, code}, :string), do: is_atom(value) and is_binary(code) and code != ""
-
-  defp code_kind_error(codes) do
-    "Enum: :codes должен сопоставлять атомам коды одного типа — либо все целые, либо все " <>
-      "непустые строки, получено: #{inspect(codes)}"
-  end
-
-  defp validate_unique!(codes) do
-    unique =
-      codes
-      |> Map.values()
-      |> Elixir.Enum.uniq()
-
-    unless length(unique) == map_size(codes) do
-      raise CompileError, description: "Enum: :codes не должен содержать повторяющихся кодов"
-    end
-
-    :ok
   end
 end

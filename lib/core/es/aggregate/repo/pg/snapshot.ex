@@ -27,6 +27,8 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   @typedoc "Настройка снапшотов репозитория."
   @type t :: %{every: pos_integer(), version: integer()}
 
+  # ===== опции =====
+
   @doc "Опция `snapshot:` → настройка снапшотов; неверная опция — `CompileError`."
   @spec opts!(term(), String.t()) :: t()
 
@@ -55,6 +57,8 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
     raise CompileError,
       description: "#{label}: version: ожидается целое, получено #{inspect(version)}"
   end
+
+  # ===== восстановление =====
 
   @doc """
   Маркер снапшотов репозитория: md5 загруженных модулей агрегата, кодека событий и событий
@@ -131,6 +135,8 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
 
   defp reason({:fold, exception}), do: "fold error=#{inspect(exception)}"
   defp reason(reason), do: Atom.to_string(reason)
+
+  # ===== запись =====
 
   @doc """
   Записать снапшоты состояний `states` одним upsert после commit

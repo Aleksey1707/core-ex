@@ -159,6 +159,8 @@ defmodule Core.Es.Projection do
   @doc "Очистить все таблицы read-модели."
   @callback clear() :: :ok | {:error, Error.t()}
 
+  # ===== объявление =====
+
   @doc "Объявить проекцию."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
@@ -206,6 +208,8 @@ defmodule Core.Es.Projection do
         line: env.line
     end
   end
+
+  # ===== проверка опций =====
 
   @doc false
   @spec declaration!(term(), term(), term()) :: %{
@@ -350,6 +354,8 @@ defmodule Core.Es.Projection do
     end
   end
 
+  # ===== пачка =====
+
   @doc """
   Прогнать одну пачку проекции `projection` в вызывающем процессе.
 
@@ -372,6 +378,8 @@ defmodule Core.Es.Projection do
   defp outcome({:processed, _event_count}), do: :processed
   defp outcome({:error, %Error{} = error, _failure}), do: {:error, error}
   defp outcome(outcome) when outcome in ~w(idle locked outdated)a, do: outcome
+
+  # ===== ожидание =====
 
   @doc """
   Дождаться, пока проекция `projection` обработает последнее событие потока `aggregate_id`

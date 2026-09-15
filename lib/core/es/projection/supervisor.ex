@@ -89,6 +89,47 @@ defmodule Core.Es.Projection.Supervisor do
 
   def start_link(opts) when is_list(opts), do: start(options!(opts))
 
+  @doc false
+  @spec init(options()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
+
+  @impl true
+  def init(%{projections: projections} = options) do
+    reader_opts = Map.to_list(Map.drop(options, ~w(projections enabled await)a))
+    readers = Enum.map(projections, &{Reader, [projection: &1] ++ reader_opts})
+
+    children = [
+      Projection.Registry,
+      %{
+        id: :readers,
+        start: {Supervisor, :start_link, [readers, [strategy: :one_for_one]]},
+        type: :supervisor
+      }
+    ]
+
+    Supervisor.init(children, strategy: :rest_for_one)
+  end
+
+  @doc """
+  Элементы `watch:` плагина `Core.Workers.PromEx` — по читателю на проекцию под именем её модуля,
+  `component: "es_projection:<name>"`.
+
+  `opts` — опции дерева, проверяются как в `start_link/1`. При `enabled: false` элементов нет:
+  читателей на ноде нет, и `up=0` был бы ложной тревогой.
+  """
+  @spec watch_list(keyword()) :: [watch_item()]
+
+  def watch_list(opts) when is_list(opts) do
+    case options!(opts) do
+      %{enabled: false} -> []
+      %{projections: projections} -> Enum.map(projections, &watch_item/1)
+    end
+  end
+
+  @doc false
+  @spec mark() :: options() | nil
+
+  def mark, do: :persistent_term.get(@mark_key, nil)
+
   # ---
 
   defp options!(opts) do
@@ -162,51 +203,8 @@ defmodule Core.Es.Projection.Supervisor do
 
   defp names(projections), do: Enum.map_join(projections, ",", &name/1)
 
-  defp name(projection), do: projection.__es_projection__().name
-
-  @doc """
-  Элементы `watch:` плагина `Core.Workers.PromEx` — по читателю на проекцию под именем её модуля,
-  `component: "es_projection:<name>"`.
-
-  `opts` — опции дерева, проверяются как в `start_link/1`. При `enabled: false` элементов нет:
-  читателей на ноде нет, и `up=0` был бы ложной тревогой.
-  """
-  @spec watch_list(keyword()) :: [watch_item()]
-
-  def watch_list(opts) when is_list(opts) do
-    case options!(opts) do
-      %{enabled: false} -> []
-      %{projections: projections} -> Enum.map(projections, &watch_item/1)
-    end
-  end
-
-  # ---
-
   defp watch_item(projection),
     do: %{component: "es_projection:#{name(projection)}", name: projection}
 
-  @doc false
-  @spec mark() :: options() | nil
-
-  def mark, do: :persistent_term.get(@mark_key, nil)
-
-  @doc false
-  @spec init(options()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
-
-  @impl true
-  def init(%{projections: projections} = options) do
-    reader_opts = Map.to_list(Map.drop(options, ~w(projections enabled await)a))
-    readers = Enum.map(projections, &{Reader, [projection: &1] ++ reader_opts})
-
-    children = [
-      Projection.Registry,
-      %{
-        id: :readers,
-        start: {Supervisor, :start_link, [readers, [strategy: :one_for_one]]},
-        type: :supervisor
-      }
-    ]
-
-    Supervisor.init(children, strategy: :rest_for_one)
-  end
+  defp name(projection), do: projection.__es_projection__().name
 end
