@@ -1,0 +1,11 @@
+{
+  "aggregate_id": "01a09d51-adb2-76d9-929c-e4fb91fb5c12",
+  "aggregate_version": 1,
+  "at": "2026-09-14T00:29:30Z",
+  "by": "01a09d51-adb2-71ae-b43c-b54d1d621359",
+  "event_id": "01a09d51-adb2-7abb-a06a-e19a72db81d5",
+  "payload": {
+    "name": ""
+  },
+  "type": "fixture.created"
+}

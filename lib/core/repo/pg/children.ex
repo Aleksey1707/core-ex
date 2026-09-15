@@ -3,7 +3,7 @@ defmodule Core.Repo.Pg.Children do
   Синхронизация дочерних строк агрегата: пишется только то, что изменилось.
 
   Обычные функции с конфигом `@pg` (`Core.Repo.Pg`) первым аргументом; спеки дочерних таблиц
-  строит `Core.Repo.Pg.Es` на этапе компиляции.
+  строит `Core.Repo.Pg.StateStored` на этапе компиляции.
 
   | Путь | Запросов на дочернюю таблицу |
   |---|---|
@@ -33,7 +33,7 @@ defmodule Core.Repo.Pg.Children do
 
   @chunk_size 500
 
-  @typedoc "Спека дочерней таблицы (строится `Repo.Pg.Es` на этапе компиляции)."
+  @typedoc "Спека дочерней таблицы (строится `Repo.Pg.StateStored` на этапе компиляции)."
   @type spec :: %{
           schema: module(),
           fk: atom(),

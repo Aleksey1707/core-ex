@@ -10,7 +10,7 @@ defmodule Core.DAO do
 
   Это `use Ecto.Repo` плюс обёртка транзакций в `Core.Helper.AfterCommit.wrap/1`.
   Без обёртки after-commit хуки — wake поллера в `Core.Outbox.Repo.append/3` и эталон
-  `Repo.Sc` в `Core.Repo.Pg.Es` — молча остаются невыполненными: ошибка не видна ни на
+  `Repo.Sc` в `Core.Repo.Pg.StateStored` — молча остаются невыполненными: ошибка не видна ни на
   компиляции, ни в рантайме, а проявляется отложенной доставкой outbox и перезаписью
   всех дочерних строк на каждом `update`.
 

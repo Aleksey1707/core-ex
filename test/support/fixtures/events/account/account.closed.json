@@ -1,0 +1,9 @@
+{
+  "aggregate_id": "01a09d85-3b0d-7db9-b527-fbb1a72396e0",
+  "aggregate_version": 5,
+  "at": "2026-09-14T01:25:49Z",
+  "by": "01a09d85-3b14-79b0-8727-d5268c8ddea0",
+  "event_id": "01a09d85-3b1a-77d9-8713-c3c78de10fc8",
+  "payload": null,
+  "type": "account.closed"
+}

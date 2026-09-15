@@ -6,7 +6,8 @@ defmodule Core.Es.Outbox do
         topic: "roles",
         event: MyApp.Domain.<BC>.Common.Role.Event
 
-  Генерирует `from_events/1` и `from_event/1`. Wire-payload — конверт события целиком
+  Генерирует `from_events/1`, `from_event/1` и интроспекцию `__es_event__/0` (сверка в
+  `Core.Repo.Pg.StateStored`). Wire-payload — конверт события целиком
   (`codec.dump(event)`, формат — `Core.Es.Event.Codec`); топик, ключ, имя и заголовки
   (`name` / `aggr_id` / `event_id`) читаются из того же конверта через
   `Core.Es.Event.Codec.to_fields/1` — второго источника wire-имени события нет.
@@ -46,6 +47,11 @@ defmodule Core.Es.Outbox do
 
       @typedoc "Событие агрегата, отображаемое в запись outbox."
       @type event :: unquote(event).t()
+
+      @doc false
+      @spec __es_event__() :: module()
+
+      def __es_event__, do: @es_event
 
       @doc "Список событий → список записей outbox."
       @spec from_events([event()]) ::

@@ -1,0 +1,11 @@
+{
+  "aggregate_id": "01a09d85-3b21-7025-8340-1b9b56b8c66e",
+  "aggregate_version": 1,
+  "at": "2026-09-14T01:25:49Z",
+  "by": "01a09d85-3b21-7963-9999-4d3ff874ae41",
+  "event_id": "01a09d85-3b21-73fc-80c5-0d0b2b577544",
+  "payload": {
+    "title": "Приёмка"
+  },
+  "type": "account.opened.v1"
+}

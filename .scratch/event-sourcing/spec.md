@@ -478,6 +478,9 @@ State-stored агрегат переезжает на общую таблицу 
 
 - **`use Core.Es.Projection, name:, events: [модули событий], version:`** (+ `repo:`, `codec:` из `Core.Config`):
   - тип агрегата — из кодека события; модуль без `type:` — `CompileError`; семейство `Agg.Event` в `events:` нельзя;
+  - кодек модуля события `<Aggregate>.Event.<Name>` — `<Aggregate>.Event.Codec` рядом с ним (раскладка `11-domain.md`,
+    конвенция по имени, как `<Behaviour>.Pg` у ADR-0006): ссылки события на кодек нет, а `Core.Config` на компиляции не
+    читается;
   - `name:` — неизменяемая строка, переименование — новая проекция; новая проекция стартует с начала истории,
     `start_from` нет;
   - `version:` — целое ≥ 1, по умолчанию 1, проверка на компиляции, только растёт.
@@ -490,7 +493,8 @@ State-stored агрегат переезжает на общую таблицу 
 - **Пачка** — одна транзакция `DAO` до `batch_size` событий:
   1. `pg_try_advisory_xact_lock(имя)` — не получен → `:locked`;
   2. строка `es_checkpoints` — нет или её версия меньше `version:` → старт с начала: `clear/0` → чекпоинт в начало со
-     своей версией и целью (максимальная позиция с `xid < pg_snapshot_xmin`, пустое хранилище — `nil`) → CAS по
+     своей версией и целью (максимальная позиция событий типов агрегатов проекции с видимостью чтения пачки —
+     `xid < pg_snapshot_xmin` или своя транзакция; таких событий нет — `nil`) → CAS по
      прочитанной строке → `info` с `projection=`, `from_version=`, `to_version=` → `:processed`;
   3. версия строки больше `version:` → `:outdated` (старая нода при поэтапной выкладке), `warning` один раз при переходе
      в пропуск;
@@ -503,6 +507,7 @@ State-stored агрегат переезжает на общую таблицу 
   `:processed | :idle | :locked | :outdated | {:error, Error.t()}` — одна пачка в вызывающем процессе, `batch_size:`
   по умолчанию 100; цикл читателя зовёт её же; внутри `Transact.run` — `raise`.
 - **`Core.Es.Projection.await(projection, aggregate, aggregate_id, timeout)`** → `:ok | {:error, Error.t()}`:
+  - `aggregate` — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec` (сам агрегат любого вида);
   - цель — позиция последнего события потока на момент вызова; пустой поток — `:ok`;
   - чекпоинт ≥ цели → `:ok`; идёт пересборка (строки нет, её версия ниже `version:` или чекпоинт < цели пересборки) →
     сразу прикладная `:projection_rebuilding`; иначе опрос `es_checkpoints` до таймаута → прикладная
@@ -549,14 +554,15 @@ State-stored агрегат переезжает на общую таблицу 
   - `:idle` / `:locked` → от `idle_min_ms` с удвоением до `poll_interval_ms`; `wake` в ожидании — цикл сразу без сброса
     счётчика, `wake` во время цикла — `schedule(0)`;
   - `:retry` → от `retry_min_ms` с удвоением до `retry_max_ms`, `wake` не ускоряет; `warning` на каждую попытку с
-    `projection=`, `position=`, `event_id=`, `attempt=` и причиной; попытка, начало и код ошибки — в state и telemetry;
-    процесс жив, рестарта нет;
+    `projection=`, `position=` (чекпоинт до пачки), `event_id=` (событие отказа), `attempt=` и причиной; попытка,
+    начало и код ошибки — в state и telemetry; серию заканчивает любой исход, кроме `:locked`; процесс жив, рестарта
+    нет;
   - `:outdated` → `poll_interval_ms`, `wake` не ускоряет;
   - `flush_wakes` в начале и в конце цикла; пересборка идёт тем же `batch_size` без паузы между пачками.
 - Решение о следующем тике — чистая функция `@doc false`.
 - Остановка — `trap_exit`, `terminate/2` только логирует; отдельного таймаута транзакции пачки нет.
-- `Core.Es.Projection.Supervisor.watch_list(projections)` — элемент на каждого читателя под именем модуля проекции,
-  `component: "es_projection:<name>"`; при `enabled: false` элементы не включаются.
+- `Core.Es.Projection.Supervisor.watch_list(opts)` — по опциям дерева элемент на каждого читателя под именем модуля
+  проекции, `component: "es_projection:<name>"`; при `enabled: false` элементы не включаются.
 
 ### Процесс агрегата (`Core.Es.Aggregate.Process`)
 
@@ -596,7 +602,8 @@ State-stored агрегат переезжает на общую таблицу 
 - **Трейсы** — словарь `Core.Otel.Es`, все span'ы `kind: :internal`:
   - `execute(type, aggregate_id, command, fun)` — `"execute <тип>"` на call site `Agg.Process.execute` у вызывающего
     (при `enabled: false` — тот же): ожидание в очереди и исполнение; атрибуты `core.es.aggregate.type` / `.id`,
-    `core.es.command`, `core.es.execute.mode`, `core.es.retries`, span event `dequeued`;
+    `core.es.command`, `core.es.execute.mode`, `core.es.retries`, span event `dequeued`; прикладная ошибка —
+    `record_error/1`, доменный отказ статус span'а не меняет;
   - `project(projection_name, version, fun)` — корневой `"project <имя>"` только на пачку с работой (события или старт с
     начала): `project/1` / `clear/0` и CAS; `core.es.projection.name` / `.version` / `.reset`,
     `core.es.batch.event_count`, `core.es.checkpoint.from` / `.to` в виде `"<xid>/<номер>"`; при ошибке —
@@ -648,8 +655,9 @@ State-stored агрегат переезжает на общую таблицу 
   4. фикстура источника грузится в модуль конца цепочки;
   5. при `aggregate:` — полнота `evolve`: `evolve(%Agg{id: aggregate_id}, событие)` на фикстуре каждого тега; провал —
      только `FunctionClauseError` самой `Agg.evolve/2`.
-- **`use Core.Es.ProjectionCase, projection:, fixtures:`** — свой sandbox checkout на `Core.Config.dao()`,
-  `async: false`; фикстура модуля — `<тип из кодека события>/<текущий тег>.json` от корня `fixtures:`, нет фикстуры —
+- **`use Core.Es.ProjectionCase, projection:, fixtures:`** — свой sandbox checkout на `repo:` проекции (по умолчанию
+  `Core.Config.dao()`), `async: false` — явной опцией ради Credo, `true` — `CompileError`; проверки — в транзакции с
+  откатом; фикстура модуля — `<тип из кодека события>/<текущий тег>.json` от корня `fixtures:`, нет фикстуры —
   провал с модулем и путём; источники `upcasts:` не прогоняются. Генерирует:
   - полноту `project/1` — фикстура каждого модуля `events:` в savepoint с откатом; пропуск клаузы — только
     `FunctionClauseError` самой `P.project/1`;

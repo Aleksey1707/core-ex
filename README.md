@@ -16,13 +16,13 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Context`, `Core.Error`, `Core.Exc`, `Core.Result`, `Core.Option` | сквозные контракты вызова и ошибок |
 | `Core.DAO` | билдер `Ecto.Repo` потребителя (обёртка транзакций под after-commit хуки) |
 | `Core.Repo`, `Core.Repo.Pg*`, `Core.Repo.Sc` | контракт репозитория, реализация на Ecto/Postgres, shadow copy |
-| `Core.Es.*` | доменные события и их wire-конверт, event store, маппинг в outbox |
+| `Core.Es.*` | доменные события и их wire-конверт, event-sourced агрегат и его write-репозиторий, event store, маппинг в outbox |
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
 | `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub (клиенты — опциональные зависимости, см. ниже) |
 | `Core.Web.*` | граница HTTP: конверт ответа, разбор параметров, `%Error{}` → HTTP-статус, сервер метрик |
 | `Core.Otel`, `Core.Otel.Messaging`, `Core.Otel.LogFilter` | пропагация OpenTelemetry через outbox и брокер, `trace_id` в metadata логов |
 | `Core.Helper.*` | транзакции, savepoint, advisory-локи, after-commit хуки |
-| `Core.*.PromEx` | плагины метрик для outbox, MQ, кешей, воркеров, cgroup |
+| `Core.*.PromEx` | плагины метрик для outbox, MQ, event sourcing, кешей, воркеров, cgroup |
 
 ## Подключение
 
@@ -162,7 +162,8 @@ end
 
 1. **`Ecto.Repo`** — через `Core.DAO`: это `use Ecto.Repo` плюс обёртка `transact/1,2`
    и `transaction/1,2` в `Core.Helper.AfterCommit.wrap/1`, без которой after-commit хуки
-   (wake поллера outbox, эталон `Repo.Sc` в `Repo.Pg.Es`) молча не выполняются:
+   (wake поллера outbox и читателей проекций, эталон `Repo.Sc` в `Repo.Pg.StateStored`) молча не
+   выполняются:
 
    ```elixir
    defmodule MyApp.DAO do
@@ -180,10 +181,7 @@ end
    иначе `Core.Outbox.Repo.Pg.Schema` не сможет писать и читать записи очереди.
    Рабочий пример — `test/support/codec_fixture.ex`.
 
-3. **Ecto-тип jsonb** для колонки `payload` в схемах событий (`payload_type:`) —
-   см. `test/support/test_types.ex`.
-
-4. **Миграции.** DDL таблицы `outbox` живёт в `Core.Outbox.Migration`; потребитель заводит
+3. **Миграции.** DDL таблицы `outbox` живёт в `Core.Outbox.Migration`; потребитель заводит
    миграцию со своим timestamp и делегирует туда:
 
    ```elixir
@@ -200,13 +198,26 @@ end
    туда же, поэтому у потребителя накатывается ровно та схема, против которой гоняются её
    тесты. Колонки и состав индексов — контракт, имена индексов — нет.
 
-   Таблицы событий агрегатов создаёт потребитель (`table:` у `Core.Es.Event.Repo.Pg.Schema`).
+   Хранилище событий `es_events`, снапшоты агрегатов `es_snapshots` и чекпоинты проекций
+   `es_checkpoints` — так же, DDL всех трёх таблиц живёт в `Core.Es.Migration`:
+
+   ```elixir
+   defmodule MyApp.Repo.Migrations.CreateEsEvents do
+     use Ecto.Migration
+
+     defdelegate up, to: Core.Es.Migration
+     defdelegate down, to: Core.Es.Migration
+   end
+   ```
+
+   Строку `es_checkpoints` проекции, убранной из кода, удаляет миграция потребителя вместе с её
+   таблицами — `Core.Es.Migration.delete_checkpoint/1`; библиотека строк сама не удаляет.
 
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
    `:failed` в очередь (runbook в `docs/rules/14-events-outbox.md`). Задача поднимает
    приложение потребителя и берёт репозиторий из `Core.Config.outbox_repo/0`.
 
-5. **DI репозиториев** — по конвенции, а не по конфигурации. Call site резолвит реализацию
+4. **DI репозиториев** — по конвенции, а не по конфигурации. Call site резолвит реализацию
    через `Core.Config.repo!/1`:
 
    ```elixir
@@ -232,7 +243,7 @@ end
    elixir deps/core/scripts/boundary_lint.exs --consumer lib test
    ```
 
-6. **Supervision.** Библиотека не имеет своего OTP-приложения: `Core.Outbox.Poller`,
+5. **Supervision.** Библиотека не имеет своего OTP-приложения: `Core.Outbox.Poller`,
    `Core.Outbox.Cleaner`, `Core.Mq.Stream.Connection`, `Core.PubSub.MqSubscriberReliable`
    поднимает supervisor потребителя. Пример старта — `test/test_helper.exs`.
 
@@ -250,7 +261,54 @@ end
     max_attempts: Core.Outbox.Attempts.new!(10)}
    ```
 
-7. **Регистрация PromEx-плагинов** в модуле `use PromEx`:
+   Проекции гоняет одно дерево `Core.Es.Projection.Supervisor` со всем списком проекций приложения
+   на каждой ноде; опции и дефолты — в его moduledoc. Config и env библиотека не читает:
+   рекомендуемые env — `ES_PROJECTIONS_*` в `config/runtime.exs`, длительности — через
+   `Core.DurationParser`. Список и опции удобно собрать одной функцией — её же принимает
+   `watch_list/1`:
+
+   ```elixir
+   # config/runtime.exs
+   duration = &Core.DurationParser.to_timeout!(System.get_env(&1, &2))
+
+   config :my_app, MyApp.Projections,
+     enabled: System.get_env("ES_PROJECTIONS_ENABLED", "true") == "true",
+     batch_size: String.to_integer(System.get_env("ES_PROJECTIONS_BATCH_SIZE", "100")),
+     idle_min_ms: duration.("ES_PROJECTIONS_IDLE_MIN", "50ms"),
+     poll_interval_ms: duration.("ES_PROJECTIONS_POLL_INTERVAL", "1s"),
+     retry_min_ms: duration.("ES_PROJECTIONS_RETRY_MIN", "1s"),
+     retry_max_ms: duration.("ES_PROJECTIONS_RETRY_MAX", "30s"),
+     shutdown: duration.("ES_PROJECTIONS_SHUTDOWN", "30s")
+
+   # lib/my_app/projections.ex
+   defmodule MyApp.Projections do
+     def opts do
+       [projections: [MyApp.Domain.Accounts.AccountList.Projection]] ++
+         Application.fetch_env!(:my_app, __MODULE__)
+     end
+   end
+
+   # MyApp.Application
+   children = [MyApp.DAO, {Core.Es.Projection.Supervisor, MyApp.Projections.opts()}]
+   ```
+
+   `enabled: false` — дерево не стартует (`:ignore`); так ставится в `config/test.exs` вместе с
+   `await: :inline`: тест прогоняет проекцию сам — `Core.Es.Projection.Test.run_until_idle/2`, а
+   `Core.Es.Projection.await/4` в usecase прогоняет её в процессе теста.
+
+   Процесс event-sourced агрегата (`use Core.Es.Aggregate.Process`) — элемент `{Agg.Process,
+   enabled: …}` на агрегат; опции и дефолты — в moduledoc `Core.Es.Aggregate.Process`. `enabled:`
+   обязательна. `true` — дерево из `Registry` и `DynamicSupervisor`: команды агрегата идут в его
+   процесс на id, который стартует в первой команде и уходит по простою; в `watch_list` плагина
+   `Core.Workers.PromEx` — `Agg.Process.watch_list/1` с теми же опциями. `false` — элемент не
+   стартует (`:ignore`), а `Agg.Process.execute` исполняет команду в вызывающем процессе — так
+   ставится в тестах.
+
+   ```elixir
+   children = [MyApp.DAO, {MyApp.Domain.Accounts.Common.Account.Process, enabled: true}]
+   ```
+
+6. **Регистрация PromEx-плагинов** в модуле `use PromEx`:
 
    ```elixir
    def plugins do
@@ -259,10 +317,23 @@ end
        {Core.Mq.PromEx, poll_rate: 5_000, readers: {MyApp.PromEx.Mq, :readers, []}},
        {Core.Workers.PromEx, poll_rate: 5_000, watch: {MyApp.PromEx.Workers, :watch_list, []}},
        {Core.Cache.PromEx, poll_rate: 5_000, sizes: {MyApp.PromEx.Caches, :sizes, []}},
-       {Core.Cgroup.PromEx, poll_rate: 5_000}
+       {Core.Cgroup.PromEx, poll_rate: 5_000},
+       {Core.Es.PromEx,
+        poll_rate: 5_000,
+        projections: {MyApp.Projections, :opts, []},
+        processes: {MyApp.PromEx.Es, :processes, []}}
      ]
    end
    ```
+
+   Читатели проекций в `watch:` — `Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts())`:
+   при `enabled: false` элементов нет, и нода без дерева не показывает `up=0`.
+
+   `Core.Es.PromEx` без `projections:` и `processes:` строит только event-метрики. `projections:` —
+   тот же провайдер опций дерева, что у `{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}`:
+   из него плагин берёт список проекций ноды для отставания, пересборки, `outdated` и сирот
+   чекпоинтов. `processes:` — список модулей процесса агрегата:
+   `def processes, do: [MyApp.Domain.Accounts.Common.Account.Process]`.
 
 ## Имена метрик
 
@@ -286,6 +357,37 @@ Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_
 при fail-stop весь хвост после сбойной записи возвращается в очередь и попадает в `retry`
 (батч из 100 с ошибкой на первой записи даёт `retry = 100`). Это «не опубликовано в этом
 цикле», а не «столько раз повторяли».
+
+Метрики `Core.Es.PromEx` — `es_*` под префиксом PromEx (`my_app_prom_ex_es_projection_lag_seconds`):
+
+| Метрика | Метки | Что это |
+|---|---|---|
+| `es_aggregate_load_total`, `es_aggregate_load_duration_milliseconds` | `type`, `op`, `result` | восстановление агрегата `get` / `get_many` / `refresh`; `result`: `ok` / `version_mismatch` |
+| `es_aggregate_fold_events` | `type`, `snapshot` | длина свёрнутого хвоста потока; `snapshot`: `hit` / `miss` / `rejected` / `off` — по ней выбирается `every:` |
+| `es_snapshot_write_total`, `es_snapshot_write_duration_milliseconds` | `type`, `result` | запись снапшотов после commit; `result`: `ok` / `error` |
+| `es_snapshot_write_rows_total` | `type` | записанные строки снапшотов |
+| `es_projection_cycles_total`, `es_projection_duration_milliseconds` | `projection`, `result` | циклы читателя, включая холостые; `result`: `processed` / `idle` / `locked` / `retry` / `outdated` |
+| `es_projection_events_total` | `projection` | события, прочитанные пачками |
+| `es_projection_retry_total` | `projection`, `error` | отказы пачки с повтором; `error` — `ns/code` ошибки или модуль исключения |
+| `es_projection_await_total`, `es_projection_await_duration_milliseconds` | `projection`, `result` | ожидание проекции; `result`: `ok` / `timeout` / `rebuilding` |
+| `es_aggregate_process_execute_total`, `es_aggregate_process_execute_duration_milliseconds` | `type`, `mode`, `result` | команды процесса агрегата, длительность — с очередью; `result`: `ok` / `version_mismatch` / `error` / `exit` |
+| `es_aggregate_process_execute_queue_milliseconds` | `type` | ожидание в очереди процесса на id (`mode="process"`) |
+| `es_aggregate_process_execute_retries_total` | `type` | повторы команды после конфликта версии |
+| `es_aggregate_process_start_total`, `es_aggregate_process_stop_total` | `type`; у `stop` — `reason` | старт процесса на id и уход: `idle` / `error` |
+| `es_projection_lag_seconds` | `projection` | отставание проекции |
+| `es_projection_rebuilding` | `projection` | 1 — пересборка: строки чекпоинта нет, её версия ниже `version:` или чекпоинт ниже цели |
+| `es_projection_outdated` | `projection` | 1 — версия строки чекпоинта выше `version:` кода этой ноды |
+| `es_checkpoint_orphan` | `name` | по строке `es_checkpoints`: 1 — проекции с таким именем нет в списке ноды |
+| `es_aggregate_processes` | `type` | процессы агрегата на id на ноде |
+
+Отставание проекции — возраст самого раннего события её типов, которое она ещё не обработала:
+первое событие каждого типа после чекпоинта (`LIMIT 1` по индексу `(тип, xid, номер)`) без
+условия видимости пачки, так что событие за долгой транзакцией в отставании видно. Событий нет —
+0; строки чекпоинта нет или её версия ниже `version:` — возраст первого события истории. При
+пересборке отставание убывает и служит её прогрессом. Опрос — запрос на тип каждой проекции раз в
+`poll_rate` на каждой ноде. `es_projection_outdated` и `es_aggregate_processes` — признаки ноды.
+Серия `es_checkpoint_orphan` удалённой строки держит последнее значение до рестарта ноды.
+Рекомендованные алерты — `docs/rules/22-projections.md`, «Эксплуатация».
 
 ## Трассировка
 

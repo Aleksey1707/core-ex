@@ -88,6 +88,17 @@ defmodule Core.Otel do
   end
 
   @doc """
+  Выполнить `fun` в корневом span'е — без родителя, даже внутри span'а процесса.
+
+  Нужен работе, которую не вызвал ни один трейс процесса: пачка несёт события разных команд.
+  Прежний контекст возвращается процессу по выходе.
+  """
+  @spec root_span(String.t(), start_opts(), (-> result)) :: result when result: var
+
+  def root_span(name, opts, fun) when is_binary(name) and is_list(opts) and is_function(fun, 0),
+    do: with_ctx(:otel_ctx.new(), fn -> span(name, opts, fun) end)
+
+  @doc """
   Выполнить `fun` в span'е, родитель которого извлечён из carrier.
 
   Прежний контекст процесса восстанавливается в `after`: процесс, обрабатывающий
@@ -118,6 +129,14 @@ defmodule Core.Otel do
   @spec current_span() :: span_ctx() | :undefined
 
   def current_span, do: :otel_tracer.current_span_ctx()
+
+  @doc "Добавить событие к текущему span'у — момент внутри span'а без своей длительности."
+  @spec add_event(String.t(), attributes()) :: :ok
+
+  def add_event(name, attributes) when is_binary(name) and is_map(attributes) do
+    _recorded? = :otel_span.add_event(:otel_tracer.current_span_ctx(), name, attributes)
+    :ok
+  end
 
   @doc "Добавить атрибуты к текущему span'у — то, что известно не на старте."
   @spec set_attributes(attributes()) :: :ok

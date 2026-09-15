@@ -61,7 +61,8 @@ AST `lib/**/*.ex` и проверяет три правила:
 - макрос, которому нужен фасад или репозиторий, при отсутствии явной опции подставляет
   **вызов** (`Core.Config.codec()` / `Core.Config.dao()` / `Core.Config.outbox_repo()`),
   а не запечённый модуль: резолв делает `Core.Helper.Opts.module_or_config!/4`
-  (`Repo.Pg.Schema`, `Repo.Pg`, `Repo.Pg.Es`, `Es.Outbox`, `Es.Event.Repo.Pg{,.Schema}`);
+  (`Repo.Pg.Schema`, `Repo.Pg`, `Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`, `Es.Outbox`,
+  `Es.Projection`);
 - имена telemetry-событий строятся вызовом `Core.Telemetry.event/1`, а не атрибутом:
   префикс задаёт потребитель (`config :core, telemetry_prefix: [...]`).
 

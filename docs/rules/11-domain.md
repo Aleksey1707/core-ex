@@ -3,8 +3,8 @@
 - **Область.** `lib/core/prim/**`, `lib/core/enum.ex`, `lib/core/validator/**`, `lib/core/codec/**`,
   `lib/core/view.ex`, `lib/core/context*`, `lib/core/es/**`; у потребителя — агрегаты, профили Codec
   и entity-фасады.
-- **Читать перед.** Новым Prim, Enum, кодеком, событием или View; правкой агрегата, профиля Codec,
-  `Core.View`; выбором между агрегатом и представлением.
+- **Читать перед.** Новым Prim, Enum, кодеком, событием, командой или View; правкой агрегата,
+  профиля Codec, `Core.View`; выбором между агрегатом и представлением.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 Строительные блоки:
@@ -381,18 +381,85 @@ InCodec.dump(step)
 
 ## Aggregates
 
-Правила:
+Агрегат бывает state-stored и event-sourced (термины — `CONTEXT.md`): вид выбирается на агрегат,
+оба вида остаются.
+
+Правила обоих видов:
 
 - Версионируются через `Version` (optimistic lock).
+- Domain MUST NOT писать в БД / MQ / outbox — только менять состояние и отдавать события.
+  Persist — задача Repo.
+
+Аудит-поля (`created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`, `deleted_by`) —
+порядок как в `20-agreements.md`.
+
+### State-stored
+
+- `version` поднимает домен, репозиторий её только проверяет.
 - Soft-delete: `deleted_at` / `deleted_by`.
 - При мутациях копят uncommitted `events: []` (prepend / append — единообразно в агрегате; flush
   делает `Enum.reverse` при необходимости).
 - Мутации возвращают `{:ok, %Agg{}} | {:error, Error.t()}`.
-- Domain MUST NOT писать в БД / MQ / outbox — только менять struct и копить события. Persist —
-  задача Repo.
 
-Аудит-поля (`created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`, `deleted_by`) —
-порядок как в `20-agreements.md`.
+### Event-sourced
+
+`use Core.Es.Aggregate, event_codec:` — автор пишет `decide/2` и `evolve/2`, библиотека
+генерирует свёртку `fold/2` / `fold/3` и чистый шаг `execute/2` (исходы — moduledoc
+`Core.Es.Aggregate`).
+
+- `id` и `version` состояния ведёт только библиотека: домен MUST NOT ставить их ни в `decide`,
+  ни в `evolve`. Начальное состояние — `%Agg{id: id}`, «не создан» — `version: nil`.
+- `decide(команда, состояние)` → `{:ok, [{Event.Mod, payload} | Event.Mod]} | {:error, _}`:
+  `id` события, `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без
+  изменений — `{:ok, []}`.
+- `not_found` / `already_exists` — доменные ошибки `decide` по `version: nil`: существование
+  агрегата решает домен, а не репозиторий.
+- Несколько событий одной команды — `with` и `fold/3`: следующее решение видит состояние после
+  предыдущего события.
+- `evolve(состояние, событие)` → голое состояние: чистый, без проверки инвариантов и без
+  catch-all. Голова `evolve` MUST матчить только событие, не значения состояния: событие — уже
+  случившийся факт, и отказаться от него свёртка не вправе.
+- Удалённый тип события (тег остаётся в `tags:`) — клауза `evolve`, возвращающая состояние
+  как есть.
+
+Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`;
+`use Core.Es.EventCompatCase, aggregate:` — у `evolve/2` есть клауза события каждого тега.
+
+```elixir
+# плохо — голова evolve проверяет статус: инвариант ушёл из decide, а на пустом состоянии
+# проверки полноты клаузы нет
+def evolve(%__MODULE__{status: :open} = state, %Event.Frozen{}), do: %{state | status: :frozen}
+
+# плохо — decide собирает событие и нумерует версию сам
+def decide(%Cmd.Freeze{} = cmd, state),
+  do: {:ok, [Event.Frozen.new(state.id, Version.next(state.version), cmd.by, cmd.at)]}
+
+# хорошо — решение в decide, evolve только применяет событие
+def decide(%Cmd.Freeze{}, %__MODULE__{version: nil}),
+  do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
+
+def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen]}
+
+def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
+```
+
+### Команда
+
+Команда event-sourced агрегата — `<Aggregate>.Cmd.<Name>` с `use Core.Es.Cmd`: struct из Prim
+без логики, собирает её usecase. `by` (Prim автора событий агрегата) и `at` (`%Es.Event.At{}`)
+MUST быть в `@enforce_keys`: автор и момент события — данные команды, а не `Context` и не часы
+библиотеки.
+
+Проверяется: `CompileError` в `use Core.Es.Cmd` — `by` или `at` не в `@enforce_keys`.
+
+```elixir
+defmodule MyApp.Domain.<BC>.Common.Account.Cmd.Rename do
+  use Core.Es.Cmd
+
+  @enforce_keys ~w(name by at)a
+  defstruct @enforce_keys
+end
+```
 
 ### Агрегат vs View
 

@@ -13,7 +13,7 @@ defmodule Core.Es.Event.CodecTest do
     test "отдаёт конверт события целиком" do
       event = EventFixture.created()
 
-      dumped = EventFixture.Codec.dump(event, InCodec)
+      dumped = EventFixture.Event.Codec.dump(event, InCodec)
 
       keys =
         dumped
@@ -31,7 +31,7 @@ defmodule Core.Es.Event.CodecTest do
     end
 
     test "у события без нагрузки payload равен nil" do
-      dumped = EventFixture.Codec.dump(EventFixture.closed(), InCodec)
+      dumped = EventFixture.Event.Codec.dump(EventFixture.closed(), InCodec)
 
       assert dumped["type"] == "fixture.closed"
       assert dumped["payload"] == nil
@@ -43,7 +43,7 @@ defmodule Core.Es.Event.CodecTest do
       event = EventFixture.created()
 
       assert {:ok, ^event} =
-               EventFixture.Codec.load(
+               EventFixture.Event.Codec.load(
                  EventFixture.Event.Created,
                  InCodec.dump(event),
                  InCodec
@@ -58,7 +58,53 @@ defmodule Core.Es.Event.CodecTest do
       assert {:ok, ^closed} = InCodec.load(EventFixture.Event, InCodec.dump(closed))
     end
 
-    test "неизвестный тег — доменная ошибка кодека агрегата" do
+    test "событие старого тега грузится фасадом в модуль текущего, заголовок не меняется" do
+      event = EventFixture.created()
+
+      data =
+        event
+        |> InCodec.dump()
+        |> Map.merge(%{"type" => "fixture.created.v2", "payload" => %{"caption" => "Приёмка"}})
+        |> json_roundtrip()
+
+      assert {:ok, ^event} = InCodec.load(EventFixture.Event, data)
+    end
+
+    test "цепочка апкастов идёт по шагам: v1 → v2 → текущий тег" do
+      event = EventFixture.created()
+
+      data =
+        event
+        |> InCodec.dump()
+        |> Map.merge(%{"type" => "fixture.created.v1", "payload" => %{"title" => "Приёмка"}})
+        |> json_roundtrip()
+
+      assert {:ok, ^event} = InCodec.load(EventFixture.Event, data)
+    end
+
+    test "переименованный тег грузится с нагрузкой как есть" do
+      event = EventFixture.created()
+
+      data =
+        event
+        |> InCodec.dump()
+        |> Map.put("type", "fixture.opened")
+        |> json_roundtrip()
+
+      assert {:ok, ^event} = InCodec.load(EventFixture.Event, data)
+    end
+
+    test "нагрузка неверной формы после апкаста — доменная ошибка load_payload" do
+      data =
+        EventFixture.created()
+        |> InCodec.dump()
+        |> Map.merge(%{"type" => "fixture.created.v2", "payload" => %{"caption" => 123}})
+        |> json_roundtrip()
+
+      assert {:error, %Error{kind: :domain}} = InCodec.load(EventFixture.Event, data)
+    end
+
+    test "тег вне tags: и upcasts: — доменная ошибка кодека агрегата" do
       data =
         EventFixture.created()
         |> InCodec.dump()
@@ -67,7 +113,7 @@ defmodule Core.Es.Event.CodecTest do
       assert {:error, %Error{kind: :domain, code: :unknown_event_type, ns: :es} = error} =
                InCodec.load(EventFixture.Event, data)
 
-      assert error.module == EventFixture.Codec
+      assert error.module == EventFixture.Event.Codec
       assert error.detail == "fixture.gone"
     end
 
@@ -114,7 +160,7 @@ defmodule Core.Es.Event.CodecTest do
       assert {:error, %Error{kind: :domain, code: :invalid_envelope, ns: :es} = error} =
                load(data)
 
-      assert error.module == EventFixture.Codec
+      assert error.module == EventFixture.Event.Codec
       assert error.detail == %{field: :aggregate_version}
     end
 
@@ -149,11 +195,64 @@ defmodule Core.Es.Event.CodecTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Es.Event.CodecTest.MissingTags do
-              use Core.Es.Event.Codec, event: Core.EventFixture.Event
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test"
             end
           end
         )
       end
+    end
+
+    test "без type: — CompileError" do
+      assert_raise CompileError, ~r/нет обязательных опций: \[:type\]/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.MissingType do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                tags: %{Core.EventFixture.Event.Closed => "missing_type.closed"}
+            end
+          end
+        )
+      end
+    end
+
+    test "type: пустая строка или не строка — CompileError" do
+      for type <- ["", :fixture] do
+        assert_raise CompileError, ~r/type: ожидается непустая строка/, fn ->
+          Code.eval_quoted(
+            quote do
+              defmodule Core.Es.Event.CodecTest.BadType do
+                use Core.Es.Event.Codec,
+                  event: Core.EventFixture.Event,
+                  type: unquote(type),
+                  tags: %{Core.EventFixture.Event.Closed => "bad_type.closed"}
+              end
+            end
+          )
+        end
+      end
+    end
+
+    test "тип агрегата доступен интроспекцией" do
+      assert EventFixture.Event.Codec.__es_type__() == "fixture"
+    end
+
+    test "интроспекция: модули из tags: и карта upcasts: как объявлена" do
+      assert Enum.sort(EventFixture.Event.Codec.__es_mods__()) ==
+               Enum.sort([EventFixture.Event.Closed, EventFixture.Event.Created])
+
+      assert EventFixture.Event.Codec.__es_upcasts__() == %{
+               "fixture.created.v1" => "fixture.created.v2",
+               "fixture.created.v2" => "fixture.created",
+               "fixture.opened" => "fixture.created"
+             }
+    end
+
+    test "источники upcasts: не входят в types/0 и mod_by_tag/1" do
+      assert EventFixture.Event.Codec.types() == MapSet.new(["fixture.created", "fixture.closed"])
+      assert EventFixture.Event.Codec.mod_by_tag("fixture.opened") == :error
     end
 
     test "отклоняет неизвестную опцию" do
@@ -163,6 +262,7 @@ defmodule Core.Es.Event.CodecTest do
             defmodule Core.Es.Event.CodecTest.UnknownOpt do
               use Core.Es.Event.Codec,
                 event: Core.EventFixture.Event,
+                type: "codec_test",
                 tags: %{Core.EventFixture.Event.Closed => "unknown_opt.closed"},
                 aggregate_id: Core.EventFixture.AggID
             end
@@ -190,6 +290,7 @@ defmodule Core.Es.Event.CodecTest do
             defmodule Core.Es.Event.CodecTest.MixedCodec do
               use Core.Es.Event.Codec,
                 event: Core.EventFixture.Event,
+                type: "codec_test",
                 tags: %{
                   Core.EventFixture.Event.Closed => "mixed.closed",
                   Core.Es.Event.CodecTest.OtherEvent => "mixed.other"
@@ -207,6 +308,7 @@ defmodule Core.Es.Event.CodecTest do
             defmodule Core.Es.Event.CodecTest.DupTag do
               use Core.Es.Event.Codec,
                 event: Core.EventFixture.Event,
+                type: "codec_test",
                 tags: %{
                   Core.EventFixture.Event.Created => "dup.tag",
                   Core.EventFixture.Event.Closed => "dup.tag"
@@ -224,6 +326,7 @@ defmodule Core.Es.Event.CodecTest do
             defmodule Core.Es.Event.CodecTest.NotAnEvent do
               use Core.Es.Event.Codec,
                 event: Core.EventFixture.Event,
+                type: "codec_test",
                 tags: %{Core.Version => "not_an_event.version"}
             end
           end
@@ -238,6 +341,7 @@ defmodule Core.Es.Event.CodecTest do
             defmodule Core.Es.Event.CodecTest.NoPayloadClauses do
               use Core.Es.Event.Codec,
                 event: Core.EventFixture.Event,
+                type: "codec_test",
                 tags: %{Core.EventFixture.Event.Created => "no_clauses.created"}
             end
           end
@@ -252,6 +356,7 @@ defmodule Core.Es.Event.CodecTest do
             defmodule Core.Es.Event.CodecTest.PayloadlessCodec do
               use Core.Es.Event.Codec,
                 event: Core.EventFixture.Event,
+                type: "codec_test",
                 tags: %{Core.EventFixture.Event.Closed => "payloadless.closed"}
             end
 
@@ -261,6 +366,91 @@ defmodule Core.Es.Event.CodecTest do
 
       assert mod.type(Core.EventFixture.Event.Closed) == "payloadless.closed"
       refute function_exported?(mod, :dump_payload, 2)
+    end
+
+    test "источник upcasts: объявлен в tags: — CompileError" do
+      assert_raise CompileError, ~r/upcasts: источник "src\.closed" объявлен в tags:/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.UpcastSourceInTags do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{
+                  Core.EventFixture.Event.Created => "src.created",
+                  Core.EventFixture.Event.Closed => "src.closed"
+                },
+                upcasts: %{"src.closed" => "src.created"}
+            end
+          end
+        )
+      end
+    end
+
+    test "цель upcasts: не в tags: и не источник — CompileError" do
+      assert_raise CompileError, ~r/upcasts: цель "dst\.gone" не объявлена/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.UpcastUnknownTarget do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{Core.EventFixture.Event.Closed => "dst.closed"},
+                upcasts: %{"dst.old" => "dst.gone"}
+            end
+          end
+        )
+      end
+    end
+
+    test "цикл в upcasts: — CompileError" do
+      assert_raise CompileError, ~r/upcasts: цикл "loop\.a" → "loop\.b" → "loop\.a"/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.UpcastCycle do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{Core.EventFixture.Event.Closed => "loop.closed"},
+                upcasts: %{"loop.a" => "loop.b", "loop.b" => "loop.a"}
+            end
+          end
+        )
+      end
+    end
+
+    test "непустые upcasts: без upcast/2 — CompileError" do
+      assert_raise CompileError, ~r/обязан объявить upcast\/2/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.NoUpcastClauses do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{Core.EventFixture.Event.Closed => "no_upcast.closed"},
+                upcasts: %{"no_upcast.old" => "no_upcast.closed"}
+            end
+          end
+        )
+      end
+    end
+
+    test "upcasts: не map непустых строк — CompileError" do
+      for upcasts <- [[{"shape.old", "shape.closed"}], %{"shape.old" => :closed}] do
+        assert_raise CompileError, ~r/upcasts: ожидается/, fn ->
+          Code.eval_quoted(
+            quote do
+              defmodule Core.Es.Event.CodecTest.BadUpcasts do
+                use Core.Es.Event.Codec,
+                  event: Core.EventFixture.Event,
+                  type: "codec_test",
+                  tags: %{Core.EventFixture.Event.Closed => "shape.closed"},
+                  upcasts: unquote(Macro.escape(upcasts))
+              end
+            end
+          )
+        end
+      end
     end
   end
 

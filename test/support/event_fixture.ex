@@ -3,21 +3,9 @@ defmodule Core.EventFixture do
   Заглушки для макросов event store, которым нужны модули из приложения-потребителя.
 
   Роль фейкового агрегата: идентификаторы, события с нагрузкой и без, каталог доменных
-  ошибок и кодек событий. `Core.EventFixture.Codec` зарегистрирован в
+  ошибок и кодек событий. `Core.EventFixture.Event.Codec` зарегистрирован в
   `Core.CodecFixture.plugins/0` — иначе фасады не смогли бы дампить события.
   """
-
-  defmodule BySchema do
-    @moduledoc "Ecto-схема автора события (`by_schema:` у `Es.Event.Repo.Pg.Schema`)."
-
-    use Ecto.Schema
-
-    @primary_key {:id, :binary_id, autogenerate: false}
-
-    schema "fake_users" do
-      field :login, :string
-    end
-  end
 
   defmodule AggID do
     @moduledoc "Идентификатор агрегата."
@@ -86,12 +74,12 @@ defmodule Core.EventFixture do
     @doc "Wire-имя события."
     @spec name(t()) :: String.t()
 
-    def name(event), do: Core.EventFixture.Codec.type(event)
+    def name(event), do: Core.EventFixture.Event.Codec.type(event)
 
     @doc "Множество wire-имён событий агрегата."
     @spec names() :: MapSet.t(String.t())
 
-    def names, do: Core.EventFixture.Codec.types()
+    def names, do: Core.EventFixture.Event.Codec.types()
   end
 
   defmodule Errors do
@@ -116,9 +104,22 @@ defmodule Core.EventFixture do
     def domain(module, :not_found = code, detail) do
       Error.domain(module, code: code, ns: :fake, message: "Агрегат не найден", detail: detail)
     end
+
+    def domain(module, :incomplete_result = code, detail) do
+      Error.domain(module,
+        code: code,
+        ns: :fake,
+        message: "Найдены не все агрегаты",
+        detail: detail
+      )
+    end
+
+    def domain(module, :no_ids = code, detail) do
+      Error.domain(module, code: code, ns: :fake, message: "Нет идентификаторов", detail: detail)
+    end
   end
 
-  defmodule Codec do
+  defmodule Event.Codec do
     @moduledoc "Кодек событий фейкового агрегата (плагин фасадов `Core.CodecFixture.*`)."
 
     alias Core.Es
@@ -128,10 +129,17 @@ defmodule Core.EventFixture do
     # Тег квалифицирован именем агрегата: он виден в брокере и в event store рядом
     # с чужими, хотя модуль выбирает внутри этого кодека.
     @tag_by_mod %{Event.Created => "fixture.created", Event.Closed => "fixture.closed"}
+    @upcasts %{
+      "fixture.created.v1" => "fixture.created.v2",
+      "fixture.created.v2" => "fixture.created",
+      "fixture.opened" => "fixture.created"
+    }
 
     use Es.Event.Codec,
       event: Event,
-      tags: @tag_by_mod
+      type: "fixture",
+      tags: @tag_by_mod,
+      upcasts: @upcasts
 
     @doc "Нагрузка события → wire."
     @spec dump_payload(Event.t(), module()) :: map()
@@ -150,6 +158,18 @@ defmodule Core.EventFixture do
         {:ok, Event.Created.Payload.new(name)}
       end
     end
+
+    @doc "Нагрузка записанного события старого тега → нагрузка следующего тега цепочки."
+    @spec upcast(String.t(), Es.Event.Codec.wire()) :: wire_payload()
+
+    @impl true
+    def upcast("fixture.created.v1", envelope),
+      do: %{"caption" => field(field(envelope, :payload), :title)}
+
+    def upcast("fixture.created.v2", envelope),
+      do: %{"name" => field(field(envelope, :payload), :caption)}
+
+    def upcast("fixture.opened", envelope), do: field(envelope, :payload)
   end
 
   alias Core.Es
@@ -180,5 +200,12 @@ defmodule Core.EventFixture do
       Es.Event.At.now!(),
       Es.Event.ID.new()
     )
+  end
+
+  @doc "Событие, перенесённое в поток `id` на версию `version`."
+  @spec in_stream(Event.t(), AggID.t(), pos_integer()) :: Event.t()
+
+  def in_stream(event, %AggID{} = id, version) when is_integer(version) do
+    %{event | aggregate_id: id, aggregate_version: Version.new!(version)}
   end
 end

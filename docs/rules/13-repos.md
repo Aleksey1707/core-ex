@@ -2,28 +2,29 @@
 
 - **Область.** `lib/core/repo/**`, `lib/core/es/**`; у потребителя — `<role>/<aggregate>/repo*`,
   `read_repo*`, `view.ex`, Ecto-схемы и Specs.
-- **Читать перед.** Новым репозиторием, Ecto-схемой или View; правкой `use Repo.Pg` / `Repo.Pg.Es`,
-  `constraint_errors`, `default_filters`; разделением read- и write-пути.
+- **Читать перед.** Новым репозиторием, Ecto-схемой или View; правкой `use Repo.Pg` /
+  `Repo.Pg.StateStored` / `Es.Aggregate.Repo.Pg`, `constraint_errors`, `default_filters`;
+  разделением read- и write-пути.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Слои и пути
 
 | Слой | Пример модуля | Роль |
 |---|---|---|
-| Behaviour | `<BC>.Common.Repo`, `<Actor>.<Aggregate>.Repo`, `<Aggregate>.Event.Repo` | `@callback` API; без SQL |
-| Pg impl | `*.Repo.Pg`, `*.<Aggregate>.Repo.Pg`, `*.Event.Repo.Pg` | PostgreSQL-реализация |
+| Behaviour | `<BC>.Common.Repo`, `<Actor>.<Aggregate>.Repo` | `@callback` API; без SQL |
+| Pg impl | `*.Repo.Pg`, `*.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
 | Schema | `*.Repo.Pg.Schema` (+ nested `Schema.<Child>`, …) | Ecto schema; write — `to_entity`/`to_model` (+ bang), read — `to_view` |
 | View | `<Actor>.<Aggregate>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
 | Specs | `*.Repo.Pg.Specs` | `dynamic` / `from` query fragments |
 | Core | `Core.Repo`, `Core.Repo.Pg`, `Core.Repo.Pg.Children`, `Core.Repo.Sc` | генерация behaviour; generic CRUD; синхронизация дочерних строк; shadow copy |
-| Core (ES) | `Core.Repo.Pg.Es`, `Core.Repo.Pg.Schema`, `Core.Es.Event.Repo{,.Pg,.Pg.Schema}` | write-репо агрегата с событиями; производные функции схемы; event store |
+| Core (ES) | `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate.Repo`, `Core.Es.Aggregate.Repo.Pg`, `Core.Es.Aggregate.Process`, `Core.Repo.Pg.Schema`, `Core.Es.Store`, `Core.Es.Projection` | write-репо state-stored агрегата; behaviour и write-репо event-sourced агрегата; команда event-sourced агрегата; производные функции схемы; хранилище событий; проекция read-модели |
 
 Структура путей (target) — всё, что относится к сущности, лежит **внутри** её каталога;
 файлов вида `<aggregate>_repo.ex` и модулей вида `<Aggregate>Repo` не бывает:
 
 ```text
 <role>/<aggregate>/repo.ex                   # write behaviour
-<role>/<aggregate>/repo/pg.ex                # use Repo.Pg.Es (или Repo.Pg — агрегат без событий)
+<role>/<aggregate>/repo/pg.ex                # use Repo.Pg.StateStored / Es.Aggregate.Repo.Pg (Repo.Pg — без событий)
 <role>/<aggregate>/repo/pg/schema.ex
 <role>/<aggregate>/repo/pg/schema/*.ex       # дочерние таблицы
 <role>/<aggregate>/repo/pg/specs.ex
@@ -34,13 +35,13 @@
 <role>/<aggregate>/read_repo/pg/specs.ex
 <role>/<aggregate>/read_repo/cached.ex       # опционально: кеш-фасад
 <role>/<aggregate>/read_repo/invalidator.ex  # опционально: инвалидация по событиям
+<role>/<aggregate>/projection.ex             # use Core.Es.Projection — пишет таблицы, которые читает read_repo
 <aggregate>/outbox.ex                        # use Es.Outbox
-<aggregate>/event/repo.ex                    # use Es.Event.Repo
-<aggregate>/event/repo/pg.ex
-<aggregate>/event/repo/pg/schema.ex
+<aggregate>/process.ex                       # use Core.Es.Aggregate.Process — рядом с repo.ex event-sourced агрегата
 ```
 
-Event store и `Outbox` — рядом с агрегатом (`common/<aggregate>/`), write-репо — в actor-срезе.
+`Outbox` — рядом с агрегатом (`common/<aggregate>/`), write-репо — в actor-срезе. Проекция —
+рядом с ReadRepo своей read-модели (`22-projections.md`).
 В actor-срезе каталог `<aggregate>/` — это namespace actor-domain (`<Actor>.<Aggregate>.…`,
 `10-architecture.md`): репозиторий, View и роль-специфичные операции живут в нём рядом.
 
@@ -62,14 +63,15 @@ Schema MUST жить под `Repo.Pg.Schema`, не под `Repo.Schema`.
 
 ### Write (`<Aggregate>.Repo`)
 
-Содержит то, что нужно **command-flow**:
+Содержит то, что нужно **изменяющему usecase**:
 
 - `get` / `get!` — load одного агрегата перед mutate (`shadow_copy?: true` при необходимости).
 - `insert` / `update` / `save` / `delete`.
-- Опционально `list` / `find_many` / `get_many`, если команда мутирует **множество** агрегатов сразу
-  (bulk: загрузить пачку → замутировать каждый → сохранить). Критерий: метод — источник данных для
-  `mutate`, а не отдача наружу (HTTP/презентер). Загрузка пачки и её сохранение — в теле одной
-  функции (см. «Load/save агрегата — в одной функции» в `20-agreements.md`).
+- Опционально `list` / `find_many` / `get_many`, если изменяющий usecase мутирует **множество**
+  агрегатов сразу (bulk: загрузить пачку → замутировать каждый → сохранить). Критерий: метод —
+  источник данных для `mutate`, а не отдача наружу (HTTP/презентер). Загрузка пачки и её
+  сохранение — в теле одной функции (см. «Load/save агрегата — в одной функции» в
+  `20-agreements.md`).
 
 - Кастомный `get_by_*` (резолв alternate key — `owner_id`, `login`, `external_id`) MUST принимать
   `version` (`%Version{} | :current`) и проверять её сам. Иначе call site вынужден делать второй
@@ -91,15 +93,15 @@ ReadRepo.
 
 - `use Core.Repo, only: :read, view: <Aggregate>.View` — read-репо отдаёт **представление**, не
   агрегат.
-- `shadow_copy?: false` в `Repo.Pg` (не участвует в optimistic-lock цепочке команд); `to_view:`
-  вместе с `shadow_copy?: true` — `CompileError`: эталон в `Repo.Sc` — механизм write-пути, а
-  `Repo.Sc.put/2` требует `id`, которого у представления может не быть.
+- `shadow_copy?: false` в `Repo.Pg` (не участвует в optimistic-lock цепочке изменяющих usecases);
+  `to_view:` вместе с `shadow_copy?: true` — `CompileError`: эталон в `Repo.Sc` — механизм
+  write-пути, а `Repo.Sc.put/2` требует `id`, которого у представления может не быть.
 - Декодер строки — `to_view: &Schema.to_view/1`; `to_model:` read-репо не нужен.
 - Собственная Ecto-схема `<Aggregate>.ReadRepo.Pg.Schema` (MUST, см. «Generic `use Core.Repo.Pg`») и
   свои `Specs`.
-- Usecases запросов (`get`/`list`/`page`, HTTP GET) вызывают **ReadRepo**.
-- Usecases команд вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть команды, не
-  query).
+- Читающие usecases (`get`/`list`/`page`, HTTP GET) вызывают **ReadRepo**.
+- Изменяющие usecases вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть
+  изменяющего usecase, а не чтение через ReadRepo).
 
 Кеш — только на ReadRepo; см. `16-caching.md` свода приложения.
 
@@ -114,7 +116,7 @@ dump-only кодек.
 ```elixir
 defmodule MyApp.Domain.<BC>.<Actor>.<Aggregate>.View do
   @moduledoc """
-  Представление <Aggregate> для query-пути
+  Представление <Aggregate> для read-пути
   """
 
   alias MyApp.Domain.<BC>.Common.<Aggregate>
@@ -246,8 +248,8 @@ Version-аргумент: `%Version{} | :current`.
 
 ## Generic `use Core.Repo.Pg`
 
-Для агрегатов **без событий**, read-репо и role-reads. Агрегат с событиями — `Repo.Pg.Es`
-(см. ниже), он же пробрасывает все перечисленные опции внутрь.
+Для агрегатов **без событий**, read-репо и role-reads. State-stored агрегат с событиями —
+`Repo.Pg.StateStored` (см. ниже), он же пробрасывает все перечисленные опции внутрь.
 
 ```elixir
 use Repo.Pg,
@@ -307,7 +309,7 @@ Guard по типу результата у read-методов не завод�
 Read-репозиторий MUST иметь **собственную** Ecto-схему `<Aggregate>.ReadRepo.Pg.Schema` на той же
 таблице: только нужные колонки, без `changeset/2` и без аудит-`belongs_to`. Схема write-репо не
 переиспользуется — иначе read-срез становится зависим от формы записи, а запись оказывается
-в одном шаге от query-пути. Цена — продублированный список полей; расхождение с миграцией
+в одном шаге от read-пути. Цена — продублированный список полей; расхождение с миграцией
 всплывает на тесте `to_view/1`.
 
 Семантики:
@@ -336,7 +338,7 @@ Read-репозиторий MUST иметь **собственную** Ecto-сх
   продолжает работу с агрегатом (`save` → mutate → `save`); игнорирует, если на записи
   заканчивает — обычный случай по «Load/save агрегата — в одной функции» (`20-agreements.md`).
   Продолжать от **входного** значения MUST NOT: у агрегата с событиями они там не вычищены, и
-  второй flush упрётся в unique-индекс `(aggregate_id, aggregate_version)` event store.
+  второй flush упрётся в занятую версию потока хранилища событий (`:version_mismatch`).
 
 ## Schema (`repo/pg/schema.ex`)
 
@@ -405,7 +407,7 @@ DB-only FK / JSON string-keys). Без `Prim.new` / ручной сборки st
 
 Когда какой вызов:
 
-- Свои строки / persist валидного domain (`use Repo.Pg`, Event.Repo, Draft write, …) → bang
+- Свои строки / persist валидного domain (`use Repo.Pg`, Draft write, …) → bang
   (`to_entity!` / `to_model!`).
 - Dirty/infra (например Outbox `reserve_rows`) → safe (`to_entity` / `to_model`).
 
@@ -419,7 +421,7 @@ DB-only FK / JSON string-keys). Без `Prim.new` / ручной сборки st
 Changeset: `@required` / `@optional` через `~w(...)a` → `cast` → `validate_required` →
 `foreign_key_constraint` (и `unique_constraint` при необходимости).
 
-В `to_entity` поле `events: []` — события читаются из Event.Repo, не из строки агрегата.
+В `to_entity` поле `events: []` — события лежат в хранилище событий, не в строке агрегата.
 
 ## Specs
 
@@ -440,13 +442,13 @@ end
 
 Композиция: `dynamic(^a() and ^b())`. Подключаются через `default_filters:` в `use Repo.Pg`.
 
-## Write агрегата с событиями (`use Core.Repo.Pg.Es`)
+## Write state-stored агрегата (`use Core.Repo.Pg.StateStored`)
 
-Агрегат с событиями и outbox (с дочерними таблицами или без) MUST использовать `Repo.Pg.Es` —
-надстройку над `Repo.Pg`. Руками `insert`/`update`/`save` не писать.
+State-stored агрегат с событиями и outbox (с дочерними таблицами или без) MUST использовать
+`Repo.Pg.StateStored` — надстройку над `Repo.Pg`. Руками `insert`/`update`/`save` не писать.
 
 ```elixir
-use Repo.Pg.Es,
+use Repo.Pg.StateStored,
   behaviour: MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
   schema: Schema,
   to_entity: &Schema.to_entity!/1,
@@ -459,7 +461,7 @@ use Repo.Pg.Es,
   entity: Agg,
   errors: Agg.Errors,
   constraint_errors: [unique: [name: :already_exists]],
-  event_repo: Agg.Event.Repo,
+  event_codec: Agg.Event.Codec,
   outbox: Agg.Outbox,
   children: [
     [
@@ -474,22 +476,28 @@ use Repo.Pg.Es,
 
 | Опция | Обяз. | Значение |
 |---|---|---|
-| `event_repo:` | да | модуль **behaviour** Event.Repo; реализацию макрос резолвит через `Core.Config.repo!/1` |
-| `outbox:` | да | `<Aggregate>.Outbox` |
+| `event_codec:` | да | `<Aggregate>.Event.Codec`; его `type:` — тип агрегата в потоке хранилища событий |
+| `outbox:` | да | `<Aggregate>.Outbox`; `event:` сверяется на компиляции с семейством кодека |
 | `children:` | нет | `[[schema:, fk:, key:, constraint_errors:], …]`; строки — из `Schema.Child.to_models/1` |
 | `entity:` | да | в `Repo.Pg` опциональна, здесь обязательна (по ней строятся заголовки) |
+| `id:` | да | в `Repo.Pg` опциональна, здесь обязательна: сверяется на компиляции с Prim агрегата кодека |
 
 Что макрос генерирует (одна транзакция на запись):
 
 0. `written` — входной агрегат с очищенными `events`
 1. `Repo.Pg.insert`/`update` — строка агрегата (эталоном в `Repo.Sc` уходит `written`)
 2. дочерние строки через `Repo.Pg.Children` — точечно, а не перезаписью коллекции
-3. flush: `<Aggregate>.Outbox.from_events` → `Event.Repo.append` → `Outbox.Repo.append`
+3. flush: `<Aggregate>.Outbox.from_events` → `Core.Es.Store.append` → `Outbox.Repo.append`
 4. возврат `written`
 
 Очистка событий идёт **до** записи, а не после: эталоном `Repo.Pg.insert/4` кладёт то, что ему
 передали, и очистка после записи разошлась бы с эталоном. В шаги 1 и 2 идёт `written`, в шаг 3 —
 исходный агрегат: события нужны там непустыми.
+
+Непрерывность потока при записи не проверяется: поток state-stored агрегата законно начинается не
+с 1 и имеет разрывы (агрегат создан без события, мутация без события). Отказ `append` —
+`errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`, транзакция
+откатывается целиком («Хранилище событий»).
 
 Стратегия записи детей (`Core.Repo.Pg.Children`):
 
@@ -522,79 +530,283 @@ Diff считается по обеим сторонам от одной и то
 `save/3` генерируется всегда: `Repo.Pg.save/4` зовёт `Repo.Pg.insert/update`, а не переопределённые
 в модуле, то есть записал бы строку без детей и без событий.
 
-## Role Repo vs common Repo.Pg vs Event.Repo
+## Write event-sourced агрегата (`use Core.Es.Aggregate.Repo.Pg`)
+
+Event-sourced агрегат (`11-domain.md`, «Event-sourced») хранится только событиями: строки
+состояния нет, и репозиторий строится не на `Repo.Pg`. Behaviour — `use Core.Es.Aggregate.Repo`,
+реализация — `use Core.Es.Aggregate.Repo.Pg`; `insert` / `update` / `save` у агрегата нет.
+
+```elixir
+defmodule MyApp.Domain.<BC>.Common.Account.Repo do
+  use Core.Es.Aggregate.Repo,
+    aggregate: MyApp.Domain.<BC>.Common.Account,
+    id: MyApp.Domain.<BC>.Common.Account.ID
+end
+
+defmodule MyApp.Domain.<BC>.Common.Account.Repo.Pg do
+  alias MyApp.Domain.<BC>.Common.Account
+
+  use Core.Es.Aggregate.Repo.Pg,
+    behaviour: MyApp.Domain.<BC>.Common.Account.Repo,
+    aggregate: Account,
+    id: Account.ID,
+    errors: Account.Errors,
+    outbox: Account.Outbox
+end
+```
+
+Кодек событий берётся из `event_codec:` агрегата, отдельной опции нет; `repo:` и `codec:` —
+опциональны, по умолчанию `Core.Config`; `snapshot:` — «Снапшоты» ниже. Реализация резолвится по
+конвенции `<Behaviour>.Pg` («DI»).
+
+Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo.Pg` — нет `outbox:`, в `errors:` нет
+clause `:version_mismatch`, Prim агрегата кодека не равен `id:`, событие `outbox:` не из
+семейства кодека.
+
+| Функция | Возврат | Исходы |
+|---|---|---|
+| `get(id, version, context)` | `{:ok, state} \| {:error, Error.t()}` | пустой поток при `:current` — `%Agg{id: id, version: nil}`; `%Version{}` мимо головы потока — `:version_mismatch`, у пустого `actual: nil` |
+| `get_many(pairs, context)` | `{:ok, [state]} \| {:error, Error.t()}` | один запрос, состояния в порядке пар; все расхождения — одна `:version_mismatch`; повтор id — `ArgumentError` |
+| `append(events, context)` | `:ok \| {:error, Error.t()}` | `[]` — без запросов; пачка потоков одного типа атомарна; событие не из `tags:` кодека — `FunctionClauseError` |
+| `refresh(state, version, context)` | `{:ok, state} \| {:error, Error.t()}` | хвост потока после `state.version` → `fold/2` → сверка `version` |
+
+- `get` / `get_many` / `refresh` — читающие, `append` — изменяющая: изменяющий usecase держит
+  `get` → `Agg.execute/2` → `append` в теле одной функции под одним `Transact.run`
+  (`20-agreements.md`, «Load/save агрегата — в одной функции»).
+- `:not_found` репозиторий не отдаёт: существование агрегата решает `decide` по `version: nil`.
+- Следующая команда той же функции MAY идти от состояния из `Agg.execute/2` без повторного `get`:
+  оно уже учитывает записываемые события.
+- `append` сам открывает `Transact.run(dao)`: `<Aggregate>.Outbox.from_events` →
+  `Core.Es.Store.append` с непрерывностью потока → `Outbox.Repo.append`. Отказ —
+  `errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`; у `get` /
+  `refresh` detail той же формы, у `get_many` — их список в порядке пар. Реакция одна — повтор
+  usecase.
+- Нечитаемый поток (неизвестный тег, разрыв версий, чужой `aggregate_id`) — исключение, а не
+  `{:error, _}`.
+
+Репозиторий event-sourced агрегата MUST быть один — в common-слое (`common/<aggregate>/repo*`),
+без `default_filters`, role-обёрток и `Repo.Sc`; доступ решают usecase (роли из `Context`) и
+`decide` (владение по состоянию и `by` команды). Удаление агрегата — доменное событие, `delete`
+нет.
+
+```elixir
+# плохо — role-обёртка фильтрует восстановленное состояние: доступ ушёл из usecase и decide
+defmodule MyApp.Domain.<BC>.<Actor>.Account.Repo.Pg do
+  def get(id, version, context, opts \\ []) do
+    with {:ok, account} <- Common.Account.Repo.Pg.get(id, version, context, opts),
+         :ok <- only_own(account, context),
+         do: {:ok, account}
+  end
+end
+
+# хорошо — один common-репозиторий; роль проверяет usecase, владение — decide по by команды
+Transact.run(DAO, fn ->
+  with {:ok, account} <- @repo.get(id, version, context),
+       {:ok, {events, _account}} <- Account.execute(account, command) do
+    @repo.append(events, context)
+  end
+end)
+```
+
+### Снапшоты
+
+Длинный поток MAY читаться от снапшота: `snapshot: [every: N, version: V]` в
+`use Core.Es.Aggregate.Repo.Pg`. `every:` обязателен и без значения по умолчанию, `version:` —
+целое, по умолчанию 1; без опции снапшоты выключены.
+
+```elixir
+use Core.Es.Aggregate.Repo.Pg,
+  behaviour: MyApp.Domain.<BC>.Common.Account.Repo,
+  aggregate: Account,
+  id: Account.ID,
+  errors: Account.Errors,
+  outbox: Account.Outbox,
+  snapshot: [every: 100]
+```
+
+- Снапшот — кэш свёртки в `es_snapshots`, а не источник истины: удаление строк корректность не
+  меняет, версию проверяет `append`. Инструмента очистки нет — подъём `version:` или `DELETE`.
+- `get` / `get_many` / `refresh` читают снапшот и хвост потока после него тем же одним запросом.
+  Свернули у потока не меньше `every` событий — upsert после commit, вне транзакции — сразу;
+  `append` снапшоты не пишет. Эта запись — наполнение кэша, наблюдаемого результата она не
+  меняет: `get` остаётся читающей (`20-agreements.md`, «Разделение изменения и чтения»).
+- Отказ снапшота (не читается, ключи struct не совпали, `fold/2` от него упал) — `warning` и
+  полная свёртка, а не ошибка.
+- Маркер снапшота — md5 модуля агрегата, кодека событий и модулей событий плюс `version:`: правка
+  этих модулей сбрасывает снапшоты сама. Если `evolve` зависит от кода вне них, правка такого кода
+  MUST поднимать `version:` — иначе свёртка продолжится от состояния, собранного старым кодом.
+
+```elixir
+# evolve считает лимит модулем вне агрегата, кодека и событий
+def evolve(state, %Event.Deposited{payload: payload}),
+  do: %{state | limit: Account.Limits.after_deposit(state.limit, payload.amount)}
+
+# плохо — логика Account.Limits поменялась, а version: прежний: снапшоты старой логики живут дальше
+snapshot: [every: 100]
+
+# хорошо — правка Account.Limits ушла вместе с подъёмом version:
+snapshot: [every: 100, version: 2]
+```
+
+Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo.Pg` — `snapshot:` без `every:`, с
+неизвестной опцией, `every:` не целое больше нуля или `version:` не целое.
+
+### Процесс агрегата
+
+Команду одного event-sourced агрегата MAY исполнять `Agg.Process.execute` вместо тела usecase
+`get` → `Agg.execute/2` → `append`. Модуль `use Core.Es.Aggregate.Process, repo: Agg.Repo` лежит
+рядом с репозиторием (`common/<aggregate>/process.ex`), реализация `repo:` резолвится по конвенции
+(«DI»), элемент `{Agg.Process, enabled: …}` ставит дерево потребителя. Опции, исходы и
+наблюдаемость — moduledoc `Core.Es.Aggregate.Process`.
+
+```elixir
+defmodule MyApp.Domain.<BC>.Common.Account.Process do
+  use Core.Es.Aggregate.Process,
+    repo: MyApp.Domain.<BC>.Common.Account.Repo
+end
+
+# usecase — транзакцию открывает execute
+Account.Process.execute(id, version, command, context, fn events ->
+  Notifications.enqueue(events, context)
+end)
+```
+
+- `execute` — изменяющая, `:ok | {:error, Error.t()}`: `get(id, version, context)` →
+  `Agg.execute/2` → `append` → `fun.(events)` одной транзакцией `Core.Config.dao/0`; процесс на id
+  (`enabled: true`) после первой команды вместо `get` дочитывает хвост `refresh(state, version,
+  context)` от состояния последнего commit.
+- Колбэк `fun.(events)` → `:ok | {:error, _}` — сопутствующие записи (Oban, `DAO`) в транзакции
+  команды, под ограничениями `Transact.run` (`20-agreements.md`, «Разделение изменения и
+  чтения»): отказ колбэка откатывает и события, при повторе колбэк зовётся заново.
+- `:version_mismatch` из `append` при `:current` повторяется новой транзакцией до `retries:`;
+  `%Version{}` мимо головы потока — `:version_mismatch` без повтора: клиент видел устаревшее
+  состояние, и повтор его не исправит.
+- Внутри `Transact.run` не вызывается — `20-agreements.md`, «Разделение изменения и чтения».
+- Команда на несколько агрегатов MUST идти путём usecase → repo: процесс исполняет команду одного
+  агрегата, а атомарность нескольких `append` даёт только одна транзакция usecase
+  («Load/save агрегата — в одной функции», `20-agreements.md`).
+
+```elixir
+# плохо — две команды процессов в транзакции usecase: ArgumentError, а атомарности нет и так
+Transact.run(DAO, fn ->
+  with :ok <- Account.Process.execute(from, :current, withdraw, context),
+       do: Account.Process.execute(to, :current, deposit, context)
+end)
+
+# хорошо — команда на два агрегата: usecase → repo одной транзакцией
+Transact.run(DAO, fn ->
+  pairs = [{from, :current}, {to, :current}]
+
+  with {:ok, [source, target]} <- @repo.get_many(pairs, context),
+       {:ok, {withdrawn, _source}} <- Account.execute(source, withdraw),
+       {:ok, {deposited, _target}} <- Account.execute(target, deposit) do
+    @repo.append(withdrawn ++ deposited, context)
+  end
+end)
+```
+
+## Role Repo vs common Repo.Pg
 
 | Kind | Location | Purpose |
 |---|---|---|
 | Common `*.Repo.Pg` | `<bc>/common/<aggregate>/repo/pg.ex` | Shared **write** (row + children + events). Не role-scoped |
 | Role `<Aggregate>.Repo` | `<actor>/<aggregate>/repo.ex`, … | Behaviour + ACL filters + CRUD reads via `use Repo.Pg` |
-| Event.Repo | `*/event/repo` | Event store append/query; вызывается из write-path |
 
 Правила:
 
 - Role Repo **делегирует write** в common `Repo.Pg`, но имеет свои `default_filters` под ACL.
 - Узкий actor-repo может не иметь `insert` (только update/save).
-- Плоский агрегат с событиями: common write-репо — `use Core.Repo.Pg.Es` (отдельный ручной модуль не
-  нужен).
+- Плоский state-stored агрегат с событиями: common write-репо — `use Core.Repo.Pg.StateStored`
+  (отдельный ручной модуль не нужен).
+- Event-sourced агрегат: только common write-репо — `use Core.Es.Aggregate.Repo.Pg`, role-обёрток
+  нет («Write event-sourced агрегата»).
 - Identity/simple BC: часто один `Common.Repo` без role wrapper.
-- Event.Repo API: `append/2`, `list_by_aggregate/2`, `page_by_aggregate/4`.
-
-| Метод | Возврат |
-|---|---|
-| `append` | `:ok \| {:error, Error.t()}` |
-| `list_by_aggregate` | `{:ok, [event]} \| {:error, Error.t()}` |
-| `page_by_aggregate` | `{:ok, Pagination.Result.t(event)} \| {:error, Error.t()}` |
-
-Чтение истории — **safe** (`Schema.to_entity/1` + `Result.traverse/2`), не `to_entity!`:
-событие с неизвестным кодеку типом обязано стать доменной ошибкой `:unknown_event_type`
-(HTTP 400), а не уронить весь GET истории в 500. Bang-реконструкция остаётся на
-write-path (`append`, восстановление агрегата).
-
-## Event store (`use Core.Es.Event.Repo{,.Pg,.Pg.Schema}`)
-
-Триплет event store целиком генерируется; руками — только `@moduledoc` и опции.
-
-```elixir
-defmodule …<Aggregate>.Event.Repo do
-  use Es.Event.Repo,
-    event: Agg.Event,
-    aggregate_id: Agg.ID
-end
-
-defmodule …<Aggregate>.Event.Repo.Pg do
-  use Es.Event.Repo.Pg,
-    behaviour: Agg.Event.Repo,
-    schema: Agg.Event.Repo.Pg.Schema,
-    aggregate_id: Agg.ID,
-    errors: Agg.Errors
-end
-
-defmodule …<Aggregate>.Event.Repo.Pg.Schema do
-  use Es.Event.Repo.Pg.Schema,
-    table: "<aggregate>_events",
-    event: Agg.Event,
-    by_schema: User.Repo.Pg.Schema,
-    payload_type: Types.JSON
-end
-```
-
-- Колонки таблицы фиксированы: `id`, `type`, `payload`, `aggregate_id`, `aggregate_version`, `at`,
-  `by_id`; индексы — `unique_index(aggregate_id, aggregate_version)` и индекс по `aggregate_id`.
-- Схема не знает ни кодека агрегата, ни его Prim: событие переводится в строку и обратно фасадом
-  (`codec.dump/1` / `codec.load(<Aggregate>.Event, wire)`), а поля конверта раскладываются по
-  колонкам парой `Core.Es.Event.Codec.to_fields/1` / `from_fields/1` — конкретный тип события
-  кодек агрегата выбирает по тегу.
-- `changeset/2` у event-схемы **не** нужен: запись идёт только через `insert_all` + `to_model!`.
-- `append/2` возвращает `:ok | {:error, Error.t()}`: конфликт по `(aggregate_id, aggregate_version)`
-  (конкурентная запись) отдаётся доменным `:version_mismatch` из `<Aggregate>.Errors`, а не
-  `Postgrex.Error`. Это единственная реальная защита от lost update — на строке агрегата
-  `optimistic_lock` не используется.
 
 Делегирование:
 
 ```elixir
 def insert(%Agg{} = agg, %Context{} = context, opts \\ []),
   do: AggRepo.Pg.insert(agg, context, opts)
+```
+
+## Хранилище событий (`Core.Es.Store`)
+
+Хранилище событий одно на приложение — таблица `es_events`, DDL — `Core.Es.Migration`; общее для
+event-sourced и state-stored агрегатов. Поток — тип агрегата (`type:` кодека событий) и
+`aggregate_id`, таблицы потоков нет. Глобальная позиция — пара `(xid, number)`: сортировать события
+по одному `number` MUST NOT, номер выдаётся до commit. Решение и цена —
+`docs/adr/0008-shared-event-table-xid8-position.md`.
+
+`Core.Es.Store.append(event_codec, events, context, mismatch, opts)` пишет пачку событий нескольких
+потоков одного типа агрегата в транзакции `DAO` вызывающего. Пачка отвергается, если хоть одно
+событие не прошло проверку:
+
+| Проверка | Отказ |
+|---|---|
+| unique `(aggregate_type, aggregate_id, aggregate_version)` | версия занята конкурентной записью |
+| страж `xid` | в потоке есть событие транзакции с `xid` больше текущей — иначе выдача по позиции переставила бы версии потока |
+| `continuous?: true` (`Es.Aggregate.Repo.Pg`) | первая версия потока в пачке не равна наибольшей версии потока + 1 (у пустого — не 1) |
+
+- `Core.Es.Store.append` MUST NOT вызываться вне write-builder'ов библиотеки
+  (`use Core.Repo.Pg.StateStored`, `use Core.Es.Aggregate.Repo.Pg`) и тестов самого
+  `Core.Es.Store`; MAY — тестовые дублёры в `test/support`. Usecase зовёт только `page_stream`
+  («Страница потока»).
+- Любой отказ — `{:error, mismatch.(detail)}` с detail `%{aggregate_id, expected, actual}`: ns и
+  код ошибки задаёт вызывающий write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`),
+  а не хранилище.
+- Отказ не переводит транзакцию в aborted, но события, прошедшие проверки, к нему уже записаны:
+  write-builder MUST возвращать `{:error, _}` от `append` из `Transact.run`, откатывая транзакцию.
+- Версии потока в пачке не по возрастанию (с `continuous?: true` — не подряд) и событие не из
+  `tags:` кодека — исключение, а не `:version_mismatch`: это ошибка программиста.
+
+```elixir
+# плохо — отказ проглочен: транзакция закоммитит строку агрегата и часть пачки
+with {:ok, _} <- Repo.Pg.update(@pg, written, context, opts) do
+  _ = Store.append(@event_codec, events, context, &version_mismatch/1)
+  Config.outbox_repo().append(records, context, opts)
+end
+
+# хорошо — `{:error, _}` выходит из `Transact.run` и откатывает транзакцию
+with {:ok, _} <- Repo.Pg.update(@pg, written, context, opts),
+     :ok <- Store.append(@event_codec, events, context, &version_mismatch/1) do
+  Config.outbox_repo().append(records, context, opts)
+end
+```
+
+## Страница потока
+
+`Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` →
+`{:ok, Pagination.Result.t(Es.Event)}` — страница потока одного агрегата любого вида: по
+возрастанию `aggregate_version`, `count` — весь поток. Тип агрегата и семейство событий — из
+кодека, `context` не используется. Читающий usecase зовёт её напрямую, мимо ReadRepo. В именах и
+текстах библиотеки — «страница потока» / «чтение потока»; называть поток «историей» MUST NOT:
+«история» — имя экрана у потребителя (`CONTEXT.md`, «Поток событий»).
+
+- `page_stream` доступ не проверяет и `:not_found` не отдаёт: пустой поток — страница с
+  `count: 0`. Читающий usecase MUST до чтения проверить права по `Context` и существование
+  агрегата через `ReadRepo.get(id, :current, context)` с его `default_filters`; у event-sourced
+  агрегата без read-модели проверяются только роли.
+- Элемент страницы — `Es.Event`, а не View (отступление от «Read (`<Aggregate>.ReadRepo`)»): Prim
+  события не ужесточается, и проверенное на записи событие грузится —
+  `docs/adr/0010-event-evolution-tag-upcast.md`. Наружу событие отдаёт презентер:
+  `OutCodec.dump` → `Es.Event.Codec.to_fields/1`.
+- Строки грузятся фасадом с апкастом; первая ошибка `load` (`:unknown_event_type`,
+  `:invalid_envelope`) — `{:error, _}` на всю страницу. Событие не пропускается: иначе `count`
+  разойдётся со страницей.
+- Поток нескольких агрегатов или типов на одном экране хранилище не даёт: это проекция потребителя
+  и ReadRepo над её read-моделью, фильтры и построчный ACL — там же.
+
+```elixir
+# плохо — чтение по голому id: наружу уходит страница чужого или удалённого агрегата
+def history(%Agg.ID{} = id, limit, offset, %Context{} = context),
+  do: Store.page_stream(Agg.Event.Codec, id, limit, offset, context)
+
+# хорошо — права и существование агрегата проверены до чтения потока
+def history(%Agg.ID{} = id, limit, offset, %Context{} = context) do
+  with {:ok, _view} <- @read_repo.get(id, :current, context) do
+    Store.page_stream(Agg.Event.Codec, id, limit, offset, context)
+  end
+end
 ```
 
 ## Наименование
@@ -605,7 +817,8 @@ def insert(%Agg{} = agg, %Context{} = context, opts \\ []),
 | Table | plural snake: `<entities>`, `<entity>_<children>`, `outbox` |
 | PK / FK | `:binary_id`; ids — UUID strings через `InCodec.dump/1` |
 | Soft delete | `deleted_at` / `deleted_by_id` + Specs `not_deleted` |
-| Events table | `<aggregate>_events`; колонки задаёт `Core.Es.Event.Repo.Pg.Schema` |
+| Events table | хранилище событий — `es_events`, колонки задаёт `Core.Es.Migration` |
+| Snapshots table | снапшоты event-sourced агрегатов — `es_snapshots`, колонки задаёт `Core.Es.Migration` |
 
 ## DI
 
@@ -656,6 +869,7 @@ elixir deps/core/scripts/boundary_lint.exs --consumer lib test
 - При `shadow_copy?: true`: `Context.new() |> Repo.Sc.init()`
 - Доменные фабрики (`<Actor>.User.new`, `<Aggregate>.new`, …), не Ecto fixtures
 - Outbox/процессы: при необходимости `Sandbox.allow(repo, self(), pid)`
+- Записанные события агрегата — `Core.Es.Store.Test.events!(Agg.Event.Codec, id)`
 
 ## Связанные правила
 

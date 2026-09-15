@@ -6,16 +6,16 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Spec:** [Event-sourced агрегат в :core](../spec.md) — «Своды, README, skills», пункт «Словарь CQS»
 
-- [ ] `20-agreements.md`: раздел CQS называется «Разделение изменения и чтения (CQS)», раздел имён —
+- [x] `20-agreements.md`: раздел CQS называется «Разделение изменения и чтения (CQS)», раздел имён —
       «Наименование читающих функций: `find` / `get` / `get!`»; «команда / запрос» в смысле CQS заменены на
       «изменяющая / читающая» функция и usecase.
-- [ ] В `13-repos.md`, `14-events-outbox.md`, `21-observability.md` заменены CQS-формы: «command-flow», «usecase
+- [x] В `13-repos.md`, `14-events-outbox.md`, `21-observability.md` заменены CQS-формы: «command-flow», «usecase
       запросов / команд», «цепочке команд», «Джоба-команда», «трейс команды», «от команды до обработчика».
-- [ ] «Запрос» в смысле SQL и HTTP не меняется; строка `<Aggregate>.Cmd.Codec` в `11-domain.md` остаётся.
-- [ ] Ссылки на переименованные разделы из других сводов, skills и `CLAUDE.md` / `AGENTS.md` ведут на новые заголовки.
-- [ ] Код библиотеки не меняется.
-- [ ] `make rules-check` и `make` зелёные.
+- [x] «Запрос» в смысле SQL и HTTP не меняется; строка `<Aggregate>.Cmd.Codec` в `11-domain.md` остаётся.
+- [x] Ссылки на переименованные разделы из других сводов, skills и `CLAUDE.md` / `AGENTS.md` ведут на новые заголовки.
+- [x] Код библиотеки не меняется.
+- [x] `make rules-check` и `make` зелёные.
