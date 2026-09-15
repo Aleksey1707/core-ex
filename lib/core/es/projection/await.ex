@@ -1,0 +1,191 @@
+defmodule Core.Es.Projection.Await do
+  @moduledoc """
+  Ожидание проекции после записи — тело `Core.Es.Projection.await/4`: цель, отметка дерева
+  `Core.Es.Projection.Supervisor`, опрос чекпоинта (`await: :poll`) или прогон проекции в
+  вызывающем процессе (`await: :inline`). Исходы — в `@moduledoc` `Core.Es.Projection`,
+  «Ожидание».
+  """
+
+  alias Core.Error
+  alias Core.Es
+  alias Core.Es.Projection
+  alias Core.Es.Projection.Batch
+  alias Core.Es.Projection.Checkpoint
+  alias Core.Otel
+  alias Core.Telemetry
+
+  require Error
+
+  @poll_min_ms 10
+  @poll_max_ms 100
+
+  @doc """
+  Дождаться, пока проекция `projection` по объявлению `declaration` обработает последнее событие
+  потока `aggregate_id` агрегата `aggregate`, — не дольше `timeout` мс.
+  """
+  @spec run(module(), Projection.t(), module(), struct(), non_neg_integer()) ::
+          :ok | {:error, Error.t()}
+
+  def run(projection, declaration, aggregate, %_{} = aggregate_id, timeout)
+      when is_atom(projection) and is_atom(aggregate) and is_integer(timeout) and timeout >= 0 do
+    type = subscribed_type(Map.to_list(declaration.streams), codec_parts(aggregate))
+    ensure_outside_transaction!(declaration.dao.in_transaction?(), declaration)
+    mark = tree_mark!(Projection.Supervisor.mark(), projection, declaration)
+    id = declaration.codec.dump(aggregate_id)
+
+    Otel.Es.await(declaration.name, type, id, fn ->
+      measured(declaration, fn ->
+        target = Es.Store.last_stream_position(declaration.dao, type, id)
+        awaited(mark, projection, declaration, target, timeout)
+      end)
+    end)
+  end
+
+  # ---
+
+  # Поток агрегата — тот, чей кодек `<Aggregate>.Event.Codec` (`11-domain.md`): так проекция
+  # находит кодек модуля события. Потока нет — проекция на тип агрегата не подписана.
+  defp subscribed_type([{type, %{codec: codec}} | streams], parts) do
+    if Module.split(codec) == parts,
+      do: type,
+      else: subscribed_type(streams, parts)
+  end
+
+  defp codec_parts(aggregate), do: Module.split(aggregate) ++ ["Event", "Codec"]
+
+  defp ensure_outside_transaction!(false, _declaration), do: :ok
+
+  defp ensure_outside_transaction!(true, declaration) do
+    raise ArgumentError,
+          "Es.Projection.await: проекция #{declaration.name} вызвана внутри транзакции — " <>
+            "пачка не видит незакоммиченной записи, ожидание идёт после commit"
+  end
+
+  defp tree_mark!(nil, _projection, _declaration) do
+    raise "Es.Projection.await: дерево проекций не запущено — " <>
+            "Core.Es.Projection.Supervisor на ноде не стартовал"
+  end
+
+  defp tree_mark!(%{projections: projections} = mark, projection, declaration) do
+    :ok = ensure_listed!(projection in projections, declaration)
+    mark
+  end
+
+  defp ensure_listed!(true, _declaration), do: :ok
+
+  defp ensure_listed!(false, declaration) do
+    raise ArgumentError,
+          "Es.Projection.await: проекция #{declaration.name} не из projections: " <>
+            "дерева проекций"
+  end
+
+  defp measured(declaration, fun) do
+    start = System.monotonic_time()
+    result = fun.()
+
+    :telemetry.execute(
+      Telemetry.event([:es, :projection, :await]),
+      %{duration: System.monotonic_time() - start},
+      %{projection: declaration.name, result: telemetry_result(result)}
+    )
+
+    result
+  end
+
+  defp telemetry_result(:ok), do: :ok
+  defp telemetry_result({:error, %Error{code: :projection_timeout}}), do: :timeout
+  defp telemetry_result({:error, %Error{code: :projection_rebuilding}}), do: :rebuilding
+
+  defp awaited(_mark, _projection, _declaration, nil, _timeout), do: :ok
+
+  defp awaited(%{await: :inline} = mark, projection, declaration, target, _timeout),
+    do: inline(projection, declaration, mark.batch_size, target)
+
+  defp awaited(%{await: :poll}, _projection, declaration, target, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    poll(declaration, target, timeout, deadline, @poll_min_ms)
+  end
+
+  # Тестовое дерево: пачки идут в процессе и транзакции вызывающего до `:idle`, затем чекпоинт
+  # сверяется с целью. Иной исход — дефект теста или проекции, а не ожидание.
+  defp inline(projection, declaration, batch_size, target) do
+    case until_idle(projection, declaration, batch_size) do
+      :idle -> verified(declaration, target)
+      {:error, %Error{} = error, _failure} -> raise_inline!(declaration, {:error, error})
+      outcome -> raise_inline!(declaration, outcome)
+    end
+  end
+
+  defp until_idle(projection, declaration, batch_size) do
+    case Batch.run(projection, declaration, batch_size) do
+      {:processed, _event_count} -> until_idle(projection, declaration, batch_size)
+      outcome -> outcome
+    end
+  end
+
+  defp verified(declaration, target) do
+    case progress(Checkpoint.find(declaration), declaration, target) do
+      :reached -> :ok
+      progress -> raise_inline!(declaration, {:idle, progress})
+    end
+  end
+
+  defp raise_inline!(declaration, outcome) do
+    raise "Es.Projection.await: прогон :inline проекции #{declaration.name} — " <>
+            "исход #{inspect(outcome)}"
+  end
+
+  defp poll(declaration, target, timeout, deadline, interval) do
+    case progress(Checkpoint.find(declaration), declaration, target) do
+      :reached -> :ok
+      :rebuilding -> {:error, rebuilding(declaration)}
+      :behind -> wait(declaration, target, timeout, deadline, interval)
+    end
+  end
+
+  # Проекция в повторе чекпоинт не двигает: ожидание идёт до таймаута, как у отстающей.
+  defp wait(declaration, target, timeout, deadline, interval) do
+    case deadline - System.monotonic_time(:millisecond) do
+      remaining when remaining > 0 ->
+        Process.sleep(min(interval, remaining))
+        poll(declaration, target, timeout, deadline, min(interval * 2, @poll_max_ms))
+
+      _expired ->
+        {:error, timed_out(declaration, timeout)}
+    end
+  end
+
+  # Чекпоинт не ниже цели — событие потока строка уже обработала, при любой её версии и во время
+  # пересборки. Ниже цели строка старой версии или чекпоинт ниже цели пересборки — read-модель
+  # неполна, ждать её пересборку до таймаута незачем.
+  defp progress(nil, _declaration, _target), do: :rebuilding
+
+  defp progress(%{position: position} = checkpoint, declaration, target) do
+    cond do
+      reached?(position, target) -> :reached
+      Checkpoint.rebuilding?(checkpoint, declaration) -> :rebuilding
+      true -> :behind
+    end
+  end
+
+  defp reached?(nil, _target), do: false
+  defp reached?(position, target), do: position >= target
+
+  defp timed_out(declaration, timeout) do
+    Error.app(
+      code: :projection_timeout,
+      ns: :es,
+      message: "Проекция не обработала запись за время ожидания",
+      detail: %{projection: declaration.name, timeout: timeout}
+    )
+  end
+
+  defp rebuilding(declaration) do
+    Error.app(
+      code: :projection_rebuilding,
+      ns: :es,
+      message: "Проекция пересобирается: read-модель неполна",
+      detail: %{projection: declaration.name}
+    )
+  end
+end

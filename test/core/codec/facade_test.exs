@@ -146,7 +146,7 @@ defmodule Core.Codec.FacadeTest do
               %Error{
                 code: :unknown_event_type,
                 ns: :es,
-                module: Core.EventFixture.Codec,
+                module: Core.EventFixture.Event.Codec,
                 detail: "nope"
               }} = InCodec.load(Core.EventFixture.Event, %{"type" => "nope"})
     end
@@ -176,7 +176,37 @@ defmodule Core.Codec.FacadeTest do
           defmodule Core.Codec.FacadeTest.DupUnionFacade do
             use Core.Codec.Facade,
               prim: Core.CodecFixture.Prim.Internal,
-              plugins: [Core.EventFixture.Codec, Core.Codec.FacadeTest.DupUnionA]
+              plugins: [Core.EventFixture.Event.Codec, Core.Codec.FacadeTest.DupUnionA]
+          end
+        end
+      )
+    end
+  end
+
+  test "тип агрегата в двух кодеках событий — CompileError с именами обоих" do
+    assert_raise CompileError, ~r/тип агрегата "fixture".*DupTypeCodec.*EventFixture/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.DupTypeEvent do
+            defmodule Opened do
+              use Core.Es.Event,
+                aggregate_id: Core.EventFixture.AggID,
+                by: Core.EventFixture.ActorID,
+                payload: nil
+            end
+          end
+
+          defmodule Core.Codec.FacadeTest.DupTypeCodec do
+            use Core.Es.Event.Codec,
+              event: Core.Codec.FacadeTest.DupTypeEvent,
+              type: "fixture",
+              tags: %{Core.Codec.FacadeTest.DupTypeEvent.Opened => "fixture.opened"}
+          end
+
+          defmodule Core.Codec.FacadeTest.DupTypeFacade do
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: [Core.EventFixture.Event.Codec, Core.Codec.FacadeTest.DupTypeCodec]
           end
         end
       )

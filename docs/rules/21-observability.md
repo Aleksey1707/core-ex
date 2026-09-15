@@ -18,6 +18,9 @@ OTel-метрики библиотека **не** вводит: дублиров
 даёт два несходящихся числа и два места, где его надо чинить. Новый показатель —
 это `:telemetry`-событие плюс строка в PromEx-плагине.
 
+Метрики event sourcing собирает `Core.Es.PromEx`, рекомендованные алерты проекций —
+`22-projections.md`, «Эксплуатация».
+
 Логи в OTLP не уходят: экспортёр логов для BEAM не выпущен в hex (`otel_log_handler`
 лежит в `opentelemetry_experimental` без экспортёра). Пока это так, логи остаются
 текстом в stdout, а связь с трейсом даёт `trace_id` в metadata.
@@ -40,9 +43,12 @@ carrier. Он не знает ни про MQ, ни про HTTP; атрибуты
 (`attributes:`), их имена — забота вызывающего. Своего словаря атрибутов у него нет,
 кроме `error.type` / `core.error.kind` у `record_error/1`.
 
-Словари semconv живут отдельными модулями: `Core.Otel.Messaging` — операции обмена
-сообщениями (`create` / `send` / `process`). Новая предметная область (HTTP-клиент,
-кеш) — это новый `Core.Otel.<Область>`, а не ещё несколько клоуз в фасаде.
+Словари живут отдельными модулями: `Core.Otel.Messaging` — операции обмена
+сообщениями по semconv (`create` / `send` / `process`), `Core.Otel.Es` — event sourcing
+(`project` — пачка проекции, `await` — ожидание проекции, `execute` — команда процесса
+агрегата, атрибуты `core.es.*`). Новая
+предметная область (HTTP-клиент, кеш) — это новый `Core.Otel.<Область>`, а не ещё несколько
+клоуз в фасаде.
 
 Правила словаря:
 
@@ -78,6 +84,39 @@ Instrumentation scope по умолчанию — `:core`. Код потреби
 
 Span на периодический опрос (тик поллера, цикл cleaner'а) — **MUST NOT**: это шум,
 в котором тонет трейс запроса. Трассируется работа, а не расписание.
+
+Пачка проекции MUST идти в корневом span'е `Core.Otel.Es.project/3` только когда у неё есть
+работа — старт с начала истории или события после чекпоинта; холостая и заблокированная пачки —
+то же расписание, span'а у них нет. Родителя у span'а нет: пачка несёт события разных команд.
+
+Проверяется: `test/core/es/projection_test.exs`, describe «span».
+
+Ожидание проекции MUST идти в span'е `Core.Otel.Es.await/4` на call site — в процессе
+вызывающего, дочерним span'у usecase, а не корневым: ожидание — часть запроса, и его длительность
+видна в трейсе рядом с записью. Span открывает сам `Core.Es.Projection.await/4`,
+`:projection_timeout` и `:projection_rebuilding` отмечаются `record_error/1`.
+
+Проверяется: `test/core/es/projection/await_test.exs`, describe «span».
+
+Команда процесса агрегата MUST идти в span'е `Core.Otel.Es.execute/4` на call site
+`Agg.Process.execute` — в процессе вызывающего, дочерним span'у usecase, а не в процессе, который
+исполняет команду: контекст трейса живёт в pdict вызывающего. Span открывает сам `execute`; режим
+и число повторов — атрибуты, прикладная ошибка — `record_error/1`, доменный отказ статус span'а не
+меняет. У восстановления агрегата (`get` / `get_many` / `refresh`) span'а нет.
+
+Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span».
+
+Контекст трейса в `es_events` MUST NOT храниться: хранилище вечное, baggage пропагатора лёг бы в
+него навсегда, а пересборка ссылалась бы на истёкшие трейсы. Обработку события с командой
+связывает `event_id` — атрибут `core.es.event.id` на отказе пачки.
+
+```elixir
+# плохо — контекст трейса команды в нагрузке события: переживёт трейс и уйдёт в пересборку
+payload = %{"name" => name, "traceparent" => Otel.inject(%{})["traceparent"]}
+
+# хорошо — событие без контекста трейса: связь с командой — его event_id
+payload = %{"name" => name}
+```
 
 ## Атрибуты
 
@@ -124,7 +163,7 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - Экспортёр span'ов глобален: тест, вызывающий `Core.OtelFixture.attach/0`, —
   `async: false` (`19-testing.md`).
 - Связность цепочки проверяется сквозным тестом (`test/core/otel_chain_test.exs`):
-  один `trace_id` от команды до обработчика сообщения, без живого брокера.
+  один `trace_id` от изменяющего usecase до обработчика сообщения, без живого брокера.
 - Утверждать MUST по родителю (`parent_span_id`) и ссылкам (`links`), а не только
   по совпадению `trace_id`: общий трейс проходит и там, где звено потеряло родителя.
 
@@ -134,3 +173,4 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - Границы библиотеки и конфигурация — `10-architecture.md`
 - Уровни и формат логов — `20-agreements.md`
 - Тесты — `19-testing.md`
+- Алерты проекций — `22-projections.md`

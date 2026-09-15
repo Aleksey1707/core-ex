@@ -1,8 +1,8 @@
 # Тесты
 
 - **Область.** `test/**` библиотеки; у потребителя — его case-модули, фикстуры и тесты.
-- **Читать перед.** Новым тестом или case-модулем; тестом кодека, репозитория, процесса, Enum или
-  события; правкой тестовой обвязки в `test/support`.
+- **Читать перед.** Новым тестом или case-модулем; тестом кодека, репозитория, агрегата,
+  процесса, Enum или события; правкой тестовой обвязки в `test/support`.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Case-модули
@@ -11,14 +11,15 @@
 |---|---|
 | `ExUnit.Case` | чистые модули: Prim, Enum, Codec, хелперы |
 | `Core.DataCase` | всё, что ходит в Postgres (Ecto Sandbox) |
+| `Core.Es.EventCompatCase` | golden-фикстуры событий и полнота `evolve` агрегата, один тест-модуль на агрегат (см. «Совместимость событий») |
+| `Core.Es.ProjectionCase` | полнота `project/1` и `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
 
-У приложения-потребителя набор шире (`MyAppWeb.ConnCase`, `MyApp.EventCompatCase`);
-в библиотеке их аналогов нет — web-слоя и доменных агрегатов здесь не бывает.
+У приложения-потребителя набор шире (`MyAppWeb.ConnCase`): web-слоя в библиотеке нет.
 
 Тестовая обвязка библиотеки живёт в `test/support`: `Core.TestRepo` (роль `MyApp.DAO`),
-`Core.CodecFixture.*` (роль `MyApp.Codec.*`), `Core.TestTypes.JSON`, `Core.PrimFixture`,
-`Core.ViewFixture`, `Core.MqFake`, `Core.EventFixture`. Процессы, которые в приложении
-поднимает его supervisor, стартуют в `test/test_helper.exs`.
+`Core.CodecFixture.*` (роль `MyApp.Codec.*`), `Core.PrimFixture`, `Core.ViewFixture`,
+`Core.MqFake`, `Core.EventFixture`, `Core.StateStoredFixture`, `Core.EsFixture`. Процессы,
+которые в приложении поднимает его supervisor, стартуют в `test/test_helper.exs`.
 
 `async: true` по умолчанию. `async: false` — только когда тест трогает глобальное состояние
 (конфиг приложения, именованный процесс, консолидированные протоколы) и восстанавливает его
@@ -72,10 +73,125 @@ MUST равняться `entity |> OutCodec.dump() |> json_roundtrip()`.
 
 ## Совместимость событий
 
-`use MyApp.EventCompatCase, codec:, event:, aggregate_id:, fixtures:` — один тест-модуль на
-агрегат (`event:` — модуль-семейство: через него фикстура грузится фасадом).
-Golden-фикстуры `test/support/fixtures/events/<aggregate>/<wire_tag>.json` не перегенерируются.
-Новый тип события → добавить фикстуру. Правила эволюции — `14-events-outbox.md`.
+Каждый агрегат с кодеком событий MUST иметь тест-модуль `use Core.Es.EventCompatCase` — один на
+агрегат. Event-sourced агрегат передаётся `aggregate:`, и case проверяет ещё полноту `evolve`
+(«Event-sourced агрегат»); кодек state-stored агрегата — `event_codec:`. Остальное case берёт из
+кодека и фасада `Core.Config.codec/0`. Каталог фикстур, инварианты и правила эволюции —
+`14-events-outbox.md`, «Golden-фикстуры».
+
+```elixir
+# плохо — свой case: его проверки расходятся с кодеком библиотеки молча
+use MyApp.EventCompatCase,
+  codec: MyApp.Codec.Internal,
+  event: Delivery.Event,
+  aggregate_id: Delivery.ID
+
+# хорошо — test/my_app/domain/<bc>/common/delivery/event_compat_test.exs
+defmodule MyApp.Domain.<BC>.Common.Delivery.EventCompatTest do
+  use Core.Es.EventCompatCase,
+    event_codec: MyApp.Domain.<BC>.Common.Delivery.Event.Codec,
+    async: true
+end
+
+# хорошо — test/my_app/domain/<bc>/common/account/event_compat_test.exs
+defmodule MyApp.Domain.<BC>.Common.Account.EventCompatTest do
+  use Core.Es.EventCompatCase,
+    aggregate: MyApp.Domain.<BC>.Common.Account,
+    async: true
+end
+```
+
+## Event-sourced агрегат
+
+Решения агрегата тестируются без БД, в `ExUnit.Case, async: true`:
+
+- given — `Core.Es.Aggregate.Test.given(state, results, by:, at:)` от `%Agg{id: id}`: результаты
+  `decide/2`, версии и `id` событий ставит библиотека; разные авторы — цепочкой вызовов;
+- when — `Agg.decide(cmd, state)`;
+- then SHOULD — короткая форма результата: `{:ok, [{Mod, payload}]}`, `{:ok, []}`,
+  `{:error, %Error{kind: :domain, code: …}}` без `message` / `detail`.
+
+Given из команд через `execute/2` SHOULD NOT: команда не воспроизводит событие удалённого типа,
+а тест одной команды начинает зависеть от `decide` другой. Then по `%Es.Event{}` или по
+состоянию после команды SHOULD NOT — `id` и `at` событий пришлось бы сверять в каждом тесте.
+
+Применение событий — отдельные тесты `evolve` через `Agg.fold/2`. Полноту `evolve` проверяет
+`use Core.Es.EventCompatCase, aggregate:`: `evolve(%Agg{id: aggregate_id}, событие)` на фикстуре
+каждого тега; провал — только `FunctionClauseError` самой `Agg.evolve/2`.
+
+Проверяется: `use Core.Es.EventCompatCase, aggregate:` — полнота `evolve`.
+
+```elixir
+# плохо — given командами: тест закрытия зависит от decide открытия и заморозки
+{:ok, {_events, state}} = Account.execute(%Account{id: id}, %Cmd.Open{name: name, by: by, at: at})
+{:ok, {_events, state}} = Account.execute(state, %Cmd.Freeze{by: by, at: at})
+
+# хорошо
+import Core.Es.Aggregate.Test, only: [given: 3]
+
+state = given(%Account{id: id}, [{Event.Opened, payload}, Event.Frozen], by: by, at: at)
+
+assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: by, at: at}, state)
+```
+
+## Проекции
+
+Каждая проекция MUST иметь тест-модуль `use Core.Es.ProjectionCase` — один на проекцию: он
+проверяет на golden-фикстурах событий (`14-events-outbox.md`) нормы `project/1` и `clear/0` из
+`22-projections.md`, «Объявление», и сам находит таблицы, которые пишет проекция. Проверки, опции
+и `async: false` — moduledoc `Core.Es.ProjectionCase`.
+
+```elixir
+# плохо — clear/0 проверен вручную: таблица, добавленная в проекцию позже, в перечень не попадёт
+test "clear/0 очищает read-модель" do
+  :ok = AccountList.Projection.project(opened)
+  :ok = AccountList.Projection.clear()
+  assert DAO.aggregate(AccountList.Row, :count) == 0
+end
+
+# хорошо — test/my_app/domain/<bc>/<actor>/account_list/projection_case_test.exs
+defmodule MyApp.Domain.<BC>.<Actor>.AccountList.ProjectionCaseTest do
+  use Core.Es.ProjectionCase,
+    projection: MyApp.Domain.<BC>.<Actor>.AccountList.Projection,
+    async: false
+end
+```
+
+Проекцию SHOULD проверять записью через репозиторий агрегата → прогоном
+`Core.Es.Projection.Test.run_until_idle/2` → чтением ReadRepo: так тест видит порядок событий
+разных агрегатов, пропуск необъявленных тегов и апкаст. Прогон MUST идти в
+`Core.DataCase, async: false`: блокировка пачки и строка чекпоинта держатся до конца
+sandbox-транзакции, и пачка соседнего теста получила бы `{:error, :locked}`.
+
+Прямой вызов `project/1` проекции MAY — в `async: true` на событиях из `Agg.execute/2` или
+`events` state-stored агрегата; хелпера сборки событий нет.
+
+```elixir
+# плохо — прогон в async: true: пачку проекции держит sandbox-транзакция соседнего теста
+use Core.DataCase, async: true
+
+assert :ok = Core.Es.Projection.Test.run_until_idle(AccountList.Projection)
+
+# хорошо — test/my_app/domain/<bc>/<actor>/account_list/projection_test.exs
+use Core.DataCase, async: false
+
+:ok = Accounts.Open.call(params, context)
+assert :ok = Core.Es.Projection.Test.run_until_idle(AccountList.Projection)
+assert {:ok, %AccountList.View{status: :open}} = AccountList.ReadRepo.get(id, :current, context)
+```
+
+Usecase с `Core.Es.Projection.await/4` тест SHOULD гонять на тестовом дереве `enabled: false`,
+`await: :inline` из `config/test.exs`: `await` прогоняет проекцию до `:idle` в процессе теста,
+как `run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой
+тест — тоже `Core.DataCase, async: false`.
+
+```elixir
+# плохо — тестовое дерево без await: :inline: читателей нет, чекпоинт стоит, await не дождётся
+config :my_app, MyApp.Projections, enabled: false
+
+# хорошо — config/test.exs
+config :my_app, MyApp.Projections, enabled: false, await: :inline
+```
 
 ## Enum: описания и внешние коды
 
@@ -157,12 +273,41 @@ end
 
 ## Процессы
 
-- `Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), pid)` для порождённых процессов.
+- `Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), pid)` для порождённых процессов, pid которых тест
+  знает до их первого запроса.
+- Процесс, который стартует внутри вызова (процесс агрегата на id при `{Agg.Process, enabled:
+  true}`), тест MUST вести в shared mode sandbox — `async: false` на `Core.DataCase`
+  (`start_owner!(shared: not async)`), без `allow` и `$callers`: pid появляется посреди вызова,
+  который уже ждёт его запроса, и поставить `allow` некому.
 - Циклы OTP проверять синхронным `run_once/1` (`Poller` / `Cleaner`), а не `sleep`
   в ожидании таймера.
 - Тест, меняющий глобальный конфиг или именованный синглтон, — `async: false` с
   восстановлением в `on_exit`.
+- Usecase с `Agg.Process.execute` тест потребителя SHOULD гонять на `{Agg.Process, enabled: false}`
+  из дерева тестового окружения: команда идёт в процессе теста и в его sandbox, как вызов
+  репозитория, без `allow`. Отметка старта глобальна — дерево ставит её один раз на прогон, а не
+  тест.
 - Устройство самих процессов — `17-otp-concurrency.md`.
+
+```elixir
+# плохо — процесс агрегата убран из тестового дерева: execute падает RuntimeError «не запущен»
+children = [MyApp.DAO | if(test?, do: [], else: [{Account.Process, enabled: true}])]
+
+# хорошо — дерево одно, config/test.exs выключает процесс: команда идёт в процессе теста
+children = [MyApp.DAO, {Account.Process, Application.fetch_env!(:my_app, Account.Process)}]
+config :my_app, Account.Process, enabled: false
+```
+
+```elixir
+# плохо — allow на дерево: процесс на id стартует внутри execute под DynamicSupervisor, allow его
+# не касается, и запрос процесса падает DBConnection.OwnershipError
+{:ok, tree} = start_supervised({Account.Process, enabled: true})
+Ecto.Adapters.SQL.Sandbox.allow(TestRepo, self(), tree)
+
+# хорошо — async: false: Core.DataCase ставит shared mode, соединение теста видят все процессы
+use Core.DataCase, async: false
+{:ok, _tree} = start_supervised({Account.Process, enabled: true})
+```
 
 ## Чувствительные данные
 

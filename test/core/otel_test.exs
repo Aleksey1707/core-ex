@@ -35,6 +35,23 @@ defmodule Core.OtelTest do
     end
   end
 
+  describe "root_span/3" do
+    test "без родителя внутри span'а процесса; прежний контекст возвращается" do
+      Otel.span("cmd", [], fn ->
+        outer = Otel.current_span()
+        Otel.root_span("пачка", [], fn -> :ok end)
+
+        assert Otel.current_span() == outer
+      end)
+
+      spans = OtelFixture.drain()
+      root = OtelFixture.find(spans, "пачка")
+
+      assert root.parent_span_id == :undefined
+      refute root.trace_id == OtelFixture.find(spans, "cmd").trace_id
+    end
+  end
+
   describe "span/3" do
     test "kind и атрибуты уходят в span как есть" do
       Otel.span("работа", [kind: :producer, attributes: %{"my.attr" => 3}], fn -> :ok end)

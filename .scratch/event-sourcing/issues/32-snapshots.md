@@ -6,30 +6,67 @@
 
 **Blocked by:** [31: Write-репозиторий event-sourced агрегата](31-event-sourced-repo.md)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Spec:** [Event-sourced агрегат в :core](../spec.md) — «Снапшоты»
 
-- [ ] Опция `snapshot:` у `use Core.Es.Aggregate.Repo.Pg`: `every:` обязателен без значения по умолчанию, `version:` —
+- [x] Опция `snapshot:` у `use Core.Es.Aggregate.Repo.Pg`: `every:` обязателен без значения по умолчанию, `version:` —
       целое, по умолчанию 1; проверка на компиляции; без опции — поведение тикета 31.
-- [ ] `Core.Es.Migration` создаёт `es_snapshots`: PK `(тип, aggregate_id)`, `aggregate_version`, `marker`,
+- [x] `Core.Es.Migration` создаёт `es_snapshots`: PK `(тип, aggregate_id)`, `aggregate_version`, `marker`,
       `state bytea`, `updated_at`.
-- [ ] Маркер — md5 модуля агрегата, кодека событий и модулей событий (интроспекция кодека) + `version:`.
-- [ ] Чтение одним запросом: `LEFT JOIN LATERAL` снапшота с маркером в условии + события после его версии; `get_many` —
+- [x] Маркер — md5 модуля агрегата, кодека событий и модулей событий (интроспекция кодека) + `version:`.
+- [x] Чтение одним запросом: `LEFT JOIN LATERAL` снапшота с маркером в условии + события после его версии; `get_many` —
       все пары одним запросом; `get(id, %Version{})` сверяет голову после свёртки.
-- [ ] Свёрнуто ≥ N событий после снапшота (или с начала потока) → upsert
+- [x] Свёрнуто ≥ N событий после снапшота (или с начала потока) → upsert
       `WHERE marker <> new OR aggregate_version < new` синхронно в хуке `AfterCommit` (вне транзакции — сразу);
       `get_many` — один upsert на несколько строк; свой
       `rescue` → `warning`, успех — `debug`; `refresh` пишет по тому же правилу; `append` не меняется.
-- [ ] Отказ: несовпавший маркер — полная свёртка тем же запросом без `warning`; ошибка `binary_to_term(bin, [:safe])`,
+- [x] Отказ: несовпавший маркер — полная свёртка тем же запросом без `warning`; ошибка `binary_to_term(bin, [:safe])`,
       расхождение ключей struct с `defstruct` или исключение `fold/2` от снапшота — `warning` и второй запрос всего
       потока; `raise` — только если не читается сам поток.
-- [ ] `Account.Repo.Pg.Snapshotted` (`every: 2`) проходит контрактный набор тикета 31. Тесты снапшота на нём: upsert
+- [x] `Account.Repo.Pg.Snapshotted` (`every: 2`) проходит контрактный набор тикета 31. Тесты снапшота на нём: upsert
       после ≥ N, один upsert у `get_many`, промах маркера прямым `UPDATE`, битый `bytea` и лишний ключ struct →
       `warning` и верное состояние.
-- [ ] Telemetry: `[:es, :aggregate, :load]` дополнен `snapshot_hit` / `snapshot_miss` / `snapshot_rejected`;
+- [x] Telemetry: `[:es, :aggregate, :load]` дополнен `snapshot_hit` / `snapshot_miss` / `snapshot_rejected`;
       `[:es, :aggregate, :fold]` — `snapshot: :hit | :miss | :rejected | :off`; `[:es, :snapshot, :write]`
       (`duration`, `rows`; `type`, `result: :ok | :error`).
-- [ ] `13-repos.md` — `snapshot:` и MUST поднять `version:`, если `evolve` зависит от кода вне модуля агрегата, кодека
+- [x] `13-repos.md` — `snapshot:` и MUST поднять `version:`, если `evolve` зависит от кода вне модуля агрегата, кодека
       и модулей событий; «Наименование» — `es_snapshots`. `CHANGELOG.md`, «Новое».
-- [ ] `make` зелёный.
+- [x] `make` зелёный.
+
+## Comments
+
+- 2026-09-14 — реализация:
+  - логика снапшота — `Core.Es.Aggregate.Repo.Pg.Snapshot`: опция и маркер на компиляции, свёртка от
+    снапшота с отказом, upsert после commit; Ecto-схема `es_snapshots` — `…Snapshot.Schema`; чтение потоков
+    осталось в `Core.Es.Aggregate.Repo.Pg`;
+  - снапшот присоединяется обычным `LEFT JOIN` по PK с маркером и версией выше версии состояния в условии: PK
+    даёт не больше одной строки, `LATERAL` ничего не добавляет; `state` уходит только в первой строке потока
+    (`row_number()`), bytea не повторяется на каждом событии хвоста;
+  - маркер считается в рантайме по загруженным модулям (`module_info(:md5)`), а не на компиляции репозитория:
+    вызов модулей из макроса не гарантирует пересборку репозитория при правке `evolve`;
+  - `refresh` берёт снапшот, только если его версия выше `state.version`;
+  - сверх пунктов: состояние снапшота сверяется ещё с `id` и версией строки (`reason=struct`); длительность
+    `[:es, :aggregate, :load]` не включает запись снапшотов; `rows` у `[:es, :snapshot, :write]` — записанные
+    строки, при отказе 0; `updated_at` ставит база;
+  - контрактный набор: «все потоки — одним читающим запросом» считает только SELECT — у `Snapshotted` за
+    `get_many` законно идёт upsert; `count_queries/2` получил вид запроса;
+  - тесты сверх пунктов: запись от `refresh`, снапшот более поздней версии не перетирается, отказ записи через
+    подменённый `repo:`, `get_many` с hit / miss / rejected в одном вызове, `CompileError` опции `snapshot:`;
+    мутации порога `every`, маркера в условии, `WHERE` upsert, сверки ключей, `[:safe]` и второго запроса
+    тесты ловят;
+  - битый снапшот той же версии upsert не перетирает (`aggregate_version < new`): `warning` повторяется до
+    следующего события потока;
+  - `es_snapshots` добавлена в тот же `Core.Es.Migration.up/0`: база, где миграция `es_events` уже накатана,
+    откатывается и накатывается заново.
+- 2026-09-14 — по ревью:
+  - CHANGELOG: снапшоты дописаны в пункты `Core.Es.Aggregate.Repo.Pg` и `Core.Es.Migration`, отдельного пункта
+    нет — правка появившегося в «Не выпущено» дополняет существующий пункт;
+  - `version:` — любое целое, как в тикете; запись снапшота на чтении оговорена в `13-repos.md` как наполнение
+    кэша (CQS, `20-agreements.md`); под `rescue` записи — одна строка, логирование вынесено;
+  - тест сверх пунктов: в транзакции снапшот пишется после commit, при откате — не пишется;
+  - оставлено как есть: порог `refresh` — свёрнутые им события хвоста после `state.version` («свернули ≥ N»),
+    а не расстояние от головы до снапшота; отказ `fold/2` от снапшота отдельным тестом не покрыт — у `Account`
+    после сверки `id`, версии и ключей он недостижим, ветка общая с отказами `decode` / `struct`;
+    `AfterCommit` смотрит транзакцию `Core.Config.dao/0`, а не `repo:` — как `Repo.Pg`; `opts` чтения
+    (`prefix:`) в upsert не передаются — как в `Core.Es.Store.append/5`.

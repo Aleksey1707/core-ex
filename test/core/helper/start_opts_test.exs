@@ -48,6 +48,19 @@ defmodule Core.Helper.StartOptsTest do
     end
   end
 
+  test "list!: обязательный список" do
+    assert StartOpts.list!(@label, [items: [:a]], :items) == [:a]
+    assert StartOpts.list!(@label, [items: []], :items) == []
+
+    assert_raise ArgumentError, ~r/:items — ожидается список, получено :a/, fn ->
+      StartOpts.list!(@label, [items: :a], :items)
+    end
+
+    assert_raise ArgumentError, ~r/нет обязательной опции :items/, fn ->
+      StartOpts.list!(@label, [], :items)
+    end
+  end
+
   test "pos_integer!: default при отсутствии, ноль и не-число — ошибка" do
     assert StartOpts.pos_integer!(@label, [], :credit, 2) == 2
     assert StartOpts.pos_integer!(@label, [credit: 5], :credit, 2) == 5
@@ -67,6 +80,19 @@ defmodule Core.Helper.StartOptsTest do
 
     assert_raise ArgumentError, ~r/:reliable\? — ожидается true или false/, fn ->
       StartOpts.boolean!(@label, [reliable?: :yes], :reliable?, true)
+    end
+  end
+
+  test "boolean!/3: обязательное булево" do
+    assert StartOpts.boolean!(@label, [enabled: true], :enabled)
+    refute StartOpts.boolean!(@label, [enabled: false], :enabled)
+
+    assert_raise ArgumentError, ~r/:enabled — ожидается true или false, получено nil/, fn ->
+      StartOpts.boolean!(@label, [enabled: nil], :enabled)
+    end
+
+    assert_raise ArgumentError, ~r/нет обязательной опции :enabled/, fn ->
+      StartOpts.boolean!(@label, [], :enabled)
     end
   end
 

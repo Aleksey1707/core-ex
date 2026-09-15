@@ -38,45 +38,13 @@ defmodule Core.MacroConfigTest do
     use Core.Repo, only: [:get, :insert, :update, :save, :exists?]
   end
 
-  defmodule EventRepo do
-    @moduledoc false
-
-    use Core.Es.Event.Repo,
-      event: Core.EventFixture.Event,
-      aggregate_id: Core.EventFixture.AggID
-  end
-
-  defmodule EventRepoImpl do
-    @moduledoc false
-
-    def append(_events, _context, _opts \\ []), do: :ok
-  end
-
-  defmodule EventRepo.Pg do
-    @moduledoc false
-
-    def append(_events, _context, _opts \\ []), do: :ok
-  end
-
-  defmodule Outbox do
-    @moduledoc false
-
-    def from_events(events) when is_list(events), do: {:ok, events}
-  end
-
   setup do
     codec = Application.fetch_env!(:core, :codec)
     dao = Application.fetch_env!(:core, :dao)
 
-    # DI доменного репозитория событий: `Repo.Pg.Es` резолвит его через `Config.repo!/1`
-    # в app-env потребителя. Здесь ключ задан явно — ветку конвенции проверяет
-    # отдельный тест ниже.
-    Application.put_env(:core, EventRepo, EventRepoImpl)
-
     on_exit(fn ->
       Application.put_env(:core, :codec, codec)
       Application.put_env(:core, :dao, dao)
-      Application.delete_env(:core, EventRepo)
     end)
 
     Application.delete_env(:core, :codec)
@@ -92,21 +60,14 @@ defmodule Core.MacroConfigTest do
       """)
     end
 
-    test "Es.Event.Repo.Pg и его Schema — без codec и dao" do
-      assert_compiles(EsEventSchema, """
-        use Core.Es.Event.Repo.Pg.Schema,
-          table: "fake_events",
-          event: Core.EventFixture.Event,
-          by_schema: Core.EventFixture.BySchema,
-          payload_type: Core.TestTypes.JSON
-      """)
+    test "Es.Projection — без dao и codec" do
+      assert_compiles(EsProjection, """
+        use Core.Es.Projection,
+          name: "macro_config",
+          events: [Core.EventFixture.Event.Created]
 
-      assert_compiles(EsEventRepoPg, """
-        use Core.Es.Event.Repo.Pg,
-          behaviour: Core.MacroConfigTest.EventRepo,
-          schema: Core.MacroConfigTest.EsEventSchema,
-          aggregate_id: Core.EventFixture.AggID,
-          errors: Core.EventFixture.Errors
+        def project(_event), do: :ok
+        def clear, do: :ok
       """)
     end
 
@@ -142,33 +103,29 @@ defmodule Core.MacroConfigTest do
       """)
     end
 
-    test "Repo.Pg.Es — без dao" do
-      assert_compiles(RepoPgEs, """
-        use Core.Repo.Pg.Es,
+    test "Repo.Pg.StateStored — без dao" do
+      assert_compiles(RepoPgStateStored, """
+        use Core.Repo.Pg.StateStored,
           behaviour: Core.MacroConfigTest.Behaviour,
           schema: Core.MacroConfigTest.Entity,
           to_entity: &Function.identity/1,
           to_model: &Function.identity/1,
+          id: Core.EventFixture.AggID,
           entity: Core.MacroConfigTest.Entity,
           errors: Core.MacroConfigTest.Errors,
-          event_repo: Core.MacroConfigTest.EventRepo,
-          outbox: Core.MacroConfigTest.Outbox
+          event_codec: Core.EventFixture.Event.Codec,
+          outbox: Core.StateStoredFixture.Outbox
       """)
     end
 
-    test "Repo.Pg.Es — без DI-ключа: реализация event_repo по конвенции" do
-      Application.delete_env(:core, EventRepo)
-
-      assert_compiles(RepoPgEsByConvention, """
-        use Core.Repo.Pg.Es,
-          behaviour: Core.MacroConfigTest.Behaviour,
-          schema: Core.MacroConfigTest.Entity,
-          to_entity: &Function.identity/1,
-          to_model: &Function.identity/1,
-          entity: Core.MacroConfigTest.Entity,
-          errors: Core.MacroConfigTest.Errors,
-          event_repo: Core.MacroConfigTest.EventRepo,
-          outbox: Core.MacroConfigTest.Outbox
+    test "Es.Aggregate.Repo.Pg — без dao и codec" do
+      assert_compiles(EsAggregateRepoPg, """
+        use Core.Es.Aggregate.Repo.Pg,
+          behaviour: Core.EsFixture.Account.Repo,
+          aggregate: Core.EsFixture.Account,
+          id: Core.EsFixture.Account.ID,
+          errors: Core.EsFixture.Account.Errors,
+          outbox: Core.EsFixture.Account.Outbox
       """)
     end
   end

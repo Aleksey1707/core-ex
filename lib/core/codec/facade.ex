@@ -17,7 +17,7 @@ defmodule Core.Codec.Facade do
   модуль-семейство: `codec.load(<Aggregate>.Event, data)` возвращает то событие, тег
   которого лежит в данных. Выбор конкретного типа — задача плагина, фасад про теги
   не знает: модули типов и семейств обязаны быть уникальными между плагинами, и это
-  проверяется на компиляции.
+  проверяется на компиляции. Так же уникален между кодеками событий тип агрегата (`type:`).
   """
 
   alias Core.Helper
@@ -40,6 +40,7 @@ defmodule Core.Codec.Facade do
       end
 
       Core.Codec.Facade.validate_mods!(@plugins)
+      Core.Codec.Facade.validate_es_types!(@plugins)
 
       @doc "Dump: entity-плагин или Prim."
       for plugin <- @plugins,
@@ -171,6 +172,40 @@ defmodule Core.Codec.Facade do
 
       :error ->
         Map.put(acc, mod, plugin)
+    end
+  end
+
+  @doc """
+  Проверить типы агрегата кодеков событий среди плагинов (compile-time).
+
+  Тип агрегата (`type:` у `Core.Es.Event.Codec`) — первая часть адреса потока событий, поэтому
+  два кодека с одним типом в одном фасаде — `CompileError`.
+  """
+  @spec validate_es_types!([module()]) :: :ok
+
+  def validate_es_types!(plugins) when is_list(plugins) do
+    _by_type =
+      plugins
+      |> ensure_plugins!()
+      |> Enum.filter(&function_exported?(&1, :__es_type__, 0))
+      |> Enum.reduce(%{}, &put_unique_es_type!/2)
+
+    :ok
+  end
+
+  # ---
+
+  defp put_unique_es_type!(plugin, acc) do
+    type = plugin.__es_type__()
+
+    case Map.fetch(acc, type) do
+      {:ok, other} ->
+        raise CompileError,
+          description:
+            "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
+
+      :error ->
+        Map.put(acc, type, plugin)
     end
   end
 end

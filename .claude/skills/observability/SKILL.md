@@ -1,6 +1,6 @@
 ---
 name: observability
-description: "Свод правил наблюдаемости библиотеки Core: разделение метрик (telemetry + PromEx), трейсов (Core.Otel) и логов, зависимость от opentelemetry_api и требование no-op без SDK, словари semconv (Core.Otel.Messaging), где ставить span и где он запрещён, атрибуты и record_error, trace_id в metadata логов, baggage, тесты трассировки. Использовать при добавлении метрики, span'а или атрибута и при правке Core.Otel."
+description: "Свод правил наблюдаемости библиотеки Core: разделение метрик (telemetry + PromEx), трейсов (Core.Otel) и логов, метрики event sourcing в Core.Es.PromEx (алерты проекций — в 22-projections.md), зависимость от opentelemetry_api и требование no-op без SDK, словари (Core.Otel.Messaging, Core.Otel.Es), где ставить span и где он запрещён, корневой span пачки проекции и span ожидания проекции await и span команды процесса агрегата execute на call site, запрет контекста трейса в es_events, атрибуты и record_error, trace_id в metadata логов, baggage, тесты трассировки. Использовать при добавлении метрики, span'а или атрибута, при правке PromEx-плагинов Core.*.PromEx и Core.Otel."
 ---
 
 # 21-observability.md

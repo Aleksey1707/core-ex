@@ -1,0 +1,11 @@
+{
+  "aggregate_id": "01a09d51-ad99-773b-b084-909caa85367d",
+  "aggregate_version": 1,
+  "at": "2026-09-14T00:29:30Z",
+  "by": "01a09d51-ada0-76db-881b-1fa7beacf3f2",
+  "event_id": "01a09d51-ada7-79b7-ad01-e05e0227a8ad",
+  "payload": {
+    "name": "Приёмка"
+  },
+  "type": "fixture.created"
+}

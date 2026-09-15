@@ -74,6 +74,11 @@ dialyzer → test → credo → audit` (тот же порядок в `.pre-comm
 Не логировать штатный per-item/per-batch на `info`. Тексты и наличие сообщений не убирать «для
 тишины» — понижать уровень. Phoenix request-логи (`Plug.Telemetry`) — вне этой политики.
 
+Повтор команды после `:version_mismatch` (`Agg.Process.execute`) — штатная конкурентная запись, а
+не аномалия: `debug` на каждый повтор; исчерпание предела повторов — `warning`.
+
+Проверяется: `test/core/es/aggregate/process_test.exs`, describe «повтор после конфликта».
+
 Формат сообщения: `"<контекст>: key=#{value} …"` (как в usecases отправки / outbox).
 
 Литерал `Logger.*` длиннее 120 символов — конкатенация `<>` по границе пробела перед следующим
@@ -87,27 +92,33 @@ Logger.debug(
 )
 ```
 
-## Command-query separation (CQS)
+## Разделение изменения и чтения (CQS)
 
-Команды и запросы разделяются: функция SHOULD делать что-то одно:
+Изменение и чтение разделяются: функция SHOULD делать что-то одно:
 
-- Либо читать данные и возвращать их (запрос)
-- Либо изменять данные и ничего не возвращать (команда) — в Elixir: `:ok` / `{:ok, _}` только как
-  сигнал успеха, не как «результат чтения»
+- Либо читать данные и возвращать их (читающая функция)
+- Либо изменять данные и ничего не возвращать (изменяющая функция) — в Elixir: `:ok` / `{:ok, _}`
+  только как сигнал успеха, не как «результат чтения»
 
-Также требуется, чтобы из запроса вызывались лишь запросы. Команда может вызывать и команды, и
-запросы. Таким образом по сигнатуре функции можно понять, что она выполняет и что от неё ожидать.
+Также требуется, чтобы из читающей функции вызывались лишь читающие. Изменяющая функция может
+вызывать и изменяющие, и читающие. Таким образом по сигнатуре функции можно понять, что она
+выполняет и что от неё ожидать.
 
-В usecases: команды → `:ok | {:error, _}` через `Helper.Transact.run(DAO, fn -> ... end)`; запросы →
-`{:ok, T} | {:error, _}` (см. `10-architecture.md`).
+В usecases: изменяющие → `:ok | {:error, _}` через `Helper.Transact.run(DAO, fn -> ... end)`;
+читающие → `{:ok, T} | {:error, _}` (см. `10-architecture.md`).
 
 Внутри `Transact.run` допустимы только запросы через `DAO` и enqueue Oban. HTTP, publish в брокер,
-кеш и `sleep` — MUST NOT: транзакция держит соединение и блокировки на всё время вызова.
-Побочный эффект — после commit (`Helper.AfterCommit.register/1`) или отдельным шагом.
-Таблица допустимого — «Что можно внутри `Transact.run`» в `10-architecture.md`.
+кеш, `sleep`, ожидание проекции `Core.Es.Projection.await/4` и команда процесса агрегата
+`Agg.Process.execute` — MUST NOT: транзакция держит соединение и блокировки на всё время вызова,
+незакоммиченную запись проекция не увидит вовсе, а команда идёт своей транзакцией, и откат её
+попытки отменил бы внешнюю. Побочный эффект — после commit (`Helper.AfterCommit.register/1`) или
+отдельным шагом. Таблица допустимого — «Что можно внутри `Transact.run`» в `10-architecture.md`.
 
-Команда не возвращает **состояние**, но MAY вернуть **результат собственного выполнения** —
-информацию, порождённую самой записью и недоступную иначе:
+Проверяется для ожидания проекции и команды процесса агрегата: `ArgumentError` в
+`Core.Es.Projection.await/4` и `Agg.Process.execute` внутри транзакции.
+
+Изменяющая функция не возвращает **состояние**, но MAY вернуть **результат собственного
+выполнения** — информацию, порождённую самой записью и недоступную иначе:
 
 - `Repo` `insert`/`update`/`save` → `{:ok, entity}`: агрегат в состоянии после записи (у агрегата
   с событиями — с очищенными `events`), то есть значение, от которого мутируют дальше;
@@ -119,16 +130,17 @@ Logger.debug(
 
 ## Load/save агрегата — в одной функции
 
-Чтение агрегата через репозиторий (`get` / `get!` / `get_by_*` / `find_many` / `list_*`) и его
-запись (`insert` / `update` / `save` / `delete`) MUST находиться в теле одной функции — вместе с
-`Transact.run`, охватывающим обе операции.
+Чтение агрегата через репозиторий (`get` / `get!` / `get_by_*` / `find_many` / `get_many` /
+`list_*`) и его запись (`insert` / `update` / `save` / `delete`, у event-sourced агрегата —
+`append`) MUST находиться в теле одной функции — вместе с `Transact.run`, охватывающим обе
+операции.
 
 - Мутации домена, разбор результата чтения и логирование выносить в чистые helper'ы без
   repo-вызовов.
 - Batch: пачку перечитывает та же функция, которая сохраняет (`find_many` +
   `Result.traverse(list, &@repo.save(&1, context))`); верхний уровень передаёт вниз идентификаторы,
   а не загруженные агрегаты.
-- Чтение без последующей записи (query-usecases, history, чтение соседнего агрегата — например
+- Чтение без последующей записи (читающие usecases, history, чтение соседнего агрегата — например
   `UserRoles` при проверке доступа) правилом не ограничено.
 
 ```elixir
@@ -153,6 +165,15 @@ Transact.run(DAO, fn ->
        {:ok, mutated} <- Result.traverse(entities, mutate),
        {:ok, _saved} <- Result.traverse(mutated, &@repo.save(&1, context)) do
     :ok
+  end
+end)
+
+# event-sourced — получить → решить → записать события; следующая команда той же функции
+# идёт от состояния из execute/2 без повторного get
+Transact.run(DAO, fn ->
+  with {:ok, account} <- @repo.get(id, version, context),
+       {:ok, {events, _account}} <- Account.execute(account, command) do
+    @repo.append(events, context)
   end
 end)
 ```
@@ -186,7 +207,7 @@ with_lock(id, fn -> ... end, context, opts)
 with_lock(id, context, fn -> ... end, opts)
 ```
 
-## Наименование запросов: `find` / `get` / `get!`
+## Наименование читающих функций: `find` / `get` / `get!`
 
 | Имя | Возврат | Исключения |
 |---|---|---|
@@ -250,8 +271,8 @@ end
 аргументов на этапе компиляции задают **clauses** / `when` (см. «Домен функции…»), не `@spec`.
 
 Исключение — функции, которые генерирует макрос внутри `quote` под `@impl true`
-(`Core.Repo.Pg`, `Core.Repo.Pg.Es`, `Core.Es.Event.Repo.Pg`): источник типов там —
-`@callback` соответствующего behaviour, а `@spec` пришлось бы собирать `unquote`-ом
+(`Core.Repo.Pg`, `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate.Repo.Pg`): источник типов
+там — `@callback` соответствующего behaviour, а `@spec` пришлось бы собирать `unquote`-ом
 из опций `use`. Обычный (не генерируемый) модуль с `@impl` от этого не освобождён —
 `@spec` пишется как везде.
 
@@ -498,12 +519,13 @@ end
 
 Bang (`get!`, `new!`, `raise Exc`, …) — только на явных bang-границах. Исключения: Schema
 bang-mappers (`to_entity!` / `to_model!`) на call site своих строк / persist валидного domain;
-реконструкция события `InCodec.load!` (как bang `to_entity!` для event store); Specs/ACL
+реконструкция события `InCodec.load!` в тестах (`Core.Es.Store.Test.events!`); Specs/ACL
 `CurrentUser.get!`; compile-time константы (`Namespace.new!` в module attribute и т.п.); OTP/config
-init.
+init; `codec.load!` при свёртке потока в `Core.Es.Aggregate.Repo.Pg` (нечитаемый поток —
+исключение, `13-repos.md`).
 
-Schema-мапперы (dual API `to_entity` / `to_entity!`) и event store — какой вызов на каком call
-site: `13-repos.md`, разделы «Schema» и «Event store».
+Schema-мапперы (dual API `to_entity` / `to_entity!`) — какой вызов на каком call site:
+`13-repos.md`, раздел «Schema»; события страницы потока грузятся safe — там же, «Страница потока».
 
 Конверсия datetime-Prim в domain flow (мутации агрегатов / actor-domain): только `from` + `with`
 (`CreatedAt.from`, `UpdatedAt.from`, `Es.Event.At.from`, …), не `from!` и без обёрток вроде

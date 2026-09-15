@@ -211,6 +211,19 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 - Репозитории (`Repo.Pg`): `not_found` / `version_mismatch` / … →
   `errors_mod.domain(behaviour, code, detail)`; незамапленный constraint и провал `changeset/2` →
   `%Error{kind: :app}` (`ns: :repo`, `code: :write_failed`) — см. `13-repos.md`.
+- Хранилище событий (`Core.Es.Store.append`): отказ записи → `version_mismatch` →
+  `errors_mod.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`; код и
+  `behaviour` задаёт write-репозиторий (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не
+  хранилище — см. `13-repos.md`. У `get` / `refresh` event-sourced репозитория, когда
+  `%Version{}` не равна голове потока, detail той же формы, у `get_many` — их список.
+- Пачка проекции (`Core.Es.Projection.run_once/2`): `{:error, _}` колбэка и ошибка загрузки
+  события — как есть; исключение `project/1` / `clear/0` → `%Error{kind: :app}` (`ns: :es`,
+  `code: :projection_raised`) с модулем исключения в detail и без текста; CAS чекпоинта мимо
+  прочитанной строки → `:checkpoint_conflict` — перечень исходов в moduledoc `Core.Es.Projection`.
+- Ожидание проекции (`Core.Es.Projection.await/4`): чекпоинт не догнал последнее событие потока
+  за таймаут → `%Error{kind: :app}` (`ns: :es`, `code: :projection_timeout`) с `projection` и
+  `timeout` в detail; идёт пересборка → `:projection_rebuilding` сразу, без ожидания. Запись к
+  этому моменту закоммичена — `22-projections.md`, «Read-after-write».
 - Outbox / инфраструктура — часто `%Error{kind: :app}` (см. `14-events-outbox.md`).
 
 ## Связанные правила

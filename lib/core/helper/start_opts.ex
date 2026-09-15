@@ -56,6 +56,17 @@ defmodule Core.Helper.StartOpts do
     end
   end
 
+  @doc "Обязательная опция — список; элементы проверяет вызывающий."
+  @spec list!(String.t(), keyword(), atom()) :: list()
+
+  def list!(label, opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} when is_list(value) -> value
+      {:ok, other} -> raise_invalid!(label, key, "список", other)
+      :error -> raise_missing!(label, key)
+    end
+  end
+
   @doc "Опция — положительное целое; `default` при отсутствии."
   @spec pos_integer!(String.t(), keyword(), atom(), pos_integer()) :: pos_integer()
 
@@ -63,6 +74,17 @@ defmodule Core.Helper.StartOpts do
     case Keyword.get(opts, key, default) do
       value when is_integer(value) and value > 0 -> value
       other -> raise_invalid!(label, key, "положительное целое", other)
+    end
+  end
+
+  @doc "Обязательная опция — булево."
+  @spec boolean!(String.t(), keyword(), atom()) :: boolean()
+
+  def boolean!(label, opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} when is_boolean(value) -> value
+      {:ok, other} -> raise_invalid!(label, key, "true или false", other)
+      :error -> raise_missing!(label, key)
     end
   end
 

@@ -11,10 +11,12 @@ defmodule Core.OtelFixture do
 
   @span_fields extract(:span, from_lib: "opentelemetry/include/otel_span.hrl")
   @link_fields extract(:link, from_lib: "opentelemetry/include/otel_span.hrl")
+  @event_fields extract(:event, from_lib: "opentelemetry/include/otel_span.hrl")
   @status_fields extract(:status, from_lib: "opentelemetry_api/include/opentelemetry.hrl")
 
   defrecordp(:span, @span_fields)
   defrecordp(:link, @link_fields)
+  defrecordp(:event, @event_fields)
   defrecordp(:status, @status_fields)
 
   @default_timeout_ms 200
@@ -31,6 +33,7 @@ defmodule Core.OtelFixture do
           parent_span_id: non_neg_integer() | :undefined,
           attributes: %{optional(String.t()) => term()},
           links: [link()],
+          events: [String.t()],
           status: {atom(), String.t()} | :undefined
         }
 
@@ -75,6 +78,7 @@ defmodule Core.OtelFixture do
       parent_span_id: span(record, :parent_span_id),
       attributes: :otel_attributes.map(span(record, :attributes)),
       links: to_links(span(record, :links)),
+      events: to_events(span(record, :events)),
       status: to_status(span(record, :status))
     }
   end
@@ -82,6 +86,8 @@ defmodule Core.OtelFixture do
   defp to_links(links) do
     Enum.map(:otel_links.list(links), &{link(&1, :trace_id), link(&1, :span_id)})
   end
+
+  defp to_events(events), do: Enum.map(:otel_events.list(events), &event(&1, :name))
 
   defp to_status(:undefined), do: :undefined
 

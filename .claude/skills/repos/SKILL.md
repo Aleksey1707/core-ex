@@ -1,6 +1,6 @@
 ---
 name: repos
-description: "Свод правил репозиториев библиотеки Core: write-путь (use Core.Repo.Pg и Repo.Pg.Es, children, constraint_errors, Repo.Sc), read-путь (ReadRepo, View через Core.View, to_view, jsonb-Redump), Repo.Pg.Schema с to_entity/to_model, Specs, event store, структура путей и алиасов, safe против bang на call site. Использовать при заведении или правке репозитория, Ecto-схемы, Specs, View и read-модели."
+description: "Свод правил репозиториев библиотеки Core: write-путь (use Core.Repo.Pg и Repo.Pg.StateStored с event_codec:, children, constraint_errors, Repo.Sc), write event-sourced агрегата (use Core.Es.Aggregate.Repo и Core.Es.Aggregate.Repo.Pg: get / get_many / append / refresh, один репозиторий в common-слое, снапшоты snapshot: с маркером и version:), процесс агрегата (use Core.Es.Aggregate.Process: Agg.Process.execute одной транзакцией с колбэком и повтором после :version_mismatch, enabled: false, команда на несколько агрегатов — usecase → repo), read-путь (ReadRepo, View через Core.View, to_view, jsonb-Redump), Repo.Pg.Schema с to_entity/to_model, Specs, хранилище событий (Core.Es.Store, es_events, страница потока page_stream), структура путей и алиасов, safe против bang на call site. Использовать при заведении или правке репозитория, Ecto-схемы, Specs, View и read-модели."
 ---
 
 # 13-repos.md

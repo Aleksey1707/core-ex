@@ -1,7 +1,8 @@
 # OTP и конкурентность
 
-- **Область.** `lib/core/outbox/{poller,cleaner}.ex`, `lib/core/mq/stream/**`, `lib/core/pubsub/**`;
-  у потребителя — его дерево супервизии.
+- **Область.** `lib/core/outbox/{poller,cleaner}.ex`, `lib/core/mq/stream/**`, `lib/core/pubsub/**`,
+  `lib/core/es/projection/{supervisor,reader,registry}.ex`,
+  `lib/core/es/aggregate/process/server.ex`; у потребителя — его дерево супервизии.
 - **Читать перед.** Новым `GenServer` или супервизором, правкой `init/1` / `handle_continue/2`,
   таймаутов `call`, backoff, mailbox, `terminate/2` и graceful shutdown.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
@@ -16,8 +17,18 @@
 Отключаемое поддерево MUST возвращать `:ignore` из `start_link/1` (а не стартовать пустым) и
 писать в лог причину на уровне `info` — «запущен» / «отключён» / «пропущен: нет зависимости».
 
-Каждый критичный процесс MUST быть в `MyApp.PromEx.Workers.watch_list/0` (`required:` учитывает
-текущую конфигурацию) — по нему работает алерт `WorkerDown`.
+Каждый критичный процесс MUST быть в `MyApp.PromEx.Workers.watch_list/0` — по нему работает алерт
+`WorkerDown`. Элемент выключенного поддерева MUST NOT включаться: `Core.Workers.PromEx` поле
+`required:` не читает, и отсутствующий процесс даёт `up=0` на ноде с `enabled: false`. Хелпер
+поддерева принимает те же опции, что и его `start_link/1`.
+
+```elixir
+# плохо — на ноде с enabled: false читателя нет, up=0
+def watch_list, do: [%{component: "es_projection:account_list", name: AccountList.Projection}]
+
+# хорошо — при enabled: false элементов нет
+def watch_list, do: Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts())
+```
 
 ## `init/1`
 
@@ -27,7 +38,8 @@
 - Тяжёлая инициализация → `{:ok, state, {:continue, :setup}}` + `handle_continue/2`.
 - `send(self(), :setup)` в `init/1` — устаревший идиом: сообщение встаёт в общую очередь и
   может обогнаться внешним сообщением; `handle_continue` выполняется до любого другого.
-- В `init/1` допустимы только разбор `opts`, сборка state и `schedule/2` таймера.
+- В `init/1` допустимы только разбор `opts`, сборка state, регистрация в локальном `Registry` и
+  `schedule/2` таймера.
 - Опции процесса MUST проверяться при разборе (`Core.Helper.StartOpts`): опечатка в них — ошибка
   конфигурации, и место ей — `ArgumentError` в `init/1`. Непроверенное значение всплывает позже и
   хуже: `FunctionClauseError` в `handle_continue/2` (супервизор уходит в цикл рестартов) либо
@@ -80,6 +92,19 @@
   (`20-agreements.md`).
 - Имя, по которому будят процесс (`Poller.wake/1`), MUST приходить из конфига, а не вычисляться:
   отсутствующий процесс → `:ok` (best-effort), а не падение.
+- Исключение — получатели `wake`, которых порождает само дерево по своему списку (читатели
+  проекций): получатель MUST регистрироваться в `Registry` с `keys: :duplicate` сам, под ключом
+  сигнала, а отправитель будит через `Registry.dispatch/3`; Registry не запущен → `:ok`. Имена в
+  конфиге дали бы второй список рядом со списком дерева.
+
+```elixir
+# плохо — имена читателей в конфиге расходятся со списком проекций дерева
+config :core, Core.Es.Projection, readers: [AccountList.Projection]
+
+# хорошо — читатель в init/1 регистрируется под типами агрегатов, append будит по типу пачки
+:ok = Core.Es.Projection.Registry.register(Map.keys(declaration.streams))
+AfterCommit.register(fn -> Core.Es.Projection.Registry.wake(type) end)
+```
 
 ## `terminate/2` и graceful shutdown
 
@@ -93,10 +118,11 @@
 | Случай | Пример | Что теряется без `trap_exit` |
 |---|---|---|
 | процесс владеет внешним ресурсом | `Stream.Reader` (подписка), `Stream.Writer` (producers) | ресурс висит в брокере до таймаута соединения |
-| единица работы выполняется целиком в одном колбэке | `Outbox.Poller` (reserve → publish → save_results), `MqSubscriberReliable` (обработка → commit) | результат уже сделанной работы не записан: пачка остаётся `:in_work` до истечения аренды, сообщение переотправляется |
+| единица работы выполняется целиком в одном колбэке | `Outbox.Poller` (reserve → publish → save_results), `MqSubscriberReliable` (обработка → commit), `Es.Projection.Reader` (пачка `project/1` → чекпоинт) | результат уже сделанной работы не записан: пачка остаётся `:in_work` до истечения аренды, сообщение переотправляется, пачка проекции откатывается и идёт заново |
 
 - У такого процесса child_spec MUST задавать `:shutdown` с запасом на единицу работы
-  (`Poller` — `@shutdown_ms`), иначе супервизор добьёт его на середине.
+  (`Poller` — `@shutdown_ms`, читатель проекции — `shutdown:` дерева), иначе супервизор добьёт его
+  на середине.
 
 ## Backoff у периодических циклов
 
@@ -109,6 +135,25 @@
 отдаёт `:retry`, когда пачка сохранена, но хоть одна запись не опубликована, и уходит
 в backoff — иначе непроходимая голова очереди повторялась бы без паузы
 (`14-events-outbox.md`, «Poller scheduling»; ADR-0002).
+
+Следующий тик нового периодического цикла SHOULD вычислять чистая функция `@doc false` от исхода
+цикла и состояния backoff'ов, с тестом таблицей исходов без процесса
+(`Core.Es.Projection.Reader.next_tick/3`): ветку, спрятанную в `handle_info/2`, проверяет только
+процесс с таймером.
+
+```elixir
+# плохо — задержка считается в handle_info: ветку backoff проверит только процесс с таймером
+def handle_info(:tick, state) do
+  result = run_batch(state)
+  Process.send_after(self(), :tick, if(result == :idle, do: state.idle_ms, else: 0))
+  {:noreply, state}
+end
+
+# хорошо — решение о тике отдельно, тест — таблица исходов в ExUnit.Case, async: true
+{delay, backoff} = next_tick(state.backoff, result, flush_wakes())
+
+assert Reader.next_tick(backoff, :idle, false) == {50, %{backoff | idle_ms: 100}}
+```
 
 ## Тесты процессов
 

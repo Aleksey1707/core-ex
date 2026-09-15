@@ -6,16 +6,16 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Spec:** [Event-sourced агрегат в :core](../spec.md) — «Кодек событий (`Core.Es.Event.Codec`)»
 
-- [ ] `use Core.Es.Event.Codec` без `type:` — `CompileError`; формат значения — как у wire-тега.
-- [ ] Тип агрегата доступен механизмам библиотеки интроспекцией кодека в одном ряду с `__es_aggregate_id__/0`.
-- [ ] Дубль `type:` среди плагинов `use Core.Codec.Facade` — `CompileError` с именами обоих кодеков.
-- [ ] Связь `type:` с префиксом тегов событий не проверяется.
-- [ ] Конверт события не меняется: round-trip тесты кодека зелёные без правки фикстур.
-- [ ] `Core.EventFixture` получает `type:`; тесты на оба `CompileError`.
-- [ ] `CHANGELOG.md`, «Изменения контракта макросов»: обязательный `type:` и отказ фасада на дубль, было → стало.
-- [ ] `14-events-outbox.md`, «Domain events»: `type:` у кодека событий — MUST.
-- [ ] `make` зелёный.
+- [x] `use Core.Es.Event.Codec` без `type:` — `CompileError`; формат значения — как у wire-тега.
+- [x] Тип агрегата доступен механизмам библиотеки интроспекцией кодека в одном ряду с `__es_aggregate_id__/0`.
+- [x] Дубль `type:` среди плагинов `use Core.Codec.Facade` — `CompileError` с именами обоих кодеков.
+- [x] Связь `type:` с префиксом тегов событий не проверяется.
+- [x] Конверт события не меняется: round-trip тесты кодека зелёные без правки фикстур.
+- [x] `Core.EventFixture` получает `type:`; тесты на оба `CompileError`.
+- [x] `CHANGELOG.md`, «Изменения контракта макросов»: обязательный `type:` и отказ фасада на дубль, было → стало.
+- [x] `14-events-outbox.md`, «Domain events»: `type:` у кодека событий — MUST.
+- [x] `make` зелёный.

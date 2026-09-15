@@ -6,13 +6,16 @@ defmodule Core.Es.Event.Codec do
 
       use Core.Es.Event.Codec,
         event: MyApp.Domain.<BC>.Common.Delivery.Event,
+        type: "delivery",
         tags: @tag_by_mod
 
   Кодек агрегата определяет только специфику нагрузки:
 
   - `dump_payload(event, codec)` — нагрузка события в wire;
   - `load_payload(mod, wire, codec)` — wire → `%Payload{}` (не событие: конверт
-    разбирает и событие собирает билдер).
+    разбирает и событие собирает билдер);
+  - `upcast(old_tag, envelope)` — нагрузка записанного события старого тега → нагрузка
+    следующего тега цепочки `upcasts:`; обязателен при непустой карте.
 
   События без нагрузки (`payload: nil` у `use Es.Event`) клоуз не требуют вовсе —
   билдер знает о них из `__es_payload__/0`.
@@ -48,14 +51,22 @@ defmodule Core.Es.Event.Codec do
   ## Opts
 
   - `event:` — объединяющий модуль событий агрегата (семейство для `codec.load/2`)
+  - `type:` — тип агрегата: wire-имя, первая часть адреса потока событий (`__es_type__/0`);
+    формат — как у тега, в конверт не попадает, с префиксом тегов не сверяется. Дубль среди
+    плагинов фасада — `CompileError`
   - `tags:` — `%{Mod => "wire_tag"}`, SSOT wire-имён событий
+  - `upcasts:` — `%{"старый тег" => "новый тег"}` (`__es_upcasts__/0`), необязательная. Событие
+    тега-источника при загрузке по семейству до выбора модуля проходит цепочку шагов: нагрузку
+    каждого отдаёт `upcast/2`, заголовок конверта не меняется. `CompileError`: источник в
+    `tags:`, цель ни в `tags:`, ни источником, цикл
 
   Prim агрегата и автора не задаются: они выводятся из самих событий
   (`__es_aggregate_id__/0` и `__es_by__/0`), и расхождение между событиями одного
-  кодека — `CompileError`.
+  кодека — `CompileError`. Выведенный Prim агрегата кодек отдаёт тем же `__es_aggregate_id__/0`.
 
-  Макрос занимает в вызывающем модуле имена `@es_event`, `@es_aggregate_id`, `@es_by`,
-  `@es_tag_by_mod`, `@es_mod_by_tag` и приватные `es_dump_payload/2`, `es_load_payload/3`.
+  Макрос занимает в вызывающем модуле имена `@es_event`, `@es_type`, `@es_aggregate_id`, `@es_by`,
+  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts` и приватные `es_dump_payload/2`,
+  `es_load_payload/3`.
   """
 
   alias Core.Error
@@ -66,8 +77,8 @@ defmodule Core.Es.Event.Codec do
   require Error
 
   @label "Es.Event.Codec"
-  @required_keys ~w(event tags)a
-  @optional_keys ~w()a
+  @required_keys ~w(event tags type)a
+  @optional_keys ~w(upcasts)a
   @ns :es
 
   @typedoc "Конверт события на wire (строковые ключи)."
@@ -100,7 +111,15 @@ defmodule Core.Es.Event.Codec do
   @callback load_payload(mod :: module(), wire :: term(), codec :: module()) ::
               {:ok, struct()} | {:error, Error.t()}
 
-  @optional_callbacks dump_payload: 2, load_payload: 3
+  @doc """
+  Конверт записанного события старого тега → нагрузка следующего тега цепочки `upcasts:`.
+
+  Тег шага берётся из карты, заголовок конверта колбэк только читает; ошибку формы
+  возвращённой нагрузки ловит `load_payload/3`.
+  """
+  @callback upcast(old_tag :: String.t(), envelope :: wire()) :: term()
+
+  @optional_callbacks dump_payload: 2, load_payload: 3, upcast: 2
 
   @doc "Объявить кодек событий агрегата."
   defmacro __using__(opts) do
@@ -108,16 +127,20 @@ defmodule Core.Es.Event.Codec do
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
     event = Helper.Opts.module!(lit, :event, @label)
 
-    # `tags:` уходят в тело модуля как есть: значение атрибута (`@tag_by_mod`) на этапе
-    # разворачивания макроса ещё не записано, и прочитать его оттуда нельзя.
+    # `tags:` и `upcasts:` уходят в тело модуля как есть: значение атрибута (`@tag_by_mod`) на
+    # этапе разворачивания макроса ещё не записано, и прочитать его оттуда нельзя.
     tags = Keyword.fetch!(opts, :tags)
+    type = Keyword.fetch!(opts, :type)
+    upcasts = Keyword.get(opts, :upcasts, quote(do: %{}))
 
     quote do
       @behaviour Core.Es.Event.Codec
 
       @es_event unquote(event)
+      @es_type Core.Es.Event.Codec.type!(unquote(type))
       @es_tag_by_mod Core.Es.Event.Codec.tags!(unquote(tags))
       @es_mod_by_tag Core.Es.Event.Codec.mods!(@es_tag_by_mod)
+      @es_upcasts Core.Es.Event.Codec.upcasts!(unquote(upcasts), @es_mod_by_tag)
       @es_aggregate_id Core.Es.Event.Codec.derive!(@es_tag_by_mod, :__es_aggregate_id__)
       @es_by Core.Es.Event.Codec.derive!(@es_tag_by_mod, :__es_by__)
 
@@ -130,6 +153,26 @@ defmodule Core.Es.Event.Codec do
 
       @typedoc "Нагрузка события на wire."
       @type wire_payload :: map() | String.t() | number() | boolean() | list() | nil
+
+      @doc false
+      @spec __es_type__() :: String.t()
+
+      def __es_type__, do: @es_type
+
+      @doc false
+      @spec __es_aggregate_id__() :: module()
+
+      def __es_aggregate_id__, do: @es_aggregate_id
+
+      @doc false
+      @spec __es_mods__() :: [module()]
+
+      def __es_mods__, do: Map.keys(@es_tag_by_mod)
+
+      @doc false
+      @spec __es_upcasts__() :: %{optional(String.t()) => String.t()}
+
+      def __es_upcasts__, do: @es_upcasts
 
       @doc "Wire-тег события по struct или модулю."
       @spec type(event() | module()) :: String.t()
@@ -168,7 +211,7 @@ defmodule Core.Es.Event.Codec do
 
       @impl true
       def load(@es_event, data, codec) when is_atom(codec) do
-        Core.Es.Event.Codec.load_by_tag(data, @es_mod_by_tag, __MODULE__, codec)
+        Core.Es.Event.Codec.load_by_tag(data, @es_mod_by_tag, @es_upcasts, __MODULE__, codec)
       end
 
       def load(mod, data, codec)
@@ -206,10 +249,17 @@ defmodule Core.Es.Event.Codec do
   @doc false
   defmacro __before_compile__(env) do
     tags = Module.get_attribute(env.module, :es_tag_by_mod)
+    upcasts = Module.get_attribute(env.module, :es_upcasts)
 
     if with_payload?(tags) do
-      Enum.each([dump_payload: 2, load_payload: 3], &ensure_defined!(env.module, &1, env))
+      Enum.each(
+        [dump_payload: 2, load_payload: 3],
+        &ensure_defined!(env.module, &1, "у кодека есть события с нагрузкой", env)
+      )
     end
+
+    if map_size(upcasts) > 0,
+      do: ensure_defined!(env.module, {:upcast, 2}, "у кодека непустые upcasts:", env)
 
     nil
   end
@@ -223,6 +273,18 @@ defmodule Core.Es.Event.Codec do
   @spec optional_keys() :: [atom()]
 
   def optional_keys, do: @optional_keys
+
+  @doc false
+  @spec type!(term()) :: String.t()
+
+  def type!(type) when is_binary(type) and type != "", do: type
+
+  def type!(other) do
+    raise CompileError,
+      description:
+        "#{@label}: type: ожидается непустая строка, как у тега события, получено " <>
+          inspect(other)
+  end
 
   @doc false
   @spec tags!(term()) :: %{optional(module()) => String.t()}
@@ -243,6 +305,23 @@ defmodule Core.Es.Event.Codec do
   @spec mods!(%{optional(module()) => String.t()}) :: %{optional(String.t()) => module()}
 
   def mods!(tags) when is_map(tags), do: Enum.reduce(tags, %{}, &put_unique_tag!/2)
+
+  @doc false
+  @spec upcasts!(term(), %{optional(String.t()) => module()}) ::
+          %{optional(String.t()) => String.t()}
+
+  def upcasts!(upcasts, mod_by_tag) when is_map(upcasts) and is_map(mod_by_tag) do
+    Enum.each(upcasts, &validate_upcast!(&1, upcasts, mod_by_tag))
+    Enum.each(Map.keys(upcasts), &ensure_acyclic!(&1, upcasts, []))
+    upcasts
+  end
+
+  def upcasts!(other, _mod_by_tag) do
+    raise CompileError,
+      description:
+        ~s(#{@label}: upcasts: ожидается map %{"старый тег" => "новый тег"}, получено ) <>
+          inspect(other)
+  end
 
   @doc """
   Вывести Prim агрегата или автора из самих событий кодека.
@@ -297,15 +376,26 @@ defmodule Core.Es.Event.Codec do
   @doc """
   Конверт → событие по тегу внутри данных (`type`).
 
+  Тег-источник `upcasts` сначала проходит цепочку апкастов: на каждом шаге `upcast/2`
+  кодека агрегата отдаёт нагрузку следующего тега, заголовок конверта остаётся как есть.
+  Модуль выбирается по тегу конца цепочки.
+
   Разбор safe с обеих сторон: сообщение переживает код, который его писал, поэтому
   чужой формат (`:invalid_envelope`) и снятый с обращения тип (`:unknown_event_type`)
   обязаны стать доменной ошибкой у подписчика, а не падением.
   """
-  @spec load_by_tag(term(), %{optional(String.t()) => module()}, module(), module()) ::
-          {:ok, struct()} | {:error, Error.t()}
+  @spec load_by_tag(
+          term(),
+          %{optional(String.t()) => module()},
+          %{optional(String.t()) => String.t()},
+          module(),
+          module()
+        ) :: {:ok, struct()} | {:error, Error.t()}
 
-  def load_by_tag(data, mod_by_tag, module, codec) when is_map(data) and is_map(mod_by_tag) do
+  def load_by_tag(data, mod_by_tag, upcasts, module, codec)
+      when is_map(data) and is_map(mod_by_tag) and is_map(upcasts) do
     with {:ok, tag} <- fetch_tag(data, module),
+         {tag, data} = upcast_chain(tag, data, upcasts, module),
          {:ok, mod} <- fetch_mod(mod_by_tag, tag, module) do
       module.load(mod, data, codec)
     end
@@ -313,7 +403,8 @@ defmodule Core.Es.Event.Codec do
 
   # Из брокера приходит `Jason.decode!/1` чего угодно: не-map — это сообщение не того
   # формата, а не повод уронить подписчика.
-  def load_by_tag(_data, mod_by_tag, module, _codec) when is_map(mod_by_tag) do
+  def load_by_tag(_data, mod_by_tag, upcasts, module, _codec)
+      when is_map(mod_by_tag) and is_map(upcasts) do
     {:error, missing(module, :type)}
   end
 
@@ -417,12 +508,49 @@ defmodule Core.Es.Event.Codec do
     end
   end
 
-  defp ensure_defined!(mod, {fun, arity}, env) do
+  defp validate_upcast!({from, to} = pair, _upcasts, _mod_by_tag)
+       when not is_binary(from) or from == "" or not is_binary(to) or to == "" do
+    raise CompileError,
+      description:
+        ~s(#{@label}: upcasts: ожидается пара непустых строк {"старый тег", "новый тег"}, ) <>
+          "получено #{inspect(pair)}"
+  end
+
+  defp validate_upcast!({from, _to}, _upcasts, mod_by_tag) when is_map_key(mod_by_tag, from) do
+    raise CompileError,
+      description:
+        "#{@label}: upcasts: источник #{inspect(from)} объявлен в tags: — " <>
+          "записанный тег читает либо модуль, либо апкаст"
+  end
+
+  defp validate_upcast!({from, to}, upcasts, mod_by_tag)
+       when not is_map_key(mod_by_tag, to) and not is_map_key(upcasts, to) do
+    raise CompileError,
+      description:
+        "#{@label}: upcasts: цель #{inspect(to)} не объявлена ни в tags:, " <>
+          "ни источником upcasts: (апкаст из #{inspect(from)})"
+  end
+
+  defp validate_upcast!(_pair, _upcasts, _mod_by_tag), do: :ok
+
+  defp ensure_acyclic!(tag, upcasts, path) do
+    cond do
+      tag in path ->
+        cycle = Enum.map_join(Enum.reverse([tag | path]), " → ", &inspect/1)
+        raise CompileError, description: "#{@label}: upcasts: цикл #{cycle}"
+
+      is_map_key(upcasts, tag) ->
+        ensure_acyclic!(Map.fetch!(upcasts, tag), upcasts, [tag | path])
+
+      true ->
+        :ok
+    end
+  end
+
+  defp ensure_defined!(mod, {fun, arity}, reason, env) do
     unless Module.defines?(mod, {fun, arity}) do
       raise CompileError,
-        description:
-          "#{@label}: #{inspect(mod)} обязан объявить #{fun}/#{arity} — " <>
-            "у кодека есть события с нагрузкой",
+        description: "#{@label}: #{inspect(mod)} обязан объявить #{fun}/#{arity} — #{reason}",
         file: env.file,
         line: env.line
     end
@@ -432,6 +560,30 @@ defmodule Core.Es.Event.Codec do
     case Helper.Map.field(data, :type) do
       tag when is_binary(tag) -> {:ok, tag}
       _other -> {:error, missing(module, :type)}
+    end
+  end
+
+  defp upcast_chain(tag, data, upcasts, module) do
+    case Map.fetch(upcasts, tag) do
+      {:ok, next} ->
+        payload = module.upcast(tag, data)
+
+        data =
+          data
+          |> put_field(:type, next)
+          |> put_field(:payload, payload)
+
+        upcast_chain(next, data, upcasts, module)
+
+      :error ->
+        {tag, data}
+    end
+  end
+
+  defp put_field(data, key, value) do
+    case Helper.Map.key(data, key) do
+      {:ok, found} -> Map.put(data, found, value)
+      :error -> Map.put(data, Atom.to_string(key), value)
     end
   end
 
