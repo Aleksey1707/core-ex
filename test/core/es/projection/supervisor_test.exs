@@ -105,6 +105,28 @@ defmodule Core.Es.Projection.SupervisorTest do
     def clear, do: :ok
   end
 
+  defmodule MirrorRepo do
+    @moduledoc false
+
+    # Второй repo проекций: слушатель берёт его конфигурацию, пачек при интервалах @quiet нет.
+    defdelegate config, to: Core.TestRepo
+  end
+
+  defmodule Mirrored do
+    @moduledoc false
+
+    use Core.Es.Projection,
+      name: "reader_mirrored",
+      events: [Core.EsFixture.Account.Event.Opened],
+      repo: Core.Es.Projection.SupervisorTest.MirrorRepo
+
+    @impl true
+    def project(_event), do: :ok
+
+    @impl true
+    def clear, do: :ok
+  end
+
   defmodule Blocking do
     @moduledoc false
 
@@ -141,7 +163,7 @@ defmodule Core.Es.Projection.SupervisorTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
     # Отметка дерева — глобальное состояние ноды.
-    on_exit(fn -> :persistent_term.erase({Es.Projection.Supervisor, :mark}) end)
+    on_exit(fn -> :persistent_term.erase(Es.Projection.Supervisor.Mark) end)
   end
 
   describe "старт" do
@@ -151,9 +173,9 @@ defmodule Core.Es.Projection.SupervisorTest do
       assert log =~ "супервизор проекций: запущен: projections=es_fixture,reader_exiting"
 
       reader = Process.whereis(@projection)
-      assert [{^reader, nil}] = Registry.lookup(Es.Projection.Registry, "fixture")
+      assert [{^reader, nil}] = Registry.lookup(Es.Projection.Registry, {:written, "fixture"})
 
-      assert Enum.sort(Registry.lookup(Es.Projection.Registry, "account")) ==
+      assert Enum.sort(Registry.lookup(Es.Projection.Registry, {:written, "account"})) ==
                Enum.sort([{reader, nil}, {Process.whereis(Exiting), nil}])
 
       state = :sys.get_state(reader)
@@ -161,7 +183,7 @@ defmodule Core.Es.Projection.SupervisorTest do
       assert checkpoint!() == nil
 
       assert %{projections: [@projection, Exiting], enabled: true, batch_size: 100} =
-               Es.Projection.Supervisor.mark()
+               Es.Projection.Supervisor.Mark.find()
     end
 
     test "enabled: false — :ignore, info и отметка" do
@@ -174,8 +196,44 @@ defmodule Core.Es.Projection.SupervisorTest do
       assert log =~ "супервизор проекций: отключён: projections=es_fixture"
       assert Process.whereis(Es.Projection.Registry) == nil
 
-      assert %{projections: [@projection], enabled: false, shutdown: 30_000, await: :poll} =
-               Es.Projection.Supervisor.mark()
+      assert %{
+               projections: [@projection],
+               enabled: false,
+               shutdown: 30_000,
+               await: :poll,
+               await_min_ms: 10,
+               await_max_ms: 100,
+               notifications: true
+             } = Es.Projection.Supervisor.Mark.find()
+    end
+
+    test "await_min_ms: и await_max_ms: — в отметке" do
+      capture_info(fn ->
+        assert :ignore =
+                 Es.Projection.Supervisor.start_link(
+                   projections: [@projection],
+                   enabled: false,
+                   await_min_ms: 25,
+                   await_max_ms: 250
+                 )
+      end)
+
+      assert %{await_min_ms: 25, await_max_ms: 250} = Es.Projection.Supervisor.Mark.find()
+    end
+
+    test "notifications: false и keyword опций соединения — в отметке" do
+      for notifications <- [false, [hostname: "db-direct"]] do
+        capture_info(fn ->
+          assert :ignore =
+                   Es.Projection.Supervisor.start_link(
+                     projections: [@projection],
+                     enabled: false,
+                     notifications: notifications
+                   )
+        end)
+
+        assert %{notifications: ^notifications} = Es.Projection.Supervisor.Mark.find()
+      end
     end
 
     test "projections: [] — :ignore, info «пропущен: нет проекций» и отметка" do
@@ -186,7 +244,7 @@ defmodule Core.Es.Projection.SupervisorTest do
 
       assert log =~ "супервизор проекций: пропущен: нет проекций"
       assert Process.whereis(Es.Projection.Registry) == nil
-      assert %{projections: [], enabled: true} = Es.Projection.Supervisor.mark()
+      assert %{projections: [], enabled: true} = Es.Projection.Supervisor.Mark.find()
     end
 
     test "опции — ArgumentError при любом enabled:" do
@@ -219,6 +277,26 @@ defmodule Core.Es.Projection.SupervisorTest do
                    end
 
       assert_raise ArgumentError,
+                   ~r/:await_min_ms — ожидается положительное целое, получено 0/,
+                   fn ->
+                     Es.Projection.Supervisor.start_link(
+                       projections: [],
+                       enabled: true,
+                       await_min_ms: 0
+                     )
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/:await_max_ms — ожидается положительное целое, получено -1/,
+                   fn ->
+                     Es.Projection.Supervisor.start_link(
+                       projections: [],
+                       enabled: false,
+                       await_max_ms: -1
+                     )
+                   end
+
+      assert_raise ArgumentError,
                    ~r/:await — ожидается одно из \[:poll, :inline\], получено :sync/,
                    fn ->
                      Es.Projection.Supervisor.start_link(
@@ -231,6 +309,44 @@ defmodule Core.Es.Projection.SupervisorTest do
       assert_raise ArgumentError, ~r/await: :inline — только при enabled: false/, fn ->
         Es.Projection.Supervisor.start_link(projections: [], enabled: true, await: :inline)
       end
+
+      assert_raise ArgumentError,
+                   ~r/:notifications — ожидается true, false или keyword, получено :yes/,
+                   fn ->
+                     Es.Projection.Supervisor.start_link(
+                       projections: [],
+                       enabled: true,
+                       notifications: :yes
+                     )
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/:notifications — ожидается .*, получено \["db-direct"\]/,
+                   fn ->
+                     Es.Projection.Supervisor.start_link(
+                       projections: [],
+                       enabled: false,
+                       notifications: ["db-direct"]
+                     )
+                   end
+    end
+
+    test "слушатели — последними, по одному на различный repo: проекций; notifications: false — без них" do
+      tree = start_tree!([@projection, Exiting, Mirrored])
+
+      assert child_ids(tree) == [:listeners, :readers, Es.Projection.Registry]
+
+      assert listeners(tree) ==
+               Enum.sort([
+                 {Es.Projection.Listener, TestRepo},
+                 {Es.Projection.Listener, MirrorRepo}
+               ])
+
+      :ok = stop_supervised(Es.Projection.Supervisor)
+      tree = start_tree!([@projection, Mirrored], notifications: false)
+
+      assert child_ids(tree) == [:readers, Es.Projection.Registry]
+      assert %{notifications: false} = Es.Projection.Supervisor.Mark.find()
     end
 
     test "второй супервизор на ноде — отказ старта по имени Registry, отметка первого" do
@@ -243,11 +359,13 @@ defmodule Core.Es.Projection.SupervisorTest do
                )
 
       assert inspect(reason) =~ "already_started"
-      assert %{projections: [@projection]} = Es.Projection.Supervisor.mark()
+      assert %{projections: [@projection]} = Es.Projection.Supervisor.Mark.find()
     end
 
-    test "Registry не запущен — wake отдаёт :ok" do
+    test "Registry не запущен — wake, wake_projection и signal_checkpoint отдают :ok" do
       assert :ok = Es.Projection.Registry.wake("account")
+      assert :ok = Es.Projection.Registry.wake_projection("es_fixture")
+      assert :ok = Es.Projection.Registry.signal_checkpoint("es_fixture")
     end
   end
 
@@ -268,7 +386,7 @@ defmodule Core.Es.Projection.SupervisorTest do
       assert %{result: :idle, backoff: %{idle_ms: 20_000}} = :sys.get_state(reader(@projection))
     end
 
-    test "wake в ожидании — цикл сразу без сброса счётчика; wake после commit append" do
+    test "wake в ожидании — цикл сразу без сброса счётчика; wake после commit append и по имени проекции" do
       start_tree!([@projection], idle_min_ms: 10_000)
       tick(@projection)
       assert_receive {:cycle, %{result: :processed}, %{events: 0}}
@@ -285,6 +403,15 @@ defmodule Core.Es.Projection.SupervisorTest do
 
       wake("unknown")
       refute_receive {:cycle, _metadata, _measurements}, 100
+
+      # Тип агрегата и имя проекции — разные ключи, даже совпав строкой.
+      wake("es_fixture")
+      :ok = Es.Projection.Registry.wake_projection("account")
+      refute_receive {:cycle, _metadata, _measurements}, 100
+
+      :ok = Es.Projection.Registry.wake_projection("es_fixture")
+      assert_receive {:cycle, %{result: :idle}, _measurements}
+      assert %{backoff: %{idle_ms: 40_000}} = :sys.get_state(reader(@projection))
     end
 
     test "отказ project/1 — повтор с warning, wake не ускоряет, рестарта нет; починка — дальше" do
@@ -337,7 +464,9 @@ defmodule Core.Es.Projection.SupervisorTest do
     test "исключение в колбэке и вне его, exit и throw — повтор с модулем исключения, exit, throw" do
       write!(@account_repo, Account.ID.new(), [open("Счёт")])
       projections = [Raising, Exiting, Throwing, Unreachable]
-      start_tree!(projections)
+
+      # У DownRepo нет конфигурации соединения для слушателя.
+      start_tree!(projections, notifications: false)
 
       log =
         capture_log(fn ->
@@ -438,19 +567,27 @@ defmodule Core.Es.Projection.SupervisorTest do
 
   defp start_tree!(projections, opts \\ []) do
     opts = Keyword.merge([projections: projections, enabled: true] ++ @quiet, opts)
-    {:ok, _pid} = start_supervised({Es.Projection.Supervisor, opts})
-    :ok
+    {:ok, pid} = start_supervised({Es.Projection.Supervisor, opts})
+    pid
+  end
+
+  defp child_ids(tree), do: Enum.map(Supervisor.which_children(tree), &elem(&1, 0))
+
+  defp listeners(tree) do
+    {:listeners, pid, :supervisor, _modules} =
+      List.keyfind(Supervisor.which_children(tree), :listeners, 0)
+
+    pid
+    |> Supervisor.which_children()
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.sort()
   end
 
   defp reader(projection), do: Process.whereis(projection)
 
   defp tick(projection), do: send(reader(projection), :tick)
 
-  defp wake(type) do
-    Registry.dispatch(Es.Projection.Registry, type, fn entries ->
-      Enum.each(entries, fn {pid, _value} -> send(pid, :wake) end)
-    end)
-  end
+  defp wake(type), do: :ok = Es.Projection.Registry.wake(type)
 
   # Отпустить пачку, когда сигнал остановки дошёл до читателя: трассировка приёма, без опроса.
   defp release_on_shutdown(reader) do

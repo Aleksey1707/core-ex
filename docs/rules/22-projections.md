@@ -100,6 +100,13 @@ def project(%Account.Event.Closed{} = event), do: close_row(event)
   `Core.DurationParser`: библиотека config и env не читает.
 - Список проекций и опции SHOULD собираться одной функцией приложения: её же принимает
   `Core.Es.Projection.Supervisor.watch_list/1` (`17-otp-concurrency.md`, «Дерево процессов»).
+- Приложение на одной ноде SHOULD ставить `notifications: false`: сигнала внутри ноды хватает, а
+  `NOTIFY` пачки берёт на commit общую на кластер блокировку и без слушателей (ADR-0013).
+- За pgbouncer в transaction mode `notifications: true` MUST NOT: `LISTEN` через пулер
+  уведомлений не получает, и ожидание молча сводится к шагам. Слушателю нужен keyword с прямым
+  хостом базы — опции соединения поверх `repo.config()`.
+- Нода держит по соединению слушателя на каждый различный `repo:` проекций: лимиты соединений
+  базы и пулера SHOULD учитывать их на каждой ноде.
 
 Проверяется: `ArgumentError` в `Core.Es.Projection.Supervisor.start_link/1` — модуль без
 `use Core.Es.Projection`, дубль `name:`; второе дерево на ноде — отказ старта.
@@ -125,7 +132,30 @@ children = [{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}]
 config :my_app, MyApp.Projections,
   enabled: System.get_env("ES_PROJECTIONS_ENABLED", "true") == "true",
   poll_interval_ms:
-    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_POLL_INTERVAL", "1s"))
+    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_POLL_INTERVAL", "1s")),
+  await_min_ms:
+    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_AWAIT_MIN", "10ms")),
+  await_max_ms:
+    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_AWAIT_MAX", "100ms")),
+  notifications: System.get_env("ES_PROJECTIONS_NOTIFICATIONS", "true") == "true"
+
+# плохо — слушатель за pgbouncer в transaction mode: LISTEN через пулер уведомлений не получает
+config :my_app, MyApp.Projections, notifications: true
+
+# хорошо — одна нода: сигнала внутри ноды хватает, NOTIFY пачек не нужен
+config :my_app, MyApp.Projections, notifications: false
+
+# хорошо — несколько нод за pgbouncer: слушатель в обход пулера, прочее — из repo.config()
+config :my_app, MyApp.Projections,
+  notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST"), port: 5432]
+```
+
+```text
+# плохо — лимит соединений посчитан по пулам repo: соединения слушателей нод в него не входят
+max_connections >= ноды × pool_size
+
+# хорошо — плюс по соединению слушателя на каждый различный repo: проекций на каждой ноде
+max_connections >= ноды × (pool_size + различных repo: проекций)
 ```
 
 ## Read-after-write
@@ -136,6 +166,18 @@ config :my_app, MyApp.Projections,
 `<Aggregate>.Event.Codec`, то есть сам агрегат. Исходы, опрос и режим `:inline` тестового
 дерева — moduledoc `Core.Es.Projection`, «Ожидание»; место вызова — после commit, вне
 `Transact.run` (`20-agreements.md`, CQS); тест — `19-testing.md`, «Проекции».
+
+Сломанный быстрый путь ожидания — `LISTEN` через пулер, `notifications: false` на одной из
+нескольких нод — ошибкой не виден: ожидание доходит шагами страховки (ADR-0013). Медленное
+ожидание SHOULD разбирать по `duration` `[:es, :projection, :await]`: держится на уровне шагов
+`await_min_ms:` … `await_max_ms:`, а не пачки, — сигнал чекпоинта не доходит.
+
+```text
+# плохо — медиана ожидания кратна шагам страховки, а пачки короче: сигнала нет, ответ даёт шаг
+# хорошо — медиана ожидания на уровне длительности пачки: ответ даёт сигнал
+histogram_quantile(0.5, sum by (le, projection)
+  (rate(my_app_prom_ex_es_projection_await_duration_milliseconds_bucket[5m])))
+```
 
 `:projection_timeout` и `:projection_rebuilding` — не отказ команды: запись уже закоммичена.
 Повтор команды по ним MUST NOT — команда исполнится второй раз; вызывающий отвечает успехом

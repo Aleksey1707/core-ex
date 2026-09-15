@@ -1,12 +1,20 @@
 defmodule Core.Es.Projection.Reader do
   @moduledoc """
   Читатель проекции — процесс дерева `Core.Es.Projection.Supervisor`, по одному на проекцию под
-  именем её модуля: гоняет пачки проекции (`Core.Es.Projection`, «Пачка») по таймеру и по `wake`
-  после commit `Core.Es.Store.append/5`.
+  именем её модуля: гоняет пачки проекции (`Core.Es.Projection`, «Пачка») по таймеру, по `wake`
+  после commit `Core.Es.Store.append/5` и по пробуждению от ожидающего `Core.Es.Projection.await/4`.
 
   В `init/1` читатель регистрируется в `Core.Es.Projection.Registry` под типами агрегатов из
-  `events:`; запросов в `init/1` нет, первый тик — через `idle_min_ms`. Опции проверяет и
-  перечисляет супервизор.
+  `events:` и под именем своей проекции; запросов в `init/1` нет, первый тик — через
+  `idle_min_ms`. Опции проверяет и перечисляет супервизор.
+
+  Пробуждение от ожидающего — то же сообщение `wake` с той же обработкой: цикл сразу до первого
+  цикла и при `:idle` / `:locked`, пропуск при `:retry` / `:outdated`, счётчик простоя не
+  сбрасывается. Зачем ожидание будит читателя на каждом шаге — `Core.Es.Projection`, «Ожидание».
+
+  После пачки с исходом `:processed` — события или старт с начала истории — читатель рассылает
+  сигнал чекпоинта своей проекции через `Core.Es.Projection.Registry`: транзакция пачки к этому
+  моменту закоммичена, и ожидающие перечитывают чекпоинт.
 
   ## Цикл
 
@@ -123,6 +131,7 @@ defmodule Core.Es.Projection.Reader do
     projection = Keyword.fetch!(opts, :projection)
     declaration = projection.__es_projection__()
     :ok = Projection.Registry.register(Map.keys(declaration.streams))
+    :ok = Projection.Registry.register_projection(declaration.name)
     idle_min_ms = Keyword.fetch!(opts, :idle_min_ms)
     retry_min_ms = Keyword.fetch!(opts, :retry_min_ms)
 
@@ -177,10 +186,17 @@ defmodule Core.Es.Projection.Reader do
     :ok = flush_ticks()
     start = System.monotonic_time()
     {result, events, state} = apply_outcome(run_batch(state), state)
+    :ok = signal_checkpoint(result, state.declaration)
     {delay, backoff} = next_tick(state.backoff, result, flush_wakes())
     emit_cycle(state, start, result, events)
     schedule(%{state | backoff: backoff, result: result}, delay)
   end
+
+  # Транзакция пачки закоммичена: ожидающие своей проекции перечитывают чекпоинт.
+  defp signal_checkpoint(:processed, declaration),
+    do: Projection.Registry.signal_checkpoint(declaration.name)
+
+  defp signal_checkpoint(_result, _declaration), do: :ok
 
   # Сбой вне колбэков пачки — недоступная БД, exit, throw — такой же повтор, как её отказ: процесс
   # не падает, и супервизор не уходит в цикл рестартов на лежащей зависимости.

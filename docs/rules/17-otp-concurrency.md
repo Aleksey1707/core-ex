@@ -1,7 +1,7 @@
 # OTP и конкурентность
 
 - **Область.** `lib/core/outbox/{poller,cleaner}.ex`, `lib/core/mq/stream/**`, `lib/core/pubsub/**`,
-  `lib/core/es/projection/{supervisor,reader,registry}.ex`,
+  `lib/core/es/projection/{supervisor,reader,registry,await,listener}.ex`,
   `lib/core/es/aggregate/process/server.ex`; у потребителя — его дерево супервизии.
 - **Читать перед.** Новым `GenServer` или супервизором, правкой `init/1` / `handle_continue/2`,
   таймаутов `call`, backoff, mailbox, `terminate/2` и graceful shutdown.
@@ -92,10 +92,17 @@ def watch_list, do: Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.o
   (`20-agreements.md`).
 - Имя, по которому будят процесс (`Poller.wake/1`), MUST приходить из конфига, а не вычисляться:
   отсутствующий процесс → `:ok` (best-effort), а не падение.
-- Исключение — получатели `wake`, которых порождает само дерево по своему списку (читатели
-  проекций): получатель MUST регистрироваться в `Registry` с `keys: :duplicate` сам, под ключом
-  сигнала, а отправитель будит через `Registry.dispatch/3`; Registry не запущен → `:ok`. Имена в
-  конфиге дали бы второй список рядом со списком дерева.
+- Исключение — получатели сигналов, которые регистрируются в `Registry` сами: читатели проекций,
+  которых порождает дерево по своему списку, и ожидающий `Core.Es.Projection.await/4`, которого
+  порождает не дерево, а вызывающий. Получатель MUST регистрироваться в `Registry` с
+  `keys: :duplicate` под ключом сигнала, отправитель будит через `Registry.dispatch/3`; Registry
+  не запущен → отправка `:ok`, регистрация ожидающего пропускается. Имена в конфиге дали бы второй
+  список рядом со списком дерева, а у ожидающего имени нет вовсе.
+- Ожидающий MUST подписываться через alias процесса (`Process.alias/1`) значением записи —
+  отправитель шлёт на alias, — а после ожидания при любом исходе снимать запись, звать
+  `Process.unalias/1` и вычерпывать доставленные сигналы. Поздний сигнал на снятый alias runtime
+  отбрасывает, а на pid он попал бы в mailbox вызывающего — GenServer, LiveView — и всплыл бы в
+  его `handle_info/2`.
 
 ```elixir
 # плохо — имена читателей в конфиге расходятся со списком проекций дерева
@@ -104,6 +111,20 @@ config :core, Core.Es.Projection, readers: [AccountList.Projection]
 # хорошо — читатель в init/1 регистрируется под типами агрегатов, append будит по типу пачки
 :ok = Core.Es.Projection.Registry.register(Map.keys(declaration.streams))
 AfterCommit.register(fn -> Core.Es.Projection.Registry.wake(type) end)
+```
+
+```elixir
+# плохо — значение записи — pid: сигнал пачки после ожидания всплывёт в handle_info/2 LiveView
+{:ok, _owner} = Registry.register(Core.Es.Projection.Registry, {:checkpoint, name}, self())
+
+# хорошо — alias на время ожидания; после — снять запись и alias, вычерпать сигналы
+subscription = Core.Es.Projection.Registry.subscribe_checkpoint(name)
+
+try do
+  wait(subscription)
+after
+  :ok = Core.Es.Projection.Registry.unsubscribe_checkpoint(name, subscription)
+end
 ```
 
 ## `terminate/2` и graceful shutdown
