@@ -17,9 +17,7 @@ defmodule Core.CgroupTest do
 
   test "отсутствующий путь → :unavailable" do
     assert :unavailable =
-             Cgroup.memory_current(
-               current_path: "/tmp/definitely-missing-cgroup-#{:erlang.unique_integer()}"
-             )
+             Cgroup.memory_current(current_path: "/tmp/definitely-missing-cgroup-#{:erlang.unique_integer()}")
   end
 
   test "мусор в файле → :unavailable", %{path: path} do

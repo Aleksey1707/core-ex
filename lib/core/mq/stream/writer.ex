@@ -135,9 +135,7 @@ defmodule Core.Mq.Stream.Writer do
   @doc false
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, reason}, %__MODULE__{conn_ref: ref} = state) do
-    Logger.warning(
-      "stream writer: соединение упало, кеш producers сброшен: reason=#{inspect(reason)}"
-    )
+    Logger.warning("stream writer: соединение упало, кеш producers сброшен: reason=#{inspect(reason)}")
 
     {:noreply, %{state | conn_ref: nil, producers: %{}}}
   end
@@ -159,8 +157,7 @@ defmodule Core.Mq.Stream.Writer do
       connection: StartOpts.module!(@label, opts, :connection),
       reference_prefix: StartOpts.binary!(@label, opts, :reference_prefix),
       conn_ref: nil,
-      confirm_timeout_ms:
-        StartOpts.pos_integer!(@label, opts, :confirm_timeout_ms, @confirm_timeout_ms),
+      confirm_timeout_ms: StartOpts.pos_integer!(@label, opts, :confirm_timeout_ms, @confirm_timeout_ms),
       confirm_poll_ms: StartOpts.pos_integer!(@label, opts, :confirm_poll_ms, @confirm_poll_ms),
       max_producers: StartOpts.pos_integer!(@label, opts, :max_producers, @max_producers),
       producers: %{},
@@ -297,9 +294,7 @@ defmodule Core.Mq.Stream.Writer do
   end
 
   defp confirm_error(topic, reason) do
-    Logger.warning(
-      "stream writer: публикация не подтверждена topic=#{topic} причина=#{inspect(reason)}"
-    )
+    Logger.warning("stream writer: публикация не подтверждена topic=#{topic} причина=#{inspect(reason)}")
 
     Error.app(
       code: :publish_unconfirmed,

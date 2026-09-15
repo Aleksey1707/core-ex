@@ -61,9 +61,7 @@ defmodule Core.Helper.Savepoint do
     rollback_to(repo, name)
   rescue
     rollback_error ->
-      Logger.error(
-        "Не удалось ROLLBACK TO SAVEPOINT #{name}: #{Exception.message(rollback_error)}"
-      )
+      Logger.error("Не удалось ROLLBACK TO SAVEPOINT #{name}: #{Exception.message(rollback_error)}")
 
       :ok
   end

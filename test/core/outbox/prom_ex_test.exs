@@ -83,15 +83,12 @@ defmodule Core.Outbox.PromExTest do
 
     PromEx.execute_queue_metrics()
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :count], %{count: _},
-                    %{status: "new"}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :count], %{count: _}, %{status: "new"}}
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :oldest_age],
-                    %{seconds: seconds}, %{}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :oldest_age], %{seconds: seconds}, %{}}
 
     assert seconds >= 0
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :expired_locks], %{count: _},
-                    %{}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :expired_locks], %{count: _}, %{}}
   end
 end

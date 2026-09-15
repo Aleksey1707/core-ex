@@ -127,8 +127,7 @@ defmodule Core.View.Dumper do
 
   defp item_var!(depth) do
     raise CompileError,
-      description:
-        "#{@label}: вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})"
+      description: "#{@label}: вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})"
   end
 
   defp field_access(value, name), do: {{:., [], [value, name]}, [no_parens: true], []}

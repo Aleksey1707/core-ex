@@ -284,8 +284,7 @@ defmodule Core.Es.Projection.AwaitTest do
 
       assert error.detail == %{projection: "es_fixture", timeout: 50}
 
-      assert_receive {:await, %{projection: "es_fixture", result: :timeout},
-                      %{duration: duration}}
+      assert_receive {:await, %{projection: "es_fixture", result: :timeout}, %{duration: duration}}
 
       assert duration >= System.convert_time_unit(50, :millisecond, :native)
     end
@@ -541,9 +540,7 @@ defmodule Core.Es.Projection.AwaitTest do
 
     on_exit(fn ->
       in_other_connection(fn ->
-        TestRepo.delete_all(
-          from(e in Es.Store.Schema, where: e.aggregate_id == ^row.aggregate_id)
-        )
+        TestRepo.delete_all(from(e in Es.Store.Schema, where: e.aggregate_id == ^row.aggregate_id))
       end)
     end)
 

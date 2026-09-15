@@ -225,10 +225,8 @@ defmodule RulesLint do
 
       [
         {Regex.match?(~r/^name: #{name}$/m, content), "frontmatter `name:` не равен `#{name}`"},
-        {Regex.match?(~r/^description: ".{80,}"$/m, content),
-         "нет содержательного `description:`"},
-        {String.contains?(content, "docs/rules/#{file}"),
-         "тело не ссылается на `docs/rules/#{file}`"}
+        {Regex.match?(~r/^description: ".{80,}"$/m, content), "нет содержательного `description:`"},
+        {String.contains?(content, "docs/rules/#{file}"), "тело не ссылается на `docs/rules/#{file}`"}
       ]
       |> Enum.reject(&elem(&1, 0))
       |> Enum.map(&err(path, 1, elem(&1, 1)))

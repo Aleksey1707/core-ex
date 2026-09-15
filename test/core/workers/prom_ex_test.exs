@@ -43,8 +43,7 @@ defmodule Core.Workers.PromExTest do
     name = :"workers_promex_absent_#{System.unique_integer([:positive])}"
     PromEx.execute_worker_metrics({StubWatch, :one, ["stub_component", name]})
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 0},
-                    %{component: "stub_component"}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 0}, %{component: "stub_component"}}
   end
 
   test "execute_worker_metrics эмитит up=1 для живого named процесса" do
@@ -55,8 +54,7 @@ defmodule Core.Workers.PromExTest do
 
     PromEx.execute_worker_metrics({StubWatch, :one, ["stub_component", name]})
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 1},
-                    %{component: "stub_component"}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 1}, %{component: "stub_component"}}
   end
 
   defp attach_up_handler(handler_id) do

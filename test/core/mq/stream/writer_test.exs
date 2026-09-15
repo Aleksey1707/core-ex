@@ -260,10 +260,7 @@ defmodule Core.Mq.Stream.WriterTest do
     writer =
       start_supervised!(
         {Stream.Writer,
-         connection: ExitConfirmConn,
-         reference_prefix: "test-writer",
-         confirm_timeout_ms: 50,
-         confirm_poll_ms: 5}
+         connection: ExitConfirmConn, reference_prefix: "test-writer", confirm_timeout_ms: 50, confirm_poll_ms: 5}
       )
 
     capture_log(fn ->
@@ -353,11 +350,7 @@ defmodule Core.Mq.Stream.WriterTest do
     start_supervised!(%{id: conn, start: {conn, :start_link, [conn_opts]}})
 
     start_supervised!(
-      {Stream.Writer,
-       connection: conn,
-       reference_prefix: "test-writer",
-       confirm_timeout_ms: 50,
-       confirm_poll_ms: 5}
+      {Stream.Writer, connection: conn, reference_prefix: "test-writer", confirm_timeout_ms: 50, confirm_poll_ms: 5}
     )
   end
 

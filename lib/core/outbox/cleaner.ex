@@ -133,9 +133,7 @@ defmodule Core.Outbox.Cleaner do
           {:error, e.error}
 
         e ->
-          Logger.error(
-            "Сбой цикла очистки outbox: #{Exception.format(:error, e, __STACKTRACE__)}"
-          )
+          Logger.error("Сбой цикла очистки outbox: #{Exception.format(:error, e, __STACKTRACE__)}")
 
           {:error,
            Error.app(

@@ -428,6 +428,5 @@ defmodule Core.Es.PromEx do
   # ===== общее =====
 
   defp metric_prefix(opts),
-    do:
-      Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(Keyword.fetch!(opts, :otp_app), :es))
+    do: Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(Keyword.fetch!(opts, :otp_app), :es))
 end

@@ -35,8 +35,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
 
       assert {:ok, _state} = @repo.get(id, :current, Context.new())
 
-      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2},
-                       %{type: "account", snapshot: :off}}
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{type: "account", snapshot: :off}}
 
       assert_received {:telemetry, [:core, :es, :aggregate, :load],
                        %{

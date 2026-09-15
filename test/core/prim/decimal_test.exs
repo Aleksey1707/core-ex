@@ -119,8 +119,7 @@ defmodule Core.Prim.DecimalTest do
   end
 
   test "custom validate возвращает свой код ошибки" do
-    assert {:error,
-            %Core.Error{kind: :domain, code: :zero, message: "Ставка: не может быть нулём"}} =
+    assert {:error, %Core.Error{kind: :domain, code: :zero, message: "Ставка: не может быть нулём"}} =
              Rate.new(0)
   end
 

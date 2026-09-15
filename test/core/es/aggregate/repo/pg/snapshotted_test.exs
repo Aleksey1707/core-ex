@@ -124,8 +124,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert log =~ "снапшоты агрегата не записаны: type=account rows=1"
       assert log =~ "соединение потеряно"
 
-      assert_received {:telemetry, [:core, :es, :snapshot, :write], %{rows: 0},
-                       %{type: "account", result: :error}}
+      assert_received {:telemetry, [:core, :es, :snapshot, :write], %{rows: 0}, %{type: "account", result: :error}}
     end
   end
 
@@ -140,8 +139,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert {{:ok, ^closed}, 1} =
                count_queries(fn -> @repo.get(id, :current, Context.new()) end, :select)
 
-      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1},
-                       %{type: "account", snapshot: :hit}}
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{type: "account", snapshot: :hit}}
 
       assert_received {:telemetry, [:core, :es, :aggregate, :load],
                        %{
@@ -180,8 +178,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
       refute log =~ dump(id)
 
-      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2},
-                       %{snapshot: :miss}}
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{snapshot: :miss}}
 
       assert_received {:telemetry, [:core, :es, :aggregate, :load], %{snapshot_miss: 1}, _}
       assert snapshot(id).marker != "stale"
@@ -203,11 +200,9 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert log =~ "снапшот агрегата отвергнут: type=account aggregate_id=#{dump(id)}"
       assert log =~ "reason=decode"
 
-      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2},
-                       %{snapshot: :rejected}}
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{snapshot: :rejected}}
 
-      assert_received {:telemetry, [:core, :es, :aggregate, :load],
-                       %{events: 2, snapshot_rejected: 1}, _}
+      assert_received {:telemetry, [:core, :es, :aggregate, :load], %{events: 2, snapshot_rejected: 1}, _}
     end
 
     test "лишний ключ struct — warning и верное состояние" do
@@ -240,8 +235,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       end)
 
       assert_received {:telemetry, [:core, :es, :aggregate, :load],
-                       %{streams: 3, snapshot_hit: 1, snapshot_miss: 1, snapshot_rejected: 1},
-                       %{op: :get_many}}
+                       %{streams: 3, snapshot_hit: 1, snapshot_miss: 1, snapshot_rejected: 1}, %{op: :get_many}}
     end
   end
 

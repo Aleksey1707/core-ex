@@ -34,8 +34,7 @@ defmodule Core.Outbox.PollerTest do
     def put(writer, message), do: put_many(writer, [message])
 
     def put_many(_writer, messages) when is_list(messages) do
-      {:error, length(messages),
-       Error.app(__MODULE__, code: :bad_index, ns: :mq, message: "индекс вне пачки")}
+      {:error, length(messages), Error.app(__MODULE__, code: :bad_index, ns: :mq, message: "индекс вне пачки")}
     end
   end
 
@@ -146,11 +145,9 @@ defmodule Core.Outbox.PollerTest do
     assert log =~ "Опрос outbox: пакет size=1 опубликовано=1 повтор=0 провалено=0"
     assert log =~ "Outbox опубликован: id=#{Outbox.ID.format(record.id, :hex)}"
 
-    assert_receive {:telemetry, [:core, :outbox, :delivery], %{count: 1},
-                    %{outcome: :published, topic: "products"}}
+    assert_receive {:telemetry, [:core, :outbox, :delivery], %{count: 1}, %{outcome: :published, topic: "products"}}
 
-    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :processed}}
+    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements, %{result: :processed}}
 
     assert measurements.batch_size == 1
     assert measurements.published == 1
@@ -178,11 +175,9 @@ defmodule Core.Outbox.PollerTest do
     assert log =~ "Ошибка доставки outbox, будет повтор"
     assert log =~ "ошибка=publish failed at 0"
 
-    assert_receive {:telemetry, [:core, :outbox, :delivery], %{count: 1},
-                    %{outcome: :retry, topic: "products"}}
+    assert_receive {:telemetry, [:core, :outbox, :delivery], %{count: 1}, %{outcome: :retry, topic: "products"}}
 
-    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :retry}}
+    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements, %{result: :retry}}
 
     assert measurements.retry == 1
 
@@ -208,11 +203,9 @@ defmodule Core.Outbox.PollerTest do
     assert log =~ "Outbox окончательно провален"
     assert log =~ "Опрос outbox: пакет size=1 опубликовано=0 повтор=0 провалено=1"
 
-    assert_receive {:telemetry, [:core, :outbox, :delivery], %{count: 1},
-                    %{outcome: :failed, topic: "products"}}
+    assert_receive {:telemetry, [:core, :outbox, :delivery], %{count: 1}, %{outcome: :failed, topic: "products"}}
 
-    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :retry}}
+    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements, %{result: :retry}}
 
     assert measurements.failed == 1
   end
@@ -327,8 +320,7 @@ defmodule Core.Outbox.PollerTest do
     assert [msg1] = MqFake.Writer.published(delivery.writer)
     assert msg1.body == Jason.encode!(%{"n" => "ok1"})
 
-    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements,
-                    %{result: :retry}}
+    assert_receive {:telemetry, [:core, :outbox, :poller, :cycle], measurements, %{result: :retry}}
 
     assert measurements.published == 1
     assert measurements.retry == 2

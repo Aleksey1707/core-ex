@@ -221,8 +221,7 @@ defmodule Core.Repo.Pg.StateStored do
   defp validate_opts!(opts) do
     unless Keyword.keyword?(opts) do
       raise CompileError,
-        description:
-          "#{@label}: ожидается литеральный keyword opts, получено #{Macro.to_string(opts)}"
+        description: "#{@label}: ожидается литеральный keyword opts, получено #{Macro.to_string(opts)}"
     end
 
     Helper.Opts.validate!(
@@ -268,8 +267,7 @@ defmodule Core.Repo.Pg.StateStored do
 
     if missing != [] do
       raise CompileError,
-        description:
-          "#{@label}: behaviour #{inspect(behaviour)} должен объявлять #{inspect(missing)}"
+        description: "#{@label}: behaviour #{inspect(behaviour)} должен объявлять #{inspect(missing)}"
     end
 
     behaviour
@@ -345,8 +343,7 @@ defmodule Core.Repo.Pg.StateStored do
 
     if unknown != [] do
       raise CompileError,
-        description:
-          "#{@children_label}: key: колонок #{inspect(unknown)} нет в #{inspect(schema)}"
+        description: "#{@children_label}: key: колонок #{inspect(unknown)} нет в #{inspect(schema)}"
     end
 
     if fk in key do
@@ -359,8 +356,7 @@ defmodule Core.Repo.Pg.StateStored do
 
   defp validate_key!(other, _schema, _fk) do
     raise CompileError,
-      description:
-        "#{@children_label}: key: ожидается непустой список колонок, получено #{inspect(other)}"
+      description: "#{@children_label}: key: ожидается непустой список колонок, получено #{inspect(other)}"
   end
 
   defp constraint_errors!(child, errors) do
@@ -383,8 +379,7 @@ defmodule Core.Repo.Pg.StateStored do
 
   defp normalize_constraint_errors!(other) do
     raise CompileError,
-      description:
-        "#{@children_label}: constraint_errors: ожидается keyword, получено #{inspect(other)}"
+      description: "#{@children_label}: constraint_errors: ожидается keyword, получено #{inspect(other)}"
   end
 
   defp put_constraint_error!({constraint, code}, acc) when is_atom(code) and not is_nil(code) do

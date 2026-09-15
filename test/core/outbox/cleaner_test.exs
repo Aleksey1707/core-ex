@@ -21,9 +21,7 @@ defmodule Core.Outbox.CleanerTest do
 
   setup do
     {:ok, cleaner} =
-      start_supervised(
-        {Cleaner, repo: @repo, published_ttl: Outbox.PublishedTTL.new!(60), interval_ms: 60_000}
-      )
+      start_supervised({Cleaner, repo: @repo, published_ttl: Outbox.PublishedTTL.new!(60), interval_ms: 60_000})
 
     handler_id = "outbox-cleaner-#{inspect(self())}"
 
@@ -61,10 +59,7 @@ defmodule Core.Outbox.CleanerTest do
     {:ok, cleaner} =
       start_supervised(
         {Cleaner,
-         repo: FailingRepo,
-         published_ttl: Outbox.PublishedTTL.new!(60),
-         interval_ms: 60_000,
-         retry_min_ms: 30},
+         repo: FailingRepo, published_ttl: Outbox.PublishedTTL.new!(60), interval_ms: 60_000, retry_min_ms: 30},
         id: :failing_cleaner
       )
 

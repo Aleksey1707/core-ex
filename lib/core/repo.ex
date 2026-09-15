@@ -148,8 +148,7 @@ defmodule Core.Repo do
 
       found ->
         raise CompileError,
-          description:
-            "#{@label}: view: допустим только для read-методов, найдены: #{inspect(found)}"
+          description: "#{@label}: view: допустим только для read-методов, найдены: #{inspect(found)}"
     end
   end
 

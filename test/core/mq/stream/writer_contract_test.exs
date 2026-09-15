@@ -65,10 +65,7 @@ defmodule Core.Mq.Stream.WriterContractTest do
 
     start_supervised!(
       {Stream.Writer,
-       connection: ContractConn,
-       reference_prefix: "contract",
-       confirm_timeout_ms: 200,
-       confirm_poll_ms: 5}
+       connection: ContractConn, reference_prefix: "contract", confirm_timeout_ms: 200, confirm_poll_ms: 5}
     )
   end
 

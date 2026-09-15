@@ -81,8 +81,7 @@ defmodule Core.Es.EventsTest do
 
     assert {:ok, ^a1} = Events.get(events, a1.id)
 
-    assert {:error,
-            %Error{kind: :domain, ns: :events, code: :not_found, message: "Событие не найдено"}} =
+    assert {:error, %Error{kind: :domain, ns: :events, code: :not_found, message: "Событие не найдено"}} =
              Events.get(events, Event.ID.new())
 
     assert Events.get!(events, a1.id) == a1

@@ -229,8 +229,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     def handle_info(
-          {:deliver,
-           %DeliverData{osiris_chunk: %OsirisChunk{num_records: n, num_entries: n} = chunk}},
+          {:deliver, %DeliverData{osiris_chunk: %OsirisChunk{num_records: n, num_entries: n} = chunk}},
           state
         ) do
       emit_deliver(state.topic_name, chunk.num_entries)
@@ -331,9 +330,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     defp subscribe(%__MODULE__{} = state) do
       case try_subscribe(state) do
         {:ok, subscription_id} ->
-          Logger.info(
-            "stream reader подписан: topic=#{state.topic_name} subscriber=#{state.subscriber}"
-          )
+          Logger.info("stream reader подписан: topic=#{state.topic_name} subscriber=#{state.subscriber}")
 
           state =
             state

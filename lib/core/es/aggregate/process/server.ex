@@ -161,9 +161,7 @@ defmodule Core.Es.Aggregate.Process.Server do
     server = struct!(__MODULE__, args)
     :ok = emit(server, :start, %{})
 
-    Logger.debug(
-      "процесс агрегата: запущен: type=#{server.cfg.type} aggregate_id=#{server.aggregate_id}"
-    )
+    Logger.debug("процесс агрегата: запущен: type=#{server.cfg.type} aggregate_id=#{server.aggregate_id}")
 
     {:ok, server, server.idle_timeout}
   end
