@@ -70,6 +70,8 @@ defmodule Core.Es.EventCompatCase do
   """
   @type reason :: File.posix() | Jason.DecodeError.t() | %{type: term()} | Core.Error.t()
 
+  # ===== объявление =====
+
   @doc "Сгенерировать тесты golden-фикстур событий агрегата."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
@@ -190,6 +192,8 @@ defmodule Core.Es.EventCompatCase do
     end
   end
 
+  # ===== наличие фикстур =====
+
   @doc false
   @spec check_tag_fixtures(module(), Path.t()) :: :ok | {:error, missing()}
 
@@ -219,6 +223,8 @@ defmodule Core.Es.EventCompatCase do
       paths -> {:error, %{missing: paths}}
     end
   end
+
+  # ===== загрузка фикстур =====
 
   @doc false
   @spec check_fixtures_load(module(), Path.t(), module()) :: :ok | {:error, failed()}
@@ -265,6 +271,8 @@ defmodule Core.Es.EventCompatCase do
     end
   end
 
+  # ===== полнота evolve =====
+
   @doc false
   @spec check_evolve(module(), Path.t(), module()) :: :ok | {:error, unhandled()}
 
@@ -310,6 +318,8 @@ defmodule Core.Es.EventCompatCase do
     _state = aggregate.evolve(struct(aggregate, id: event.aggregate_id), event)
     true
   end
+
+  # ===== общее =====
 
   defp load_fixture(path, event_codec, codec) do
     with {:ok, body} <- File.read(path),

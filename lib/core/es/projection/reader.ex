@@ -90,6 +90,8 @@ defmodule Core.Es.Projection.Reader do
           attempt: non_neg_integer()
         }
 
+  # ===== цикл =====
+
   @doc """
   Спецификация для Supervisor: `:id` — модуль проекции, `:shutdown` — запас на пачку, которую
   читатель дописывает под `trap_exit`.
@@ -267,29 +269,6 @@ defmodule Core.Es.Projection.Reader do
   defp cycle_metadata(%__MODULE__{declaration: declaration}, result),
     do: %{projection: declaration.name, result: result}
 
-  @doc false
-  @spec next_tick(backoff(), result(), boolean()) :: {non_neg_integer(), backoff()}
-
-  def next_tick(backoff, :processed, woken?) when is_boolean(woken?),
-    do: {0, %{backoff | idle_ms: backoff.idle_min_ms, retry_ms: backoff.retry_min_ms}}
-
-  def next_tick(backoff, :idle, woken?) when is_boolean(woken?),
-    do: next_tick(%{backoff | retry_ms: backoff.retry_min_ms}, :locked, woken?)
-
-  # Заблокированная пачка серию повторов не заканчивает: `retry_ms` остаётся.
-  def next_tick(backoff, :locked, true), do: {0, backoff}
-
-  def next_tick(%{idle_ms: idle_ms} = backoff, :locked, false),
-    do: {idle_ms, %{backoff | idle_ms: min(idle_ms * 2, backoff.poll_interval_ms)}}
-
-  def next_tick(%{retry_ms: retry_ms} = backoff, :retry, woken?) when is_boolean(woken?),
-    do: {retry_ms, %{backoff | retry_ms: min(retry_ms * 2, backoff.retry_max_ms)}}
-
-  def next_tick(backoff, :outdated, woken?) when is_boolean(woken?),
-    do: {backoff.poll_interval_ms, %{backoff | retry_ms: backoff.retry_min_ms}}
-
-  # ---
-
   defp schedule(%__MODULE__{} = state, ms),
     do: %{state | timer_ref: Process.send_after(self(), :tick, ms)}
 
@@ -319,4 +298,27 @@ defmodule Core.Es.Projection.Reader do
       0 -> :ok
     end
   end
+
+  # ===== backoff =====
+
+  @doc false
+  @spec next_tick(backoff(), result(), boolean()) :: {non_neg_integer(), backoff()}
+
+  def next_tick(backoff, :processed, woken?) when is_boolean(woken?),
+    do: {0, %{backoff | idle_ms: backoff.idle_min_ms, retry_ms: backoff.retry_min_ms}}
+
+  def next_tick(backoff, :idle, woken?) when is_boolean(woken?),
+    do: next_tick(%{backoff | retry_ms: backoff.retry_min_ms}, :locked, woken?)
+
+  # Заблокированная пачка серию повторов не заканчивает: `retry_ms` остаётся.
+  def next_tick(backoff, :locked, true), do: {0, backoff}
+
+  def next_tick(%{idle_ms: idle_ms} = backoff, :locked, false),
+    do: {idle_ms, %{backoff | idle_ms: min(idle_ms * 2, backoff.poll_interval_ms)}}
+
+  def next_tick(%{retry_ms: retry_ms} = backoff, :retry, woken?) when is_boolean(woken?),
+    do: {retry_ms, %{backoff | retry_ms: min(retry_ms * 2, backoff.retry_max_ms)}}
+
+  def next_tick(backoff, :outdated, woken?) when is_boolean(woken?),
+    do: {backoff.poll_interval_ms, %{backoff | retry_ms: backoff.retry_min_ms}}
 end

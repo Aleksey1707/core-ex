@@ -23,6 +23,8 @@ defmodule Core.Codec.Facade do
   alias Core.Helper
   alias Core.Prim
 
+  # ===== билдер =====
+
   @doc "Объявить entity-фасад (`prim:` + `plugins:`)."
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
@@ -136,27 +138,6 @@ defmodule Core.Codec.Facade do
 
   # ---
 
-  defp ensure_plugins!(plugins) do
-    Enum.each(plugins, &ensure_plugin!/1)
-
-    plugins
-  end
-
-  # `ensure_compiled!` отделяет «модуль ещё не собран» от «собран, но не плагин»: без него
-  # обе причины приходили бы одной `UndefinedFunctionError` на `__codec_types__/0`.
-  defp ensure_plugin!(plugin) when is_atom(plugin) and not is_nil(plugin) do
-    Code.ensure_compiled!(plugin)
-
-    if not function_exported?(plugin, :__codec_types__, 0) do
-      raise CompileError,
-        description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"
-    end
-  end
-
-  defp ensure_plugin!(plugin) do
-    raise CompileError, description: "плагин #{inspect(plugin)}: ожидается модуль"
-  end
-
   defp merge_plugin_mods!(plugin, acc) do
     Enum.reduce(load_mods(plugin), acc, fn mod, inner ->
       put_unique_mod!(inner, mod, plugin)
@@ -174,6 +155,8 @@ defmodule Core.Codec.Facade do
         Map.put(acc, mod, plugin)
     end
   end
+
+  # ===== типы агрегата =====
 
   @doc """
   Проверить типы агрегата кодеков событий среди плагинов (compile-time).
@@ -207,5 +190,28 @@ defmodule Core.Codec.Facade do
       :error ->
         Map.put(acc, type, plugin)
     end
+  end
+
+  # ===== общее =====
+
+  defp ensure_plugins!(plugins) do
+    Enum.each(plugins, &ensure_plugin!/1)
+
+    plugins
+  end
+
+  # `ensure_compiled!` отделяет «модуль ещё не собран» от «собран, но не плагин»: без него
+  # обе причины приходили бы одной `UndefinedFunctionError` на `__codec_types__/0`.
+  defp ensure_plugin!(plugin) when is_atom(plugin) and not is_nil(plugin) do
+    Code.ensure_compiled!(plugin)
+
+    if not function_exported?(plugin, :__codec_types__, 0) do
+      raise CompileError,
+        description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"
+    end
+  end
+
+  defp ensure_plugin!(plugin) do
+    raise CompileError, description: "плагин #{inspect(plugin)}: ожидается модуль"
   end
 end

@@ -92,7 +92,6 @@ defmodule Core.Cache.PromEx do
     %{cache: cache}
   end
 
-  # ---
   # Имена событий резолвятся в рантайме: префикс задаёт потребитель
   # (`Core.Config.telemetry_prefix/0`), а библиотека компилируется один раз на все приложения.
 

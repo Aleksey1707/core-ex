@@ -41,6 +41,8 @@ defmodule Core.Es.Projection.Checkpoint do
           target: Es.Store.position() | nil
         }
 
+  # ===== блокировка =====
+
   @doc "Взять блокировку пачки проекции до конца транзакции; `false` — её держит другая пачка."
   @spec try_lock(Projection.t()) :: boolean()
 
@@ -48,6 +50,8 @@ defmodule Core.Es.Projection.Checkpoint do
     %{rows: [[locked]]} = Ecto.Adapters.SQL.query!(dao, @lock_sql, [name])
     locked
   end
+
+  # ===== чтение =====
 
   @doc "Строка чекпоинта проекции; `nil` — строки нет."
   @spec find(Projection.t()) :: t() | nil
@@ -80,6 +84,8 @@ defmodule Core.Es.Projection.Checkpoint do
   defp position(nil, nil), do: nil
   defp position(xid, number), do: {xid, number}
 
+  # ===== состояние =====
+
   @doc """
   Read-модель проекции неполна по строке `checkpoint`: строки нет, её версия ниже `version:`
   объявления или позиция ниже цели пересборки.
@@ -92,17 +98,19 @@ defmodule Core.Es.Projection.Checkpoint do
   def rebuilding?(%{position: position, target: target}, _declaration),
     do: below?(position, target)
 
+  @doc "Версия строки `checkpoint` выше `version:` объявления: пачки этого кода — `:outdated`."
+  @spec outdated?(t() | nil, Projection.t()) :: boolean()
+
+  def outdated?(nil, _declaration), do: false
+  def outdated?(%{version: version}, %{version: current}), do: version > current
+
   # ---
 
   defp below?(_position, nil), do: false
   defp below?(nil, _target), do: true
   defp below?(position, target), do: position < target
 
-  @doc "Версия строки `checkpoint` выше `version:` объявления: пачки этого кода — `:outdated`."
-  @spec outdated?(t() | nil, Projection.t()) :: boolean()
-
-  def outdated?(nil, _declaration), do: false
-  def outdated?(%{version: version}, %{version: current}), do: version > current
+  # ===== запись =====
 
   @doc """
   Записать строку в начале истории с версией проекции и целью `target` при условии, что строка

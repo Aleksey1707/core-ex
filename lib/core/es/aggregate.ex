@@ -81,6 +81,8 @@ defmodule Core.Es.Aggregate do
   @doc "Применение события к состоянию."
   @callback evolve(state :: struct(), event :: Es.Event.t()) :: struct()
 
+  # ===== объявление =====
+
   @doc "Объявить event-sourced агрегат."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
@@ -137,6 +139,8 @@ defmodule Core.Es.Aggregate do
     end
   end
 
+  # ===== команда =====
+
   @doc false
   @spec execute(module(), struct(), struct()) ::
           {:ok, {[Es.Event.t()], struct()}} | {:error, Error.t()}
@@ -188,6 +192,8 @@ defmodule Core.Es.Aggregate do
             "#{inspect(state.id)}: aggregate_id #{inspect(event.aggregate_id)}"
   end
 
+  # ===== события =====
+
   @doc false
   @spec events(module(), struct(), [result()], struct(), Es.Event.At.t()) :: [Es.Event.t()]
 
@@ -211,6 +217,8 @@ defmodule Core.Es.Aggregate do
 
   defp event(mod, mods, id, version, by, at) when is_map_key(mods, mod),
     do: mod.new(id, version, by, at)
+
+  # ===== общее =====
 
   defp next_version(nil), do: Version.new()
   defp next_version(%Version{} = version), do: Version.next(version)

@@ -22,8 +22,6 @@ defmodule Core.EsFixture.Account do
   use Core.Es.Aggregate,
     event_codec: Core.EsFixture.Account.Event.Codec
 
-  # ===== aggregate =====
-
   defmodule ID do
     @moduledoc "Идентификатор счёта."
 

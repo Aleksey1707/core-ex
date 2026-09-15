@@ -34,6 +34,8 @@ defmodule Core.Prim do
 
   require Error
 
+  # ===== объявление =====
+
   @doc "Объявить доменный Prim (`cast` / `name` / `kind` + опциональные mutate/validate)."
   defmacro __using__(opts) do
     {value_type, opts} = Keyword.pop(opts, :value_type, quote(do: term()))
@@ -265,6 +267,8 @@ defmodule Core.Prim do
     %{error | detail: redact(error.detail, true), parent: redact_chain(parent, true)}
   end
 
+  # ===== прогон шагов =====
+
   @doc false
   @spec normalize_ok(cast_result()) :: cast_result()
 
@@ -346,23 +350,6 @@ defmodule Core.Prim do
     end
   end
 
-  # ---
-
-  defp normalize_mutate({:ok, value}), do: {:ok, value}
-
-  defp normalize_mutate({:error, {code, detail}} = err)
-       when is_atom(code) and is_binary(detail),
-       do: err
-
-  defp normalize_mutate({:error, %Error{}} = err), do: err
-
-  defp normalize_mutate({:error, _} = err) do
-    raise ArgumentError,
-          "доменная ошибка: ожидается {:error, {code, detail}} или {:error, %Error{}}, получено: #{inspect(err)}"
-  end
-
-  defp normalize_mutate(value), do: {:ok, value}
-
   @doc false
   @spec run_validates(validate_spec(), term(), keyword()) :: :ok | error()
 
@@ -384,4 +371,21 @@ defmodule Core.Prim do
       end
     end)
   end
+
+  # ---
+
+  defp normalize_mutate({:ok, value}), do: {:ok, value}
+
+  defp normalize_mutate({:error, {code, detail}} = err)
+       when is_atom(code) and is_binary(detail),
+       do: err
+
+  defp normalize_mutate({:error, %Error{}} = err), do: err
+
+  defp normalize_mutate({:error, _} = err) do
+    raise ArgumentError,
+          "доменная ошибка: ожидается {:error, {code, detail}} или {:error, %Error{}}, получено: #{inspect(err)}"
+  end
+
+  defp normalize_mutate(value), do: {:ok, value}
 end

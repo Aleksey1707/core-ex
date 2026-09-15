@@ -113,6 +113,8 @@ defmodule Core.Es.Store do
           actual: pos_integer() | nil
         }
 
+  # ===== запись =====
+
   @doc """
   Записать события потоков одного типа агрегата — `type:` кодека `event_codec`.
 
@@ -305,6 +307,8 @@ defmodule Core.Es.Store do
   defp first_versions(rows),
     do: Enum.reduce(rows, %{}, &Map.put_new(&2, &1.aggregate_id, &1.aggregate_version))
 
+  # ===== страница потока =====
+
   @doc """
   Страница потока `aggregate_id` по возрастанию версии; `count` — число событий всего потока.
 
@@ -351,6 +355,8 @@ defmodule Core.Es.Store do
   defp load(row, event_codec, codec),
     do: codec.load(event_codec.__codec_union__(), Schema.to_wire(row))
 
+  # ===== чтение по позиции =====
+
   @doc false
   @spec list_after(Ecto.Repo.t(), [String.t()], position() | nil, pos_integer()) :: [positioned()]
 
@@ -377,24 +383,6 @@ defmodule Core.Es.Store do
     |> Enum.map(&positioned/1)
   end
 
-  # ---
-
-  defp after_position(query, nil), do: query
-
-  defp after_position(query, {xid, number}),
-    do: where(query, [e], fragment("(?, ?) > (?::xid8, ?)", e.xid, e.number, ^xid, ^number))
-
-  # Колонок позиции в схеме нет: строка собирается в неё без них.
-  defp positioned(row) do
-    %{
-      position: {row.xid, row.number},
-      type: row.aggregate_type,
-      tag: row.tag,
-      event_id: row.event_id,
-      wire: Schema.to_wire(struct(Schema, row))
-    }
-  end
-
   @doc false
   @spec last_position(Ecto.Repo.t(), [String.t()]) :: position() | nil
 
@@ -405,20 +393,6 @@ defmodule Core.Es.Store do
       select: {e.xid, e.number}
     )
     |> dao.one()
-  end
-
-  # ---
-
-  defp visible(types) do
-    from(e in "es_events",
-      where: e.aggregate_type in type(^types, {:array, :string}),
-      where:
-        fragment(
-          "? < pg_snapshot_xmin(pg_current_snapshot()) OR ? = pg_current_xact_id_if_assigned()",
-          e.xid,
-          e.xid
-        )
-    )
   end
 
   @doc false
@@ -448,6 +422,34 @@ defmodule Core.Es.Store do
   end
 
   # ---
+
+  defp after_position(query, nil), do: query
+
+  defp after_position(query, {xid, number}),
+    do: where(query, [e], fragment("(?, ?) > (?::xid8, ?)", e.xid, e.number, ^xid, ^number))
+
+  # Колонок позиции в схеме нет: строка собирается в неё без них.
+  defp positioned(row) do
+    %{
+      position: {row.xid, row.number},
+      type: row.aggregate_type,
+      tag: row.tag,
+      event_id: row.event_id,
+      wire: Schema.to_wire(struct(Schema, row))
+    }
+  end
+
+  defp visible(types) do
+    from(e in "es_events",
+      where: e.aggregate_type in type(^types, {:array, :string}),
+      where:
+        fragment(
+          "? < pg_snapshot_xmin(pg_current_snapshot()) OR ? = pg_current_xact_id_if_assigned()",
+          e.xid,
+          e.xid
+        )
+    )
+  end
 
   defp first_at_after(dao, type, position) do
     from(e in "es_events",

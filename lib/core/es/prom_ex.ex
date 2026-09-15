@@ -59,6 +59,8 @@ defmodule Core.Es.PromEx do
   @duration_buckets [1, 10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
   @events_buckets [0, 1, 5, 10, 25, 50, 100, 250, 500, 1_000, 5_000]
 
+  # ===== метрики событий =====
+
   @doc false
   @spec event_metrics(keyword()) :: [Event.t()]
 
@@ -250,6 +252,13 @@ defmodule Core.Es.PromEx do
     ])
   end
 
+  defp plural(unit), do: PromEx.Utils.make_plural_atom(unit)
+
+  defp tag_values(keys),
+    do: fn metadata -> Map.new(keys, &{&1, to_string(Map.fetch!(metadata, &1))}) end
+
+  # ===== метрики опроса =====
+
   @doc false
   @spec polling_metrics(keyword()) :: [Polling.t()]
 
@@ -331,6 +340,8 @@ defmodule Core.Es.PromEx do
     ]
   end
 
+  # ===== замер проекций =====
+
   @doc false
   @spec execute_projection_metrics({module(), atom(), [term()]}, DateTime.t()) :: :ok
 
@@ -387,6 +398,8 @@ defmodule Core.Es.PromEx do
   defp flag(true), do: 1
   defp flag(false), do: 0
 
+  # ===== замер процессов =====
+
   @doc false
   @spec execute_process_metrics({module(), atom(), [term()]}) :: :ok
 
@@ -412,12 +425,9 @@ defmodule Core.Es.PromEx do
   defp active(nil), do: 0
   defp active(pid), do: DynamicSupervisor.count_children(pid).active
 
+  # ===== общее =====
+
   defp metric_prefix(opts),
     do:
       Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(Keyword.fetch!(opts, :otp_app), :es))
-
-  defp plural(unit), do: PromEx.Utils.make_plural_atom(unit)
-
-  defp tag_values(keys),
-    do: fn metadata -> Map.new(keys, &{&1, to_string(Map.fetch!(metadata, &1))}) end
 end

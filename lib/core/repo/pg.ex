@@ -74,6 +74,8 @@ defmodule Core.Repo.Pg do
   @error_types %{unique: :unique, foreign_key: :foreign, check: :check, exclusion: :exclusion}
   @insert_many_chunk_size 500
 
+  # ===== объявление =====
+
   @doc "Реализовать Repo behaviour через PostgreSQL (generic CRUD)."
   defmacro __using__(opts) do
     # credo:disable-for-next-line Credo.Check.Refactor.LongQuoteBlocks
@@ -358,6 +360,8 @@ defmodule Core.Repo.Pg do
 
   defp validate_encoder!(_opts, false), do: :ok
 
+  # ===== ошибки ограничений =====
+
   @doc false
   @spec validate_errors_module!(module()) :: :ok
 
@@ -414,40 +418,6 @@ defmodule Core.Repo.Pg do
       description: "constraint_errors: ожидается keyword, получено #{inspect(other)}"
   end
 
-  # ---
-
-  defp put_constraint_type({type, fields}, acc) do
-    unless type in @constraint_types do
-      raise CompileError,
-        description:
-          "constraint_errors: неизвестный тип #{inspect(type)}, допустимы #{inspect(@constraint_types)}"
-    end
-
-    unless is_list(fields) and Keyword.keyword?(fields) do
-      raise CompileError,
-        description:
-          "constraint_errors: для #{inspect(type)} ожидается keyword [field: code], получено #{inspect(fields)}"
-    end
-
-    Enum.reduce(fields, acc, &put_constraint_field(type, &1, &2))
-  end
-
-  defp put_constraint_field(type, {field, code}, acc) do
-    unless is_atom(field) and is_atom(code) do
-      raise CompileError,
-        description:
-          "constraint_errors: field и code должны быть атомами, получено #{inspect({field, code})}"
-    end
-
-    key = {Map.fetch!(@error_types, type), field}
-
-    if Map.has_key?(acc, key) do
-      raise CompileError, description: "constraint_errors: дубликат #{inspect({type, field})}"
-    end
-
-    Map.put(acc, key, code)
-  end
-
   @doc false
   @spec validate_constraint_error_codes!(module(), %{optional(term()) => atom()}) :: :ok
 
@@ -458,20 +428,6 @@ defmodule Core.Repo.Pg do
     |> Enum.each(&ensure_constraint_error_code!(errors, &1))
 
     :ok
-  end
-
-  # ---
-
-  defp ensure_constraint_error_code!(errors, code) do
-    errors.domain(__MODULE__, code, nil)
-  rescue
-    FunctionClauseError ->
-      reraise CompileError,
-              [
-                description:
-                  "constraint_errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
-              ],
-              __STACKTRACE__
   end
 
   @doc """
@@ -511,6 +467,54 @@ defmodule Core.Repo.Pg do
         nil
     end)
   end
+
+  # ---
+
+  defp put_constraint_type({type, fields}, acc) do
+    unless type in @constraint_types do
+      raise CompileError,
+        description:
+          "constraint_errors: неизвестный тип #{inspect(type)}, допустимы #{inspect(@constraint_types)}"
+    end
+
+    unless is_list(fields) and Keyword.keyword?(fields) do
+      raise CompileError,
+        description:
+          "constraint_errors: для #{inspect(type)} ожидается keyword [field: code], получено #{inspect(fields)}"
+    end
+
+    Enum.reduce(fields, acc, &put_constraint_field(type, &1, &2))
+  end
+
+  defp put_constraint_field(type, {field, code}, acc) do
+    unless is_atom(field) and is_atom(code) do
+      raise CompileError,
+        description:
+          "constraint_errors: field и code должны быть атомами, получено #{inspect({field, code})}"
+    end
+
+    key = {Map.fetch!(@error_types, type), field}
+
+    if Map.has_key?(acc, key) do
+      raise CompileError, description: "constraint_errors: дубликат #{inspect({type, field})}"
+    end
+
+    Map.put(acc, key, code)
+  end
+
+  defp ensure_constraint_error_code!(errors, code) do
+    errors.domain(__MODULE__, code, nil)
+  rescue
+    FunctionClauseError ->
+      reraise CompileError,
+              [
+                description:
+                  "constraint_errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
+              ],
+              __STACKTRACE__
+  end
+
+  # ===== CRUD =====
 
   @doc """
   Ecto-репозиторий конфига: явный `repo:` либо `Core.Config.dao()`.
