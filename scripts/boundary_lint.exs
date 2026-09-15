@@ -110,8 +110,7 @@ defmodule BoundaryLint do
   # Ключ-репозиторий в `compile_env` — это связывание «behaviour → реализация» руками.
   # Прочие ключи-модули (`MyApp.Endpoint`, `MyApp.Mailer`, …) — обычная конфигурация, не DI.
   defp violations(
-         {{:., _, [{:__aliases__, _, [:Application]}, fun]}, meta,
-          [_app, {:__aliases__, _, mods} = key | _]},
+         {{:., _, [{:__aliases__, _, [:Application]}, fun]}, meta, [_app, {:__aliases__, _, mods} = key | _]},
          path,
          :consumer
        )

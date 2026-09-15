@@ -142,8 +142,8 @@ defmodule Core.Prim.UUID do
   defp from_canonical(uuid, :urn), do: "urn:uuid:" <> uuid
 
   defp from_canonical(
-         <<a::binary-size(8), ?-, b::binary-size(4), ?-, c::binary-size(4), ?-, d::binary-size(4),
-           ?-, e::binary-size(12)>>,
+         <<a::binary-size(8), ?-, b::binary-size(4), ?-, c::binary-size(4), ?-, d::binary-size(4), ?-,
+           e::binary-size(12)>>,
          :hex
        ) do
     a <> b <> c <> d <> e
@@ -152,8 +152,8 @@ defmodule Core.Prim.UUID do
   # Каноническая форма: 36 символов, дефисы на своих местах, шестнадцатеричные цифры
   # в нижнем регистре. Верхний регистр канону не соответствует — его нормализует `cast/1`.
   defp canonical?(
-         <<a::binary-size(8), ?-, b::binary-size(4), ?-, c::binary-size(4), ?-, d::binary-size(4),
-           ?-, e::binary-size(12)>>
+         <<a::binary-size(8), ?-, b::binary-size(4), ?-, c::binary-size(4), ?-, d::binary-size(4), ?-,
+           e::binary-size(12)>>
        ) do
     lower_hex?(a) and lower_hex?(b) and lower_hex?(c) and lower_hex?(d) and lower_hex?(e)
   end

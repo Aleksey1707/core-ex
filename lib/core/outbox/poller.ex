@@ -289,9 +289,7 @@ defmodule Core.Outbox.Poller do
       :ok
   catch
     :exit, reason ->
-      Logger.error(
-        "Outbox: не удалось снять аренду после сбоя цикла: exit reason=#{inspect(reason)}"
-      )
+      Logger.error("Outbox: не удалось снять аренду после сбоя цикла: exit reason=#{inspect(reason)}")
 
       :ok
   end
@@ -392,9 +390,7 @@ defmodule Core.Outbox.Poller do
   end
 
   defp log_batch_summary(size, published, retry, failed) do
-    Logger.debug(
-      "Опрос outbox: пакет size=#{size} опубликовано=#{published} повтор=#{retry} провалено=#{failed}"
-    )
+    Logger.debug("Опрос outbox: пакет size=#{size} опубликовано=#{published} повтор=#{retry} провалено=#{failed}")
   end
 
   defp emit_poller_cycle(start, result, batch_size, published, retry, failed) do

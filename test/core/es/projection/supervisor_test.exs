@@ -376,8 +376,7 @@ defmodule Core.Es.Projection.SupervisorTest do
 
       tick(@projection)
 
-      assert_receive {:cycle, %{projection: "es_fixture", result: :processed},
-                      %{events: 0, attempt: 0}}
+      assert_receive {:cycle, %{projection: "es_fixture", result: :processed}, %{events: 0, attempt: 0}}
 
       assert_receive {:cycle, %{projection: "es_fixture", result: :processed}, %{events: 2}}
       assert_receive {:cycle, %{projection: "es_fixture", result: :idle}, %{events: 0}}
@@ -472,8 +471,7 @@ defmodule Core.Es.Projection.SupervisorTest do
         capture_log(fn ->
           Enum.each(projections, &tick/1)
 
-          assert_receive {:cycle,
-                          %{projection: "reader_raising", result: :retry, error: "ArgumentError"},
+          assert_receive {:cycle, %{projection: "reader_raising", result: :retry, error: "ArgumentError"},
                           %{attempt: 1}}
 
           assert_receive {:cycle,
@@ -483,12 +481,9 @@ defmodule Core.Es.Projection.SupervisorTest do
                             error: "DBConnection.ConnectionError"
                           }, %{attempt: 1}}
 
-          assert_receive {:cycle, %{projection: "reader_exiting", result: :retry, error: "exit"},
-                          %{attempt: 1}}
+          assert_receive {:cycle, %{projection: "reader_exiting", result: :retry, error: "exit"}, %{attempt: 1}}
 
-          assert_receive {:cycle,
-                          %{projection: "reader_throwing", result: :retry, error: "throw"},
-                          %{attempt: 1}}
+          assert_receive {:cycle, %{projection: "reader_throwing", result: :retry, error: "throw"}, %{attempt: 1}}
         end)
 
       assert log =~

@@ -41,11 +41,9 @@ defmodule Core.Cache.PromExTest do
 
     PromEx.execute_size_metrics({StubSizes, :two, []})
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :cache, :size], %{value: 3},
-                    %{cache: "stub_a"}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :cache, :size], %{value: 3}, %{cache: "stub_a"}}
 
-    assert_receive {:telemetry, [:prom_ex, :plugin, :cache, :size], %{value: 0},
-                    %{cache: "stub_b"}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :cache, :size], %{value: 0}, %{cache: "stub_b"}}
   end
 
   test "emit_request эмитит событие обращения" do

@@ -183,8 +183,7 @@ defmodule Core.View.Opts do
   defp spec!(:form, form_name, name, form_names, label) do
     if form_name not in form_names do
       raise CompileError,
-        description:
-          "#{@label}: #{label}, поле #{name}: форма #{inspect(form_name)} не объявлена в forms:"
+        description: "#{@label}: #{label}, поле #{name}: форма #{inspect(form_name)} не объявлена в forms:"
     end
 
     {:form, form_name}
@@ -195,8 +194,7 @@ defmodule Core.View.Opts do
 
     if optional? do
       raise CompileError,
-        description:
-          "#{@label}: #{label}, поле #{name}: optional: задаётся у самого поля, не в list:"
+        description: "#{@label}: #{label}, поле #{name}: optional: задаётся у самого поля, не в list:"
     end
 
     {:list, spec}

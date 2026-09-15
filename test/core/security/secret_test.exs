@@ -38,9 +38,7 @@ defmodule Core.Security.SecretTest do
       assert {:error, %Error{kind: :app, ns: :secret, code: :decrypt_failed}} =
                Secret.reveal(secret)
     after
-      Application.put_env(:core, Secret,
-        secret_key: "l6UwrPjFASzAVdJ7C_RbSZENSg4hztiWjOUM_RoZMkg="
-      )
+      Application.put_env(:core, Secret, secret_key: "l6UwrPjFASzAVdJ7C_RbSZENSg4hztiWjOUM_RoZMkg=")
     end
   end
 
@@ -58,9 +56,7 @@ defmodule Core.Security.SecretTest do
                      Secret.ensure_configured!()
                    end
     after
-      Application.put_env(:core, Secret,
-        secret_key: "l6UwrPjFASzAVdJ7C_RbSZENSg4hztiWjOUM_RoZMkg="
-      )
+      Application.put_env(:core, Secret, secret_key: "l6UwrPjFASzAVdJ7C_RbSZENSg4hztiWjOUM_RoZMkg=")
     end
   end
 

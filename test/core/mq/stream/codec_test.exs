@@ -65,8 +65,6 @@ defmodule Core.Mq.Stream.CodecTest do
              Stream.Codec.decode(~s({"topic": ) <> secret)
 
     assert {:error, %{code: :invalid_headers, detail: :redacted}} =
-             Stream.Codec.decode(
-               ~s({"topic": "products", "body": "#{secret}", "headers": {"k": 1}})
-             )
+             Stream.Codec.decode(~s({"topic": "products", "body": "#{secret}", "headers": {"k": 1}}))
   end
 end

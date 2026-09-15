@@ -756,9 +756,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       start!(Account.Process)
 
       assert_raise ArgumentError, ~r/unknown keys \[:retries\]/, fn ->
-        Account.Process.execute(Account.ID.new(), :current, open("Счёт"), Context.new(), nil,
-          retries: 5
-        )
+        Account.Process.execute(Account.ID.new(), :current, open("Счёт"), Context.new(), nil, retries: 5)
       end
     end
   end

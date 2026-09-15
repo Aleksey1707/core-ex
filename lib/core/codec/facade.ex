@@ -32,9 +32,7 @@ defmodule Core.Codec.Facade do
 
       @behaviour Core.Codec.Facade.Behaviour
 
-      @prim Helper.Opts.module!(opts, :prim, "Codec.Facade",
-              exports: [dump: 1, load: 2, load!: 2]
-            )
+      @prim Helper.Opts.module!(opts, :prim, "Codec.Facade", exports: [dump: 1, load: 2, load!: 2])
       @plugins Keyword.get(opts, :plugins, [])
 
       if not is_list(@plugins) do
@@ -148,8 +146,7 @@ defmodule Core.Codec.Facade do
     case Map.fetch(acc, mod) do
       {:ok, other} ->
         raise CompileError,
-          description:
-            "тип #{inspect(mod)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
+          description: "тип #{inspect(mod)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
 
       :error ->
         Map.put(acc, mod, plugin)
@@ -184,8 +181,7 @@ defmodule Core.Codec.Facade do
     case Map.fetch(acc, type) do
       {:ok, other} ->
         raise CompileError,
-          description:
-            "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
+          description: "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
 
       :error ->
         Map.put(acc, type, plugin)

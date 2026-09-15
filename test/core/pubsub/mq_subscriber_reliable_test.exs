@@ -19,10 +19,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
   setup do
     topic = Mq.Topic.new!("products")
 
-    {:ok,
-     topic: topic,
-     reader: MqFake.QueueReader.new([message(topic, "body")]),
-     context: Context.new()}
+    {:ok, topic: topic, reader: MqFake.QueueReader.new([message(topic, "body")]), context: Context.new()}
   end
 
   defmodule ExitReader do
@@ -210,9 +207,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     end
 
     sub =
-      start_sub(reader, topic, "sub-ctx", on,
-        context_factory: fn -> Repo.Sc.init(Context.new()) end
-      )
+      start_sub(reader, topic, "sub-ctx", on, context_factory: fn -> Repo.Sc.init(Context.new()) end)
 
     assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
 

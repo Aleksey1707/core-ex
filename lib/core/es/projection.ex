@@ -304,13 +304,11 @@ defmodule Core.Es.Projection do
 
       family?(mod) ->
         raise CompileError,
-          description:
-            "#{@label}: events: #{inspect(mod)} — семейство событий, объявляются модули событий"
+          description: "#{@label}: events: #{inspect(mod)} — семейство событий, объявляются модули событий"
 
       true ->
         raise CompileError,
-          description:
-            "#{@label}: events: #{inspect(mod)} — не модуль события (use Core.Es.Event)"
+          description: "#{@label}: events: #{inspect(mod)} — не модуль события (use Core.Es.Event)"
     end
   end
 

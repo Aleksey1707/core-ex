@@ -322,8 +322,7 @@ defmodule Core.Repo.Pg do
 
   defp ensure_single_decoder!([]) do
     raise CompileError,
-      description:
-        "to_entity/to_view: нужен декодер строки — to_entity: (write) или to_view: (read)"
+      description: "to_entity/to_view: нужен декодер строки — to_entity: (write) или to_view: (read)"
   end
 
   defp ensure_single_decoder!(_entity_and_view) do
@@ -384,8 +383,7 @@ defmodule Core.Repo.Pg do
         FunctionClauseError ->
           reraise CompileError,
                   [
-                    description:
-                      "errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
+                    description: "errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
                   ],
                   __STACKTRACE__
       end
@@ -473,8 +471,7 @@ defmodule Core.Repo.Pg do
   defp put_constraint_type({type, fields}, acc) do
     unless type in @constraint_types do
       raise CompileError,
-        description:
-          "constraint_errors: неизвестный тип #{inspect(type)}, допустимы #{inspect(@constraint_types)}"
+        description: "constraint_errors: неизвестный тип #{inspect(type)}, допустимы #{inspect(@constraint_types)}"
     end
 
     unless is_list(fields) and Keyword.keyword?(fields) do
@@ -489,8 +486,7 @@ defmodule Core.Repo.Pg do
   defp put_constraint_field(type, {field, code}, acc) do
     unless is_atom(field) and is_atom(code) do
       raise CompileError,
-        description:
-          "constraint_errors: field и code должны быть атомами, получено #{inspect({field, code})}"
+        description: "constraint_errors: field и code должны быть атомами, получено #{inspect({field, code})}"
     end
 
     key = {Map.fetch!(@error_types, type), field}
@@ -508,8 +504,7 @@ defmodule Core.Repo.Pg do
     FunctionClauseError ->
       reraise CompileError,
               [
-                description:
-                  "constraint_errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
+                description: "constraint_errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
               ],
               __STACKTRACE__
   end

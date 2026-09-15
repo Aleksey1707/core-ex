@@ -70,8 +70,7 @@ defmodule Core.Es.Store.Opts do
     FunctionClauseError ->
       reraise CompileError,
               [
-                description:
-                  "#{label}: errors: отсутствует clause для :version_mismatch в #{inspect(errors)}"
+                description: "#{label}: errors: отсутствует clause для :version_mismatch в #{inspect(errors)}"
               ],
               __STACKTRACE__
   end

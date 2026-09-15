@@ -121,9 +121,7 @@ defmodule Core.Outbox.Repo.Pg do
       {_count, _} =
         from(r in Schema, where: r.id in ^ids)
         |> fence(lease)
-        |> Config.dao().update_all(
-          set: [status: :new, locked_until: nil, lease_id: nil, updated_at: updated_at]
-        )
+        |> Config.dao().update_all(set: [status: :new, locked_until: nil, lease_id: nil, updated_at: updated_at])
     end)
 
     :ok

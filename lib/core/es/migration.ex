@@ -108,13 +108,9 @@ defmodule Core.Es.Migration do
       add :target_number, :bigint
     end
 
-    create constraint(:es_checkpoints, :es_checkpoints_position,
-             check: "(xid IS NULL) = (number IS NULL)"
-           )
+    create constraint(:es_checkpoints, :es_checkpoints_position, check: "(xid IS NULL) = (number IS NULL)")
 
-    create constraint(:es_checkpoints, :es_checkpoints_target,
-             check: "(target_xid IS NULL) = (target_number IS NULL)"
-           )
+    create constraint(:es_checkpoints, :es_checkpoints_target, check: "(target_xid IS NULL) = (target_number IS NULL)")
 
     :ok
   end

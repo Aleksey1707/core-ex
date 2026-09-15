@@ -171,9 +171,7 @@ defmodule Core.Es.Projection.Reader do
 
   @impl true
   def terminate(reason, %__MODULE__{declaration: declaration}) do
-    Logger.info(
-      "проекция: читатель остановлен: projection=#{declaration.name} reason=#{inspect(reason)}"
-    )
+    Logger.info("проекция: читатель остановлен: projection=#{declaration.name} reason=#{inspect(reason)}")
 
     :ok
   end

@@ -164,8 +164,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
             opts \\ []
           )
           when is_version(version) and is_list(opts),
-          do:
-            Core.Es.Aggregate.Repo.Pg.refresh(es_aggregate_repo(), state, version, context, opts)
+          do: Core.Es.Aggregate.Repo.Pg.refresh(es_aggregate_repo(), state, version, context, opts)
 
       defoverridable get: 3,
                      get: 4,

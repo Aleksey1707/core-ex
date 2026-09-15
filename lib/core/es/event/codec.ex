@@ -498,8 +498,7 @@ defmodule Core.Es.Event.Codec do
     case Map.fetch(acc, tag) do
       {:ok, other} ->
         raise CompileError,
-          description:
-            "#{@label}: tags: дубликат тега #{inspect(tag)} у #{inspect(mod)} и #{inspect(other)}"
+          description: "#{@label}: tags: дубликат тега #{inspect(tag)} у #{inspect(mod)} и #{inspect(other)}"
 
       :error ->
         Map.put(acc, tag, mod)

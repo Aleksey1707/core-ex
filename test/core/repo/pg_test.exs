@@ -161,8 +161,7 @@ defmodule Core.Repo.PgTest do
     defp failure do
       [
         {:name,
-         {"should be at least %{count} character(s)",
-          [count: 3, validation: :length, kind: :min, type: :string]}}
+         {"should be at least %{count} character(s)", [count: 3, validation: :length, kind: :min, type: :string]}}
       ]
     end
   end
@@ -521,8 +520,7 @@ defmodule Core.Repo.PgTest do
 
     changeset = %Ecto.Changeset{
       errors: [
-        {:name,
-         {"has already been taken", [constraint: :unique, constraint_name: "products_name_index"]}}
+        {:name, {"has already been taken", [constraint: :unique, constraint_name: "products_name_index"]}}
       ],
       valid?: false
     }
@@ -539,9 +537,7 @@ defmodule Core.Repo.PgTest do
 
     changeset = %Ecto.Changeset{
       errors: [
-        {:delivery_id,
-         {"does not exist",
-          [constraint: :foreign, constraint_name: "acceptances_delivery_id_fkey"]}}
+        {:delivery_id, {"does not exist", [constraint: :foreign, constraint_name: "acceptances_delivery_id_fkey"]}}
       ],
       valid?: false
     }
