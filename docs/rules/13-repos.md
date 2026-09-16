@@ -103,7 +103,7 @@ ReadRepo.
 - Изменяющие usecases вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть
   изменяющего usecase, а не чтение через ReadRepo).
 
-Кеш — только на ReadRepo; см. `16-caching.md` свода приложения.
+Кеш — только на ReadRepo; см. `deps/core/docs/rules/app/16-caching.md`.
 
 ## View (read-модель)
 
@@ -169,7 +169,7 @@ end
   `Decimal.t()`, `pos_integer()`, `<Enum>.t()`), именованные `@type` форм, `new/1` (keyword),
   маркер `__view__/0` и вложенный `<Aggregate>.View.Codec` — dump-only плагин (`loadable: false`),
   который регистрируется в `Codec.plugins()`. Презентер зовёт `OutCodec.dump(view)`
-  (`15-web-api.md` свода приложения).
+  (`deps/core/docs/rules/app/15-web-api.md`).
 - `to_view/1` SHOULD собирать представление литералом `%View{...}` — неизвестный ключ там ловит
   компилятор. `new/1` — для динамической сборки; он отвергает ключ, не объявленный в `fields:`
   (`KeyError`, как и пропуск обязательного поля), иначе опечатка в имени необязательного поля
@@ -876,7 +876,7 @@ elixir deps/core/scripts/boundary_lint.exs --consumer lib test
 - Архитектура / usecases — `10-architecture.md`
 - Ошибки — `12-errors.md`
 - События и outbox flush — `14-events-outbox.md`
-- Кеш ReadRepo — `16-caching.md` свода приложения
-- Миграции таблиц — `18-migrations.md` свода приложения
+- Кеш ReadRepo — `deps/core/docs/rules/app/16-caching.md`
+- Миграции таблиц — `deps/core/docs/rules/app/18-migrations.md`
 - Тесты репозиториев — `19-testing.md`
 - Load/save в одной функции — `20-agreements.md`

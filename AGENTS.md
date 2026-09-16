@@ -60,6 +60,25 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 `SKILL.md` трогать нужно, только если поменялось имя файла или область применения.
 Форма самих файлов проверяется `make rules-check` (`scripts/rules_lint.exs`).
 
+### Свод приложения-потребителя
+
+`docs/rules/app/*.md` — второй ярус свода: нормы, общие для **любого** приложения на `Core.*`
+(раскладка слоёв, конвенция usecase, пайплайн проверок, кеш, миграции, эксплуатация). Он
+приезжает к потребителю вместе с зависимостью и лежит у него в `deps/core/docs/rules/app/`.
+
+- стандарт яруса и критерий «сюда или в локальный свод приложения» — `docs/rules/app/00-index.md`;
+- нормы записываются плейсхолдерами (`MyApp`, `:my_app`, `<BC>`, `<Actor>`, `<Aggregate>`):
+  имени конкретного потребителя в `app/**` быть не должно, это проверяет `make rules-check`;
+- скиллов у этого яруса нет — их заводит у себя приложение, указывая три файла: свой,
+  `deps/core/docs/rules/NN-*.md` и `deps/core/docs/rules/app/NN-*.md`; у `20-agreements.md`
+  скилла нет ни на одном ярусе — он доставляется импортом в `AGENTS.md` потребителя;
+- ссылка между ярусами пишется путём от корня потребителя (`deps/core/docs/rules/…`), внутри
+  своего яруса — именем файла: у потребителя `docs/rules/` — это уже его локальный свод;
+- проверку ярусов ведёт тот же `scripts/rules_lint.exs`, потребитель зовёт его из
+  `deps/core/scripts/` с флагом `--consumer` — копии скрипта у него быть не должно;
+- правка `app/**` — изменение контракта для всех потребителей, и она идёт в `CHANGELOG.md`
+  тем же коммитом.
+
 ## CHANGELOG
 
 `CHANGELOG.md` обновляется в том же коммите, что и правка, — не перед выпуском.
@@ -78,7 +97,7 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 ```bash
 make                     # boundary-check → rules-check → layout-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
 make boundary-check      # главный инвариант: библиотека не знает потребителя
-make rules-check         # свод docs/rules против стандарта 00-index.md
+make rules-check         # оба яруса docs/rules против стандартов 00-index.md
 make layout-check        # разделители внутри модуля: # --- и # ===== <имя> =====
 make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
 make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)

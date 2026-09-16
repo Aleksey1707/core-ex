@@ -440,12 +440,12 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
 3. Починить обработчик, затем переиграть содержимое DLQ-стрима в исходный топик
    (порядок относительно уже обработанных сообщений не восстанавливается).
 - Инвалидация кеша по событию — только `del` по id, без обновления из payload
-  (`16-caching.md` свода приложения): payload может прийти устаревшим.
+  (`deps/core/docs/rules/app/16-caching.md`): payload может прийти устаревшим.
 
 ## Связанные правила
 
 - Es.Event / агрегаты / `Event.Codec` — `11-domain.md`
 - OTP-процессы поллеров и читателей — `17-otp-concurrency.md`
 - Flush в Repo (`Repo.Pg.StateStored`), хранилище событий (`Core.Es.Store`) — `13-repos.md`
-- Кеш ReadRepo (инвалидация по событиям) — `16-caching.md` свода приложения
+- Кеш ReadRepo (инвалидация по событиям) — `deps/core/docs/rules/app/16-caching.md`
 - Архитектура слоёв — `10-architecture.md`

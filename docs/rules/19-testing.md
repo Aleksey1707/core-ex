@@ -327,5 +327,5 @@ use Core.DataCase, async: false
 
 - Репозитории и Sandbox — `13-repos.md`
 - События и идемпотентность — `14-events-outbox.md`
-- Кеш и контрактные тесты фасадов — `16-caching.md` свода приложения
+- Кеш и контрактные тесты фасадов — `deps/core/docs/rules/app/16-caching.md`
 - OTP — `17-otp-concurrency.md`
