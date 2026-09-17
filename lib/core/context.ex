@@ -3,14 +3,15 @@ defmodule Core.Context do
   Сквозной контекст вызова: `%Context{data: map}`.
 
   Носитель того, что не является аргументом предметной операции: текущий пользователь
-  (`Domain.Auth.CurrentUser`), shadow copy (`Repo.Sc`) и подобное. Типизированный
+  (`MyApp.Domain.<BC>.CurrentUser`), shadow copy (`Repo.Sc`) и подобное. Типизированный
   доступ к ключу — через `Context.Accessor`.
 
   Ключ — атом: словарь ключей закрыт кодом (`Context.Accessor`, `Repo.Sc`), а не приходит
   извне.
 
   `get/2` отличает сохранённый `nil` от отсутствующего ключа; `find/2` — нет.
-  Последний аргумент публичных usecase/repo-функций — именно `%Context{}`.
+  `%Context{}` в сигнатуре — последний из данных: за ним только колбэк и `opts`
+  (`20-agreements.md`, «Context — последний из данных»).
 
   `inspect/1` печатает только список ключей: контекст лежит в state OTP-процессов
   (`Outbox.Poller`, `Outbox.Cleaner`) и целиком уходит в crash-репорты, а его значения —

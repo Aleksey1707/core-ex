@@ -13,22 +13,8 @@
 Запускай `make` для проверки корректности кода, сразу после внесения изменений. При обнаружении
 ошибок сразу их исправь.
 
-`make` = `boundary-check → rules-check → layout-check → format-check → compile →
-compile-no-optional → consumer-check → deps-clean → xref → dialyzer → test → credo → audit` (тот же
-порядок в `.pre-commit-config.yaml`):
-
-| Шаг | Что проверяет |
-|---|---|
-| `boundary-check` | `scripts/boundary_lint.exs` — библиотека не знает потребителя (`10-architecture.md`) |
-| `rules-check` | `scripts/rules_lint.exs` — свод правил против стандарта `00-index.md` |
-| `layout-check` | `scripts/layout_lint.exs` — разделители модуля («Разделители внутри модуля») |
-| `format-check` | `mix format --check-formatted` — падает, а не правит |
-| `compile` | `--warnings-as-errors`, включая нарушения `boundary` |
-| `compile-no-optional` | сборка без optional-клиентов брокеров (`10-architecture.md`) |
-| `consumer-check` | предупреждения фикстуры-потребителя `fixtures/consumer` против маркеров `# expect:` (ADR-0014) |
-| `xref` | `mix xref graph --format cycles` — храповик на циклы компиляции |
-| `credo` | `mix credo --strict` |
-| `audit` | `mix deps.audit` — известные CVE в зависимостях |
+Состав пайплайна: в библиотеке — `CLAUDE.md`, «Команды»; у потребителя —
+`deps/core/docs/rules/app/20-agreements.md`, «Пайплайн проверок».
 
 Физическая строка исходника ≤ 120 символов (Credo `Readability.MaxLineLength`). `mix format`
 строковые литералы не переносит — длинный `"..."` разбивать вручную (см. «Логирование»).
@@ -83,7 +69,7 @@ compile-no-optional → consumer-check → deps-clean → xref → dialyzer → 
 
 Проверяется: `test/core/es/aggregate/process_test.exs`, describe «повтор после конфликта».
 
-Формат сообщения: `"<контекст>: key=#{value} …"` (как в usecases отправки / outbox).
+Формат сообщения: `"<контекст>: key=#{value} …"`.
 
 Литерал `Logger.*` длиннее 120 символов — конкатенация `<>` по границе пробела перед следующим
 `key=`. Текст лога не менять. Не heredoc, не `\`-продолжение строки (`mix format` склеит в одну), не
@@ -91,10 +77,16 @@ metadata вместо `key=`, не `# credo:disable-for-*` ради длины.
 
 ```elixir
 Logger.debug(
-  "сообщение создано: message_id=#{InCodec.dump(message.id)} kind=#{message.kind} " <>
-    "integrator=#{Message.integrator(message)} owner_id=#{InCodec.dump(message.owner_id)}"
+  "агрегат создан: id=#{InCodec.dump(aggregate.id)} kind=#{aggregate.kind} " <>
+    "owner_id=#{InCodec.dump(aggregate.owner_id)} created_by=#{InCodec.dump(aggregate.created_by)}"
 )
 ```
+
+`IO.puts` вместо `Logger` — MUST NOT: вывод мимо `Logger` теряет уровень, metadata и
+`trace_id`. Вывод точки входа оператора (mix-таска) — не лог, а ответ оператору:
+`Mix.shell().info/1`.
+
+Проверяется: `mix credo --strict` (`Credo.Check.Refactor.IoPuts`, исключён `test/`).
 
 ## Разделение изменения и чтения (CQS)
 
@@ -108,15 +100,14 @@ Logger.debug(
 вызывать и изменяющие, и читающие. Таким образом по сигнатуре функции можно понять, что она
 выполняет и что от неё ожидать.
 
-В usecases: изменяющие → `:ok | {:error, _}` через `Helper.Transact.run(DAO, fn -> ... end)`;
-читающие → `{:ok, T} | {:error, _}` (см. `10-architecture.md`).
+Возвраты usecases — `deps/core/docs/rules/app/10-architecture.md`, «Usecases».
 
-Внутри `Transact.run` допустимы только запросы через `DAO` и enqueue Oban. HTTP, publish в брокер,
-кеш, `sleep`, ожидание проекции `Projection.await/3` и команда процесса агрегата
-`Agg.Process.execute` — MUST NOT: транзакция держит соединение и блокировки на всё время вызова,
-незакоммиченную запись проекция не увидит вовсе, а команда идёт своей транзакцией, и откат её
-попытки отменил бы внешнюю. Побочный эффект — после commit (`Helper.AfterCommit.register/1`) или
-отдельным шагом. Таблица допустимого — «Что можно внутри `Transact.run`» в `10-architecture.md`.
+Внутри `Transact.run` допустимы только запросы через `DAO` и постановка фоновой задачи. HTTP,
+publish в брокер, кеш, `sleep`, ожидание проекции `Projection.await/3` и команда процесса агрегата
+`Agg.Process.execute` — MUST NOT: незакоммиченную запись проекция не увидит вовсе, а команда идёт
+своей транзакцией, и откат её попытки отменил бы внешнюю. Таблица допустимого, её обоснование и
+куда выносить побочный эффект — `deps/core/docs/rules/app/10-architecture.md`, «Что можно внутри
+`Transact.run`».
 
 Проверяется для ожидания проекции и команды процесса агрегата: `ArgumentError` в
 `Projection.await/3` и `Agg.Process.execute` внутри транзакции.
@@ -127,7 +118,9 @@ Logger.debug(
 - `Repo` `insert`/`update`/`save` → `{:ok, entity}`: агрегат в состоянии после записи (у агрегата
   с событиями — с очищенными `events`), то есть значение, от которого мутируют дальше;
 - `Repo.Pg.insert_many/4` → число записанных строк: при `on_conflict: :nothing` это единственный
-  сигнал о пропущенных дублях.
+  сигнал о пропущенных дублях;
+- команда usecase → версия агрегата после записи, команда-создание → идентификатор созданного
+  агрегата (`deps/core/docs/rules/app/10-architecture.md`, «Usecases»).
 
 В случае необходимости нарушить этот принцип необходимо дать имя функции, явно говорящее об этом
 (например `get_or_create_*`).
@@ -145,7 +138,7 @@ Logger.debug(
   `Result.traverse(list, &@repo.save(&1, context))`); верхний уровень передаёт вниз идентификаторы,
   а не загруженные агрегаты.
 - Чтение без последующей записи (читающие usecases, history, чтение соседнего агрегата — например
-  `UserRoles` при проверке доступа) правилом не ограничено.
+  при проверке доступа) правилом не ограничено.
 
 ```elixir
 # плохо — load в одной функции, save в другой
@@ -183,9 +176,8 @@ end)
 ```
 
 Резолв alternate key (`owner_id` → агрегат) отдельным чтением перед `get(id, version)` — тот же
-разнос load/save, только внутри чтения: два SELECT ради одной проверки `version`. Кастомный
-`get_by_*` в write-репозитории MUST принимать `version` (`%Version{} | :current`) и проверять её
-сам — как `get/3` (`Repo.Pg.version_error/4`).
+разнос load/save, только внутри чтения: два SELECT ради одной проверки `version`. Поэтому
+кастомный `get_by_*` проверяет `version` сам (`13-repos.md`, «Write (`<Aggregate>.Repo`)»).
 
 Почему: `Repo.Sc` фиксирует эталон по первому чтению, а `Version` проверяется на записи. Разнесённые
 load/save дают запись по устаревшей копии, немой пропуск `update`
@@ -265,7 +257,7 @@ end
 У каждого публичного модуля и публичной функции должны быть `@moduledoc` / `@doc`.
 
 `Core.Enum` — строже: в `@moduledoc` MUST быть таблица с описанием **каждого** значения
-(`11-domain.md`, «Описание значений в `@moduledoc`»). Проверяется тестом, а не ревью.
+(`11-domain.md`, «Описание значений в `@moduledoc`»).
 
 ## Спецификации типов
 
@@ -279,6 +271,9 @@ end
 там — `@callback` соответствующего behaviour, а `@spec` пришлось бы собирать `unquote`-ом
 из опций `use`. Обычный (не генерируемый) модуль с `@impl` от этого не освобождён —
 `@spec` пишется как везде.
+
+Исключение — экшены контроллера: их контракт описывает `operation/2`
+(`deps/core/docs/rules/app/15-web-api.md`, «Controller»).
 
 Визуально: после блока `@doc`/`@spec` — пустая строка, затем `def`/`defp` (или `@impl` + `def`).
 `@doc` и `@spec` без пустой строки между собой. `@impl` остаётся рядом с функцией (разрыв между
@@ -407,31 +402,15 @@ Prim.String.new(value)
 затеняет `Version` из Elixir осознанно — semver в домене не используется. Появилась нужда в
 затенённом модуле — звать его полным путём (`Elixir.Version.match?/2`), а не переименовывать свой.
 
-Репозиторий агрегата (`<Aggregate>.Repo`, `13-repos.md`) MUST адресоваться через алиас
-**агрегата** — `alias MyApp.Domain.<BC>.Common.Delivery` → `Delivery.Repo.Pg.Schema`. Отдельный
-`alias …Common.Delivery.Repo` — **MUST NOT**: короткое имя `Repo` в том же файле почти всегда
-занято `Core.Repo` (`use Repo.Pg`), и такой алиас молча его перебивает.
-
-Когда родитель имена не разводит (`MyApp.Domain.<BC>.Repo` и `Core.Repo` — оба листа зовутся
+Когда родитель имена не разводит (`Core.Repo` и `Repo` другого пространства — оба листа зовутся
 `Repo`), остаётся полный путь для одного из двух; `as:` — последнее средство, и только на одном
 из конфликтующих.
 
 Листовые модули без вложенности (`Error`, `Exc`, `Context`) — алиасить напрямую, без `as:`.
 
-Исключение — профили Codec:
-
-```elixir
-alias MyApp.Codec.Internal, as: InCodec
-alias MyApp.Codec.External, as: OutCodec
-```
-
-`InCodec`/`OutCodec` — entity-фасады (Prim + plugins). Явный Prim-only:
-`alias MyApp.Codec.Prim.Internal, as: PrimInCodec`.
-
-Кастомные Prim `dump/1` / `dump_kind/2` / `load_kind/3` — с `@impl true` (`@behaviour Core.Codec`).
-Entity-плагины — `Core.Codec.Plugin` (dump-only: `loadable: false`; полиморфный wire — `union:` с
-модулем-семейством); фасад — `use Core.Codec.Facade` (`dump/1`, `load/2`, `load!/2` — весь его
-интерфейс).
+Алиасы модулей приложения (профили Codec, репозиторий агрегата) —
+`deps/core/docs/rules/app/20-agreements.md`, «Алиасы приложения». Кастомные Prim профиля,
+entity-плагины и фасад — `11-domain.md`, «Codec (Prim и Entity)».
 
 ### Dump/load только через фасад
 
@@ -478,7 +457,8 @@ Entity-плагины — `Core.Codec.Plugin` (dump-only: `loadable: false`; п�
 `test`-блоков; форма маркеров общая.
 
 Проверяется: `make layout-check` (`scripts/layout_lint.exs`) — форма маркеров, наличие на каждом
-переходе, счёт блоков и хвостовой блок; в `test/**` вне `test/support/**` — только форма.
+переходе, счёт блоков и хвостовой блок, `# ---` перед блоком `общее`, маркер внутри `quote`; в
+`test/**` вне `test/support/**` — только форма.
 
 Почему уровня два и почему общий приватный живёт в хвосте — ADR-0012
 (`docs/adr/0012-module-separators.md`).
@@ -490,11 +470,11 @@ Entity-плагины — `Core.Codec.Plugin` (dump-only: `loadable: false`; п�
 несколько. Каждый читается как «ниже детали реализации того, что выше».
 
 ```elixir
-def send(%Message.ID{} = id, %Context{} = context), do: send_many([id], context)
+def archive(%Agg.ID{} = id, %Context{} = context), do: archive_many([id], context)
 
 # ---
 
-defp send_groups(groups, by, context) do
+defp archive_groups(groups, by, context) do
 ```
 
 ### Блоки (`# ===== … =====`)
@@ -609,24 +589,27 @@ end
 
 Bang (`get!`, `new!`, `raise Exc`, …) — только на явных bang-границах. Исключения: Schema
 bang-mappers (`to_entity!` / `to_model!`) на call site своих строк / persist валидного domain;
-реконструкция события `InCodec.load!` в тестах (`Core.Es.Store.Test.events!`); Specs/ACL
-`CurrentUser.get!`; compile-time константы (`Namespace.new!` в module attribute и т.п.); OTP/config
-init; `codec.load!` при свёртке потока в `Core.Es.Aggregate.Repo.Pg` (нечитаемый поток —
-исключение, `13-repos.md`).
+реконструкция события `InCodec.load!` в тестах (`Core.Es.Store.Test.events!`); аксессор текущего
+пользователя (`use Core.Context.Accessor`) `get!/1` в ACL-фильтре; compile-time константы
+(Prim-константа в атрибуте модуля (`new!`) и т.п.); OTP/config init; `codec.load!` при свёртке
+потока в `Core.Es.Aggregate.Repo.Pg` (нечитаемый поток — исключение, `13-repos.md`); конверсия
+Prim в `evolve/2` event-sourced агрегата — колбэк возвращает голое состояние
+(`@callback evolve(state, event) :: struct()`), вернуть `{:error, _}` ему некуда, и нечитаемое
+событие — исключение, как `codec.load!` при свёртке.
 
 Schema-мапперы (dual API `to_entity` / `to_entity!`) — какой вызов на каком call site:
 `13-repos.md`, раздел «Schema»; события страницы потока грузятся safe — там же, «Страница потока».
 
-Конверсия datetime-Prim в domain flow (мутации агрегатов / actor-domain): только `from` + `with`
-(`CreatedAt.from`, `UpdatedAt.from`, `Es.Event.At.from`, …), не `from!` и без обёрток вроде
-`event_at/1` — на call site сразу `Es.Event.At.from(at)`.
+Конверсия datetime-Prim в domain flow (мутации агрегатов / actor-domain), кроме `evolve/2`:
+только `from` + `with` (`CreatedAt.from`, `UpdatedAt.from`, `Es.Event.At.from`, …), не `from!` и
+без обёрток вроде `event_at/1` — на call site сразу `Es.Event.At.from(at)`.
 
 Текущее время в Result-flow: `now` + `with` (`CreatedAt.now()`, …); bang-границы / OTP / тесты —
 `now!`.
 
 Repo Specs / ACL-фильтры, которым по контракту **обязан** быть current user в `Context` (например
-`CurrentUser.get!/1` в `only_own` / `approver?`): отсутствие ID — ошибка программиста; bang
-допустим.
+`get!/1` аксессора текущего пользователя (`use Core.Context.Accessor`) в ACL-фильтре): отсутствие
+ID — ошибка программиста; bang допустим.
 
 ### Использование try
 

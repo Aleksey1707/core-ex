@@ -75,7 +75,6 @@
           {Credo.Check.Consistency.SpaceAroundOperators, []},
           {Credo.Check.Consistency.SpaceInParentheses, []},
           {Credo.Check.Consistency.TabsOrSpaces, []},
-          # force: :meaningful — `_opts` вместо `_` (стиль фиксируем явно, а не по большинству).
 
           #
           ## Design Checks
@@ -83,8 +82,9 @@
           # You can customize the priority of any check
           # Priority values are: `low, normal, high, higher`
           #
-          # AliasUsage противоречит 20-agreements.md: вызываем через родителя
-          # (`Parent.Leaf.fun(...)`), а не алиасим лист.
+          # AliasUsage противоречит 20-agreements.md («Алиасы модулей»): лист алиасится напрямую,
+          # только пока короткое имя свободно, а при занятом — алиас родителя и вызов
+          # `Parent.Leaf.fun(...)`, который чек требует заменить алиасом листа.
           # {Credo.Check.Design.AliasUsage,
           #  [priority: :low, if_nested_deeper_than: 2, if_called_more_often_than: 0]},
           {Credo.Check.Design.SkipTestWithoutComment, []},
@@ -129,7 +129,6 @@
           ## Refactoring Opportunities
           #
           {Credo.Check.Refactor.Apply, []},
-          # `a ++ [b]` — про накопление events в агрегате (11-domain.md: prepend + reverse на flush).
           {Credo.Check.Refactor.CondStatements, []},
           {Credo.Check.Refactor.CyclomaticComplexity, []},
           {Credo.Check.Refactor.DoubleBooleanNegation, []},
@@ -137,7 +136,8 @@
           {Credo.Check.Refactor.FilterFilter, []},
           {Credo.Check.Refactor.FilterReject, []},
           {Credo.Check.Refactor.FunctionArity, []},
-          # Logger вместо IO.puts (20-agreements.md). В библиотеке точек входа оператора нет.
+          # Logger вместо IO.puts (20-agreements.md, «Логирование (`Logger`)»); вывод mix-задачи —
+          # через `Mix.shell()`.
           {Credo.Check.Refactor.IoPuts, [files: %{excluded: ["test/"]}]},
           {Credo.Check.Refactor.LongQuoteBlocks, []},
           {Credo.Check.Refactor.MapJoin, []},
@@ -182,12 +182,13 @@
           {Credo.Check.Warning.UnusedTupleOperation, []},
           {Credo.Check.Warning.WrongTestFilename, []},
           #
-          # Включены осознанно: проверяют письменные правила из .claude/rules/
+          # Включены осознанно: проверяют правила из docs/rules/ и гигиену окружения
           #   Specs — 20-agreements.md
-          #   UnsafeToAtom / LeakyEnvironment — 12-errors.md (чувствительные данные)
-          #   MixEnv — 10-architecture.md (runtime-конфиг)
+          #   UnsafeToAtom — 20-agreements.md («Атомы из внешних данных»)
+          #   LeakyEnvironment — утечка окружения в подпроцессы
+          #   MixEnv — runtime-конфиг вместо `Mix.env/0`
           #   PassAsyncInTestCases — 19-testing.md
-          # AliasAs НЕ включаем: конфликтует с InCodec / OutCodec (20-agreements.md).
+          # AliasAs НЕ включаем: конфликтует с InCodec / OutCodec (docs/rules/app/20-agreements.md).
           {Credo.Check.Readability.Specs, [files: %{excluded: ["test/"]}]},
           {Credo.Check.Refactor.PassAsyncInTestCases, []},
           {Credo.Check.Warning.LeakyEnvironment, []},
@@ -203,11 +204,13 @@
           # `_` и `_name` несут разный смысл: первое — «значение не важно вообще»
           # (`{:ok, _}`, `_ -> false`), второе — «не важно, но читателю стоит знать, что это»
           # (`_reason`, `_state`). Проверка требует единообразия в любой настройке
-          # (`force:` / авто-детект) и ловит только идиоматичные места. См. DEBT.md.
+          # (`force:` / авто-детект) и ловит только идиоматичные места.
+          # См. docs/rules/app/20-agreements.md, «Настройки Credo».
           {Credo.Check.Consistency.UnusedVariableNames, []},
           # Ловит `x ++ [:a]`, но пропускает соседнее `x ++ [:a, :b]` — синтаксическая
           # проверка, не отличающая горячий цикл от разовой сборки имени метрики.
-          # Места, где `++` нужен по порядку элементов, она делает только хуже. См. DEBT.md.
+          # Места, где `++` нужен по порядку элементов, она делает только хуже.
+          # См. docs/rules/app/20-agreements.md, «Настройки Credo».
           {Credo.Check.Refactor.AppendSingleItem, []},
           #
           # Controversial and experimental checks (opt-in, just move the check to `:enabled`

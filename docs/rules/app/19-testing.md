@@ -19,15 +19,29 @@
 | `Core.Es.EventCompatCase` | golden-фикстуры событий агрегата |
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции |
 
-- `async: true` — по умолчанию. `async: false` MUST сопровождаться причиной и восстановлением
-  состояния в `on_exit`; причин ровно три: глобальный конфиг, именованный синглтон, DDL мимо
-  sandbox.
-- Собственный case-модуль совместимости событий MUST NOT: библиотечный уже держит оба
-  инварианта, а копия расходится с форматом конверта.
-- Репозитории тестируются **через behaviour**: `@repo Config.repo!(Behaviour)` атрибутом в теле
-  тест-модуля. Это `compile_env` под макросом — внутри `setup` и `test` он даёт ошибку.
+- `async:`, причины `async: false` и уборка после них, тест репозитория через behaviour —
+  `deps/core/docs/rules/19-testing.md`, «Case-модули».
+- Собственный case-модуль совместимости событий MUST NOT: библиотечный уже держит все инварианты
+  (`deps/core/docs/rules/14-events-outbox.md`, «Совместимость событий»), а копия расходится с
+  форматом конверта.
+- `MyApp.DataCase` MUST поднимать sandbox через
+  `Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.DAO, shared: not tags[:async])` и останавливать
+  владельца в `on_exit`: на shared mode при `async: false` держатся прогон проекции и процесс,
+  стартующий внутри вызова (`deps/core/docs/rules/19-testing.md`, «Процессы»).
 
-Проверяется: `Credo.Check.Refactor.PassAsyncInTestCases` — `async:` задаётся явно.
+```elixir
+# плохо — checkout без shared mode: процесс, стартующий внутри вызова, соединения не получит
+setup tags do
+  :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.DAO)
+end
+
+# хорошо — test/support/data_case.ex
+setup tags do
+  pid = Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.DAO, shared: not tags[:async])
+  on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+  :ok
+end
+```
 
 ## Обвязка `test/support`
 
@@ -35,64 +49,36 @@
 |---|---|
 | `*_fixture.ex` | доменные фабрики агрегатов |
 | `*_seed.ex` | наполнение БД связанными агрегатами под сценарий |
-| `*_contract.ex` | общие наборы тестов behaviour |
+| `*_contract.ex` | общие наборы тестов behaviour (`deps/core/docs/rules/19-testing.md`, «Контрактные тесты behaviour») |
 | дублёры внешних систем | канал, брокер, каталог пользователей без сети |
 | `test/support/fixtures/events/**` | снимки wire-формата событий |
 
-- Фикстуры MUST собирать агрегат **доменными конструкторами**, а не вставлять строки в БД мимо
-  репозитория: иначе тест проверяет схему, а не домен.
-- Фикстура event-sourced агрегата собирает состояние командами и пишет события, а не строки в
-  таблицу проекции.
-- Фикстуры и объявления Prim живут в `test/support`, а не внутри тест-файла: протоколы
-  консолидируются до старта тестов, и `@derive Inspect` у модуля из тест-файла не действует —
-  проверка «секрет не утекает» на нём молча пройдёт.
+- Сборка фикстур доменными конструкторами и событиями, а не строками в БД, —
+  `deps/core/docs/rules/19-testing.md`, «Case-модули»; объявления Prim для проверки «секрет не
+  утекает» — там же, «Чувствительные данные».
 - Дублёр внешней системы MUST держать контракт адаптера буквально, включая поведение при
   ошибке. Дублёр, который «всегда `:ok`», прячет ровно тот класс ошибок, ради которого пишется
   тест.
 
-## Контрактные наборы behaviour
-
-Behaviour с двумя и более реализациями MUST иметь общий набор тестов, прогоняемый на каждой:
-без него реализации расходятся молча. Специфика реализации (hit/miss кеша, реальная загрузка)
-остаётся в тестах самой реализации и в общий набор не переносится.
-
 ## Event sourcing
 
-Контракты тестов — `deps/core/docs/rules/19-testing.md`, «Event-sourced агрегат» и «Проекции».
-Что из этого обязано быть у приложения:
+Тесты решений агрегата, записанных событий, совместимости wire и проекций, тестовое дерево
+`enabled: false, await: :inline` — `deps/core/docs/rules/19-testing.md`, «Event-sourced
+агрегат», «Совместимость событий» и «Проекции».
 
-| Что | Чем |
-|---|---|
-| решения агрегата | `ExUnit.Case, async: true`: given — `Core.Es.Aggregate.Test.given/3`, when — `Agg.decide/2`, then — короткая форма результата |
-| применение событий | отдельные тесты `evolve` через `Agg.fold/2`; полноту проверяет сборка `<Aggregate>.Repo` (`deps/core/docs/rules/11-domain.md`, «Event-sourced») |
-| совместимость wire | `use Core.Es.EventCompatCase` — один модуль на агрегат, фикстуры в `test/support/fixtures/events/<тип агрегата>/` |
-| проекция | `use Core.Es.ProjectionCase` — один модуль на проекцию; полноту `project/1` проверяет сборка проекции (`deps/core/docs/rules/22-projections.md`, «Объявление») |
-| read-модель целиком | запись через репозиторий → `Core.Es.Projection.Test.run_until_idle/2` → чтение ReadRepo |
-| записанные события | `Core.Es.Store.Test.events!(Agg.Event.Codec, id)` |
-
-- Given через `execute/2` SHOULD NOT: команда не воспроизводит событие удалённого типа, и тест
-  одной команды начинает зависеть от `decide` другой.
-- Прогон проекции и любой код, зовущий `Projection.await/3`, MUST идти в
-  `async: false`: блокировка пачки и строка чекпоинта держатся до конца sandbox-транзакции, и
-  пачка соседнего теста получила бы `{:error, :locked}`.
-- Тестовое дерево MUST быть `enabled: false, await: :inline` в `config/test.exs` — иначе
-  читателей нет, чекпоинт стоит и `await` не дождётся ничего.
-- Тесту, который read-модель не читает, прогон не нужен: версию для следующей команды он берёт
-  из возврата usecase, а не из ReadRepo.
-- Фикстура event-sourced агрегата собирает состояние командами и пишет события `append`, а не
-  строки в таблицу проекции: иначе тест проверяет проекцию, а не агрегат.
+Тесту, который read-модель не читает, прогон не нужен: версию для следующей команды он берёт
+из возврата usecase, а не из ReadRepo.
 
 ```elixir
-# плохо — чтение ReadRepo без прогона проекции: таблица пуста
-{:ok, {id, _version}} = Usecases.open(context)
-{:ok, view} = Usecases.get(id, :current, context)
-
-# хорошо
-use MyApp.DataCase, async: false
-
+# плохо — прогон и чтение ради версии: её уже вернул usecase
 {:ok, {id, _version}} = Usecases.open(context)
 :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Projection)
 {:ok, view} = Usecases.get(id, :current, context)
+{:ok, _version} = Usecases.close(id, Version.new!(view.version), context)
+
+# хорошо
+{:ok, {id, version}} = Usecases.open(context)
+{:ok, _version} = Usecases.close(id, version, context)
 ```
 
 ## Ратчеты
@@ -102,15 +88,21 @@ use MyApp.DataCase, async: false
 
 | Норма | Где записана |
 |---|---|
-| каждое значение `Core.Enum` описано в `@moduledoc` | `11-domain.md` |
+| каждое значение `Core.Enum` описано в `@moduledoc` | `deps/core/docs/rules/11-domain.md`, «Описание значений в `@moduledoc`» |
 | wire-теги событий уникальны и квалифицированы именем агрегата | `14-events-outbox.md` |
 | `constraint_errors` сходятся с `changeset/2` и с ограничениями БД | `13-repos.md` |
 | новая миграция создаёт индексы `concurrently` | `18-migrations.md` |
 | web-слой не ссылается на `*Repo` и `DAO` | `10-architecture.md` |
 | `watch_list/0` согласован с конфигурацией | `17-otp-concurrency.md` |
-| кластерный запуск с включённой очередью запрещён | `14-events-outbox.md` |
+| состав `plugins/0` PromEx и провайдеры публикуют метрику | `21-observability.md`, «Метрики» |
+| старт с включённым outbox и заданной кластеризацией падает | `14-events-outbox.md`, «Единственность поллера» |
 | примеры тел в спецификации проходят валидацию схем | `15-web-api.md` |
 
+- Ратчет описаний enum — `test/my_app/enum_docs_test.exs`, один на приложение: модули `:my_app`
+  отбирает `Core.Enum.enum?/1`, а не эвристика по экспортам, и у каждого сверяет строки таблицы
+  в `@moduledoc` с `values/0`. Не описанное значение и описанное несуществующее валят сборку.
+- Ратчет `constraint_errors` — `test/my_app/repo/constraint_errors_test.exs`, один на
+  приложение; что он сверяет — `deps/core/docs/rules/19-testing.md`, «`constraint_errors`».
 - Новый ратчет MUST объяснять в `@moduledoc`, какое правило он проверяет и почему проверка
   именно такая: иначе следующий прочтёт его как тест поведения и ослабит.
 - Ратчет со списком-исключением MUST быть заморожен: список пополняется **только** вместе со
@@ -119,21 +111,21 @@ use MyApp.DataCase, async: false
 
 ## Read-путь
 
-- У каждого View MUST быть тест `to_view/1`: формат значений на read-пути обязан совпадать с
-  агрегатным (`13-repos.md`).
-- Форма jsonb проверяется **исполняемо**: спека `Redump` сверяется с тем, что реально уходит
-  наружу, а не описывается комментарием.
+- Тест `to_view/1` и исполняемая сверка формы jsonb по спеке `Redump` —
+  `deps/core/docs/rules/19-testing.md`, «View: round-trip неприменим» и «jsonb на read-пути:
+  контракт wire».
 - Презентер, который что-то не отдаёт наружу (ключ хранилища, внутренний идентификатор), MUST
   иметь тест именно на это (`12-errors.md`).
 
 ## Внешние зависимости
 
 - HTTP-клиенты — через тестовый plug из `config/test.exs`; живые вызовы MUST NOT.
-- Тесты, которым нужен живой брокер или хранилище, — под тегом, исключённым по умолчанию в
-  `test/test_helper.exs`, и гоняются явно.
-- Планировщик задач — в ручном режиме; постановка проверяется утверждением об очереди. Задача
-  с внешним эффектом MUST иметь тест на ключ идемпотентности: две постановки с одинаковыми
-  ключами дают одну задачу (`14-events-outbox.md`).
+- Живой брокер или хранилище — под тегом (`deps/core/docs/rules/19-testing.md`, «Внешние
+  зависимости»).
+- Oban — режим `testing: :manual`; постановка джобы проверяется
+  `Oban.Testing.assert_enqueued/1`. Воркер с внешним эффектом MUST иметь тест на ключ
+  идемпотентности: две постановки с одинаковыми `unique`-полями дают одну джобу
+  (`14-events-outbox.md`, «Идемпотентность потребителей»).
 
 ## Пробелы
 
@@ -149,3 +141,4 @@ use MyApp.DataCase, async: false
 - Контрактные тесты фасадов кеша — `16-caching.md`
 - Процессы — `17-otp-concurrency.md`
 - Ратчет миграций — `18-migrations.md`
+- Контракты тестов библиотеки — `deps/core/docs/rules/19-testing.md`

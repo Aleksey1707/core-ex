@@ -5,9 +5,10 @@
 #   elixir scripts/boundary_lint.exs --consumer lib test  # приложение-потребитель
 #
 # Режим библиотеки проверяет главный инвариант «Core не знает потребителя»
-# (`docs/rules/10-architecture.md`), режим потребителя — что DI репозиториев идёт через
-# `Core.Config.repo!/1` (`docs/rules/13-repos.md`, «DI»). Норму ввела библиотека, поэтому
-# инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`.
+# (`docs/rules/10-architecture.md`), режим потребителя — что DI репозиториев (`Repo` и
+# `ReadRepo`) идёт через `Core.Config.repo!/1` (`docs/rules/13-repos.md`, «DI»). Норму ввела
+# библиотека, поэтому инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`,
+# и путь правил в его сообщениях — от корня потребителя.
 
 defmodule BoundaryLint do
   @moduledoc false
@@ -16,11 +17,11 @@ defmodule BoundaryLint do
   @consumer_dirs ["lib"]
   @config "lib/core/config.ex"
   @architecture "docs/rules/10-architecture.md"
-  @repos "docs/rules/13-repos.md"
+  @repos "deps/core/docs/rules/13-repos.md"
   @env_funs ~w(get_env fetch_env fetch_env! compile_env compile_env!)a
   @compile_env_funs ~w(compile_env compile_env!)a
   @own_apps ~w(core argon2_elixir)a
-  @repo_key :Repo
+  @repo_keys ~w(Repo ReadRepo)a
 
   def run(["--consumer" | dirs]) do
     check(:consumer, if(dirs == [], do: @consumer_dirs, else: dirs), @repos)
@@ -118,7 +119,7 @@ defmodule BoundaryLint do
     message =
       "`Application.#{fun}` на #{Macro.to_string(key)}: реализация резолвится `Core.Config.repo!/1`"
 
-    if List.last(mods) == @repo_key,
+    if List.last(mods) in @repo_keys,
       do: [err(path, meta, message)],
       else: []
   end

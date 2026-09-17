@@ -48,8 +48,9 @@ lib/my_app_web/{error_mapper,fallback_controller}.ex
   снимает ETS в `before_send` (`11-domain.md`). Плаг аутентификации только докладывает в него
   текущего пользователя.
 - Отказ формируется на границе: плаг отвечает 401 сам и дальше `conn` не пускает.
-- Текст 401 MUST быть **константой** независимо от причины (нет заголовка, битый токен,
-  истёкшая сессия); причина уходит в `Logger.debug` (`12-errors.md`).
+- Текст 401 — константа независимо от причины (нет заголовка, битый токен, истёкшая сессия):
+  `deps/core/docs/rules/10-architecture.md`, «Граница HTTP»; причина уходит в `Logger.debug`
+  (`12-errors.md`).
 - Существование и права пользователя плаг не проверяет — это работа usecase, иначе authz
   растечётся по двум слоям.
 - Схема аутентификации MUST быть объявлена в `ApiSpec` своей поверхности, иначе UI не даёт
@@ -86,15 +87,18 @@ end
 После успешного usecase экшен MUST дождаться её — **вне** транзакции, по потоку агрегата
 (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
 
-- Usecase команды отдаёт версию после записи, у заведения — пару `{id, version}`
-  (`10-architecture.md`); ждать проекцию и читать представление — дело экшена.
+- Usecase команды отдаёт версию после записи, у заведения — пару `{id, version}`; путь через
+  `<Aggregate>.Process.execute` версии не отдаёт (`10-architecture.md`, «Usecases»). Ждать
+  проекцию и читать представление — дело экшена.
 - `:projection_timeout` и `:projection_rebuilding` — ответ 202 с `{id, version}`, а не ошибка:
   запись применена, повтор команды по ним запрещает свод библиотеки.
 - Операция такой команды MUST объявлять ответ `accepted:` со своей схемой.
-- Проекцию ждёт литеральный вызов `Projection.await(Agg, id, timeout)` в экшене или в его
-  `defp`, общий хелпер принимает результат. ID на месте вызова MUST быть сужен до `%Agg.ID{}` —
-  паттерном в голове функции с вызовом или в `with`: ID из параметра без сужения сборка не
-  сверяет, и ловится только агрегат не из `events:`. Хелпер, который зовёт
+- Ответ 202 по `:projection_timeout` / `:projection_rebuilding` собирает один хелпер
+  приложения — `MyAppWeb.Helper.Projection`. Проекцию ждёт литеральный вызов
+  `Projection.await(Agg, id, timeout)` в экшене или в его `defp`, хелпер принимает результат.
+  ID на месте вызова MUST быть сужен до `%Agg.ID{}` — паттерном в голове функции с вызовом или
+  в `with`: ID из параметра без сужения сборка не сверяет, и ловится только агрегат не из
+  `events:`. Хелпер, который зовёт
   `projection.await(agg, id, timeout)` сам, MUST NOT: через модуль-переменную сборка не
   проверяет ни агрегат, ни ID.
 
@@ -104,11 +108,11 @@ with {:ok, _version} <- Usecases.Agg.take(id, version, context),
      do: reload(conn, id)
 
 # плохо — модуль проекции параметром хелпера: ID другого агрегата сборка не видит
-Helper.Projection.await(conn, Projection, Agg, id, written, &reload(&1, id))
+MyAppWeb.Helper.Projection.await(conn, Projection, Agg, id, written, &reload(&1, id))
 
 # плохо — ID параметром defp без сужения: ID другого агрегата сборка не видит
 defp respond_taken(conn, id, version) do
-  Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+  MyAppWeb.Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
 end
 
 # хорошо — литерал в defp экшена, ID сужен в голове, ответ 202 получает {id, version}
@@ -116,7 +120,7 @@ with {:ok, version} <- Usecases.Agg.take(id, expected, context),
      do: respond_taken(conn, id, version)
 
 defp respond_taken(conn, %Agg.ID{} = id, version) do
-  Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+  MyAppWeb.Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
 end
 ```
 
@@ -125,8 +129,9 @@ end
 `FallbackController` таблицы статусов не содержит: он зовёт маппер приложения, отправляет
 конверт и логирует на уровне, который вернула таблица.
 
-- Свои клозы `map/1` объявляются **перед** делегированием в `Core.Web.ErrorMapper.map/2` — так
-  таблица остаётся чистой функцией и проверяется тестом построчно.
+- Таблица маппера приложения — чистая функция, проверяемая тестом построчно: свои клозы `map/1`
+  перед делегированием в `Core.Web.ErrorMapper.map/2` (`deps/core/docs/rules/10-architecture.md`,
+  «Граница HTTP»).
 - `%Ecto.Changeset{}` в клозах MUST NOT: репозиторий его не отдаёт (`13-repos.md`).
 - Ошибку, не дошедшую до контроллера (неизвестный маршрут, неразобранное тело, отказ плага,
   непойманное исключение), MUST отдавать тем же конвертом: клиент разбирает ответ одинаково на

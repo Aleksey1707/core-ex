@@ -32,8 +32,8 @@ defmodule Core.Outbox do
   вперемешку — молча, без единой ошибки. Отказ старта при `DNS_CLUSTER_QUERY` ловит ту же
   ошибку между нодами; эта проверка — внутри одной.
 
-  Звать из `start/2` приложения-потребителя рядом с `check_singleton!/0`, передавая
-  конфигурацию `:pollers` как есть.
+  Звать из `start/2` приложения-потребителя рядом с проверкой единственности поллера
+  приложения, передавая конфигурацию `:pollers` как есть.
 
       Core.Outbox.validate_partition!(
         Application.get_env(:core, Core.Outbox, [])[:pollers] || []
@@ -95,7 +95,7 @@ defmodule Core.Outbox do
     "Core.Outbox: фильтры топиков поллеров пересекаются, порядок доставки не гарантирован: " <>
       "#{inspect(a_name)} #{inspect(a_topics)} и #{inspect(b_name)} #{inspect(b_topics)}. " <>
       "Разведите топики по поллерам через {:only, [...]} без общих элементов " <>
-      "(docs/rules/14-events-outbox.md, «Единственность поллера»)"
+      "(deps/core/docs/rules/14-events-outbox.md, «Единственность поллера»)"
   end
 
   defmodule Status do
@@ -165,7 +165,7 @@ defmodule Core.Outbox do
     """
 
     # Тот же набор символов, что у `Topic`: для событий агрегата имя — это wire-тег
-    # (`<Aggregate>.Event.Codec`), а он квалифицирован именем агрегата — `acceptance.created`.
+    # (`<Aggregate>.Event.Codec`), а он квалифицирован именем агрегата — `<aggregate>.created`.
     use Core.Prim.String,
       name: first_line(@moduledoc),
       min_len: 1,

@@ -1,7 +1,8 @@
 # Раскладка модуля: маркеры `# ---` (падение уровня абстракции) и `# ===== <имя> =====`
 # (граница блока) — `docs/rules/20-agreements.md`, «Разделители внутри модуля». Проверка идёт
 # по AST плюс исходным строкам: маркер — комментарий, и в AST его нет.
-# Запуск: elixir scripts/layout_lint.exs  (цель `make layout-check`).
+# Запуск: elixir scripts/layout_lint.exs  (цель `make layout-check`); у потребителя —
+# elixir deps/core/scripts/layout_lint.exs, и путь правил в сообщениях — `deps/core/…`.
 #
 # `lib/**` и `test/support/**` проверяются целиком; в остальных `test/**` разметка
 # добровольна — проверяется только форма маркеров.
@@ -10,6 +11,8 @@ defmodule LayoutLint do
   @moduledoc false
 
   @rules "docs/rules/20-agreements.md"
+  @dep_rules_dir "deps/core/docs/rules"
+  @shared_block "общее"
   @full ["lib/**/*.{ex,exs}", "test/support/**/*.{ex,exs}"]
   @form ["test/**/*.{ex,exs}"]
 
@@ -49,18 +52,32 @@ defmodule LayoutLint do
     |> Enum.sort_by(fn {path, line, _} -> {path, line} end)
     |> Enum.each(fn {path, line, message} -> IO.puts(:stderr, "#{path}:#{line}: #{message}") end)
 
-    IO.puts(:stderr, "\nlayout-check: нарушений — #{length(errors)}; правила — #{@rules}")
+    IO.puts(:stderr, "\nlayout-check: нарушений — #{length(errors)}; правила — #{rules()}")
     System.halt(1)
+  end
+
+  # У потребителя свод приехал зависимостью: его `docs/rules/` — уже локальный свод.
+  defp rules do
+    if File.dir?(@dep_rules_dir),
+      do: Path.join("deps/core", @rules),
+      else: @rules
   end
 
   defp check_file(path, mode) do
     source = File.read!(path)
     code = code_lines(path, source)
     nodes = source |> Code.string_to_quoted!(columns: true, token_metadata: true) |> collect()
+    markers = markers(code)
 
-    nodes
-    |> units(markers(code))
-    |> Enum.flat_map(&check_unit(&1, code, mode, path))
+    quoted =
+      if mode == :full,
+        do: check_quoted(markers, nodes, path),
+        else: []
+
+    quoted ++
+      (nodes
+       |> units(markers)
+       |> Enum.flat_map(&check_unit(&1, code, mode, path)))
   end
 
   # Тело heredoc гасится: маркер ищется в коде, а не в примере внутри `@moduledoc`. Закрывающая
@@ -121,6 +138,14 @@ defmodule LayoutLint do
 
   defp quoted?(line, quotes),
     do: Enum.any?(quotes, fn {from, to} -> line > from and line <= to end)
+
+  # Код `quote` инжектится в чужой модуль: разделитель внутри него размечал бы модуль, которого
+  # здесь не видно, поэтому в единицы он не попадает, а здесь — нарушение.
+  defp check_quoted(markers, nodes, path) do
+    for marker <- markers, quoted?(marker.line, nodes.quotes) do
+      err(path, marker.line, "маркер внутри `quote` MUST NOT: он размечает модуль, куда инжектится код")
+    end
+  end
 
   defp collect(ast) do
     {_ast, nodes} = Macro.prewalk(ast, %{modules: [], defs: [], quotes: []}, &node/2)
@@ -299,9 +324,10 @@ defmodule LayoutLint do
   defp check_tail(blocks, unit, path) do
     last = List.last(blocks)
 
-    blocks
-    |> Enum.reject(fn block -> Enum.any?(block.defs, &(&1.kind == :public)) end)
-    |> Enum.flat_map(&check_private_block(&1, &1 == last, unit, path))
+    (blocks
+     |> Enum.reject(fn block -> Enum.any?(block.defs, &(&1.kind == :public)) end)
+     |> Enum.flat_map(&check_private_block(&1, &1 == last, unit, path))) ++
+      dash_before_shared(unit, path)
   end
 
   defp check_private_block(%{defs: []} = block, _last?, _unit, path),
@@ -320,6 +346,22 @@ defmodule LayoutLint do
       err(path, marker.line, "`# ---` в блоке без публичных определений")
     end
   end
+
+  # Переход к приватным `общее` размечает сам маркер блока: `# ---` сразу перед ним лишний.
+  defp dash_before_shared(unit, path) do
+    unit.markers
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.filter(fn [dash, block] ->
+      dash.kind == :dash and shared?(block) and
+        not Enum.any?(unit.defs, &(&1.line > dash.line and &1.line < block.line))
+    end)
+    |> Enum.map(fn [dash, _block] ->
+      err(path, dash.line, "`# ---` перед `# ===== #{@shared_block} =====` MUST NOT")
+    end)
+  end
+
+  defp shared?(%{kind: :block, text: text}), do: String.trim(text) == "# ===== #{@shared_block} ====="
+  defp shared?(_marker), do: false
 
   defp blocks(marks, unit) do
     bounds = Enum.map(marks, & &1.line)

@@ -9,10 +9,10 @@
 
 ## Объявление
 
-Проекция — модуль `use Core.Es.Projection` рядом с ReadRepo своей read-модели (`13-repos.md`,
-«Слои и пути»). Она строит read-модель из событий хранилища агрегатов обоих видов в порядке
-глобальной позиции и пишет чекпоинт в той же транзакции пачки (ADR-0009). Перечень опций, шагов
-пачки и исходов — moduledoc `Core.Es.Projection`.
+Проекция — модуль `use Core.Es.Projection`; его место в приложении —
+`deps/core/docs/rules/app/13-repos.md`, «Проекции read-модели». Она строит read-модель из событий
+хранилища агрегатов обоих видов в порядке глобальной позиции и пишет чекпоинт в той же транзакции
+пачки (ADR-0009). Перечень опций, шагов пачки и исходов — moduledoc `Core.Es.Projection`.
 
 - `name:` MUST NOT меняться: строка чекпоинта привязана к имени, другое имя — новая проекция,
   которая стартует с начала истории.
@@ -96,68 +96,34 @@ def project(%Account.Event.Closed{} = event), do: close_row(event)
 Проекции приложения MUST стоять в одном `Core.Es.Projection.Supervisor` со всем списком: дубль
 `name:` виден только в полном списке, а второе дерево на ноде не стартует. Дерево ставится на всех
 нодах — пачки одной проекции разводит её блокировка. Опции и цикл читателя — moduledoc
-`Core.Es.Projection.Supervisor` и `Core.Es.Projection.Reader`.
+`Core.Es.Projection.Supervisor` и `Core.Es.Projection.Reader`; config и env библиотека не читает.
 
-- Опции SHOULD приходить из env `ES_PROJECTIONS_*` в `config/runtime.exs`, длительности — через
-  `Core.DurationParser`: библиотека config и env не читает.
-- Список проекций и опции SHOULD собираться одной функцией приложения: её же принимает
-  `Core.Es.Projection.Supervisor.watch_list/1` (`17-otp-concurrency.md`, «Дерево процессов»).
-- Приложение на одной ноде SHOULD ставить `notifications: false`: сигнала внутри ноды хватает, а
-  `NOTIFY` пачки берёт на commit общую на кластер блокировку и без слушателей (ADR-0013).
+- `enabled: false` и пустой `projections:` — `:ignore` с `info`: приложение стартует без дерева.
+- `Core.Es.Projection.Supervisor.watch_list/1` принимает те же опции, что и дерево
+  (`17-otp-concurrency.md`, «Дерево процессов»).
+- `notifications:` — сигнал чекпоинта между нодами: `true` (по умолчанию) — слушатель на
+  соединении из `repo.config()`, keyword — опции соединения поверх `repo.config()`, `false` — ни
+  слушателя, ни `NOTIFY` пачек ноды. `NOTIFY` пачки берёт на commit общую на кластер блокировку
+  и без слушателей (ADR-0013).
 - За pgbouncer в transaction mode `notifications: true` MUST NOT: `LISTEN` через пулер
   уведомлений не получает, и ожидание молча сводится к шагам. Слушателю нужен keyword с прямым
   хостом базы — опции соединения поверх `repo.config()`.
-- Нода держит по соединению слушателя на каждый различный `repo:` проекций: лимиты соединений
-  базы и пулера SHOULD учитывать их на каждой ноде.
+- Нода держит по соединению слушателя на каждый различный `repo:` проекций; нода с
+  `enabled: false` соединений не открывает.
+
+Env-ключи `ES_PROJECTIONS_*` и их чтение в `config/runtime.exs`, сборка списка и опций одной
+функцией приложения, выбор `notifications:` и расчёт лимита соединений —
+`deps/core/docs/rules/app/17-otp-concurrency.md`, «Проекции и процессы агрегата».
 
 Проверяется: `ArgumentError` в `Core.Es.Projection.Supervisor.start_link/1` — модуль без
 `use Core.Es.Projection`, дубль `name:`; второе дерево на ноде — отказ старта.
 
 ```elixir
-# плохо — дерево на контекст: второе дерево на ноде не стартует
-children = [
-  {Core.Es.Projection.Supervisor, projections: [AccountList.Projection], enabled: true},
-  {Core.Es.Projection.Supervisor, projections: [DeliveryList.Projection], enabled: true}
-]
-
-# хорошо — один список; опции из runtime.exs, те же — в watch_list/1
-defmodule MyApp.Projections do
-  def opts do
-    [projections: [AccountList.Projection, DeliveryList.Projection]] ++
-      Application.fetch_env!(:my_app, __MODULE__)
-  end
-end
-
-children = [{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}]
-
-# config/runtime.exs
-config :my_app, MyApp.Projections,
-  enabled: System.get_env("ES_PROJECTIONS_ENABLED", "true") == "true",
-  poll_interval_ms:
-    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_POLL_INTERVAL", "1s")),
-  await_min_ms:
-    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_AWAIT_MIN", "10ms")),
-  await_max_ms:
-    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_AWAIT_MAX", "100ms")),
-  notifications: System.get_env("ES_PROJECTIONS_NOTIFICATIONS", "true") == "true"
-
 # плохо — слушатель за pgbouncer в transaction mode: LISTEN через пулер уведомлений не получает
-config :my_app, MyApp.Projections, notifications: true
+notifications: true
 
-# хорошо — одна нода: сигнала внутри ноды хватает, NOTIFY пачек не нужен
-config :my_app, MyApp.Projections, notifications: false
-
-# хорошо — несколько нод за pgbouncer: слушатель в обход пулера, прочее — из repo.config()
-config :my_app, MyApp.Projections,
-  notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST"), port: 5432]
-```
-
-```text
-# плохо — лимит соединений посчитан по пулам repo: соединения слушателей нод в него не входят
-max_connections >= ноды × pool_size
-
-# хорошо — плюс по соединению слушателя на каждый различный repo: проекций на каждой ноде
-max_connections >= ноды × (pool_size + различных repo: проекций)
+# хорошо — слушатель в обход пулера, прочее — из repo.config()
+notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST"), port: 5432]
 ```
 
 ## Read-after-write
@@ -328,9 +294,9 @@ def down, do: raise(Ecto.MigrationError, "удаление проекции acco
 - Отставание одинаково на всех нодах: агрегировать его SHOULD через `max by (projection)`, а не
   `sum` — сумма умножила бы значение на число нод.
 - Алерт SHOULD NOT заводиться на падение читателей и процессов агрегата — его ведёт
-  `WorkerDown` (`17-otp-concurrency.md`); на `checkpoint_orphan` — сирота штатна между
-  выкладками 2 и 3 новой проекции; на отказ записи снапшота, `version_mismatch` процесса агрегата
-  и `await` с `:timeout`.
+  `WorkerDown` (`21-observability.md`, «Рекомендованные алерты»); на `checkpoint_orphan` —
+  сирота штатна между выкладками 2 и 3 новой проекции; на отказ записи снапшота,
+  `version_mismatch` процесса агрегата и `await` с `:timeout`.
 
 ```yaml
 # плохо — отставание без условия пересборки: алерт горит на каждой пересборке
@@ -349,6 +315,8 @@ def down, do: raise(Ecto.MigrationError, "удаление проекции acco
 
 - События, кодек и совместимость тегов — `14-events-outbox.md`
 - Дерево процессов и `watch_list` — `17-otp-concurrency.md`
-- ReadRepo, View и пути — `13-repos.md`
+- Дерево проекций в приложении — `deps/core/docs/rules/app/17-otp-concurrency.md`
+- ReadRepo и View — `13-repos.md`
+- Раскладка проекций и read-модели — `deps/core/docs/rules/app/13-repos.md`
 - Тесты проекций — `19-testing.md`
 - Span пачки проекции — `21-observability.md`

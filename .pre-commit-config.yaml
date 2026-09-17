@@ -22,7 +22,7 @@ repos:
         pass_filenames: false
 
       - id: rules-lint
-        name: "Rules: свод .claude/rules"
+        name: "Rules: свод docs/rules"
         entry: elixir scripts/rules_lint.exs
         language: system
         require_serial: true

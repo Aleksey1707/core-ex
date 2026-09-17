@@ -15,9 +15,11 @@
 | Namespace | Path | Назначение |
 |---|---|---|
 | `Core` | зависимость `:core` | shared-фундамент: `Prim`, `Enum`, `Codec`, `View`, `Context`, `Error`, `Es`, `Repo`, `Outbox`, `Mq`, `PubSub`, `Web`, `Helper` |
+| `MyApp.Application` | `lib/my_app/application.ex` | композиционный корень: проверки конфигурации на старте и дерево процессов, включая процессы Core |
 | `MyApp.Codec` | `lib/my_app/codec/` | Prim-профили `Prim.{Internal,External}`, entity-фасады `{Internal,External}`, реестр плагинов |
 | `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>/` | bounded context: `common` + actor-срезы |
 | `MyApp.Outbox` | `lib/my_app/outbox/` | OTP-дерево очереди: writer + поллер + cleaner |
+| `MyApp.Projections` | `lib/my_app/projections.ex` | список проекций и опции их дерева (`17-otp-concurrency.md`, «Проекции и процессы агрегата») |
 | `MyApp.PromEx` | `lib/my_app/prom_ex*` | плагины метрик и MFA-провайдеры списков |
 | `MyApp.ContextFactory` | `lib/my_app/context_factory.ex` | сборка `%Context{}` вне web |
 | `MyApp.DAO` | `lib/my_app/dao.ex` | единственный `Ecto.Repo` |
@@ -28,30 +30,24 @@
 
 ## Обязательства перед библиотекой
 
-Всё, что библиотека знает о приложении, лежит под её собственным ключом:
-
-```elixir
-# config/config.exs — читается на компиляции call site, поэтому не в runtime.exs
-config :core,
-  otp_app: :my_app,
-  dao: MyApp.DAO,
-  codec: MyApp.Codec.Internal,
-  tz: "Etc/UTC",
-  telemetry_prefix: [:my_app]
-```
+Всё, что библиотека знает о приложении, лежит под её собственным ключом `config :core`. Ключи,
+их обязательность и дефолты — `deps/core/docs/rules/10-architecture.md`, «Контракт конфигурации».
 
 - `MyApp.DAO` MUST объявляться через `use Core.DAO`, а не `use Ecto.Repo`: иначе after-commit
   хуки (wake поллера outbox, эталон `Repo.Sc`) молча не выполняются, и ошибка проявится
   отложенной доставкой и перезаписью дочерних строк, а не падением.
-- `Core.Outbox.Codec` MUST входить в реестр плагинов фасада (`11-domain.md`).
+- Состав реестра плагинов фасада, включая `Core.Outbox.Codec`, — `11-domain.md`, «Фасады и
+  реестр плагинов».
 - `otp_app` MUST лежать в `config.exs`: его читает `Core.Config.repo!/1` на компиляции каждого
   call site, и в `runtime.exs` он опоздает.
-- `telemetry_prefix` MUST задаваться явно, даже когда совпадает с дефолтом `[otp_app()]`:
-  имена метрик зашиты в дашборды и алерты и обязаны пережить смену `otp_app`
-  (`21-observability.md`).
-- Клиент брокера MUST быть объявлен в `deps` приложения: в библиотеке он `optional: true`, и
-  без записи в `deps` адаптеров `Core.Mq.*` просто нет. После добавления или удаления клиента —
-  `mix deps.compile core --force`, иначе адаптер останется в том состоянии, в каком его собрали.
+- `telemetry_prefix` MUST задаваться явно, даже когда совпадает с дефолтом `[otp_app()]`: он
+  входит в имена telemetry-событий Core, и обработчики приложения, подписанные на них литералом
+  имени, обязаны пережить смену `otp_app`. Имена метрик от него не зависят — их префикс задаёт
+  `otp_app` модуля `use PromEx` (`PromEx.metric_prefix/2`) (`21-observability.md`).
+- Клиент используемого брокера MUST быть объявлен в `deps` приложения: в библиотеке он
+  `optional: true`, и без записи в `deps` адаптеров `Core.Mq.*` просто нет. После добавления или
+  удаления клиента — `mix deps.compile core --force`, иначе адаптер останется в том состоянии, в
+  каком его собрали.
 - Ключи под `:my_app` — только подмена конвенции `<Behaviour>.Pg` (`13-repos.md`) и настройки
   подсистем самого приложения.
 
@@ -61,8 +57,12 @@ config :core,
 ```elixir
 Core.Config.validate!()
 Core.Security.Secret.ensure_configured!()
-Core.Mq.Stream.ensure_available!()
 ```
+
+- Проверка адаптера MUST стоять на каждый используемый адаптер брокера и только на него:
+  `Core.Mq.Stream.ensure_available!/0`, `Core.Mq.Kafka.ensure_available!/0`.
+- При нескольких поллерах outbox (конфиг `pollers`) MUST стоять
+  `Core.Outbox.validate_partition!/1` (`deps/core/docs/rules/14-events-outbox.md`).
 
 ## Boundary
 
@@ -110,7 +110,8 @@ Bounded context делится на `common` и actor-срезы. Это **actor
 1. Authz — до открытия транзакции.
 2. Актор: `CurrentUser.get(context)` → `by` — там же, до транзакции.
 3. Load → мутация домена → persist — внутри `Transact.run`.
-4. Последний аргумент публичных функций — `%Context{}` (`deps/core/docs/rules/20-agreements.md`).
+4. `%Context{}` — последний из данных (`deps/core/docs/rules/20-agreements.md`, «Context — последний
+   из данных»).
 
 Authz и резолв актора MUST идти до открытия транзакции: проверка прав ходит в read-путь, а тот
 в dev и prod MAY быть закеширован, и внепроцессный сайд-эффект внутри транзакции запрещён.
@@ -123,20 +124,22 @@ Authz и резолв актора MUST идти до открытия тран�
 |---|---|
 | Команда | `:ok \| {:error, Error.t()}` |
 | Команда-создание | MAY `{:ok, <Aggregate>.ID.t()}` — идентификатор генерирует домен |
-| Команда event-sourced агрегата | `{:ok, Version.t()}`; создание — `{:ok, {<Aggregate>.ID.t(), Version.t()}}` |
+| Команда event-sourced агрегата через `Transact.run` | `{:ok, Version.t()}`; создание — `{:ok, {<Aggregate>.ID.t(), Version.t()}}` |
+| Команда event-sourced агрегата через `<Aggregate>.Process.execute` | `:ok \| {:error, Error.t()}` — версии после записи у этого пути нет |
 | Запрос | `{:ok, <Aggregate>.View.t()} \| {:error, Error.t()}` — read-путь отдаёт представление |
 
-Возврат id из команды-создания — единственное допустимое отступление от CQS: без него
-вызывающий вынужден искать созданный агрегат отдельным запросом. Версия после записи
-отступлением не считается — это результат собственного выполнения команды, по ней граница
+Идентификатор созданного агрегата и версия после записи — результат собственного выполнения
+команды, а не отступление от CQS (`deps/core/docs/rules/20-agreements.md`, «Разделение изменения и
+чтения (CQS)»): без id вызывающий искал бы созданный агрегат отдельным запросом, по версии граница
 ждёт проекцию (`15-web-api.md`). Прочие данные агрегата команда не возвращает.
 
-Репозиторий резолвится **только** через `Core.Config.repo!/1`; прямой
-`Application.compile_env!/2` на доменный behaviour — MUST NOT (`13-repos.md`).
+Резолв репозитория — `deps/core/docs/rules/13-repos.md`, «DI».
 
 У команды **event-sourced** агрегата то же тело, но другой состав шагов: `get` → `Agg.execute/2`
-→ `append` под одной транзакцией, либо `<Aggregate>.Process.execute` вместо неё. Отличия, которые
-видит usecase (`13-repos.md`, «Event-sourced агрегат»):
+→ `append` под одной транзакцией, либо `<Aggregate>.Process.execute` вместо неё. Путь через
+`Process.execute` отдаёт `:ok`: версии для ответа 202 у него нет, и команда, чей ответ несёт
+версию, идёт через `Transact.run`. Отличия, которые видит usecase (`13-repos.md`, «Event-sourced
+агрегат»):
 
 - существование агрегата решает `decide` по `version: nil`, а не `:not_found` репозитория;
 - запись по `:current` повторяется после `:version_mismatch`, по явной `%Version{}` — нет;
@@ -200,7 +203,8 @@ flowchart TB
   Store --> DAO
 ```
 
-- Web вызывает только usecases; domain и repo напрямую — MUST NOT.
+- Web вызывает usecases: мутации domain и вызовы repo / DAO из web — MUST NOT; разбор параметров
+  в Prim и ожидание проекции — MAY (`15-web-api.md`).
 - Воркеры, подписчики и mix-таски — такие же вызывающие, как web: оркестрация прогона, но не
   доменные мутации.
 - Usecases оркестрируют domain и репозитории; authz живёт здесь.

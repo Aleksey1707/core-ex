@@ -6,9 +6,10 @@
 #
 # Режим библиотеки проверяет два яруса разом: `docs/rules` по стандарту `docs/rules/00-index.md`
 # и ярус потребителя `docs/rules/app` по стандарту `docs/rules/app/00-index.md` — та же форма,
-# своя карта, скиллов нет, имён конкретных приложений быть не должно. Режим потребителя
-# проверяет локальный свод `docs/rules`: его форму, карты и то, что ссылки на оба приехавших
-# яруса разрешаются, а скиллы ведут на все файлы темы.
+# своя карта, скиллов нет, путей модулей с корнем конкретного приложения быть не должно. Режим
+# потребителя проверяет локальный свод `docs/rules`: его форму, индекс, карты и то, что ссылки на
+# оба приехавших яруса разрешаются, а скиллы ведут на все файлы темы — и у тем ярусов, которых
+# в локальном своде нет.
 #
 # Адресация ссылок общая для обоих режимов (`docs/rules/app/00-index.md`, «Адресация ссылок»):
 # сосед по ярусу — именем файла, другой ярус — путём от корня потребителя (`deps/core/…`).
@@ -36,6 +37,9 @@ defmodule RulesLint do
   @modality ~r/\b(MUST|SHOULD|MAY)\b/
 
   @link ~r/`(\d\d-[a-z0-9-]+\.md)`/
+  @fence ~r/^\s*`{3,}/
+  @fence_after_code ~r/^\s*[^\s`].*`{3,}\s*$/
+  @example_span ~r/``.+?``/
   @bare_path ~r/`(docs\/rules\/(?:app\/)?\d\d-[a-z0-9-]+\.md)`/
 
   # Корень цепочки модулей в ярусе потребителя: либо библиотека, либо плейсхолдер приложения,
@@ -69,50 +73,68 @@ defmodule RulesLint do
     files = rules(@dir)
     app_files = rules(@app_dir)
 
-    if files == [], do: abort(["#{@dir}: файлов свода не найдено"])
-    if app_files == [], do: abort(["#{@app_dir}: файлов свода потребителя не найдено"])
+    if files == [], do: abort(["#{@dir}: файлов свода не найдено"], :library)
+    if app_files == [], do: abort(["#{@app_dir}: файлов свода потребителя не найдено"], :library)
 
     known = MapSet.new(files, &Path.basename/1)
     app_known = MapSet.new(app_files, &Path.basename/1)
     tiers = [{@dep_dir, @dir}, {@dep_app_dir, @app_dir}]
 
-    (Enum.flat_map(files, &check_file(&1, known, tiers)) ++
+    (Enum.flat_map(files, &(check_file(&1, known, tiers) ++ check_own_tier(&1, @dep_dir))) ++
        Enum.flat_map(app_files, &check_app_file(&1, app_known, tiers)) ++
        check_map(files, @dir) ++
        check_map(app_files, @app_dir) ++
-       check_skills(files, []) ++
+       check_skills(files, [@dir]) ++
        check_entry(files) ++ check_imports([@dir]) ++ check_alias())
-    |> report(length(files) + length(app_files))
+    |> report(length(files) + length(app_files), :library)
   end
 
   # У потребителя проверяется его собственный свод; ярусы приехали в `deps/core` и проверены
-  # в библиотеке — от них нужна только разрешимость ссылок и доставка.
+  # в библиотеке — от них нужна только разрешимость ссылок и доставка. Тема ярусов без локального
+  # файла доставляется так же: скиллом и строкой карты с путём `deps/core/…`.
   defp check(:consumer) do
     files = rules(@dir)
 
-    if files == [], do: abort(["#{@dir}: файлов свода не найдено"])
+    if files == [], do: abort(["#{@dir}: файлов свода не найдено"], :consumer)
 
     known = MapSet.new(files, &Path.basename/1)
     tiers = [{@dep_dir, @dep_dir}, {@dep_app_dir, @dep_app_dir}]
+    themes = tier_themes(known)
 
     (Enum.flat_map(files, &check_file(&1, known, tiers)) ++
        check_map(files, @dir) ++
-       check_skills(files, [@dep_dir, @dep_app_dir]) ++
-       check_entry(files) ++ check_imports([@dep_dir, @dep_app_dir, @dir]) ++ check_alias())
-    |> report(length(files))
+       check_skills(files, [@dir, @dep_dir, @dep_app_dir]) ++
+       check_skills(themes, [@dep_dir, @dep_app_dir]) ++
+       check_entry(files) ++
+       check_entry_themes(themes) ++
+       check_imports([@dep_dir, @dep_app_dir, @dir]) ++ check_alias())
+    |> report(length(files), :consumer)
   end
 
   defp rules(dir), do: dir |> Path.join("[0-9][0-9]-*.md") |> Path.wildcard() |> Enum.sort()
 
-  defp report([], count), do: IO.puts("rules-check: #{count} файлов, нарушений нет")
+  # Темы ярусов, у которых нет локального файла; индекс и соглашения доставляются иначе.
+  defp tier_themes(known) do
+    [@dep_dir, @dep_app_dir]
+    |> Enum.flat_map(&rules/1)
+    |> Enum.map(&Path.basename/1)
+    |> Enum.reject(&(&1 in [@index, @always_on] or MapSet.member?(known, &1)))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
 
-  defp report(errors, _count), do: abort(errors)
+  defp report([], count, _mode), do: IO.puts("rules-check: #{count} файлов, нарушений нет")
 
-  defp abort(errors) do
+  defp report(errors, _count, mode), do: abort(errors, mode)
+
+  defp abort(errors, mode) do
     Enum.each(errors, &IO.puts(:stderr, &1))
-    IO.puts(:stderr, "\nrules-check: нарушений — #{length(errors)}; стандарт — #{@dir}/#{@index}")
+    IO.puts(:stderr, "\nrules-check: нарушений — #{length(errors)}; стандарт — #{standard(mode)}")
     System.halt(1)
   end
+
+  defp standard(:library), do: "#{@dir}/#{@index}"
+  defp standard(:consumer), do: "#{@dep_app_dir}/#{@index}"
 
   # ===== форма файла =====
 
@@ -120,7 +142,8 @@ defmodule RulesLint do
     lines = path |> File.read!() |> String.split("\n")
     marked = mark_fences(lines)
 
-    check_h1(path, marked) ++
+    check_fences(path, marked) ++
+      check_h1(path, marked) ++
       check_header(path, marked) ++
       check_tail(path, marked) ++
       check_depth(path, marked) ++
@@ -136,7 +159,7 @@ defmodule RulesLint do
   defp check_app_file(path, known, tiers) do
     marked = path |> File.read!() |> String.split("\n") |> mark_fences()
 
-    check_file(path, known, tiers) ++ check_app_names(path, marked)
+    check_file(path, known, tiers) ++ check_own_tier(path, @dep_app_dir) ++ check_app_names(path, marked)
   end
 
   # ---
@@ -153,7 +176,7 @@ defmodule RulesLint do
 
   # Каждой строке приписывается: номер, признак «внутри fenced-блока» и открывающий fence.
   defp mark_fences(lines) do
-    {marked, open} =
+    {marked, _open} =
       lines
       |> Enum.with_index(1)
       |> Enum.map_reduce(nil, fn {line, no}, open ->
@@ -172,7 +195,24 @@ defmodule RulesLint do
         end
       end)
 
-    if open, do: raise("#{__MODULE__}: незакрытый fenced-блок"), else: marked
+    marked
+  end
+
+  # Разметка выше видит только fence с начала строки; сломанный блок ловится по сырым строкам:
+  # fence под отступом (в пункте списка) тоже открывает блок, а тройной backtick в конце строки
+  # с кодом его не закрывает.
+  defp check_fences(path, marked) do
+    fences = for {no, line, _, _} <- marked, Regex.match?(@fence, line), do: no
+
+    unclosed =
+      if rem(length(fences), 2) == 1,
+        do: [err(path, List.last(fences), "fence-строк нечётное число — блок не закрыт")],
+        else: []
+
+    unclosed ++
+      for {no, line, _, _} <- marked, Regex.match?(@fence_after_code, line) do
+        err(path, no, "``` в конце строки с текстом блок не закрывает — fence отдельной строкой")
+      end
   end
 
   defp check_h1(path, marked) do
@@ -288,6 +328,16 @@ defmodule RulesLint do
     end
   end
 
+  # В библиотеке свой ярус адресуется коротким именем: префиксный путь на него у потребителя
+  # ведёт туда же, но читается как ссылка на соседний ярус. Пример записи ссылки в `` `…` `` —
+  # не ссылка.
+  defp check_own_tier(path, prefix) do
+    for {no, line, false, _} <- path |> File.read!() |> String.split("\n") |> mark_fences(),
+        [_, target] <- Regex.scan(tier_link(prefix), Regex.replace(@example_span, line, "")) do
+      err(path, no, "`#{prefix}/#{target}` — ссылка на свой ярус коротким именем: `#{target}`")
+    end
+  end
+
   defp tier_link(prefix), do: Regex.compile!("`#{Regex.escape(prefix)}/(\\d\\d-[a-z0-9-]+\\.md)`")
 
   # ===== карты и доставка =====
@@ -296,10 +346,17 @@ defmodule RulesLint do
   defp check_map(files, dir) do
     index = Path.join(dir, @index)
 
+    case File.read(index) do
+      {:ok, content} -> compare_map(files, index, content)
+      {:error, _} -> [err(index, 1, "нет индекса свода: в нём карта файлов и ссылки на стандарты")]
+    end
+  end
+
+  # Строка карты — строка таблицы, начинающаяся с имени файла свода.
+  defp compare_map(files, index, content) do
     listed =
-      index
-      |> File.read!()
-      |> then(&Regex.scan(~r/^\| `(\d\d-[a-z0-9-]+\.md)`/m, &1))
+      ~r/^\| `(\d\d-[a-z0-9-]+\.md)`/m
+      |> Regex.scan(content)
       |> Enum.map(&Enum.at(&1, 1))
 
     actual = files |> Enum.map(&Path.basename/1) |> Enum.reject(&(&1 == @index))
@@ -317,11 +374,11 @@ defmodule RulesLint do
 
   # У каждого свода, кроме индекса и всегда-загруженных соглашений, есть skill-указатель;
   # у потребителя его тело ведёт на все файлы темы, а не только на локальный.
-  defp check_skills(files, tiers) do
+  defp check_skills(files, dirs) do
     files
     |> Enum.map(&Path.basename/1)
     |> Enum.reject(&(&1 in [@index, @always_on]))
-    |> Enum.flat_map(&check_skill(&1, tiers))
+    |> Enum.flat_map(&check_skill(&1, dirs))
   end
 
   # Карта в точке входа (`AGENTS.md`, на неё симлинк `CLAUDE.md`) и набор файлов совпадают.
@@ -342,6 +399,16 @@ defmodule RulesLint do
           do: err(@entry, 1, "карта ссылается на несуществующий `#{f}`")
 
     missing ++ Enum.uniq(extra)
+  end
+
+  # Тема без локального файла стоит в карте строкой таблицы с путём в ярус.
+  defp check_entry_themes(themes) do
+    rows = @entry |> File.read!() |> String.split("\n") |> Enum.filter(&String.starts_with?(&1, "|"))
+
+    for file <- themes,
+        not Enum.any?(rows, &Regex.match?(~r/`#{@dep_dir}\/(app\/)?#{Regex.escape(file)}`/, &1)) do
+      err(@entry, 1, "тема `#{file}` без локального файла отсутствует в карте: нужен путь `deps/core/…`")
+    end
   end
 
   # У соглашений скилла нет ни на одном ярусе — они доставляются импортом в точку входа
@@ -367,7 +434,7 @@ defmodule RulesLint do
 
   # ---
 
-  defp check_skill(file, tiers) do
+  defp check_skill(file, dirs) do
     name = file |> String.replace(~r/^\d\d-/, "") |> String.replace_suffix(".md", "")
     path = Path.join([@skills_dir, name, "SKILL.md"])
 
@@ -376,9 +443,8 @@ defmodule RulesLint do
 
       ([
          {Regex.match?(~r/^name: #{name}$/m, content), "frontmatter `name:` не равен `#{name}`"},
-         {Regex.match?(~r/^description: ".{80,}"$/m, content), "нет содержательного `description:`"},
-         {String.contains?(content, "`#{@dir}/#{file}`"), "тело не ссылается на `#{@dir}/#{file}`"}
-       ] ++ skill_tiers(content, file, tiers))
+         {Regex.match?(~r/^description: ".{80,}"$/m, content), "нет содержательного `description:`"}
+       ] ++ skill_tiers(content, file, dirs))
       |> Enum.reject(&elem(&1, 0))
       |> Enum.map(&err(path, 1, elem(&1, 1)))
     else
@@ -386,9 +452,9 @@ defmodule RulesLint do
     end
   end
 
-  # Ярус требуется, только если он получен и файл этой темы в нём есть.
-  defp skill_tiers(content, file, tiers) do
-    for dir <- tiers, tier_has?(dir, file) do
+  # Каталог требуется, только если он получен и файл этой темы в нём есть.
+  defp skill_tiers(content, file, dirs) do
+    for dir <- dirs, tier_has?(dir, file) do
       {String.contains?(content, "`#{dir}/#{file}`"), "тело не ссылается на `#{dir}/#{file}`"}
     end
   end

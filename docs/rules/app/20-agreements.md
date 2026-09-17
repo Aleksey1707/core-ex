@@ -74,10 +74,8 @@ dialyzer → test → credo → security → audit
 
 ## Настройки Credo
 
-Физическая строка исходника ≤ 120 символов (`Readability.MaxLineLength`). `mix format`
-строковые литералы не переносит — длинный литерал `Logger.*` MUST разбиваться конкатенацией
-`<>` по границе пробела перед следующим `key=`, не heredoc и не `# credo:disable-for-*`
-(`deps/core/docs/rules/20-agreements.md`).
+Длина строки (`Readability.MaxLineLength`, ≤ 120) и разбиение литерала `Logger.*` —
+`deps/core/docs/rules/20-agreements.md`, «Linters & Formatters» и «Логирование (`Logger`)».
 
 Включены осознанно, потому что проверяют письменные правила:
 
@@ -87,7 +85,8 @@ dialyzer → test → credo → security → audit
 | `Warning.UnsafeToAtom` | атомы из внешних данных; исключён `test/` |
 | `Warning.LeakyEnvironment` | утечка окружения в подпроцессы |
 | `Warning.MixEnv` | runtime-конфиг вместо `Mix.env/0` |
-| `Refactor.PassAsyncInTestCases` | явный `async:` в тестах (`19-testing.md`) |
+| `Refactor.PassAsyncInTestCases` | явный `async:` в тестах (`deps/core/docs/rules/19-testing.md`) |
+| `Refactor.IoPuts` | `Logger` вместо `IO.puts` (`deps/core/docs/rules/20-agreements.md`, «Логирование (`Logger`)»); исключён `test/` |
 
 Отключены осознанно:
 
@@ -95,19 +94,35 @@ dialyzer → test → credo → security → audit
 |---|---|
 | `Readability.AliasAs` | конфликтует с профилями Codec: они алиасятся через `as:` |
 | `Readability.Specs` в web-слое | контракт экшена описывает `operation/2` (`15-web-api.md`) |
-| `Readability.StrictModuleLayout` для `use`, атрибутов, вложенных модулей | `use` здесь — DSL на алиасах, а `use Repo.Pg.Schema` обязан идти после блока `schema` |
+| `Readability.StrictModuleLayout` для `use`, атрибутов, вложенных модулей | их место диктует компилятор (`deps/core/docs/rules/20-agreements.md`, «Шапка модуля») |
 | `Design.AliasUsage` | противоречит адресации через родителя: чек требует алиасить лист |
+| `Consistency.UnusedVariableNames` | `_` и `_name` несут разный смысл: «значение не важно вообще» (`{:ok, _}`) против «не важно, но читателю стоит знать, что это» (`_reason`); чек требует единообразия при любой настройке и ловит только идиоматичные места |
+| `Refactor.AppendSingleItem` | синтаксический: ловит `x ++ [:a]`, но пропускает соседнее `x ++ [:a, :b]` и не отличает горячий цикл от разовой сборки; там, где `++` нужен по порядку элементов, делает только хуже |
 
 Правка `.credo.exs` MUST сопровождаться строкой в этой таблице у себя: включённый или
 выключенный чек без записанной причины через полгода читается как случайность.
 
 ## Алиасы приложения
 
-- Профили Codec — единственное место, где алиас берёт `as:`: `alias MyApp.Codec.Internal, as:
-  InCodec` и `…External, as: OutCodec`. Прочие конфликты имён разводятся алиасом **родителя**,
-  а не переименованием (`deps/core/docs/rules/20-agreements.md`).
-- Короткое имя `Repo` занято `Core.Repo` (`use Repo.Pg`), поэтому доменный репозиторий
-  адресуется через алиас агрегата, а `alias …<Aggregate>.Repo` — MUST NOT (`13-repos.md`).
+Общее правило — лист, родитель, `as:` последним средством при конфликте имён —
+`deps/core/docs/rules/20-agreements.md`, «Алиасы модулей». Здесь — конвенции приложения.
+
+- Профили Codec MUST алиаситься через `as:` всегда, а не только при конфликте: `InCodec` /
+  `OutCodec` — имена фасадов, общие для всего кода, а листы `Internal` / `External` у фасада и
+  у Prim-профиля совпадают. Прочие конфликты имён разводятся алиасом **родителя**, а не
+  переименованием.
+
+  ```elixir
+  alias MyApp.Codec.Internal, as: InCodec
+  alias MyApp.Codec.External, as: OutCodec
+  alias MyApp.Codec.Prim.Internal, as: PrimInCodec
+  ```
+
+  `InCodec` / `OutCodec` — entity-фасады (Prim + плагины); `PrimInCodec` — явный Prim-only.
+- Репозиторий агрегата (`<Aggregate>.Repo`) MUST адресоваться через алиас **агрегата**:
+  `alias MyApp.Domain.<BC>.Common.<Aggregate>` → `<Aggregate>.Repo.Pg.Schema`. Отдельный
+  `alias …Common.<Aggregate>.Repo` — MUST NOT: короткое имя `Repo` в том же файле почти всегда
+  занято `Core.Repo` (`use Repo.Pg`), и такой алиас молча его перебивает (`13-repos.md`).
 - `MyApp.DAO` — единственный `Ecto.Repo`; обращаться к нему из web-слоя MUST NOT
   (`10-architecture.md`).
 - `Core.Config` требует `require Config` рядом с алиасом: `repo!/1` — макрос.
@@ -124,8 +139,8 @@ dialyzer → test → credo → security → audit
   выводе команд и логах; синоним вместо него — дефект текста наравне с опечаткой.
 - Понятие, которого в глоссарии нет, MUST попадать туда вместе с кодом, который его вводит:
   иначе имя расходится по файлам раньше, чем его кто-либо согласует.
-- Значения терминов задаёт `CONTEXT.md`, нормы — свод. Переносить нормы в глоссарий, а
-  определения терминов в свод MUST NOT: копии расходятся при правке одной из них.
+
+Разделение глоссария и свода — `deps/core/docs/rules/00-index.md`, «Как пользоваться».
 
 ## Логи подсистем
 
