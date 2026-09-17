@@ -13,7 +13,7 @@ defmodule Consumer.S.CommandTypo do
   @impl true
   def decide(%Cmd.Rename{} = command, %__MODULE__{}),
     # expect: unknown key .nmae
-    do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(command.nmae))]}
+    do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(command.nmae))]}
 
   @impl true
   def evolve(state, %Event.Opened{}), do: state

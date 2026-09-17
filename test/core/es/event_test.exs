@@ -81,4 +81,14 @@ defmodule Core.Es.EventTest do
 
     assert %EventWithPayload{id: ^id, payload: ^payload} = event
   end
+
+  test "draft/1 — черновик события с нагрузкой: модуль события и нагрузка" do
+    payload = ValuePayload.new(:ok)
+
+    assert EventWithPayload.draft(payload) == {EventWithPayload, payload}
+  end
+
+  test "draft/0 — черновик события без нагрузки: модуль события" do
+    assert EmptyEvent.draft() == EmptyEvent
+  end
 end

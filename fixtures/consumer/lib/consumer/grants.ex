@@ -44,12 +44,12 @@ defmodule Consumer.Grants do
   def decide(%Cmd.Grant{role: %RoleID{} = role}, %__MODULE__{} = state) do
     if MapSet.member?(state.roles, role),
       do: {:ok, []},
-      else: {:ok, [Event.Codec.draft(Event.Granted, role)]}
+      else: {:ok, [Event.Granted.draft(role)]}
   end
 
   def decide(%Cmd.Revoke{role: %RoleID{} = role}, %__MODULE__{} = state) do
     if MapSet.member?(state.roles, role),
-      do: {:ok, [Event.Codec.draft(Event.Revoked, role)]},
+      do: {:ok, [Event.Revoked.draft(role)]},
       else: {:ok, []}
   end
 

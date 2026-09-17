@@ -41,7 +41,7 @@ defmodule Consumer.Order do
 
   @impl true
   def decide(%Cmd.Place{amount: amount}, %__MODULE__{version: nil}),
-    do: {:ok, [Event.Codec.draft(Event.Placed, Event.Placed.Payload.new(amount))]}
+    do: {:ok, [Event.Placed.draft(Event.Placed.Payload.new(amount))]}
 
   def decide(%Cmd.Place{}, %__MODULE__{}),
     do: {:error, Errors.domain(__MODULE__, :already_exists, nil)}
@@ -49,7 +49,7 @@ defmodule Consumer.Order do
   def decide(%Cmd.Cancel{}, %__MODULE__{version: nil}),
     do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
 
-  def decide(%Cmd.Cancel{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Cancelled)]}
+  def decide(%Cmd.Cancel{}, %__MODULE__{}), do: {:ok, [Event.Cancelled.draft()]}
 
   @impl true
   def evolve(state, %Event.Placed{payload: %Event.Placed.Payload{} = payload}),

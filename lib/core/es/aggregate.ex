@@ -12,7 +12,7 @@ defmodule Core.Es.Aggregate do
         def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
 
         def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
-          do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
+          do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
 
         @impl true
         def evolve(state, %Event.Renamed{payload: payload}), do: %{state | name: payload.name}
@@ -23,9 +23,9 @@ defmodule Core.Es.Aggregate do
   ## Колбэки
 
   - `decide(command, state)` → `{:ok, [result]} | {:error, Error.t()}` — решение по команде
-    (`use Core.Es.Cmd`). Элемент результата — черновик события от кодека агрегата:
-    `Event.Codec.draft(Event.Mod, payload)` или `Event.Codec.draft(Event.Mod)` у события без
-    нагрузки (`Core.Es.Event.Codec`, «Черновик события»); `{:ok, []}` — команда без изменений.
+    (`use Core.Es.Cmd`). Элемент результата — черновик события от модуля события:
+    `Event.Mod.draft(payload)` или `Event.Mod.draft()` у события без нагрузки (`Core.Es.Event`,
+    «Черновик события»); `{:ok, []}` — команда без изменений.
     Агрегата ещё нет — `version: nil`: `:not_found` / `:already_exists` решает `decide` доменной
     ошибкой.
   - `evolve(state, event)` → состояние — применение события: чистый, без проверки инвариантов и
@@ -63,8 +63,9 @@ defmodule Core.Es.Aggregate do
   ## Opts
 
   - `event_codec:` — кодек событий агрегата (`use Core.Es.Event.Codec`). На компиляции не
-    загружается: события ссылаются на Prim агрегата, и загрузка кодека замкнула бы цикл
-    агрегат → кодек → события → `Agg.ID`. Полноту `evolve` по кодеку проверяет при сборке
+    загружается: кодек ждёт события, события — `Agg.ID`, объявленный в теле агрегата, и
+    агрегат, ждущий кодек, держался бы лишь на том, что ни кодек, ни события не ждут сам его
+    модуль (ADR-0014, «Полнота»). Полноту `evolve` по кодеку проверяет при сборке
     репозиторий агрегата (`Core.Es.Aggregate.Repo`, «Полнота `evolve`»); агрегат без
     репозитория не проверяется.
   """

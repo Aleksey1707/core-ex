@@ -22,7 +22,7 @@ defmodule Consumer.Ping do
   defstruct id: nil, version: nil, count: 0
 
   @impl true
-  def decide(%Cmd.Hit{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Pinged)]}
+  def decide(%Cmd.Hit{}, %__MODULE__{}), do: {:ok, [Event.Pinged.draft()]}
 
   @impl true
   def evolve(%__MODULE__{} = state, %Event.Pinged{}), do: %{state | count: state.count + 1}

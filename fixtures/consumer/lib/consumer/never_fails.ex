@@ -11,7 +11,7 @@ defmodule Consumer.NeverFails do
 
   @impl true
   def decide(%Cmd.Cancel{}, %__MODULE__{cancelled?: true}), do: {:ok, []}
-  def decide(%Cmd.Cancel{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Cancelled)]}
+  def decide(%Cmd.Cancel{}, %__MODULE__{}), do: {:ok, [Event.Cancelled.draft()]}
 
   @impl true
   def evolve(state, %Event.Placed{}), do: state

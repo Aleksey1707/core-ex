@@ -20,26 +20,6 @@ defmodule Core.Es.Event.Codec do
   События без нагрузки (`payload: nil` у `use Es.Event`) клоуз не требуют вовсе —
   билдер знает о них из `__es_payload__/0`.
 
-  ## Черновик события
-
-  Элемент результата `decide/2` агрегата строится конструктором кодека — `draft`, который
-  билдер генерирует по `tags:`:
-
-  - `draft(Event.Mod, %Event.Mod.Payload{} = payload)` → `{Event.Mod, payload}` — clause на
-    каждое событие с нагрузкой;
-  - `draft(Event.Mod)` → `Event.Mod` — clause на каждое событие без нагрузки.
-
-  Пара «событие — модуль нагрузки» стоит в голове clause литералами, поэтому событие не из
-  `tags:`, нагрузку другого события и событие с нагрузкой без неё ловит вывод типов при сборке
-  вызывающего. Модуль нагрузки, общий у нескольких событий кодека, ошибкой не является: событие
-  задаёт первый аргумент. Возвращается прежний элемент `Core.Es.Aggregate.result()`, так что
-  `Core.Es.Aggregate.Test.given/3` и тесты, сравнивающие результат `decide/2` с кортежами, не
-  меняются.
-
-  Конструктор живёт в кодеке, а не в семействе `<Aggregate>.Event`: семейство и кодек ждут
-  компиляции друг друга. Вызов `draft` из `decide/2` — ребро runtime, цикла компиляции он не
-  добавляет.
-
   ## Проверки нагрузки
 
   Сборка кодека проверяет колбэки нагрузки по `tags:`: на каждое событие с нагрузкой макрос
@@ -107,7 +87,7 @@ defmodule Core.Es.Event.Codec do
   кодека — `CompileError`. Выведенный Prim агрегата кодек отдаёт тем же `__es_aggregate_id__/0`.
 
   Макрос занимает в вызывающем модуле имена `@es_event`, `@es_type`, `@es_aggregate_id`, `@es_by`,
-  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_use_line`, `draft/1`, `draft/2`,
+  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_use_line`, имена
   функций-проверок нагрузки и приватные `es_dump_payload/2`, `es_load_payload/3`.
   """
 
@@ -303,8 +283,7 @@ defmodule Core.Es.Event.Codec do
       do: ensure_defined!(env.module, {:upcast, 2}, "у кодека непустые upcasts:", env)
 
     quote do
-      unquote(draft_ast(tags))
-      unquote_splicing(payload_checks(env.module, tags))
+      (unquote_splicing(payload_checks(env.module, tags)))
     end
   end
 
@@ -596,55 +575,6 @@ defmodule Core.Es.Event.Codec do
         description: "#{@label}: #{inspect(mod)} обязан объявить #{fun}/#{arity} — #{reason}",
         file: env.file,
         line: env.line
-    end
-  end
-
-  defp draft_ast(tags) do
-    {with_payload, without_payload} =
-      tags
-      |> Map.keys()
-      |> Enum.sort()
-      |> Enum.split_with(&(not is_nil(&1.__es_payload__())))
-
-    quote do
-      unquote(draft_payload_ast(with_payload))
-      unquote(draft_bare_ast(without_payload))
-    end
-  end
-
-  defp draft_payload_ast([]), do: nil
-
-  defp draft_payload_ast(mods) do
-    clauses =
-      for mod <- mods do
-        quote do
-          def draft(unquote(mod), %unquote(mod.__es_payload__()){} = payload), do: {unquote(mod), payload}
-        end
-      end
-
-    quote do
-      @doc "Черновик события с нагрузкой — элемент результата `decide/2`."
-      @spec draft(module(), struct()) :: Core.Es.Aggregate.result()
-
-      unquote_splicing(clauses)
-    end
-  end
-
-  defp draft_bare_ast([]), do: nil
-
-  defp draft_bare_ast(mods) do
-    clauses =
-      for mod <- mods do
-        quote do
-          def draft(unquote(mod)), do: unquote(mod)
-        end
-      end
-
-    quote do
-      @doc "Черновик события без нагрузки — элемент результата `decide/2`."
-      @spec draft(module()) :: Core.Es.Aggregate.result()
-
-      unquote_splicing(clauses)
     end
   end
 

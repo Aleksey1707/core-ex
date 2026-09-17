@@ -6,6 +6,26 @@ defmodule Core.Es.Event do
   интроспекция события — `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`:
   кодек выводит по ней Prim агрегата и автора, а событиям без нагрузки не требует
   клоуз `dump_payload/2` и `load_payload/3`.
+
+  ## Черновик события
+
+  Элемент результата `decide/2` агрегата строит само событие — `draft`:
+
+  - `draft(%Payload{} = payload)` → `{Event.Mod, payload}` у события с нагрузкой;
+  - `draft()` → `Event.Mod` у события без нагрузки.
+
+  Модуль нагрузки стоит в голове литералом, поэтому нагрузку другого события и не-struct ловит
+  вывод типов при сборке вызывающего, а `draft()` у события с нагрузкой и `draft(payload)` у
+  события без неё — предупреждение о неопределённой функции. Модуль нагрузки, общий у нескольких
+  событий, ошибкой не является: `draft` у каждого события свой. Событие другого агрегата сборка не
+  ловит — `FunctionClauseError` при исполнении команды (`Core.Es.Aggregate`). Возвращается элемент
+  `Core.Es.Aggregate.result()`, так что `Core.Es.Aggregate.Test.given/3` и тесты, сравнивающие
+  результат `decide/2` с кортежами, не меняются.
+
+  Черновик живёт в событии, а не в кодеке агрегата: он не касается wire, а пару «событие —
+  нагрузка» событие знает само из `payload:`.
+
+  Макрос занимает в модуле события имя `draft/1` (с нагрузкой) или `draft/0` (без неё).
   """
 
   import Core.Helper.String, only: [first_line: 1]
@@ -96,6 +116,11 @@ defmodule Core.Es.Event do
                 by: unquote(by_mod).t()
               }
 
+        @doc "Черновик события без нагрузки — элемент результата `decide/2` агрегата."
+        @spec draft() :: __MODULE__
+
+        def draft, do: __MODULE__
+
         @doc "Создать событие без нагрузки. Опциональный `id` — для восстановления из хранилища."
         @spec new(
                 unquote(aggregate_id_mod).t(),
@@ -135,6 +160,11 @@ defmodule Core.Es.Event do
                 at: EsEvent.At.t(),
                 by: unquote(by_mod).t()
               }
+
+        @doc "Черновик события с нагрузкой — элемент результата `decide/2` агрегата."
+        @spec draft(unquote(payload_mod).t()) :: {__MODULE__, unquote(payload_mod).t()}
+
+        def draft(%unquote(payload_mod){} = payload), do: {__MODULE__, payload}
 
         @doc "Создать событие. Опциональный `id` — для восстановления из хранилища."
         @spec new(

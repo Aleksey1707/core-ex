@@ -679,17 +679,18 @@
   └─ lib/my_app/domain/<bc>/common/account/repo.ex:2: MyApp.Domain.<BC>.Common.Account.Repo."evolve/2 принимает MyApp.Domain.<BC>.Common.Account.Event.Closed"/2
   ```
 
-  Элемент результата `decide/2` — черновик события — строится конструктором кодека агрегата:
-  `use Core.Es.Event.Codec` генерирует по `tags:` `draft(Event.Mod, payload)` (clause на каждое
-  событие с нагрузкой) и `draft(Event.Mod)` (на каждое событие без неё). Кортеж, собранный
-  вручную, ни с чем не сверялся: событие не из кодека агрегата, нагрузка другого события и
-  событие с нагрузкой без неё падали `FunctionClauseError` / `UndefinedFunctionError` в
-  транзакции. У `draft` пара событие–нагрузка стоит в голове clause, и те же ошибки —
-  предупреждение при сборке. Модуль нагрузки, общий у нескольких событий кодека, законен: событие
-  задаёт первый аргумент. `draft` возвращает прежний кортеж, поэтому `given/3` и тесты с
-  `{:ok, [Event.Closed]} = decide(…)` не меняются; кортеж вручную библиотека по-прежнему
-  принимает, но свод требует `draft` (`11-domain.md`). Пару сверяет только вызов с литералом
-  события: событие и нагрузка из переменных (`Enum.map`) сборке не видны.
+  Элемент результата `decide/2` — черновик события — строит само событие: `use Core.Es.Event`
+  генерирует `draft(%Payload{} = payload)` у события с нагрузкой и `draft()` у события без неё.
+  Кортеж, собранный вручную, ни с чем не сверялся: нагрузка другого события и событие с нагрузкой
+  без неё падали `FunctionClauseError` / `UndefinedFunctionError` в транзакции. У `draft` модуль
+  нагрузки стоит в голове, и те же ошибки — предупреждение при сборке: чужая нагрузка —
+  `incompatible types`, неверная арность — неопределённая функция. Событие не из кодека агрегата
+  сборка не ловит — оно по-прежнему падает `FunctionClauseError` при исполнении команды. Модуль
+  нагрузки, общий у нескольких событий, законен: `draft` у каждого события свой. Черновик живёт в
+  событии, а не в кодеке: к wire он отношения не имеет (ADR-0014). `draft` возвращает прежний
+  кортеж, поэтому `given/3` и тесты с `{:ok, [Event.Closed]} = decide(…)` не меняются; кортеж
+  вручную библиотека по-прежнему принимает, но свод требует `draft` (`11-domain.md`). Нагрузку
+  сверяет только вызов у литерала события: событие из переменной (`Enum.map`) сборке не видно.
 
   ```elixir
   # было
@@ -700,12 +701,12 @@
 
   # стало
   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
-    do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
+    do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
 
-  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
+  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
 
   # общий модуль нагрузки — было `Enum.map(role_ids, &{event, &1})`
-  Enum.map(role_ids, &Event.Codec.draft(event, &1))
+  Enum.map(role_ids, &event.draft(&1))
   ```
 
   ```elixir
@@ -716,7 +717,7 @@
     defstruct id: nil, version: nil, name: nil, status: nil
 
     @impl true
-    def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
+    def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
 
     @impl true
     def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
@@ -1119,10 +1120,11 @@
 
 ### Изменения контракта макросов
 
-- **`use Core.Es.Event.Codec` занимает в кодеке агрегата имена `draft/1`, `draft/2` и
-  функций-проверок нагрузки.** `draft` — конструктор черновика события (пункт «Event-sourced
-  агрегат» в разделе «Новое»). Своя функция с этим именем и арностью в кодеке сталкивается с
-  генерируемыми clauses: её нужно переименовать. Занятыми стали и `@es_use_line`, и имена
+- **`use Core.Es.Event` занимает в модуле события имя `draft/1` (с нагрузкой) или `draft/0` (без
+  неё), `use Core.Es.Event.Codec` в кодеке агрегата — имена функций-проверок нагрузки.** `draft` —
+  конструктор черновика события (пункт «Event-sourced агрегат» в разделе «Новое»). Своя функция с
+  этим именем и арностью в модуле события сталкивается с генерируемой: её нужно переименовать.
+  В кодеке занятыми стали `@es_use_line` и имена
   `"dump_payload/2 принимает <Event>"/2` и `"load_payload/3 отдаёт нагрузку <Payload>"/3` (пункт
   «`Core.Es.Event.Codec`: колбэки вместо приватных клоуз» в разделе «Ломающие изменения контракта»).
 - **Bang-конструкторы Prim и `Core.Version.new/0` возвращают известный компилятору struct.**
