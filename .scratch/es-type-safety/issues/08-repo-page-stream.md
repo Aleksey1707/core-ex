@@ -62,3 +62,7 @@
   `page_stream/4` и опции `repo:` / `codec:` на странице потока — сигнатура из спеки, `Store.page_stream/5` читает
   через `Core.Config`, как и `Store.append/5`; тест ошибки всей страницы у state-stored — реализация общая, исход
   держат контракт и `store_test.exs`.
+- 2026-09-17 — по проверке rc на qc (коммит 87b2579): `Core.Es.Store.page_stream/5` с прежними именем и арностью
+  у потребителя собиралась молча. Реализация переименована в `Core.Es.Store.read_stream/5`: старый вызов —
+  `Core.Es.Store.page_stream/5 is undefined or private` (маркер X3o фикстуры). `13-repos.md`, moduledoc
+  `Core.Es.Store`, CHANGELOG — «было → стало» с предупреждением старого вызова.

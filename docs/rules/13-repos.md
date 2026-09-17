@@ -799,7 +799,7 @@ MUST NOT: «история» — имя экрана у потребителя (
 
 - Голова принимает только `%Agg.ID{}`, результат сужен до `{:ok, %Pagination.Result{}}`: ID другого
   агрегата, опечатка в поле страницы и невозможная clause — предупреждение при сборке. Реализацию
-  `Core.Es.Store.page_stream/5` (`@doc false`) звать из usecase MUST NOT: кодек и ID в ней —
+  `Core.Es.Store.read_stream/5` (`@doc false`) звать из usecase MUST NOT: кодек и ID в ней —
   параметры, сборка их не сверяет, и ID другого агрегата молча даёт пустую страницу.
 - `page_stream` доступ не проверяет и `:not_found` не отдаёт: пустой поток — страница с
   `count: 0`. Читающий usecase MUST до чтения проверить права по `Context` и существование
@@ -828,7 +828,7 @@ def history(%Agg.ID{} = id, limit, offset, %Context{} = context) do
 end
 
 # плохо — реализация хранилища: ID другого агрегата собирается и молча даёт пустую страницу
-Core.Es.Store.page_stream(Agg.Event.Codec, other_id, limit, offset, context)
+Core.Es.Store.read_stream(Agg.Event.Codec, other_id, limit, offset, context)
 
 # хорошо — репозиторий агрегата: на ID другого агрегата сборка даёт
 # warning: incompatible types given to MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Pg.page_stream/4

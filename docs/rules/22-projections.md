@@ -170,6 +170,8 @@ clause на каждый агрегат, чьи события есть в `even
 агрегата и невозможная clause по результату — предупреждение при сборке. Исходы, опрос и режим
 `:inline` тестового дерева — moduledoc `Core.Es.Projection`, «Ожидание»; место вызова — после
 commit, вне `Transact.run` (`20-agreements.md`, CQS); тест — `19-testing.md`, «Проекции».
+Реализацию `Core.Es.Projection.Await.run/5` (`@doc false`) звать MUST NOT: модуль проекции и тип
+агрегата в ней — параметры, и сборка не сверяет ни агрегат, ни ID.
 
 Проверяется: предупреждение при сборке вызывающего — агрегат не из `events:`, ID другого агрегата,
 невозможная clause по результату `await/3` (`make consumer-check`).
@@ -194,6 +196,9 @@ histogram_quantile(0.5, sum by (le, projection)
 # плохо — повтор команды по таймауту ожидания: запись уже закоммичена
 with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, context),
      do: open_and_await(id, params, context)
+
+# плохо — реализация ожидания мимо await/3: ID другого агрегата сборка не видит
+Core.Es.Projection.Await.run(projection, projection.__es_projection__(), "account", order_id, 5_000)
 
 # хорошо — usecase записал и закоммитил, вызывающий ждёт проекцию и читает read-модель
 with :ok <- Accounts.Open.call(id, params, context),

@@ -201,7 +201,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
             %Core.Pagination.Offset{} = offset,
             %Core.Context{} = context
           ) do
-        case Core.Es.Store.page_stream(unquote(cfg.event_codec), id, limit, offset, context) do
+        case Core.Es.Store.read_stream(unquote(cfg.event_codec), id, limit, offset, context) do
           {:ok, %Core.Pagination.Result{} = page} -> {:ok, page}
           {:error, reason} -> {:error, reason}
         end

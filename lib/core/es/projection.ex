@@ -171,7 +171,6 @@ defmodule Core.Es.Projection do
 
   alias Core.Error
   alias Core.Es
-  alias Core.Es.Projection.Await
   alias Core.Es.Projection.Batch
   alias Core.Helper
 
@@ -299,7 +298,7 @@ defmodule Core.Es.Projection do
     quote generated: true do
       def await(unquote(aggregate), %unquote(id){} = aggregate_id, timeout)
           when is_integer(timeout) and timeout >= 0 do
-        case Core.Es.Projection.await(__MODULE__, unquote(type), aggregate_id, timeout) do
+        case Core.Es.Projection.Await.run(__MODULE__, __es_projection__(), unquote(type), aggregate_id, timeout) do
           :ok -> :ok
           {:error, %Core.Error{} = error} -> {:error, error}
         end
@@ -483,13 +482,4 @@ defmodule Core.Es.Projection do
   defp outcome({:processed, _event_count}), do: :processed
   defp outcome({:error, %Error{} = error, _failure}), do: {:error, error}
   defp outcome(outcome) when outcome in ~w(idle locked outdated)a, do: outcome
-
-  # ===== ожидание =====
-
-  @doc false
-  @spec await(module(), String.t(), struct(), non_neg_integer()) :: :ok | {:error, Error.t()}
-
-  def await(projection, type, %_{} = aggregate_id, timeout)
-      when is_atom(projection) and is_binary(type) and is_integer(timeout) and timeout >= 0,
-      do: Await.run(projection, projection.__es_projection__(), type, aggregate_id, timeout)
 end

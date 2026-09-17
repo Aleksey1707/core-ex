@@ -156,7 +156,7 @@ defmodule Core.Es.StoreTest do
     end
   end
 
-  describe "page_stream/5" do
+  describe "read_stream/5" do
     test "страница по возрастанию версии; count — весь поток" do
       id = AggID.new()
       [first, second, third, fourth, fifth] = Enum.map(1..5, &event(id, &1))
@@ -205,7 +205,7 @@ defmodule Core.Es.StoreTest do
   end
 
   defp page(id, limit, offset) do
-    Es.Store.page_stream(
+    Es.Store.read_stream(
       @codec,
       id,
       Pagination.Limit.new!(limit),

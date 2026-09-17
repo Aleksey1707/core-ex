@@ -91,9 +91,12 @@ end
 - `:projection_timeout` и `:projection_rebuilding` — ответ 202 с `{id, version}`, а не ошибка:
   запись применена, повтор команды по ним запрещает свод библиотеки.
 - Операция такой команды MUST объявлять ответ `accepted:` со своей схемой.
-- Проекцию ждёт литеральный вызов `Projection.await(Agg, id, timeout)` в экшене, общий хелпер
-  принимает его результат. Хелпер, который зовёт `projection.await(agg, id, timeout)` сам,
-  MUST NOT: через модуль-переменную сборка не проверяет ни агрегат, ни ID.
+- Проекцию ждёт литеральный вызов `Projection.await(Agg, id, timeout)` в экшене или в его
+  `defp`, общий хелпер принимает результат. ID на месте вызова MUST быть сужен до `%Agg.ID{}` —
+  паттерном в голове функции с вызовом или в `with`: ID из параметра без сужения сборка не
+  сверяет, и ловится только агрегат не из `events:`. Хелпер, который зовёт
+  `projection.await(agg, id, timeout)` сам, MUST NOT: через модуль-переменную сборка не
+  проверяет ни агрегат, ни ID.
 
 ```elixir
 # плохо — чтение сразу после команды: проекция ещё не обработала запись
@@ -103,9 +106,17 @@ with {:ok, _version} <- Usecases.Agg.take(id, version, context),
 # плохо — модуль проекции параметром хелпера: ID другого агрегата сборка не видит
 Helper.Projection.await(conn, Projection, Agg, id, written, &reload(&1, id))
 
-# хорошо
-with {:ok, written} <- Usecases.Agg.take(id, version, context) do
-  Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), written, &reload(&1, id))
+# плохо — ID параметром defp без сужения: ID другого агрегата сборка не видит
+defp respond_taken(conn, id, version) do
+  Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+end
+
+# хорошо — литерал в defp экшена, ID сужен в голове, ответ 202 получает {id, version}
+with {:ok, version} <- Usecases.Agg.take(id, expected, context),
+     do: respond_taken(conn, id, version)
+
+defp respond_taken(conn, %Agg.ID{} = id, version) do
+  Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
 end
 ```
 

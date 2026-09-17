@@ -42,7 +42,7 @@ defmodule Core.Es.Store do
 
   ## Страница потока
 
-  `page_stream/5` — реализация `page_stream/4`, которую генерируют репозитории агрегатов
+  `read_stream/5` — реализация `page_stream/4`, которую генерируют репозитории агрегатов
   (`use Core.Es.Aggregate.Repo.Pg`, `use Core.Repo.Pg.StateStored`) с кодеком агрегата и закрытым
   struct его ID: потребитель читает страницу у репозитория. Отдаёт `Core.Pagination.Result` из
   событий потока одного агрегата по возрастанию версии; `count` — число событий всего потока.
@@ -312,7 +312,7 @@ defmodule Core.Es.Store do
   # ===== страница потока =====
 
   @doc false
-  @spec page_stream(
+  @spec read_stream(
           module(),
           struct(),
           Pagination.Limit.t(),
@@ -320,7 +320,7 @@ defmodule Core.Es.Store do
           Context.t()
         ) :: {:ok, Pagination.Result.t(Es.Event.t())} | {:error, Error.t()}
 
-  def page_stream(
+  def read_stream(
         event_codec,
         %_{} = aggregate_id,
         %Pagination.Limit{} = limit,

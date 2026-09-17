@@ -46,4 +46,8 @@ defmodule Consumer.S.Draft do
   def b3b_event_without_payload_given_payload(%Account.Name{} = name),
     # expect: Consumer.Account.Event.Frozen.draft/1 is undefined or private
     do: Account.Event.Frozen.draft(Account.Event.Opened.Payload.new(name))
+
+  # B3c — захват `draft/1` события без нагрузки
+  # expect: Consumer.Account.Event.Closed.draft/1 is undefined or private
+  def b3c_capture_event_without_payload(names), do: Enum.map(names, &Account.Event.Closed.draft/1)
 end

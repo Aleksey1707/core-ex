@@ -581,11 +581,14 @@
   невозможная clause по результату — предупреждение при сборке вызывающего. Прежняя форма
   `Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` принимала кодек и ID
   параметрами, и сборка молчала: ID заказа при кодеке `Account` давал пустую страницу потока
-  `account` с чужим uuid. Теперь это `@doc false` реализация; тестовый дублёр behaviour
+  `account` с чужим uuid. Реализация переименована в `Core.Es.Store.read_stream/5`
+  (`@doc false`): с прежним именем старый вызов собирался бы молча, теперь он даёт
+  предупреждение `Core.Es.Store.page_stream/5 is undefined or private`. Тестовый дублёр behaviour
   `use Core.Es.Aggregate.Repo` получает колбэк `page_stream/4`.
 
   ```elixir
-  # было — собиралось, отдавало пустую страницу потока `account` с uuid заказа
+  # было — собиралось, отдавало пустую страницу потока `account` с uuid заказа;
+  # теперь — warning: Core.Es.Store.page_stream/5 is undefined or private
   Core.Es.Store.page_stream(Account.Event.Codec, order_id, limit, offset, context)
 
   # стало — warning: incompatible types given to MyApp.Domain.<BC>.Common.Account.Repo.Pg.page_stream/4
@@ -690,7 +693,13 @@
   событии, а не в кодеке: к wire он отношения не имеет (ADR-0014). `draft` возвращает прежний
   кортеж, поэтому `given/3` и тесты с `{:ok, [Event.Closed]} = decide(…)` не меняются; кортеж
   вручную библиотека по-прежнему принимает, но свод требует `draft` (`11-domain.md`). Нагрузку
-  сверяет только вызов у литерала события: событие из переменной (`Enum.map`) сборке не видно.
+  сверяет только вызов у литерала события. Модуль события в переменной (`&event.draft(&1)`) сборка
+  не проверяет вовсе — это вызов через модуль-переменную, и свод его запрещает; захват
+  `&Event.X.draft/1` сверяет арность, а нагрузку элементов списка не видит ни одна форма. Событие
+  другого агрегата сборка не ловит — `FunctionClauseError` при исполнении команды, поэтому у каждой
+  ветки `decide` нужен тест через `given/3`. Кортеж от `draft` сборка не отличает и на прежнюю
+  форму не предупреждает — однострочные формы находит поиск:
+  `grep -rnE '\{Event\.[A-Z][A-Za-z]*, |\[Event\.[A-Z][A-Za-z]*\]|Enum\.map\((.*, )?&\{[a-z_]+, &1\}' lib`.
 
   ```elixir
   # было
@@ -705,8 +714,8 @@
 
   def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
 
-  # общий модуль нагрузки — было `Enum.map(role_ids, &{event, &1})`
-  Enum.map(role_ids, &event.draft(&1))
+  # список черновиков — было `Enum.map(role_ids, &{event, &1})`
+  Enum.map(role_ids, &Event.RoleGranted.draft/1)
   ```
 
   ```elixir
@@ -935,10 +944,12 @@
   `Core.Es.Projection.await(projection, aggregate, aggregate_id, timeout)` принимала модуль
   проекции и агрегат параметрами, хотя на месте вызова они всегда литералы, и сборка молчала: ID
   заказа при `Account` ждал поток `account` с чужим uuid, агрегат не из `events:` падал
-  `FunctionClauseError` при исполнении. Теперь это `@doc false` реализация. Макрос занимает в
-  модуле проекции имя `await/3`. Цель — позиция последнего события потока на момент вызова:
-  пустой поток или чекпоинт не ниже цели — `:ok`; строки чекпоинта нет, её версия ниже
-  `version:` или чекпоинт ниже цели пересборки — сразу прикладная `:projection_rebuilding`, а не
+  `FunctionClauseError` при исполнении. Она удалена: `await/3` сам зовёт реализацию ожидания
+  `Core.Es.Projection.Await.run/5` (`@doc false`, звать её MUST NOT), и старый вызов даёт
+  предупреждение `Core.Es.Projection.await/4 is undefined or private`. Макрос занимает в модуле
+  проекции имя `await/3`. Цель — позиция последнего события потока на момент вызова: пустой поток
+  или чекпоинт не ниже цели — `:ok`; строки чекпоинта нет, её версия ниже `version:` или чекпоинт
+  ниже цели пересборки — сразу прикладная `:projection_rebuilding`, а не
   ожидание до таймаута; иначе ожидание до таймаута — прикладная `:projection_timeout`
   (`ns: :es`). Ответ приходит сразу после commit пачки на любой ноде: пачка с исходом
   `:processed`, включая старт пересборки, в своей транзакции шлёт `NOTIFY` в канал
@@ -975,9 +986,10 @@
   `duration`; `projection`, `result: :ok | :timeout | :rebuilding`. Нормы — `22-projections.md`
   («Read-after-write»), `20-agreements.md` (`await` MUST NOT внутри `Transact.run`),
   `19-testing.md` (`await: :inline`), `21-observability.md` (span ожидания на call site); у
-  потребителя — `app/15-web-api.md`: проекцию ждёт литеральный вызов в экшене, а хелпер,
-  принимающий модуль проекции параметром, запрещён — через модуль-переменную сборка не проверяет
-  ни агрегат, ни ID.
+  потребителя — `app/15-web-api.md`: проекцию ждёт литеральный вызов в экшене или его `defp` с ID,
+  суженным до `%Agg.ID{}` (ID из параметра без сужения сборка не сверяет), а хелпер, принимающий
+  модуль проекции параметром, запрещён — через модуль-переменную сборка не проверяет ни агрегат,
+  ни ID.
 
   ```elixir
   # config/test.exs
@@ -989,7 +1001,8 @@
     AccountList.ReadRepo.get(id, :current, context)
   end
 
-  # было — собиралось, ждало поток `account` с uuid заказа
+  # было — собиралось, ждало поток `account` с uuid заказа;
+  # теперь — warning: Core.Es.Projection.await/4 is undefined or private
   Core.Es.Projection.await(AccountList.Projection, Account, order_id, 5_000)
 
   # стало — warning: incompatible types given to MyApp.Domain.<BC>.<Actor>.AccountList.Projection.await/3

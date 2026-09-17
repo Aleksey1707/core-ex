@@ -16,6 +16,10 @@ defmodule Consumer.S.Await do
     # expect: incompatible types given to Consumer.Projection.await/3
     do: Projection.await(Ping, id, 100)
 
+  # G4o — прежняя форма: реализация ожидания в библиотеке вместо `await/3` модуля проекции
+  # expect: Core.Es.Projection.await/4 is undefined or private
+  def g4o_library_await(%Account.ID{} = id), do: Core.Es.Projection.await(Projection, Account, id, 100)
+
   # G4c — `{:ok, _}` по результату `await`
   def g4c_case_ok(%Account.ID{} = id) do
     case Projection.await(Account, id, 100) do

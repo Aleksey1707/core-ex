@@ -4,6 +4,9 @@ defmodule Core.Es.Projection.Await do
   `Core.Es.Projection.Supervisor`, сигнал и шаги чекпоинта (`await: :poll`) или прогон проекции
   в вызывающем процессе (`await: :inline`). Исходы — в `@moduledoc` `Core.Es.Projection`,
   «Ожидание».
+
+  `run/5` зовёт только `await/3`, которую генерирует `use Core.Es.Projection`: модуль проекции и
+  тип агрегата в ней — параметры, сборка их не сверяет, и потребитель ждёт у модуля проекции.
   """
 
   alias Core.Error
@@ -16,10 +19,7 @@ defmodule Core.Es.Projection.Await do
 
   require Error
 
-  @doc """
-  Дождаться, пока проекция `projection` по объявлению `declaration` обработает последнее событие
-  потока `aggregate_id` типа агрегата `type`, — не дольше `timeout` мс.
-  """
+  @doc false
   @spec run(module(), Projection.t(), String.t(), struct(), non_neg_integer()) ::
           :ok | {:error, Error.t()}
 
