@@ -420,9 +420,9 @@ InCodec.dump(step)
   `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без изменений —
   `{:ok, []}`.
 - Элемент результата — черновик события (`CONTEXT.md`, «Черновик события»); он MUST строиться
-  только кодеком агрегата: `Event.Codec.draft(Event.Mod, payload)` у события с нагрузкой,
-  `Event.Codec.draft(Event.Mod)` — без неё. Кортеж `{Event.Mod, payload}`, собранный вручную,
-  библиотека примет, но пару событие–нагрузка в нём сборка не сверяет.
+  только самим событием: `Event.Mod.draft(payload)` у события с нагрузкой, `Event.Mod.draft()` —
+  без неё. Кортеж `{Event.Mod, payload}`, собранный вручную, библиотека примет, но нагрузку в нём
+  сборка не сверяет.
 - `not_found` / `already_exists` — доменные ошибки `decide` по `version: nil`: существование
   агрегата решает домен, а не репозиторий.
 - Несколько событий одной команды — `with` и `fold/3`: следующее решение видит состояние после
@@ -437,10 +437,11 @@ InCodec.dump(step)
   как есть.
 
 Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`;
-предупреждение при сборке — у `draft` событие не из кодека, нагрузка другого события или событие
-с нагрузкой без неё; на строке `use Core.Es.Aggregate.Repo` — у `evolve/2` нет clause события
-кодека, опечатка в ключе `%{state | …}` или в поле нагрузки без паттерна `%Payload{}`
-(`make consumer-check`).
+предупреждение при сборке — у `draft` нагрузка другого события, `draft()` у события с нагрузкой
+или `draft(payload)` у события без неё; на строке `use Core.Es.Aggregate.Repo` — у `evolve/2` нет
+clause события кодека, опечатка в ключе `%{state | …}` или в поле нагрузки без паттерна
+`%Payload{}` (`make consumer-check`); `FunctionClauseError` при исполнении команды — черновик
+события не из кодека агрегата.
 
 ```elixir
 # плохо — голова evolve проверяет статус: инвариант ушёл из decide, а событие при другом
@@ -455,14 +456,14 @@ def decide(%Cmd.Freeze{} = cmd, state),
 def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
   do: {:ok, [{Event.Renamed, Event.Opened.Payload.new(name)}]}
 
-# хорошо — решение в decide, черновик от кодека, evolve только применяет событие
+# хорошо — решение в decide, черновик от события, evolve только применяет событие
 def decide(%Cmd.Freeze{}, %__MODULE__{version: nil}),
   do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
 
-def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
+def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
 
 def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
-  do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
+  do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
 
 def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 ```
@@ -550,7 +551,8 @@ end
 
 `use Es.Event` дополнительно генерирует интроспекцию (`__es_payload__/0`, `__es_aggregate_id__/0`,
 `__es_by__/0`) — по ней `<Aggregate>.Event.Codec` выводит Prim агрегата и автора и обслуживает
-события без нагрузки сам.
+события без нагрузки сам. Черновик события для `decide/2` агрегата — тоже `use Es.Event`:
+`draft/1` у события с нагрузкой, `draft/0` без неё («Event-sourced»).
 
 Объединяющий модуль событий агрегата (`<Aggregate>.Event`) обязан предоставлять:
 

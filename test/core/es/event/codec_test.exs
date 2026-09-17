@@ -175,61 +175,6 @@ defmodule Core.Es.Event.CodecTest do
     end
   end
 
-  describe "draft/1 и draft/2" do
-    test "событие с нагрузкой — элемент результата decide: модуль события и нагрузка" do
-      payload = EventFixture.Event.Created.Payload.new(EventFixture.Name.new!("Приёмка"))
-
-      assert EventFixture.Event.Codec.draft(EventFixture.Event.Created, payload) ==
-               {EventFixture.Event.Created, payload}
-    end
-
-    test "событие без нагрузки — элемент результата decide: модуль события" do
-      assert EventFixture.Event.Codec.draft(EventFixture.Event.Closed) == EventFixture.Event.Closed
-    end
-
-    test "модуль нагрузки, общий у двух событий, — кодек собирается, событие задаёт первый аргумент" do
-      {mod, _} =
-        Code.eval_quoted(
-          quote do
-            defmodule Core.Es.Event.CodecTest.Granted do
-              use Core.Es.Event,
-                aggregate_id: Core.EventFixture.AggID,
-                by: Core.EventFixture.ActorID,
-                payload: Core.EventFixture.Name
-            end
-
-            defmodule Core.Es.Event.CodecTest.Revoked do
-              use Core.Es.Event,
-                aggregate_id: Core.EventFixture.AggID,
-                by: Core.EventFixture.ActorID,
-                payload: Core.EventFixture.Name
-            end
-
-            defmodule Core.Es.Event.CodecTest.SharedPayloadCodec do
-              use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
-                type: "codec_test",
-                tags: %{
-                  Core.Es.Event.CodecTest.Granted => "shared.granted",
-                  Core.Es.Event.CodecTest.Revoked => "shared.revoked"
-                }
-
-              def dump_payload(%{payload: name}, codec), do: codec.dump(name)
-
-              def load_payload(_mod, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
-            end
-
-            Core.Es.Event.CodecTest.SharedPayloadCodec
-          end
-        )
-
-      name = EventFixture.Name.new!("Приёмка")
-
-      assert mod.draft(Core.Es.Event.CodecTest.Granted, name) == {Core.Es.Event.CodecTest.Granted, name}
-      assert mod.draft(Core.Es.Event.CodecTest.Revoked, name) == {Core.Es.Event.CodecTest.Revoked, name}
-    end
-  end
-
   describe "to_fields/1 и from_fields/1" do
     test "переносят поля конверта врозь и обратно" do
       event = EventFixture.created()
@@ -421,6 +366,46 @@ defmodule Core.Es.Event.CodecTest do
 
       assert mod.type(Core.EventFixture.Event.Closed) == "payloadless.closed"
       refute function_exported?(mod, :dump_payload, 2)
+    end
+
+    test "модуль нагрузки, общий у двух событий, — кодек собирается" do
+      {mod, _} =
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.Granted do
+              use Core.Es.Event,
+                aggregate_id: Core.EventFixture.AggID,
+                by: Core.EventFixture.ActorID,
+                payload: Core.EventFixture.Name
+            end
+
+            defmodule Core.Es.Event.CodecTest.Revoked do
+              use Core.Es.Event,
+                aggregate_id: Core.EventFixture.AggID,
+                by: Core.EventFixture.ActorID,
+                payload: Core.EventFixture.Name
+            end
+
+            defmodule Core.Es.Event.CodecTest.SharedPayloadCodec do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{
+                  Core.Es.Event.CodecTest.Granted => "shared.granted",
+                  Core.Es.Event.CodecTest.Revoked => "shared.revoked"
+                }
+
+              def dump_payload(%{payload: name}, codec), do: codec.dump(name)
+
+              def load_payload(_mod, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
+            end
+
+            Core.Es.Event.CodecTest.SharedPayloadCodec
+          end
+        )
+
+      assert mod.type(Core.Es.Event.CodecTest.Granted) == "shared.granted"
+      assert mod.type(Core.Es.Event.CodecTest.Revoked) == "shared.revoked"
     end
 
     test "источник upcasts: объявлен в tags: — CompileError" do

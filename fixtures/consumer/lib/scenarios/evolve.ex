@@ -10,7 +10,7 @@ defmodule Consumer.S.BadEvolve do
   defstruct id: nil, version: nil, name: nil, status: nil
 
   @impl true
-  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Closed)]}
+  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Closed.draft()]}
 
   @impl true
   def evolve(state, %Event.Opened{payload: %Event.Opened.Payload{} = payload}),
@@ -45,7 +45,7 @@ defmodule Consumer.S.BadEvolvePayload do
   defstruct id: nil, version: nil, name: nil, status: nil
 
   @impl true
-  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Closed)]}
+  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Closed.draft()]}
 
   @impl true
   def evolve(state, %Event.Opened{payload: payload}), do: %{state | name: payload.name}
@@ -76,7 +76,7 @@ defmodule Consumer.S.BadEvolveState do
   defstruct id: nil, version: nil, name: nil, status: nil
 
   @impl true
-  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Closed)]}
+  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Closed.draft()]}
 
   @impl true
   def evolve(state, %Event.Renamed{payload: %Event.Renamed.Payload{} = payload}),
@@ -142,7 +142,7 @@ defmodule Consumer.S.LongName do
   defstruct id: nil, version: nil, closed?: false
 
   @impl true
-  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Codec.draft(Event.Closed)]}
+  def decide(%Cmd.Close{}, %__MODULE__{}), do: {:ok, [Event.Closed.draft()]}
 
   @impl true
   def evolve(state, %Event.Closed{}), do: %{state | closed?: true}
