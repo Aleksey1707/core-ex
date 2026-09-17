@@ -84,6 +84,16 @@ defmodule Consumer.S.Repo do
       # expect: incompatible types given to Consumer.Account.Repo.Pg.page_stream/4
       do: @repo.page_stream(id, limit, offset, context)
 
+  # X3o — прежняя форма: реализация хранилища вместо репозитория агрегата
+  def x3o_store_page_stream(
+        %Account.ID{} = id,
+        %Pagination.Limit{} = limit,
+        %Pagination.Offset{} = offset,
+        %Context{} = context
+      ),
+      # expect: Core.Es.Store.page_stream/5 is undefined or private
+      do: Core.Es.Store.page_stream(Account.Event.Codec, id, limit, offset, context)
+
   # X3b — `:ok` по результату `page_stream`
   def x3b_case_page_stream_ok(%Account.ID{} = id, %Pagination.Limit{} = limit, %Context{} = context) do
     case @repo.page_stream(id, limit, Pagination.Offset.new!(0), context) do

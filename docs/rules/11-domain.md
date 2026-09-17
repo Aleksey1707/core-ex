@@ -422,7 +422,10 @@ InCodec.dump(step)
 - Элемент результата — черновик события (`CONTEXT.md`, «Черновик события»); он MUST строиться
   только самим событием: `Event.Mod.draft(payload)` у события с нагрузкой, `Event.Mod.draft()` —
   без неё. Кортеж `{Event.Mod, payload}`, собранный вручную, библиотека примет, но нагрузку в нём
-  сборка не сверяет.
+  сборка не сверяет. Модуль события в переменной (`event.draft(payload)`, `&event.draft(&1)`) —
+  MUST NOT: вызов через модуль-переменную сборка не проверяет вовсе. Список черновиков строит
+  захват `&Event.Mod.draft/1` — арность он сверяет, нагрузку элементов списка не видит ни одна
+  форма.
 - `not_found` / `already_exists` — доменные ошибки `decide` по `version: nil`: существование
   агрегата решает домен, а не репозиторий.
 - Несколько событий одной команды — `with` и `fold/3`: следующее решение видит состояние после
@@ -456,6 +459,9 @@ def decide(%Cmd.Freeze{} = cmd, state),
 def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
   do: {:ok, [{Event.Renamed, Event.Opened.Payload.new(name)}]}
 
+# плохо — модуль события в переменной: сборка не проверяет ни арность, ни нагрузку
+Enum.map(role_ids, &event.draft(&1))
+
 # хорошо — решение в decide, черновик от события, evolve только применяет событие
 def decide(%Cmd.Freeze{}, %__MODULE__{version: nil}),
   do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
@@ -464,6 +470,9 @@ def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.d
 
 def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
   do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
+
+# список черновиков — захват у литерала события: неверную арность сборка ловит
+Enum.map(role_ids, &Event.RoleGranted.draft/1)
 
 def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 ```
