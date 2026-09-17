@@ -27,8 +27,10 @@
 
 Проверяется: `CompileError` в `use Core.Es.Projection` — нет `project/1` или `clear/0`; в
 `events:` семейство, не событие или событие вне `tags:` кодека `<Aggregate>.Event.Codec`;
-`use Core.Es.ProjectionCase` — у `project/1` есть клауза каждого модуля `events:`, `clear/0`
-очищает каждую таблицу, которую `project/1` пишет на golden-фикстурах.
+предупреждение при сборке на строке `use Core.Es.Projection` — у `project/1` нет clause модуля
+`events:` или опечатка в поле нагрузки без паттерна `%Payload{}` (`make consumer-check`);
+`use Core.Es.ProjectionCase` — `clear/0` очищает каждую таблицу, которую `project/1` пишет на
+golden-фикстурах.
 
 ```elixir
 # плохо — семейство вместо модулей событий и catch-all: необъявленное событие теряется молча
@@ -161,11 +163,16 @@ max_connections >= ноды × (pool_size + различных repo: проек�
 ## Read-after-write
 
 Когда клиент сразу после команды читает read-модель, вызывающий после `:ok` usecase ждёт проекцию
-— `Core.Es.Projection.await(projection, aggregate, aggregate_id, timeout)`. Цель — последнее
-событие потока агрегата на момент вызова; `aggregate` — модуль, в котором лежит кодек событий
-`<Aggregate>.Event.Codec`, то есть сам агрегат. Исходы, опрос и режим `:inline` тестового
-дерева — moduledoc `Core.Es.Projection`, «Ожидание»; место вызова — после commit, вне
-`Transact.run` (`20-agreements.md`, CQS); тест — `19-testing.md`, «Проекции».
+— `Projection.await(Agg, %Agg.ID{} = aggregate_id, timeout)` у модуля своей проекции. Цель —
+последнее событие потока агрегата на момент вызова; `Agg` — модуль, в котором лежит кодек событий
+`<Aggregate>.Event.Codec`, то есть сам агрегат. `await/3` генерирует `use Core.Es.Projection` —
+clause на каждый агрегат, чьи события есть в `events:`: агрегат не из `events:`, ID другого
+агрегата и невозможная clause по результату — предупреждение при сборке. Исходы, опрос и режим
+`:inline` тестового дерева — moduledoc `Core.Es.Projection`, «Ожидание»; место вызова — после
+commit, вне `Transact.run` (`20-agreements.md`, CQS); тест — `19-testing.md`, «Проекции».
+
+Проверяется: предупреждение при сборке вызывающего — агрегат не из `events:`, ID другого агрегата,
+невозможная clause по результату `await/3` (`make consumer-check`).
 
 Сломанный быстрый путь ожидания — `LISTEN` через пулер, `notifications: false` на одной из
 нескольких нод — ошибкой не виден: ожидание доходит шагами страховки (ADR-0013). Медленное
@@ -190,7 +197,7 @@ with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, c
 
 # хорошо — usecase записал и закоммитил, вызывающий ждёт проекцию и читает read-модель
 with :ok <- Accounts.Open.call(id, params, context),
-     :ok <- Core.Es.Projection.await(AccountList.Projection, Account, id, 5_000) do
+     :ok <- AccountList.Projection.await(Account, id, 5_000) do
   AccountList.ReadRepo.get(id, :current, context)
 end
 ```

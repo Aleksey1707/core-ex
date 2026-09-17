@@ -6,7 +6,7 @@ defmodule Core.Es.Projection.Checkpoint do
   (`t:Core.Es.Store.position/0`), `nil` — начало истории. Цель — позиция, до которой идёт
   пересборка, `nil` — цели нет. Запросы идут в транзакции пачки на `repo:` проекции
   (`Core.Es.Projection.run_once/2`); `find/1` зовёт и ожидание проекции
-  (`Core.Es.Projection.await/4`) вне транзакции, `list/1` — метрики `Core.Es.PromEx`.
+  (`await/3` модуля проекции) вне транзакции, `list/1` — метрики `Core.Es.PromEx`.
   """
 
   alias Core.Error

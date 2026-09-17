@@ -14,8 +14,8 @@
 ошибок сразу их исправь.
 
 `make` = `boundary-check → rules-check → layout-check → format-check → compile →
-compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit` (тот же порядок в
-`.pre-commit-config.yaml`):
+compile-no-optional → consumer-check → deps-clean → xref → dialyzer → test → credo → audit` (тот же
+порядок в `.pre-commit-config.yaml`):
 
 | Шаг | Что проверяет |
 |---|---|
@@ -25,6 +25,7 @@ compile-no-optional → deps-clean → xref → dialyzer → test → credo → 
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
 | `compile` | `--warnings-as-errors`, включая нарушения `boundary` |
 | `compile-no-optional` | сборка без optional-клиентов брокеров (`10-architecture.md`) |
+| `consumer-check` | предупреждения фикстуры-потребителя `fixtures/consumer` против маркеров `# expect:` (ADR-0014) |
 | `xref` | `mix xref graph --format cycles` — храповик на циклы компиляции |
 | `credo` | `mix credo --strict` |
 | `audit` | `mix deps.audit` — известные CVE в зависимостях |
@@ -111,14 +112,14 @@ Logger.debug(
 читающие → `{:ok, T} | {:error, _}` (см. `10-architecture.md`).
 
 Внутри `Transact.run` допустимы только запросы через `DAO` и enqueue Oban. HTTP, publish в брокер,
-кеш, `sleep`, ожидание проекции `Core.Es.Projection.await/4` и команда процесса агрегата
+кеш, `sleep`, ожидание проекции `Projection.await/3` и команда процесса агрегата
 `Agg.Process.execute` — MUST NOT: транзакция держит соединение и блокировки на всё время вызова,
 незакоммиченную запись проекция не увидит вовсе, а команда идёт своей транзакцией, и откат её
 попытки отменил бы внешнюю. Побочный эффект — после commit (`Helper.AfterCommit.register/1`) или
 отдельным шагом. Таблица допустимого — «Что можно внутри `Transact.run`» в `10-architecture.md`.
 
 Проверяется для ожидания проекции и команды процесса агрегата: `ArgumentError` в
-`Core.Es.Projection.await/4` и `Agg.Process.execute` внутри транзакции.
+`Projection.await/3` и `Agg.Process.execute` внутри транзакции.
 
 Изменяющая функция не возвращает **состояние**, но MAY вернуть **результат собственного
 выполнения** — информацию, порождённую самой записью и недоступную иначе:
@@ -326,6 +327,42 @@ def parse({:ok, data}, opts), do: do_parse(data, opts)
 # хорошо — домен только допустимых форм; иное → FunctionClauseError / type warning
 def parse({:ok, data}, opts), do: do_parse(data, opts)
 ```
+
+### Генерируемые функции
+
+Функция, которую макрос `Core` генерирует у потребителя, — граница типов: вызов через
+модуль-переменную и функция `Core`, вызванная при его же сборке, дают компилятору `dynamic()`.
+Почему граница стоит здесь — ADR-0014 (`docs/adr/0014-consumer-type-safety-by-inference.md`).
+
+- Голова MUST закрывать struct паттерном (`%__MODULE__{}`, `%unquote(id){}`), а не `is_struct/2`:
+  guard даёт открытую map, и опечатка в поле не ловится.
+- Результат из библиотеки MUST сужаться паттерном в той же функции, код сужения — в
+  `quote generated: true`: у части потребителей одна из clauses недостижима, и без разметки
+  компилятор предупреждает в их сборке.
+- Clause, недостижимая у части потребителей, MUST NOT возвращать голую переменную
+  (`{:error, _} = error -> error`): её тело типизируется `dynamic()` и схлопывает весь результат.
+- Bang-функция MUST делать `raise Core.Exc` сама, а не через `Core.Result.unwrap!/1`: результат
+  `unwrap!` при сборке `Core` — `dynamic()`.
+
+```elixir
+# плохо — открытая голова, результат библиотеки без формы
+quote do
+  def execute(state, command) when is_struct(state, __MODULE__) and is_struct(command),
+    do: Core.Es.Aggregate.execute(__MODULE__, state, command)
+end
+
+# хорошо
+quote generated: true do
+  def execute(%__MODULE__{} = state, command) when is_struct(command) do
+    case Core.Es.Aggregate.apply_decision(__MODULE__, state, command, decide(command, state)) do
+      {:ok, {events, %__MODULE__{} = executed}} when is_list(events) -> {:ok, {events, executed}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+end
+```
+
+Проверяется: `make consumer-check` — предупреждения фикстуры-потребителя `fixtures/consumer`.
 
 ## Сборка struct
 

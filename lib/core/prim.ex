@@ -29,7 +29,6 @@ defmodule Core.Prim do
   alias Core.Error
   alias Core.Helper
   alias Core.Mutator
-  alias Core.Result
   alias Core.Validator
 
   require Error
@@ -97,7 +96,16 @@ defmodule Core.Prim do
       @doc "Создать Prim; при ошибке — raise."
       @spec new!(term()) :: t()
 
-      def new!(raw), do: Result.unwrap!(new(raw))
+      unquote(
+        quote generated: true do
+          def new!(raw) do
+            case new(raw) do
+              {:ok, %__MODULE__{} = prim} -> prim
+              {:error, %Error{} = error} -> raise Core.Exc, error
+            end
+          end
+        end
+      )
 
       @doc "Достать внутреннее значение."
       @spec value(t()) :: unquote(value_type)

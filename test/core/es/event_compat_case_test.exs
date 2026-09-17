@@ -5,13 +5,11 @@ defmodule Core.Es.EventCompatCaseTest do
   alias Core.Error
   alias Core.Es.EventCompatCase
   alias Core.EsFixture.Account
-  alias Core.EsFixture.BrokenAccount
   alias Core.EventFixture
 
   # Сломанный каталог фикстур того же кодека: у тега `fixture.closed` и источника
   # `fixture.opened` фикстур нет, остальные не грузятся или несут тег не из имени файла.
   @broken "test/support/fixtures/events_broken/fixture"
-  @account "test/support/fixtures/events/account"
 
   describe "check_tag_fixtures/2" do
     test "тег без фикстуры — путь к недостающей" do
@@ -53,15 +51,6 @@ defmodule Core.Es.EventCompatCaseTest do
                EventCompatCase.check_upcasts_load(EventFixture.Event.Codec, @broken, InCodec)
 
       assert [{^v1, %{type: "fixture.created"}}, {^v2, %Error{kind: :domain}}] = failed
-    end
-  end
-
-  describe "check_evolve/3" do
-    test "у evolve/2 нет клаузы события — путь фикстуры и модуль события" do
-      path = Path.join(@account, "account.closed.json")
-
-      assert {:error, %{unhandled: [{^path, Account.Event.Closed}]}} =
-               EventCompatCase.check_evolve(BrokenAccount, @account, InCodec)
     end
   end
 

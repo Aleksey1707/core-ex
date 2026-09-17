@@ -16,6 +16,7 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
   alias Core.Error
   alias Core.Es
   alias Core.EsFixture.Account
+  alias Core.Pagination
   alias Core.Version
 
   @table __MODULE__
@@ -51,6 +52,13 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
 
   @impl true
   defdelegate refresh(state, version, context, opts \\ []), to: Account.Repo.Pg
+
+  @doc "Страница потока счёта."
+  @spec page_stream(Account.ID.t(), Pagination.Limit.t(), Pagination.Offset.t(), Context.t()) ::
+          {:ok, Pagination.Result.t(Es.Event.t())} | {:error, Error.t()}
+
+  @impl true
+  defdelegate page_stream(id, limit, offset, context), to: Account.Repo.Pg
 
   @doc "Записать события; перед поставленной гонкой — конкурирующее событие."
   @spec append([Es.Event.t()], Context.t(), keyword()) :: :ok | {:error, Error.t()}

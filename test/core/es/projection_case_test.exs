@@ -42,21 +42,14 @@ defmodule Core.Es.ProjectionCaseTest do
     def clear, do: {:error, Error.app(code: :clear_failed, ns: :projection_case)}
   end
 
-  describe "check_project/2" do
-    test "у project/1 нет клаузы события — путь фикстуры и модуль события" do
-      path = Path.join(@fixtures, "account/account.closed.json")
-
-      assert {:error, %{unhandled: [{^path, Account.Event.Closed}]}} =
-               ProjectionCase.check_project(EsFixture.BrokenProjection, @fixtures)
-    end
-
-    test "строки read-модели откатываются" do
-      assert :ok = ProjectionCase.check_project(EsFixture.Projection, @fixtures)
-      assert TestRepo.aggregate(EsFixture.Projection.Row, :count) == 0
-    end
-  end
-
   describe "check_clear/2" do
+    test "строки read-модели откатываются" do
+      assert {:error, %{not_cleared: _not_cleared}} =
+               ProjectionCase.check_clear(EsFixture.BrokenProjection, @fixtures)
+
+      assert TestRepo.aggregate("fixture_broken_projection_names", :count) == 0
+    end
+
     test "clear/0 не очистил таблицу — таблица и число строк в ней" do
       assert {:error, %{not_cleared: [{"public.fixture_broken_projection_names", 1}]}} =
                ProjectionCase.check_clear(EsFixture.BrokenProjection, @fixtures)
@@ -80,9 +73,7 @@ defmodule Core.Es.ProjectionCaseTest do
         {Path.join(@broken, "fixture/fixture.closed.json"), EventFixture.Event.Closed}
       ]
 
-      for check <- [&ProjectionCase.check_project/2, &ProjectionCase.check_clear/2] do
-        assert {:error, %{missing: ^missing}} = check.(EsFixture.Projection, @broken)
-      end
+      assert {:error, %{missing: ^missing}} = ProjectionCase.check_clear(EsFixture.Projection, @broken)
     end
 
     @tag :tmp_dir
@@ -91,10 +82,8 @@ defmodule Core.Es.ProjectionCaseTest do
       File.mkdir_p!(Path.dirname(path))
       File.cp!(Path.join(@fixtures, "account/account.opened.v1.json"), path)
 
-      for check <- [&ProjectionCase.check_project/2, &ProjectionCase.check_clear/2] do
-        assert {:error, %{failed: [{^path, %{type: "account.opened.v1"}}]}} =
-                 check.(Silent, tmp_dir)
-      end
+      assert {:error, %{failed: [{^path, %{type: "account.opened.v1"}}]}} =
+               ProjectionCase.check_clear(Silent, tmp_dir)
     end
   end
 

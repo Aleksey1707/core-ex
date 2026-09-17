@@ -28,6 +28,10 @@ defmodule Core.Codec.FacadeTest do
     defstruct [:x]
   end
 
+  defmodule ValueStruct do
+    defstruct [:value]
+  end
+
   defmodule SampleAt do
     use Prim.DateTime, name: "Момент"
   end
@@ -69,9 +73,15 @@ defmodule Core.Codec.FacadeTest do
     assert exported == [dump: 1, load: 2, load!: 2]
   end
 
-  test "dump unknown non-prim struct raises ArgumentError" do
+  test "dump struct без плагина и без поля value — FunctionClauseError" do
+    assert_raise FunctionClauseError, fn ->
+      InCodec.dump(struct(UnknownStruct, x: 1))
+    end
+  end
+
+  test "dump struct с полем value, который не Prim, — ArgumentError" do
     assert_raise ArgumentError, ~r/нет codec-плагина/, fn ->
-      InCodec.dump(%UnknownStruct{x: 1})
+      InCodec.dump(%ValueStruct{value: 1})
     end
   end
 
@@ -109,6 +119,10 @@ defmodule Core.Codec.FacadeTest do
     assert_raise ArgumentError, ~r/dump-only плагин/, fn ->
       ViewFacade.load(SampleView, %{})
     end
+
+    assert_raise ArgumentError, ~r/dump-only плагин/, fn ->
+      ViewFacade.load!(SampleView, %{})
+    end
   end
 
   test "dump and load compose via prim profile" do
@@ -118,6 +132,11 @@ defmodule Core.Codec.FacadeTest do
     dumped = InCodec.dump(composed)
     assert dumped == InCodec.dump(SampleUUID.new!(uuid))
     assert {:ok, ^composed} = InCodec.load(ApproverID, dumped)
+    assert ^composed = InCodec.load!(ApproverID, dumped)
+  end
+
+  test "load! prim: ошибка — Core.Exc" do
+    assert_raise Core.Exc, fn -> InCodec.load!(SampleString, "") end
   end
 
   test "dump prim works when module is not loaded yet" do
@@ -130,6 +149,24 @@ defmodule Core.Codec.FacadeTest do
     refute :erlang.module_loaded(mod)
 
     assert is_binary(InCodec.dump(id))
+  end
+
+  describe "load/2 и load!/2 по модулю события" do
+    test "восстанавливает событие с нагрузкой и без" do
+      created = Core.EventFixture.created()
+      closed = Core.EventFixture.closed()
+
+      assert {:ok, ^created} = InCodec.load(Core.EventFixture.Event.Created, InCodec.dump(created))
+      assert ^created = InCodec.load!(Core.EventFixture.Event.Created, InCodec.dump(created))
+      assert {:ok, ^closed} = InCodec.load(Core.EventFixture.Event.Closed, InCodec.dump(closed))
+    end
+
+    test "ошибка загрузки — {:error, _} у load/2 и Core.Exc у load!/2" do
+      assert {:error, %Error{code: :invalid_envelope, ns: :es}} =
+               InCodec.load(Core.EventFixture.Event.Closed, %{})
+
+      assert_raise Core.Exc, fn -> InCodec.load!(Core.EventFixture.Event.Closed, %{}) end
+    end
   end
 
   describe "load/2 по модулю-семейству" do
@@ -149,6 +186,10 @@ defmodule Core.Codec.FacadeTest do
                 module: Core.EventFixture.Event.Codec,
                 detail: "nope"
               }} = InCodec.load(Core.EventFixture.Event, %{"type" => "nope"})
+
+      assert_raise Core.Exc, ~r/Неизвестный тип события/, fn ->
+        InCodec.load!(Core.EventFixture.Event, %{"type" => "nope"})
+      end
     end
 
     test "данные без тега — доменная ошибка кодека агрегата" do

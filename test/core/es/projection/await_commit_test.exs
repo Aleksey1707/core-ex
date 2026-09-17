@@ -70,7 +70,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
     assert_receive {:cycle, %{projection: "es_fixture", result: :idle}}, @timeout
     assert :ok = commit(older)
 
-    assert :ok = Es.Projection.await(@projection, Account, account, @timeout)
+    assert :ok = @projection.await(Account, account, @timeout)
     assert rows() == [{"account", dump(account), "Счёт", false}]
   end
 
@@ -87,7 +87,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
     # спит 60 000 мс, шаг ожидания тоже, и `:ok` приносит только уведомление канала.
     batch = after_checkpoint_read(fn -> Es.Projection.run_once(@projection) end)
 
-    assert :ok = Es.Projection.await(@projection, Account, account, @timeout)
+    assert :ok = @projection.await(Account, account, @timeout)
     assert :processed = Task.await(batch)
     assert rows() == [{"account", dump(account), "Счёт", false}]
   end
@@ -104,7 +104,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
     write!(@account_repo, account, [open("Счёт")])
     resumed = after_checkpoint_read(fn -> :sys.resume(reader) end)
 
-    assert :ok = Es.Projection.await(@projection, Account, account, @timeout)
+    assert :ok = @projection.await(Account, account, @timeout)
     assert :ok = Task.await(resumed)
     assert rows() == [{"account", dump(account), "Счёт", false}]
   end

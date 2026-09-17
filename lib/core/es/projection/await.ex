@@ -1,6 +1,6 @@
 defmodule Core.Es.Projection.Await do
   @moduledoc """
-  Ожидание проекции после записи — тело `Core.Es.Projection.await/4`: цель, отметка дерева
+  Ожидание проекции после записи — тело `await/3` модуля проекции: цель, отметка дерева
   `Core.Es.Projection.Supervisor`, сигнал и шаги чекпоинта (`await: :poll`) или прогон проекции
   в вызывающем процессе (`await: :inline`). Исходы — в `@moduledoc` `Core.Es.Projection`,
   «Ожидание».
@@ -18,14 +18,13 @@ defmodule Core.Es.Projection.Await do
 
   @doc """
   Дождаться, пока проекция `projection` по объявлению `declaration` обработает последнее событие
-  потока `aggregate_id` агрегата `aggregate`, — не дольше `timeout` мс.
+  потока `aggregate_id` типа агрегата `type`, — не дольше `timeout` мс.
   """
-  @spec run(module(), Projection.t(), module(), struct(), non_neg_integer()) ::
+  @spec run(module(), Projection.t(), String.t(), struct(), non_neg_integer()) ::
           :ok | {:error, Error.t()}
 
-  def run(projection, declaration, aggregate, %_{} = aggregate_id, timeout)
-      when is_atom(projection) and is_atom(aggregate) and is_integer(timeout) and timeout >= 0 do
-    type = subscribed_type(Map.to_list(declaration.streams), codec_parts(aggregate))
+  def run(projection, declaration, type, %_{} = aggregate_id, timeout)
+      when is_atom(projection) and is_binary(type) and is_integer(timeout) and timeout >= 0 do
     ensure_outside_transaction!(declaration.dao.in_transaction?(), declaration)
     mark = tree_mark!(Projection.Supervisor.Mark.find(), projection, declaration)
     id = declaration.codec.dump(aggregate_id)
@@ -36,16 +35,6 @@ defmodule Core.Es.Projection.Await do
   end
 
   # ---
-
-  # Поток агрегата — тот, чей кодек `<Aggregate>.Event.Codec` (`11-domain.md`): так проекция
-  # находит кодек модуля события. Потока нет — проекция на тип агрегата не подписана.
-  defp subscribed_type([{type, %{codec: codec}} | streams], parts) do
-    if Module.split(codec) == parts,
-      do: type,
-      else: subscribed_type(streams, parts)
-  end
-
-  defp codec_parts(aggregate), do: Module.split(aggregate) ++ ["Event", "Codec"]
 
   defp ensure_outside_transaction!(false, _declaration), do: :ok
 

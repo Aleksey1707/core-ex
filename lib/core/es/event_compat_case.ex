@@ -25,18 +25,17 @@ defmodule Core.Es.EventCompatCase do
      грузится через `codec.load(<Aggregate>.Event, _)`; посторонний `*.json` и фикстура тега,
      которого в кодеке нет, — провал;
   3. у каждого источника `upcasts:` есть фикстура;
-  4. фикстура источника несёт его тег и грузится — апкастом, в модуль конца цепочки;
-  5. при `aggregate:` — у `evolve/2` есть клауза события каждого тега: вызов
-     `evolve(%Agg{id: aggregate_id}, событие)` на фикстуре тега. Провал — только
-     `FunctionClauseError` самой `Agg.evolve/2`: тело клаузы вправе упасть на пустом состоянии,
-     пропуском клаузы это не считается. Фикстуру без файла или незагружаемую ловят тесты 1 и 2.
+  4. фикстура источника несёт его тег и грузится — апкастом, в модуль конца цепочки.
+
+  Полноту `evolve/2` event-sourced агрегата проверяет сборка его репозитория
+  (`Core.Es.Aggregate.Repo`, «Полнота `evolve`»).
 
   Логика теста — функция `check_*` (`:ok | {:error, detail}`), сам тест — `assert :ok = …`:
   провал печатает пути фикстур и причины.
 
   ## Opts
 
-  - `aggregate:` — event-sourced агрегат (`use Core.Es.Aggregate`); кодек — его
+  - `aggregate:` — event-sourced агрегат (`use Core.Es.Aggregate`), источник кодека — его
     `__es_event_codec__/0`
   - `event_codec:` — кодек событий state-stored агрегата (`use Core.Es.Event.Codec`). Ровно одна
     из `aggregate:` и `event_codec:`, иначе `CompileError`
@@ -61,9 +60,6 @@ defmodule Core.Es.EventCompatCase do
   @typedoc "Фикстуры, которые не загрузились, с причиной."
   @type failed :: %{failed: [{Path.t(), reason()}]}
 
-  @typedoc "Фикстуры событий, для которых у `evolve/2` агрегата нет клаузы, с модулем события."
-  @type unhandled :: %{unhandled: [{Path.t(), module()}]}
-
   @typedoc """
   Причина: файл не читается, не JSON, тег в конверте (`type`) не совпал с именем файла или
   ошибка фасада.
@@ -76,7 +72,7 @@ defmodule Core.Es.EventCompatCase do
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    {aggregate, event_codec} = source!(lit)
+    event_codec = source!(lit)
     fixtures = fixtures!(lit, event_codec)
     async = async!(lit)
 
@@ -116,8 +112,6 @@ defmodule Core.Es.EventCompatCase do
                    Core.Config.codec()
                  )
       end
-
-      unquote(evolve_test(aggregate, fixtures))
     end
   end
 
@@ -126,21 +120,18 @@ defmodule Core.Es.EventCompatCase do
   defp source!(opts) do
     case Enum.filter(@source_keys, &Keyword.has_key?(opts, &1)) do
       [:event_codec] ->
-        {nil, Helper.Opts.module!(opts, :event_codec, @label, exports: @codec_exports)}
+        Helper.Opts.module!(opts, :event_codec, @label, exports: @codec_exports)
 
       [:aggregate] ->
         aggregate =
           Helper.Opts.module!(opts, :aggregate, @label, exports: [__es_event_codec__: 0])
 
-        event_codec =
-          Helper.Opts.module!(
-            [event_codec: aggregate.__es_event_codec__()],
-            :event_codec,
-            "#{@label}: #{inspect(aggregate)}",
-            exports: @codec_exports
-          )
-
-        {aggregate, event_codec}
+        Helper.Opts.module!(
+          [event_codec: aggregate.__es_event_codec__()],
+          :event_codec,
+          "#{@label}: #{inspect(aggregate)}",
+          exports: @codec_exports
+        )
 
       keys ->
         raise CompileError,
@@ -174,21 +165,6 @@ defmodule Core.Es.EventCompatCase do
       other ->
         raise CompileError,
           description: "#{@label}: async: ожидается boolean, получено #{inspect(other)}"
-    end
-  end
-
-  defp evolve_test(nil, _fixtures), do: nil
-
-  defp evolve_test(aggregate, fixtures) do
-    quote do
-      test "у evolve/2 есть клауза события каждого тега" do
-        assert :ok =
-                 Core.Es.EventCompatCase.check_evolve(
-                   unquote(aggregate),
-                   unquote(fixtures),
-                   Core.Config.codec()
-                 )
-      end
     end
   end
 
@@ -271,56 +247,6 @@ defmodule Core.Es.EventCompatCase do
     end
   end
 
-  # ===== полнота evolve =====
-
-  @doc false
-  @spec check_evolve(module(), Path.t(), module()) :: :ok | {:error, unhandled()}
-
-  def check_evolve(aggregate, fixtures, codec)
-      when is_atom(aggregate) and is_binary(fixtures) and is_atom(codec) do
-    event_codec = aggregate.__es_event_codec__()
-
-    event_codec.types()
-    |> Enum.sort()
-    |> Enum.map(&fixture_path(fixtures, &1))
-    |> Enum.flat_map(&unhandled(&1, aggregate, event_codec, codec))
-    |> case do
-      [] -> :ok
-      unhandled -> {:error, %{unhandled: unhandled}}
-    end
-  end
-
-  # ---
-
-  defp unhandled(path, aggregate, event_codec, codec) do
-    case load_fixture(path, event_codec, codec) do
-      {:ok, %mod{} = event} ->
-        if evolve_clause?(aggregate, event), do: [], else: [{path, mod}]
-
-      {:error, _reason} ->
-        []
-    end
-  end
-
-  # Пропуск клаузы — только `FunctionClauseError` самой `evolve/2`: исключение из тела клаузы
-  # или из функции, которую она зовёт, говорит о пустом состоянии, а не о пропущенном событии.
-  defp evolve_clause?(aggregate, event) do
-    evolves?(aggregate, event)
-  rescue
-    error in FunctionClauseError ->
-      {error.module, error.function, error.arity} != {aggregate, :evolve, 2}
-
-    _other ->
-      true
-  end
-
-  defp evolves?(aggregate, event) do
-    _state = aggregate.evolve(struct(aggregate, id: event.aggregate_id), event)
-    true
-  end
-
-  # ===== общее =====
-
   defp load_fixture(path, event_codec, codec) do
     with {:ok, body} <- File.read(path),
          {:ok, data} <- Jason.decode(body),
@@ -334,13 +260,15 @@ defmodule Core.Es.EventCompatCase do
   defp check_type(%{"type" => type}, tag) when type != tag, do: {:error, %{type: type}}
   defp check_type(_data, _tag), do: :ok
 
+  defp tag(path), do: Path.basename(path, ".json")
+
+  # ===== общее =====
+
   defp upcast_sources(event_codec) do
     event_codec.__es_upcasts__()
     |> Map.keys()
     |> Enum.sort()
   end
-
-  defp tag(path), do: Path.basename(path, ".json")
 
   defp fixture_path(fixtures, tag), do: Path.join(fixtures, tag <> ".json")
 end

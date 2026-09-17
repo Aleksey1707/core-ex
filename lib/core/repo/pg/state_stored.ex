@@ -20,7 +20,8 @@ defmodule Core.Repo.Pg.StateStored do
         children: [[schema: Schema.Permission, fk: :role_id]]
 
   Надстройка над `Core.Repo.Pg`: свои опции макрос забирает себе, остальные передаёт
-  в `use Repo.Pg` как есть, затем переопределяет `insert/3`, `update/3` и `save/3`.
+  в `use Repo.Pg` как есть, затем переопределяет `insert/3`, `update/3` и `save/3` и добавляет
+  страницу потока `page_stream/4`.
   Набор ключей проверяется целиком здесь — чтобы опечатка в любой опции называла
   `Repo.Pg.StateStored`.
 
@@ -52,6 +53,18 @@ defmodule Core.Repo.Pg.StateStored do
   транзакция откатывается целиком. Событие, которое фасад знает, но которого нет в `tags:` кодека
   (событие чужого агрегата), — `FunctionClauseError`.
 
+  ## Страница потока
+
+  `page_stream(id, limit, offset, context)` →
+  `{:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}` — страница
+  потока агрегата по возрастанию версии, `count` — весь поток. Реализация и исходы —
+  `Core.Es.Store`, «Страница потока».
+
+  Колбэка у `use Core.Repo` нет: функция генерируется по `event_codec:`, вызывающий зовёт её у
+  реализации (`Core.Config.repo!/1`). Голова принимает только struct `id:`, результат сужен до
+  `{:ok, %Core.Pagination.Result{}} | {:error, _}`: ID другого агрегата, опечатка в поле страницы и
+  невозможная clause — предупреждение при сборке вызывающего. Функция `defoverridable`.
+
   ## Opts (сверх опций `Repo.Pg`)
 
   - `event_codec:` — кодек событий агрегата (`use Core.Es.Event.Codec`); его `type:` — тип
@@ -81,7 +94,7 @@ defmodule Core.Repo.Pg.StateStored do
   - `query:` прогружает дочерние ассоциации целиком и без фильтров: эталон в `Repo.Sc` — это
     прочитанный агрегат, и неполный эталон даст diff с пропущенными удалениями.
 
-  Макрос занимает имена `@es_event_codec`, `@es_outbox`, `@es_children`.
+  Макрос занимает имена `@es_event_codec`, `@es_outbox`, `@es_children` и `page_stream/4`.
   """
 
   alias Core.Es
@@ -170,7 +183,9 @@ defmodule Core.Repo.Pg.StateStored do
         )
       end
 
-      defoverridable insert: 2, insert: 3, update: 2, update: 3, save: 2, save: 3
+      unquote(page_stream_ast(cfg))
+
+      defoverridable insert: 2, insert: 3, update: 2, update: 3, save: 2, save: 3, page_stream: 4
 
       defp known_to_exist?(entity, context, opts) do
         if Core.Repo.Pg.baseline(@pg, entity, context) != nil,
@@ -234,22 +249,44 @@ defmodule Core.Repo.Pg.StateStored do
     event_codec =
       Es.Store.Opts.event_codec!(Helper.Opts.module!(opts, :event_codec, @label), @label)
 
-    Es.Store.Opts.ensure_aggregate_id!(
-      event_codec,
-      Helper.Opts.module!(opts, :id, @label),
-      @label
-    )
+    id = Helper.Opts.module!(opts, :id, @label)
+    Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
 
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
     Es.Store.Opts.ensure_version_mismatch!(errors, @label)
 
     %{
       entity: Helper.Opts.module!(opts, :entity, @label),
+      id: id,
       event_codec: event_codec,
       outbox: outbox!(opts, event_codec),
       children: children!(opts),
       behaviour: behaviour!(opts)
     }
+  end
+
+  defp page_stream_ast(cfg) do
+    quote generated: true do
+      @doc "Страница потока агрегата по возрастанию версии; `count` — весь поток."
+      @spec page_stream(
+              unquote(cfg.id).t(),
+              Core.Pagination.Limit.t(),
+              Core.Pagination.Offset.t(),
+              Core.Context.t()
+            ) :: {:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}
+
+      def page_stream(
+            %unquote(cfg.id){} = id,
+            %Core.Pagination.Limit{} = limit,
+            %Core.Pagination.Offset{} = offset,
+            %Core.Context{} = context
+          ) do
+        case Core.Es.Store.page_stream(unquote(cfg.event_codec), id, limit, offset, context) do
+          {:ok, %Core.Pagination.Result{} = page} -> {:ok, page}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
   end
 
   defp outbox!(opts, event_codec) do

@@ -1,6 +1,6 @@
 defmodule Core.Es.ProjectionCase do
   @moduledoc """
-  Case-модуль проекции: полнота `project/1` и `clear/0` на golden-фикстурах событий.
+  Case-модуль проекции: очистка `clear/0` на golden-фикстурах событий.
 
       defmodule MyApp.Domain.<BC>.<Actor>.AccountList.ProjectionCaseTest do
         use Core.Es.ProjectionCase,
@@ -16,23 +16,22 @@ defmodule Core.Es.ProjectionCase do
   агрегата и тег берутся из кодека события, фикстура грузится фасадом `codec:` проекции. Тег в
   `type` фикстуры сверяется с текущим: фикстуры источников `upcasts:` не прогоняются, апкаст
   проверяет `Core.Es.EventCompatCase`. Нет фикстуры, в ней чужой тег или она не грузится — провал
-  обоих тестов с путями.
+  теста с путями.
 
-  ## Генерируемые тесты
+  ## Генерируемый тест
 
-  1. у `project/1` есть клауза каждого модуля `events:`: вызов на фикстуре модуля в savepoint с
-     откатом. Провал — только `FunctionClauseError` самой `project/1`: тело клаузы вправе упасть
-     или вернуть `{:error, _}` на одиночной фикстуре, пропуском клаузы это не считается;
-  2. `clear/0` очищает каждую таблицу, которую пишет `project/1`: `project/1` на всех фикстурах,
-     каждая в savepoint (отказ откатывается), затем `clear/0` и `count(*) = 0` у каждой таблицы, в
-     которой `n_tup_ins + n_tup_upd + n_tup_del` из `pg_stat_xact_user_tables` вырос за прогон.
-     Перечня таблиц нет: внутри открытой транзакции статистика не сбрасывается и считает попытки
-     откаченных savepoint'ов, разница точна. Ни одной таблицы — провал. Таблица, в которой
-     `project/1` на фикстурах не изменил ни строки (`UPDATE` строки, которой нет, `INSERT`,
-     отвергнутый ограничением), в набор не попадает.
+  `clear/0` очищает каждую таблицу, которую пишет `project/1`: `project/1` на всех фикстурах,
+  каждая в savepoint (отказ откатывается), затем `clear/0` и `count(*) = 0` у каждой таблицы, в
+  которой `n_tup_ins + n_tup_upd + n_tup_del` из `pg_stat_xact_user_tables` вырос за прогон.
+  Перечня таблиц нет: внутри открытой транзакции статистика не сбрасывается и считает попытки
+  откаченных savepoint'ов, разница точна. Ни одной таблицы — провал. Таблица, в которой
+  `project/1` на фикстурах не изменил ни строки (`UPDATE` строки, которой нет, `INSERT`,
+  отвергнутый ограничением), в набор не попадает.
 
-  Логика теста — функция `check_*` (`:ok | {:error, detail}`) в транзакции с откатом, сам тест —
-  `assert :ok = …`.
+  Полноту `project/1` проверяет сборка проекции (`Core.Es.Projection`, «Полнота `project/1`»).
+
+  Логика теста — функция `check_clear/2` (`:ok | {:error, detail}`) в транзакции с откатом, сам
+  тест — `assert :ok = …`.
 
   ## Opts
 
@@ -68,9 +67,6 @@ defmodule Core.Es.ProjectionCase do
   """
   @type reason :: File.posix() | Jason.DecodeError.t() | %{type: term()} | Core.Error.t()
 
-  @typedoc "Фикстуры событий, для которых у `project/1` нет клаузы, с модулем события."
-  @type unhandled :: %{unhandled: [{Path.t(), module()}]}
-
   @typedoc """
   Отказ `clear/0`, пустой набор таблиц или таблицы (`схема.имя`) со строками после `clear/0`.
   """
@@ -81,7 +77,7 @@ defmodule Core.Es.ProjectionCase do
 
   # ===== объявление =====
 
-  @doc "Сгенерировать тесты полноты `project/1` и `clear/0` проекции."
+  @doc "Сгенерировать тест очистки `clear/0` проекции."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
@@ -94,11 +90,6 @@ defmodule Core.Es.ProjectionCase do
 
       setup do
         :ok = Ecto.Adapters.SQL.Sandbox.checkout(unquote(projection).__es_projection__().dao)
-      end
-
-      test "у project/1 есть клауза каждого модуля events:" do
-        assert :ok =
-                 Core.Es.ProjectionCase.check_project(unquote(projection), unquote(fixtures))
       end
 
       test "clear/0 очищает каждую таблицу, которую пишет project/1" do
@@ -135,50 +126,6 @@ defmodule Core.Es.ProjectionCase do
     end
   end
 
-  # ===== полнота project =====
-
-  @doc false
-  @spec check_project(module(), Path.t()) :: :ok | {:error, missing() | failed() | unhandled()}
-
-  def check_project(projection, fixtures) when is_atom(projection) and is_binary(fixtures) do
-    %{dao: dao} = declaration = projection.__es_projection__()
-
-    with {:ok, loaded} <- load_fixtures(declaration, fixtures) do
-      rolled_back(&Transact.run/2, dao, fn -> check_clauses(projection, dao, loaded) end)
-    end
-  end
-
-  # ---
-
-  defp check_clauses(projection, dao, loaded) do
-    loaded
-    |> Enum.reject(fn {_path, event} ->
-      rolled_back(&Savepoint.run/2, dao, fn -> project_clause?(projection, event) end)
-    end)
-    |> Enum.map(fn {path, %mod{}} -> {path, mod} end)
-    |> case do
-      [] -> :ok
-      unhandled -> {:error, %{unhandled: unhandled}}
-    end
-  end
-
-  # Пропуск клаузы — только `FunctionClauseError` самой `project/1`: исключение из тела клаузы
-  # или из функции, которую она зовёт, говорит об одиночной фикстуре, а не о пропущенном событии.
-  defp project_clause?(projection, event) do
-    projects?(projection, event)
-  rescue
-    error in FunctionClauseError ->
-      {error.module, error.function, error.arity} != {projection, :project, 1}
-
-    _other ->
-      true
-  end
-
-  defp projects?(projection, event) do
-    _result = projection.project(event)
-    true
-  end
-
   # ===== полнота clear =====
 
   @doc false
@@ -188,7 +135,7 @@ defmodule Core.Es.ProjectionCase do
     %{dao: dao} = declaration = projection.__es_projection__()
 
     with {:ok, loaded} <- load_fixtures(declaration, fixtures) do
-      rolled_back(&Transact.run/2, dao, fn -> check_tables(projection, dao, loaded) end)
+      rolled_back(dao, fn -> check_tables(projection, dao, loaded) end)
     end
   end
 
@@ -244,14 +191,11 @@ defmodule Core.Es.ProjectionCase do
     end
   end
 
-  # ===== общее =====
-
   # Проверка идёт в транзакции с откатом: savepoint'у нужна явная транзакция — в sandbox вне неё
   # каждый запрос идёт в своём savepoint Postgrex и снимает вложенные, — а строки read-модели
-  # после проверки не остаются. `run` — `Transact.run/2` или `Savepoint.run/2`: оба откатывают
-  # `{:error, _}`.
-  defp rolled_back(run, dao, fun) do
-    {:error, {:rolled_back, result}} = run.(dao, fn -> {:error, {:rolled_back, fun.()}} end)
+  # после проверки не остаются.
+  defp rolled_back(dao, fun) do
+    {:error, {:rolled_back, result}} = Transact.run(dao, fn -> {:error, {:rolled_back, fun.()}} end)
     result
   end
 

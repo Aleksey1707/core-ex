@@ -3,12 +3,11 @@ defmodule Core.EsFixture.BrokenProjection do
   Сломанная проекция проверок `Core.Es.ProjectionCase`: события счёта `Core.EsFixture.Account`,
   поток — в `fixture_broken_projection_streams`, название — в `fixture_broken_projection_names`.
 
-  - у `project/1` нет клаузы `Closed`;
-  - `clear/0` очищает только таблицу потоков.
+  - `clear/0` очищает только таблицу потоков;
+  - `project/1` на `Renamed` падает `FunctionClauseError` приватной функции: отказ на фикстуре
+    проверка откатывает и идёт дальше.
 
-  `Renamed` пропуском клаузы не считается: падает `FunctionClauseError` приватной функции, а не
-  самой `project/1`. Таблицы — миграция
-  `priv/repo/migrations/20260914145000_create_broken_projection_fixture.exs`.
+  Таблицы — миграция `priv/repo/migrations/20260914145000_create_broken_projection_fixture.exs`.
   """
 
   alias Core.Config
@@ -21,7 +20,7 @@ defmodule Core.EsFixture.BrokenProjection do
   @streams "fixture_broken_projection_streams"
   @names "fixture_broken_projection_names"
 
-  @doc "Открытие счёта → строки потока и названия; у `Closed` клаузы нет."
+  @doc "Событие счёта → строки потока и названия при открытии."
   @spec project(Core.Es.Event.t()) :: :ok
 
   @impl true
@@ -36,6 +35,8 @@ defmodule Core.EsFixture.BrokenProjection do
   end
 
   def project(%Account.Event.Renamed{payload: payload}), do: rename(payload.name)
+
+  def project(%Account.Event.Closed{}), do: :ok
 
   @doc "Очистить read-модель — таблица названий забыта."
   @spec clear() :: :ok

@@ -62,12 +62,15 @@ MUST NOT — копия расходится с оригиналом на пер
 |---|---|
 | `use Core.Repo.Pg.Es`, опция `event_repo:` | `use Core.Repo.Pg.StateStored`, обязательная `event_codec:` |
 | `<Aggregate>.Event.Repo` и таблица `<aggregate>_events` на агрегат | одно хранилище `es_events`, DDL — `Core.Es.Migration` (`13-repos.md`) |
-| `Event.Repo.page_by_aggregate/4` | `Core.Es.Store.page_stream/5` (`13-repos.md`, «Страница потока») |
+| `Event.Repo.page_by_aggregate/4` | `@repo.page_stream/4` репозитория агрегата (`13-repos.md`, «Страница потока») |
 | агрегат с событиями только state-stored | `use Core.Es.Aggregate` с `decide/2` и `evolve/2` и команды `use Core.Es.Cmd` (`11-domain.md`) |
+| `{Event.X, payload}` / `Event.X` в результате `decide` | `Event.Codec.draft(Event.X, payload)` / `Event.Codec.draft(Event.X)` (`deps/core/docs/rules/11-domain.md`) |
 | read-модель пишет usecase или репозиторий | её пишет проекция `use Core.Es.Projection` (`13-repos.md`, «Проекции read-модели») |
 | чтение read-модели сразу после команды | ожидание проекции и 202 на таймаут (`15-web-api.md`) |
+| `Core.Es.Projection.await(Projection, Agg, id, timeout)` | `Projection.await(Agg, id, timeout)` у модуля проекции (`deps/core/docs/rules/22-projections.md`) |
+| `Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` | `@repo.page_stream(id, limit, offset, context)` у репозитория агрегата (`13-repos.md`, «Страница потока») |
 | «тег события неизменяем навсегда» | версия схемы — тег: новый тег плюс апкаст со старого (`14-events-outbox.md`) |
-| свой `EventCompatCase` в `test/support` | `use Core.Es.EventCompatCase`, полнота `evolve` — опцией `aggregate:` (`19-testing.md`) |
+| свой `EventCompatCase` в `test/support` | `use Core.Es.EventCompatCase` (`19-testing.md`) |
 | ключ конфигурации на каждый репозиторий | конвенция `<Behaviour>.Pg`, ключ — только на подмену (`13-repos.md`, «DI») |
 | `tagged:` / `tags:` у плагина кодека, `dump_tagged` / `load_tagged` у фасада | `types:` и `union:`, у фасада только `dump/1`, `load/2`, `load!/2` (`11-domain.md`) |
 

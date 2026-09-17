@@ -297,7 +297,7 @@ end
 
    `enabled: false` — дерево не стартует (`:ignore`); так ставится в `config/test.exs` вместе с
    `await: :inline`: тест прогоняет проекцию сам — `Core.Es.Projection.Test.run_until_idle/2`, а
-   `Core.Es.Projection.await/4` в usecase прогоняет её в процессе теста.
+   `Projection.await/3` в usecase прогоняет её в процессе теста.
 
    `notifications:` — сигнал чекпоинта между нодами: пачка шлёт `NOTIFY`, слушатель ноды держит
    по соединению на каждый различный `repo:` проекций — учтите их в лимитах базы и пулера. Одна

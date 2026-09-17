@@ -17,7 +17,7 @@
 | `MyApp.DataCase` | всё, что ходит в `MyApp.DAO`: репозитории, usecases, воркеры |
 | `MyAppWeb.ConnCase` | контроллеры и плаги |
 | `Core.Es.EventCompatCase` | golden-фикстуры событий агрегата |
-| `Core.Es.ProjectionCase` | полнота `project/1` и `clear/0` проекции |
+| `Core.Es.ProjectionCase` | очистка `clear/0` проекции |
 
 - `async: true` — по умолчанию. `async: false` MUST сопровождаться причиной и восстановлением
   состояния в `on_exit`; причин ровно три: глобальный конфиг, именованный синглтон, DDL мимо
@@ -64,15 +64,15 @@ Behaviour с двумя и более реализациями MUST иметь �
 | Что | Чем |
 |---|---|
 | решения агрегата | `ExUnit.Case, async: true`: given — `Core.Es.Aggregate.Test.given/3`, when — `Agg.decide/2`, then — короткая форма результата |
-| применение событий | отдельные тесты `evolve` через `Agg.fold/2`; полноту держит `use Core.Es.EventCompatCase, aggregate:` |
+| применение событий | отдельные тесты `evolve` через `Agg.fold/2`; полноту проверяет сборка `<Aggregate>.Repo` (`deps/core/docs/rules/11-domain.md`, «Event-sourced») |
 | совместимость wire | `use Core.Es.EventCompatCase` — один модуль на агрегат, фикстуры в `test/support/fixtures/events/<тип агрегата>/` |
-| проекция | `use Core.Es.ProjectionCase` — один модуль на проекцию |
+| проекция | `use Core.Es.ProjectionCase` — один модуль на проекцию; полноту `project/1` проверяет сборка проекции (`deps/core/docs/rules/22-projections.md`, «Объявление») |
 | read-модель целиком | запись через репозиторий → `Core.Es.Projection.Test.run_until_idle/2` → чтение ReadRepo |
 | записанные события | `Core.Es.Store.Test.events!(Agg.Event.Codec, id)` |
 
 - Given через `execute/2` SHOULD NOT: команда не воспроизводит событие удалённого типа, и тест
   одной команды начинает зависеть от `decide` другой.
-- Прогон проекции и любой код, зовущий `Core.Es.Projection.await/4`, MUST идти в
+- Прогон проекции и любой код, зовущий `Projection.await/3`, MUST идти в
   `async: false`: блокировка пачки и строка чекпоинта держатся до конца sandbox-транзакции, и
   пачка соседнего теста получила бы `{:error, :locked}`.
 - Тестовое дерево MUST быть `enabled: false, await: :inline` в `config/test.exs` — иначе

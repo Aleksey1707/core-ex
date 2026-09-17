@@ -171,7 +171,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     end
 
     test "behaviour объявляет колбэки Es.Aggregate.Repo" do
-      message = ~r/должен объявлять \[get_many: 3, append: 3, refresh: 4\]/
+      message = ~r/должен объявлять \[get_many: 3, append: 3, refresh: 4, page_stream: 4\]/
 
       assert_raise CompileError, message, fn ->
         compile!(StateStoredBehaviour, behaviour: Core.StateStoredFixture.Repo)
