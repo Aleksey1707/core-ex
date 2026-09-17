@@ -1,0 +1,71 @@
+Running ExUnit with seed: 698985, max_cases: 32
+
+...    warning: incompatible types given to App.Local.to_int/1:
+
+        App.Local.to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  7 │     assert_raise FunctionClauseError, fn -> App.Local.to_int("x") end
+    │                                                       ~
+    │
+    └─ test/types_test.exs:7:55: App.TypesTest."test wrong arg to lib function"/1
+
+    warning: incompatible types given to App.Local.to_int/1:
+
+        App.Local.to_int(value)
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    where "value" was given the type:
+
+        # type: binary()
+        # from: test/types_test.exs:15:11
+        value = "x"
+
+    type warning found at:
+    │
+ 16 │     assert_raise FunctionClauseError, fn -> App.Local.to_int(value) end
+    │                                                       ~
+    │
+    └─ test/types_test.exs:16:55: App.TypesTest."test direct call outside fn"/1
+
+    warning: incompatible types given to helper/1:
+
+        helper("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 11 │     assert_raise FunctionClauseError, fn -> helper("x") end
+    │                                             ~
+    │
+    └─ test/types_test.exs:11:45: App.TypesTest."test wrong arg to local helper"/1
+
+
+Finished in 0.01 seconds (0.01s async, 0.00s sync)
+
+Result: 3 passed
+
+ERROR! Test suite aborted after successful execution due to warnings while using the --warnings-as-errors option

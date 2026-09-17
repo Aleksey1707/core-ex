@@ -1,0 +1,148 @@
+Blind.Account.Event.Codec:__es_type__/0 [infer, 1 clause(s), domain nil]
+    ( -> binary())
+Blind.Account.Event.Codec:__es_aggregate_id__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.Account.ID)
+Blind.Account.Event.Codec:__es_mods__/0 [infer, 1 clause(s), domain nil]
+    ( -> non_empty_list(
+  Blind.Account.Event.Closed or Blind.Account.Event.Opened or Blind.Account.Event.Renamed
+))
+Blind.Account.Event.Codec:__es_upcasts__/0 [infer, 1 clause(s), domain nil]
+    ( -> empty_map())
+Blind.Account.Event.Codec:type/1 [infer, 2 clause(s), domain set]
+    (%{..., __struct__: atom()} -> dynamic())
+    (atom() -> binary())
+Blind.Account.Event.Codec:types/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic(%MapSet{}))
+Blind.Account.Event.Codec:mod_by_tag/1 [infer, 1 clause(s), domain nil]
+    (binary() -> dynamic(
+  :error or
+    {:ok, Blind.Account.Event.Closed or Blind.Account.Event.Opened or Blind.Account.Event.Renamed}
+))
+Blind.Account.Event.Codec:dump/2 [infer, 1 clause(s), domain nil]
+    (%{
+  ...,
+  __struct__: atom(),
+  aggregate_id: term(),
+  aggregate_version: term(),
+  at: term(),
+  by: term(),
+  id: term()
+}, atom() -> dynamic(%{binary() => term()}))
+Blind.Account.Event.Codec:load/3 [infer, 2 clause(s), domain set]
+    (Blind.Account.Event, term(), atom() -> dynamic())
+    (not Blind.Account.Event, map(), atom() -> dynamic())
+Blind.Account.Event.Codec:dump_payload/2 [infer, 1 clause(s), domain set]
+    (%Blind.Account.Event.Opened{payload: %{..., name: term()}} or
+  %Blind.Account.Event.Renamed{payload: %{..., name: term()}}, atom() -> dynamic(%{binary() => term()}))
+Blind.Account.Event.Codec:load_payload/3 [infer, 1 clause(s), domain set]
+    (Blind.Account.Event.Opened or Blind.Account.Event.Renamed, term(), term() -> dynamic())
+Blind.Account.Event.Codec:__codec_types__/0 [infer, 1 clause(s), domain nil]
+    ( -> non_empty_list(
+  Blind.Account.Event.Closed or Blind.Account.Event.Opened or Blind.Account.Event.Renamed
+))
+Blind.Account.Event.Codec:__codec_union__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.Account.Event)
+Blind.Account.Event.Codec:__codec_loadable__/0 [infer, 1 clause(s), domain nil]
+    ( -> true)
+Core.Es.Event.Codec:dump_envelope/4 [infer, 1 clause(s), domain nil]
+    (%{..., aggregate_id: term(), aggregate_version: term(), at: term(), by: term(), id: term()}, binary(), term(), atom() -> dynamic(%{binary() => term()}))
+Core.Es.Event.Codec:load_by_tag/5 [infer, 2 clause(s), domain set]
+    (map(), map(), map(), term(), term() -> dynamic())
+    (not map(), map(), map(), term(), term() -> dynamic({:error, term()}))
+Core.Es.Event.Codec:load_header/4 [infer, 1 clause(s), domain nil]
+    (map(), atom(), atom(), atom() -> dynamic(
+  ({...} and not {:ok, term()}) or atom() or bitstring() or empty_list() or float() or fun() or
+    integer() or map() or non_empty_list(term(), term()) or pid() or port() or reference() or
+    {:ok, %{aggregate_id: term(), at: term(), by: term(), id: term(), version: term()}}
+))
+Core.Es.Event.Codec:build/3 [infer, 1 clause(s), domain nil]
+    (atom(), term(), map() -> dynamic())
+Core.Es.Event.Codec:to_fields/1 [infer, 1 clause(s), domain nil]
+    (map() -> dynamic(%{
+  aggregate_id: term(),
+  aggregate_version: term(),
+  at: term(),
+  by: term(),
+  id: term(),
+  payload: term(),
+  type: term()
+}))
+Blind.Codec.Internal:dump/1 [infer, 3 clause(s), domain set]
+    (%Core.Outbox.Record{} -> dynamic(%{
+  attempts: term(),
+  created_at: term(),
+  errors: term(),
+  headers: term(),
+  id: term(),
+  key: term(),
+  lease_id: term(),
+  locked_until: term(),
+  name: term(),
+  payload: term(),
+  published_at: term(),
+  status: term(),
+  topic: term(),
+  updated_at: term()
+}))
+    (%Core.Outbox.RecordError{} -> dynamic(%{attempt: term(), message: term()}))
+    (%Blind.Account.Event.Closed{} or %Blind.Account.Event.Opened{} or %Blind.Account.Event.Renamed{} or
+  %Blind.Order.Event.Cancelled{} or %Blind.Order.Event.Placed{} or %Blind.Parcel.Event.Lost{} or
+  %Blind.Parcel.Event.Returned{} or %Blind.Parcel.Event.Sent{} or
+  (%{..., __struct__: atom()} and
+     not (%Core.Outbox.Record{} or %Blind.Parcel.Event.Returned{} or %Blind.Account.Event.Closed{} or
+            %Core.Outbox.RecordError{} or %Blind.Order.Event.Placed{} or
+            %Blind.Parcel.Event.Sent{} or %Blind.Order.Event.Cancelled{} or
+            %Blind.Account.Event.Renamed{} or %Blind.Account.Event.Opened{})) -> dynamic())
+Blind.Codec.Internal:load/2 [infer, 3 clause(s), domain set]
+    (Core.Outbox.Record, map() -> dynamic(
+  ({...} and not {:ok, term()}) or atom() or bitstring() or empty_list() or float() or fun() or
+    integer() or map() or non_empty_list(term(), term()) or pid() or port() or reference() or
+    {:ok, %Core.Outbox.Record{}}
+))
+    (Core.Outbox.RecordError, map() -> dynamic())
+    (atom() and not(Core.Outbox.Record, Core.Outbox.RecordError), term() -> dynamic())
+Blind.Codec.Internal:load!/2 [infer, 1 clause(s), domain nil]
+    (atom(), term() -> dynamic())
+Core.Result:unwrap!/1 [infer, 2 clause(s), domain set]
+    ({:ok, term()} -> dynamic())
+    ({:error, term()} -> none())
+Core.Result:traverse/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), (none() -> term()) -> dynamic({:error or :ok, term()}))
+Blind.Account.Outbox:from_events/1 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()) -> dynamic({:error or :ok, term()}))
+Blind.Account.Outbox:from_event/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic(
+  ({...} and not {:ok, term()}) or ({:error, term()} and not {:ok, %Core.Outbox.CreatedAt{}}) or
+    ({:error, term()} and not {:ok, %Core.Outbox.Key{}}) or
+    ({:error, term()} and not {:ok, %Core.Outbox.Name{}}) or atom() or bitstring() or empty_list() or
+    float() or fun() or integer() or map() or non_empty_list(term(), term()) or pid() or port() or
+    reference() or
+    {:ok,
+     %Core.Outbox.Record{
+       topic: %Core.Outbox.Topic{},
+       key: %Core.Outbox.Key{},
+       name: %Core.Outbox.Name{},
+       payload: %{..., __struct__: not atom()} or %{..., __struct__: not_set()},
+       status: :new,
+       errors: empty_list(),
+       locked_until: nil,
+       lease_id: nil,
+       published_at: nil,
+       headers: %{..., __struct__: not atom()} or %{..., __struct__: not_set()} or nil,
+       updated_at: nil
+     }}
+))
+Blind.Account.Outbox:__es_event__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.Account.Event)
+Blind.Projection:__es_projection__/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic())
+Blind.Projection:clear/0 [infer, 1 clause(s), domain nil]
+    ( -> :ok)
+Core.Es.Projection:await/4 [infer, 1 clause(s), domain nil]
+    (atom(), atom(), %{..., __struct__: atom()}, integer() -> dynamic())
+Core.Es.Projection:run_once/2 [infer, 1 clause(s), domain nil]
+    (atom(), empty_list() or non_empty_list(term(), term()) -> dynamic(:idle or :locked or :outdated or :processed or {:error, %Core.Error{}}))
+Core.Es.Projection.Await:run/5 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., codec: atom(), dao: atom(), name: term(), streams: map()}, atom(), %{..., __struct__: atom()}, integer() -> dynamic())
+Core.Es.Store:page_stream/5 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., __struct__: atom()}, %Core.Pagination.Limit{}, %Core.Pagination.Offset{}, %Core.Context{} -> dynamic())

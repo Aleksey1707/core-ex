@@ -1,0 +1,18 @@
+App.Local:to_int/1 [infer, 1 clause(s), domain nil]
+    (integer() -> integer())
+App.Facade:to_int/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic())
+App.Facade:to_int_guarded/1 [infer, 1 clause(s), domain nil]
+    (integer() -> dynamic())
+App.Facade:delegated_to_int/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic())
+App.Facade:status/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic())
+App.Facade:dep_to_int/1 [infer, 1 clause(s), domain nil]
+    (integer() -> integer())
+App.Facade:dep_status/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic(:ok))
+DepLib.Facade:to_int/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic())
+DepLib.Facade:status/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic())

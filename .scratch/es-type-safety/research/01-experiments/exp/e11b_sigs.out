@@ -1,0 +1,5 @@
+E11b.Account:fold_reduce/2 [infer, 1 clause(s), domain nil]
+    (term(), term() -> dynamic())
+E11b.Account:fold_rec/2 [infer, 2 clause(s), domain set]
+    (term(), empty_list() -> dynamic())
+    (%E11b.Account{balance: float() or integer()}, non_empty_list(term(), term()) -> dynamic())

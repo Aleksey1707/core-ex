@@ -1,0 +1,37 @@
+    warning: incompatible types given to E04b.Codec.load!/1:
+
+        E04b.Codec.load!("not a map")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        map()
+
+    type warning found at:
+    │
+ 22 │   def direct, do: E04b.Codec.load!("not a map")
+    │                              ~
+    │
+    └─ e04b_unquote_module.ex:22:30: E04b.Caller.direct/0
+
+    warning: incompatible types given to E04b.Codec.load!/1:
+
+        E04b.Codec.load!("not a map")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        map()
+
+    type warning found at:
+    │
+ 17 │   use E04b.Using, codec: E04b.Codec
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e04b_unquote_module.ex:17: E04b.Repo.load_literal_bug/0

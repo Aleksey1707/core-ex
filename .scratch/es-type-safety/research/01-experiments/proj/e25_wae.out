@@ -1,0 +1,92 @@
+Compiling 1 file (.ex)
+Generated app app
+Running ExUnit with seed: 854832, max_cases: 32
+
+.    warning: incompatible types given to App.Local.to_int/1:
+
+        App.Local.to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  7 │     assert_raise FunctionClauseError, fn -> App.Local.to_int("x") end
+    │                                                       ~
+    │
+    └─ test/types_test.exs:7:55: App.TypesTest."test wrong arg to lib function"/1
+
+    warning: incompatible types given to App.Local.to_int/1:
+
+        App.Local.to_int(value)
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    where "value" was given the type:
+
+        # type: binary()
+        # from: test/types_test.exs:15:11
+        value = "x"
+
+    type warning found at:
+    │
+ 16 │     assert App.Local.to_int(value) == "x"
+    │                      ~
+    │
+    └─ test/types_test.exs:16:22: App.TypesTest."test direct call outside fn"/1
+
+    warning: incompatible types given to helper/1:
+
+        helper("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 11 │     assert_raise FunctionClauseError, fn -> helper("x") end
+    │                                             ~
+    │
+    └─ test/types_test.exs:11:45: App.TypesTest."test wrong arg to local helper"/1
+
+
+
+  1) test direct call outside fn (App.TypesTest)
+     test/types_test.exs:14
+     ** (FunctionClauseError) no function clause matching in App.Local.to_int/1
+
+     The following arguments were given to App.Local.to_int/1:
+
+         # 1
+         "x"
+
+     Attempted function clauses (showing 1 out of 1):
+
+         def to_int(x) when -is_integer(x)-
+
+     code: assert App.Local.to_int(value) == "x"
+     stacktrace:
+       (app 0.1.0) lib/app/local.ex:3: App.Local.to_int/1
+       test/types_test.exs:16: (test)
+
+.
+Finished in 0.01 seconds (0.01s async, 0.00s sync)
+
+Result: 2/3 passed
+Failed: 1 test

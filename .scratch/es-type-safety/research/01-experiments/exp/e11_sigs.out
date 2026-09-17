@@ -1,0 +1,4 @@
+E11.Transact:run/1 [infer, 1 clause(s), domain nil]
+    ((-> term()) -> dynamic())
+E11.Transact:call_with_string/1 [infer, 1 clause(s), domain nil]
+    ((none() -> term()) -> dynamic())

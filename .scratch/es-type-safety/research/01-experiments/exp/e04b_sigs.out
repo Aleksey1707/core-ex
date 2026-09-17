@@ -1,0 +1,2 @@
+E04b.Repo:load/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic())

@@ -1,0 +1,6 @@
+E24:defguard_struct/1 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: E24.Evt, amout: term()} -> dynamic())
+E24:upcase_result/1 [infer, 1 clause(s), domain nil]
+    (binary() -> dynamic(float() or integer()))
+String:upcase/1 [infer, 1 clause(s), domain nil]
+    (binary() -> dynamic() or binary())

@@ -1,0 +1,82 @@
+Blind.Account:__es_event_codec__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.Account.Event.Codec)
+Blind.Account:fold/2 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: Blind.Account}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Blind.Account:fold/3 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: Blind.Account, version: term()}, %{..., __struct__: atom(), at: term(), by: term()}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Blind.Account:execute/2 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: Blind.Account}, %{..., __struct__: atom(), at: term(), by: term()} -> dynamic({:error, %Core.Error{}} or {:ok, {term(), term()}}))
+Blind.Account:decide/2 [infer, 6 clause(s), domain set]
+    (%Blind.Account.Cmd.Open{}, %Blind.Account{version: nil} -> dynamic({:ok, non_empty_list({Blind.Account.Event.Opened, term()})}))
+    (%Blind.Account.Cmd.Open{}, %Blind.Account{version: %Core.Version{}} -> dynamic({:error, term()}))
+    (%{..., __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Rename}, %Blind.Account{version: nil} -> dynamic({:error, term()}))
+    (%Blind.Account.Cmd.Rename{}, %Blind.Account{} -> {:ok, empty_list()})
+    (%Blind.Account.Cmd.Rename{}, %Blind.Account{status: :open} -> dynamic({:ok, non_empty_list({Blind.Account.Event.Renamed, term()})}))
+    (%Blind.Account.Cmd.Close{}, %Blind.Account{status: :open} -> {:ok, non_empty_list(Blind.Account.Event.Closed)})
+Blind.Account:evolve/2 [infer, 3 clause(s), domain set]
+    (%{..., name: term(), status: term()}, %Blind.Account.Event.Opened{payload: %{..., name: term()}} -> dynamic(%{..., name: term(), status: :open}))
+    (%{..., name: term()}, %Blind.Account.Event.Renamed{payload: %{..., name: term()}} -> dynamic(%{..., name: term()}))
+    (%{..., status: term()}, %Blind.Account.Event.Closed{} -> dynamic(%{..., status: :closed}))
+Core.Es.Aggregate:execute/3 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., __struct__: term()}, %{..., __struct__: atom(), at: term(), by: term()} -> dynamic({:error, %Core.Error{}} or {:ok, {term(), term()}}))
+Core.Es.Aggregate:fold/3 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., __struct__: term()}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Core.Es.Aggregate:fold/4 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., __struct__: term(), version: term()}, %{..., __struct__: atom(), at: term(), by: term()}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Core.Es.Aggregate:events/5 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., __struct__: term(), version: term()}, empty_list() or non_empty_list(term(), term()), term(), term() -> dynamic())
+Blind.Account.Cmd.Open:__es_cmd__/0 [infer, 1 clause(s), domain nil]
+    ( -> true)
+Blind.Account.Event.Opened:new/5 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.Event.Opened.Payload{}, %Blind.Account.ID{}, %Core.Version{}, %Blind.UserID{}, %Core.Es.Event.At{} -> dynamic(%Blind.Account.Event.Opened{
+  payload: %Blind.Account.Event.Opened.Payload{},
+  aggregate_id: %Blind.Account.ID{},
+  aggregate_version: %Core.Version{},
+  at: %Core.Es.Event.At{},
+  by: %Blind.UserID{}
+}))
+Blind.Account.Event.Opened:new/6 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.Event.Opened.Payload{}, %Blind.Account.ID{}, %Core.Version{}, %Blind.UserID{}, %Core.Es.Event.At{}, %{..., __struct__: Core.Es.Event.ID} or nil -> dynamic(%Blind.Account.Event.Opened{
+  payload: %Blind.Account.Event.Opened.Payload{},
+  aggregate_id: %Blind.Account.ID{},
+  aggregate_version: %Core.Version{},
+  at: %Core.Es.Event.At{},
+  by: %Blind.UserID{}
+}))
+Blind.Account.Event.Closed:new/4 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %Core.Version{}, %Blind.UserID{}, %Core.Es.Event.At{} -> dynamic(%Blind.Account.Event.Closed{
+  payload: nil,
+  aggregate_id: %Blind.Account.ID{},
+  aggregate_version: %Core.Version{},
+  at: %Core.Es.Event.At{},
+  by: %Blind.UserID{}
+}))
+Blind.Account.Event.Closed:new/5 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %Core.Version{}, %Blind.UserID{}, %Core.Es.Event.At{}, %{..., __struct__: Core.Es.Event.ID} or nil -> dynamic(%Blind.Account.Event.Closed{
+  payload: nil,
+  aggregate_id: %Blind.Account.ID{},
+  aggregate_version: %Core.Version{},
+  at: %Core.Es.Event.At{},
+  by: %Blind.UserID{}
+}))
+Blind.Account.Event.Opened:__es_payload__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.Account.Event.Opened.Payload)
+Blind.Account.Event.Opened:__es_aggregate_id__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.Account.ID)
+Blind.Account.Event.Opened:__es_by__/0 [infer, 1 clause(s), domain nil]
+    ( -> Blind.UserID)
+Blind.Account.ID:new/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic())
+Blind.Account.ID:new/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic({:error, term()} or {:ok, %Blind.Account.ID{}}))
+Blind.Account.Name:new!/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic())
+Core.Es.Event.At:now/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic({:error, term()} or {:ok, %Core.Es.Event.At{}}))
+Core.Es.Event.At:now!/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic())
+Core.Version:new/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic())
+Core.Result:unwrap!/1 [infer, 2 clause(s), domain set]
+    ({:ok, term()} -> dynamic())
+    ({:error, term()} -> none())

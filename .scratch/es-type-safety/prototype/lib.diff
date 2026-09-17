@@ -1,0 +1,445 @@
+diff --git a/lib/core/es/aggregate.ex b/lib/core/es/aggregate.ex
+index 5715acd..c8129cf 100644
+--- a/lib/core/es/aggregate.ex
++++ b/lib/core/es/aggregate.ex
+@@ -89,7 +89,7 @@ defmodule Core.Es.Aggregate do
+     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
+     event_codec = Helper.Opts.atom!(lit, :event_codec, @label)
+
+-    quote do
++    quote generated: true do
+       @behaviour Core.Es.Aggregate
+       @after_compile Core.Es.Aggregate
+
+@@ -101,21 +101,29 @@ defmodule Core.Es.Aggregate do
+       @doc "Свернуть события истории от состояния `state`."
+       @spec fold(%__MODULE__{}, [Core.Es.Event.t()]) :: %__MODULE__{}
+
+-      def fold(state, events) when is_struct(state, __MODULE__) and is_list(events),
+-        do: Core.Es.Aggregate.fold(__MODULE__, state, events)
++      def fold(%__MODULE__{} = state, events) when is_list(events) do
++        %__MODULE__{} = folded = Core.Es.Aggregate.fold(__MODULE__, state, events)
++        folded
++      end
+
+       @doc "Свернуть результат `decide/2` по команде `command` от состояния `state`."
+       @spec fold(%__MODULE__{}, struct(), [Core.Es.Aggregate.result()]) :: %__MODULE__{}
+
+-      def fold(state, command, results) when is_struct(state, __MODULE__) and is_list(results),
+-        do: Core.Es.Aggregate.fold(__MODULE__, state, command, results)
++      def fold(%__MODULE__{} = state, command, results) when is_list(results) do
++        %__MODULE__{} = folded = Core.Es.Aggregate.fold(__MODULE__, state, command, results)
++        folded
++      end
+
+       @doc "Исполнить команду: события решения `decide/2` и состояние после них."
+       @spec execute(%__MODULE__{}, struct()) ::
+               {:ok, {[Core.Es.Event.t()], %__MODULE__{}}} | {:error, Core.Error.t()}
+
+-      def execute(state, command) when is_struct(state, __MODULE__) and is_struct(command),
+-        do: Core.Es.Aggregate.execute(__MODULE__, state, command)
++      def execute(%__MODULE__{} = state, command) when is_struct(command) do
++        case Core.Es.Aggregate.apply_decision(__MODULE__, state, command, decide(command, state)) do
++          {:ok, {events, %__MODULE__{} = executed}} when is_list(events) -> {:ok, {events, executed}}
++          {:error, reason} -> {:error, reason}
++        end
++      end
+     end
+   end
+
+@@ -145,18 +153,23 @@ defmodule Core.Es.Aggregate do
+   @spec execute(module(), struct(), struct()) ::
+           {:ok, {[Es.Event.t()], struct()}} | {:error, Error.t()}
+
+-  def execute(aggregate, state, %{by: by, at: at} = command)
+-      when is_struct(state, aggregate) and is_struct(command) do
+-    case aggregate.decide(command, state) do
+-      {:ok, results} when is_list(results) ->
+-        events = events(aggregate, state, results, by, at)
+-        {:ok, {events, fold(aggregate, state, events)}}
++  def execute(aggregate, state, command) when is_struct(state, aggregate) and is_struct(command),
++    do: apply_decision(aggregate, state, command, aggregate.decide(command, state))
+
+-      {:error, %Error{}} = error ->
+-        error
+-    end
++  @doc false
++  @spec apply_decision(module(), struct(), struct(), {:ok, [result()]} | {:error, Error.t()}) ::
++          {:ok, {[Es.Event.t()], struct()}} | {:error, Error.t()}
++
++  def apply_decision(aggregate, state, %{by: by, at: at} = command, {:ok, results})
++      when is_struct(state, aggregate) and is_struct(command) and is_list(results) do
++    events = events(aggregate, state, results, by, at)
++    {:ok, {events, fold(aggregate, state, events)}}
+   end
+
++  def apply_decision(aggregate, state, command, {:error, %Error{}} = error)
++      when is_struct(state, aggregate) and is_struct(command),
++      do: error
++
+   @doc false
+   @spec fold(module(), struct(), struct(), [result()]) :: struct()
+
+diff --git a/lib/core/es/aggregate/process.ex b/lib/core/es/aggregate/process.ex
+index a2a78ff..e4d140d 100644
+--- a/lib/core/es/aggregate/process.ex
++++ b/lib/core/es/aggregate/process.ex
+@@ -202,7 +202,7 @@ defmodule Core.Es.Aggregate.Process do
+           when is_version(version) and is_struct(command) and
+                  (is_nil(fun) or is_function(fun, 1)) and is_list(opts) do
+         call = %{id: id, version: version, command: command, context: context, fun: fun}
+-        Core.Es.Aggregate.Process.execute(__MODULE__, @es_aggregate_process, call, opts)
++        es_executed(Core.Es.Aggregate.Process.execute(__MODULE__, @es_aggregate_process, call, opts))
+       end
+
+       @doc "Элемент дерева супервизии: `{#{inspect(__MODULE__)}, enabled: …}`."
+@@ -224,6 +224,15 @@ defmodule Core.Es.Aggregate.Process do
+       @spec __es_aggregate_process__() :: Core.Es.Aggregate.Process.cfg()
+
+       def __es_aggregate_process__, do: @es_aggregate_process
++
++      unquote(narrow_executed())
++    end
++  end
++
++  defp narrow_executed do
++    quote generated: true do
++      defp es_executed(:ok), do: :ok
++      defp es_executed({:error, _} = error), do: error
+     end
+   end
+
+diff --git a/lib/core/es/aggregate/repo.ex b/lib/core/es/aggregate/repo.ex
+index cf2ae6a..1760816 100644
+--- a/lib/core/es/aggregate/repo.ex
++++ b/lib/core/es/aggregate/repo.ex
+@@ -44,8 +44,24 @@ defmodule Core.Es.Aggregate.Repo do
+     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
+     aggregate = Helper.Opts.module!(lit, :aggregate, @label, exports: [__es_event_codec__: 0])
+     id = Helper.Opts.module!(lit, :id, @label)
++    codec = Code.ensure_compiled!(aggregate.__es_event_codec__())
++
++    # Прототип (решение 3): полнота `evolve/2` — литеральный вызов на каждое событие кодека.
++    evolve_checks =
++      for mod <- Enum.sort(codec.__es_mods__()) do
++        quote do
++          @doc false
++          def unquote(Core.Es.Event.Codec.check_name("evolve/2 принимает", mod))(
++                %unquote(aggregate){} = state,
++                unquote(Core.Es.Event.Codec.event_pattern(mod, __CALLER__.line)) = event
++              ),
++              do: unquote(aggregate).evolve(state, event)
++        end
++      end
+
+     quote do
++      unquote_splicing(evolve_checks)
++
+       @doc false
+       @spec __es_aggregate_repo__() :: %{aggregate: module(), id: module()}
+
+diff --git a/lib/core/es/aggregate/repo/pg.ex b/lib/core/es/aggregate/repo/pg.ex
+index e3a7dee..b11e31c 100644
+--- a/lib/core/es/aggregate/repo/pg.ex
++++ b/lib/core/es/aggregate/repo/pg.ex
+@@ -130,7 +130,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
+     dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
+     codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
+
+-    quote do
++    quote generated: true do
+       @behaviour unquote(cfg.behaviour)
+
+       @es_aggregate_repo unquote(Macro.escape(cfg))
+@@ -140,20 +140,32 @@ defmodule Core.Es.Aggregate.Repo.Pg do
+       @doc "Состояние агрегата из его потока; `version` сверяется с головой потока."
+       @impl true
+       def get(%unquote(cfg.id){} = id, version, %Core.Context{} = context, opts \\ [])
+-          when is_version(version) and is_list(opts),
+-          do: Core.Es.Aggregate.Repo.Pg.get(es_aggregate_repo(), id, version, context, opts)
++          when is_version(version) and is_list(opts) do
++        case Core.Es.Aggregate.Repo.Pg.get(es_aggregate_repo(), id, version, context, opts) do
++          {:ok, %unquote(cfg.aggregate){} = state} -> {:ok, state}
++          {:error, _} = error -> error
++        end
++      end
+
+       @doc "Состояния агрегатов по парам `{id, version}` одним запросом, в порядке пар."
+       @impl true
+       def get_many(pairs, %Core.Context{} = context, opts \\ [])
+-          when is_list(pairs) and is_list(opts),
+-          do: Core.Es.Aggregate.Repo.Pg.get_many(es_aggregate_repo(), pairs, context, opts)
++          when is_list(pairs) and is_list(opts) do
++        case Core.Es.Aggregate.Repo.Pg.get_many(es_aggregate_repo(), pairs, context, opts) do
++          {:ok, states} when is_list(states) -> {:ok, states}
++          {:error, _} = error -> error
++        end
++      end
+
+       @doc "Записать события агрегатов в хранилище событий и outbox одной транзакцией."
+       @impl true
+       def append(events, %Core.Context{} = context, opts \\ [])
+-          when is_list(events) and is_list(opts),
+-          do: Core.Es.Aggregate.Repo.Pg.append(es_aggregate_repo(), events, context, opts)
++          when is_list(events) and is_list(opts) do
++        case Core.Es.Aggregate.Repo.Pg.append(es_aggregate_repo(), events, context, opts) do
++          :ok -> :ok
++          {:error, _} = error -> error
++        end
++      end
+
+       @doc "Дочитать поток после `state.version`; `version` сверяется с головой потока."
+       @impl true
+@@ -163,8 +175,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
+             %Core.Context{} = context,
+             opts \\ []
+           )
+-          when is_version(version) and is_list(opts),
+-          do: Core.Es.Aggregate.Repo.Pg.refresh(es_aggregate_repo(), state, version, context, opts)
++          when is_version(version) and is_list(opts) do
++        case Core.Es.Aggregate.Repo.Pg.refresh(es_aggregate_repo(), state, version, context, opts) do
++          {:ok, %unquote(cfg.aggregate){} = refreshed} -> {:ok, refreshed}
++          {:error, _} = error -> error
++        end
++      end
+
+       defoverridable get: 3,
+                      get: 4,
+diff --git a/lib/core/es/event/codec.ex b/lib/core/es/event/codec.ex
+index 98c6b5f..8e39a69 100644
+--- a/lib/core/es/event/codec.ex
++++ b/lib/core/es/event/codec.ex
+@@ -241,6 +241,7 @@ defmodule Core.Es.Event.Codec do
+       end
+
+       @before_compile Core.Es.Event.Codec
++      @es_use_line unquote(__CALLER__.line)
+     end
+   end
+
+@@ -259,9 +260,105 @@ defmodule Core.Es.Event.Codec do
+     if map_size(upcasts) > 0,
+       do: ensure_defined!(env.module, {:upcast, 2}, "у кодека непустые upcasts:", env)
+
+-    nil
++    mods = tags |> Map.keys() |> Enum.sort()
++    line = Module.get_attribute(env.module, :es_use_line)
++
++    quote line: line do
++      unquote(draft_ast(mods, env))
++      unquote(payload_checks_ast(mods, line))
++    end
++  end
++
++  # Прототип (решение 4): конструктор элемента результата `decide/2`. Clause на модуль нагрузки
++  # каждого события с нагрузкой и на модуль каждого события без неё.
++  defp draft_ast(mods, env) do
++    ensure_unique_payloads!(mods, env)
++
++    clauses =
++      for mod <- mods do
++        case mod.__es_payload__() do
++          nil ->
++            quote do
++              def draft(unquote(mod)), do: unquote(mod)
++            end
++
++          payload ->
++            quote do
++              def draft(%unquote(payload){} = payload), do: {unquote(mod), payload}
++            end
++        end
++      end
++
++    quote do
++      @doc "Элемент результата `decide/2`: нагрузка события или модуль события без нагрузки."
++      @spec draft(struct() | module()) :: Core.Es.Aggregate.result()
++
++      unquote_splicing(clauses)
++    end
+   end
+
++  defp ensure_unique_payloads!(mods, env) do
++    shared =
++      mods
++      |> Enum.reject(&is_nil(&1.__es_payload__()))
++      |> Enum.group_by(& &1.__es_payload__())
++      |> Enum.filter(fn {_payload, events} -> length(events) > 1 end)
++
++    if shared != [] do
++      raise CompileError,
++        description:
++          "#{@label}: нагрузка задаёт событие для draft/1, а у кодека #{inspect(env.module)} " <>
++            "модуль нагрузки общий у нескольких событий: #{inspect(shared)}",
++        file: env.file,
++        line: env.line
++    end
++  end
++
++  # Прототип (решение 3): функции-проверки полноты `dump_payload/2` и `load_payload/3` и формы
++  # нагрузки, которую возвращает `load_payload/3`.
++  defp payload_checks_ast(mods, line) do
++    for mod <- mods, payload = mod.__es_payload__(), not is_nil(payload) do
++      [ok_clause] = quote(line: line, do: ({:ok, %unquote(payload){}} -> :ok))
++      [error_clause] = quote(line: line, generated: true, do: ({:error, _} -> :ok))
++      load_call = quote(line: line, do: load_payload(unquote(mod), wire, codec))
++
++      quote line: line do
++        @doc false
++        def unquote(check_name("dump_payload/2 принимает", mod))(
++              unquote(event_pattern(mod, line)) = event,
++              codec
++            ),
++            do: dump_payload(event, codec)
++
++        @doc false
++        def unquote(check_name("load_payload/3 отдаёт нагрузку", payload))(unquote(mod), wire, codec),
++          do: unquote({:case, [], [load_call, [do: [ok_clause, error_clause]]]})
++      end
++    end
++  end
++
++  @doc false
++  @spec event_pattern(module(), non_neg_integer()) :: Macro.t()
++
++  def event_pattern(mod, line) when is_atom(mod) do
++    payload =
++      case mod.__es_payload__() do
++        nil -> nil
++        payload_mod -> quote(line: line, do: %unquote(payload_mod){})
++      end
++
++    quote line: line do
++      %unquote(mod){payload: unquote(payload)}
++    end
++  end
++
++  # Имя функции-проверки — утверждение, которое нарушено: оно печатается в месте предупреждения.
++  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
++  @doc false
++  @spec check_name(String.t(), module()) :: atom()
++
++  def check_name(claim, mod), do: String.to_atom("#{claim} #{inspect(mod)}")
++
+   @doc false
+   @spec required_keys() :: [atom()]
+
+diff --git a/lib/core/es/projection.ex b/lib/core/es/projection.ex
+index 3f9eaf1..d858dc9 100644
+--- a/lib/core/es/projection.ex
++++ b/lib/core/es/projection.ex
+@@ -201,6 +201,7 @@ defmodule Core.Es.Projection do
+     quote do
+       @behaviour Core.Es.Projection
+       @before_compile Core.Es.Projection
++      @es_use_line unquote(__CALLER__.line)
+
+       @es_projection Core.Es.Projection.declaration!(
+                        unquote(name),
+@@ -219,7 +220,19 @@ defmodule Core.Es.Projection do
+   @doc false
+   defmacro __before_compile__(env) do
+     Enum.each([project: 1, clear: 0], &ensure_defined!(env, &1))
+-    nil
++
++    # Прототип (решение 3): полнота `project/1` — литеральный вызов на каждое событие `events:`.
++    line = Module.get_attribute(env.module, :es_use_line)
++
++    for mod <- Module.get_attribute(env.module, :es_projection).events do
++      quote line: line do
++        @doc false
++        def unquote(Es.Event.Codec.check_name("project/1 принимает", mod))(
++              unquote(Es.Event.Codec.event_pattern(mod, line)) = event
++            ),
++            do: project(event)
++      end
++    end
+   end
+
+   # ---
+diff --git a/lib/core/prim.ex b/lib/core/prim.ex
+index 12c3537..677fc15 100644
+--- a/lib/core/prim.ex
++++ b/lib/core/prim.ex
+@@ -29,7 +29,6 @@ defmodule Core.Prim do
+   alias Core.Error
+   alias Core.Helper
+   alias Core.Mutator
+-  alias Core.Result
+   alias Core.Validator
+
+   require Error
+@@ -97,7 +96,12 @@ defmodule Core.Prim do
+       @doc "Создать Prim; при ошибке — raise."
+       @spec new!(term()) :: t()
+
+-      def new!(raw), do: Result.unwrap!(new(raw))
++      def new!(raw) do
++        case new(raw) do
++          {:ok, %__MODULE__{} = prim} -> prim
++          {:error, %Error{} = error} -> raise Core.Exc, error
++        end
++      end
+
+       @doc "Достать внутреннее значение."
+       @spec value(t()) :: unquote(value_type)
+diff --git a/lib/core/prim/date_time.ex b/lib/core/prim/date_time.ex
+index 8c44a87..d296f46 100644
+--- a/lib/core/prim/date_time.ex
++++ b/lib/core/prim/date_time.ex
+@@ -70,7 +70,12 @@ defmodule Core.Prim.DateTime do
+       @doc "Текущее время; при ошибке — raise."
+       @spec now!() :: t()
+
+-      def now!, do: Result.unwrap!(now())
++      def now! do
++        case now() do
++          {:ok, %__MODULE__{} = prim} -> prim
++          {:error, %Core.Error{} = error} -> raise Core.Exc, error
++        end
++      end
+
+       @doc "Собрать из другого datetime-Prim (полный pipeline целевого `new/1`)."
+       @spec from(term()) :: {:ok, t()} | {:error, Error.t()}
+diff --git a/test/support/es_fixture/account.ex b/test/support/es_fixture/account.ex
+index e105d30..69f635c 100644
+--- a/test/support/es_fixture/account.ex
++++ b/test/support/es_fixture/account.ex
+@@ -107,7 +107,7 @@ defmodule Core.EsFixture.Account do
+
+   @impl true
+   def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),
+-    do: {:ok, [{Event.Opened, Event.Opened.Payload.new(name)}]}
++    do: {:ok, [Event.Codec.draft(Event.Opened.Payload.new(name))]}
+
+   def decide(%Cmd.Open{}, %__MODULE__{} = state) do
+     {:error, Errors.domain(__MODULE__, :already_exists, %{version: Version.value(state.version)})}
+@@ -119,11 +119,11 @@ defmodule Core.EsFixture.Account do
+   def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
+
+   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+-    do: {:ok, [{Event.Renamed, Event.Renamed.Payload.new(name)}]}
++    do: {:ok, [Event.Codec.draft(Event.Renamed.Payload.new(name))]}
+
+-  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen]}
++  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
+
+-  def decide(%Cmd.Close{}, %__MODULE__{status: :frozen}), do: {:ok, [Event.Closed]}
++  def decide(%Cmd.Close{}, %__MODULE__{status: :frozen}), do: {:ok, [Event.Codec.draft(Event.Closed)]}
+
+   # Closed решается по состоянию после Frozen: промежуточное событие сворачивается в той же команде.
+   def decide(%Cmd.Close{} = command, %__MODULE__{status: :open} = state) do
+diff --git a/test/support/es_fixture/broken_projection.ex b/test/support/es_fixture/broken_projection.ex
+index 2bdc12e..2ceff5e 100644
+--- a/test/support/es_fixture/broken_projection.ex
++++ b/test/support/es_fixture/broken_projection.ex
+@@ -37,6 +37,10 @@ defmodule Core.EsFixture.BrokenProjection do
+
+   def project(%Account.Event.Renamed{payload: payload}), do: rename(payload.name)
+
++  # Прототип: пропуск клаузы `Closed` скрыт от проверки полноты на компиляции — guard ложен
++  # только в runtime, и `FunctionClauseError` по-прежнему бросает сама `project/1`.
++  def project(%Account.Event.Closed{} = event) when map_size(event) < 0, do: :ok
++
+   @doc "Очистить read-модель — таблица названий забыта."
+   @spec clear() :: :ok

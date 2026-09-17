@@ -1,0 +1,222 @@
+    warning: this clause cannot match because a previous clause at line 24 always matches
+    │
+ 25 │       {:ok, events} -> events
+    │                     ~
+    │
+    └─ e10_control_flow.ex:25:21
+
+    warning: the following clause will never match:
+
+        {:error, reason} ->
+
+    because it attempts to match on the result of:
+
+        E10.Decider.decide(1)
+
+    which has type:
+
+        dynamic({:ok, non_empty_list(integer())})
+
+    type warning found at:
+    │
+ 11 │       {:error, reason} -> reason
+    │       ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e10_control_flow.ex:11: E10.case_dead_clause/0
+
+    warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+        _ ->
+
+    it attempts to match on the result of:
+
+        E10.Decider.decide(1)
+
+    which has the already matched type:
+
+        dynamic({:ok, non_empty_list(integer())})
+
+    type warning found at:
+    │
+ 18 │       _ -> :unreachable
+    │         ~
+    │
+    └─ e10_control_flow.ex:18:9: E10.case_wildcard/0
+
+    warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+        {:ok, events} ->
+
+    it attempts to match on the result of:
+
+        E10.Decider.decide(1)
+
+    which has the already matched type:
+
+        dynamic({:ok, non_empty_list(integer())})
+
+    where "events" was given the type:
+
+        # type: dynamic(non_empty_list(integer()))
+        # from: e10_control_flow.ex
+        {:ok, events}
+
+    type warning found at:
+    │
+ 25 │       {:ok, events} -> events
+    │                     ~
+    │
+    └─ e10_control_flow.ex:25:21: E10.case_wildcard_first/0
+
+    warning: the following clause will never match:
+
+        {:error, reason} ->
+
+    it is expected to match on type:
+
+        none()
+
+    type warning found at:
+    │
+ 33 │       {:error, reason} -> reason
+    │       ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e10_control_flow.ex:33: E10.with_else_dead/0
+
+    warning: the following pattern will never match:
+
+        {:error, reason} <- E10.Decider.decide(1)
+
+    because the right-hand side has type:
+
+        dynamic({:ok, non_empty_list(integer())})
+
+    type warning found at:
+    │
+ 46 │     with {:error, reason} <- Decider.decide(1) do
+    │     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e10_control_flow.ex:46: E10.with_never_matches/0
+
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(x)
+
+    given types:
+
+        -dynamic(:error or nil or {integer(), binary()})-
+
+    but expected one of:
+
+        bitstring()
+
+    where "x" was given the type:
+
+        # type: dynamic(:error or nil or {integer(), binary()})
+        # from: e10_control_flow.ex:52:7
+        x =
+          try do
+            ...
+          end
+
+    type warning found at:
+    │
+ 59 │     byte_size(x)
+    │     ~
+    │
+    └─ e10_control_flow.ex:59:5: E10.try_result/1
+
+    warning: incompatible types given to Integer.to_string/1:
+
+        Integer.to_string("a")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 69 │     a = Integer.to_string("a")
+    │                 ~
+    │
+    └─ e10_control_flow.ex:69:17: E10.first_error_only/0
+
+    warning: incompatible types given to Integer.to_string/1:
+
+        Integer.to_string("a")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 76 │       Integer.to_string("a")
+    │               ~
+    │
+    └─ e10_control_flow.ex:76:15: E10.branches_each_reported/1
+
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(1)
+
+    given types:
+
+        -integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    type warning found at:
+    │
+ 78 │       byte_size(1)
+    │       ~
+    │
+    └─ e10_control_flow.ex:78:7: E10.branches_each_reported/1
+
+    warning: unknown key .mesage in expression:
+
+        e.mesage
+
+    the given type does not have the given key:
+
+        dynamic(%ArgumentError{__exception__: term(), message: term()})
+
+    where "e" was given the type:
+
+        # type: dynamic(%ArgumentError{})
+        # from: e10_control_flow.ex
+        rescue try do
+          ...
+        end
+
+    type warning found at:
+    │
+ 65 │     e in ArgumentError -> e.mesage
+    │                             ~~~~~~
+    │
+    └─ e10_control_flow.ex:65:29: E10.rescue_field/0
+
+    warning: the following clause will never match:
+
+        _ ->
+
+    it is expected to match on type:
+
+        none()
+
+    type warning found at:
+    │
+ 41 │       _ -> :unreachable
+    │       ~
+    │
+    └─ e10_control_flow.ex:41:7: E10.with_else_wildcard/0

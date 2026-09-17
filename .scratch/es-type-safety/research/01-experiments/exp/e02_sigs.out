@@ -1,0 +1,8 @@
+E02.Strict:decide/2 [infer, 1 clause(s), domain nil]
+    (%E02.Rename{name: binary()}, %E02.Strict{} -> dynamic({:ok, non_empty_list(binary())}))
+E02.CatchAllRaise:decide/2 [infer, 2 clause(s), domain set]
+    (%E02.Rename{name: binary()}, %E02.CatchAllRaise{} -> dynamic({:ok, non_empty_list(binary())}))
+    (term(), term() -> none())
+E02.CatchAllError:decide/2 [infer, 2 clause(s), domain set]
+    (%E02.Rename{name: binary()}, %E02.CatchAllError{} -> dynamic({:ok, non_empty_list(binary())}))
+    (term(), term() -> {:error, :unknown_command})

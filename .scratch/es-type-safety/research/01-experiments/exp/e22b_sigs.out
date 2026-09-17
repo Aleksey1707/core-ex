@@ -1,0 +1,5 @@
+E22b.SameReturn:evolve/2 [infer, 1 clause(s), domain set]
+    (:state, %E22b.Ev1{} or %E22b.Ev10{} or %E22b.Ev11{} or %E22b.Ev12{} or %E22b.Ev13{} or %E22b.Ev14{} or
+  %E22b.Ev15{} or %E22b.Ev16{} or %E22b.Ev17{} or %E22b.Ev18{} or %E22b.Ev19{} or %E22b.Ev2{} or
+  %E22b.Ev20{} or %E22b.Ev3{} or %E22b.Ev4{} or %E22b.Ev5{} or %E22b.Ev6{} or %E22b.Ev7{} or
+  %E22b.Ev8{} or %E22b.Ev9{} -> {:state, integer()})

@@ -1,0 +1,8 @@
+E07.access_on_struct: UndefinedFunctionError
+E07.enum_map_non_enumerable: Protocol.UndefinedError
+E07.json_atom_key: KeyError
+E11.reduce_capture_args_swapped: FunctionClauseError
+E11.callback_param_wrong: FunctionClauseError
+E23.partial_union(false): FunctionClauseError
+E03.apply3: FunctionClauseError
+E03.param_var: FunctionClauseError

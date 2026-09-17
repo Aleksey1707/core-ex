@@ -1,0 +1,64 @@
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(%E18.Row{..., amount: 1}.amount)
+
+    given types:
+
+        -integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    type warning found at:
+    │
+ 27 │   def literal_struct_field_type, do: byte_size(%Row{amount: 1}.amount)
+    │                                      ~
+    │
+    └─ e18_ecto.ex:27:38: E18.literal_struct_field_type/0
+
+    warning: unknown key .amout in expression:
+
+        r.amout
+
+    the given type does not have the given key:
+
+        dynamic(%E18.Row{__meta__: term(), id: term(), amount: term(), payload: term()})
+
+    where "r" was given the type:
+
+        # type: dynamic(%E18.Row{})
+        # from: e18_ecto.ex:17:26
+        %E18.Row{} = r
+
+    type warning found at:
+    │
+ 17 │   def schema_typo(%Row{} = r), do: r.amout
+    │                                      ~~~~~
+    │
+    └─ e18_ecto.ex:17:38: E18.schema_typo/1
+
+    warning: unknown key .amout in expression:
+
+        row.amout
+
+    the given type does not have the given key:
+
+        dynamic(%E18.Row{__meta__: term(), id: term(), amount: term(), payload: term()})
+
+    where "row" was given the types:
+
+        # type: dynamic(%E18.Row{})
+        # from: e18_ecto.ex:23:12
+        %E18.Row{} = row = E18.Repo.get!(E18.Row, id)
+
+        # type: dynamic(%E18.Row{})
+        # from: e18_ecto.ex:23:18
+        %E18.Row{} = row
+
+    type warning found at:
+    │
+ 24 │     row.amout
+    │         ~~~~~
+    │
+    └─ e18_ecto.ex:24:9: E18.repo_get_matched_typo/1

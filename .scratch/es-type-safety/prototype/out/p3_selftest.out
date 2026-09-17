@@ -1,0 +1,16 @@
+== 1. исходное состояние
+ratchet: ok — 30 ожидаемых предупреждений, лишних нет
+exit=0
+== 2. пропавшее предупреждение (C1 починен, маркер остался)
+ratchet: FAIL — маркеров 30, пропало 1, лишних 0
+  пропало: lib/scenarios/p2_evolve.ex:23: incompatible types given to Blind.BadEvolveMissing.evolve/2
+exit=1
+== 3. лишнее предупреждение (опечатка в lib/blind/usecase.ex)
+ratchet: FAIL — маркеров 30, пропало 0, лишних 1
+  лишнее:  lib/blind/usecase.ex:60: unknown key .nmae in expression: [Blind.Usecase.typo/1]
+exit=1
+== 4. сдвиг строк в p0.ex на 7
+ratchet: ok — 30 ожидаемых предупреждений, лишних нет
+exit=0
+== 5. эталон file:line при сдвиге на 7: строк 30, разошлось 16
+== 5b. эталон file: title [mfa] без строки: разошлось 0

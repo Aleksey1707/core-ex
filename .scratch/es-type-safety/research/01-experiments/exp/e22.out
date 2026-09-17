@@ -1,0 +1,114 @@
+     warning: the following clause will never match:
+
+         :impossible ->
+
+     because it attempts to match on the result of:
+
+         E22.Small.evolve(:state, e)
+
+     which has type:
+
+         dynamic({:state, :s1 or :s2 or :s3})
+
+     type warning found at:
+     │
+ 121 │       :impossible -> :never
+     │       ~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ e22_max_clauses.ex:121: E22.Caller.small_dynamic/1
+
+     warning: the following clause will never match:
+
+         :impossible ->
+
+     because it attempts to match on the result of:
+
+         E22.Big.evolve(:state, %E22.Ev1{...})
+
+     which has type:
+
+         dynamic({:state, :s1})
+
+     type warning found at:
+     │
+ 128 │       :impossible -> :never
+     │       ~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ e22_max_clauses.ex:128: E22.Caller.big_literal/0
+
+     warning: incompatible types given to E22.Big.evolve/2:
+
+         E22.Big.evolve(:state, "not an event")
+
+     given types:
+
+         :state, -binary()-
+
+     but expected one of:
+
+         #1
+         :state, %E22.Ev1{}
+
+         #2
+         :state, %E22.Ev2{}
+
+         #3
+         :state, %E22.Ev3{}
+
+         #4
+         :state, %E22.Ev4{}
+
+         #5
+         :state, %E22.Ev5{}
+
+         #6
+         :state, %E22.Ev6{}
+
+         #7
+         :state, %E22.Ev7{}
+
+         #8
+         :state, %E22.Ev8{}
+
+         #9
+         :state, %E22.Ev9{}
+
+         #10
+         :state, %E22.Ev10{}
+
+         #11
+         :state, %E22.Ev11{}
+
+         #12
+         :state, %E22.Ev12{}
+
+         #13
+         :state, %E22.Ev13{}
+
+         #14
+         :state, %E22.Ev14{}
+
+         #15
+         :state, %E22.Ev15{}
+
+         #16
+         :state, %E22.Ev16{}
+
+         #17
+         :state, %E22.Ev17{}
+
+         #18
+         :state, %E22.Ev18{}
+
+         #19
+         :state, %E22.Ev19{}
+
+         #20
+         :state, %E22.Ev20{}
+
+     type warning found at:
+     │
+ 132 │   def big_wrong_arg, do: E22.Big.evolve(:state, "not an event")
+     │                                  ~
+     │
+     └─ e22_max_clauses.ex:132:34: E22.Caller.big_wrong_arg/0

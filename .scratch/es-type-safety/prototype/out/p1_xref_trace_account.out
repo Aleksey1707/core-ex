@@ -1,0 +1,958 @@
+    warning: incompatible types given to dump_payload/2:
+
+        dump_payload(event, codec)
+
+    given types:
+
+        -dynamic(%Blind.Parcel.Event.Lost{payload: %Blind.Parcel.Event.Lost.Payload{}})-, dynamic()
+
+    but expected one of:
+
+        %Blind.Parcel.Event.Sent{payload: %{..., note: term()}}, term()
+
+    where "codec" (context Core.Es.Event.Codec) was given the type:
+
+        # type: dynamic()
+        # from: lib/scenarios/h_codec.ex:60
+        codec
+
+    where "event" (context Core.Es.Event.Codec) was given the type:
+
+        # type: dynamic(%Blind.Parcel.Event.Lost{payload: %Blind.Parcel.Event.Lost.Payload{}})
+        # from: lib/scenarios/h_codec.ex:60
+        %Blind.Parcel.Event.Lost{payload: %Blind.Parcel.Event.Lost.Payload{}} = event
+
+    type warning found at:
+    │
+ 60 │   use Core.Es.Event.Codec,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/h_codec.ex:60: Blind.Parcel.Event.Codec."dump_payload/2 принимает Blind.Parcel.Event.Lost"/2
+
+    warning: incompatible types given to load_payload/3:
+
+        load_payload(Blind.Parcel.Event.Lost, wire, codec)
+
+    given types:
+
+        -Blind.Parcel.Event.Lost-, dynamic(map()), dynamic()
+
+    but expected one of:
+
+        Blind.Parcel.Event.Sent, map(), term()
+
+    where "codec" (context Core.Es.Event.Codec) was given the type:
+
+        # type: dynamic()
+        # from: lib/scenarios/h_codec.ex:60
+        codec
+
+    where "wire" (context Core.Es.Event.Codec) was given the types:
+
+        # type: dynamic()
+        # from: lib/scenarios/h_codec.ex:60
+        wire
+
+        # type: dynamic(map())
+        # from: lib/scenarios/h_codec.ex:60
+        load_payload(Blind.Parcel.Event.Lost, wire, codec)
+
+    type warning found at:
+    │
+ 60 │   use Core.Es.Event.Codec,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/h_codec.ex:60: Blind.Parcel.Event.Codec."load_payload/3 отдаёт нагрузку Blind.Parcel.Event.Lost.Payload"/3
+
+    warning: the following clause will never match:
+
+        {:ok, %Blind.Parcel.Event.Sent.Payload{}} ->
+
+    because it attempts to match on the result of:
+
+        load_payload(Blind.Parcel.Event.Sent, wire, codec)
+
+    which has type:
+
+        dynamic({:ok, %Blind.Account.Event.Renamed.Payload{}})
+
+    type warning found at:
+    │
+ 60 │   use Core.Es.Event.Codec,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/h_codec.ex:60: Blind.Parcel.Event.Codec."load_payload/3 отдаёт нагрузку Blind.Parcel.Event.Sent.Payload"/3
+
+    warning: the following clause will never match:
+
+        {:ok, %Blind.Parcel.Event.Sent.Payload{}} ->
+
+    because it attempts to match on the result of:
+
+        load_payload(Blind.Parcel.Event.Sent, wire, codec)
+
+    which has type:
+
+        dynamic(
+          ({...} and not {:ok, term()}) or atom() or bitstring() or empty_list() or float() or fun() or
+            integer() or map() or non_empty_list(term(), term()) or pid() or port() or reference() or
+            {:ok, %Blind.Account.Event.Renamed.Payload{name: %Blind.Account.Name{}}}
+        )
+
+    type warning found at:
+    │
+ 84 │   use Core.Es.Event.Codec,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/h_codec.ex:84: Blind.Parcel.Event.CodecNew."load_payload/3 отдаёт нагрузку Blind.Parcel.Event.Sent.Payload"/3
+
+    warning: incompatible types given to Blind.Account.execute/2:
+
+        Blind.Account.execute(state, cmd)
+
+    given types:
+
+        dynamic(%Blind.Account{}), -dynamic(%Blind.Order.Cmd.Place{})-
+
+    but expected one of:
+
+        (
+          %Blind.Account{},
+          %Blind.Account.Cmd.Close{} or %Blind.Account.Cmd.Freeze{} or %Blind.Account.Cmd.Open{} or
+            %Blind.Account.Cmd.Rename{} or
+            %{
+              ...,
+              __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Freeze or Blind.Account.Cmd.Rename
+            }
+        )
+
+    where "cmd" was given the type:
+
+        # type: dynamic(%Blind.Order.Cmd.Place{})
+        # from: lib/scenarios/p0.ex:14:61
+        %Blind.Order.Cmd.Place{} = cmd
+
+    where "state" was given the type:
+
+        # type: dynamic(%Blind.Account{})
+        # from: lib/scenarios/p0.ex:14:33
+        %Blind.Account{} = state
+
+    type warning found at:
+    │
+ 15 │     do: Account.execute(state, cmd)
+    │                 ~
+    │
+    └─ lib/scenarios/p0.ex:15:17: Blind.S.P0.a1_foreign_cmd/2
+
+    warning: incompatible types given to Blind.Account.execute/2:
+
+        Blind.Account.execute(state, %Blind.Account.Cmd.Orphan{by: by, at: at})
+
+    given types:
+
+        (
+          dynamic(%Blind.Account{}),
+          -dynamic(%Blind.Account.Cmd.Orphan{by: %Blind.UserID{}, at: %Core.Es.Event.At{}})-
+        )
+
+    but expected one of:
+
+        (
+          %Blind.Account{},
+          %Blind.Account.Cmd.Close{} or %Blind.Account.Cmd.Freeze{} or %Blind.Account.Cmd.Open{} or
+            %Blind.Account.Cmd.Rename{} or
+            %{
+              ...,
+              __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Freeze or Blind.Account.Cmd.Rename
+            }
+        )
+
+    where "at" was given the type:
+
+        # type: dynamic(%Core.Es.Event.At{})
+        # from: lib/scenarios/p0.ex:18:78
+        %Core.Es.Event.At{} = at
+
+    where "by" was given the type:
+
+        # type: dynamic(%Blind.UserID{})
+        # from: lib/scenarios/p0.ex:18:57
+        %Blind.UserID{} = by
+
+    where "state" was given the type:
+
+        # type: dynamic(%Blind.Account{})
+        # from: lib/scenarios/p0.ex:18:38
+        %Blind.Account{} = state
+
+    type warning found at:
+    │
+ 19 │     do: Account.execute(state, %Account.Cmd.Orphan{by: by, at: at})
+    │                 ~
+    │
+    └─ lib/scenarios/p0.ex:19:17: Blind.S.P0.a2_no_decide_clause/3
+
+    warning: incompatible types given to Blind.Account.execute/2:
+
+        Blind.Account.execute(state, cmd)
+
+    given types:
+
+        -dynamic(%Blind.Order{})-, dynamic(%Blind.Account.Cmd.Open{})
+
+    but expected one of:
+
+        (
+          %Blind.Account{},
+          %Blind.Account.Cmd.Close{} or %Blind.Account.Cmd.Freeze{} or %Blind.Account.Cmd.Open{} or
+            %Blind.Account.Cmd.Rename{} or
+            %{
+              ...,
+              __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Freeze or Blind.Account.Cmd.Rename
+            }
+        )
+
+    where "cmd" was given the type:
+
+        # type: dynamic(%Blind.Account.Cmd.Open{})
+        # from: lib/scenarios/p0.ex:22:62
+        %Blind.Account.Cmd.Open{} = cmd
+
+    where "state" was given the type:
+
+        # type: dynamic(%Blind.Order{})
+        # from: lib/scenarios/p0.ex:22:33
+        %Blind.Order{} = state
+
+    type warning found at:
+    │
+ 23 │     do: Account.execute(state, cmd)
+    │                 ~
+    │
+    └─ lib/scenarios/p0.ex:23:17: Blind.S.P0.a3_foreign_state/2
+
+    warning: the following clause will never match:
+
+        {:ok, events} when is_list(events) ->
+
+    because it attempts to match on the result of:
+
+        Blind.Account.execute(state, cmd)
+
+    which has type:
+
+        dynamic(
+          {:error, %Core.Error{}} or
+            {:ok, {empty_list() or non_empty_list(term(), term()), %Blind.Account{}}}
+        )
+
+    where "events" was given the type:
+
+        # type: empty_list() or non_empty_list(term(), term())
+        # from: lib/scenarios/p0.ex:28:26
+        is_list(events)
+
+    type warning found at:
+    │
+ 28 │       {:ok, events} when is_list(events) -> events
+    │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p0.ex:28: Blind.S.P0.a4a_case_events_list/2
+
+    warning: incompatible types given to Blind.Account.Event.Opened.new/5:
+
+        Blind.Account.Event.Opened.new(payload, Blind.Order.ID.new(), Core.Version.new(), by, at)
+
+    given types:
+
+        (
+          dynamic(%Blind.Account.Event.Opened.Payload{}),
+          -dynamic(%Blind.Order.ID{})-,
+          dynamic(%Core.Version{}),
+          dynamic(%Blind.UserID{}),
+          dynamic(%Core.Es.Event.At{})
+        )
+
+    but expected one of:
+
+        (
+          %Blind.Account.Event.Opened.Payload{},
+          %Blind.Account.ID{},
+          %Core.Version{},
+          %Blind.UserID{},
+          %Core.Es.Event.At{}
+        )
+
+    where "at" was given the type:
+
+        # type: dynamic(%Core.Es.Event.At{})
+        # from: lib/scenarios/p0.ex:51:100
+        %Core.Es.Event.At{} = at
+
+    where "by" was given the type:
+
+        # type: dynamic(%Blind.UserID{})
+        # from: lib/scenarios/p0.ex:51:79
+        %Blind.UserID{} = by
+
+    where "payload" was given the type:
+
+        # type: dynamic(%Blind.Account.Event.Opened.Payload{})
+        # from: lib/scenarios/p0.ex:51:58
+        %Blind.Account.Event.Opened.Payload{} = payload
+
+    type warning found at:
+    │
+ 52 │     do: Account.Event.Opened.new(payload, Order.ID.new(), Version.new(), by, at)
+    │                              ~
+    │
+    └─ lib/scenarios/p0.ex:52:30: Blind.S.P0.d2b_foreign_id_new/3
+
+    warning: incompatible types given to Blind.Account.Repo.Pg.get/3:
+
+        Blind.Account.Repo.Pg.get(Blind.Order.ID.new(), :current, context)
+
+    given types:
+
+        -dynamic(%Blind.Order.ID{})-, :current, dynamic(%Core.Context{})
+
+    but expected one of:
+
+        %Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %Core.Context{}
+
+    where "context" was given the type:
+
+        # type: dynamic(%Core.Context{})
+        # from: lib/scenarios/p0.ex:55:37
+        %Core.Context{} = context
+
+    type warning found at:
+    │
+ 55 │   def e1b_foreign_id_new(%Context{} = context), do: @repo.get(Order.ID.new(), :current, context)
+    │                                                           ~
+    │
+    └─ lib/scenarios/p0.ex:55:59: Blind.S.P0.e1b_foreign_id_new/1
+
+    warning: incompatible types given to Blind.Account.Process.execute/4:
+
+        Blind.Account.Process.execute(Blind.Order.ID.new(), :current, cmd, context)
+
+    given types:
+
+        (
+          -dynamic(%Blind.Order.ID{})-,
+          :current,
+          dynamic(%Blind.Account.Cmd.Open{}),
+          dynamic(%Core.Context{})
+        )
+
+    but expected one of:
+
+        (
+          %Blind.Account.ID{},
+          %{..., __struct__: Core.Version} or :current,
+          %{..., __struct__: atom()},
+          %Core.Context{}
+        )
+
+    where "cmd" was given the type:
+
+        # type: dynamic(%Blind.Account.Cmd.Open{})
+        # from: lib/scenarios/p0.ex:58:46
+        %Blind.Account.Cmd.Open{} = cmd
+
+    where "context" was given the type:
+
+        # type: dynamic(%Core.Context{})
+        # from: lib/scenarios/p0.ex:58:64
+        %Core.Context{} = context
+
+    type warning found at:
+    │
+ 59 │     do: Account.Process.execute(Order.ID.new(), :current, cmd, context)
+    │                         ~
+    │
+    └─ lib/scenarios/p0.ex:59:25: Blind.S.P0.f1b_foreign_id_new/2
+
+    warning: the following clause will never match:
+
+        {:ok, state} ->
+
+    because it attempts to match on the result of:
+
+        Blind.Account.Process.execute(id, :current, cmd, context)
+
+    which has type:
+
+        dynamic(:ok or {:error, term()})
+
+    type warning found at:
+    │
+ 68 │       {:ok, state} -> state
+    │       ~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p0.ex:68: Blind.S.P0.f5_case/3
+
+    warning: the following clause will never match:
+
+        {:ok, _} ->
+
+    because it attempts to match on the result of:
+
+        Blind.Account.Repo.Pg.append([event], context)
+
+    which has type:
+
+        dynamic(:ok or {:error, term()})
+
+    type warning found at:
+    │
+ 77 │       {:ok, _} -> :ok
+    │       ~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p0.ex:77: Blind.S.P0.e8_case_append/2
+
+    warning: incompatible types given to Blind.AlwaysFails.execute/2:
+
+        Blind.AlwaysFails.execute(state, cmd)
+
+    given types:
+
+        dynamic(%Blind.AlwaysFails{}), -dynamic(%Blind.Order.Cmd.Cancel{})-
+
+    but expected one of:
+
+        %Blind.AlwaysFails{}, %Blind.Order.Cmd.Place{}
+
+    where "cmd" was given the type:
+
+        # type: dynamic(%Blind.Order.Cmd.Cancel{})
+        # from: lib/scenarios/p0.ex:90:81
+        %Blind.Order.Cmd.Cancel{} = cmd
+
+    where "state" was given the type:
+
+        # type: dynamic(%Blind.AlwaysFails{})
+        # from: lib/scenarios/p0.ex:90:52
+        %Blind.AlwaysFails{} = state
+
+    type warning found at:
+    │
+ 91 │     do: Blind.AlwaysFails.execute(state, cmd)
+    │                           ~
+    │
+    └─ lib/scenarios/p0.ex:91:27: Blind.S.P0.a1_always_fails_foreign/2
+
+    warning: unknown key .nmae in expression:
+
+        executed.nmae
+
+    the given type does not have the given key:
+
+        dynamic(%Blind.Account{id: term(), version: term(), name: term(), status: term()})
+
+    where "executed" was given the type:
+
+        # type: dynamic(%Blind.Account{})
+        # from: lib/scenarios/p0.ex:35:32
+        {:ok, {_events, executed}} = Blind.Account.execute(state, cmd)
+
+    type warning found at:
+    │
+ 36 │     executed.nmae
+    │              ~~~~
+    │
+    └─ lib/scenarios/p0.ex:36:14: Blind.S.P0.a5a_state_typo/2
+
+    warning: unknown key .nmae in expression:
+
+        state.nmae
+
+    the given type does not have the given key:
+
+        dynamic(%Blind.Account{id: term(), version: term(), name: term(), status: term()})
+
+    where "state" was given the type:
+
+        # type: dynamic(%Blind.Account{})
+        # from: lib/scenarios/p0.ex:41:23
+        {:ok, state} <- Blind.Account.Repo.Pg.get(id, :current, context)
+
+    type warning found at:
+    │
+ 41 │     with {:ok, state} <- @repo.get(id, :current, context), do: state.nmae
+    │                                                                      ~~~~
+    │
+    └─ lib/scenarios/p0.ex:41:70: Blind.S.P0.e5_state_typo/2
+
+    warning: unknown key .nmae in expression:
+
+        refreshed.nmae
+
+    the given type does not have the given key:
+
+        dynamic(%Blind.Account{id: term(), version: term(), name: term(), status: term()})
+
+    where "refreshed" was given the type:
+
+        # type: dynamic(%Blind.Account{})
+        # from: lib/scenarios/p0.ex:46:22
+        {:ok, refreshed} = Blind.Account.Repo.Pg.refresh(state, :current, context)
+
+    type warning found at:
+    │
+ 47 │     refreshed.nmae
+    │               ~~~~
+    │
+    └─ lib/scenarios/p0.ex:47:15: Blind.S.P0.e5b_refresh_typo/2
+
+    warning: unknown key .nmae in expression:
+
+        executed.nmae
+
+    the given type does not have the given key:
+
+        dynamic(%Blind.NeverFails{id: term(), version: term(), cancelled?: term()})
+
+    where "executed" was given the type:
+
+        # type: dynamic(%Blind.NeverFails{})
+        # from: lib/scenarios/p0.ex:85:32
+        {:ok, {_events, executed}} = Blind.NeverFails.execute(state, cmd)
+
+    type warning found at:
+    │
+ 86 │     executed.nmae
+    │              ~~~~
+    │
+    └─ lib/scenarios/p0.ex:86:14: Blind.S.P0.a5a_never_fails_typo/2
+
+    warning: unknown key .valeu in expression:
+
+        Core.Es.Event.At.now!().valeu
+
+    the given type does not have the given key:
+
+        dynamic(%Core.Es.Event.At{value: term()})
+
+    type warning found at:
+    │
+ 94 │   def at_now_typo, do: Es.Event.At.now!().valeu
+    │                                           ~~~~~
+    │
+    └─ lib/scenarios/p0.ex:94:43: Blind.S.P0.at_now_typo/0
+
+    warning: unknown key .valeu in expression:
+
+        Core.Version.new().valeu
+
+    the given type does not have the given key:
+
+        dynamic(%Core.Version{value: term()})
+
+    type warning found at:
+    │
+ 95 │   def version_new_typo, do: Version.new().valeu
+    │                                           ~~~~~
+    │
+    └─ lib/scenarios/p0.ex:95:43: Blind.S.P0.version_new_typo/0
+
+    warning: incompatible types given to Blind.Account.Event.Codec.draft/1:
+
+        Blind.Account.Event.Codec.draft(Blind.Order.Event.Cancelled)
+
+    given types:
+
+        -Blind.Order.Event.Cancelled-
+
+    but expected one of:
+
+        #1
+        Blind.Account.Event.Closed
+
+        #2
+        Blind.Account.Event.Frozen
+
+        #3
+        %Blind.Account.Event.Opened.Payload{}
+
+        #4
+        %Blind.Account.Event.Renamed.Payload{}
+
+    type warning found at:
+    │
+ 14 │     do: {:ok, [Event.Codec.draft(Order.Event.Cancelled)]}
+    │                            ~
+    │
+    └─ lib/scenarios/p1_draft.ex:14:28: Blind.BadDraft.decide/2
+
+    warning: incompatible types given to Blind.Account.Event.Codec.draft/1:
+
+        Blind.Account.Event.Codec.draft(%Blind.Order.Event.Placed.Payload{...})
+
+    given types:
+
+        -%Blind.Order.Event.Placed.Payload{amount: nil}-
+
+    but expected one of:
+
+        #1
+        Blind.Account.Event.Closed
+
+        #2
+        Blind.Account.Event.Frozen
+
+        #3
+        %Blind.Account.Event.Opened.Payload{}
+
+        #4
+        %Blind.Account.Event.Renamed.Payload{}
+
+    type warning found at:
+    │
+ 18 │     do: {:ok, [Event.Codec.draft(%Order.Event.Placed.Payload{amount: nil})]}
+    │                            ~
+    │
+    └─ lib/scenarios/p1_draft.ex:18:28: Blind.BadDraft.decide/2
+
+    warning: incompatible types given to Blind.Account.Event.Codec.draft/1:
+
+        Blind.Account.Event.Codec.draft(Blind.Order.Event.Placed.Payload.new(Blind.Order.Amount.new!(1)))
+
+    given types:
+
+        -dynamic(%Blind.Order.Event.Placed.Payload{amount: %Blind.Order.Amount{}})-
+
+    but expected one of:
+
+        #1
+        Blind.Account.Event.Closed
+
+        #2
+        Blind.Account.Event.Frozen
+
+        #3
+        %Blind.Account.Event.Opened.Payload{}
+
+        #4
+        %Blind.Account.Event.Renamed.Payload{}
+
+    type warning found at:
+    │
+ 22 │     do: {:ok, [Event.Codec.draft(Order.Event.Placed.Payload.new(Order.Amount.new!(1)))]}
+    │                            ~
+    │
+    └─ lib/scenarios/p1_draft.ex:22:28: Blind.BadDraft.decide/2
+
+    warning: incompatible types given to Blind.Account.Event.Codec.draft/1:
+
+        Blind.Account.Event.Codec.draft(Blind.Account.Event.Opened)
+
+    given types:
+
+        -Blind.Account.Event.Opened-
+
+    but expected one of:
+
+        #1
+        Blind.Account.Event.Closed
+
+        #2
+        Blind.Account.Event.Frozen
+
+        #3
+        %Blind.Account.Event.Opened.Payload{}
+
+        #4
+        %Blind.Account.Event.Renamed.Payload{}
+
+    type warning found at:
+    │
+ 26 │     do: {:ok, [Event.Codec.draft(Event.Opened)]}
+    │                            ~
+    │
+    └─ lib/scenarios/p1_draft.ex:26:28: Blind.BadDraft.decide/2
+
+    warning: incompatible types given to Blind.Account.Event.Codec.draft/1:
+
+        Blind.Account.Event.Codec.draft("opened")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        #1
+        Blind.Account.Event.Closed
+
+        #2
+        Blind.Account.Event.Frozen
+
+        #3
+        %Blind.Account.Event.Opened.Payload{}
+
+        #4
+        %Blind.Account.Event.Renamed.Payload{}
+
+    type warning found at:
+    │
+ 46 │   def b1s_string, do: Event.Codec.draft("opened")
+    │                                   ~
+    │
+    └─ lib/scenarios/p1_draft.ex:46:35: Blind.S.Draft.b1s_string/0
+
+    warning: incompatible types given to Blind.BadEvolveState.evolve/2:
+
+        Blind.BadEvolveState.evolve(state, event)
+
+    given types:
+
+        (
+          dynamic(%Blind.BadEvolveState{}),
+          dynamic(%Blind.Account.Event.Renamed{payload: %Blind.Account.Event.Renamed.Payload{}})
+        )
+
+    but expected one of:
+
+        #1
+        %{..., name: term()}, %Blind.Account.Event.Opened{payload: %{..., name: term()}}
+
+        #2
+        %{..., nmae: term()}, %Blind.Account.Event.Renamed{payload: %{..., name: term()}}
+
+        #3
+        %{..., status: term()}, %Blind.Account.Event.Frozen{}
+
+        #4
+        %{..., status: term()}, %Blind.Account.Event.Closed{}
+
+    where "event" (context Core.Es.Aggregate.Repo) was given the type:
+
+        # type: dynamic(%Blind.Account.Event.Renamed{payload: %Blind.Account.Event.Renamed.Payload{}})
+        # from: lib/scenarios/p2_evolve.ex:73
+        %Blind.Account.Event.Renamed{payload: %Blind.Account.Event.Renamed.Payload{}} = event
+
+    where "state" (context Core.Es.Aggregate.Repo) was given the type:
+
+        # type: dynamic(%Blind.BadEvolveState{})
+        # from: lib/scenarios/p2_evolve.ex:73
+        %Blind.BadEvolveState{} = state
+
+    type warning found at:
+    │
+ 73 │   use Core.Es.Aggregate.Repo,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p2_evolve.ex:73: Blind.BadEvolveState.Repo."evolve/2 принимает Blind.Account.Event.Renamed"/2
+
+    warning: incompatible types given to Blind.BadEvolveTypo.evolve/2:
+
+        Blind.BadEvolveTypo.evolve(state, event)
+
+    given types:
+
+        (
+          dynamic(%Blind.BadEvolveTypo{}),
+          -dynamic(%Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}})-
+        )
+
+    but expected one of:
+
+        #1
+        (
+          %{..., name: term()},
+          %Blind.Account.Event.Opened{payload: %{..., nmae: term()}} or
+            %Blind.Account.Event.Renamed{payload: %{..., name: term()}}
+        )
+
+        #2
+        %{..., status: term()}, %Blind.Account.Event.Frozen{}
+
+        #3
+        %{..., status: term()}, %Blind.Account.Event.Closed{}
+
+    where "event" (context Core.Es.Aggregate.Repo) was given the type:
+
+        # type: dynamic(%Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}})
+        # from: lib/scenarios/p2_evolve.ex:47
+        %Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}} = event
+
+    where "state" (context Core.Es.Aggregate.Repo) was given the type:
+
+        # type: dynamic(%Blind.BadEvolveTypo{})
+        # from: lib/scenarios/p2_evolve.ex:47
+        %Blind.BadEvolveTypo{} = state
+
+    type warning found at:
+    │
+ 47 │   use Core.Es.Aggregate.Repo,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p2_evolve.ex:47: Blind.BadEvolveTypo.Repo."evolve/2 принимает Blind.Account.Event.Opened"/2
+
+    warning: incompatible types given to Blind.BadEvolveMissing.evolve/2:
+
+        Blind.BadEvolveMissing.evolve(state, event)
+
+    given types:
+
+        dynamic(%Blind.BadEvolveMissing{}), -dynamic(%Blind.Account.Event.Closed{payload: nil})-
+
+    but expected one of:
+
+        #1
+        (
+          %{..., name: term()},
+          %Blind.Account.Event.Opened{payload: %{..., name: term()}} or
+            %Blind.Account.Event.Renamed{payload: %{..., name: term()}}
+        )
+
+        #2
+        %{..., status: term()}, %Blind.Account.Event.Frozen{}
+
+    where "event" (context Core.Es.Aggregate.Repo) was given the type:
+
+        # type: dynamic(%Blind.Account.Event.Closed{payload: nil})
+        # from: lib/scenarios/p2_evolve.ex:21
+        %Blind.Account.Event.Closed{...} = event
+
+    where "state" (context Core.Es.Aggregate.Repo) was given the type:
+
+        # type: dynamic(%Blind.BadEvolveMissing{})
+        # from: lib/scenarios/p2_evolve.ex:21
+        %Blind.BadEvolveMissing{} = state
+
+    type warning found at:
+    │
+ 21 │   use Core.Es.Aggregate.Repo,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p2_evolve.ex:21: Blind.BadEvolveMissing.Repo."evolve/2 принимает Blind.Account.Event.Closed"/2
+
+    warning: incompatible types given to project/1:
+
+        project(event)
+
+    given types:
+
+        -dynamic(%Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}})-
+
+    but expected one of:
+
+        #1
+        %Blind.Account.Event.Opened{payload: %{..., nmae: term()}}
+
+        #2
+        %Blind.Account.Event.Closed{}
+
+    where "event" (context Core.Es.Projection) was given the type:
+
+        # type: dynamic(%Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}})
+        # from: lib/scenarios/p2_projection.ex:22
+        %Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}} = event
+
+    type warning found at:
+    │
+ 22 │   use Core.Es.Projection,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p2_projection.ex:22: Blind.BadProjectionTypo."project/1 принимает Blind.Account.Event.Opened"/1
+
+    warning: incompatible types given to project/1:
+
+        project(event)
+
+    given types:
+
+        -dynamic(%Blind.Account.Event.Closed{payload: nil})-
+
+    but expected one of:
+
+        %Blind.Account.Event.Opened{payload: %{..., name: %Blind.Account.Name{}}}
+
+    where "event" (context Core.Es.Projection) was given the type:
+
+        # type: dynamic(%Blind.Account.Event.Closed{payload: nil})
+        # from: lib/scenarios/p2_projection.ex:5
+        %Blind.Account.Event.Closed{...} = event
+
+    type warning found at:
+    │
+  5 │   use Core.Es.Projection,
+    │   ~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/scenarios/p2_projection.ex:5: Blind.BadProjectionMissing."project/1 принимает Blind.Account.Event.Closed"/1
+
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:13: struct Blind.Account (export)
+lib/blind/account.ex:14: alias Blind.Account.Event.Codec (compile)
+lib/blind/account.ex:17: struct Blind.Account.ID (export)
+lib/blind/account.ex:17: struct Blind.Account.ID (export)
+lib/blind/account.ex:17: struct Blind.Account.ID (export)
+lib/blind/account.ex:17: struct Blind.Account.ID (export)
+lib/blind/account.ex:17: struct Blind.Account.ID (export)
+lib/blind/account.ex:23: struct Blind.Account.Name (export)
+lib/blind/account.ex:23: struct Blind.Account.Name (export)
+lib/blind/account.ex:23: struct Blind.Account.Name (export)
+lib/blind/account.ex:23: struct Blind.Account.Name (export)
+lib/blind/account.ex:36: struct Blind.Account.Cmd.Open (export)
+lib/blind/account.ex:71: struct Blind.Account (export)
+lib/blind/account.ex:73: alias Blind.Account.Cmd.Close (runtime)
+lib/blind/account.ex:73: alias Blind.Account.Cmd.Freeze (runtime)
+lib/blind/account.ex:73: alias Blind.Account.Cmd.Rename (runtime)
+lib/blind/account.ex:76: struct Blind.Account (export)
+lib/blind/account.ex:76: struct Blind.Account.Cmd.Open (export)
+lib/blind/account.ex:76: alias Blind.Account.Cmd.Open (runtime)
+lib/blind/account.ex:77: call Blind.Account.Event.Codec.draft/1 (runtime)
+lib/blind/account.ex:77: call Blind.Account.Event.Opened.Payload.new/1 (runtime)
+lib/blind/account.ex:79: struct Blind.Account (export)
+lib/blind/account.ex:79: struct Blind.Account.Cmd.Open (export)
+lib/blind/account.ex:79: alias Blind.Account.Cmd.Open (runtime)
+lib/blind/account.ex:80: call Blind.Account.Errors.domain/3 (runtime)
+lib/blind/account.ex:82: struct Blind.Account (export)
+lib/blind/account.ex:83: call Blind.Account.Errors.domain/3 (runtime)
+lib/blind/account.ex:85: struct Blind.Account (export)
+lib/blind/account.ex:85: struct Blind.Account.Cmd.Rename (export)
+lib/blind/account.ex:85: alias Blind.Account.Cmd.Rename (runtime)
+lib/blind/account.ex:87: struct Blind.Account (export)
+lib/blind/account.ex:87: struct Blind.Account.Cmd.Rename (export)
+lib/blind/account.ex:87: alias Blind.Account.Cmd.Rename (runtime)
+lib/blind/account.ex:88: call Blind.Account.Event.Codec.draft/1 (runtime)
+lib/blind/account.ex:88: call Blind.Account.Event.Renamed.Payload.new/1 (runtime)
+lib/blind/account.ex:90: struct Blind.Account (export)
+lib/blind/account.ex:90: struct Blind.Account.Cmd.Freeze (export)
+lib/blind/account.ex:90: alias Blind.Account.Cmd.Freeze (runtime)
+lib/blind/account.ex:90: alias Blind.Account.Event.Frozen (runtime)
+lib/blind/account.ex:90: call Blind.Account.Event.Codec.draft/1 (runtime)
+lib/blind/account.ex:92: struct Blind.Account (export)
+lib/blind/account.ex:92: struct Blind.Account.Cmd.Close (export)
+lib/blind/account.ex:92: alias Blind.Account.Cmd.Close (runtime)
+lib/blind/account.ex:92: alias Blind.Account.Event.Closed (runtime)
+lib/blind/account.ex:92: call Blind.Account.Event.Codec.draft/1 (runtime)
+lib/blind/account.ex:94: struct Blind.Account (export)
+lib/blind/account.ex:94: struct Blind.Account.Cmd.Close (export)
+lib/blind/account.ex:95: struct Blind.Account.Cmd.Freeze (export)
+lib/blind/account.ex:95: alias Blind.Account.Cmd.Freeze (runtime)
+lib/blind/account.ex:103: struct Blind.Account (export)
+lib/blind/account.ex:104: call Blind.Account.Errors.domain/3 (runtime)
+lib/blind/account.ex:107: struct Blind.Account.Event.Opened (export)
+lib/blind/account.ex:107: alias Blind.Account.Event.Opened (runtime)
+lib/blind/account.ex:107: struct Blind.Account.Event.Opened.Payload (export)
+lib/blind/account.ex:110: struct Blind.Account.Event.Renamed (export)
+lib/blind/account.ex:110: alias Blind.Account.Event.Renamed (runtime)
+lib/blind/account.ex:112: struct Blind.Account.Event.Frozen (export)
+lib/blind/account.ex:112: alias Blind.Account.Event.Frozen (runtime)
+lib/blind/account.ex:114: struct Blind.Account.Event.Closed (export)
+lib/blind/account.ex:114: alias Blind.Account.Event.Closed (runtime)

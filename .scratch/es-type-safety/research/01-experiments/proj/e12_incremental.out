@@ -1,0 +1,247 @@
+Compiling 1 file (.ex)
+    warning: unknown key .missing_field in expression:
+
+        local.missing_field
+
+    the given type does not have the given key:
+
+        dynamic(%App.Local{n: term()})
+
+    where "local" was given the type:
+
+        # type: dynamic(%App.Local{})
+        # from: lib/app/proto.ex:10:12
+        local
+
+    type warning found at:
+    │
+ 10 │   def dump(local), do: local.missing_field
+    │                              ~~~~~~~~~~~~~
+    │
+    └─ lib/app/proto.ex:10:30: App.Proto.App.Local.dump/1
+
+    warning: incompatible types given to App.Local.to_int/1:
+
+        App.Local.to_int(x)
+
+    given types:
+
+        -integer()-
+
+    but expected one of:
+
+        binary()
+
+    where "x" was given the types:
+
+        # type: integer()
+        # from: lib/app/facade.ex:3:22
+        x
+
+        # type: integer()
+        # from: lib/app/facade.ex:3:30
+        is_integer(x)
+
+    type warning found at:
+    │
+  3 │   def to_int_guarded(x) when is_integer(x), do: App.Local.to_int(x)
+    │                                                           ~
+    │
+    └─ lib/app/facade.ex:3:59: App.Facade.to_int_guarded/1
+
+    warning: incompatible types given to App.Facade.to_int_guarded/1:
+
+        App.Facade.to_int_guarded("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  4 │   def local_via_guarded_facade, do: App.Facade.to_int_guarded("x")
+    │                                                ~
+    │
+    └─ lib/app/caller.ex:4:48: App.Caller.local_via_guarded_facade/0
+
+    warning: incompatible types given to DepLib.to_int/1:
+
+        DepLib.to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  6 │   def dep_direct, do: DepLib.to_int("x")
+    │                              ~
+    │
+    └─ lib/app/caller.ex:6:30: App.Caller.dep_direct/0
+
+    warning: incompatible types given to App.Facade.dep_to_int/1:
+
+        App.Facade.dep_to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  7 │   def dep_via_app_facade, do: App.Facade.dep_to_int("x")
+    │                                          ~
+    │
+    └─ lib/app/caller.ex:7:42: App.Caller.dep_via_app_facade/0
+
+    warning: the following clause will never match:
+
+        :error ->
+
+    because it attempts to match on the result of:
+
+        App.Local.status()
+
+    which has type:
+
+        dynamic(:ok)
+
+    type warning found at:
+    │
+ 13 │       :error -> :never
+    │       ~~~~~~~~~~~~~~~~
+    │
+    └─ lib/app/caller.ex:13: App.Caller.local_status/0
+
+    warning: the following clause will never match:
+
+        :error ->
+
+    because it attempts to match on the result of:
+
+        App.Facade.dep_status()
+
+    which has type:
+
+        dynamic(:ok)
+
+    type warning found at:
+    │
+ 27 │       :error -> :never
+    │       ~~~~~~~~~~~~~~~~
+    │
+    └─ lib/app/caller.ex:27: App.Caller.dep_status_via_app_facade/0
+
+    warning: incompatible types given to App.Proto.dump/1:
+
+        App.Proto.dump("x")
+
+    given types:
+
+        -binary()-
+
+    but expected a type that implements the App.Proto protocol.
+    You either passed the wrong value or you forgot to implement the protocol.
+
+    hint: the App.Proto protocol is implemented for the following types:
+
+        dynamic(%App.Local{}) or integer()
+
+    type warning found at:
+    │
+ 38 │   def app_protocol, do: App.Proto.dump("x")
+    │                                   ~
+    │
+    └─ lib/app/caller.ex:38:35: App.Caller.app_protocol/0
+
+    warning: incompatible types given to DepLib.Dump.dump/1:
+
+        DepLib.Dump.dump("x")
+
+    given types:
+
+        -binary()-
+
+    but expected a type that implements the DepLib.Dump protocol.
+    You either passed the wrong value or you forgot to implement the protocol.
+
+    hint: the DepLib.Dump protocol is implemented for the following types:
+
+        integer()
+
+    type warning found at:
+    │
+ 39 │   def dep_protocol, do: DepLib.Dump.dump("x")
+    │                                     ~
+    │
+    └─ lib/app/caller.ex:39:37: App.Caller.dep_protocol/0
+
+    warning: incompatible value given to for-comprehension:
+
+        x <- %App.Local{...}
+
+    it has type:
+
+        -%App.Local{n: nil}-
+
+    but expected a type that implements the Enumerable protocol.
+    You either passed the wrong value or you must:
+
+    1. convert the given value to an Enumerable explicitly
+    2. implement the Enumerable protocol
+
+    hint: the Enumerable protocol is implemented for the following types:
+
+        dynamic(
+          %Date.Range{} or %File.Stream{} or %GenEvent.Stream{} or %HashDict{} or %HashSet{} or
+            %IO.Stream{} or %MapSet{} or %Range{} or %Stream{}
+        ) or empty_list() or fun() or non_empty_list(term(), term()) or non_struct_map()
+
+    type warning found at:
+    │
+ 41 │   def enumerable, do: for(x <- %App.Local{}, do: x)
+    │                             ~
+    │
+    └─ lib/app/caller.ex:41:29: App.Caller.enumerable/0
+
+    warning: incompatible value given to string interpolation:
+
+        %App.Local{...}
+
+    it has type:
+
+        -%App.Local{n: nil}-
+
+    but expected a type that implements the String.Chars protocol.
+    You either passed the wrong value or you must:
+
+    1. convert the given value to a string explicitly
+       (use inspect/1 if you want to convert any data structure to a string)
+    2. implement the String.Chars protocol
+
+    hint: the String.Chars protocol is implemented for the following types:
+
+        dynamic(
+          %Date{} or %DateTime{} or %NaiveDateTime{} or %Time{} or %URI{} or %Version{} or
+            %Version.Requirement{}
+        ) or atom() or bitstring() or empty_list() or float() or integer() or
+          non_empty_list(term(), term())
+
+    type warning found at:
+    │
+ 40 │   def string_chars, do: "#{%App.Local{}}"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/app/caller.ex:40: App.Caller.string_chars/0

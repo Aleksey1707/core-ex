@@ -1,0 +1,8 @@
+Compiling 1 file (.ex)
+
+== Compilation error in file lib/scenarios/zz_shared_payload.ex ==
+** (CompileError) lib/scenarios/zz_shared_payload.ex:34: Es.Event.Codec: нагрузка задаёт событие для draft/1, а у кодека Blind.Roles.Event.Codec модуль нагрузки общий у нескольких событий: [{Blind.Roles.RoleID, [Blind.Roles.Event.Granted, Blind.Roles.Event.Revoked]}]
+    (core 0.1.0) lib/core/es/event/codec.ex:308: Core.Es.Event.Codec.ensure_unique_payloads!/2
+    (core 0.1.0) lib/core/es/event/codec.ex:275: Core.Es.Event.Codec.draft_ast/2
+    (core 0.1.0) expanding macro: Core.Es.Event.Codec.__before_compile__/1
+    lib/scenarios/zz_shared_payload.ex:34: Blind.Roles.Event.Codec (module)
