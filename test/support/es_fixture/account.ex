@@ -107,7 +107,7 @@ defmodule Core.EsFixture.Account do
 
   @impl true
   def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),
-    do: {:ok, [{Event.Opened, Event.Opened.Payload.new(name)}]}
+    do: {:ok, [Event.Codec.draft(Event.Opened, Event.Opened.Payload.new(name))]}
 
   def decide(%Cmd.Open{}, %__MODULE__{} = state) do
     {:error, Errors.domain(__MODULE__, :already_exists, %{version: Version.value(state.version)})}
@@ -119,11 +119,11 @@ defmodule Core.EsFixture.Account do
   def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
-    do: {:ok, [{Event.Renamed, Event.Renamed.Payload.new(name)}]}
+    do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
 
-  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen]}
+  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
 
-  def decide(%Cmd.Close{}, %__MODULE__{status: :frozen}), do: {:ok, [Event.Closed]}
+  def decide(%Cmd.Close{}, %__MODULE__{status: :frozen}), do: {:ok, [Event.Codec.draft(Event.Closed)]}
 
   # Closed решается по состоянию после Frozen: промежуточное событие сворачивается в той же команде.
   def decide(%Cmd.Close{} = command, %__MODULE__{status: :open} = state) do

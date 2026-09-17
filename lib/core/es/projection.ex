@@ -1,7 +1,7 @@
 defmodule Core.Es.Projection do
   @moduledoc """
-  Builder проекции (`use`), её behaviour, прогон одной пачки `run_once/2` и ожидание проекции
-  после записи `await/4`.
+  Builder проекции (`use`), её behaviour, прогон одной пачки `run_once/2` и генерируемое ожидание
+  проекции после записи `await/3`.
 
       defmodule MyApp.Domain.<BC>.<Actor>.AccountList.Projection do
         alias MyApp.Domain.<BC>.Common.Account
@@ -31,8 +31,19 @@ defmodule Core.Es.Projection do
   - `clear()` → `:ok | {:error, Error.t()}` — очистить все таблицы read-модели; зовётся при
     старте с начала истории.
 
-  Оба колбэка обязательны. Клаузу `project/1` каждого модуля `events:` и очистку таблиц `clear/0`
-  проверяет `Core.Es.ProjectionCase`.
+  Оба колбэка обязательны. Полноту `project/1` проверяет сборка проекции («Полнота `project/1`»),
+  очистку таблиц `clear/0` — `Core.Es.ProjectionCase`.
+
+  ## Полнота `project/1`
+
+  Сборка проекции проверяет `project/1` по `events:`: на каждый модуль события макрос генерирует
+  функцию-проверку (`Core.Es.Check`) — литеральный вызов
+  `project(%Event.Mod{payload: %Payload{}} = event)`, у события без нагрузки `payload: nil`.
+  Предупреждение компилятора указывает на строку `use`, а имя функции в нём называет нарушенное
+  утверждение — `"project/1 принимает <Event>"`. Ловятся:
+
+  - модуль `events:` без clause `project/1`;
+  - опечатка в поле нагрузки, которую clause не сузила паттерном `%Payload{}`.
 
   ## События
 
@@ -88,10 +99,18 @@ defmodule Core.Es.Projection do
 
   ## Ожидание
 
-  `await/4` после commit записи ждёт, пока проекция обработает последнее событие потока агрегата,
-  — read-after-write. Агрегат — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec`:
-  по раскладке `11-domain.md` это сам агрегат любого вида. Цель — позиция последнего события
-  потока на момент вызова:
+  `await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `:ok | {:error, Error.t()}` модуля проекции
+  после commit записи ждёт, пока проекция обработает последнее событие потока агрегата, —
+  read-after-write. Агрегат — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec`:
+  по раскладке `11-domain.md` это сам агрегат любого вида.
+
+  Функцию генерирует `use` — clause на каждый агрегат, чьи события есть в `events:`: голова —
+  литерал агрегата и закрытый struct его ID (`__es_aggregate_id__/0` кодека), результат сужен до
+  `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`, ID другого агрегата и невозможная
+  clause по результату — предупреждение при сборке вызывающего. Кодек, названный не
+  `<Aggregate>.Event.Codec`, clause не получает; без clauses функции нет.
+
+  Цель — позиция последнего события потока на момент вызова:
 
   - поток пуст — `:ok`;
   - чекпоинт не ниже цели — `:ok`, при любой версии строки и во время пересборки;
@@ -122,12 +141,12 @@ defmodule Core.Es.Projection do
   последнем отрезке перед таймаутом чекпоинт перечитывает только сигнал.
 
   Режим — опция `await:` дерева `Core.Es.Projection.Supervisor` из его отметки. При `:inline`
-  (тестовое дерево) `await/4` прогоняет проекцию до `:idle` в вызывающем процессе с `batch_size`
+  (тестовое дерево) `await/3` прогоняет проекцию до `:idle` в вызывающем процессе с `batch_size`
   дерева и сверяет чекпоинт с целью; иной исход — `RuntimeError` с исходом и именем проекции.
 
-  Ошибки программиста: тип агрегата вне `events:` — `FunctionClauseError`; вызов внутри транзакции
-  `repo:` — `ArgumentError`; дерево проекций на ноде не стартовало — `RuntimeError`; проекция не из
-  `projections:` дерева — `ArgumentError`.
+  Ошибки программиста: агрегат вне `events:` или ID другого агрегата — `FunctionClauseError`;
+  вызов внутри транзакции `repo:` — `ArgumentError`; дерево проекций на ноде не стартовало —
+  `RuntimeError`; проекция не из `projections:` дерева — `ArgumentError`.
 
   Ожидание идёт в span'е `Core.Otel.Es.await/4` внутри трейса вызывающего. Telemetry
   `[:es, :projection, :await]` (`Core.Telemetry.event/1`): измерение `duration` (native),
@@ -146,7 +165,8 @@ defmodule Core.Es.Projection do
   семейством `<Aggregate>.Event`, с событием без кодека `<Aggregate>.Event.Codec`, с кодеком без
   `type:` или не объявившим событие в `tags:`, с двумя кодеками одного типа агрегата.
 
-  Макрос занимает в вызывающем модуле имя `@es_projection`.
+  Макрос занимает в вызывающем модуле имена `@es_projection`, `@es_use_line`, `await/3` и
+  функций-проверок, по одному на модуль `events:`.
   """
 
   alias Core.Error
@@ -201,6 +221,7 @@ defmodule Core.Es.Projection do
     quote do
       @behaviour Core.Es.Projection
       @before_compile Core.Es.Projection
+      @es_use_line unquote(__CALLER__.line)
 
       @es_projection Core.Es.Projection.declaration!(
                        unquote(name),
@@ -219,7 +240,11 @@ defmodule Core.Es.Projection do
   @doc false
   defmacro __before_compile__(env) do
     Enum.each([project: 1, clear: 0], &ensure_defined!(env, &1))
-    nil
+
+    quote do
+      unquote(await_ast(env.module))
+      (unquote_splicing(project_checks(env.module)))
+    end
   end
 
   # ---
@@ -230,6 +255,64 @@ defmodule Core.Es.Projection do
         description: "#{@label}: #{inspect(env.module)} обязан объявить #{fun}/#{arity}",
         file: env.file,
         line: env.line
+    end
+  end
+
+  defp await_ast(module) do
+    case aggregates(Module.get_attribute(module, :es_projection).streams) do
+      [] ->
+        nil
+
+      aggregates ->
+        modules = union(for {aggregate, _id, _type} <- aggregates, do: aggregate)
+        ids = union(for {_aggregate, id, _type} <- aggregates, do: quote(do: unquote(id).t()))
+
+        quote do
+          @doc """
+          Дождаться, пока проекция обработает последнее событие потока агрегата `aggregate_id`, —
+          не дольше `timeout` мс; первый аргумент — модуль агрегата. Исходы — `Core.Es.Projection`,
+          «Ожидание».
+          """
+          @spec await(unquote(modules), unquote(ids), non_neg_integer()) :: :ok | {:error, Core.Error.t()}
+
+          unquote_splicing(Enum.map(aggregates, &await_clause/1))
+        end
+    end
+  end
+
+  # Агрегат — модуль, в котором лежит кодек `<Aggregate>.Event.Codec` (`11-domain.md`); кодек с
+  # другим именем ожиданию недоступен.
+  defp aggregates(streams) do
+    for {type, %{codec: codec}} <- streams,
+        ["Codec", "Event" | [_ | _] = parts] <- [Enum.reverse(Module.split(codec))],
+        do: {aggregate_name(Enum.reverse(parts)), codec.__es_aggregate_id__(), type}
+  end
+
+  # Имя агрегата вычисляется на компиляции: `safe_concat` непригоден — у событий без модуля
+  # агрегата атома его имени может не быть.
+  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
+  defp aggregate_name(parts), do: Module.concat(parts)
+
+  defp union(types), do: Enum.reduce(types, &quote(do: unquote(&2) | unquote(&1)))
+
+  defp await_clause({aggregate, id, type}) do
+    quote generated: true do
+      def await(unquote(aggregate), %unquote(id){} = aggregate_id, timeout)
+          when is_integer(timeout) and timeout >= 0 do
+        case Core.Es.Projection.await(__MODULE__, unquote(type), aggregate_id, timeout) do
+          :ok -> :ok
+          {:error, %Core.Error{} = error} -> {:error, error}
+        end
+      end
+    end
+  end
+
+  defp project_checks(module) do
+    line = Module.get_attribute(module, :es_use_line)
+
+    for event <- Module.get_attribute(module, :es_projection).events do
+      args = [quote(do: unquote(Es.Check.event_pattern(event)) = event)]
+      Es.Check.define("project/1 принимает", event, args, quote(do: project(event)), line)
     end
   end
 
@@ -403,15 +486,10 @@ defmodule Core.Es.Projection do
 
   # ===== ожидание =====
 
-  @doc """
-  Дождаться, пока проекция `projection` обработает последнее событие потока `aggregate_id`
-  агрегата `aggregate`, — не дольше `timeout` мс.
+  @doc false
+  @spec await(module(), String.t(), struct(), non_neg_integer()) :: :ok | {:error, Error.t()}
 
-  Зовётся после commit записи. Исходы, режимы и ошибки программиста — в `@moduledoc`, «Ожидание».
-  """
-  @spec await(module(), module(), struct(), non_neg_integer()) :: :ok | {:error, Error.t()}
-
-  def await(projection, aggregate, %_{} = aggregate_id, timeout)
-      when is_atom(projection) and is_atom(aggregate) and is_integer(timeout) and timeout >= 0,
-      do: Await.run(projection, projection.__es_projection__(), aggregate, aggregate_id, timeout)
+  def await(projection, type, %_{} = aggregate_id, timeout)
+      when is_atom(projection) and is_binary(type) and is_integer(timeout) and timeout >= 0,
+      do: Await.run(projection, projection.__es_projection__(), type, aggregate_id, timeout)
 end

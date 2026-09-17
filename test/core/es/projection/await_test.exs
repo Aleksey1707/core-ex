@@ -114,7 +114,7 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, account, [open("Счёт")])
       insert_entity!(entity, "Агрегат")
 
-      assert :ok = Es.Projection.await(@projection, Account, account, 1_000)
+      assert :ok = @projection.await(Account, account, 1_000)
 
       assert rows() == [
                {"account", dump(account), "Счёт", false},
@@ -123,7 +123,7 @@ defmodule Core.Es.Projection.AwaitTest do
 
       close_entity!(entity, "Агрегат")
 
-      assert :ok = Es.Projection.await(@projection, EventFixture, entity, 1_000)
+      assert :ok = @projection.await(EventFixture, entity, 1_000)
       assert {"fixture", _id, "Агрегат", true} = List.last(rows())
       assert_receive {:await, %{projection: "es_fixture", result: :ok}, _measurements}
     end
@@ -135,14 +135,14 @@ defmodule Core.Es.Projection.AwaitTest do
       mark!([Failing], await: :inline)
 
       assert_raise RuntimeError, ~r/await_failing.*project_failed/s, fn ->
-        Es.Projection.await(Failing, Account, account, 1_000)
+        Failing.await(Account, account, 1_000)
       end
 
       :ok = insert_checkpoint!("es_fixture", 2)
       mark!([@projection], await: :inline)
 
       assert_raise RuntimeError, ~r/es_fixture.*:outdated/, fn ->
-        Es.Projection.await(@projection, Account, account, 1_000)
+        @projection.await(Account, account, 1_000)
       end
 
       refute_received {:await, _metadata, _measurements}
@@ -155,7 +155,7 @@ defmodule Core.Es.Projection.AwaitTest do
       :ok = hold_batch_lock!(@projection)
 
       assert_raise RuntimeError, ~r/es_fixture — исход :locked/, fn ->
-        Es.Projection.await(@projection, Account, account, 1_000)
+        @projection.await(Account, account, 1_000)
       end
     end
 
@@ -168,7 +168,7 @@ defmodule Core.Es.Projection.AwaitTest do
       :ok = commit_event!(account)
 
       assert_raise RuntimeError, ~r/es_fixture — исход \{:idle, :behind\}/, fn ->
-        Es.Projection.await(@projection, Account, account, 1_000)
+        @projection.await(Account, account, 1_000)
       end
     end
   end
@@ -186,7 +186,7 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, account, [open("Счёт")])
       resumed = after_checkpoint_read(fn -> :sys.resume(reader) end)
 
-      assert :ok = Es.Projection.await(@projection, Account, account, 5_000)
+      assert :ok = @projection.await(Account, account, 5_000)
       assert :ok = Task.await(resumed)
       assert rows() == [{"account", dump(account), "Счёт", false}]
 
@@ -205,7 +205,7 @@ defmodule Core.Es.Projection.AwaitTest do
       # Вставка мимо `append`: `wake` нет, а первый тик читателя — через 60 000 мс.
       {1, nil} = TestRepo.insert_all(Es.Store.Schema, [event_row(account)])
 
-      assert :ok = Es.Projection.await(@projection, Account, account, 5_000)
+      assert :ok = @projection.await(Account, account, 5_000)
     end
 
     test "таймаут — сигналы во время и после ожидания в mailbox теста не остаются" do
@@ -224,7 +224,7 @@ defmodule Core.Es.Projection.AwaitTest do
         end)
 
       assert {:error, %Error{code: :projection_timeout}} =
-               Es.Projection.await(@projection, Account, account, 0)
+               @projection.await(Account, account, 0)
 
       :ok = Es.Projection.Registry.wake("account")
       assert_receive {:cycle, %{result: :processed}, _measurements}, 1_000
@@ -248,7 +248,7 @@ defmodule Core.Es.Projection.AwaitTest do
         end)
 
       assert {:error, %Error{code: :projection_rebuilding}} =
-               Es.Projection.await(Failing, Account, account, 5_000)
+               Failing.await(Account, account, 5_000)
 
       assert :ok = Task.await(rebuilt)
 
@@ -262,12 +262,12 @@ defmodule Core.Es.Projection.AwaitTest do
       mark!([@projection])
       account = Account.ID.new()
 
-      assert :ok = Es.Projection.await(@projection, Account, account, 30_000)
+      assert :ok = @projection.await(Account, account, 30_000)
 
       write!(@account_repo, account, [open("Счёт")])
       assert :ok = Es.Projection.Test.run_until_idle(@projection)
 
-      assert :ok = Es.Projection.await(@projection, Account, account, 30_000)
+      assert :ok = @projection.await(Account, account, 30_000)
       assert_receive {:await, %{projection: "es_fixture", result: :ok}, %{duration: duration}}
       assert is_integer(duration)
     end
@@ -280,7 +280,7 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, account, [close()])
 
       assert {:error, %Error{kind: :app, ns: :es, code: :projection_timeout} = error} =
-               Es.Projection.await(@projection, Account, account, 50)
+               @projection.await(Account, account, 50)
 
       assert error.detail == %{projection: "es_fixture", timeout: 50}
 
@@ -299,7 +299,7 @@ defmodule Core.Es.Projection.AwaitTest do
       # Проверки на 0, 50, 150 и 350 мс, следующий шаг — позже таймаута; долгое чтение их сокращает.
       {result, reads} =
         count_checkpoint_reads(fn ->
-          Es.Projection.await(@projection, Account, account, 500)
+          @projection.await(Account, account, 500)
         end)
 
       assert {:error, %Error{code: :projection_timeout}} = result
@@ -316,7 +316,7 @@ defmodule Core.Es.Projection.AwaitTest do
       # Шаг 10 мс — до 50 проверок за 500 мс; с пределом удвоения 100 мс их не больше 8.
       {result, reads} =
         count_checkpoint_reads(fn ->
-          Es.Projection.await(@projection, Account, account, 500)
+          @projection.await(Account, account, 500)
         end)
 
       assert {:error, %Error{code: :projection_timeout}} = result
@@ -330,7 +330,7 @@ defmodule Core.Es.Projection.AwaitTest do
       mark!([@projection])
 
       assert {:error, %Error{} = error} =
-               Es.Projection.await(@projection, Account, account, 30_000)
+               @projection.await(Account, account, 30_000)
 
       assert %{kind: :app, ns: :es, code: :projection_rebuilding} = error
       assert error.detail == %{projection: "es_fixture"}
@@ -340,12 +340,12 @@ defmodule Core.Es.Projection.AwaitTest do
       mark!([Bumped])
 
       assert {:error, %Error{code: :projection_rebuilding}} =
-               Es.Projection.await(Bumped, Account, account, 30_000)
+               Bumped.await(Account, account, 30_000)
 
       assert :processed = Es.Projection.run_once(Bumped)
 
       assert {:error, %Error{code: :projection_rebuilding}} =
-               Es.Projection.await(Bumped, Account, account, 30_000)
+               Bumped.await(Account, account, 30_000)
 
       for _await <- 1..3 do
         assert_receive {:await, %{projection: "es_fixture", result: :rebuilding}, _measurements}
@@ -360,24 +360,28 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, late, [open("Поздний")])
       mark!([Bumped])
 
-      assert :ok = Es.Projection.await(Bumped, Account, early, 30_000)
+      assert :ok = Bumped.await(Account, early, 30_000)
 
       assert :processed = Es.Projection.run_once(Bumped)
       assert :processed = Es.Projection.run_once(Bumped, batch_size: 1)
 
-      assert :ok = Es.Projection.await(Bumped, Account, early, 30_000)
+      assert :ok = Bumped.await(Account, early, 30_000)
 
       assert {:error, %Error{code: :projection_rebuilding}} =
-               Es.Projection.await(Bumped, Account, late, 30_000)
+               Bumped.await(Account, late, 30_000)
     end
   end
 
   describe "ошибки программиста" do
-    test "тип агрегата, на который проекция не подписана, — FunctionClauseError" do
+    test "агрегат, на который проекция не подписана, и ID другого агрегата — FunctionClauseError" do
       mark!([AccountOnly])
 
       assert_raise FunctionClauseError, fn ->
-        Es.Projection.await(AccountOnly, EventFixture, EventFixture.AggID.new(), 100)
+        AccountOnly.await(EventFixture, EventFixture.AggID.new(), 100)
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        AccountOnly.await(Account, EventFixture.AggID.new(), 100)
       end
     end
 
@@ -386,7 +390,7 @@ defmodule Core.Es.Projection.AwaitTest do
 
       assert_raise ArgumentError, ~r/проекция es_fixture вызвана внутри транзакции/, fn ->
         Transact.run(TestRepo, fn ->
-          Es.Projection.await(@projection, Account, Account.ID.new(), 100)
+          @projection.await(Account, Account.ID.new(), 100)
         end)
       end
     end
@@ -395,7 +399,7 @@ defmodule Core.Es.Projection.AwaitTest do
       :persistent_term.erase(@mark_key)
 
       assert_raise RuntimeError, ~r/дерево проекций не запущено/, fn ->
-        Es.Projection.await(@projection, Account, Account.ID.new(), 100)
+        @projection.await(Account, Account.ID.new(), 100)
       end
     end
 
@@ -403,7 +407,7 @@ defmodule Core.Es.Projection.AwaitTest do
       mark!([@projection])
 
       assert_raise ArgumentError, ~r/проекция await_account_only не из projections:/, fn ->
-        Es.Projection.await(AccountOnly, Account, Account.ID.new(), 100)
+        AccountOnly.await(Account, Account.ID.new(), 100)
       end
     end
   end
@@ -421,7 +425,7 @@ defmodule Core.Es.Projection.AwaitTest do
       _spans = OtelFixture.drain(0)
 
       Otel.span("usecase", [], fn ->
-        assert :ok = Es.Projection.await(@projection, Account, account, 1_000)
+        assert :ok = @projection.await(Account, account, 1_000)
       end)
 
       spans = OtelFixture.drain()
@@ -444,7 +448,7 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, account, [open("Счёт")])
       _spans = OtelFixture.drain(0)
 
-      assert {:error, _error} = Es.Projection.await(@projection, Account, account, 30_000)
+      assert {:error, _error} = @projection.await(Account, account, 30_000)
 
       rebuilding = OtelFixture.drain() |> OtelFixture.find("await es_fixture")
       assert rebuilding.attributes["error.type"] == "es/projection_rebuilding"
@@ -454,7 +458,7 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, account, [close()])
       _spans = OtelFixture.drain(0)
 
-      assert {:error, _error} = Es.Projection.await(@projection, Account, account, 10)
+      assert {:error, _error} = @projection.await(Account, account, 10)
 
       timeout = OtelFixture.drain() |> OtelFixture.find("await es_fixture")
       assert timeout.attributes["error.type"] == "es/projection_timeout"
@@ -616,7 +620,7 @@ defmodule Core.Es.Projection.AwaitTest do
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
-  # Mailbox теста без telemetry ожидания и цикла читателя: всё прочее — сигналы, оставленные await/4.
+  # Mailbox теста без telemetry ожидания и цикла читателя: всё прочее — сигналы, оставленные await/3.
   defp leftovers do
     {:messages, messages} = Process.info(self(), :messages)
 

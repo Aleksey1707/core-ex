@@ -17,7 +17,10 @@ defmodule Core.Es.Aggregate.Repo do
   - `append(events, context, opts)` → `:ok | {:error, Error.t()}` — запись событий
     `Agg.execute/2`;
   - `refresh(state, version, context, opts)` → `{:ok, state} | {:error, Error.t()}` — хвост
-    потока после `state.version`.
+    потока после `state.version`;
+  - `page_stream(id, limit, offset, context)` →
+    `{:ok, Pagination.Result.t(Es.Event.t())} | {:error, Error.t()}` — страница потока агрегата
+    для читающего usecase.
 
   Реализация — `use Core.Es.Aggregate.Repo.Pg` (исходы — там), резолв — `Core.Config.repo!/1`
   по конвенции `<Behaviour>.Pg`.
@@ -25,18 +28,37 @@ defmodule Core.Es.Aggregate.Repo do
   Интроспекция — `__es_aggregate_repo__/0`: по ней `use Core.Es.Aggregate.Process` находит
   агрегат и Prim идентификатора.
 
+  ## Полнота `evolve`
+
+  Сборка репозитория проверяет `evolve/2` агрегата по его кодеку событий: на каждое событие макрос
+  генерирует функцию-проверку (`Core.Es.Check`) — литеральный вызов
+  `Agg.evolve(%Agg{} = state, %Event.Mod{payload: %Payload{}} = event)`, у события без нагрузки
+  `payload: nil`. Предупреждение компилятора указывает на строку `use`, а имя функции в нём
+  называет нарушенное утверждение — `"evolve/2 принимает <Event>"`. Ловятся:
+
+  - событие кодека без clause `evolve/2`;
+  - опечатка в ключе `%{state | …}`;
+  - опечатка в поле нагрузки, которую clause не сузила паттерном `%Payload{}`.
+
+  Агрегат без репозитория полноту `evolve` не проверяет. Кодек агрегата грузится при сборке
+  репозитория; не кодек событий — `CompileError`. Макрос занимает в вызывающем модуле имена
+  функций-проверок, по одному на событие кодека.
+
   ## Opts
 
   - `aggregate:` — модуль агрегата (`use Core.Es.Aggregate`); тип состояния — его `t()`
   - `id:` — Prim идентификатора агрегата
   """
 
+  alias Core.Es
   alias Core.Helper
 
   @label "Es.Aggregate.Repo"
   @required_keys ~w(aggregate id)a
   @optional_keys []
-  @callbacks [get: 4, get_many: 3, append: 3, refresh: 4]
+  @callbacks [get: 4, get_many: 3, append: 3, refresh: 4, page_stream: 4]
+
+  # ===== объявление =====
 
   @doc "Объявить behaviour write-репозитория event-sourced агрегата."
   defmacro __using__(opts) do
@@ -46,6 +68,8 @@ defmodule Core.Es.Aggregate.Repo do
     id = Helper.Opts.module!(lit, :id, @label)
 
     quote do
+      unquote_splicing(evolve_checks(aggregate, __CALLER__.line))
+
       @doc false
       @spec __es_aggregate_repo__() :: %{aggregate: module(), id: module()}
 
@@ -76,8 +100,28 @@ defmodule Core.Es.Aggregate.Repo do
                   context :: Core.Context.t(),
                   opts :: keyword()
                 ) :: {:ok, unquote(aggregate).t()} | {:error, Core.Error.t()}
+
+      @callback page_stream(
+                  id :: unquote(id).t(),
+                  limit :: Core.Pagination.Limit.t(),
+                  offset :: Core.Pagination.Offset.t(),
+                  context :: Core.Context.t()
+                ) :: {:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}
     end
   end
+
+  # ---
+
+  defp evolve_checks(aggregate, line) do
+    event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
+
+    for event <- Enum.sort(event_codec.__es_mods__()) do
+      args = [quote(do: %unquote(aggregate){} = state), quote(do: unquote(Es.Check.event_pattern(event)) = event)]
+      Es.Check.define("evolve/2 принимает", event, args, quote(do: unquote(aggregate).evolve(state, event)), line)
+    end
+  end
+
+  # ===== колбэки =====
 
   @doc false
   @spec callbacks() :: keyword(arity())

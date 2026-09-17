@@ -18,6 +18,20 @@ defmodule Core.Codec.Facade do
   которого лежит в данных. Выбор конкретного типа — задача плагина, фасад про теги
   не знает: модули типов и семейств обязаны быть уникальными между плагинами, и это
   проверяется на компиляции. Так же уникален между кодеками событий тип агрегата (`type:`).
+
+  ## Сужение результата
+
+  Клоузы плагинов сужают его результат паттерном, и компилятор у вызывающего знает тип значения:
+  `load(A, raw)` — `{:ok, %A{}} | {:error, _}`, `load(<Aggregate>.Event, raw)` — объединение
+  `{:ok, %Event.X{}}` по событиям кодека, `load!/2` — само значение, ошибка плагина — `raise Core.Exc`.
+  Событие сужается и по нагрузке: `%Event.X{payload: %Payload{}}` либо `payload: nil`. Опечатка в
+  поле загруженного значения или его нагрузки и невозможная clause по результату — предупреждение при
+  сборке вызывающего.
+
+  Фолбэк `dump/1` принимает только struct с полем `value` (`Core.Guard.is_prim/1`): команда или View
+  без плагина — предупреждение при сборке, при исполнении — `FunctionClauseError`; struct с полем
+  `value`, который не Prim, — `ArgumentError`. Фолбэк `load/2` / `load!/2` по атому не сужен: Prim по
+  атому в guard не распознать, и модуль без плагина компилятор не ловит.
   """
 
   alias Core.Helper
@@ -42,7 +56,12 @@ defmodule Core.Codec.Facade do
       Core.Codec.Facade.validate_mods!(@plugins)
       Core.Codec.Facade.validate_es_types!(@plugins)
 
-      @doc "Dump: entity-плагин или Prim."
+      require Core.Guard
+
+      @doc "Dump: entity-плагин или Prim; struct без плагина обязан быть Prim."
+      @spec dump(struct()) :: term()
+
+      @impl true
       for plugin <- @plugins,
           type <- plugin.__codec_types__() do
         def dump(%unquote(type){} = value) do
@@ -50,12 +69,23 @@ defmodule Core.Codec.Facade do
         end
       end
 
+      def dump(%mod{} = value) when Core.Guard.is_prim(value) do
+        if Prim.prim?(mod),
+          do: @prim.dump(value),
+          else: raise(ArgumentError, "нет codec-плагина для #{inspect(mod)}")
+      end
+
       @doc "Load: entity-плагин или Prim."
+      @spec load(module(), term()) :: {:ok, term()} | {:error, Core.Error.t()}
+
+      @impl true
       for plugin <- @plugins,
           plugin.__codec_loadable__(),
           mod <- Core.Codec.Facade.load_mods(plugin) do
         def load(unquote(mod), raw) do
-          unquote(plugin).load(unquote(mod), raw, __MODULE__)
+          case unquote(plugin).load(unquote(mod), raw, __MODULE__) do
+            unquote(Core.Codec.Facade.load_clauses(plugin, mod, :load))
+          end
         end
       end
 
@@ -72,20 +102,6 @@ defmodule Core.Codec.Facade do
         end
       end
 
-      @doc "Dump: fallback на Prim или ArgumentError."
-      @spec dump(struct()) :: term()
-
-      @impl true
-      def dump(%mod{} = value) do
-        if Prim.prim?(mod),
-          do: @prim.dump(value),
-          else: raise(ArgumentError, "нет codec-плагина для #{inspect(mod)}")
-      end
-
-      @doc "Load: fallback на Prim."
-      @spec load(module(), term()) :: {:ok, term()} | {:error, Core.Error.t()}
-
-      @impl true
       def load(mod, raw) when is_atom(mod) do
         if Prim.prim?(mod),
           do: @prim.load(mod, raw),
@@ -96,6 +112,16 @@ defmodule Core.Codec.Facade do
       @spec load!(module(), term()) :: term()
 
       @impl true
+      for plugin <- @plugins,
+          plugin.__codec_loadable__(),
+          mod <- Core.Codec.Facade.load_mods(plugin) do
+        def load!(unquote(mod), raw) do
+          case unquote(plugin).load(unquote(mod), raw, __MODULE__) do
+            unquote(Core.Codec.Facade.load_clauses(plugin, mod, :load!))
+          end
+        end
+      end
+
       def load!(mod, raw) when is_atom(mod) do
         Core.Result.unwrap!(load(mod, raw))
       end
@@ -152,6 +178,34 @@ defmodule Core.Codec.Facade do
         Map.put(acc, mod, plugin)
     end
   end
+
+  # ===== сужение load =====
+
+  @doc false
+  @spec load_clauses(module(), module(), :load | :load!) :: [Macro.t()]
+
+  def load_clauses(plugin, mod, fun) when is_atom(plugin) and is_atom(mod) and fun in [:load, :load!] do
+    types = if mod == plugin.__codec_union__(), do: plugin.__codec_types__(), else: [mod]
+    patterns = Enum.map(types, &type_pattern(plugin, &1))
+
+    Enum.flat_map(patterns, &ok_clause(&1, fun)) ++ error_clause(fun)
+  end
+
+  # ---
+
+  # Поля struct компилятор не типизирует, поэтому событие сужается ещё и по нагрузке: иначе опечатка
+  # в её поле после `load/2` молчала бы.
+  defp type_pattern(plugin, type) do
+    if function_exported?(plugin, :__es_type__, 0),
+      do: Core.Es.Check.event_pattern(type),
+      else: quote(do: %unquote(type){})
+  end
+
+  defp ok_clause(pattern, :load), do: quote(generated: true, do: ({:ok, unquote(pattern) = value} -> {:ok, value}))
+  defp ok_clause(pattern, :load!), do: quote(generated: true, do: ({:ok, unquote(pattern) = value} -> value))
+
+  defp error_clause(:load), do: quote(generated: true, do: ({:error, reason} -> {:error, reason}))
+  defp error_clause(:load!), do: quote(generated: true, do: ({:error, %Core.Error{} = error} -> raise Core.Exc, error))
 
   # ===== типы агрегата =====
 

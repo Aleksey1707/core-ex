@@ -3,7 +3,7 @@ DOCKER ?= podman
 # Порядок совпадает с .pre-commit-config.yaml.
 .PHONY: default
 default: boundary-check rules-check layout-check format-check compile compile-no-optional \
-         deps-clean xref dialyzer test credo audit
+         consumer-check deps-clean xref dialyzer test credo audit
 
 # Главный инвариант: библиотека не знает приложения-потребителя (`10-architecture.md`).
 .PHONY: boundary-check
@@ -48,6 +48,15 @@ compile:
 .PHONY: compile-no-optional
 compile-no-optional:
 	mix compile --no-optional-deps --warnings-as-errors
+
+# Храповик вывода типов: предупреждения компилятора фикстуры-потребителя против маркеров
+# `# expect:` в её исходниках (`fixtures/consumer/README.md`). Зависимости фикстуры тянутся,
+# только когда их нет или lock библиотеки ушёл вперёд; окружение — всегда `dev`, один `_build`.
+.PHONY: consumer-check
+consumer-check:
+	cd fixtures/consumer && export MIX_ENV=dev && \
+		(mix deps.loadpaths --no-compile >/dev/null 2>&1 || mix deps.get) && \
+		mix run --no-start --no-compile check.exs
 
 .PHONY: test
 test: infra-up

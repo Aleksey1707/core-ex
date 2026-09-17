@@ -11,8 +11,8 @@
 |---|---|
 | `ExUnit.Case` | чистые модули: Prim, Enum, Codec, хелперы |
 | `Core.DataCase` | всё, что ходит в Postgres (Ecto Sandbox) |
-| `Core.Es.EventCompatCase` | golden-фикстуры событий и полнота `evolve` агрегата, один тест-модуль на агрегат (см. «Совместимость событий») |
-| `Core.Es.ProjectionCase` | полнота `project/1` и `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
+| `Core.Es.EventCompatCase` | golden-фикстуры событий, один тест-модуль на агрегат (см. «Совместимость событий») |
+| `Core.Es.ProjectionCase` | очистка `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
 
 У приложения-потребителя набор шире (`MyAppWeb.ConnCase`): web-слоя в библиотеке нет.
 
@@ -74,10 +74,9 @@ MUST равняться `entity |> OutCodec.dump() |> json_roundtrip()`.
 ## Совместимость событий
 
 Каждый агрегат с кодеком событий MUST иметь тест-модуль `use Core.Es.EventCompatCase` — один на
-агрегат. Event-sourced агрегат передаётся `aggregate:`, и case проверяет ещё полноту `evolve`
-(«Event-sourced агрегат»); кодек state-stored агрегата — `event_codec:`. Остальное case берёт из
-кодека и фасада `Core.Config.codec/0`. Каталог фикстур, инварианты и правила эволюции —
-`14-events-outbox.md`, «Golden-фикстуры».
+агрегат. Event-sourced агрегат передаётся `aggregate:` — case берёт его кодек; кодек state-stored
+агрегата — `event_codec:`. Остальное case берёт из кодека и фасада `Core.Config.codec/0`. Каталог
+фикстур, инварианты и правила эволюции — `14-events-outbox.md`, «Golden-фикстуры».
 
 ```elixir
 # плохо — свой case: его проверки расходятся с кодеком библиотеки молча
@@ -115,11 +114,8 @@ Given из команд через `execute/2` SHOULD NOT: команда не �
 а тест одной команды начинает зависеть от `decide` другой. Then по `%Es.Event{}` или по
 состоянию после команды SHOULD NOT — `id` и `at` событий пришлось бы сверять в каждом тесте.
 
-Применение событий — отдельные тесты `evolve` через `Agg.fold/2`. Полноту `evolve` проверяет
-`use Core.Es.EventCompatCase, aggregate:`: `evolve(%Agg{id: aggregate_id}, событие)` на фикстуре
-каждого тега; провал — только `FunctionClauseError` самой `Agg.evolve/2`.
-
-Проверяется: `use Core.Es.EventCompatCase, aggregate:` — полнота `evolve`.
+Применение событий — отдельные тесты `evolve` через `Agg.fold/2`; полноту `evolve` проверяет
+сборка репозитория агрегата (`11-domain.md`, «Event-sourced»).
 
 ```elixir
 # плохо — given командами: тест закрытия зависит от decide открытия и заморозки
@@ -137,9 +133,10 @@ assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: by, at: at}, state)
 ## Проекции
 
 Каждая проекция MUST иметь тест-модуль `use Core.Es.ProjectionCase` — один на проекцию: он
-проверяет на golden-фикстурах событий (`14-events-outbox.md`) нормы `project/1` и `clear/0` из
-`22-projections.md`, «Объявление», и сам находит таблицы, которые пишет проекция. Проверки, опции
-и `async: false` — moduledoc `Core.Es.ProjectionCase`.
+проверяет на golden-фикстурах событий (`14-events-outbox.md`) норму `clear/0` из
+`22-projections.md`, «Объявление», и сам находит таблицы, которые пишет проекция. Проверка, опции
+и `async: false` — moduledoc `Core.Es.ProjectionCase`; полноту `project/1` проверяет сборка
+проекции (`22-projections.md`, «Объявление»).
 
 ```elixir
 # плохо — clear/0 проверен вручную: таблица, добавленная в проекцию позже, в перечень не попадёт
@@ -180,7 +177,7 @@ assert :ok = Core.Es.Projection.Test.run_until_idle(AccountList.Projection)
 assert {:ok, %AccountList.View{status: :open}} = AccountList.ReadRepo.get(id, :current, context)
 ```
 
-Usecase с `Core.Es.Projection.await/4` тест SHOULD гонять на тестовом дереве `enabled: false`,
+Usecase с `Projection.await/3` тест SHOULD гонять на тестовом дереве `enabled: false`,
 `await: :inline` из `config/test.exs`: `await` прогоняет проекцию до `:idle` в процессе теста,
 как `run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой
 тест — тоже `Core.DataCase, async: false`.

@@ -8,6 +8,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
   alias Core.EventFixture
   alias Core.EventFixture.AggID
   alias Core.Outbox
+  alias Core.Pagination
   alias Core.Repo
   alias Core.StateStoredFixture
   alias Core.StateStoredFixture.Child
@@ -245,6 +246,31 @@ defmodule Core.Repo.Pg.StateStoredTest do
     end
   end
 
+  describe "page_stream/4" do
+    test "страница потока по возрастанию версии; count — весь поток" do
+      id = AggID.new()
+      created = event(EventFixture.created(), id, 2)
+      closed = event(EventFixture.closed(), id, 4)
+
+      assert {:ok, _} = @repo.insert(entity(id, 1, []), Context.new())
+      assert {:ok, _} = @repo.update(entity(id, 2, [created]), Context.new())
+      assert {:ok, _} = @repo.update(%{entity(id, 3, []) | name: "Без события"}, Context.new())
+      assert {:ok, _} = @repo.update(entity(id, 4, [closed]), Context.new())
+
+      assert {:ok, %Pagination.Result{items: items, count: 2}} = page(id, 1, 1)
+
+      assert wires(items) == wires([closed])
+    end
+
+    test "агрегат без событий — страница с count: 0" do
+      id = AggID.new()
+
+      assert {:ok, _} = @repo.insert(entity(id, 1, []), Context.new())
+
+      assert {:ok, %Pagination.Result{items: [], count: 0}} = page(id, 10, 0)
+    end
+  end
+
   defp compile!(name, overrides) do
     opts =
       base_opts()
@@ -285,6 +311,9 @@ defmodule Core.Repo.Pg.StateStoredTest do
   end
 
   defp event(event, id, version), do: EventFixture.in_stream(event, id, version)
+
+  defp page(id, limit, offset),
+    do: @repo.page_stream(id, Pagination.Limit.new!(limit), Pagination.Offset.new!(offset), Context.new())
 
   defp outbox_names(id) do
     key = dump(id)

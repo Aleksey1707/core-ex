@@ -33,15 +33,26 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `FunctionClauseError`.
   - `refresh(state, version, context, opts)` — события потока после `state.version`, свёрнутые
     от `state`; `version` сверяется, как у `get`.
+  - `page_stream(id, limit, offset, context)` — страница потока агрегата по возрастанию версии,
+    `count` — весь поток: пустой поток — страница с `count: 0`, первая ошибка загрузки —
+    `{:error, _}` на всю страницу. Реализация и исходы — `Core.Es.Store`, «Страница потока».
 
-  `opts` — опции запроса и транзакции. Функции `defoverridable`.
+  `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
+
+  Головы принимают только `%Agg.ID{}` и `%Agg{}`, результат сужен паттерном: `get` / `refresh` —
+  `{:ok, %Agg{}} | {:error, _}`, `get_many` — `{:ok, list} | {:error, _}`, `append` —
+  `:ok | {:error, _}`, `page_stream` — `{:ok, %Core.Pagination.Result{}} | {:error, _}`. Компилятор
+  у вызывающего знает состояние агрегата и страницу, и ID другого агрегата, опечатка в поле или
+  невозможная clause по результату — предупреждение при сборке; элементы списков `get_many` и
+  страницы он не видит.
 
   `:version_mismatch` — `errors.domain(behaviour, :version_mismatch, detail)`, detail —
   `%{aggregate_id, expected, actual}` (`t:Core.Es.Store.mismatch_detail/0`): у `append` его
   строит хранилище, у чтения `expected` — значение `version`, `actual` — версия после свёртки.
 
-  Нечитаемый поток — исключение: неизвестный тег — `Core.Exc` загрузки фасадом, разрыв версий —
-  `ArgumentError` из `Agg.fold/2`.
+  Нечитаемый поток у `get` / `get_many` / `refresh` — исключение: неизвестный тег — `Core.Exc`
+  загрузки фасадом, разрыв версий — `ArgumentError` из `Agg.fold/2`. `page_stream` отдаёт ошибку
+  загрузки `{:error, _}` на всю страницу.
 
   ## Снапшоты
 
@@ -83,11 +94,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `id:` — Prim идентификатора агрегата
   - `errors:` — каталог ошибок с clause `:version_mismatch`
   - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`)
-  - `repo:` — Ecto-репозиторий транзакции `append` и чтения потока; по умолчанию
-    `Core.Config.dao/0` в рантайме. Сами события `Core.Es.Store.append/5` пишет через
-    `Core.Config.dao/0`
-  - `codec:` — фасад дампа id и загрузки событий на чтении; по умолчанию `Core.Config.codec/0`
-    в рантайме
+  - `repo:` — Ecto-репозиторий транзакции `append` и восстановления состояния (`get` /
+    `get_many` / `refresh`); по умолчанию `Core.Config.dao/0` в рантайме. Сами события `Core.Es.Store.append/5` пишет, а страницу
+    потока `page_stream` читает через `Core.Config.dao/0`
+  - `codec:` — фасад дампа id и загрузки событий при восстановлении состояния; по умолчанию
+    `Core.Config.codec/0` в рантайме. Страница потока грузится через `Core.Config.codec/0`
   - `snapshot:` — `[every: N, version: V]`, без опции снапшоты выключены: `every:` — сколько
     свёрнутых событий потока дают запись снапшота, целое больше нуля, обязательна; `version:` —
     ручная часть маркера, целое, по умолчанию 1
@@ -130,7 +141,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
 
-    quote do
+    quote generated: true do
       @behaviour unquote(cfg.behaviour)
 
       @es_aggregate_repo unquote(Macro.escape(cfg))
@@ -140,20 +151,32 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       @doc "Состояние агрегата из его потока; `version` сверяется с головой потока."
       @impl true
       def get(%unquote(cfg.id){} = id, version, %Core.Context{} = context, opts \\ [])
-          when is_version(version) and is_list(opts),
-          do: Core.Es.Aggregate.Repo.Pg.get(es_aggregate_repo(), id, version, context, opts)
+          when is_version(version) and is_list(opts) do
+        case Core.Es.Aggregate.Repo.Pg.get(es_aggregate_repo(), id, version, context, opts) do
+          {:ok, %unquote(cfg.aggregate){} = state} -> {:ok, state}
+          {:error, reason} -> {:error, reason}
+        end
+      end
 
       @doc "Состояния агрегатов по парам `{id, version}` одним запросом, в порядке пар."
       @impl true
       def get_many(pairs, %Core.Context{} = context, opts \\ [])
-          when is_list(pairs) and is_list(opts),
-          do: Core.Es.Aggregate.Repo.Pg.get_many(es_aggregate_repo(), pairs, context, opts)
+          when is_list(pairs) and is_list(opts) do
+        case Core.Es.Aggregate.Repo.Pg.get_many(es_aggregate_repo(), pairs, context, opts) do
+          {:ok, states} when is_list(states) -> {:ok, states}
+          {:error, reason} -> {:error, reason}
+        end
+      end
 
       @doc "Записать события агрегатов в хранилище событий и outbox одной транзакцией."
       @impl true
       def append(events, %Core.Context{} = context, opts \\ [])
-          when is_list(events) and is_list(opts),
-          do: Core.Es.Aggregate.Repo.Pg.append(es_aggregate_repo(), events, context, opts)
+          when is_list(events) and is_list(opts) do
+        case Core.Es.Aggregate.Repo.Pg.append(es_aggregate_repo(), events, context, opts) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+      end
 
       @doc "Дочитать поток после `state.version`; `version` сверяется с головой потока."
       @impl true
@@ -163,8 +186,26 @@ defmodule Core.Es.Aggregate.Repo.Pg do
             %Core.Context{} = context,
             opts \\ []
           )
-          when is_version(version) and is_list(opts),
-          do: Core.Es.Aggregate.Repo.Pg.refresh(es_aggregate_repo(), state, version, context, opts)
+          when is_version(version) and is_list(opts) do
+        case Core.Es.Aggregate.Repo.Pg.refresh(es_aggregate_repo(), state, version, context, opts) do
+          {:ok, %unquote(cfg.aggregate){} = refreshed} -> {:ok, refreshed}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+
+      @doc "Страница потока агрегата по возрастанию версии; `count` — весь поток."
+      @impl true
+      def page_stream(
+            %unquote(cfg.id){} = id,
+            %Core.Pagination.Limit{} = limit,
+            %Core.Pagination.Offset{} = offset,
+            %Core.Context{} = context
+          ) do
+        case Core.Es.Store.page_stream(unquote(cfg.event_codec), id, limit, offset, context) do
+          {:ok, %Core.Pagination.Result{} = page} -> {:ok, page}
+          {:error, reason} -> {:error, reason}
+        end
+      end
 
       defoverridable get: 3,
                      get: 4,
@@ -173,7 +214,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
                      append: 2,
                      append: 3,
                      refresh: 3,
-                     refresh: 4
+                     refresh: 4,
+                     page_stream: 4
 
       defp es_aggregate_repo,
         do: Map.merge(@es_aggregate_repo, %{dao: unquote(dao), codec: unquote(codec)})

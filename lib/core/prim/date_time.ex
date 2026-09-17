@@ -26,7 +26,7 @@ defmodule Core.Prim.DateTime do
 
   @doc "Объявить datetime-Prim (`name:` + опции tz/precision/bounds)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
+    quote bind_quoted: [opts: opts], unquote: true do
       kind = Prim.Opts.prepare!(opts, Core.Prim.DateTime)
 
       type_opts = Keyword.take(opts, ~w(after before tz precision)a)
@@ -70,7 +70,16 @@ defmodule Core.Prim.DateTime do
       @doc "Текущее время; при ошибке — raise."
       @spec now!() :: t()
 
-      def now!, do: Result.unwrap!(now())
+      unquote(
+        quote generated: true do
+          def now! do
+            case now() do
+              {:ok, %__MODULE__{} = prim} -> prim
+              {:error, %Error{} = error} -> raise Core.Exc, error
+            end
+          end
+        end
+      )
 
       @doc "Собрать из другого datetime-Prim (полный pipeline целевого `new/1`)."
       @spec from(term()) :: {:ok, t()} | {:error, Error.t()}

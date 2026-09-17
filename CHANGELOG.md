@@ -24,6 +24,31 @@
   больше нет, и требование глобальной уникальности тега снято — тег уникален внутри своего
   кодека. Квалифицированные имена (`order.created`) остаются конвенцией: тег виден в
   брокере и в event store рядом с чужими.
+- **`use Core.Codec.Facade` сужает результат плагина и фолбэк `dump/1`.** Клоуза плагина отдавала
+  его результат как есть, и `load/2` / `load!/2` фасада выводились как `dynamic()`: опечатка в поле
+  события из `InCodec.load(Agg.Event, data)` или в поле его нагрузки падала `KeyError` при
+  исполнении, clause `:ok ->` по результату молча не срабатывала, а команда в `InCodec.dump/1` падала
+  `ArgumentError` «нет codec-плагина». Теперь клоуза плагина сужает результат паттерном по его
+  типам: `load(Mod, data)` — `{:ok, %Mod{}} | {:error, _}`, `load(<Aggregate>.Event, data)` —
+  объединение событий кодека, событие — ещё и по нагрузке (`%Event.X{payload: %Payload{}}` либо
+  `payload: nil`); `load!/2` получил те же клоузы и делает `raise Core.Exc` сам. Фолбэк `dump/1`
+  принимает только struct с полем `value` (`Core.Guard.is_prim/1`): struct без плагина и без
+  `value` — предупреждение при сборке, при исполнении — `FunctionClauseError` вместо
+  `ArgumentError`; struct с `value`, который не Prim, — по-прежнему `ArgumentError`. Исходы
+  корректных вызовов прежние, фолбэк `load/2` по атому не сужен. Плагин, чей `load/3` нарушает
+  контракт — отдаёт не struct запрошенного типа или, у `load!/2`, ошибку не `%Core.Error{}`, —
+  падает `CaseClauseError`. Правится вызов, а не предупреждение.
+
+  ```elixir
+  # было — собиралось и падало KeyError при исполнении;
+  # стало — warning: unknown key .aggregat_id in expression
+  {:ok, event} = InCodec.load(Account.Event, data)
+  event.aggregat_id
+
+  # было — собиралось и падало ArgumentError «нет codec-плагина»;
+  # стало — warning: incompatible types given to MyApp.Codec.Internal.dump/1
+  InCodec.dump(%Account.Cmd.Open{name: name, by: by, at: at})
+  ```
 - **`Core.Codec.Plugin`: `types:` вместо `tags:`, `union:` вместо `tagged:`.** Механизм
   `tagged: true` / `dump_tagged` / `load_tagged` удалён целиком. `types:` стала обязательной;
   `union:` требует `loadable: true`. Генерация `type/1`, `types/0`, `mod_by_tag/1`,
@@ -39,6 +64,33 @@
   одного кодека — `CompileError`. Неизвестный тег теперь `:unknown_event_type` (`ns: :es`,
   модуль — кодек агрегата) вместо `:unknown_tagged_type` фасада. Clause `:unknown_event_type` в
   каталогах `<Aggregate>.Errors` больше не вызывается — ошибку строит кодек.
+
+  Колбэки нагрузки проверяет сборка кодека: `use Core.Es.Event.Codec` генерирует на каждое событие
+  с нагрузкой функции-проверки (`Core.Es.Check`) — литеральный вызов
+  `dump_payload(%Event.Mod{payload: %Payload{}} = event, codec)` и сопоставление результата
+  `load_payload(Event.Mod, wire, codec)` с `{:ok, %Payload{}}` (у модуля нагрузки, общего у
+  нескольких событий, — clause функции на каждое событие). Нет clause `dump_payload/2` или
+  `load_payload/3` для события с нагрузкой, `load_payload/3` отдаёт нагрузку другого события —
+  литералом или через `Payload.new` — предупреждение на строке `use`, и имя функции в нём
+  называет нарушенное утверждение. Прежде пропущенная clause падала `FunctionClauseError` при
+  записи или чтении события, а нагрузка другого события — в `Event.Mod.new/6` при чтении. Clause
+  `{:error, _}` сгенерирована с `generated: true`: у `load_payload/3`, который никогда не
+  ошибается, ложного предупреждения нет. Кодек без событий с нагрузкой проверок нагрузки не
+  получает. Код потребителя не меняется: сборка с `--warnings-as-errors` падает там, где колбэки
+  нагрузки были неверны всегда, — правится кодек.
+
+  ```text
+  # было — при записи события
+  ** (FunctionClauseError) no function clause matching in MyApp.Domain.<BC>.Common.Account.Event.Codec.dump_payload/2
+
+  # стало — предупреждение при сборке
+  warning: incompatible types given to dump_payload/2:
+  └─ lib/my_app/domain/<bc>/common/account/event/codec.ex:9: MyApp.Domain.<BC>.Common.Account.Event.Codec."dump_payload/2 принимает MyApp.Domain.<BC>.Common.Account.Event.Renamed"/2
+
+  warning: the following clause will never match:
+      {:ok, %MyApp.Domain.<BC>.Common.Account.Event.Renamed.Payload{}} ->
+  └─ lib/my_app/domain/<bc>/common/account/event/codec.ex:9: MyApp.Domain.<BC>.Common.Account.Event.Codec."load_payload/3 отдаёт нагрузку MyApp.Domain.<BC>.Common.Account.Event.Renamed.Payload"/3
+  ```
 - **`Core.Es.Outbox.Envelope` удалён** (был добавлен в этом же невыпущенном цикле): обе стороны
   формата конверта живут в `Core.Es.Event.Codec`. Наружу отдаётся только пара `to_fields/1` /
   `from_fields/1` — для транспорта, который хранит поля события врозь. Оттуда же `Es.Outbox`
@@ -140,10 +192,11 @@
     `config :my_app, <Agg>.Event.Repo, <Impl>` из app-env удалить: хранилище событий — модуль
     библиотеки, подменять можно только `<Agg>.Repo`.
   - **Чтение потока.** `@event_repo.page_by_aggregate(id, limit, offset, context)` →
-    `Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)`,
-    `count_by_aggregate` → `count` той же страницы. `page_stream` доступ не проверяет и
-    `:not_found` не отдаёт, поэтому usecase обязан проверить права и существование агрегата до
-    чтения — `ReadRepo.get(id, :current, context)` (`13-repos.md`, «Страница потока»). В тестах
+    `@repo.page_stream(id, limit, offset, context)` write-репозитория агрегата (генерирует
+    `use Core.Repo.Pg.StateStored`), `count_by_aggregate` → `count` той же страницы.
+    `page_stream` доступ не проверяет и `:not_found` не отдаёт, поэтому usecase обязан проверить
+    права и существование агрегата до чтения — `ReadRepo.get(id, :current, context)`
+    (`13-repos.md`, «Страница потока»). В тестах
     `{:ok, events} = @event_repo.list_by_aggregate(id, context)` →
     `events = Core.Es.Store.Test.events!(Agg.Event.Codec, id)`.
   - **`:version_mismatch` записи событий.** Код — тот же, из `errors:`; модуль ошибки —
@@ -503,9 +556,9 @@
   @impl true
   def upcast("user.created", envelope), do: %{"login" => field(field(envelope, :payload), :name)}
   ```
-- **Хранилище событий: `es_events`, `Core.Es.Store.append/5` и `page_stream/5`.** Одна таблица
-  событий на приложение, общая для event-sourced и state-stored агрегатов; DDL —
-  `Core.Es.Migration` (`up/0` / `down/0`), миграция потребителя делегирует ему, как
+- **Хранилище событий: `es_events`, `Core.Es.Store.append/5` и страница потока
+  `page_stream/4`.** Одна таблица событий на приложение, общая для event-sourced и state-stored
+  агрегатов; DDL — `Core.Es.Migration` (`up/0` / `down/0`), миграция потребителя делегирует ему, как
   `Core.Outbox.Migration`; она же создаёт `es_snapshots` — снапшоты event-sourced агрегатов — и
   `es_checkpoints` — чекпоинты проекций (база, где миграция из этого цикла уже накатана,
   откатывает и накатывает её заново). Поток —
@@ -516,11 +569,30 @@
   поздним `xid` и, с `continuous?: true`, первую версию потока не вслед за головой. Отказ —
   ошибка, которую строит колбэк вызывающего из `%{aggregate_id, expected, actual}`; транзакция
   в aborted не переходит. Записанное тест читает `Core.Es.Store.Test.events!/2`.
-  `page_stream(Agg.Event.Codec, id, limit, offset, context)` отдаёт страницу потока —
+  `@repo.page_stream(id, limit, offset, context)` отдаёт страницу потока —
   `Pagination.Result` из `Es.Event` по возрастанию версии с `count` всего потока: апкаст
   действует, нечитаемое событие — `{:error, _}` на всю страницу. Доступ она не проверяет, а
   пустой поток — страница с `count: 0`, поэтому права и существование агрегата usecase
-  проверяет до чтения — `ReadRepo.get(id, :current, context)`. У потребителя — миграция:
+  проверяет до чтения — `ReadRepo.get(id, :current, context)`. Функцию генерирует
+  write-репозиторий агрегата любого вида: `use Core.Es.Aggregate.Repo.Pg` (колбэк
+  `use Core.Es.Aggregate.Repo`) и `use Core.Repo.Pg.StateStored` (по `event_codec:`, колбэка в
+  `use Core.Repo` нет); голова — закрытый struct ID агрегата, результат сужен до
+  `{:ok, %Pagination.Result{}} | {:error, _}`. ID другого агрегата, опечатка в поле страницы и
+  невозможная clause по результату — предупреждение при сборке вызывающего. Прежняя форма
+  `Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` принимала кодек и ID
+  параметрами, и сборка молчала: ID заказа при кодеке `Account` давал пустую страницу потока
+  `account` с чужим uuid. Теперь это `@doc false` реализация; тестовый дублёр behaviour
+  `use Core.Es.Aggregate.Repo` получает колбэк `page_stream/4`.
+
+  ```elixir
+  # было — собиралось, отдавало пустую страницу потока `account` с uuid заказа
+  Core.Es.Store.page_stream(Account.Event.Codec, order_id, limit, offset, context)
+
+  # стало — warning: incompatible types given to MyApp.Domain.<BC>.Common.Account.Repo.Pg.page_stream/4
+  @repo.page_stream(order_id, limit, offset, context)
+  ```
+
+  У потребителя — миграция:
 
   ```elixir
   defmodule MyApp.Repo.Migrations.CreateEsEvents do
@@ -535,9 +607,10 @@
   теста: у каждого тега `types/0` есть фикстура; каждая фикстура, кроме источников `upcasts:`,
   несёт в `type` тег из имени файла и грузится фасадом `Core.Config.codec/0` через семейство; у
   каждого источника `upcasts:` есть фикстура; она несёт его тег и грузится апкастом.
-  Event-sourced агрегат передаётся `aggregate:` (кодек — его `__es_event_codec__/0`) и получает
-  пятый тест — полноту `evolve`: `evolve(%Agg{id: aggregate_id}, событие)` на фикстуре каждого
-  тега, провал — только `FunctionClauseError` самой `Agg.evolve/2`. Семейство
+  Event-sourced агрегат передаётся `aggregate:` — кодек берётся из его `__es_event_codec__/0`.
+  Полноту `evolve` case не проверяет: пятый тест — `evolve(%Agg{id: aggregate_id}, событие)` на
+  фикстуре каждого тега — удалён, её проверяет сборка репозитория агрегата (пункт «Event-sourced
+  агрегат»); опция `aggregate:` осталась. Семейство
   событий, тип агрегата и карта апкастов берутся из кодека, фикстуры —
   `test/support/fixtures/events/<тип агрегата>/<тег>.json`, другой каталог — `fixtures:`.
   `async:` уходит в `ExUnit.Case` (по умолчанию `true`) и пишется явно ради
@@ -561,7 +634,7 @@
 - **Event-sourced агрегат: `Core.Es.Aggregate`, `Core.Es.Cmd`, `Core.Es.Aggregate.Test`.**
   Агрегат, чей источник истины — события, рядом со state-stored. Автор пишет под
   `use Core.Es.Aggregate, event_codec:` два колбэка: `decide(команда, состояние)` →
-  `{:ok, [{Event.Mod, payload} | Event.Mod]} | {:error, Error.t()}` и `evolve(состояние, событие)` →
+  `{:ok, [черновик события]} | {:error, Error.t()}` и `evolve(состояние, событие)` →
   состояние. Библиотека генерирует `fold/2` (свёртка истории от любого состояния; разрыв версий
   или чужой `aggregate_id` — `ArgumentError`), `fold/3` (результат `decide` одной команды —
   несколько событий автор сворачивает через `with`), чистый шаг `execute/2` →
@@ -575,6 +648,66 @@
   `Core.Es.Aggregate.Test.given(state, results, by:, at:)` → состояние, then — короткая форма
   результата `decide/2`.
 
+  Ошибки вызова видит компилятор (`docs/adr/0014-consumer-type-safety-by-inference.md`):
+  `execute/2` зовёт `decide(command, state)` в модуле агрегата, а не библиотека через
+  модуль-переменную, поэтому домен команды — clauses `decide/2`, и команда другого агрегата или
+  без clause в `decide` — предупреждение при сборке, а не `FunctionClauseError` в транзакции.
+  Головы `execute/2` и `fold/2,3` принимают только `%Agg{}`, результат сужен до
+  `{:ok, {[Es.Event], %Agg{}}} | {:error, _}` и `%Agg{}`: опечатка в поле состояния и невозможная
+  clause по результату ловятся при сборке. Сужение сгенерировано с `generated: true`, и у
+  агрегата, чей `decide` никогда не ошибается или только ошибается, ложных предупреждений нет.
+
+  Полноту `evolve/2` проверяет сборка репозитория агрегата: `use Core.Es.Aggregate.Repo`
+  генерирует на каждое событие кодека функцию-проверку (`Core.Es.Check`) с литеральным вызовом
+  `Agg.evolve(%Agg{} = state, %Event.Mod{payload: %Payload{}} = event)`. Событие без clause,
+  опечатка в ключе `%{state | …}` и в поле нагрузки, не суженной паттерном `%Payload{}`, —
+  предупреждение на строке `use`, и имя функции в нём называет нарушенное утверждение. Прежде
+  пропущенную clause находил только тест `EventCompatCase` с `aggregate:` — при прогоне и у того,
+  кто его подключил, — а опечатки падали `KeyError` при свёртке; тест удалён. Агрегат без
+  репозитория полноту не проверяет. Кодек агрегата теперь грузится при сборке репозитория, а
+  макрос занимает в модуле behaviour имена функций-проверок `"evolve/2 принимает <Event>"/2`.
+  Код потребителя не меняется: сборка с `--warnings-as-errors` падает там, где `evolve` был
+  неполон всегда, — правится `evolve`.
+
+  ```text
+  # было — тест при прогоне
+  1) test у evolve/2 есть клауза события каждого тега (MyApp.Domain.<BC>.Common.Account.EventCompatTest)
+     {:error, %{unhandled: [{"test/support/fixtures/events/account/account.closed.json", Event.Closed}]}}
+
+  # стало — предупреждение при сборке
+  warning: incompatible types given to MyApp.Domain.<BC>.Common.Account.evolve/2:
+  └─ lib/my_app/domain/<bc>/common/account/repo.ex:2: MyApp.Domain.<BC>.Common.Account.Repo."evolve/2 принимает MyApp.Domain.<BC>.Common.Account.Event.Closed"/2
+  ```
+
+  Элемент результата `decide/2` — черновик события — строится конструктором кодека агрегата:
+  `use Core.Es.Event.Codec` генерирует по `tags:` `draft(Event.Mod, payload)` (clause на каждое
+  событие с нагрузкой) и `draft(Event.Mod)` (на каждое событие без неё). Кортеж, собранный
+  вручную, ни с чем не сверялся: событие не из кодека агрегата, нагрузка другого события и
+  событие с нагрузкой без неё падали `FunctionClauseError` / `UndefinedFunctionError` в
+  транзакции. У `draft` пара событие–нагрузка стоит в голове clause, и те же ошибки —
+  предупреждение при сборке. Модуль нагрузки, общий у нескольких событий кодека, законен: событие
+  задаёт первый аргумент. `draft` возвращает прежний кортеж, поэтому `given/3` и тесты с
+  `{:ok, [Event.Closed]} = decide(…)` не меняются; кортеж вручную библиотека по-прежнему
+  принимает, но свод требует `draft` (`11-domain.md`). Пару сверяет только вызов с литералом
+  события: событие и нагрузка из переменных (`Enum.map`) сборке не видны.
+
+  ```elixir
+  # было
+  def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+    do: {:ok, [{Event.Renamed, Event.Renamed.Payload.new(name)}]}
+
+  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen]}
+
+  # стало
+  def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+    do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
+
+  def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
+
+  # общий модуль нагрузки — было `Enum.map(role_ids, &{event, &1})`
+  Enum.map(role_ids, &Event.Codec.draft(event, &1))
+  ```
+
   ```elixir
   defmodule MyApp.Domain.<BC>.Common.Account do
     use Core.Es.Aggregate,
@@ -583,7 +716,7 @@
     defstruct id: nil, version: nil, name: nil, status: nil
 
     @impl true
-    def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen]}
+    def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
 
     @impl true
     def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
@@ -600,7 +733,8 @@
   поток при `:current` — `%Agg{id: id, version: nil}`, а не `:not_found` (существование решает
   `decide`), `%Version{}` мимо головы потока — `:version_mismatch` (у пустого `actual: nil`).
   `get_many(pairs, context)` читает все потоки одним запросом и отдаёт одну `:version_mismatch`
-  на все расхождения; `refresh(state, version, context)` дочитывает хвост после `state.version`.
+  на все расхождения; `refresh(state, version, context)` дочитывает хвост после `state.version`;
+  `page_stream(id, limit, offset, context)` — страница потока (пункт «Хранилище событий»).
   `append(events, context)` сам открывает транзакцию: `outbox.from_events` →
   `Core.Es.Store.append` с непрерывностью потока → `Outbox.Repo.append`; пачка потоков одного
   типа атомарна, `[]` — `:ok` без запросов. Behaviour — `use Core.Es.Aggregate.Repo, aggregate:,
@@ -611,7 +745,11 @@
   `Core.Es.Aggregate.Repo`. Telemetry —
   `[:es, :aggregate, :load]` на вызов и `[:es, :aggregate, :fold]` на поток, span'а нет. Один
   репозиторий на агрегат в common-слое, без `default_filters`, `Repo.Sc` и `delete`
-  (`13-repos.md`, «Write event-sourced агрегата»).
+  (`13-repos.md`, «Write event-sourced агрегата»). Головы принимают только `%Agg.ID{}` / `%Agg{}`,
+  результат сужен: `get` / `refresh` — `{:ok, %Agg{}}`, `get_many` — `{:ok, list}`, `append` —
+  `:ok | {:error, _}`, `page_stream` — `{:ok, %Pagination.Result{}} | {:error, _}`; опечатка в
+  поле прочитанного состояния и clause `{:ok, _}` по результату `append` — предупреждение при
+  сборке.
 
   ```elixir
   Transact.run(DAO, fn ->
@@ -707,6 +845,27 @@
     Core.Es.Migration.delete_checkpoint("account_list")
   end
   ```
+
+  Полноту `project/1` проверяет сборка проекции: `use Core.Es.Projection` генерирует на каждый
+  модуль `events:` функцию-проверку (`Core.Es.Check`) с литеральным вызовом
+  `project(%Event.Mod{payload: %Payload{}} = event)`. Модуль без clause и опечатка в поле
+  нагрузки, не суженной паттерном `%Payload{}`, — предупреждение на строке `use`, и имя функции в
+  нём называет нарушенное утверждение. Прежде пропущенную clause находил только тест
+  `Core.Es.ProjectionCase` — при прогоне и у того, кто его подключил, — а в проде такое событие и
+  опечатка откатывали пачку `:projection_raised`; тест удалён (пункт «`Core.Es.ProjectionCase`»).
+  Макрос занимает в модуле проекции имена `@es_use_line` и функций-проверок
+  `"project/1 принимает <Event>"/1`. Код потребителя не меняется: сборка с `--warnings-as-errors`
+  падает там, где `project/1` был неполон всегда, — правится `project/1`.
+
+  ```text
+  # было — тест при прогоне
+  1) test у project/1 есть клауза каждого модуля events: (MyApp.Domain.<BC>.<Actor>.AccountList.ProjectionCaseTest)
+     {:error, %{unhandled: [{"test/support/fixtures/events/account/account.closed.json", Account.Event.Closed}]}}
+
+  # стало — предупреждение при сборке
+  warning: incompatible types given to project/1:
+  └─ lib/my_app/domain/<bc>/<actor>/account_list/projection.ex:4: MyApp.Domain.<BC>.<Actor>.AccountList.Projection."project/1 принимает MyApp.Domain.<BC>.Common.Account.Event.Closed"/1
+  ```
 - **Дерево проекций: `Core.Es.Projection.Supervisor`.** Приложение ставит в своё дерево
   `{Core.Es.Projection.Supervisor, projections: [...], enabled: ...}` — и на каждой ноде читатели
   `Core.Es.Projection.Reader`, по одному на проекцию под именем её модуля, сами гоняют пачки
@@ -717,7 +876,7 @@
   проекций; падение слушателя читателей не трогает; второй супервизор на ноде не стартует. Опции
   общие на дерево: обязательны `projections:` и `enabled:`; `batch_size` 100, `idle_min_ms` 50,
   `poll_interval_ms` 1 000, `retry_min_ms` 1 000, `retry_max_ms` 30 000, `shutdown` 30 000,
-  `await: :poll` — режим `Core.Es.Projection.await/4`, `await_min_ms` 10 и `await_max_ms` 100 —
+  `await: :poll` — режим `Projection.await/3`, `await_min_ms` 10 и `await_max_ms` 100 —
   его шаг опроса, `notifications: true` — сигнал чекпоинта между нодами (пункт
   «Read-after-write»).
   Config и env библиотека не читает — README рекомендует env `ES_PROJECTIONS_*` в `runtime.exs`.
@@ -762,13 +921,22 @@
   # MyApp.PromEx.Workers
   def watch_list, do: Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts())
   ```
-- **Read-after-write: `Core.Es.Projection.await/4`.** После `:ok` usecase вызывающий ждёт, пока
+- **Read-after-write: `Projection.await/3`.** После `:ok` usecase вызывающий ждёт, пока
   проекция обработает последнее событие потока агрегата, и читает read-модель уже с ним:
-  `Core.Es.Projection.await(projection, aggregate, aggregate_id, timeout)` →
-  `:ok | {:error, Error.t()}`. `aggregate` — модуль `<Aggregate>` любого вида с кодеком событий
+  `Projection.await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `:ok | {:error, Error.t()}` у
+  модуля проекции. `Agg` — модуль `<Aggregate>` любого вида с кодеком событий
   `<Aggregate>.Event.Codec` (по раскладке `11-domain.md` — сам агрегат): той же раскладкой
-  проекция находит кодек модуля события. Цель — позиция последнего события потока на момент
-  вызова: пустой поток или чекпоинт не ниже цели — `:ok`; строки чекпоинта нет, её версия ниже
+  проекция находит кодек модуля события. `await/3` генерирует `use Core.Es.Projection` — clause
+  на каждый агрегат, чьи события есть в `events:`: голова — литерал агрегата и закрытый struct его
+  ID, результат сужен до `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`, ID другого
+  агрегата и невозможная clause по результату — предупреждение при сборке вызывающего; кодек,
+  названный не `<Aggregate>.Event.Codec`, clause не получает. Прежняя форма
+  `Core.Es.Projection.await(projection, aggregate, aggregate_id, timeout)` принимала модуль
+  проекции и агрегат параметрами, хотя на месте вызова они всегда литералы, и сборка молчала: ID
+  заказа при `Account` ждал поток `account` с чужим uuid, агрегат не из `events:` падал
+  `FunctionClauseError` при исполнении. Теперь это `@doc false` реализация. Макрос занимает в
+  модуле проекции имя `await/3`. Цель — позиция последнего события потока на момент вызова:
+  пустой поток или чекпоинт не ниже цели — `:ok`; строки чекпоинта нет, её версия ниже
   `version:` или чекпоинт ниже цели пересборки — сразу прикладная `:projection_rebuilding`, а не
   ожидание до таймаута; иначе ожидание до таймаута — прикладная `:projection_timeout`
   (`ns: :es`). Ответ приходит сразу после commit пачки на любой ноде: пачка с исходом
@@ -792,9 +960,10 @@
   за шаг после её commit. Проекция в повторе чекпоинт не двигает, и ожидание идёт до таймаута.
   На время ожидания вызывающий связан с Registry дерева: остановка дерева посреди ожидания
   завершает вызывающего без `trap_exit`, а с `trap_exit` приносит `{:EXIT, _, _}`. `append`
-  репозитория по-прежнему `:ok` и позицию не возвращает. Ошибки программиста: тип агрегата вне
-  `events:` — `FunctionClauseError`; вызов внутри транзакции — `ArgumentError`; дерево проекций
-  не запущено — `RuntimeError`; проекция не из `projections:` дерева — `ArgumentError`.
+  репозитория по-прежнему `:ok` и позицию не возвращает. Ошибки программиста: агрегат вне
+  `events:` или ID другого агрегата — `FunctionClauseError`; вызов внутри транзакции —
+  `ArgumentError`; дерево проекций не запущено — `RuntimeError`; проекция не из `projections:`
+  дерева — `ArgumentError`.
 
   У `Core.Es.Projection.Supervisor` — опция `await: :poll | :inline`, по умолчанию `:poll`;
   `:inline` при `enabled: true` — `ArgumentError`. В тестовом дереве с `await: :inline` ожидание
@@ -804,7 +973,10 @@
   `:projection_rebuilding` — `record_error/1`; telemetry `[:es, :projection, :await]` —
   `duration`; `projection`, `result: :ok | :timeout | :rebuilding`. Нормы — `22-projections.md`
   («Read-after-write»), `20-agreements.md` (`await` MUST NOT внутри `Transact.run`),
-  `19-testing.md` (`await: :inline`), `21-observability.md` (span ожидания на call site).
+  `19-testing.md` (`await: :inline`), `21-observability.md` (span ожидания на call site); у
+  потребителя — `app/15-web-api.md`: проекцию ждёт литеральный вызов в экшене, а хелпер,
+  принимающий модуль проекции параметром, запрещён — через модуль-переменную сборка не проверяет
+  ни агрегат, ни ID.
 
   ```elixir
   # config/test.exs
@@ -812,22 +984,28 @@
 
   # запись → ожидание проекции → чтение read-модели
   with :ok <- Accounts.Open.call(id, params, context),
-       :ok <- Core.Es.Projection.await(AccountList.Projection, Account, id, 5_000) do
+       :ok <- AccountList.Projection.await(Account, id, 5_000) do
     AccountList.ReadRepo.get(id, :current, context)
   end
+
+  # было — собиралось, ждало поток `account` с uuid заказа
+  Core.Es.Projection.await(AccountList.Projection, Account, order_id, 5_000)
+
+  # стало — warning: incompatible types given to MyApp.Domain.<BC>.<Actor>.AccountList.Projection.await/3
+  AccountList.Projection.await(Account, order_id, 5_000)
   ```
-- **`Core.Es.ProjectionCase` — полноту `project/1` и `clear/0` проверяет библиотека.** Тест-модуль
-  `use Core.Es.ProjectionCase, projection:, async: false` генерирует два теста на golden-фикстурах
+- **`Core.Es.ProjectionCase` — очистку `clear/0` проверяет библиотека.** Тест-модуль
+  `use Core.Es.ProjectionCase, projection:, async: false` генерирует тест на golden-фикстурах
   событий — `<тип агрегата>/<текущий тег>.json` от корня `fixtures:` (по умолчанию
-  `test/support/fixtures/events`), тип и тег берутся из кодека каждого модуля `events:`. Первый
-  требует у `project/1` клаузу каждого модуля: провал — только `FunctionClauseError` самой
-  `project/1`, исключение или `{:error, _}` из тела клаузы пропуском не считаются. Второй
+  `test/support/fixtures/events`), тип и тег берутся из кодека каждого модуля `events:`. Тест
   прогоняет `project/1` на всех фикстурах, находит записанные таблицы по статистике
   `pg_stat_xact_user_tables`, зовёт `clear/0` и требует пустоты каждой; ни одной таблицы — провал.
   Перечня таблиц нет ни у case, ни у `use Core.Es.Projection`: новая таблица проекции попадает под
-  проверку сама. Нет фикстуры, в ней не текущий тег или она не грузится — провал обоих тестов с
-  путями. Проверки идут в транзакции с откатом на своём sandbox checkout, case — `async: false`:
-  `async: true` — `CompileError`, явный `async: false` требует
+  проверку сама. Нет фикстуры, в ней не текущий тег или она не грузится — провал теста с путями.
+  Полноту `project/1` case не проверяет: первый тест — вызов на фикстуре каждого модуля с
+  провалом только по `FunctionClauseError` самой `project/1` — удалён, её проверяет сборка
+  проекции (пункт «Проекции»). Проверки идут в транзакции с откатом на своём sandbox checkout,
+  case — `async: false`: `async: true` — `CompileError`, явный `async: false` требует
   `Credo.Check.Refactor.PassAsyncInTestCases`. Норма — `19-testing.md`, «Проекции».
 
   ```elixir
@@ -881,6 +1059,10 @@
   usecase → repo), `20-agreements.md` (`execute` MUST NOT внутри `Transact.run`, повтор на
   `debug`), `21-observability.md` (span команды у вызывающего), `19-testing.md` (`enabled: false`
   в тестах потребителя, shared mode sandbox у процессов, стартующих внутри вызова).
+
+  Результат `execute/4..6` сужен до `:ok | {:error, _}`: clause `{:ok, state}` по нему —
+  предупреждение при сборке. Команду другого агрегата сборка не ловит — процесс не видит
+  `decide/2` агрегата.
 
   ```elixir
   defmodule MyApp.Domain.<BC>.Common.Account.Process do
@@ -937,6 +1119,27 @@
 
 ### Изменения контракта макросов
 
+- **`use Core.Es.Event.Codec` занимает в кодеке агрегата имена `draft/1`, `draft/2` и
+  функций-проверок нагрузки.** `draft` — конструктор черновика события (пункт «Event-sourced
+  агрегат» в разделе «Новое»). Своя функция с этим именем и арностью в кодеке сталкивается с
+  генерируемыми clauses: её нужно переименовать. Занятыми стали и `@es_use_line`, и имена
+  `"dump_payload/2 принимает <Event>"/2` и `"load_payload/3 отдаёт нагрузку <Payload>"/3` (пункт
+  «`Core.Es.Event.Codec`: колбэки вместо приватных клоуз» в разделе «Ломающие изменения контракта»).
+- **Bang-конструкторы Prim и `Core.Version.new/0` возвращают известный компилятору struct.**
+  `new!/1` у `use Core.Prim.*`, `new/0` у `Prim.UUID`, `now!/0` у `Prim.DateTime` и
+  `Core.Version.new/0` выводились как `dynamic()`: `Core.Result.unwrap!/1` прятал тип, и ID из
+  `Role.ID.new()` молча проходил в функцию с `%User.ID{}` в голове, а опечатка в поле результата
+  падала `KeyError` при исполнении. Теперь они делают `raise Core.Exc` сами — исход при исполнении
+  прежний, а сборка с `--warnings-as-errors` падает там, где ошибка была всегда. Правится вызов, а
+  не предупреждение.
+
+  ```elixir
+  def get(%User.ID{} = id, %Context{} = context), do: @repo.get(id, context)
+
+  # было — собиралось и падало FunctionClauseError при исполнении;
+  # стало — warning: incompatible types given to get/2
+  get(Role.ID.new(), context)
+  ```
 - **Реализация репозитория выводится из имени behaviour.** `Core.Config.repo!/1` резолвит
   `<Behaviour>` → `<Behaviour>.Pg`, если в app-env потребителя не задано другое; тот же
   дефолт у `Core.Config.outbox_repo/0`. Из `config/config.exs` уходит по строке на каждый
@@ -998,7 +1201,7 @@
   Prim агрегата кодека (новая интроспекция `__es_aggregate_id__/0`) не равен `id:`; событие
   `outbox:` (новая интроспекция `Core.Es.Outbox.__es_event__/0`) не равно семейству кодека; в
   `errors:` нет clause `:version_mismatch`. Макрос занимает `@es_event_codec` вместо
-  `@es_event_repo`.
+  `@es_event_repo` и имя `page_stream/4` — страница потока агрегата (пункт про `es_events`).
 
   ```elixir
   # было

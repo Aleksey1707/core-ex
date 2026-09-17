@@ -2,7 +2,7 @@ defmodule Core.Es.Projection.Listener do
   @moduledoc """
   Слушатель канала сигнала чекпоинта — процесс дерева `Core.Es.Projection.Supervisor`, по одному на
   каждый различный `repo:` проекций. Уведомление пачки любой ноды он переводит в сигнал чекпоинта
-  через `Core.Es.Projection.Registry`: ожидающие `Core.Es.Projection.await/4` на этой ноде
+  через `Core.Es.Projection.Registry`: ожидающие `await/3` модуля проекции на этой ноде
   перечитывают чекпоинт без кластера Erlang (`docs/adr/0013-checkpoint-signal-listen-notify.md`).
 
   ## Протокол канала

@@ -29,6 +29,10 @@ defmodule Core.Es.Aggregate.Process do
   ограничениями `Transact.run`, возвращает `:ok | {:error, _}`. Ошибка `decide`, `append` или
   колбэка откатывает транзакцию и уходит вызывающему.
 
+  Голова принимает только `%Agg.ID{}`, результат сужен паттерном до `:ok | {:error, _}`:
+  невозможная clause по результату — предупреждение при сборке. Домен команды — любой struct:
+  процесс не видит `decide/2` агрегата, и команду другого агрегата сборка не ловит.
+
   - `:version_mismatch` из `append` при `version: :current` — конкурентная запись: повтор новой
     транзакцией, колбэк зовётся заново; `debug` на каждый повтор. После `retries:` повторов —
     `warning` и ошибка вызывающему.
@@ -165,7 +169,7 @@ defmodule Core.Es.Aggregate.Process do
     type = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label).__es_type__()
     process = __CALLER__.module
 
-    quote do
+    quote generated: true do
       import Core.Version, only: [is_version: 1]
 
       require Core.Config
@@ -202,7 +206,11 @@ defmodule Core.Es.Aggregate.Process do
           when is_version(version) and is_struct(command) and
                  (is_nil(fun) or is_function(fun, 1)) and is_list(opts) do
         call = %{id: id, version: version, command: command, context: context, fun: fun}
-        Core.Es.Aggregate.Process.execute(__MODULE__, @es_aggregate_process, call, opts)
+
+        case Core.Es.Aggregate.Process.execute(__MODULE__, @es_aggregate_process, call, opts) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+        end
       end
 
       @doc "Элемент дерева супервизии: `{#{inspect(__MODULE__)}, enabled: …}`."

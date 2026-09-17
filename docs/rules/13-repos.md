@@ -530,6 +530,9 @@ Diff считается по обеим сторонам от одной и то
 `save/3` генерируется всегда: `Repo.Pg.save/4` зовёт `Repo.Pg.insert/update`, а не переопределённые
 в модуле, то есть записал бы строку без детей и без событий.
 
+По `event_codec:` макрос генерирует и страницу потока агрегата `page_stream/4` («Страница потока»):
+колбэка в `use Core.Repo` у неё нет, usecase зовёт её у реализации из `Core.Config.repo!/1`.
+
 ## Write event-sourced агрегата (`use Core.Es.Aggregate.Repo.Pg`)
 
 Event-sourced агрегат (`11-domain.md`, «Event-sourced») хранится только событиями: строки
@@ -569,8 +572,10 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
 | `get_many(pairs, context)` | `{:ok, [state]} \| {:error, Error.t()}` | один запрос, состояния в порядке пар; все расхождения — одна `:version_mismatch`; повтор id — `ArgumentError` |
 | `append(events, context)` | `:ok \| {:error, Error.t()}` | `[]` — без запросов; пачка потоков одного типа атомарна; событие не из `tags:` кодека — `FunctionClauseError` |
 | `refresh(state, version, context)` | `{:ok, state} \| {:error, Error.t()}` | хвост потока после `state.version` → `fold/2` → сверка `version` |
+| `page_stream(id, limit, offset, context)` | `{:ok, Pagination.Result.t(Es.Event)} \| {:error, Error.t()}` | «Страница потока» |
 
-- `get` / `get_many` / `refresh` — читающие, `append` — изменяющая: изменяющий usecase держит
+- `get` / `get_many` / `refresh` / `page_stream` — читающие, `append` — изменяющая: изменяющий
+  usecase держит
   `get` → `Agg.execute/2` → `append` в теле одной функции под одним `Transact.run`
   (`20-agreements.md`, «Load/save агрегата — в одной функции»).
 - `:not_found` репозиторий не отдаёт: существование агрегата решает `decide` по `version: nil`.
@@ -581,8 +586,16 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
   `errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`; у `get` /
   `refresh` detail той же формы, у `get_many` — их список в порядке пар. Реакция одна — повтор
   usecase.
-- Нечитаемый поток (неизвестный тег, разрыв версий, чужой `aggregate_id`) — исключение, а не
-  `{:error, _}`.
+- Нечитаемый поток (неизвестный тег, разрыв версий, чужой `aggregate_id`) у `get` / `get_many` /
+  `refresh` — исключение, а не `{:error, _}`; `page_stream` отдаёт ошибку загрузки `{:error, _}`
+  на всю страницу («Страница потока»).
+- Форму результата вызывающему знает компилятор: головы — `%Agg.ID{}` / `%Agg{}`, `get` /
+  `refresh` сужены до `{:ok, %Agg{}}`, `get_many` — до `{:ok, list}`, `append` — до `:ok`,
+  `page_stream` — до `{:ok, %Pagination.Result{}}`. Чужой ID, опечатка в поле прочитанного
+  состояния или страницы и невозможная clause — предупреждение при сборке; элементы списков
+  `get_many`, `append` и страницы компилятор не сверяет. Переопределение функции
+  (`defoverridable`) MUST сохранять закрытую голову и сужение (`20-agreements.md`, «Генерируемые
+  функции»).
 
 Репозиторий event-sourced агрегата MUST быть один — в common-слое (`common/<aggregate>/repo*`),
 без `default_filters`, role-обёрток и `Repo.Sc`; доступ решают usecase (роли из `Context`) и
@@ -749,8 +762,8 @@ event-sourced и state-stored агрегатов. Поток — тип агре
 
 - `Core.Es.Store.append` MUST NOT вызываться вне write-builder'ов библиотеки
   (`use Core.Repo.Pg.StateStored`, `use Core.Es.Aggregate.Repo.Pg`) и тестов самого
-  `Core.Es.Store`; MAY — тестовые дублёры в `test/support`. Usecase зовёт только `page_stream`
-  («Страница потока»).
+  `Core.Es.Store`; MAY — тестовые дублёры в `test/support`. Usecase читает поток только через
+  `page_stream/4` репозитория агрегата («Страница потока»).
 - Любой отказ — `{:error, mismatch.(detail)}` с detail `%{aggregate_id, expected, actual}`: ns и
   код ошибки задаёт вызывающий write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`),
   а не хранилище.
@@ -775,13 +788,19 @@ end
 
 ## Страница потока
 
-`Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` →
-`{:ok, Pagination.Result.t(Es.Event)}` — страница потока одного агрегата любого вида: по
-возрастанию `aggregate_version`, `count` — весь поток. Тип агрегата и семейство событий — из
-кодека, `context` не используется. Читающий usecase зовёт её напрямую, мимо ReadRepo. В именах и
-текстах библиотеки — «страница потока» / «чтение потока»; называть поток «историей» MUST NOT:
-«история» — имя экрана у потребителя (`CONTEXT.md`, «Поток событий»).
+`@repo.page_stream(id, limit, offset, context)` →
+`{:ok, Pagination.Result.t(Es.Event)} | {:error, Error.t()}` — страница потока одного агрегата: по
+возрастанию `aggregate_version`, `count` — весь поток. Её генерирует write-репозиторий агрегата
+любого вида: `use Core.Es.Aggregate.Repo.Pg` (колбэк `use Core.Es.Aggregate.Repo`) и
+`use Core.Repo.Pg.StateStored` (по `event_codec:`). Тип агрегата и семейство событий — из кодека
+агрегата, `context` не используется. Читающий usecase зовёт её у репозитория, мимо ReadRepo. В
+именах и текстах библиотеки — «страница потока» / «чтение потока»; называть поток «историей»
+MUST NOT: «история» — имя экрана у потребителя (`CONTEXT.md`, «Поток событий»).
 
+- Голова принимает только `%Agg.ID{}`, результат сужен до `{:ok, %Pagination.Result{}}`: ID другого
+  агрегата, опечатка в поле страницы и невозможная clause — предупреждение при сборке. Реализацию
+  `Core.Es.Store.page_stream/5` (`@doc false`) звать из usecase MUST NOT: кодек и ID в ней —
+  параметры, сборка их не сверяет, и ID другого агрегата молча даёт пустую страницу.
 - `page_stream` доступ не проверяет и `:not_found` не отдаёт: пустой поток — страница с
   `count: 0`. Читающий usecase MUST до чтения проверить права по `Context` и существование
   агрегата через `ReadRepo.get(id, :current, context)` с его `default_filters`; у event-sourced
@@ -799,15 +818,26 @@ end
 ```elixir
 # плохо — чтение по голому id: наружу уходит страница чужого или удалённого агрегата
 def history(%Agg.ID{} = id, limit, offset, %Context{} = context),
-  do: Store.page_stream(Agg.Event.Codec, id, limit, offset, context)
+  do: @repo.page_stream(id, limit, offset, context)
 
 # хорошо — права и существование агрегата проверены до чтения потока
 def history(%Agg.ID{} = id, limit, offset, %Context{} = context) do
   with {:ok, _view} <- @read_repo.get(id, :current, context) do
-    Store.page_stream(Agg.Event.Codec, id, limit, offset, context)
+    @repo.page_stream(id, limit, offset, context)
   end
 end
+
+# плохо — реализация хранилища: ID другого агрегата собирается и молча даёт пустую страницу
+Core.Es.Store.page_stream(Agg.Event.Codec, other_id, limit, offset, context)
+
+# хорошо — репозиторий агрегата: на ID другого агрегата сборка даёт
+# warning: incompatible types given to MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Pg.page_stream/4
+@repo.page_stream(id, limit, offset, context)
 ```
+
+Проверяется: предупреждение при сборке вызывающего — ID другого агрегата, опечатка в поле страницы,
+невозможная clause по результату `page_stream/4` репозитория event-sourced агрегата
+(`make consumer-check`).
 
 ## Наименование
 

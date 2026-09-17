@@ -220,7 +220,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
   события — как есть; исключение `project/1` / `clear/0` → `%Error{kind: :app}` (`ns: :es`,
   `code: :projection_raised`) с модулем исключения в detail и без текста; CAS чекпоинта мимо
   прочитанной строки → `:checkpoint_conflict` — перечень исходов в moduledoc `Core.Es.Projection`.
-- Ожидание проекции (`Core.Es.Projection.await/4`): чекпоинт не догнал последнее событие потока
+- Ожидание проекции (`Projection.await/3`): чекпоинт не догнал последнее событие потока
   за таймаут → `%Error{kind: :app}` (`ns: :es`, `code: :projection_timeout`) с `projection` и
   `timeout` в detail; идёт пересборка → `:projection_rebuilding` сразу, без ожидания. Запись к
   этому моменту закоммичена — `22-projections.md`, «Read-after-write».

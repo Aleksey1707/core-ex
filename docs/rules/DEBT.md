@@ -87,3 +87,17 @@ handle — убрана: модуль приходит опцией `:delivery_m
 `Mq.ReaderReliable.get/2` его нет; вынести offset в контракт — правка обоих behaviour
 и всех дублёров ради счётчика, который на практике не ошибается (одинаковые подряд
 сообщения различает commit, обнуляющий `pending_raw`).
+
+## Генерируемые функции вне границы типов
+
+`20-agreements.md`, «Генерируемые функции», выполнено для `Core.Es.Aggregate`,
+`Core.Es.Aggregate.Repo.Pg`, `Core.Es.Aggregate.Process`, `new!/1` Prim, `now!/0`
+`Prim.DateTime`, `Core.Version.new/0` и клоуз плагинов `Codec.Facade`. Открытые головы,
+несуженный результат и bang через `Core.Result.unwrap!/1` остаются у `Core.Repo.Pg`,
+`Repo.Pg.StateStored`, `Repo.Pg.Schema`, `Core.View`, `Core.Enum`, `Core.Context.Accessor`,
+`Core.Codec`, Prim-фолбэка `load/2` / `load!/2` у `Codec.Facade`, `Codec.Plugin`,
+`Core.Es.Outbox`, `Core.Es.ValueChanged`, `today!/0` / `from!/1` у `Prim.Date` и `Prim.DateTime`.
+
+Почему остаётся: граница ставится срезами спеки `.scratch/es-type-safety/` (тикеты 09–11), и
+правка без сценария фикстуры-потребителя, который она делает видимым, не вносится. Пункт
+закрывается вместе с тикетом 11.

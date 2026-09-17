@@ -247,7 +247,7 @@ end
 
 ### Процесс агрегата — `Core.Es.Aggregate.Process`
 
-- Результат `execute/4..6` сужается до `:ok | {:error, _}` через приватную функцию в `quote generated: true`.
+- Результат `execute/4..6` сужается до `:ok | {:error, _}` паттерном в самой `execute` (`quote generated: true`).
 - Домен команды остаётся «любой struct»: процесс не видит `decide` агрегата. Чужая команда в `Process.execute` —
   отложена (`DEBT.md`, условие возврата — вызовы `Process.execute` у потребителей).
 

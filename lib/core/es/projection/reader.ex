@@ -2,7 +2,7 @@ defmodule Core.Es.Projection.Reader do
   @moduledoc """
   Читатель проекции — процесс дерева `Core.Es.Projection.Supervisor`, по одному на проекцию под
   именем её модуля: гоняет пачки проекции (`Core.Es.Projection`, «Пачка») по таймеру, по `wake`
-  после commit `Core.Es.Store.append/5` и по пробуждению от ожидающего `Core.Es.Projection.await/4`.
+  после commit `Core.Es.Store.append/5` и по пробуждению от ожидающего `await/3` модуля проекции.
 
   В `init/1` читатель регистрируется в `Core.Es.Projection.Registry` под типами агрегатов из
   `events:` и под именем своей проекции; запросов в `init/1` нет, первый тик — через

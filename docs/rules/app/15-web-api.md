@@ -91,15 +91,21 @@ end
 - `:projection_timeout` и `:projection_rebuilding` — ответ 202 с `{id, version}`, а не ошибка:
   запись применена, повтор команды по ним запрещает свод библиотеки.
 - Операция такой команды MUST объявлять ответ `accepted:` со своей схемой.
+- Проекцию ждёт литеральный вызов `Projection.await(Agg, id, timeout)` в экшене, общий хелпер
+  принимает его результат. Хелпер, который зовёт `projection.await(agg, id, timeout)` сам,
+  MUST NOT: через модуль-переменную сборка не проверяет ни агрегат, ни ID.
 
 ```elixir
 # плохо — чтение сразу после команды: проекция ещё не обработала запись
 with {:ok, _version} <- Usecases.Agg.take(id, version, context),
      do: reload(conn, id)
 
+# плохо — модуль проекции параметром хелпера: ID другого агрегата сборка не видит
+Helper.Projection.await(conn, Projection, Agg, id, written, &reload(&1, id))
+
 # хорошо
 with {:ok, written} <- Usecases.Agg.take(id, version, context) do
-  Helper.Projection.await(conn, Projection, Agg, id, written, &reload(&1, id))
+  Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), written, &reload(&1, id))
 end
 ```
 

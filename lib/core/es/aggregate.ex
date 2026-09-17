@@ -12,7 +12,7 @@ defmodule Core.Es.Aggregate do
         def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
 
         def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
-          do: {:ok, [{Event.Renamed, Event.Renamed.Payload.new(name)}]}
+          do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
 
         @impl true
         def evolve(state, %Event.Renamed{payload: payload}), do: %{state | name: payload.name}
@@ -23,9 +23,11 @@ defmodule Core.Es.Aggregate do
   ## Колбэки
 
   - `decide(command, state)` → `{:ok, [result]} | {:error, Error.t()}` — решение по команде
-    (`use Core.Es.Cmd`). Результат — `{Event.Mod, payload}` или `Event.Mod` у события без
-    нагрузки; `{:ok, []}` — команда без изменений. Агрегата ещё нет — `version: nil`:
-    `:not_found` / `:already_exists` решает `decide` доменной ошибкой.
+    (`use Core.Es.Cmd`). Элемент результата — черновик события от кодека агрегата:
+    `Event.Codec.draft(Event.Mod, payload)` или `Event.Codec.draft(Event.Mod)` у события без
+    нагрузки (`Core.Es.Event.Codec`, «Черновик события»); `{:ok, []}` — команда без изменений.
+    Агрегата ещё нет — `version: nil`: `:not_found` / `:already_exists` решает `decide` доменной
+    ошибкой.
   - `evolve(state, event)` → состояние — применение события: чистый, без проверки инвариантов и
     без catch-all, голова матчит только событие. `id` и `version` результата библиотека
     перезаписывает.
@@ -38,15 +40,20 @@ defmodule Core.Es.Aggregate do
 
   ## Генерируемые функции
 
-  - `fold(state, events)` — свёртка истории от любого состояния: версии событий идут подряд от
-    `state.version`, `aggregate_id` равен `state.id`; разрыв версий или чужой `aggregate_id` —
-    `ArgumentError`;
-  - `fold(state, command, results)` — свёртка результата `decide/2`: несколько событий одной
-    команды автор сворачивает через `with`, чтобы следующее решение видело состояние после
+  - `fold(state, events)` → `%Agg{}` — свёртка истории от любого состояния: версии событий идут
+    подряд от `state.version`, `aggregate_id` равен `state.id`; разрыв версий или чужой
+    `aggregate_id` — `ArgumentError`;
+  - `fold(state, command, results)` → `%Agg{}` — свёртка результата `decide/2`: несколько событий
+    одной команды автор сворачивает через `with`, чтобы следующее решение видело состояние после
     предыдущего;
-  - `execute(state, command)` → `{:ok, {[Es.Event], state}} | {:error, Error.t()}` — чистый шаг
+  - `execute(state, command)` → `{:ok, {[Es.Event], %Agg{}}} | {:error, Error.t()}` — чистый шаг
     «`decide/2` → события → `fold/2`»; `{:ok, []}` даёт `{:ok, {[], state}}` без роста версии;
   - `__es_event_codec__/0` — кодек событий агрегата.
+
+  Головы принимают только `%Agg{}`, результат сужен до формы выше: компилятор у вызывающего знает
+  состояние агрегата, и опечатка в его поле или невозможная clause по результату — предупреждение
+  при сборке. `execute/2` зовёт `decide(command, state)` в модуле агрегата, поэтому домен команды
+  — clauses `decide/2`: команда другого агрегата или без clause в `decide` ловится при сборке.
 
   События результата `decide/2` собираются так: `id` — новый, `aggregate_id` — `state.id`,
   `aggregate_version` — по порядку от `state.version` (от `nil` — с 1), `by` и `at` — поля
@@ -57,8 +64,9 @@ defmodule Core.Es.Aggregate do
 
   - `event_codec:` — кодек событий агрегата (`use Core.Es.Event.Codec`). На компиляции не
     загружается: события ссылаются на Prim агрегата, и загрузка кодека замкнула бы цикл
-    агрегат → кодек → события → `Agg.ID`. Полноту `evolve` по кодеку проверяет
-    `use Core.Es.EventCompatCase, aggregate:`.
+    агрегат → кодек → события → `Agg.ID`. Полноту `evolve` по кодеку проверяет при сборке
+    репозиторий агрегата (`Core.Es.Aggregate.Repo`, «Полнота `evolve`»); агрегат без
+    репозитория не проверяется.
   """
 
   alias Core.Error
@@ -71,7 +79,7 @@ defmodule Core.Es.Aggregate do
   @optional_keys []
   @state_keys ~w(id version)a
 
-  @typedoc "Элемент результата `decide/2`: событие с нагрузкой или модуль события без неё."
+  @typedoc "Черновик события — элемент результата `decide/2`: `{Event.Mod, payload}` или `Event.Mod`."
   @type result :: {module(), struct()} | module()
 
   @doc "Решение по команде: события, которые случатся, или доменный отказ."
@@ -89,7 +97,7 @@ defmodule Core.Es.Aggregate do
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
     event_codec = Helper.Opts.atom!(lit, :event_codec, @label)
 
-    quote do
+    quote generated: true do
       @behaviour Core.Es.Aggregate
       @after_compile Core.Es.Aggregate
 
@@ -101,21 +109,29 @@ defmodule Core.Es.Aggregate do
       @doc "Свернуть события истории от состояния `state`."
       @spec fold(%__MODULE__{}, [Core.Es.Event.t()]) :: %__MODULE__{}
 
-      def fold(state, events) when is_struct(state, __MODULE__) and is_list(events),
-        do: Core.Es.Aggregate.fold(__MODULE__, state, events)
+      def fold(%__MODULE__{} = state, events) when is_list(events) do
+        %__MODULE__{} = folded = Core.Es.Aggregate.fold(__MODULE__, state, events)
+        folded
+      end
 
       @doc "Свернуть результат `decide/2` по команде `command` от состояния `state`."
       @spec fold(%__MODULE__{}, struct(), [Core.Es.Aggregate.result()]) :: %__MODULE__{}
 
-      def fold(state, command, results) when is_struct(state, __MODULE__) and is_list(results),
-        do: Core.Es.Aggregate.fold(__MODULE__, state, command, results)
+      def fold(%__MODULE__{} = state, command, results) when is_list(results) do
+        %__MODULE__{} = folded = Core.Es.Aggregate.fold(__MODULE__, state, command, results)
+        folded
+      end
 
       @doc "Исполнить команду: события решения `decide/2` и состояние после них."
       @spec execute(%__MODULE__{}, struct()) ::
               {:ok, {[Core.Es.Event.t()], %__MODULE__{}}} | {:error, Core.Error.t()}
 
-      def execute(state, command) when is_struct(state, __MODULE__) and is_struct(command),
-        do: Core.Es.Aggregate.execute(__MODULE__, state, command)
+      def execute(%__MODULE__{} = state, command) when is_struct(command) do
+        case Core.Es.Aggregate.apply_decision(__MODULE__, state, command, decide(command, state)) do
+          {:ok, {events, %__MODULE__{} = executed}} when is_list(events) -> {:ok, {events, executed}}
+          {:error, reason} -> {:error, reason}
+        end
+      end
     end
   end
 
@@ -142,12 +158,12 @@ defmodule Core.Es.Aggregate do
   # ===== команда =====
 
   @doc false
-  @spec execute(module(), struct(), struct()) ::
+  @spec apply_decision(module(), struct(), struct(), {:ok, [result()]} | {:error, Error.t()}) ::
           {:ok, {[Es.Event.t()], struct()}} | {:error, Error.t()}
 
-  def execute(aggregate, state, %{by: by, at: at} = command)
+  def apply_decision(aggregate, state, %{by: by, at: at} = command, decision)
       when is_struct(state, aggregate) and is_struct(command) do
-    case aggregate.decide(command, state) do
+    case decision do
       {:ok, results} when is_list(results) ->
         events = events(aggregate, state, results, by, at)
         {:ok, {events, fold(aggregate, state, events)}}

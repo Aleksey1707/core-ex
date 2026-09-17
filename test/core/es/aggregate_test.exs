@@ -23,7 +23,7 @@ defmodule Core.Es.AggregateTest do
     @spec decide(struct(), %__MODULE__{}) :: {:ok, [module()]}
 
     @impl true
-    def decide(_command, _state), do: {:ok, [Event.Frozen]}
+    def decide(_command, _state), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
 
     @spec evolve(%__MODULE__{}, Event.Frozen.t()) :: %__MODULE__{}
 

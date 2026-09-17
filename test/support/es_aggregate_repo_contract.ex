@@ -5,7 +5,8 @@ defmodule Core.EsAggregateRepoContract do
 
   Восстановление состояния, сверка версии и атомарность записи — то, на чём стоит usecase
   команды: реализация с другим путём чтения, разойдясь с этими исходами, молча отдаст команде
-  чужое состояние (`19-testing.md`, «Контрактные тесты behaviour»).
+  чужое состояние (`19-testing.md`, «Контрактные тесты behaviour»). Страница потока — то, на чём
+  стоит читающий usecase.
 
   Хост-модуль — `use Core.DataCase` и `use Core.EsAggregateRepoContract, impl: <реализация>`.
   """
@@ -22,6 +23,7 @@ defmodule Core.EsAggregateRepoContract do
   alias Core.EventFixture
   alias Core.Helper.Transact
   alias Core.Outbox
+  alias Core.Pagination
   alias Core.Version
 
   @query_event [:core, :test_repo, :query]
@@ -40,6 +42,7 @@ defmodule Core.EsAggregateRepoContract do
       unquote(get_many_tests())
       unquote(append_tests())
       unquote(refresh_tests())
+      unquote(page_stream_tests())
     end
   end
 
@@ -297,6 +300,41 @@ defmodule Core.EsAggregateRepoContract do
           state = write!(@repo_impl, id, [open(), freeze()])
 
           assert {:ok, ^state} = @repo_impl.refresh(%Account{id: id}, :current, Context.new())
+        end
+      end
+    end
+  end
+
+  defp page_stream_tests do
+    quote do
+      describe "контракт Es.Aggregate.Repo: page_stream" do
+        test "страница по возрастанию версии; count — весь поток" do
+          id = Account.ID.new()
+          write!(@repo_impl, id, [open(), rename("Отгрузка"), freeze()])
+
+          assert {:ok, %Pagination.Result{items: items, count: 3}} =
+                   @repo_impl.page_stream(id, Pagination.Limit.new!(2), Pagination.Offset.new!(1), Context.new())
+
+          assert Enum.map(items, &Account.Event.Codec.type/1) == ~w(account.renamed account.frozen)
+        end
+
+        test "пустой поток — страница с count: 0" do
+          assert {:ok, %Pagination.Result{items: [], count: 0}} =
+                   @repo_impl.page_stream(
+                     Account.ID.new(),
+                     Pagination.Limit.new!(10),
+                     Pagination.Offset.new!(0),
+                     Context.new()
+                   )
+        end
+
+        test "неизвестный тег в потоке — ошибка всей страницы" do
+          id = Account.ID.new()
+          {opened, _state} = execute!(%Account{id: id}, open())
+          insert_rows!(opened, "account.unknown")
+
+          assert {:error, %Error{code: :unknown_event_type, detail: "account.unknown"}} =
+                   @repo_impl.page_stream(id, Pagination.Limit.new!(10), Pagination.Offset.new!(0), Context.new())
         end
       end
     end

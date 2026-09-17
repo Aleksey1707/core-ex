@@ -316,8 +316,15 @@ use Core.Codec.Facade,
 случай» (raw-путь, теги) у фасада нет — то, что раньше жило в нём частностями View и событий, ушло в
 `Core.Codec.Helper` и в сам плагин.
 
-- `dump/1` / `load/2` / `load!/2` — plugin clauses, иначе делегат в `prim` (только `struct()`;
-  не-Prim без плагина → `ArgumentError`)
+- `dump/1` / `load/2` / `load!/2` — plugin clauses, иначе делегат в `prim`. Фолбэк `dump/1`
+  принимает только struct с полем `value` (`is_prim/1`): struct без плагина и без `value`
+  (команда, View) — предупреждение при сборке и `FunctionClauseError`, с `value`, но не Prim, —
+  `ArgumentError`
+- Результат plugin clause сужен по типам плагина: `load(Mod, data)` —
+  `{:ok, %Mod{}} | {:error, _}`, `load(<Aggregate>.Event, data)` — объединение событий кодека,
+  событие — ещё и по нагрузке; `load!/2` — само значение или `raise Core.Exc`. Опечатка в поле
+  загруженного значения и невозможная clause по результату ловятся при сборке
+  (`make consumer-check`). Фолбэк `load/2` по атому не сужен: модуль без плагина компилятор не ловит
 - Полиморфный wire (тег внутри данных) грузится через **модуль-семейство**:
   `InCodec.load(<Aggregate>.Event, data)`. Семейство объявляет плагин опцией `union:`, конкретный
   тип выбирает он же — фасад про теги не знает
@@ -409,9 +416,13 @@ InCodec.dump(step)
 
 - `id` и `version` состояния ведёт только библиотека: домен MUST NOT ставить их ни в `decide`,
   ни в `evolve`. Начальное состояние — `%Agg{id: id}`, «не создан» — `version: nil`.
-- `decide(команда, состояние)` → `{:ok, [{Event.Mod, payload} | Event.Mod]} | {:error, _}`:
-  `id` события, `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без
-  изменений — `{:ok, []}`.
+- `decide(команда, состояние)` → `{:ok, [черновик]} | {:error, _}`: `id` события,
+  `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без изменений —
+  `{:ok, []}`.
+- Элемент результата — черновик события (`CONTEXT.md`, «Черновик события»); он MUST строиться
+  только кодеком агрегата: `Event.Codec.draft(Event.Mod, payload)` у события с нагрузкой,
+  `Event.Codec.draft(Event.Mod)` — без неё. Кортеж `{Event.Mod, payload}`, собранный вручную,
+  библиотека примет, но пару событие–нагрузка в нём сборка не сверяет.
 - `not_found` / `already_exists` — доменные ошибки `decide` по `version: nil`: существование
   агрегата решает домен, а не репозиторий.
 - Несколько событий одной команды — `with` и `fold/3`: следующее решение видит состояние после
@@ -419,26 +430,39 @@ InCodec.dump(step)
 - `evolve(состояние, событие)` → голое состояние: чистый, без проверки инвариантов и без
   catch-all. Голова `evolve` MUST матчить только событие, не значения состояния: событие — уже
   случившийся факт, и отказаться от него свёртка не вправе.
+- Полноту `evolve` проверяет сборка репозитория агрегата (`use Core.Es.Aggregate.Repo`,
+  `13-repos.md`, «Write event-sourced агрегата»): у агрегата без репозитория clause, пропущенная
+  для события кодека, найдётся только при свёртке.
 - Удалённый тип события (тег остаётся в `tags:`) — клауза `evolve`, возвращающая состояние
   как есть.
 
 Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`;
-`use Core.Es.EventCompatCase, aggregate:` — у `evolve/2` есть клауза события каждого тега.
+предупреждение при сборке — у `draft` событие не из кодека, нагрузка другого события или событие
+с нагрузкой без неё; на строке `use Core.Es.Aggregate.Repo` — у `evolve/2` нет clause события
+кодека, опечатка в ключе `%{state | …}` или в поле нагрузки без паттерна `%Payload{}`
+(`make consumer-check`).
 
 ```elixir
-# плохо — голова evolve проверяет статус: инвариант ушёл из decide, а на пустом состоянии
-# проверки полноты клаузы нет
+# плохо — голова evolve проверяет статус: инвариант ушёл из decide, а событие при другом
+# статусе роняет свёртку — проверка полноты при сборке этого не видит
 def evolve(%__MODULE__{status: :open} = state, %Event.Frozen{}), do: %{state | status: :frozen}
 
 # плохо — decide собирает событие и нумерует версию сам
 def decide(%Cmd.Freeze{} = cmd, state),
   do: {:ok, [Event.Frozen.new(state.id, Version.next(state.version), cmd.by, cmd.at)]}
 
-# хорошо — решение в decide, evolve только применяет событие
+# плохо — кортеж вручную: нагрузку другого события сборка не заметит
+def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+  do: {:ok, [{Event.Renamed, Event.Opened.Payload.new(name)}]}
+
+# хорошо — решение в decide, черновик от кодека, evolve только применяет событие
 def decide(%Cmd.Freeze{}, %__MODULE__{version: nil}),
   do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
 
-def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen]}
+def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Codec.draft(Event.Frozen)]}
+
+def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+  do: {:ok, [Event.Codec.draft(Event.Renamed, Event.Renamed.Payload.new(name))]}
 
 def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 ```

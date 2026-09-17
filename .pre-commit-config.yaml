@@ -11,7 +11,7 @@ repos:
 
   # Порядок как у `make` (Makefile default):
   #   boundary-check → rules-check → layout-check → format-check → compile → compile-no-optional →
-  #   deps-clean → xref → dialyzer → test → credo → audit
+  #   consumer-check → deps-clean → xref → dialyzer → test → credo → audit
   - repo: local
     hooks:
       - id: boundary-lint
@@ -52,6 +52,13 @@ repos:
       - id: mix-compile-no-optional
         name: "Elixir: mix compile --no-optional-deps"
         entry: mix compile --no-optional-deps --warnings-as-errors
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: consumer-check
+        name: "Consumer: предупреждения фикстуры-потребителя"
+        entry: make consumer-check
         language: system
         require_serial: true
         pass_filenames: false

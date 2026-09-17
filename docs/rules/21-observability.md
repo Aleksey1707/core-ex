@@ -93,7 +93,7 @@ Span на периодический опрос (тик поллера, цикл
 
 Ожидание проекции MUST идти в span'е `Core.Otel.Es.await/4` на call site — в процессе
 вызывающего, дочерним span'у usecase, а не корневым: ожидание — часть запроса, и его длительность
-видна в трейсе рядом с записью. Span открывает сам `Core.Es.Projection.await/4`,
+видна в трейсе рядом с записью. Span открывает сам `Projection.await/3`,
 `:projection_timeout` и `:projection_rebuilding` отмечаются `record_error/1`.
 
 Проверяется: `test/core/es/projection/await_test.exs`, describe «span».
