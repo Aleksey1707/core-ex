@@ -62,22 +62,9 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 
 ### Свод приложения-потребителя
 
-`docs/rules/app/*.md` — второй ярус свода: нормы, общие для **любого** приложения на `Core.*`
-(раскладка слоёв, конвенция usecase, пайплайн проверок, кеш, миграции, эксплуатация). Он
-приезжает к потребителю вместе с зависимостью и лежит у него в `deps/core/docs/rules/app/`.
-
-- стандарт яруса и критерий «сюда или в локальный свод приложения» — `docs/rules/app/00-index.md`;
-- нормы записываются плейсхолдерами (`MyApp`, `:my_app`, `<BC>`, `<Actor>`, `<Aggregate>`):
-  имени конкретного потребителя в `app/**` быть не должно, это проверяет `make rules-check`;
-- скиллов у этого яруса нет — их заводит у себя приложение, указывая три файла: свой,
-  `deps/core/docs/rules/NN-*.md` и `deps/core/docs/rules/app/NN-*.md`; у `20-agreements.md`
-  скилла нет ни на одном ярусе — он доставляется импортом в `AGENTS.md` потребителя;
-- ссылка между ярусами пишется путём от корня потребителя (`deps/core/docs/rules/…`), внутри
-  своего яруса — именем файла: у потребителя `docs/rules/` — это уже его локальный свод;
-- проверку ярусов ведёт тот же `scripts/rules_lint.exs`, потребитель зовёт его из
-  `deps/core/scripts/` с флагом `--consumer` — копии скрипта у него быть не должно;
-- правка `app/**` — изменение контракта для всех потребителей, и она идёт в `CHANGELOG.md`
-  тем же коммитом.
+`docs/rules/app/*.md` — ярус норм, общих для любого приложения на `Core.*`; к потребителю он
+приезжает в `deps/core/docs/rules/app/`. Его стандарт — `docs/rules/app/00-index.md`. Правка
+`app/**` меняет контракт для всех потребителей и идёт в `CHANGELOG.md` тем же коммитом.
 
 ## CHANGELOG
 
@@ -110,6 +97,24 @@ mix credo --strict
 mix dialyzer
 mix docs
 ```
+
+Шаги `make` — в том же порядке, что хуки `.pre-commit-config.yaml`:
+
+| Шаг | Что проверяет |
+|---|---|
+| `boundary-check` | `scripts/boundary_lint.exs` — библиотека не знает потребителя (`docs/rules/10-architecture.md`) |
+| `rules-check` | `scripts/rules_lint.exs` — оба яруса свода против стандартов `docs/rules/00-index.md` и `docs/rules/app/00-index.md` |
+| `layout-check` | `scripts/layout_lint.exs` — разделители модуля (`docs/rules/20-agreements.md`, «Разделители внутри модуля») |
+| `format-check` | `mix format --check-formatted` — падает, а не правит |
+| `compile` | `mix compile --warnings-as-errors` |
+| `compile-no-optional` | сборка без optional-клиентов брокеров (`docs/rules/10-architecture.md`) |
+| `consumer-check` | предупреждения фикстуры-потребителя `fixtures/consumer` против маркеров `# expect:` (ADR-0014) |
+| `deps-clean` | `mix deps.clean --unused` — неиспользуемые зависимости |
+| `xref` | `mix xref graph --format cycles` — храповик на циклы компиляции |
+| `dialyzer` | `mix dialyzer` |
+| `test` | `mix test` после `make infra-up` |
+| `credo` | `mix credo --strict` |
+| `audit` | `mix deps.audit` — известные CVE в зависимостях |
 
 Тестовая инфраструктура живёт в самой библиотеке: `Core.TestRepo`, `Core.DataCase`,
 Codec-фикстуры и Prim-фикстуры — в `test/support`, таблица `outbox` — в

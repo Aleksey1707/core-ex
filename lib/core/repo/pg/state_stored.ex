@@ -78,7 +78,7 @@ defmodule Core.Repo.Pg.StateStored do
     - `constraint_errors:` — `[<имя constraint'а в БД>: <код ошибки>]`; у дочерних схем нет
       `changeset/2`, поэтому маппинг идёт по имени constraint'а, а не по полю. Коды
       проверяются на этапе компиляции по модулю `errors:`, имена — тестом
-      `test/<app>/repo/constraint_errors_test.exs`. FK на **сам агрегат** (колонка `fk:`)
+      `test/my_app/repo/constraint_errors_test.exs`. FK на **сам агрегат** (колонка `fk:`)
       не мапится: строка родителя пишется той же транзакцией раньше, нарушить его нечем
 
   Опции `entity:` и `id:` обязательны (в `Repo.Pg` они опциональны): по `entity:` строятся

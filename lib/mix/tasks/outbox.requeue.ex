@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Outbox.Requeue do
   @shortdoc "Вернуть проваленные записи outbox в очередь"
 
   @moduledoc """
-  Возврат записей outbox из `:failed` в `:new` (шаг 3 runbook'а, `14-events-outbox.md`).
+  Возврат записей outbox из `:failed` в `:new` (шаг 3 runbook'а, `docs/rules/app/14-events-outbox.md`).
 
       mix outbox.requeue --all
       mix outbox.requeue --id 0199c0e2-... --id 0199c0e3-...

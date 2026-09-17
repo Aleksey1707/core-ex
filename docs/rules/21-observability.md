@@ -3,7 +3,7 @@
 - **Область.** `lib/core/otel.ex`, `lib/core/otel/**`, `lib/core/telemetry.ex`,
   `lib/core/*/prom_ex.ex`.
 - **Читать перед.** Новой метрикой, span'ом или атрибутом; правкой `Core.Otel` и словарей semconv;
-  переносом контекста трассировки через асинхронный транспорт.
+  переносом контекста трассировки через асинхронный транспорт; алертом на подсистему библиотеки.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Разделение труда
@@ -167,6 +167,46 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - Утверждать MUST по родителю (`parent_span_id`) и ссылкам (`links`), а не только
   по совпадению `trace_id`: общий трейс проходит и там, где звено потеряло родителя.
 
+## Рекомендованные алерты
+
+Метрики подсистем отдают плагины `Core.*.PromEx`, имена — с префиксом PromEx
+`my_app_prom_ex_<плагин>_` (`PromEx.metric_prefix/2`, если плагину не задан `metric_prefix:`).
+Приложение, поднимающее подсистему, SHOULD заводить её алерты по таблице; `<порог>` и `for:`
+выбирает само. Алерты проекций — `22-projections.md`, «Эксплуатация».
+
+| Алерт | PromQL | Смысл |
+|---|---|---|
+| `OutboxQueueFailedGrowing` | `max(my_app_prom_ex_outbox_queue_count{status="failed"}) > 0`, `for: <порог>` | записи в `:failed` ждут оператора: `Cleaner` их не удаляет |
+| `OutboxFailedDelivery` | `sum(increase(my_app_prom_ex_outbox_delivery_total{outcome="failed"}[5m])) > 0` | запись исчерпала `max_attempts` и ушла в `:failed` |
+| `OutboxOldestNewHigh` | `max(my_app_prom_ex_outbox_queue_oldest_age_seconds) > <порог>`, `for: <порог>` | очередь не разгребается: поллер не запущен, брокер недоступен или голова очереди раз за разом уходит в backoff |
+| `OutboxExpiredLocks` | `max(my_app_prom_ex_outbox_queue_expired_locks_count) > 0`, `for: <порог>` | аренда `:in_work` истекла: поллер остановлен посреди пачки или цикл дольше `lock_duration` |
+| `MqPublishErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_publish_total{result!="ok"}[5m])) > 0` | публикация в RabbitMQ Stream отказала или не подтверждена брокером; у Kafka — `my_app_prom_ex_mq_kafka_publish_total{result="error"}` |
+| `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching |
+| `MqSubscriberDlq` | `sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0` | подписчик отправил «ядовитое» сообщение в DLQ (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
+| `WorkerDown` | `my_app_prom_ex_workers_up == 0`, `for: <порог>` | процесса из `watch:` нет на ноде |
+| `WorkerMailboxHigh` | `my_app_prom_ex_workers_message_queue_len > <порог>`, `for: <порог>` | mailbox процесса растёт быстрее, чем он обрабатывает сообщения (`17-otp-concurrency.md`, «Mailbox и backpressure») |
+| `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
+| `CacheStoreErrors` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="store_error"}[5m])) > 0` | отказывает store за кешем, а не кеш: сброс кеша не поможет |
+
+- Условие MUST брать имя метрики с префиксом PromEx: серии без префикса не существует, и алерт
+  на неё молчит всегда, не выдавая ошибки.
+- Gauge очереди outbox (`queue_count`, `queue_oldest_age_seconds`, `queue_expired_locks_count`)
+  каждая нода считает по одной таблице: агрегировать SHOULD через `max`, а не `sum` — сумма
+  умножила бы значение на число нод.
+- `WorkerDown` верен, только пока в `watch:` нет элементов выключенного поддерева
+  (`17-otp-concurrency.md`, «Дерево процессов»).
+
+```yaml
+# плохо — имя без префикса PromEx: такой серии нет, алерт не сработает никогда
+- alert: OutboxQueueFailedGrowing
+  expr: outbox_queue_count{status="failed"} > 0
+
+# хорошо
+- alert: OutboxQueueFailedGrowing
+  expr: max(my_app_prom_ex_outbox_queue_count{status="failed"}) > 0
+  for: 10m
+```
+
 ## Связанные правила
 
 - Цепочка outbox и её спаны — `14-events-outbox.md`
@@ -174,3 +214,4 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - Уровни и формат логов — `20-agreements.md`
 - Тесты — `19-testing.md`
 - Алерты проекций — `22-projections.md`
+- Разбор записей `:failed` по алертам очереди — `deps/core/docs/rules/app/14-events-outbox.md`

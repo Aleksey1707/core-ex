@@ -9,25 +9,32 @@
 
 ## Дерево процессов
 
-`MyApp.Application` — композиционный корень, `strategy: :one_for_one`. Поддеревья с внутренним
-порядком запуска (`Writer` → `Poller` → `Cleaner`, `Reader` → `Subscriber` → `Bootstrap`) —
-собственные `Supervisor` со `strategy: :rest_for_one`: падение нижнего звена перезапускает
-всё, что от него зависит.
+Композиционный корень, порядок детей, тумблеры подсистем и `watch_list` приложения —
+`deps/core/docs/rules/app/17-otp-concurrency.md`, «Дерево процессов» и «Наблюдение за процессами».
+
+Супервизор с внутренним порядком запуска MUST идти со `strategy: :rest_for_one`: падение нижнего
+звена перезапускает всё, что от него зависит (`Core.Es.Projection.Supervisor`: `Registry` →
+читатели → слушатели).
 
 Отключаемое поддерево MUST возвращать `:ignore` из `start_link/1` (а не стартовать пустым) и
 писать в лог причину на уровне `info` — «запущен» / «отключён» / «пропущен: нет зависимости».
+Так устроены `Core.Es.Projection.Supervisor` (`enabled: false` — «отключён», `projections: []` —
+«пропущен: нет проекций») и `<Aggregate>.Process` (`enabled: false` — «отключён»).
 
-Каждый критичный процесс MUST быть в `MyApp.PromEx.Workers.watch_list/0` — по нему работает алерт
-`WorkerDown`. Элемент выключенного поддерева MUST NOT включаться: `Core.Workers.PromEx` поле
-`required:` не читает, и отсутствующий процесс даёт `up=0` на ноде с `enabled: false`. Хелпер
-поддерева принимает те же опции, что и его `start_link/1`.
+`Core.Workers.PromEx` поле `required:` не читает: процесс из `watch:`, которого нет на ноде, даёт
+`up=0` и алерт `WorkerDown` (`21-observability.md`, «Рекомендованные алерты»). Поэтому элемент
+выключенного поддерева в список MUST NOT попадать, а хелпер `watch_list` поддерева MUST принимать
+те же опции, что его `start_link/1`, и при выключенном поддереве отдавать `[]`.
+
+Проверяется: `test/core/es/projection/supervisor_test.exs` (describe «старт», «watch_list/1»),
+`test/core/es/aggregate/process_test.exs`.
 
 ```elixir
-# плохо — на ноде с enabled: false читателя нет, up=0
-def watch_list, do: [%{component: "es_projection:account_list", name: AccountList.Projection}]
+# плохо — элемент литералом: на ноде с enabled: false читателя нет, up=0
+[%{component: "es_projection:account_list", name: AccountList.Projection}]
 
-# хорошо — при enabled: false элементов нет
-def watch_list, do: Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts())
+# хорошо — те же опции, что у start_link/1: при enabled: false элементов нет
+Core.Es.Projection.Supervisor.watch_list(opts)
 ```
 
 ## `init/1`
@@ -70,10 +77,11 @@ def watch_list, do: Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.o
 ## Mailbox и backpressure
 
 - Неограниченная очередь сообщений — дефект: процесс, принимающий сигналы чаще, чем успевает
-  их обрабатывать, растит mailbox до OOM. Алерт `WorkerMailboxHigh` ловит это постфактум.
+  их обрабатывать, растит mailbox до OOM. Алерт `WorkerMailboxHigh` ловит это постфактум
+  (`21-observability.md`, «Рекомендованные алерты»).
 - Повторяющиеся сигналы-«будильники» MUST схлопываться: в начале и в конце цикла вычерпать
   накопившиеся сообщения (`flush_wakes/0` в `Core.Outbox.Poller`), а не обрабатывать каждое.
-- Чтение из брокера — по кредитам (`Stream.Reader`, `reader_credit` = число in-flight чанков),
+- Чтение из брокера — по кредитам (`Stream.Reader`, опция `:credit` = число in-flight чанков),
   а не «всё, что пришло».
 
 ## `Task` и параллелизм
@@ -149,8 +157,9 @@ end
 
 Цикл, ходящий в БД или сеть по таймеру, MUST различать успех и сбой при планировании
 следующего тика: фиксированный интервал на лежащей зависимости даёт полную частоту запросов
-и заливает лог. Схема — `retry_min_ms` × 2 до `interval_ms` (`Outbox.Cleaner`,
-`Outbox.Poller.schedule_backoff/1`), сброс на первом успехе.
+и заливает лог. Схема — удвоение от минимума до потолка, сброс на первом успехе:
+`retry_min_ms` × 2 до `interval_ms` у `Outbox.Cleaner`, `idle_min_ms` × 2 до `poll_interval_ms` у
+`Outbox.Poller`.
 
 Сбоем считается и **успешно завершённый цикл с неуспешной работой**: `Outbox.Poller`
 отдаёт `:retry`, когда пачка сохранена, но хоть одна запись не опубликована, и уходит
@@ -184,5 +193,7 @@ assert Reader.next_tick(backoff, :idle, false) == {50, %{backoff | idle_ms: 100}
 ## Связанные правила
 
 - Outbox / MQ / порядок доставки — `14-events-outbox.md`
-- Архитектура и композиционный корень — `10-architecture.md`
+- Архитектура — `10-architecture.md`
+- Дерево приложения, тумблеры и `watch_list` — `deps/core/docs/rules/app/17-otp-concurrency.md`
+- Алерты на процессы — `21-observability.md`
 - Тесты — `19-testing.md`

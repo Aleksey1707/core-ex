@@ -27,20 +27,49 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 7. HTTP-эндпоинт — последним: он поднимается, когда зависимости готовы.
 
 Поддерево с внутренним порядком запуска (writer → поллер → cleaner) — собственный `Supervisor`
-со `strategy: :rest_for_one`: падение нижнего звена перезапускает всё, что от него зависит.
+со `strategy: :rest_for_one` (`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево процессов»).
+
+Поддерево подписчиков брокера (`Core.PubSub.MqSubscriberReliable`, `:rest_for_one`) MUST ставить
+детей в порядке:
+
+1. свой DLQ-writer (`14-events-outbox.md`, «Подписчики»);
+2. на каждый топик — `Core.Mq.Stream.Reader` и его `MqSubscriberReliable`;
+3. подписка (`MqSubscriberReliable.subscribe/3` по всем подписчикам) — последним ребёнком:
+   `subscribe/3` — вызов процесса подписчика, и в `init/1` супервизора, до старта детей, его
+   ещё нет.
+
+- Сбой подписки MUST завершать ребёнка аварийно: его перезапускает супервизор, а повторяющийся
+  сбой роняет поддерево, и его видно по `WorkerDown`. Сбой, записанный в лог с нормальным
+  выходом, оставляет читателя и подписчика живыми — алерт молчит, а сообщения не читаются.
+- `{:error, %Error{code: :already_subscribed}}` — успех: после рестарта ребёнка подписка уже
+  действует.
+
+```elixir
+# плохо — сбой в лог и нормальный выход: процессы живы, WorkerDown молчит
+{:error, %Error{} = error} -> Logger.error("сбой подписки: #{Error.format_chain(error)}")
+
+# хорошо — повтор подписки успешен, иной сбой — аварийный выход и рестарт
+case Core.PubSub.MqSubscriberReliable.subscribe(subscriber, nil, context) do
+  :ok -> :ok
+  {:error, %Error{code: :already_subscribed}} -> :ok
+  {:error, %Error{} = error} -> exit({:subscribe_failed, subscriber, error})
+end
+```
 
 ## Отключаемые поддеревья
 
-Подсистема, которую можно выключить, MUST возвращать `:ignore` из `start_link/1` — а не
-подниматься вхолостую и не падать: приложение обязано стартовать без неё.
+Подсистема, которую можно выключить, отдаёт `:ignore` из `start_link/1` и пишет причину на
+`info` — «запущено» / «отключено» / «пропущено: нет зависимости»
+(`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево процессов»): приложение обязано стартовать
+без неё, а молча отсутствующее поддерево не отличить от упавшего.
 
-- Решение об `:ignore` принимается в `start_link/1` и MUST логироваться на `info`
-  («запущено» / «отключено» / «пропущено: нет зависимости»): молча отсутствующее поддерево не
-  отличить от упавшего.
-- Третий случай реален: подписчик отдаёт `:ignore`, если соединение с брокером не поднялось,
-  и приложение стартует без него, а не уходит в цикл рестартов.
-- Тумблер живёт в `config/runtime.exs` и читается из env; дублировать его в `config.exs`
-  MUST NOT.
+- Третий случай — поддереву нечего запускать: `Core.Es.Projection.Supervisor` при
+  `projections: []` отдаёт `:ignore` с `info` «пропущен: нет проекций». Недоступная внешняя
+  система к нему не относится: подключение идёт в `handle_continue/2` с backoff
+  (`deps/core/docs/rules/17-otp-concurrency.md`, «`init/1`»).
+- Тумблер подсистемы и её значения из env (tunables очереди, проекций, кеша) живут **только** в
+  `config/runtime.exs`; дублировать их в `config.exs` MUST NOT: у значения появились бы два
+  источника, и они разойдутся.
 - Тумблер читается из того же ключа, что и остальная конфигурация подсистемы: тумблеры
   приложения — под `:my_app`, тумблер очереди — под `:core`. Расхождение даёт дерево, которое
   считает выключенное включённым.
@@ -57,41 +86,61 @@ backpressure, `trap_exit`, backoff у периодических циклов �
   молчаливое усечение.
 - Список, который собирает несколько подсистем (проекции, топики, наблюдаемые процессы), MUST
   собираться **одной** функцией приложения: вторая сборка в другом месте старта разошлась бы с
-  первой молча.
-
-```elixir
-# плохо — список и опции собраны на месте вызова
-{Core.Es.Projection.Supervisor, projections: [MyApp.Domain.<BC>.Common.Projection], enabled: true}
-
-# хорошо — один источник, его же читает наблюдаемость
-{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}
-```
+  первой молча. Пример — «Проекции и процессы агрегата».
 
 ## Проекции и процессы агрегата
 
-Дерево проекций у приложения **одно** — `Core.Es.Projection.Supervisor` со всем списком проекций,
-и оно ставится на всех нодах (`deps/core/docs/rules/22-projections.md`, «Дерево»). Второе дерево
-на ноде не стартует, а дубль `name:` виден только в полном списке.
+Контракт дерева проекций — один `Core.Es.Projection.Supervisor` на все проекции и все ноды,
+отказы старта, семантика `notifications:` — `deps/core/docs/rules/22-projections.md`, «Дерево».
+Config и env библиотека не читает.
 
 - Список проекций и опции MUST собирать одна функция приложения (`MyApp.Projections.opts/0`):
   её же принимают `Core.Es.Projection.Supervisor.watch_list/1` и PromEx-плагин
   (`21-observability.md`). Вторая сборка разошлась бы со списком, который видят `await` и метрики.
 - Опции приходят из env `ES_PROJECTIONS_*` в `config/runtime.exs`, длительности — через
   `Core.DurationParser`.
-- `notifications:` выбирает приложение: `false` на одной ноде (сигнала внутри ноды хватает),
-  keyword с прямым хостом базы — за пулером в transaction mode, где `LISTEN` уведомлений не
-  получает. Ошибкой сломанный быстрый путь не виден — ожидание молча сводится к шагам.
-- Лимит соединений базы MUST считаться с учётом слушателей: по соединению на каждый различный
-  `repo:` проекций на каждой ноде, сверх `pool_size`.
+- Приложение на одной ноде SHOULD ставить `notifications: false`: сигнала внутри ноды хватает;
+  за пулером в transaction mode — keyword с прямым хостом базы.
+- Лимиты соединений базы и пулера MUST считаться с учётом слушателей: по соединению на каждый
+  различный `repo:` проекций на каждой ноде, сверх `pool_size`.
 - Цена выключения дерева (`ES_PROJECTIONS_ENABLED=false`) — read-модель не обновляется: экраны
   отстают, а команды на границе отвечают 202 (`15-web-api.md`).
 
 ```elixir
 # плохо — список и опции собраны на месте старта: await и метрики видят другой список
-{Core.Es.Projection.Supervisor, projections: [MyApp.Domain.Orders.Projection], enabled: true}
+{Core.Es.Projection.Supervisor, projections: [MyApp.Domain.<BC>.Common.Projection], enabled: true}
 
-# хорошо
-{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}
+# хорошо — одна функция; её же читают watch_list/1 и Core.Es.PromEx
+defmodule MyApp.Projections do
+  def opts do
+    [projections: [MyApp.Domain.<BC>.Common.Projection]] ++
+      Application.fetch_env!(:my_app, __MODULE__)
+  end
+end
+
+children = [{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}]
+
+# config/runtime.exs
+config :my_app, MyApp.Projections,
+  enabled: System.get_env("ES_PROJECTIONS_ENABLED", "true") == "true",
+  poll_interval_ms:
+    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_POLL_INTERVAL", "1s")),
+  await_min_ms:
+    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_AWAIT_MIN", "10ms")),
+  await_max_ms:
+    Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_AWAIT_MAX", "100ms")),
+  notifications: System.get_env("ES_PROJECTIONS_NOTIFICATIONS", "true") == "true"
+
+# хорошо — одна нода: сигнала внутри ноды хватает, NOTIFY пачек не нужен
+config :my_app, MyApp.Projections, notifications: false
+```
+
+```text
+# плохо — лимит соединений посчитан по пулам repo: соединения слушателей нод в него не входят
+max_connections >= ноды × pool_size
+
+# хорошо — плюс по соединению слушателя на каждый различный repo: проекций на каждой ноде
+max_connections >= ноды × (pool_size + различных repo: проекций)
 ```
 
 Процесс агрегата ставится в дерево элементом `{<Aggregate>.Process, enabled: …}`
@@ -105,8 +154,8 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 
 - Новый именованный процесс, чьё падение меняет поведение системы, MUST попадать в
   `watch_list/0` **той же правкой**, что и в дерево: процесс без наблюдения падает молча.
-- Список фильтруется по **текущей** конфигурации (`required:`): выключенное поддерево не должно
-  давать вечный алерт «процесс отсутствует».
+- Список фильтруется по **текущей** конфигурации: элемент выключенного поддерева дал бы вечный
+  алерт «процесс отсутствует» (`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево процессов»).
 - Имя процесса берётся у его владельца (функция супервизора, `cache/0` фасада), а не
   повторяется литералом в двух местах.
 - Читателей проекций перечисляет само дерево (`Core.Es.Projection.Supervisor.watch_list/1`), а не
@@ -118,15 +167,16 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 
 - В полёте MUST быть ровно один таймер: перед постановкой нового прежний отменяется — иначе
   тики накапливаются на время долгого цикла. Накопившиеся тики схлопываются.
-- Сбой цикла уходит в backoff (удвоение до потолка), первый успех сбрасывает его.
+- Сбой цикла уходит в backoff — `deps/core/docs/rules/17-otp-concurrency.md`, «Backoff у
+  периодических циклов».
 - Цикл, который ставит фоновую задачу, MUST полагаться на её ключ идемпотентности, а не на то,
   что тик не повторится (`14-events-outbox.md`).
 - Ошибка недоступной БД MAY прийти как `exit`: цикл MUST его ловить и уходить в backoff, а не
   падать вместе с супервизором.
 - Цикл, который нужно прогнать синхронно (тест, оператор), MUST отдавать `run_once/1` с явным
   таймаутом; ожидание таймера в тесте MUST NOT.
-- `GenServer.call` к любому долгоживущему процессу идёт с явным таймаутом: умолчание в 5 с
-  прячет затор в mailbox за `:timeout` без объяснения.
+- Таймаут `GenServer.call` к процессу цикла — `deps/core/docs/rules/17-otp-concurrency.md`,
+  «`GenServer.call`».
 
 ## Фоновые задания
 
@@ -138,13 +188,6 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 - Размер пачки — параметр, а не константа в коде: один прогон не должен держать транзакцию на
   произвольном объёме.
 
-## Тесты процессов
-
-- Порождённым процессам нужен доступ к sandbox: `Ecto.Adapters.SQL.Sandbox.allow/3`.
-- Тест, меняющий глобальный конфиг или именованный синглтон, — `async: false` с
-  восстановлением в `on_exit`.
-- Синхронная проверка цикла — `run_once/1`, а не `sleep` в ожидании таймера.
-
 ## Связанные правила
 
 - Композиционный корень и boundary — `10-architecture.md`
@@ -152,4 +195,4 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 - Очередь, подписчики, порядок доставки — `14-events-outbox.md`
 - Кеш и его инвалидация — `16-caching.md`
 - Метрики и алерты — `21-observability.md`
-- Тесты — `19-testing.md`
+- Тесты — `19-testing.md`; тесты процессов — `deps/core/docs/rules/19-testing.md`, «Процессы»

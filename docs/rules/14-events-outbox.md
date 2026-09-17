@@ -10,18 +10,10 @@
 
 Событие агрегата: `use Es.Event` (см. `11-domain.md`) + вложенный `Payload` (или `nil`).
 
-Объединяющий модуль (`<Aggregate>.Event`):
-
-| Функция | Назначение |
-|---|---|
-| `name/1` | wire-type через `<Aggregate>.Event.Codec` |
-| `names/0` | множество wire-type через Codec |
-
-Dump/load — только через фасад: `InCodec`/`OutCodec.dump(event)` отдаёт **весь конверт**,
-`InCodec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу внутри конверта (модуль
-событий агрегата — это семейство, `union:` у плагина; `codec.load(Mod, data)` — когда конкретный тип
-известен). Неизвестный тег → `:unknown_event_type` кодека агрегата (`ns: :es`). Момент постановки в
-outbox: `Outbox.CreatedAt.now()` (usec); `event.at` — только в конверте (`"at"`), не в
+Dump/load события — только через фасад (`11-domain.md`, «Dump/load только через фасад»).
+Неизвестный тег → `:unknown_event_type` (`ns: :es`): ошибку строит кодек агрегата, clause с этим
+кодом в каталоге `<Aggregate>.Errors` MUST NOT. Момент постановки в outbox:
+`Outbox.CreatedAt.now()` (usec); `event.at` — только в конверте (`"at"`), не в
 `Record.created_at`.
 
 Правила:
@@ -43,10 +35,11 @@ outbox: `Outbox.CreatedAt.now()` (usec); `event.at` — только в конв
   ловится на компиляции.
 - `type:` у кодека событий — MUST: тип агрегата в формате тега. Проверяется на компиляции:
   кодек без `type:` и один `type:` у двух кодеков среди плагинов фасада — `CompileError`.
-- Wire-тег уникален **внутри своего кодека** (дубль — `CompileError`), но квалифицировать
-  его именем агрегата (`acceptance.created`, а не `created`) MUST: тег виден в брокере и в
-  event store рядом с чужими. Кодек событий MUST быть в `Codec.plugins()` — иначе фасад не
-  знает ни события, ни его семейства.
+- Wire-тег уникален **внутри своего кодека**: дубль — `CompileError`. Квалификация тега именем
+  агрегата и уникальность между агрегатами — `deps/core/docs/rules/app/14-events-outbox.md`,
+  «Wire-тег события».
+- Кодек событий MUST быть в `Codec.plugins()` — иначе фасад не знает ни события, ни его
+  семейства.
 
 Источники `:version_mismatch` из `<Aggregate>.Errors` у state-stored агрегата:
 
@@ -209,39 +202,22 @@ end
 
 | Компонент | Назначение |
 |---|---|
-| `Poller` | reserve (под токеном аренды `lease_id`) → `publish_many` → save_results; один sequential publisher; drain после `:processed`; `:retry` / idle / error — adaptive backoff; `wake/1` (имя обязательно) после commit `append` (coalesce `:wake` в mailbox) |
+| `Poller` | reserve (под токеном аренды `lease_id`) → `publish_many` → save_results; один sequential publisher; drain после `:processed`; `:retry` / idle / error — adaptive backoff; `wake/1` после commit `append` (`nil` и отсутствующий процесс → `:ok`; coalesce `:wake` в mailbox) |
 | `Delivery.Mq` | JSON body + `Record.headers` как есть; `publish_many` → `Writer.put_many` (stop-on-first-error). Единственный Delivery: брокер подключается адаптером `Mq.Writer` (`Mq.Stream.Writer`, `Mq.Kafka.Writer`), не отдельным `Delivery.*`. Модуль реализации поллер берёт из опции `:delivery_module`; выводить его из `__struct__` handle MUST NOT — `Delivery.t()` структуры не требует |
 | `Cleaner` | TTL published |
-| `Outbox.Supervisor` | OTP-сборщик; `enabled: true` в dev/prod, `false` в test |
 
-Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyApp.Outbox`): Core (`Outbox.Repo.Pg`)
-и app-обвязка (`Outbox.Supervisor`) читают один ключ.
+Поддерево очереди (`Writer` → `Poller` → `Cleaner`) собирает супервизор приложения; своего
+супервизора у библиотеки нет.
 
-Tunables (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) — **только**
-`config/runtime.exs` + env `OUTBOX_*` (SSOT). MUST NOT дублировать в `config.exs`. В `:test` —
-overlay в `config/test.exs` (runtime-блок Outbox пропускается).
+Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyApp.Outbox`). Библиотека читает из
+него только цели пробуждения после commit `append` (`Outbox.Repo.Pg`):
 
-| Env | Назначение |
-|---|---|
-| `OUTBOX_ENABLED` | Supervisor (Writer + Poller + Cleaner) |
-| `OUTBOX_POLL_INTERVAL` | max idle / safety poll (cap backoff) |
-| `OUTBOX_IDLE_MIN` | стартовый idle backoff; drain → `schedule(0)` |
-| `OUTBOX_BATCH_SIZE` | размер пачки reserve |
-| `OUTBOX_LOCK_DURATION` | аренда `:in_work` |
-| `OUTBOX_MAX_ATTEMPTS` | порог `:failed` |
-| `OUTBOX_PUBLISHED_TTL` | TTL для Cleaner |
-| `OUTBOX_CLEANER_INTERVAL` | интервал Cleaner |
-| `OUTBOX_REFERENCE_PREFIX` | producer reference для `Stream.Writer` |
-| `OUTBOX_ALLOW_CLUSTER` | разрешить старт при `DNS_CLUSTER_QUERY` (ценой порядка доставки) |
+- `poller_name` — atom имени GenServer; `nil` — wake no-op;
+- `pollers` — `[[name:, topics:], …]`: будится каждый поллер, чей фильтр топиков совпал с пачкой.
 
-Длительности (`OUTBOX_POLL_INTERVAL`, `OUTBOX_IDLE_MIN`, `OUTBOX_LOCK_DURATION`,
-`OUTBOX_PUBLISHED_TTL`, `OUTBOX_CLEANER_INTERVAL`) задаются строкой вида `"1s"` / `"50ms"` /
-`"1h30m"` / `"7d"` и разбираются `Core.DurationParser.parse!/2` в единицу ключа конфига (`*_ms` /
-`*_seconds`). Голое число без единицы и неточная конвертация (`"1500ms"` → секунды) — ошибка старта,
-а не тихое усечение.
-
-Дополнительно в config Outbox: `poller_name` (atom имени GenServer; в test — `nil`, wake no-op) и
-`pollers` (`[[name:, topics:], …]` — таргеты `Poller.wake/1` после commit `append`).
+Остальное — опции `Poller` / `Cleaner` (обязательные и дефолты — их moduledoc), их передаёт
+супервизор приложения. Где лежат значения, из каких env приходят и как задаются длительности —
+`deps/core/docs/rules/app/14-events-outbox.md`, «Конфигурация».
 
 ### Poller scheduling
 
@@ -258,8 +234,9 @@ overlay в `config/test.exs` (runtime-блок Outbox пропускается).
   заранее: иначе непрерывный `append` при лежащем брокере держит интервал на минимуме.
 - Входящие `:wake` coalesce'ятся (`flush_wakes` в начале/конце цикла) — mailbox не растёт
   пропорционально RPS `append`.
-- `Outbox.Repo.append` регистрирует `Poller.wake/0` через `Helper.AfterCommit` (после outermost
-  commit; вне TX — сразу). Same-VM only; другие ноды — safety poll.
+- `Outbox.Repo.append` регистрирует через `Helper.AfterCommit` вызов `Poller.wake/1` для целей из
+  `poller_name` / `pollers` (после outermost commit; вне TX — сразу). Same-VM only; другие
+  ноды — safety poll.
 - `DAO` объявляется через `use Core.DAO`: `transact` / `transaction` обёрнуты в `AfterCommit.wrap`
   (depth / rollback-safe).
 
@@ -272,7 +249,7 @@ overlay в `config/test.exs` (runtime-блок Outbox пропускается).
 до конца нельзя: записи ушли бы в `published`, не побывав в брокере.
 
 Окно до `:failed` — это `max_attempts` × backoff; оно MUST превышать время рестарта брокера
-и задаётся тройкой `OUTBOX_IDLE_MIN` / `OUTBOX_POLL_INTERVAL` / `OUTBOX_MAX_ATTEMPTS`.
+и задаётся тройкой опций `idle_min_ms` / `poll_interval_ms` / `max_attempts`.
 
 Почему backoff общий для очереди, а не отложенный retry на запись, и таблица окон —
 ADR-0002.
@@ -289,6 +266,13 @@ ADR-0002.
 `delete_published_before` (возвращает `non_neg_integer()` — число удалённых), `requeue_failed`,
 статистика для метрик (`queue_counts`, `oldest_age_seconds`, `expired_lock_count`).
 
+`Cleaner` удаляет только `published`: записи `:failed` остаются до разбора оператором.
+`requeue_failed/2` (его зовёт `mix outbox.requeue --all` / `--id <uuid>`) переводит `:failed` →
+`:new`, обнуляет `attempts`, снимает аренду и очищает `errors` — счётчик попыток стартует с нуля,
+и сохранённая история пронумеровалась бы заново поверх старой. Порядок доставки для возвращённых
+записей не восстанавливается: сообщения, шедшие за ними, уже опубликованы. Разбор записей в
+`:failed` — `deps/core/docs/rules/app/14-events-outbox.md`, «Runbook: записи в `:failed`».
+
 ### Запросы очереди — только по индексу
 
 - `fetch_and_reserve` MUST брать кандидатов **двумя** индексными запросами (`:new` и
@@ -304,10 +288,12 @@ ADR-0002.
   индекс. Проверять `EXPLAIN (ANALYZE, BUFFERS)` на объёме, а не на пустой таблице: планы
   расходятся на три порядка только под данными.
 
-Состав индексов — часть контракта таблицы: DDL лежит в `Core.Outbox.Migration`, и миграция
-потребителя MUST делегировать `up/0` / `down/0` туда, а не повторять DDL своей копией — иначе
-новый частичный индекс приедет с зависимостью, но не в его базу. Имена индексов контрактом
-не являются.
+Состав индексов — часть контракта таблицы: DDL лежит в `Core.Outbox.Migration`, миграция
+потребителя делегирует ему (`deps/core/docs/rules/app/18-migrations.md`, «Таблицы библиотеки»).
+Имена индексов контрактом не являются. Схема `outbox` меняется только аддитивно — новая
+nullable-колонка, новый индекс `concurrently`; переименование и удаление колонок MUST NOT:
+очередь несёт историческую нагрузку, а изменение DDL доходит до потребителя его собственной
+миграцией по пункту `CHANGELOG.md`.
 
 Почему так и чем платим — ADR-0003 (выборка пачки) и ADR-0005 (метрики очереди).
 
@@ -319,44 +305,18 @@ ADR-0002.
 **Порядок внутри пачки** — `order_by: [created_at, id]`: `created_at` ставится на каждое событие
 отдельно и может совпасть в микросекунде, `id` (UUIDv7) даёт tiebreaker. Часть ошибок — `Error.app`
 + `raise Exc`. Persist `Record` в Schema — через `Outbox.Codec` / `InCodec.load`/`dump` (remap JSON
-errors string↔atom keys). `persist_all!` / `append` чанкуют `insert_all` (лимит параметров
-PostgreSQL при больших batch).
+errors string↔atom keys). `append` чанкует `insert_all` (лимит параметров PostgreSQL при
+больших batch).
 
 ### Единственность поллера
 
-Гарантия порядка держится на одном поллере на топик-группу. `FOR UPDATE SKIP LOCKED` защищает
-от дублей, но не от перестановки: две ноды разложат одну очередь в брокер вперемешку.
+Гарантия порядка держится на одном поллере на топик-группу; как приложение обеспечивает это на
+нодах и на старте — `deps/core/docs/rules/app/14-events-outbox.md`, «Единственность поллера».
 
-- MUST: `OUTBOX_ENABLED=true` ровно на одном инстансе.
-- Кластеризация (`DNS_CLUSTER_QUERY` задан) вместе с включённым outbox — **отказ старта**
-  (`Outbox.Supervisor.check_singleton!/0`, `ArgumentError` с инструкцией).
-- `OUTBOX_ALLOW_CLUSTER=true` — осознанный отказ от гарантии порядка: старт разрешён,
-  в лог уходит `warning`. Ставить только там, где порядок не важен.
-- Несколько поллеров **на одной ноде** (конфиг `pollers`) MUST разбивать топики без
-  пересечений, и потребитель MUST проверять это на старте — `Outbox.validate_partition!/1`
-  рядом с `check_singleton!/0`. Без проверки пересекающиеся фильтры стартуют молча.
-  Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`.
-- Переход на несколько нод без потери порядка требует лидер-элекции (`:global` /
-  advisory-lock на топик-группу) — отдельная задача, не покрыта.
-
-### Runbook: записи в `:failed`
-
-Алерты Prometheus на стороне приложения: `OutboxQueueFailedGrowing`
-(`outbox_queue_count{status="failed"} > 0`), `OutboxFailedDelivery`, `OutboxOldestNewHigh`.
-
-`Cleaner` удаляет только `published` — `:failed` копятся, пока их не разберёт оператор:
-
-1. Причина — колонка `errors` таблицы `outbox` (список `{attempt, message}`) и логи
-   `"Outbox окончательно провален: id=..."`. Читать MUST до шага 3: requeue историю
-   очищает.
-2. Починить источник отказа (брокер, топик, права, формат payload).
-3. Вернуть в очередь: `mix outbox.requeue --all` или `mix outbox.requeue --id <uuid>`
-   (`Outbox.Repo.requeue_failed/2`: `:failed` → `:new`, `attempts` = 0, аренда снята,
-   `errors` очищены — счётчик попыток стартует с нуля, и сохранённая история
-   пронумеровалась бы заново поверх старой).
-
-Порядок доставки для возвращённых записей **не восстанавливается**: сообщения, шедшие за ними,
-уже опубликованы. Если порядок критичен — вместе с requeue нужен пересчёт состояния получателем.
+`Core.Outbox.validate_partition!/1` принимает конфиг `pollers` как есть и отказывает
+`ArgumentError`, если фильтры топиков двух поллеров пересекаются; раскладка на один поллер
+проверки не требует. Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`: два
+`{:except, _}` пересекаются всегда.
 
 ## Трассировка цепочки
 
@@ -390,49 +350,25 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
 ## Идемпотентность потребителей
 
 Доставка — **at-least-once** на каждом звене: outbox переотправляет батч после сбоя,
-брокер передоставляет неподтверждённое, Oban повторяет джобу до `max_attempts`.
-Значит, обработчик обязан переживать повтор.
+брокер передоставляет неподтверждённое. Значит, обработчик обязан переживать повтор. Как
+приложение делает свои обработчики и фоновые задачи идемпотентными —
+`deps/core/docs/rules/app/14-events-outbox.md`, «Идемпотентность потребителей».
 
 - Проекция и реакция на событие с внешним эффектом — `22-projections.md`, «Read-модель».
-- Воркер с **внешним** эффектом (HTTP клиенту, отправка сообщения, списание) MUST иметь
-  `unique:` с ключом, однозначно определяющим событие:
-
-  ```elixir
-  use Oban.Worker,
-    queue: :notifications,
-    max_attempts: 10,
-    unique: [period: :infinity, keys: [:message_id, :status, :event_id]]
-  ```
-
-  `event_id` в ключе обязателен: `message_id + status` повторяются при переоткате статуса,
-  а `event_id` уникален для конкретного факта.
-- Джоба, которую ставит **изменяющий usecase** (не реакция на событие), события не имеет — ключ
-  строится из набора идентификаторов агрегатов, а `period` конечен: повторная отправка тех же
-  сообщений позже законна, вечная уникальность её заблокировала бы.
-
-  ```elixir
-  # Workers.SendMessage — args либо %{"message_ids" => [...]}, либо %{"message_id" => id}
-  unique: [period: 60, states: :incomplete, keys: [:message_ids, :message_id]] ```
-
-  `unique` защищает от дублирующего **enqueue** (два прогона `DrainPending`), а не от
-  повторного выполнения ретрая: от него защищает переход статуса агрегата под
-  optimistic lock event store'а.
-- Воркер, который только меняет состояние в БД, идемпотентен, если мутация агрегата
-  проверяет текущий статус и возвращает `{:error, _}` / no-op на повторе.
-- Обработчик MQ-сообщения MUST быть готов к дублю и к **перестановке** относительно других
-  топиков; порядок гарантирован только внутри одной топик-группы.
+- Исход обработчика `MqSubscriberReliable` (`PubSub.handler_result()`): `:ok` и
+  `{:skip, reason}` коммитят offset; `{:error, _}`, ошибка `from_message` и исключение в
+  обработчике — нет, сообщение приходит снова с растущим интервалом. Исключение не роняет
+  подписчик: оно становится `{:error, _}` (`:handler_crashed`).
 - «Ядовитое» сообщение (обработчик стабильно возвращает ошибку) MUST иметь выход:
   `MqSubscriberReliable` считает попытки, растит интервал до `retry_max_ms` и после
   `max_attempts` публикует сырое сообщение в DLQ-топик (`<topic>.dlq`, заголовки
   `x-dlq-source-topic` / `x-dlq-attempts` / `x-dlq-error`), коммитит offset и эмитит
-  `[:mq, :subscriber, :dlq]` (алерт `MqSubscriberDlq`). Без настроенного `dlq_writer`
-  сообщение не выбрасывается — повторы продолжаются, в лог идёт `error`.
-- Поэтому дерево подписчика MUST поднимать **свой** `Mq.Stream.Writer` и передавать его
-  каждому `MqSubscriberReliable` (`dlq_writer` + `dlq_handle`). Свой, а не writer outbox:
-  тот выключается вместе с outbox (`OUTBOX_ENABLED=false`), а выход для «ядовитого»
-  сообщения обязан работать независимо от публикации событий. `reference_prefix` у него
-  отдельный — общий с outbox пересёк бы счётчики подтверждений по одноимённым топикам.
-  Writer идёт **первым** ребёнком при `:rest_for_one`.
+  `[:mq, :subscriber, :dlq]` (алерт `MqSubscriberDlq` — `21-observability.md`, «Рекомендованные
+  алерты»). Без настроенного `dlq_writer` сообщение не выбрасывается — повторы продолжаются, в
+  лог идёт `error`.
+- DLQ-writer подписчику передаётся опциями `dlq_writer` (модуль `Mq.Writer`) и `dlq_handle` (его
+  handle); чей это writer и где он стоит в дереве — `deps/core/docs/rules/app/14-events-outbox.md`,
+  «Подписчики».
 
 ### Runbook: сообщения в DLQ
 
@@ -441,8 +377,6 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
    `x-dlq-error` самого сообщения.
 3. Починить обработчик, затем переиграть содержимое DLQ-стрима в исходный топик
    (порядок относительно уже обработанных сообщений не восстанавливается).
-- Инвалидация кеша по событию — только `del` по id, без обновления из payload
-  (`deps/core/docs/rules/app/16-caching.md`): payload может прийти устаревшим.
 
 ## Связанные правила
 
@@ -450,4 +384,7 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
 - OTP-процессы поллеров и читателей — `17-otp-concurrency.md`
 - Flush в Repo (`Repo.Pg.StateStored`), хранилище событий (`Core.Es.Store`) — `13-repos.md`
 - Кеш ReadRepo (инвалидация по событиям) — `deps/core/docs/rules/app/16-caching.md`
+- Конфигурация, единственность поллера, runbook и идемпотентность приложения —
+  `deps/core/docs/rules/app/14-events-outbox.md`
+- Рекомендованные алерты очереди и подписчиков — `21-observability.md`
 - Архитектура слоёв — `10-architecture.md`

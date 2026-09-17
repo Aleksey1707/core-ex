@@ -6,9 +6,10 @@
   плагинов; правкой `ContextFactory`.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
-Контракты `Core.Prim`, `Core.Enum`, `Core.Codec.*`, `Core.View`, `Es.Event`, `Version` и
-`Context` нормирует `deps/core/docs/rules/11-domain.md`: там опции макросов, конвейер
-`cast → mutate → validate`, приоритеты dump/load и требования к описанию значений enum.
+Контракты `Core.Prim`, `Core.Enum`, `Core.Codec.*`, `Core.View`, `Core.Es.Aggregate`,
+`Core.Es.Cmd`, `Es.Event`, `Version` и `Context` нормирует `deps/core/docs/rules/11-domain.md`:
+там опции макросов, конвейер `cast → mutate → validate`, приоритеты dump/load, формы `decide` /
+`evolve` и требования к описанию значений enum.
 Здесь — как это собирается в приложении.
 
 ## Профили Codec
@@ -17,8 +18,8 @@
 
 | Профиль | Где применяется | Что задаёт |
 |---|---|---|
-| `MyApp.Codec.Prim.Internal` | БД, outbox, MQ, события | форму хранения: `uuid: :full`, `datetime: :datetime`, момент в UTC |
-| `MyApp.Codec.Prim.External` | HTTP JSON | форму контракта: `uuid: :hex`, `:iso8601`, `decimal: :string` |
+| `MyApp.Codec.Prim.Internal` | БД, outbox, MQ, события | форму хранения: `uuid: :full`, `datetime: :datetime`, `datetime_tz: "Etc/UTC"`, `date: :date`, `decimal: :decimal` |
+| `MyApp.Codec.Prim.External` | HTTP JSON | форму контракта: `uuid: :hex`, `datetime: :iso8601`, `datetime_tz: :app` либо `:keep`, `date: :iso8601`, `decimal: :string` |
 
 - Момент времени MUST храниться в UTC, а наружу уходить в зоне приложения либо как записан
   (`datetime_tz:` внешнего профиля) — но не наоборот: приложение с локальной зоной в БД
@@ -34,8 +35,10 @@
 Фасады — `MyApp.Codec.Internal` (алиас `InCodec`) и `MyApp.Codec.External` (`OutCodec`); список
 плагинов у них **общий** — `MyApp.Codec.plugins/0`.
 
-- Новый entity-кодек MUST попадать в `plugins/0`: фасад диспетчеризуется клоузами на модуль, и
-  незарегистрированный плагин даёт `ArgumentError` на первом дампе.
+- Новый entity-кодек (`use Core.Codec.Plugin`) MUST попадать в `plugins/0`: фасад
+  диспетчеризуется клоузами на модуль, и у незарегистрированного плагина их нет — `dump/1` его
+  значения даёт предупреждение при сборке и `FunctionClauseError`, `load/2` — `ArgumentError`
+  (`deps/core/docs/rules/11-domain.md`, «Codec (Prim и Entity)»).
 - В реестре MUST быть `Core.Outbox.Codec` — иначе запись outbox не сериализуется.
 - Вложенная сущность агрегата — тоже плагин реестра, а не приватный хелпер внутри кодека
   агрегата: иначе её форму нельзя ни переиспользовать, ни покрыть round-trip-тестом.
@@ -43,7 +46,7 @@
   `use Core.Es.Event.Codec`; оба регистрируются наравне с остальными.
 - Вызовы идут **только** через фасад: `codec.dump(value)` внутри плагина, `InCodec` / `OutCodec`
   снаружи. Обращение к соседнему `*.Codec` напрямую — MUST NOT
-  (`deps/core/docs/rules/20-agreements.md`, «Dump/load только через фасад»).
+  (`deps/core/docs/rules/11-domain.md`, «Dump/load только через фасад»).
 
 Событие — обычная сущность фасада: `InCodec.dump(event)` отдаёт конверт целиком,
 `InCodec.load(<Aggregate>.Event, wire)` восстанавливает его по тегу внутри конверта.
@@ -51,16 +54,20 @@
 ## Агрегаты
 
 Вид агрегата — state-stored или event-sourced — выбирается на агрегат (`13-repos.md`, «Вид
-агрегата»); контракты обоих нормирует `deps/core/docs/rules/11-domain.md`. Общее для обоих:
+агрегата»); контракты обоих (`Version`, `decide` / `evolve`, черновики событий, `id` / `version`,
+команда `use Core.Es.Cmd`) нормирует `deps/core/docs/rules/11-domain.md`, «Aggregates». Общее
+для обоих:
 
-- версионируются через `Version`;
 - домен MUST NOT писать в БД, брокер или очередь — только менять состояние и отдавать события;
-- порядок аудит-полей при сборке struct — `deps/core/docs/rules/20-agreements.md`.
+  persist — задача репозитория;
+- поля аудита (`created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`,
+  `deleted_by`) MAY; нормирован только их порядок при сборке struct
+  (`deps/core/docs/rules/20-agreements.md`, «Сборка struct»).
 
 ### State-stored
 
-- Мутация возвращает `{:ok, %Agg{}} | {:error, Error.t()}` и копит событие в `events`; сбрасывает
-  их в хранилище репозиторий, в той же транзакции, что и состояние.
+- Мутация — функция агрегата: возвращает `{:ok, %Agg{}} | {:error, Error.t()}` и копит событие в
+  `events`; сбрасывает их в хранилище репозиторий, в той же транзакции, что и состояние.
 - Удаление — soft-delete парой `deleted_at` / `deleted_by`, если строку нужно пережить.
 - Агрегат **без событий** заводится осознанно и MUST иметь записанную причину: производность от
   чужого события, собственный жизненный цикл вложения, объём fan-out.
@@ -68,25 +75,17 @@
 ### Event-sourced
 
 `use Core.Es.Aggregate, event_codec:` — приложение пишет `decide/2` и `evolve/2`, свёртку и
-`execute/2` даёт библиотека.
+`execute/2` даёт библиотека; их контракт — `deps/core/docs/rules/11-domain.md`, «Event-sourced».
 
-- `id` и `version` ведёт только библиотека: ставить их в `decide` или `evolve` MUST NOT.
-- Существование агрегата решает **домен**: `not_found` и `already_exists` — доменные ошибки
-  `decide` по `version: nil`, а не отказ репозитория.
-- `evolve` — чистое применение случившегося факта: голова матчит только событие, без проверки
-  инвариантов и без catch-all. Инвариант, который захотелось проверить в `evolve`, принадлежит
-  `decide`.
-- Удалённый тип события остаётся клаузой `evolve`, возвращающей состояние как есть: строки в
-  хранилище живут дольше кода.
-- Конверсия момента события в Prim состояния идёт safe (`from` + `with`), а не bang
-  (`deps/core/docs/rules/20-agreements.md`, «Safe vs bang»); исключение для свёртки, если оно
-  нужно, — строка в `DEBT.md`.
+- Автор и момент изменения лежат в `by` / `at` событий: поля аудита в состоянии не нужны, а
+  soft-delete к агрегату не применяется — удаление является доменным событием.
+- Конверсия момента события в Prim состояния внутри `evolve/2` — bang
+  (`deps/core/docs/rules/20-agreements.md`, «Safe vs bang»).
 
 ### Команда
 
-Команда event-sourced агрегата — `<Aggregate>.Cmd.<Name>` (`use Core.Es.Cmd`): struct из Prim без
-логики. `by` и `at` — в `@enforce_keys`: автор и момент события это **данные команды**, а не
-`Context` и не часы библиотеки.
+Команда event-sourced агрегата — `<Aggregate>.Cmd.<Name>` (`use Core.Es.Cmd`); её контракт
+(`by` и `at` в `@enforce_keys`) — `deps/core/docs/rules/11-domain.md`, «Команда».
 
 Собирает команду usecase: `by` — из `CurrentUser.get(context)`, `at` — из текущего времени
 (`Es.Event.At.now/0` либо момента внешнего источника). Брать автора внутри `decide` из контекста
@@ -102,10 +101,8 @@ MUST NOT: домен контекста не знает.
 - Справочник **внешнего** источника объявляется `Core.Enum` с `codes:` — картой «значение →
   код источника». Карта соответствий рядом с модулем MUST NOT: она разойдётся со словарём.
 - Собственный словарь домена объявляется через `values:`: кода у него нет и быть не должно.
-- Каждое значение MUST быть описано строкой таблицы в `@moduledoc` своего модуля.
-  Проверяется: ратчет описаний enum (`19-testing.md`).
-- Значение, выведенное источником из обращения, MUST быть помечено в той же таблице — иначе
-  читатель примет его за действующее.
+- Описание значений enum в `@moduledoc` — `deps/core/docs/rules/11-domain.md`, «Описание
+  значений в `@moduledoc`». Проверяется: ратчет описаний enum (`19-testing.md`, «Ратчеты»).
 - Guard'ы в заголовках — `Core.Guard` через `import` (`is/2`, `is_opt/2`, `is_enum/2`,
   `in_enum/3`), а не россыпь `is_*` (`deps/core/docs/rules/20-agreements.md`).
 

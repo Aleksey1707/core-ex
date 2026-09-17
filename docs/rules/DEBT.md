@@ -23,11 +23,21 @@
 
 ## Длинный `quote` в `Core.Repo.Pg`
 
-`lib/core/repo/pg.ex:78` — `# credo:disable-for-next-line Credo.Check.Refactor.LongQuoteBlocks`.
+`lib/core/repo/pg.ex`, `defmacro __using__/1` — `# credo:disable-for-next-line` для
+`Credo.Check.Refactor.LongQuoteBlocks` перед его `quote`.
 
 Почему остаётся: тело макроса генерирует связанный набор колбэков репозитория; дробление
 на несколько `quote` разносит по файлу то, что читается только целиком, и не убирает
 объём — переносит его.
+
+## Опции процессов outbox и подписчика без `StartOpts`
+
+`Core.Outbox.Poller`, `Core.Outbox.Cleaner` и `Core.PubSub.MqSubscriberReliable` разбирают опции
+в `init/1` через `Keyword.fetch!` / `Keyword.get`, а не `Core.Helper.StartOpts`, вопреки
+`17-otp-concurrency.md`, «`init/1`»: опечатка в значении проходит разбор и всплывает позже.
+
+Почему остаётся: процессы написаны до введения `StartOpts` и при нём не переведены. Выход —
+перевод их разбора на `StartOpts`.
 
 ## Kafka — адаптер только на запись
 

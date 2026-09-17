@@ -27,7 +27,7 @@
 | Поле | Назначение |
 |---|---|
 | `kind` | `:domain` или `:app` |
-| `ns` | атом предметной категории ошибки (обязателен); **не** `Domain.Perms.Namespace` |
+| `ns` | атом предметной категории ошибки (обязателен); **не** namespace разрешений приложения |
 | `module` | модуль-источник (кто создал) |
 | `code` | атом кода ошибки |
 | `message` | текст для клиента / логов; **обязателен для `:domain`**, опционален для `:app` (`nil` или `""` → `String.Chars` fallback `"#{ns}/#{code}"`) |
@@ -59,8 +59,8 @@ Error.app(code: :cycle_failed, ns: :outbox, detail: e, parent: inner)
 Error.domain(OtherMod, code: :not_found, ns: :product, message: "…", detail: id)
 ```
 
-`ns` — самостоятельный словарь классификации ошибок (`:auth`, `:mq`, …). Может быть детальнее
-permission-ns; не обязан совпадать с `Agg.ns()` / `Domain.Perms.Namespace`.
+`ns` — самостоятельный словарь классификации ошибок (`:prim`, `:mq`, `ns/0` каталога агрегата, …).
+Может быть детальнее namespace разрешений приложения и не обязан с ним совпадать.
 
 Не путать `Error.detail` (произвольный payload) с Prim-кортежем `{code, detail}` (строка текста
 валидации).
@@ -73,6 +73,9 @@ permission-ns; не обязан совпадать с `Agg.ns()` / `Domain.Perm
 
 ### Prim: `sensitive: true`
 
+Что делает опция — скрытие в `inspect/1`, редактирование `Error.detail`, наследование в
+`Prim.Compose` — `11-domain.md`, «Prim (value object)».
+
 ```elixir
 use Core.Prim.String,
   name: first_line(@moduledoc),
@@ -80,21 +83,6 @@ use Core.Prim.String,
   max_len: 32,
   sensitive: true
 ```
-
-Что даёт опция:
-
-| Эффект | Как |
-|---|---|
-| `inspect/1` не печатает значение | `@derive {Inspect, except: [:value]}` → `#Password<...>` |
-| `Error.detail` не содержит raw | `{:redacted, byte_size}` для binary, `:redacted` для остального |
-| Флаг доступен коду | `__domain_sensitive__/0` |
-
-`Prim.Compose` наследует чувствительность базового Prim; явный `sensitive: true` перебивает
-наследование, а **понижение** (`sensitive: false` поверх чувствительной базы) — `CompileError`:
-композит строит внешнюю ошибку сам, и без флага raw ушёл бы в её `detail` целым — база
-успевает защитить только свой `detail` внутри `parent`.
-Опция есть у всех обёрток (`Prim.String` / `Integer` / `UUID` / `Decimal` / `Date` / `DateTime` /
-`Compose`).
 
 MUST помечать: пароли (plaintext и хеши), токены и ключи, коды подтверждения, ПДн, платёжные
 реквизиты.
@@ -190,19 +178,27 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 
 ## Каталог агрегата (`<Aggregate>.Errors`)
 
-Доменные ошибки агрегата объявлять в `MyApp.Domain.<BC>.Common.<Aggregate>.Errors`:
+Каталог ошибок — модуль, который макросы репозиториев принимают опцией `errors:` и зовут как
+`errors.domain(behaviour, code, detail)`. Возврат — `%Error{}`, обёртку `{:error, _}` добавляет
+репозиторий. Сборка проверяет каталог вызовом `domain(_, code, nil)` на каждый код, который
+макрос может вернуть:
 
-- `ns/0` — атом пространства имён ошибок.
-- `domain(module, code, detail)` / `domain(module, code, detail, message)` — PM по `code`, **без**
-  catch-all и **без** `@type code`.
-- Clause: `def domain(module, :empty = code, detail, message)` →
-  `Error.domain(module, code: code, ns: ns(), message: …, detail: detail)` (не дублировать атом
-  кода).
-- `module` — `__MODULE__` вызывающего; `message` опционален (дефолт в clause); если тексты для
-  одного кода различаются — message обязателен на call site.
-- Возврат — `%Error{}`; обёртку `{:error, _}` оставляет вызывающий.
-- Repo-коды (`:not_found`, `:version_mismatch`, `:incomplete_result`, `:no_ids`) — в том же
-  каталоге; `use Repo.Pg, errors: Draft.Errors` (через родителя агрегата, не leaf `Errors`).
+| Макрос | Коды, обязательные в `errors:` |
+|---|---|
+| `use Core.Repo.Pg` (read- и write-репозиторий) | `:not_found`, `:version_mismatch`, `:incomplete_result`, `:no_ids` и каждый код `constraint_errors:` |
+| `use Core.Repo.Pg.StateStored` | коды `Repo.Pg` плюс коды `constraint_errors:` дочерних схем `children:` |
+| `use Core.Es.Aggregate.Repo.Pg` | `:version_mismatch` |
+
+- Клаузы по коду MUST NOT иметь catch-all: пропущенный код сборка находит по
+  `FunctionClauseError`, а catch-all превращает опечатку в валидную ошибку и прячет перечень
+  кодов.
+- Clause обязательного кода MUST принимать `detail` `nil`: с ним её зовёт проверка при сборке.
+
+Проверяется: `CompileError` в `use Core.Repo.Pg`, `use Core.Repo.Pg.StateStored` и
+`use Core.Es.Aggregate.Repo.Pg` — у модуля `errors:` нет `domain/3` или clause обязательного кода.
+
+Раскладка каталога в приложении — путь, `ns/0`, `domain/4`, тексты по умолчанию —
+`deps/core/docs/rules/app/12-errors.md`, «Каталоги агрегатов».
 
 ## Источники `%Error{}` в проекте
 
@@ -225,6 +221,32 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
   `timeout` в detail; идёт пересборка → `:projection_rebuilding` сразу, без ожидания. Запись к
   этому моменту закоммичена — `22-projections.md`, «Read-after-write».
 - Outbox / инфраструктура — часто `%Error{kind: :app}` (см. `14-events-outbox.md`).
+
+### `ns`, которые ставит библиотека
+
+Коды репозиториев (`:not_found`, `:version_mismatch`, …) строит каталог `errors:` приложения —
+у них `ns` каталога. Остальные ошибки библиотека собирает сама:
+
+| Модуль-источник | `ns` | Kind | Коды |
+|---|---|---|---|
+| `Core.Prim` и обёртки `Core.Prim.*` | `:prim` | `:domain` | код шага валидации |
+| `Core.Enum` | `:enum` | `:domain` | `:invalid_value` |
+| `Core.Context` | `:context` | `:domain` | `:not_found` |
+| `Core.DurationParser` | `:duration_parser` | `:domain` | `:invalid_format`, `:precision_loss`, `:unsupported_component`, `:invalid_component`, `:invalid_input`, `:negative_duration` |
+| `Core.Web.Params` | `:web` | `:domain` | `:missing_param` |
+| `Core.Mq.Message` | `:mq` | `:domain` | `:header_not_found`, `:invalid_header_value` |
+| `Core.Mq.Stream.Codec` | `:mq` | `:app` | `:encode_failed`, `:invalid_payload`, `:invalid_body`, `:invalid_topic`, `:invalid_key`, `:invalid_headers` |
+| `Core.Mq.Stream.Reader` | `:mq` | `:app` | `:not_reliable`, `:nothing_to_commit`, `:commit_failed` |
+| `Core.Mq.Stream.Writer` | `:mq` | `:app` | `:publish_unconfirmed`, `:producer_setup_failed` |
+| `Core.Mq.Kafka.Writer` | `:mq` | `:app` | `:kafka_publish_failed` |
+| `Core.PubSub.MqSubscriberReliable` | `:pubsub` | `:app` | `:already_subscribed`, `:reader_unavailable`, `:dlq_publish_failed`, `:handler_crashed`, `:unexpected_handler_result` |
+| `Core.Outbox.Poller`, `Core.Outbox.Cleaner` | `:outbox` | `:app` | `:cycle_failed`, `:cycle_exit` |
+| `Core.Outbox.Delivery.Mq` | `:outbox` | `:app` | `:encode_payload_failed` |
+| `Core.Security.Secret` | `:secret` | `:app` | `:encrypt_failed`, `:decrypt_failed` |
+| `Core.Repo.Pg` | `:repo` | `:app` | `:write_failed` |
+| `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
+| `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
+| `Core.Es.Projection` (`Batch`, `Checkpoint`, `Await`) | `:es` | `:app` | `:projection_raised`, `:checkpoint_conflict`, `:projection_timeout`, `:projection_rebuilding` |
 
 ## Связанные правила
 

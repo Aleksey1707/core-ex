@@ -1,6 +1,6 @@
 ---
 name: otp-concurrency
-description: "Свод правил OTP и конкурентности библиотеки Core: дерево процессов и стратегии супервизии, отключаемые поддеревья через :ignore, init/1 против handle_continue, backoff при подключении к внешним системам, таймауты GenServer.call, mailbox и backpressure, Task.async_stream, имена процессов и Registry получателей wake, следующий тик периодического цикла чистой функцией с тестом без процесса, watch_list без элементов выключенного поддерева, trap_exit и graceful shutdown. Использовать при заведении или правке GenServer, супервизора, поллера, читателя брокера, подписчика и процесса агрегата на id."
+description: "Свод правил OTP и конкурентности библиотеки Core: дерево процессов (rest_for_one у супервизора с порядком запуска, :ignore с info у Core.Es.Projection.Supervisor и <Aggregate>.Process, Core.Workers.PromEx не читает required: — watch_list без элементов выключенного поддерева), init/1 против handle_continue, backoff при подключении к внешним системам, таймауты GenServer.call, mailbox и backpressure, Task.async_stream, имена процессов и Registry получателей wake, backoff у периодических циклов и следующий тик чистой функцией с тестом без процесса, trap_exit и graceful shutdown; композиционный корень, порядок детей, тумблеры и watch_list приложения — в deps/core/docs/rules/app/17-otp-concurrency.md. Использовать при заведении или правке GenServer, супервизора, поллера, читателя брокера, подписчика и процесса агрегата на id."
 ---
 
 # 17-otp-concurrency.md

@@ -29,7 +29,7 @@ defmodule Core.Repo.Pg do
     `exclusion:`), а сверяется с `error_type` ошибки changeset: у `foreign_key_constraint/3` это
     `:foreign`, а не `:foreign_key`. Перевод делает макрос (`@error_types`) — иначе маппинг FK
     не совпал бы никогда. Соответствие деклараций `changeset/2` проверяет
-    `test/<app>/repo/constraint_errors_test.exs`.
+    ратчет приложения `test/my_app/repo/constraint_errors_test.exs`.
   - Незамапленный constraint и любой другой провал `changeset/2` — дыра в декларации, то есть
     ошибка программиста: наружу уходит `%Error{kind: :app, ns: :repo, code: :write_failed}`
     (в `detail` — `%{schema:, errors:}`), а не `%Ecto.Changeset{}`: контракт репозитория

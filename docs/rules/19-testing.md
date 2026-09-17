@@ -10,26 +10,66 @@
 | Case | Когда |
 |---|---|
 | `ExUnit.Case` | чистые модули: Prim, Enum, Codec, хелперы |
-| `Core.DataCase` | всё, что ходит в Postgres (Ecto Sandbox) |
+| `MyApp.DataCase` (в самой библиотеке — `Core.DataCase`) | всё, что ходит в Postgres (Ecto Sandbox) |
 | `Core.Es.EventCompatCase` | golden-фикстуры событий, один тест-модуль на агрегат (см. «Совместимость событий») |
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
 
-У приложения-потребителя набор шире (`MyAppWeb.ConnCase`): web-слоя в библиотеке нет.
+Тестовая обвязка библиотеки живёт в `test/support`: `Core.DataCase`, `Core.TestRepo` (роль
+`MyApp.DAO`), `Core.CodecFixture.*` (роль `MyApp.Codec.*`); фикстуры `Core.*Fixture`, дублёр
+`Core.MqFake` и контрактные наборы `Core.*Contract` — по каталогу. Процессы, которые в
+приложении поднимает его supervisor, стартуют в `test/test_helper.exs`.
 
-Тестовая обвязка библиотеки живёт в `test/support`: `Core.TestRepo` (роль `MyApp.DAO`),
-`Core.CodecFixture.*` (роль `MyApp.Codec.*`), `Core.PrimFixture`, `Core.ViewFixture`,
-`Core.MqFake`, `Core.EventFixture`, `Core.StateStoredFixture`, `Core.EsFixture`. Процессы,
-которые в приложении поднимает его supervisor, стартуют в `test/test_helper.exs`.
+`async: true` по умолчанию. `async: false` — только по одной из трёх причин, и уборка у каждой
+своя:
 
-`async: true` по умолчанию. `async: false` — только когда тест трогает глобальное состояние
-(конфиг приложения, именованный процесс, консолидированные протоколы) и восстанавливает его
-в `on_exit`. Явный `async:` требует `Credo.Check.Refactor.PassAsyncInTestCases`.
+| Причина | Примеры | Уборка |
+|---|---|---|
+| глобальное состояние | app env, именованный процесс, консолидация протоколов, экспортёр OTel (`Core.OtelFixture.attach/0`) | MUST восстанавливать в `on_exit` |
+| общий sandbox | прогон или `await` проекции («Проекции»), процесс, стартующий внутри вызова («Процессы») | `on_exit` не нужен: DataCase при `async: false` ставит shared mode, запись откатывает sandbox |
+| гонка двух транзакций | участники коммитят мимо sandbox («Гонки транзакций») | MUST убирать запись в `on_exit` |
 
-Фикстуры — доменные конструкторы (`<Aggregate>.new`, `test/support/prim_fixture.ex`), не Ecto
-fixtures. Репозитории тестируются через behaviour: `@repo Config.repo!(Behaviour)`
-(`13-repos.md`, «DI»). Подмена реализации на тестовую — ключом в `config/test.exs`, а не
-другим call site.
+Проверяется: `Credo.Check.Refactor.PassAsyncInTestCases` — `async:` задаётся явно.
+
+Фикстуры MUST собирать агрегат доменными конструкторами (`<Aggregate>.new`,
+`test/support/prim_fixture.ex`), а не Ecto fixtures и не строками в БД мимо репозитория: иначе
+тест проверяет схему, а не домен. Фикстура event-sourced агрегата собирает состояние командами и
+пишет события `append`, а не строки в таблицу проекции: иначе тест проверяет проекцию, а не
+агрегат.
+
+Репозитории тестируются через behaviour: `@repo Config.repo!(Behaviour)` атрибутом в теле
+тест-модуля (`13-repos.md`, «DI»). Это `compile_env` под макросом — внутри `setup` и `test` он
+даёт ошибку. Подмена реализации на тестовую — ключом в `config/test.exs`, а не другим call site.
 При `shadow_copy?: true` контекст готовится как `Context.new() |> Repo.Sc.init()`.
+
+### Гонки транзакций
+
+Тест гонки двух транзакций (конкурентная запись одной версии, резерв одного ключа) MUST идти
+мимо sandbox: под ним все процессы теста делят одно соединение и одну транзакцию, а блокировка,
+которую ждёт второй участник, межтранзакционная.
+
+- Каждый участник MUST держать свою транзакцию в `Ecto.Adapters.SQL.Sandbox.unboxed_run/2`.
+- Тест MUST быть `async: false`: запись участников коммитится по-настоящему и видна соседям.
+- Записанное участниками тест MUST убирать сам в `on_exit`: отката sandbox у этой записи нет.
+- Когда коммитить по-настоящему должны и процессы, которых тест не порождает (дерево проекций),
+  MAY `Ecto.Adapters.SQL.Sandbox.mode(repo, :auto)` на модуль с возвратом `:manual` в `on_exit`.
+
+```elixir
+# плохо — участники в sandbox теста: соединение и транзакция у них одни, второму нечего ждать
+use MyApp.DataCase, async: true
+
+defp participant(test), do: Task.async(fn -> Transact.run(DAO, fn -> serve(test) end) end)
+
+# хорошо — участник на своём соединении мимо sandbox, запись убирается в on_exit
+use ExUnit.Case, async: false
+
+setup do
+  on_exit(fn -> Sandbox.unboxed_run(DAO, fn -> DAO.query!("TRUNCATE es_events") end) end)
+end
+
+defp participant(test) do
+  Task.async(fn -> Sandbox.unboxed_run(DAO, fn -> Transact.run(DAO, fn -> serve(test) end) end) end)
+end
+```
 
 ## Codec: round-trip
 
@@ -37,8 +77,8 @@ fixtures. Репозитории тестируются через behaviour: `@
 round-trip-проверку `entity |> dump() |> load() == entity`.
 
 - Примерный тест (один-два инстанса) — минимум.
-- Property-based (`stream_data`) — для типов с комбинаторикой полей (шаги сообщения,
-  настройки интегратора, nullable-поля): генератор доменных значений + `check all`.
+- Property-based (`stream_data`) — для типов с комбинаторикой полей (списки вариантов,
+  вложенные структуры, nullable-поля): генератор доменных значений + `check all`.
 
 Round-trip на текущем коде **не** ловит переименования: меняются обе стороны сразу.
 От этого защищают golden-фикстуры (см. ниже).
@@ -65,10 +105,11 @@ MUST равняться `entity |> OutCodec.dump() |> json_roundtrip()`.
 - `json_roundtrip` (`Jason.encode!` → `decode!`) обязателен: только он придаёт дампу ту
   форму, в которой jsonb реально возвращается из БД (строковые ключи, `Decimal` числом или
   строкой, `DateTime` строкой). Без него сверка идёт не с тем, что лежит в колонке.
-- Проверка перебирает **весь набор** источников формы (`for step <- Step.Codec.steps()`),
-  а не один пример: новый вариант нагрузки без объявленного формата обязан валить тест.
-- Отдельным тестом — полнота декларации: у каждой нагрузки все поля с форматируемым Prim
-  (`:uuid` / `:datetime` / `:date` / `:decimal`) объявлены (`wire_prims:`). Он даёт понятную
+- Проверка перебирает **весь набор** источников формы
+  (всё, что перечисляет пишущий кодек), а не один пример: новый вариант нагрузки без
+  объявленного формата обязан валить тест.
+- Отдельным тестом — полнота декларации: у каждой нагрузки поля с форматируемым Prim
+  (`:uuid` / `:datetime` / `:date` / `:decimal`) объявлены в спеке источника. Он даёт понятную
   ошибку раньше, чем расхождение дампов.
 
 ## Совместимость событий
@@ -125,9 +166,18 @@ Given из команд через `execute/2` SHOULD NOT: команда не �
 # хорошо
 import Core.Es.Aggregate.Test, only: [given: 3]
 
-state = given(%Account{id: id}, [{Event.Opened, payload}, Event.Frozen], by: by, at: at)
+state = given(%Account{id: id}, [Event.Opened.draft(payload), Event.Frozen.draft()], by: by, at: at)
 
 assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: by, at: at}, state)
+```
+
+Записанные события — `Core.Es.Store.Test.events!(<Aggregate>.Event.Codec, id)`: все события
+потока по возрастанию версии, прочитанные из `es_events` мимо репозитория агрегата и загруженные
+фасадом с апкастом; нечитаемая строка — `Core.Exc`. Им проверяется **запись** — usecase, процесс
+агрегата, фикстура с `append` — на DataCase; решения агрегата проверяются `decide/2` без БД.
+
+```elixir
+assert [%Event.Opened{}, %Event.Frozen{}] = Core.Es.Store.Test.events!(Account.Event.Codec, id)
 ```
 
 ## Проекции
@@ -141,15 +191,15 @@ assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: by, at: at}, state)
 ```elixir
 # плохо — clear/0 проверен вручную: таблица, добавленная в проекцию позже, в перечень не попадёт
 test "clear/0 очищает read-модель" do
-  :ok = AccountList.Projection.project(opened)
-  :ok = AccountList.Projection.clear()
-  assert DAO.aggregate(AccountList.Row, :count) == 0
+  :ok = Projection.project(opened)
+  :ok = Projection.clear()
+  assert DAO.aggregate(Account.ReadRepo.Pg.Schema, :count) == 0
 end
 
-# хорошо — test/my_app/domain/<bc>/<actor>/account_list/projection_case_test.exs
-defmodule MyApp.Domain.<BC>.<Actor>.AccountList.ProjectionCaseTest do
+# хорошо — test/my_app/domain/<bc>/common/projection_case_test.exs
+defmodule MyApp.Domain.<BC>.Common.ProjectionCaseTest do
   use Core.Es.ProjectionCase,
-    projection: MyApp.Domain.<BC>.<Actor>.AccountList.Projection,
+    projection: MyApp.Domain.<BC>.Common.Projection,
     async: false
 end
 ```
@@ -157,30 +207,36 @@ end
 Проекцию SHOULD проверять записью через репозиторий агрегата → прогоном
 `Core.Es.Projection.Test.run_until_idle/2` → чтением ReadRepo: так тест видит порядок событий
 разных агрегатов, пропуск необъявленных тегов и апкаст. Прогон MUST идти в
-`Core.DataCase, async: false`: блокировка пачки и строка чекпоинта держатся до конца
+`MyApp.DataCase, async: false`: блокировка пачки и строка чекпоинта держатся до конца
 sandbox-транзакции, и пачка соседнего теста получила бы `{:error, :locked}`.
 
 Прямой вызов `project/1` проекции MAY — в `async: true` на событиях из `Agg.execute/2` или
 `events` state-stored агрегата; хелпера сборки событий нет.
 
 ```elixir
+# плохо — чтение ReadRepo без прогона проекции: таблица пуста
+{:ok, {id, _version}} = Usecases.Account.open(params, context)
+{:ok, view} = Account.ReadRepo.get(id, :current, context)
+
 # плохо — прогон в async: true: пачку проекции держит sandbox-транзакция соседнего теста
-use Core.DataCase, async: true
+use MyApp.DataCase, async: true
 
-assert :ok = Core.Es.Projection.Test.run_until_idle(AccountList.Projection)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Projection)
 
-# хорошо — test/my_app/domain/<bc>/<actor>/account_list/projection_test.exs
-use Core.DataCase, async: false
+# хорошо — test/my_app/domain/<bc>/<actor>/usecases/account_test.exs
+use MyApp.DataCase, async: false
 
-:ok = Accounts.Open.call(params, context)
-assert :ok = Core.Es.Projection.Test.run_until_idle(AccountList.Projection)
-assert {:ok, %AccountList.View{status: :open}} = AccountList.ReadRepo.get(id, :current, context)
+{:ok, {id, _version}} = Usecases.Account.open(params, context)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Projection)
+assert {:ok, %Account.View{status: :open}} = Account.ReadRepo.get(id, :current, context)
 ```
 
-Usecase с `Projection.await/3` тест SHOULD гонять на тестовом дереве `enabled: false`,
-`await: :inline` из `config/test.exs`: `await` прогоняет проекцию до `:idle` в процессе теста,
-как `run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой
-тест — тоже `Core.DataCase, async: false`.
+Usecase с `Projection.await/3` тест MUST гонять на тестовом дереве `enabled: false`,
+`await: :inline` из `config/test.exs`: без него читателей нет, чекпоинт стоит и `await` не
+дождётся ничего, а с ним `await` прогоняет проекцию до `:idle` в процессе теста, как
+`run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой тест —
+тоже `MyApp.DataCase, async: false`. Живое дерево (`await: :poll`) MAY только у тестов самого
+ожидания в библиотеке: они проверяют опрос и сигнал чекпоинта, которых у `:inline` нет.
 
 ```elixir
 # плохо — тестовое дерево без await: :inline: читателей нет, чекпоинт стоит, await не дождётся
@@ -192,10 +248,8 @@ config :my_app, MyApp.Projections, enabled: false, await: :inline
 
 ## Enum: описания и внешние коды
 
-`test/my_app/enum_docs_test.exs` — один тест на всё приложение: находит модули `Core.Enum`
-(`values/0` + `cast_optional/1` без `new/1`) и сверяет таблицу значений в `@moduledoc`
-с `values/0`. Не описанное значение и описанное несуществующее валят сборку. Конвенция
-описаний — `11-domain.md`.
+Описание значений в `@moduledoc` (`11-domain.md`, «Описание значений в `@moduledoc`») держит
+ратчет приложения — `deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
 
 Enum с `codes:` MUST иметь round-trip по **всем** `values/0`
 (`from_code(to_code(value)) == {:ok, value}`) и проверку нескольких известных кодов
@@ -221,6 +275,8 @@ end
 
 Если у behaviour больше одной реализации (`.Pg` и `.Cached`), общий набор тестов MUST лежать
 в `test/support` и прогоняться на **каждой** реализации — иначе фасады расходятся молча.
+Специфика реализации (hit/miss кеша, реальная загрузка) остаётся в тестах самой реализации и в
+общий набор не переносится.
 
 ```elixir
 defmodule MyApp.ReadRepoContract do
@@ -233,25 +289,28 @@ end
 
 Маппинг DB-ограничения в доменный код — декларация, которая при расхождении с `changeset/2`
 не падает: наружу уходит прикладной `%Error{kind: :app, code: :write_failed}` (500 и лог)
-вместо доменного кода с текстом для клиента. Поэтому
-`test/<app>/repo/constraint_errors_test.exs` (один на приложение) сверяет декларации с реальностью:
+вместо доменного кода с текстом для клиента. Поэтому декларации MUST сверяться с реальностью
+тестом на все репозитории:
 
 1. каждый ключ `constraint_errors` объявлен в `changeset/2` (сверка по `error_type`, не по типу
    ограничения — `foreign_key_constraint/3` пишет `:foreign`);
 2. каждое ограничение `changeset/2` покрыто маппингом;
 3. имена ограничений (`unique_constraint(name:)`, ключи `children:`) существуют в БД —
    `pg_constraint` плюс имена индексов, `unique_index` строки в `pg_constraint` не создаёт;
-4. каждый FK дочерней таблицы, кроме колонки `fk:` на сам агрегат, покрыт маппингом.
+4. каждый FK дочерней таблицы, кроме колонки `fk:` на сам агрегат, покрыт маппингом;
+5. read-репозиторий (без `insert` / `update`) `constraint_errors` не объявляет: маппинг
+   срабатывает только на записи, а у схемы read-репозитория нет `changeset/2` (`13-repos.md`).
 
-Источник списка репозиториев — сгенерированные `__constraint_errors__/0` и
-`__children_constraint_errors__/0`, а не ручной перечень: новый репозиторий попадает под
-проверку сам.
+Источник списка репозиториев — сгенерированные `__constraint_errors__/0` (есть у каждого
+`use Core.Repo.Pg`) и `__children_constraint_errors__/0` (`use Core.Repo.Pg.StateStored`), а не
+ручной перечень: новый репозиторий попадает под проверку сам. Место теста в приложении —
+`deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
 
 ## ACL
 
 Каждый actor-репозиторий с `default_filters` под роль MUST иметь **negative**-тест: сущность
-чужого владельца недоступна (`{:error, :not_found}`), а не «просто не появилась в списке».
-Позитивный тест доступа сам по себе не доказывает, что фильтр работает.
+чужого владельца недоступна (`{:error, %Error{kind: :domain, code: :not_found}}`), а не «просто
+не появилась в списке». Позитивный тест доступа сам по себе не доказывает, что фильтр работает.
 
 ## Время
 
@@ -262,24 +321,18 @@ end
 Тест MUST NOT зависеть от реального «сейчас»: сравнения дат — с зафиксированным значением,
 переданным в конструктор.
 
-## Oban
-
-- Режим `testing: :manual`; постановка джобы проверяется `Oban.Testing.assert_enqueued/1`.
-- Воркер с внешним эффектом MUST иметь тест на ключ идемпотентности: две постановки с
-  одинаковыми `unique`-полями дают одну джобу (см. `14-events-outbox.md`).
-
 ## Процессы
 
 - `Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), pid)` для порождённых процессов, pid которых тест
   знает до их первого запроса.
 - Процесс, который стартует внутри вызова (процесс агрегата на id при `{Agg.Process, enabled:
-  true}`), тест MUST вести в shared mode sandbox — `async: false` на `Core.DataCase`
+  true}`), тест MUST вести в shared mode sandbox — `async: false` на `MyApp.DataCase`
   (`start_owner!(shared: not async)`), без `allow` и `$callers`: pid появляется посреди вызова,
   который уже ждёт его запроса, и поставить `allow` некому.
 - Циклы OTP проверять синхронным `run_once/1` (`Poller` / `Cleaner`), а не `sleep`
   в ожидании таймера.
-- Тест, меняющий глобальный конфиг или именованный синглтон, — `async: false` с
-  восстановлением в `on_exit`.
+- Именованный синглтон и глобальный конфиг — `async: false` с уборкой в `on_exit`
+  («Case-модули»).
 - Usecase с `Agg.Process.execute` тест потребителя SHOULD гонять на `{Agg.Process, enabled: false}`
   из дерева тестового окружения: команда идёт в процессе теста и в его sandbox, как вызов
   репозитория, без `allow`. Отметка старта глобальна — дерево ставит её один раз на прогон, а не
@@ -299,10 +352,10 @@ config :my_app, Account.Process, enabled: false
 # плохо — allow на дерево: процесс на id стартует внутри execute под DynamicSupervisor, allow его
 # не касается, и запрос процесса падает DBConnection.OwnershipError
 {:ok, tree} = start_supervised({Account.Process, enabled: true})
-Ecto.Adapters.SQL.Sandbox.allow(TestRepo, self(), tree)
+Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), tree)
 
-# хорошо — async: false: Core.DataCase ставит shared mode, соединение теста видят все процессы
-use Core.DataCase, async: false
+# хорошо — async: false: MyApp.DataCase ставит shared mode, соединение теста видят все процессы
+use MyApp.DataCase, async: false
 {:ok, _tree} = start_supervised({Account.Process, enabled: true})
 ```
 
@@ -315,8 +368,9 @@ use Core.DataCase, async: false
 
 ## Внешние зависимости
 
-- Тесты, которым нужен живой брокер, — под тегом (`:rabbit_stream`), исключённым по умолчанию
-  в `test/test_helper.exs`. Инфраструктура поднимается `make infra-up`.
+- Тесты, которым нужен живой брокер или хранилище, — под тегом, исключённым по умолчанию
+  в `test/test_helper.exs`, и гоняются явно. В библиотеке это `:rabbit_stream`
+  (`make test-stream`), инфраструктура поднимается `make infra-up`.
 - Конфигурационный контракт (`Core.Config`) проверяется отдельно, `test/core/config_test.exs`:
   такие тесты правят app env целиком, поэтому `async: false` с восстановлением в `on_exit`.
 
@@ -326,3 +380,4 @@ use Core.DataCase, async: false
 - События и идемпотентность — `14-events-outbox.md`
 - Кеш и контрактные тесты фасадов — `deps/core/docs/rules/app/16-caching.md`
 - OTP — `17-otp-concurrency.md`
+- Обвязка и ратчеты приложения — `deps/core/docs/rules/app/19-testing.md`

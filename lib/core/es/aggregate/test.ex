@@ -6,7 +6,7 @@ defmodule Core.Es.Aggregate.Test do
       import Core.Es.Aggregate.Test, only: [given: 3]
 
       test "закрыть замороженный счёт — Closed" do
-        state = given(%Account{id: id}, [{Event.Opened, payload}, Event.Frozen], by: by, at: at)
+        state = given(%Account{id: id}, [Event.Opened.draft(payload), Event.Frozen.draft()], by: by, at: at)
 
         assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: by, at: at}, state)
       end
@@ -18,7 +18,7 @@ defmodule Core.Es.Aggregate.Test do
   alias Core.Es
 
   @doc """
-  Состояние после результатов `decide/2` (`{Event.Mod, payload}` / `Event.Mod`).
+  Состояние после результатов `decide/2` (`Event.Mod.draft(payload)` / `Event.Mod.draft()`).
 
   События собираются, как в `execute/2`: `id` — новый, `aggregate_id` — `state.id`, версии — по
   порядку от `state.version`, `by` и `at` — из опций. `by:` и `at:` обязательны без значений по

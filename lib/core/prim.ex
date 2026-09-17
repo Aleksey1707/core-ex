@@ -3,8 +3,8 @@ defmodule Core.Prim do
   Билдер value object: `%Mod{value:}` + конвейер `cast → mutate → custom_mutate →
   validate → custom_validate`.
 
-  Опции `use`: `cast:`, `mutate:`, `validate:`, `custom_mutate:`, `custom_validate:`,
-  `name:`, `kind:` (обязателен), `type_opts:`, `pipeline_opts:`, `sensitive:`.
+  Опции `use`: обязательные `cast:`, `name:`, `kind:`; необязательные `mutate:`, `validate:`,
+  `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `sensitive:`.
   Типизированные обёртки — `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` /
   `Date` / `Compose`.
 

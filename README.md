@@ -118,7 +118,8 @@ config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYP
 
 Остальные настройки outbox (интервалы, размер батча, TTL) библиотека не читает: они
 приходят `opts`-ами в `Core.Outbox.Poller` / `Core.Outbox.Cleaner` от supervisor'а
-потребителя, поэтому храните их там, где вам удобно.
+потребителя. Где их держать и из каких env читать — конвенция приложения,
+`deps/core/docs/rules/app/14-events-outbox.md`, «Конфигурация».
 
 ### Реализации репозиториев
 
@@ -214,7 +215,7 @@ end
    таблицами — `Core.Es.Migration.delete_checkpoint/1`; библиотека строк сама не удаляет.
 
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
-   `:failed` в очередь (runbook в `docs/rules/14-events-outbox.md`). Задача поднимает
+   `:failed` в очередь (runbook в `deps/core/docs/rules/app/14-events-outbox.md`). Задача поднимает
    приложение потребителя и берёт репозиторий из `Core.Config.outbox_repo/0`.
 
 4. **DI репозиториев** — по конвенции, а не по конфигурации. Call site резолвит реализацию
@@ -346,9 +347,14 @@ end
 
 ## Имена метрик
 
-События Core называются `telemetry_prefix ++ suffix`. По умолчанию префикс — `[otp_app()]`,
-то есть `[:my_app, :outbox, :poller, :cycle]`. Если приложение переезжает на библиотеку
-с уже работающими дашбордами, задайте `telemetry_prefix` явно и сверьтесь с ними.
+Telemetry-события Core называются `telemetry_prefix ++ suffix`. По умолчанию префикс —
+`[otp_app()]`, то есть `[:my_app, :outbox, :poller, :cycle]`; он нужен собственным обработчикам
+telemetry приложения. Имена метрик от него не зависят: плагины `Core.*.PromEx` строят их через
+`PromEx.metric_prefix(otp_app, <плагин>)`, где `otp_app` — из `use PromEx` приложения
+(`my_app_prom_ex_outbox_poller_cycles_total`), а переопределяет его опция плагина
+`metric_prefix:`. Если приложение переезжает на библиотеку с уже работающими дашбордами,
+сверьтесь с ними по этим именам. Рекомендованные алерты подсистем —
+`docs/rules/21-observability.md`, «Рекомендованные алерты».
 
 У `[:outbox, :poller, :cycle]` метка `result` принимает значения `:processed` / `:retry` /
 `:idle` / `:error`. `:retry` — цикл дошёл до конца, но хоть одна запись пачки не

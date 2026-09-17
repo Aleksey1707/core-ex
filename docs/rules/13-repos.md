@@ -1,6 +1,6 @@
 # Репозитории
 
-- **Область.** `lib/core/repo/**`, `lib/core/es/**`; у потребителя — `<role>/<aggregate>/repo*`,
+- **Область.** `lib/core/repo/**`, `lib/core/es/**`; у потребителя — `<aggregate>/repo*`,
   `read_repo*`, `view.ex`, Ecto-схемы и Specs.
 - **Читать перед.** Новым репозиторием, Ecto-схемой или View; правкой `use Repo.Pg` /
   `Repo.Pg.StateStored` / `Es.Aggregate.Repo.Pg`, `constraint_errors`, `default_filters`;
@@ -14,43 +14,14 @@
 | Behaviour | `<BC>.Common.Repo`, `<Actor>.<Aggregate>.Repo` | `@callback` API; без SQL |
 | Pg impl | `*.Repo.Pg`, `*.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
 | Schema | `*.Repo.Pg.Schema` (+ nested `Schema.<Child>`, …) | Ecto schema; write — `to_entity`/`to_model` (+ bang), read — `to_view` |
-| View | `<Actor>.<Aggregate>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
+| View | `<Aggregate>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
 | Specs | `*.Repo.Pg.Specs` | `dynamic` / `from` query fragments |
 | Core | `Core.Repo`, `Core.Repo.Pg`, `Core.Repo.Pg.Children`, `Core.Repo.Sc` | генерация behaviour; generic CRUD; синхронизация дочерних строк; shadow copy |
 | Core (ES) | `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate.Repo`, `Core.Es.Aggregate.Repo.Pg`, `Core.Es.Aggregate.Process`, `Core.Repo.Pg.Schema`, `Core.Es.Store`, `Core.Es.Projection` | write-репо state-stored агрегата; behaviour и write-репо event-sourced агрегата; команда event-sourced агрегата; производные функции схемы; хранилище событий; проекция read-модели |
 
-Структура путей (target) — всё, что относится к сущности, лежит **внутри** её каталога;
-файлов вида `<aggregate>_repo.ex` и модулей вида `<Aggregate>Repo` не бывает:
-
-```text
-<role>/<aggregate>/repo.ex                   # write behaviour
-<role>/<aggregate>/repo/pg.ex                # use Repo.Pg.StateStored / Es.Aggregate.Repo.Pg (Repo.Pg — без событий)
-<role>/<aggregate>/repo/pg/schema.ex
-<role>/<aggregate>/repo/pg/schema/*.ex       # дочерние таблицы
-<role>/<aggregate>/repo/pg/specs.ex
-<role>/<aggregate>/view.ex                   # View + вложенный View.Codec (dump-only)
-<role>/<aggregate>/read_repo.ex              # read behaviour (:read + view:)
-<role>/<aggregate>/read_repo/pg.ex
-<role>/<aggregate>/read_repo/pg/schema.ex    # своя read-only Ecto-схема (to_view/1)
-<role>/<aggregate>/read_repo/pg/specs.ex
-<role>/<aggregate>/read_repo/cached.ex       # опционально: кеш-фасад
-<role>/<aggregate>/read_repo/invalidator.ex  # опционально: инвалидация по событиям
-<role>/<aggregate>/projection.ex             # use Core.Es.Projection — пишет таблицы, которые читает read_repo
-<aggregate>/outbox.ex                        # use Es.Outbox
-<aggregate>/process.ex                       # use Core.Es.Aggregate.Process — рядом с repo.ex event-sourced агрегата
-```
-
-`Outbox` — рядом с агрегатом (`common/<aggregate>/`), write-репо — в actor-срезе. Проекция —
-рядом с ReadRepo своей read-модели (`22-projections.md`).
-В actor-срезе каталог `<aggregate>/` — это namespace actor-domain (`<Actor>.<Aggregate>.…`,
-`10-architecture.md`): репозиторий, View и роль-специфичные операции живут в нём рядом.
-
-Schema MUST жить под `Repo.Pg.Schema`, не под `Repo.Schema`.
-
-Следствие для алиасов: короткое имя `Repo` теперь занято `Core.Repo` почти в каждом файле,
-поэтому доменный репозиторий MUST адресоваться через алиас агрегата (`alias …Common.Delivery` →
-`Delivery.Repo.Pg.Schema`), а отдельный `alias …Common.Delivery.Repo` — **MUST NOT**: он перебивает
-`alias Core.Repo` и ломает `use Repo.Pg` (`20-agreements.md`, «Алиасы модулей»).
+Раскладка этих модулей у потребителя — где лежат репозиторий, схема, Specs, View, `Outbox`,
+процесс агрегата и проекция, — `deps/core/docs/rules/app/13-repos.md`, «Раскладка»; алиас
+репозитория агрегата — `deps/core/docs/rules/app/20-agreements.md`, «Алиасы приложения».
 
 ## Read/Write репозитории
 
@@ -134,7 +105,7 @@ defmodule MyApp.Domain.<BC>.<Actor>.<Aggregate>.View do
     ],
     forms: [
       stage: [
-        code: [prim: Process.Stage.Code],
+        code: [prim: <Aggregate>.Stage.Code],
         started_at: [prim: <Aggregate>.Stage.StartedAt, optional: true]
       ]
     ]
@@ -162,13 +133,11 @@ end
   (`If-Match` → `Version.parse/1` → `get(id, version, context)`), а не в результате.
 - View **MUST NOT** попадать в write-путь: `insert` / `update` / `save` принимают агрегат.
   Собирать агрегат из View запрещено — он не проходил доменной валидации и не знает инвариантов.
-- Наименование: `<Actor>.<Aggregate>.View`, файл `<role>/<aggregate>/view.ex`. View принадлежит
-  actor-срезу, а не репозиторию: его видят behaviour, usecase, презентер и кеш. Форма View
-  роле-специфична — набор полей у разных акторов разный.
+- Имя модуля View и его файл — `deps/core/docs/rules/app/13-repos.md`, «Раскладка».
 - Генерируются `@enforce_keys`, `defstruct`, `@type t` (точный: `String.t()`, `DateTime.t()`,
   `Decimal.t()`, `pos_integer()`, `<Enum>.t()`), именованные `@type` форм, `new/1` (keyword),
   маркер `__view__/0` и вложенный `<Aggregate>.View.Codec` — dump-only плагин (`loadable: false`),
-  который регистрируется в `Codec.plugins()`. Презентер зовёт `OutCodec.dump(view)`
+  который регистрируется в реестре плагинов фасада. Презентер зовёт `OutCodec.dump(view)`
   (`deps/core/docs/rules/app/15-web-api.md`).
 - `to_view/1` SHOULD собирать представление литералом `%View{...}` — неизвестный ключ там ловит
   компилятор. `new/1` — для динамической сборки; он отвергает ключ, не объявленный в `fields:`
@@ -191,11 +160,11 @@ end
 внешнем. Перевод делает `Core.Codec.Redump` по спеке формы
 (`{:prim, Mod} | {:map, %{ключ => спека}} | {:list, спека} | {:tagged, %{тег => спека}}`).
 
-- Спеку объявляет **тот кодек, который эту wire-форму пишет** (`<X>.Codec.<форма>_redump_spec/0`),
-  а не View: кто задал формат, тот его и описывает.
-- Спека полиморфной нагрузки собирается из деклараций её источников, а не выписывается списком
-  (у шагов процесса — `wire_prims:` в `use Process.Step` → `Step.Codec.redump_specs/0`): иначе
-  новый вариант нагрузки молча останется в старом формате.
+- Спеку объявляет **тот кодек, который эту wire-форму пишет** (его функция
+  `<форма>_redump_spec/0`), а не View: кто задал формат, тот его и описывает. Дублировать форму
+  во View MUST NOT.
+- Спека полиморфной нагрузки собирается из деклараций её источников, а не выписывается списком:
+  иначе новый вариант нагрузки молча останется в старом формате.
 - Ссылка из View — `jsonb: {Модуль, :функция}`, вызов идёт в рантайме: compile-зависимости
   View на кодеки не появляется.
 - `jsonb:` типизируется `map()`. Массив нагрузок объявляется `list: [jsonb: {Мод, :спека}]` —
@@ -203,7 +172,8 @@ end
   **элемент**, а не список.
 - Redump тотален по значению (неизвестный тег, отсутствующий ключ, неприводимое значение —
   как есть) и строг по спеке: нераспознанная спека — ошибка программиста.
-- Обязателен контрактный тест «read-wire == агрегатный wire» (`19-testing.md`).
+- Форма MUST быть закрыта контрактным тестом «read-wire == агрегатный wire» (`19-testing.md`),
+  а не описана комментарием.
 
 ## Behaviour (`use Core.Repo`)
 
@@ -269,8 +239,8 @@ use Repo.Pg,
   ]
 ```
 
-`errors:` — модуль через родителя агрегата (`Draft.Errors`, `Product.Errors`, `User.Errors`), не
-leaf-alias `Errors`. Role `*.Repo.Pg` MUST NOT дублировать тексты ошибок.
+`errors:` — модуль через родителя агрегата (`<Aggregate>.Errors`), не leaf-alias `Errors`.
+Role `*.Repo.Pg` MUST NOT дублировать тексты ошибок.
 
 `constraint_errors:` — опционально; keyword `[constraint_type: [field: error_code]]`. Типы: `unique`
 / `foreign_key` / `check` / `exclusion`. Коды проверяются compile-time через `errors.domain/3`.
@@ -278,8 +248,22 @@ leaf-alias `Errors`. Role `*.Repo.Pg` MUST NOT дублировать текст
 Поле MUST соответствовать `*_constraint` в `changeset/2`: сверка идёт с `error_type` ошибки
 changeset, а не с типом ограничения (`foreign_key_constraint/3` пишет `:foreign`) — перевод
 делает макрос. Незаявленный в `changeset/2` маппинг молча не сработает, поэтому соответствие
-деклараций — и у агрегата, и у `children:` — проверяется тестом
-`test/<app>/repo/constraint_errors_test.exs` (`19-testing.md`).
+деклараций — и у агрегата, и у `children:` — проверяется тестом (`19-testing.md`,
+«`constraint_errors`»).
+
+Составной unique-индекс Ecto регистрирует на **первое** поле списка `unique_constraint/3` (если
+не задан `error_key:`), а сверка идёт по полю ошибки changeset: маппинг на остальные поля мёртв и
+MUST NOT объявляться.
+
+```elixir
+# changeset/2: unique_constraint(changeset, [:owner_id, :name])
+
+# плохо — ошибка changeset лежит на :owner_id, маппинг по :name не сработает никогда
+constraint_errors: [unique: [name: :already_exists]]
+
+# хорошо
+constraint_errors: [unique: [owner_id: :already_exists]]
+```
 
 Read-репозиторий — тот же макрос, другой декодер строки:
 
@@ -318,7 +302,7 @@ Read-репозиторий MUST иметь **собственную** Ecto-сх
   `shadow_copy?: true` — `Repo.Sc.put`.
 - Чтение read-репо → View через тотальный `to_view` (`Repo.Sc` не участвует).
 - Эталон Sc ключуется парой `{модуль сущности, id}` (`Repo.Sc.find(context, Entity, id)`): разные
-  агрегаты могут делить идентификатор (`User` и `UserRoles`).
+  агрегаты могут делить идентификатор (агрегат, чей id — id другого агрегата).
 - `Repo.Sc.init/1` / `clear/1` / `delete/1` возвращают контекст, и дальше работать нужно с
   возвращённым: контекст неизменяем, а старая копия держит уже удалённую ETS-таблицу (`put` / `find`
   по ней — no-op).
@@ -347,9 +331,15 @@ Read-репозиторий MUST иметь **собственную** Ecto-сх
 - `@primary_key {:id, :binary_id, autogenerate: false}`
 - `@foreign_key_type :binary_id`
 - Явные `field :created_at/:updated_at/:deleted_at, :utc_datetime` — **не** `timestamps()`
-- Аудит FK: `created_by_id` / `updated_by_id` / `deleted_by_id` → `belongs_to` UserSchema
 - Optimistic lock: integer `version`
+
+Только у схемы write-пути state-stored агрегата:
+
+- Аудит FK: `created_by_id` / `updated_by_id` / `deleted_by_id` → `belongs_to` UserSchema
 - Дочерние сущности — **отдельные таблицы** + `has_many`, **не** `embeds_*`
+
+Таблицы read-модели проекций им не подчиняются — jsonb на read-пути легален
+(`deps/core/docs/rules/app/13-repos.md`, «Проекции read-модели»).
 
 Обязательный API:
 
@@ -366,7 +356,7 @@ Bang-обёртки и `@type t` не пишутся руками — их да�
 блока `schema/2` (нужен `defstruct`):
 
 ```elixir
-schema "roles" do
+schema "<entities>" do
   # ...
 end
 
@@ -375,13 +365,13 @@ use Repo.Pg.Schema,
   id: Agg.ID
 ```
 
-`id:` — отдельная опция, не обязательно `<entity>.ID`: у `UserRoles` идентификатор агрегата —
-`User.ID`.
+`id:` — отдельная опция, не обязательно `<entity>.ID`: у агрегата, чей id — id другого
+агрегата, это Prim того агрегата (`<Other>.ID`).
 
 Режим `view:` — схема read-репозитория (`entity:` и `view:` взаимоисключающие):
 
 ```elixir
-schema "roles" do
+schema "<entities>" do
   # ...
 end
 
@@ -407,7 +397,7 @@ DB-only FK / JSON string-keys). Без `Prim.new` / ручной сборки st
 
 Когда какой вызов:
 
-- Свои строки / persist валидного domain (`use Repo.Pg`, Draft write, …) → bang
+- Свои строки / persist валидного domain (`use Repo.Pg`, write-путь агрегата, …) → bang
   (`to_entity!` / `to_model!`).
 - Dirty/infra (например Outbox `reserve_rows`) → safe (`to_entity` / `to_model`).
 
@@ -494,8 +484,13 @@ use Repo.Pg.StateStored,
 передали, и очистка после записи разошлась бы с эталоном. В шаги 1 и 2 идёт `written`, в шаг 3 —
 исходный агрегат: события нужны там непустыми.
 
-Непрерывность потока при записи не проверяется: поток state-stored агрегата законно начинается не
-с 1 и имеет разрывы (агрегат создан без события, мутация без события). Отказ `append` —
+`update` перед шагом 0 сверяет агрегат с эталоном `Repo.Sc`: состояние изменено, а событий нет —
+`ArgumentError`. Версию проверяет только `append` хранилища событий (`optimistic_lock` на строке
+агрегата нет), и мутация без события обошла бы эту проверку молча.
+
+Непрерывность потока при записи не проверяется: поток state-stored агрегата MAY начинаться не с 1
+(агрегат создан без события) и иметь разрывы — мутация без события, но только без эталона
+(`shadow_copy?: false` или агрегат в этом контексте не читался). Отказ `append` —
 `errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`, транзакция
 откатывается целиком («Хранилище событий»).
 
@@ -687,14 +682,17 @@ end)
 - `execute` — изменяющая, `:ok | {:error, Error.t()}`: `get(id, version, context)` →
   `Agg.execute/2` → `append` → `fun.(events)` одной транзакцией `Core.Config.dao/0`; процесс на id
   (`enabled: true`) после первой команды вместо `get` дочитывает хвост `refresh(state, version,
-  context)` от состояния последнего commit.
+  context)` от состояния последнего commit. При `enabled: false` команда идёт тем же путём в
+  вызывающем процессе, без процесса на id.
 - Колбэк `fun.(events)` → `:ok | {:error, _}` — сопутствующие записи (Oban, `DAO`) в транзакции
   команды, под ограничениями `Transact.run` (`20-agreements.md`, «Разделение изменения и
   чтения»): отказ колбэка откатывает и события, при повторе колбэк зовётся заново.
 - `:version_mismatch` из `append` при `:current` повторяется новой транзакцией до `retries:`;
   `%Version{}` мимо головы потока — `:version_mismatch` без повтора: клиент видел устаревшее
   состояние, и повтор его не исправит.
-- Внутри `Transact.run` не вызывается — `20-agreements.md`, «Разделение изменения и чтения».
+- Внутри `Transact.run` MUST NOT вызываться: транзакцию открывает сам `execute`, и откат его
+  попытки отменил бы внешнюю (`ArgumentError`; `20-agreements.md`, «Разделение изменения и
+  чтения (CQS)»).
 - Команда на несколько агрегатов MUST идти путём usecase → repo: процесс исполняет команду одного
   агрегата, а атомарность нескольких `append` даёт только одна транзакция usecase
   («Load/save агрегата — в одной функции», `20-agreements.md`).
@@ -718,36 +716,13 @@ Transact.run(DAO, fn ->
 end)
 ```
 
-## Role Repo vs common Repo.Pg
-
-| Kind | Location | Purpose |
-|---|---|---|
-| Common `*.Repo.Pg` | `<bc>/common/<aggregate>/repo/pg.ex` | Shared **write** (row + children + events). Не role-scoped |
-| Role `<Aggregate>.Repo` | `<actor>/<aggregate>/repo.ex`, … | Behaviour + ACL filters + CRUD reads via `use Repo.Pg` |
-
-Правила:
-
-- Role Repo **делегирует write** в common `Repo.Pg`, но имеет свои `default_filters` под ACL.
-- Узкий actor-repo может не иметь `insert` (только update/save).
-- Плоский state-stored агрегат с событиями: common write-репо — `use Core.Repo.Pg.StateStored`
-  (отдельный ручной модуль не нужен).
-- Event-sourced агрегат: только common write-репо — `use Core.Es.Aggregate.Repo.Pg`, role-обёрток
-  нет («Write event-sourced агрегата»).
-- Identity/simple BC: часто один `Common.Repo` без role wrapper.
-
-Делегирование:
-
-```elixir
-def insert(%Agg{} = agg, %Context{} = context, opts \\ []),
-  do: AggRepo.Pg.insert(agg, context, opts)
-```
-
 ## Хранилище событий (`Core.Es.Store`)
 
 Хранилище событий одно на приложение — таблица `es_events`, DDL — `Core.Es.Migration`; общее для
 event-sourced и state-stored агрегатов. Поток — тип агрегата (`type:` кодека событий) и
-`aggregate_id`, таблицы потоков нет. Глобальная позиция — пара `(xid, number)`: сортировать события
-по одному `number` MUST NOT, номер выдаётся до commit. Решение и цена —
+`aggregate_id`, таблицы потоков нет; своей таблицы событий (`<aggregate>_events`) и модуля
+`<Aggregate>.Event.Repo` у агрегата MUST NOT. Глобальная позиция — пара `(xid, number)`:
+сортировать события по одному `number` MUST NOT, номер выдаётся до commit. Решение и цена —
 `docs/adr/0008-shared-event-table-xid8-position.md`.
 
 `Core.Es.Store.append(event_codec, events, context, mismatch, opts)` пишет пачку событий нескольких
@@ -771,6 +746,10 @@ event-sourced и state-stored агрегатов. Поток — тип агре
   write-builder MUST возвращать `{:error, _}` от `append` из `Transact.run`, откатывая транзакцию.
 - Версии потока в пачке не по возрастанию (с `continuous?: true` — не подряд) и событие не из
   `tags:` кодека — исключение, а не `:version_mismatch`: это ошибка программиста.
+- Схема `es_events` в `Core.Es.Migration` меняется только аддитивно — новая nullable-колонка,
+  новый индекс `concurrently`; переименование и удаление колонок, изменение семантики нагрузки
+  MUST NOT: таблица append-only с исторической нагрузкой, а у потребителя её DDL накатывает его
+  собственная миграция (`deps/core/docs/rules/app/18-migrations.md`, «Таблицы библиотеки»).
 
 ```elixir
 # плохо — отказ проглочен: транзакция закоммитит строку агрегата и часть пачки
@@ -802,9 +781,9 @@ MUST NOT: «история» — имя экрана у потребителя (
   `Core.Es.Store.read_stream/5` (`@doc false`) звать из usecase MUST NOT: кодек и ID в ней —
   параметры, сборка их не сверяет, и ID другого агрегата молча даёт пустую страницу.
 - `page_stream` доступ не проверяет и `:not_found` не отдаёт: пустой поток — страница с
-  `count: 0`. Читающий usecase MUST до чтения проверить права по `Context` и существование
-  агрегата через `ReadRepo.get(id, :current, context)` с его `default_filters`; у event-sourced
-  агрегата без read-модели проверяются только роли.
+  `count: 0`. Читающий usecase MUST до чтения проверить права по `Context`, а существование
+  агрегата — авторитетным для этого агрегата источником
+  (`deps/core/docs/rules/app/13-repos.md`, «Страница потока»).
 - Элемент страницы — `Es.Event`, а не View (отступление от «Read (`<Aggregate>.ReadRepo`)»): Prim
   события не ужесточается, и проверенное на записи событие грузится —
   `docs/adr/0010-event-evolution-tag-upcast.md`. Наружу событие отдаёт презентер:
@@ -820,7 +799,7 @@ MUST NOT: «история» — имя экрана у потребителя (
 def history(%Agg.ID{} = id, limit, offset, %Context{} = context),
   do: @repo.page_stream(id, limit, offset, context)
 
-# хорошо — права и существование агрегата проверены до чтения потока
+# хорошо — права и существование агрегата (здесь авторитетна строка ReadRepo) проверены до чтения
 def history(%Agg.ID{} = id, limit, offset, %Context{} = context) do
   with {:ok, _view} <- @read_repo.get(id, :current, context) do
     @repo.page_stream(id, limit, offset, context)
@@ -841,14 +820,9 @@ Core.Es.Store.read_stream(Agg.Event.Codec, other_id, limit, offset, context)
 
 ## Наименование
 
-| Concern | Convention |
-|---|---|
-| Schema module | `…Repo.Pg.Schema` (+ nested leaf) |
-| Table | plural snake: `<entities>`, `<entity>_<children>`, `outbox` |
-| PK / FK | `:binary_id`; ids — UUID strings через `InCodec.dump/1` |
-| Soft delete | `deleted_at` / `deleted_by_id` + Specs `not_deleted` |
-| Events table | хранилище событий — `es_events`, колонки задаёт `Core.Es.Migration` |
-| Snapshots table | снапшоты event-sourced агрегатов — `es_snapshots`, колонки задаёт `Core.Es.Migration` |
+Имена схем и таблиц, ключи и soft delete — `deps/core/docs/rules/app/13-repos.md`,
+«Наименование»; таблицы библиотеки — `es_events` и `es_snapshots` («Хранилище событий»,
+«Снапшоты»), колонки задаёт `Core.Es.Migration`.
 
 ## DI
 
@@ -868,9 +842,10 @@ require Config
 @repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
 ```
 
-Реализация репозитория MUST лежать в `<Behaviour>.Pg` — это та же раскладка, что задаёт
-«Структура» ниже. Нестандартная реализация объявляется в app-env **потребителя**, под
-именем приложения из `config :core, otp_app:` (`10-architecture.md`):
+Реализация репозитория MUST лежать в `<Behaviour>.Pg` — та же раскладка, что задаёт
+`deps/core/docs/rules/app/13-repos.md`, «Раскладка». Нестандартная реализация объявляется в
+app-env **потребителя**, под именем приложения из `config :core, otp_app:`
+(`10-architecture.md`):
 
 ```elixir
 # config/config.exs потребителя — только при подмене
@@ -880,6 +855,18 @@ config :my_app, MyApp.Domain.Orders.Order.Repo, MyApp.Domain.Orders.Order.Repo.M
 Модуль-реализация проверяется на компиляции call site — и выведенный по конвенции, и
 заданный ключом: отсутствие даёт `CompileError`, а не `UndefinedFunctionError` на первом
 вызове. Цена — ребро в графе компиляции call site → реализация.
+
+Аргумент `repo!/1` MUST быть литералом модуля: имя реализации вычисляется на компиляции, и
+переменная (например, цикла) ему не годится — таблица реализаций выписывается поимённо.
+
+```elixir
+# плохо — переменная цикла: имя `<Behaviour>.Pg` на компиляции не вычислить
+for behaviour <- [Order.Repo, Invoice.Repo], do: Config.repo!(behaviour)
+
+# хорошо
+@order_repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
+@invoice_repo Config.repo!(MyApp.Domain.Orders.Invoice.Repo)
+```
 
 Инфраструктурный репозиторий самой библиотеки живёт по той же конвенции:
 `Core.Config.outbox_repo/0` (`config :core, Core.Outbox.Repo` — только при подмене).
@@ -893,13 +880,7 @@ elixir deps/core/scripts/boundary_lint.exs --consumer lib test
 
 ## Тесты
 
-- `use Core.DataCase, async: true` (в приложении — его `MyApp.DataCase`)
-- Sandbox: `Ecto.Adapters.SQL.Sandbox.start_owner!(repo, ...)` (в DataCase)
-- `@repo Config.repo!(Behaviour)` — тестировать через behaviour, а не реализацию
-- При `shadow_copy?: true`: `Context.new() |> Repo.Sc.init()`
-- Доменные фабрики (`<Actor>.User.new`, `<Aggregate>.new`, …), не Ecto fixtures
-- Outbox/процессы: при необходимости `Sandbox.allow(repo, self(), pid)`
-- Записанные события агрегата — `Core.Es.Store.Test.events!(Agg.Event.Codec, id)`
+Тесты репозиториев — `19-testing.md`.
 
 ## Связанные правила
 

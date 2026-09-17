@@ -10,29 +10,22 @@
 
 `:core` — библиотека, подключаемая git-зависимостью к нескольким разным приложениям.
 Она даёт фундамент (`Prim`, `Codec`, `Repo`, `Es`, `Outbox`, `Mq`, `PubSub`, `Helper`,
-`Web`, PromEx-плагины); домен, роутер с эндпоинтом и композиционный корень остаются
-у потребителя.
-
-| Namespace | Где живёт |
-|---|---|
-| `Core.*` | эта библиотека |
-| `MyApp.Codec.*` | потребитель: Prim-профили и entity-фасады поверх `Core.Codec` |
-| `MyApp.Domain.<BC>.*` | потребитель: агрегаты, репозитории, usecases |
-| `MyApp.DAO` | потребитель: единственный `Ecto.Repo` |
-| `MyApp.Application` | потребитель: композиционный корень, поднимает процессы Core |
+`Web`, PromEx-плагины) в пространстве `Core.*`; домен, роутер с эндпоинтом и композиционный
+корень остаются у потребителя. Раскладка `MyApp.*` — `deps/core/docs/rules/app/10-architecture.md`,
+«Top-level namespaces».
 
 ## Главный инвариант: библиотека не знает потребителя
 
 `Core` MUST NOT содержать ссылок на конкретное приложение: ни на его модули, ни на его
 имя OTP-приложения, ни на его конфигурационные ключи. Всё, что нужно от хоста, приходит
-одним из четырёх путей:
+одним из пяти путей:
 
 | Что | Как получает зависимость |
 |---|---|
 | Инфра-синглтоны (`dao`, `codec`, `tz`, ключ шифрования, реализация `Outbox.Repo`) | `Core.Config` — `config :core, ...` |
 | Реализации репозиториев (доменных и `Outbox.Repo`) | конвенция `<Behaviour>.Pg`; ключ конфигурации — только при подмене |
 | OTP-процессы (`Outbox.Poller`, `Outbox.Cleaner`, `Mq.Stream.*`, `PubSub.MqSubscriberReliable`) | `opts` от supervisor'а потребителя |
-| Макросы (`Repo.Pg`, `Repo.Pg.Schema`, `Prim.DateTime`, `Codec.Facade`) | `use`-опция, fallback → `Core.Config` |
+| Макросы (`Repo.Pg`, `Repo.Pg.Schema`, `Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`, `Es.Outbox`, `Es.Projection`, `Prim.DateTime`, `Prim.Date`) | `use`-опция (`repo:`, `codec:`, `tz:`), без неё — `Core.Config` в рантайме |
 | PromEx-плагины | списки процессов / размеров — MFA-провайдер в `opts` плагина |
 
 **Контроль — линтер, а не компилятор** (boundary здесь бесполезен: приложение одно).
@@ -58,29 +51,33 @@ AST `lib/**/*.ex` и проверяет три правила:
 и всегда раньше `runtime.exs`. Поэтому:
 
 - значения `Core.Config` резолвятся **в рантайме**, а не модульными атрибутами;
-- макрос, которому нужен фасад или репозиторий, при отсутствии явной опции подставляет
-  **вызов** (`Core.Config.codec()` / `Core.Config.dao()` / `Core.Config.outbox_repo()`),
-  а не запечённый модуль: резолв делает `Core.Helper.Opts.module_or_config!/4`
-  (`Repo.Pg.Schema`, `Repo.Pg`, `Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`, `Es.Outbox`,
-  `Es.Projection`);
+- макрос, которому нужен фасад или `Ecto.Repo`, при отсутствии явной опции подставляет
+  **вызов** (`Core.Config.codec()` / `Core.Config.dao()`), а не запечённый модуль: резолв
+  делает `Core.Helper.Opts.module_or_config!/4` (`Repo.Pg.Schema`, `Repo.Pg.StateStored`,
+  `Es.Aggregate.Repo.Pg`, `Es.Outbox`, `Es.Projection`); `Repo.Pg` хранит `repo:` как есть и
+  берёт DAO на каждом вызове — `Core.Repo.Pg.dao/1`;
+- реализация outbox-репозитория — вызов `Core.Config.outbox_repo()` в момент записи
+  (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не опция макроса;
+- `tz` у `Prim.DateTime` / `Prim.Date` без опции `tz:` — вызов `Core.Config.tz()` в теле
+  функции (`now/0`, `today/0`);
 - имена telemetry-событий строятся вызовом `Core.Telemetry.event/1`, а не атрибутом:
   префикс задаёт потребитель (`config :core, telemetry_prefix: [...]`).
 
 Нарушение выглядит одинаково: `mix deps.compile core` падает с
 `Core.Config: не задан config :core, ...` у любого потребителя.
 
-Проверяется: `test/core/macro_config_test.exs` — компилирует эти макросы со снятыми
-ключами `:core`.
+Проверяется: `test/core/macro_config_test.exs` — компилирует макросы репозиториев, `Es.Outbox`
+и `Es.Projection` со снятыми ключами `:core`.
 
 ## Контракт конфигурации
 
 ```elixir
 config :core,
-  otp_app: :my_app,          # обязателен: app-env с DI-ключами потребителя
+  otp_app: :my_app,          # обязателен: app-env с DI-ключами потребителя; читается на компиляции call site
   dao: MyApp.DAO,            # обязателен
   codec: MyApp.Codec.Internal, # обязателен
   tz: "Etc/UTC",             # опционален, дефолт "Etc/UTC"
-  telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]
+  telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]; префикс имён telemetry-событий
 
 config :core, Core.Outbox, poller_name: MyApp.Outbox.Poller
 config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
@@ -109,8 +106,10 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   MUST попадать в `elixirc_options: [no_warn_undefined: [...]]` в `mix.exs`;
 - новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.ReaderReliable` —
   как в библиотеке, так и на стороне потребителя;
-- у адаптера MUST быть `ensure_available!/0` (образец — `Core.Mq.Stream`): отличает
-  «клиента нет в deps» от «клиент есть, но `core` собран без него»;
+- у адаптера MUST быть `ensure_available!/0` на модуле брокера, делегирующая общей проверке
+  `Core.Mq.Client.ensure_available!/1` строкой опций, а не копией `cond` (образцы —
+  `Core.Mq.Stream`, `Core.Mq.Kafka`): отличает «клиента нет в deps» от «клиент есть, но `core`
+  собран без него»;
 - инвариант «библиотека собирается без клиентов» держится на сборке без них: собственные
   тесты библиотеки его не ловят, в них оба клиента есть всегда. Тот же приём —
   у `ecto_sql` (`if Code.ensure_loaded?(Postgrex) do` вокруг `Ecto.Adapters.Postgres.Connection`).
@@ -158,12 +157,33 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 `Core.Web.*` возвращает **данные**: map конверта и кортеж ответа. Ни `Plug.Conn`, ни
 `Phoenix.Controller` в них не участвуют (исключение — `MetricsPlug`, он и есть плаг).
 
-У потребителя остаются: роутер, эндпоинт, контроллеры, `FallbackController` (тонкая обёртка
-над `ErrorMapper` + `Logger`), OpenApiSpex-схемы и `ApiSpec`, плаги аутентификации
-(они ходят в его домен), презентеры агрегатов.
+Что остаётся у потребителя (роутер, эндпоинт, контроллеры, `FallbackController`, схемы, плаги,
+презентеры) — `deps/core/docs/rules/app/15-web-api.md`.
 
-Правило 401 живёт в `ErrorMapper`: наружу уходит константный текст независимо от причины,
-причина — только в лог (`Error.format_chain/1`).
+`Core.Web.ErrorMapper.map/2` — чистая функция: `{статус, код конверта, текст, уровень лога}`.
+`Logger` зовёт потребитель по возвращённому уровню (`nil` — не логировать): так таблица остаётся
+запросом и проверяется тестом построчно.
+
+| Ошибка | Статус | Код | Текст | Лог |
+|---|---|---|---|---|
+| `%Error{kind: :domain, code: :version_mismatch}` | 412 | `:diff_version` | `message` | — |
+| `%Error{kind: :domain, code: :access_denied}` | 403 | `:error` | `message` | — |
+| `%Error{code: c}` любого `kind`, `c` в `auth_codes:` | 401 | `:auth_error` | константа | `:debug` |
+| `%Error{kind: :domain}` | 400 | `:domain_error` | `message` | — |
+| `%Error{kind: :app}` с любым `code` | 500 | `:critical` | шаблон | `:error` |
+| прочее (не `%Error{}`) | 500 | `:critical` | шаблон | `:error` |
+
+- Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту показывать
+  нельзя, и она обязана попасть в лог (`12-errors.md`).
+- На 401 наружу MUST уходить константный текст независимо от причины: разные тексты позволяют
+  перебирать учётки, сессии и токены. Причина — только в лог (`Error.format_chain/1`).
+- Опции: `auth_codes:` (дефолт `~w(unauthorized auth_failed invalid_token session_not_found)a`),
+  `unauthorized_message:`, `critical_message:`.
+- Своя строка таблицы — клоза `map/1` маппера приложения. Свои клозы MUST объявляться **перед**
+  делегированием в `Core.Web.ErrorMapper.map/2`: `map/2` не макрос и не behaviour, и порядок
+  клоз — это приоритет строк.
+
+Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно.
 
 Расширение под потребителя — тремя независимыми шагами, каждый нужен только по надобности:
 
