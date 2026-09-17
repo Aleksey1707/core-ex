@@ -1,0 +1,137 @@
+Compiling 4 files (.ex)
+    warning: unknown key .missing_field in expression:
+
+        local.missing_field
+
+    the given type does not have the given key:
+
+        dynamic(%App.Local{n: term()})
+
+    where "local" was given the type:
+
+        # type: dynamic(%App.Local{})
+        # from: lib/app/proto.ex:10:12
+        local
+
+    type warning found at:
+    │
+ 10 │   def dump(local), do: local.missing_field
+    │                              ~~~~~~~~~~~~~
+    │
+    └─ lib/app/proto.ex:10:30: App.Proto.App.Local.dump/1
+
+    warning: incompatible types given to App.Local.to_int/1:
+
+        App.Local.to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  2 │   def local_direct, do: App.Local.to_int("x")
+    │                                   ~
+    │
+    └─ lib/app/caller.ex:2:35: App.Caller.local_direct/0
+
+    warning: incompatible types given to App.Facade.to_int_guarded/1:
+
+        App.Facade.to_int_guarded("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  4 │   def local_via_guarded_facade, do: App.Facade.to_int_guarded("x")
+    │                                                ~
+    │
+    └─ lib/app/caller.ex:4:48: App.Caller.local_via_guarded_facade/0
+
+    warning: incompatible types given to DepLib.to_int/1:
+
+        DepLib.to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  6 │   def dep_direct, do: DepLib.to_int("x")
+    │                              ~
+    │
+    └─ lib/app/caller.ex:6:30: App.Caller.dep_direct/0
+
+    warning: incompatible types given to App.Facade.dep_to_int/1:
+
+        App.Facade.dep_to_int("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+  7 │   def dep_via_app_facade, do: App.Facade.dep_to_int("x")
+    │                                          ~
+    │
+    └─ lib/app/caller.ex:7:42: App.Caller.dep_via_app_facade/0
+
+    warning: the following clause will never match:
+
+        :error ->
+
+    because it attempts to match on the result of:
+
+        App.Local.status()
+
+    which has type:
+
+        dynamic(:ok)
+
+    type warning found at:
+    │
+ 13 │       :error -> :never
+    │       ~~~~~~~~~~~~~~~~
+    │
+    └─ lib/app/caller.ex:13: App.Caller.local_status/0
+
+    warning: the following clause will never match:
+
+        :error ->
+
+    because it attempts to match on the result of:
+
+        App.Facade.dep_status()
+
+    which has type:
+
+        dynamic(:ok)
+
+    type warning found at:
+    │
+ 27 │       :error -> :never
+    │       ~~~~~~~~~~~~~~~~
+    │
+    └─ lib/app/caller.ex:27: App.Caller.dep_status_via_app_facade/0
+
+Generated app app

@@ -1,0 +1,277 @@
+    warning: this clause cannot match because a previous clause at line 44 matches the same pattern as this clause
+    │
+ 45 │   def redundant(%Evt{}), do: 2
+    │       ~
+    │
+    └─ e01_basics.ex:45:7
+
+    warning: incompatible types given to Integer.to_string/1:
+
+        Integer.to_string(x)
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    where "x" was given the types:
+
+        # type: binary()
+        # from: e01_basics.ex:8:18
+        x
+
+        # type: binary()
+        # from: e01_basics.ex:8:26
+        is_binary(x)
+
+    type warning found at:
+    │
+  8 │   def stdlib_arg(x) when is_binary(x), do: Integer.to_string(x)
+    │                                                    ~
+    │
+    └─ e01_basics.ex:8:52: E01.stdlib_arg/1
+
+    warning: expected a tuple with at least 3 elements in Kernel.elem/2:
+
+        elem(t, 2)
+
+    the given type does not have the given index:
+
+        dynamic({term(), term()})
+
+    where "t" was given the type:
+
+        # type: dynamic({term(), term()})
+        # from: e01_basics.ex:14:26
+        {_, _} = t
+
+    type warning found at:
+    │
+ 14 │   def tuple_index({_, _} = t), do: elem(t, 2)
+    │                                    ~
+    │
+    └─ e01_basics.ex:14:36: E01.tuple_index/1
+
+    warning: the following clause will never match:
+
+        "str" ->
+
+    because it attempts to match on the result of:
+
+        x
+
+    which has type:
+
+        integer()
+
+    type warning found at:
+    │
+ 18 │       "str" -> :never
+    │       ~~~~~~~~~~~~~~~
+    │
+    └─ e01_basics.ex:18: E01.never_match/1
+
+    warning: this guard will never succeed:
+
+        is_integer(x) and is_binary(x)
+
+    because it returns type:
+
+        false
+
+    where "x" was given the type:
+
+        # type: integer()
+        # from: e01_basics.ex:23:27
+        is_integer(x)
+
+    type warning found at:
+    │
+ 23 │   def guard_never(x) when is_integer(x) and is_binary(x), do: :never
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e01_basics.ex:23: E01.guard_never/1
+
+    warning: incompatible types in binary construction:
+
+        <<..., x::binary>>
+
+    got type:
+
+        integer()
+
+    but expected type:
+
+        binary()
+
+    where "x" was given the types:
+
+        # type: integer()
+        # from: e01_basics.ex:28:21
+        x
+
+        # type: integer()
+        # from: e01_basics.ex:28:29
+        is_integer(x)
+
+    type warning found at:
+    │
+ 28 │   def binary_concat(x) when is_integer(x), do: "a" <> x
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e01_basics.ex:28: E01.binary_concat/1
+
+    warning: comparison between distinct types found:
+
+        e < %Date{..., year: 2020, month: 1, day: 1}
+
+    given types:
+
+        dynamic(%E01.Evt{}) < %Date{
+          year: integer(),
+          month: integer(),
+          day: integer(),
+          calendar: Calendar.ISO
+        }
+
+    where "e" was given the type:
+
+        # type: dynamic(%E01.Evt{})
+        # from: e01_basics.ex:30:22
+        %E01.Evt{} = e
+
+    While Elixir can compare across all types, you are comparing across types which are always disjoint, and the result is either always true or always false
+
+    type warning found at:
+    │
+ 30 │   def compare(%Evt{} = e), do: e < ~D[2020-01-01]
+    │                                  ~
+    │
+    └─ e01_basics.ex:30:34: E01.compare/1
+
+    warning: incompatible types given to Map.fetch!/2:
+
+        Map.fetch!(v, :k)
+
+    given types:
+
+        -dynamic(binary() or integer())-, :k
+
+    but expected one of:
+
+        map(), term()
+
+    where "v" was given the type:
+
+        # type: dynamic(binary() or integer())
+        # from: e01_basics.ex:38:7
+        v =
+          if c do
+            1
+          else
+            "a"
+          end
+
+    type warning found at:
+    │
+ 39 │     Map.fetch!(v, :k)
+    │         ~
+    │
+    └─ e01_basics.ex:39:9: E01.dynamic_disjoint/1
+
+    warning: incompatible types given to Map.fetch!/2:
+
+        Map.fetch!(%{a: 1}, :b)
+
+    the map:
+
+        %{a: integer()}
+
+    does not have all required keys:
+
+        :b
+
+    therefore this function will always raise
+
+    type warning found at:
+    │
+ 42 │   def fetch_bang, do: Map.fetch!(%{a: 1}, :b)
+    │                           ~
+    │
+    └─ e01_basics.ex:42:27: E01.fetch_bang/0
+
+    warning: the following clause is redundant:
+
+        def redundant(%E01.Evt{})
+
+    it has type:
+
+        %E01.Evt{}
+
+    previous clauses have already matched on the following types:
+
+        %E01.Evt{}
+
+    │
+ 45 │   def redundant(%Evt{}), do: 2
+    │       ~
+    │
+    └─ e01_basics.ex:45:7: E01.redundant/1
+
+    warning: unknown key .amout in expression:
+
+        e.amout
+
+    the given type does not have the given key:
+
+        dynamic(%E01.Evt{amount: term()})
+
+    where "e" was given the type:
+
+        # type: dynamic(%E01.Evt{})
+        # from: e01_basics.ex:10:27
+        %E01.Evt{} = e
+
+    type warning found at:
+    │
+ 10 │   def struct_field(%Evt{} = e), do: e.amout
+    │                                       ~~~~~
+    │
+    └─ e01_basics.ex:10:39: E01.struct_field/1
+
+    warning: unknown key .b in expression:
+
+        %{a: 1}.b
+
+    the given type does not have the given key:
+
+        %{a: integer()}
+
+    type warning found at:
+    │
+ 12 │   def map_key, do: %{a: 1}.b
+    │                            ~
+    │
+    └─ e01_basics.ex:12:28: E01.map_key/0
+
+    warning: incompatible types given to priv/1:
+
+        priv("s")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 25 │   def local_private, do: priv("s")
+    │                          ~
+    │
+    └─ e01_basics.ex:25:26: E01.local_private/0

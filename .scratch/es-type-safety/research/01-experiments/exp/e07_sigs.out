@@ -1,0 +1,21 @@
+JSON:decode!/1 [infer, 1 clause(s), domain nil]
+    (binary() -> dynamic())
+Access:get/2 [infer, 3 clause(s), domain set]
+    (%{..., __struct__: atom()} or nil or non_struct_map(), term() -> dynamic())
+    (empty_list() or non_empty_list(term(), term()), atom() -> dynamic())
+    (empty_list() or non_empty_list(term(), term()), term() -> none())
+Keyword:get/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), atom() -> dynamic())
+Keyword:fetch!/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), atom() -> dynamic())
+Enum:map/2 [infer, 2 clause(s), domain set]
+    (not %Range{}, term() -> dynamic())
+    (%Range{}, term() -> dynamic(empty_list() or non_empty_list(term(), term())))
+Enum:at/2 [infer, 1 clause(s), domain nil]
+    (term(), integer() -> dynamic())
+Enum:reduce/3 [infer, 1 clause(s), domain set]
+    (term(), term(), term() -> dynamic())
+String:upcase/1 [infer, 1 clause(s), domain nil]
+    (binary() -> dynamic() or binary())
+Map:get/2 [infer, 1 clause(s), domain nil]
+    (map(), term() -> dynamic())

@@ -1,0 +1,48 @@
+Blind.Account:execute/2 [infer, 1 clause(s), domain nil]
+    (%Blind.Account{}, %Blind.Account.Cmd.Close{} or %Blind.Account.Cmd.Freeze{} or %Blind.Account.Cmd.Open{} or
+  %Blind.Account.Cmd.Rename{} or
+  %{
+    ...,
+    __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Freeze or Blind.Account.Cmd.Rename
+  } -> dynamic(
+  {:error, %Core.Error{}} or
+    {:ok, {empty_list() or non_empty_list(term(), term()), %Blind.Account{}}}
+))
+Blind.NeverFails:execute/2 [infer, 1 clause(s), domain nil]
+    (%Blind.NeverFails{}, %Blind.Order.Cmd.Cancel{} -> dynamic(
+  {:error, term()} or {:ok, {empty_list() or non_empty_list(term(), term()), %Blind.NeverFails{}}}
+))
+Blind.AlwaysFails:execute/2 [infer, 1 clause(s), domain nil]
+    (%Blind.AlwaysFails{}, %Blind.Order.Cmd.Place{} -> dynamic({:error, %Core.Error{}} or {:ok, {term(), term()}}))
+Blind.Account:fold/2 [infer, 1 clause(s), domain nil]
+    (%Blind.Account{}, empty_list() or non_empty_list(term(), term()) -> dynamic(%Blind.Account{}))
+Blind.Account.Repo.Pg:get/3 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %Core.Context{} -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, %Blind.Account{}}))
+Blind.Account.Repo.Pg:refresh/3 [infer, 1 clause(s), domain nil]
+    (%Blind.Account{}, %{..., __struct__: Core.Version} or :current, %Core.Context{} -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, %Blind.Account{}}))
+Blind.Account.Repo.Pg:append/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), %Core.Context{} -> dynamic(:ok or {:error, term()}))
+Blind.Account.Process:execute/4 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %{..., __struct__: atom()}, %Core.Context{} -> dynamic(:ok or {:error, term()}))
+Blind.Account.ID:new/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic(%Blind.Account.ID{}))
+Core.Version:new/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic(%Core.Version{}))
+Core.Es.Event.At:now!/0 [infer, 1 clause(s), domain nil]
+    ( -> dynamic(%Core.Es.Event.At{}))
+Blind.Account.Event.Codec:draft/1 [infer, 4 clause(s), domain set]
+    (Blind.Account.Event.Closed -> Blind.Account.Event.Closed)
+    (Blind.Account.Event.Frozen -> Blind.Account.Event.Frozen)
+    (%Blind.Account.Event.Opened.Payload{} -> dynamic({Blind.Account.Event.Opened, %Blind.Account.Event.Opened.Payload{}}))
+    (%Blind.Account.Event.Renamed.Payload{} -> dynamic({Blind.Account.Event.Renamed, %Blind.Account.Event.Renamed.Payload{}}))
+Blind.Account:decide/2 [infer, 7 clause(s), domain set]
+    (%Blind.Account.Cmd.Open{}, %Blind.Account{version: nil} -> dynamic({:ok, non_empty_list(term())}))
+    (%Blind.Account.Cmd.Open{}, %Blind.Account{version: %Core.Version{}} -> dynamic({:error, term()}))
+    (%{
+  ...,
+  __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Freeze or Blind.Account.Cmd.Rename
+}, %Blind.Account{version: term()} -> dynamic({:error, term()}))
+    (%Blind.Account.Cmd.Rename{}, %Blind.Account{} -> {:ok, empty_list()})
+    (%Blind.Account.Cmd.Freeze{} or %Blind.Account.Cmd.Rename{}, %Blind.Account{status: :open} -> dynamic({:ok, non_empty_list(term())}))
+    (%Blind.Account.Cmd.Close{}, %Blind.Account{status: :frozen} -> dynamic({:ok, non_empty_list(term())}))
+    (%Blind.Account.Cmd.Close{}, %Blind.Account{status: :open} and not %Blind.Account{version: nil} -> dynamic())

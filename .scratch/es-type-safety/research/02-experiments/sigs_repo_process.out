@@ -1,0 +1,64 @@
+Blind.Account.Repo:__es_aggregate_repo__/0 [infer, 1 clause(s), domain nil]
+    ( -> %{aggregate: Blind.Account, id: Blind.Account.ID})
+Blind.Account.Repo.Pg:get/3 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %Core.Context{} -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Blind.Account.Repo.Pg:get/4 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Blind.Account.Repo.Pg:get_many/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), %Core.Context{} -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Blind.Account.Repo.Pg:get_many/3 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Blind.Account.Repo.Pg:append/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), %Core.Context{} -> dynamic())
+Blind.Account.Repo.Pg:append/3 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Blind.Account.Repo.Pg:refresh/3 [infer, 1 clause(s), domain nil]
+    (%Blind.Account{}, %{..., __struct__: Core.Version} or :current, %Core.Context{} -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Blind.Account.Repo.Pg:refresh/4 [infer, 1 clause(s), domain nil]
+    (%Blind.Account{}, %{..., __struct__: Core.Version} or :current, %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Core.Es.Aggregate.Repo.Pg:get/5 [infer, 1 clause(s), domain nil]
+    (%{
+  ...,
+  aggregate: %{..., __struct__: atom()} or atom(),
+  snapshot: %{..., every: term()} or nil,
+  type: term()
+}, term(), %{..., __struct__: Core.Version} or :current, %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Core.Es.Aggregate.Repo.Pg:get_many/4 [infer, 1 clause(s), domain nil]
+    (%{..., aggregate: term(), id: term(), snapshot: %{..., every: term()} or nil, type: term()}, empty_list() or non_empty_list(term(), term()), %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Core.Es.Aggregate.Repo.Pg:append/4 [infer, 2 clause(s), domain set]
+    (term(), empty_list(), %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> :ok)
+    (%{..., dao: term()}, non_empty_list(term(), term()), %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Core.Es.Aggregate.Repo.Pg:refresh/5 [infer, 1 clause(s), domain nil]
+    (%{..., snapshot: %{..., every: term()} or nil, type: term()}, term(), %{..., __struct__: Core.Version} or :current, %Core.Context{}, empty_list() or non_empty_list(term(), term()) -> dynamic({:error, %Core.Error{code: :version_mismatch}} or {:ok, term()}))
+Blind.Account.Process:execute/4 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %{..., __struct__: atom()}, %Core.Context{} -> dynamic())
+Blind.Account.Process:execute/5 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %{..., __struct__: atom()}, %Core.Context{}, nil or (none() -> term()) -> dynamic())
+Blind.Account.Process:execute/6 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %{..., __struct__: Core.Version} or :current, %{..., __struct__: atom()}, %Core.Context{}, nil or (none() -> term()), empty_list() or non_empty_list(term(), term()) -> dynamic())
+Blind.Account.Process:child_spec/1 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()) -> dynamic(%{
+  id: atom(),
+  start: {Core.Es.Aggregate.Process, :start_link, non_empty_list(term())},
+  type: :supervisor
+}))
+Blind.Account.Process:watch_list/1 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()) -> dynamic(list(%{component: binary(), name: atom()})))
+Blind.Account.Process:__es_aggregate_process__/0 [infer, 1 clause(s), domain nil]
+    ( -> %{
+  aggregate: Blind.Account,
+  registry: Blind.Account.Process.Registry,
+  repo: Blind.Account.Repo.Pg,
+  supervisor: Blind.Account.Process.Supervisor,
+  type: binary()
+})
+Core.Es.Aggregate.Process:execute/4 [infer, 1 clause(s), domain nil]
+    (atom(), %{..., type: term()}, %{..., command: %{..., __struct__: term()}, id: term()}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Core.Es.Aggregate.Process:child_spec/3 [infer, 1 clause(s), domain nil]
+    (atom(), term(), empty_list() or non_empty_list(term(), term()) -> dynamic(%{
+  id: atom(),
+  start: {Core.Es.Aggregate.Process, :start_link, non_empty_list(term())},
+  type: :supervisor
+}))
+Core.Es.Aggregate.Process:watch_list/3 [infer, 1 clause(s), domain nil]
+    (atom(), term(), empty_list() or non_empty_list(term(), term()) -> dynamic(list(%{component: binary(), name: atom()})))

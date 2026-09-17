@@ -1,0 +1,113 @@
+    warning: incompatible types given to Integer.to_string/1:
+
+        Integer.to_string("not an int")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 38 │   use E04.Using, id: E04.Id
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e04_macros.ex:38: E04.Plain.buggy/0
+
+    warning: incompatible types given to E04.Plain.get/1:
+
+        E04.Plain.get("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        %E04.Id{}
+
+    type warning found at:
+    │
+ 67 │   def plain, do: E04.Plain.get("x")
+    │                            ~
+    │
+    └─ e04_macros.ex:67:28: E04.Caller.plain/0
+
+    warning: incompatible types given to Integer.to_string/1:
+
+        Integer.to_string("not an int")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 46 │   use E04.Using, id: E04.Id
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ e04_macros.ex:46: E04.Overridden.buggy/0
+
+    warning: incompatible types given to E04.Generated.get/1:
+
+        E04.Generated.get("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        %E04.Id{}
+
+    type warning found at:
+    │
+ 68 │   def generated, do: E04.Generated.get("x")
+    │                                    ~
+    │
+    └─ e04_macros.ex:68:36: E04.Caller.generated/0
+
+    warning: incompatible types given to E04.Overridden.get/1:
+
+        E04.Overridden.get(%E04.Id{value: "x"})
+
+    given types:
+
+        -%E04.Id{value: binary()}-
+
+    but expected one of:
+
+        %E04.Id{value: integer()}
+
+    type warning found at:
+    │
+ 69 │   def overridden, do: E04.Overridden.get(%E04.Id{value: "x"})
+    │                                      ~
+    │
+    └─ e04_macros.ex:69:38: E04.Caller.overridden/0
+
+    warning: incompatible types given to E04.Plain.get_or_default/1:
+
+        E04.Plain.get_or_default("x")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        %E04.Id{}
+
+    type warning found at:
+    │
+ 70 │   def default_wrapper, do: E04.Plain.get_or_default("x")
+    │                                      ~
+    │
+    └─ e04_macros.ex:70:38: E04.Caller.default_wrapper/0

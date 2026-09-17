@@ -1,0 +1,190 @@
+    warning: incompatible types given to E03.Repo.get/1:
+
+        E03.Repo.get("id")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 13 │   def direct, do: E03.Repo.get("id")
+    │                            ~
+    │
+    └─ e03_dynamic_calls.ex:13:28: E03.direct/0
+
+    warning: incompatible types given to E03.Repo.get/1:
+
+        E03.Repo.get("id")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    type warning found at:
+    │
+ 15 │   def attr, do: @repo.get("id")
+    │                       ~
+    │
+    └─ e03_dynamic_calls.ex:15:23: E03.attr/0
+
+    warning: incompatible types given to E03.Repo.get/1:
+
+        repo.get("id")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        integer()
+
+    where "repo" was given the type:
+
+        # type: E03.Repo
+        # from: e03_dynamic_calls.ex:18:10
+        repo = E03.Repo
+
+    type warning found at:
+    │
+ 19 │     repo.get("id")
+    │          ~
+    │
+    └─ e03_dynamic_calls.ex:19:10: E03.local_literal_var/0
+
+    warning: incompatible types given to E03.Codec.load!/1:
+
+        codec.load!("raw")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        map()
+
+    where "codec" was given the types:
+
+        # type: dynamic(E03.Codec)
+        # from: e03_dynamic_calls.ex:29:23
+        codec
+
+        # type: E03.Codec
+        # from: e03_dynamic_calls.ex:29
+        codec === E03.Codec
+
+    type warning found at:
+    │
+ 29 │   def param_var_guard(codec) when codec in [E03.Codec], do: codec.load!("raw")
+    │                                                                   ~
+    │
+    └─ e03_dynamic_calls.ex:29:67: E03.param_var_guard/1
+
+    warning: incompatible types given to E03.Codec.load!/1:
+
+        cfg.codec.load!("raw")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        map()
+
+    where "cfg" was given the type:
+
+        # type: %{codec: E03.Codec}
+        # from: e03_dynamic_calls.ex:34:9
+        cfg = %{codec: E03.Codec}
+
+    type warning found at:
+    │
+ 35 │     cfg.codec.load!("raw")
+    │               ~
+    │
+    └─ e03_dynamic_calls.ex:35:15: E03.via_map_literal/0
+
+    warning: the following clause will never match:
+
+        :error ->
+
+    because it attempts to match on the result of:
+
+        E03.Repo.get(1)
+
+    which has type:
+
+        dynamic({:ok, integer()})
+
+    type warning found at:
+    │
+ 47 │       :error -> :never
+    │       ~~~~~~~~~~~~~~~~
+    │
+    └─ e03_dynamic_calls.ex:47: E03.attr_result/0
+
+    warning: expected a module (an atom) when invoking get/1 in expression:
+
+        m.get(1)
+
+    where "m" was given the type:
+
+        # type: dynamic(map())
+        # from: e03_dynamic_calls.ex:58:24
+        %{} = m
+
+    type warning found at:
+    │
+ 58 │   def not_a_module(%{} = m), do: m.get(1)
+    │                                    ~
+    │
+    └─ e03_dynamic_calls.ex:58:36: E03.not_a_module/1
+
+    warning: incompatible types given to E03.Codec.load!/1:
+
+        codec.load!("raw")
+        #=> invoked as E03.Codec.load!/1
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        map()
+
+    where "codec" was given the type:
+
+        # type: dynamic(E03.Codec or E03.Repo)
+        # from: e03_dynamic_calls.ex:23:11
+        codec =
+          if flag do
+            E03.Codec
+          else
+            E03.Repo
+          end
+
+    type warning found at:
+    │
+ 24 │     codec.load!("raw")
+    │           ~
+    │
+    └─ e03_dynamic_calls.ex:24:11: E03.branch_var/1
+
+    warning: E03.Repo.load!/1 is undefined or private
+    │
+ 24 │     codec.load!("raw")
+    │           ~
+    │
+    └─ e03_dynamic_calls.ex:24:11: E03.branch_var/1

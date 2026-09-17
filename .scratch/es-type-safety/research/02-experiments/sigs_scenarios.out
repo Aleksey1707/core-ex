@@ -1,0 +1,36 @@
+Blind.QcStyle:decide/2 [infer, 3 clause(s), domain set]
+    (%{..., __struct__: Blind.Account.Cmd.Close or Blind.Account.Cmd.Rename, nmae: term()}, %Blind.QcStyle{version: nil} -> dynamic({:error, term()}))
+    (%Blind.Account.Cmd.Rename{}, %Blind.QcStyle{} -> dynamic({:ok, non_empty_list({Blind.Account.Event.Renamed, term()})}))
+    (%Blind.Account.Cmd.Close{}, %Blind.QcStyle{} -> {:ok, non_empty_list(Blind.Account.Event.Closed)})
+Blind.BadDecide:decide/2 [infer, 3 clause(s), domain set]
+    (%Blind.Account.Cmd.Open{}, %Blind.BadDecide{} -> {:ok, non_empty_list({Blind.Order.Event.Placed, %Blind.Order.Event.Placed.Payload{amount: nil}})})
+    (%Blind.Account.Cmd.Rename{}, %Blind.BadDecide{} -> dynamic(
+  {:ok, non_empty_list({Blind.Account.Event.Opened, %Blind.Account.Event.Renamed.Payload{}})}
+))
+    (%Blind.Account.Cmd.Close{}, %Blind.BadDecide{} -> {:ok, non_empty_list(Blind.Account.Event.Opened)})
+Blind.BadEvolve:evolve/2 [infer, 1 clause(s), domain set]
+    (%{..., name: term()}, %Blind.Account.Event.Opened{payload: %Blind.Account.Event.Opened.Payload{}} or
+  %Blind.Account.Event.Renamed{payload: %{..., nmae: term()}} -> dynamic(%{..., name: term()}))
+Blind.BadEvolveState:evolve/2 [infer, 2 clause(s), domain set]
+    (%{..., nmae: term()}, %Blind.Account.Event.Renamed{payload: %{..., name: term()}} -> dynamic(%{..., nmae: term()}))
+    (term(), %Blind.Account.Event.Closed{} or %Blind.Account.Event.Opened{} -> dynamic())
+Blind.BadProjection:project/1 [infer, 2 clause(s), domain set]
+    (%Blind.Account.Event.Opened{payload: %{..., nmae: term()}} or
+  %Blind.Account.Event.Renamed{payload: %Blind.Account.Event.Renamed.Payload{}} -> dynamic(:ok))
+    (%Blind.Order.Event.Placed{} -> :ok)
+Blind.Projection:project/1 [infer, 2 clause(s), domain set]
+    (%Blind.Account.Event.Opened{payload: %{..., name: %Blind.Account.Name{}}} or
+  %Blind.Account.Event.Renamed{payload: %{..., name: %Blind.Account.Name{}}} -> dynamic(:ok))
+    (%Blind.Account.Event.Closed{} -> :ok)
+Blind.Parcel.Event.Codec:dump_payload/2 [infer, 1 clause(s), domain nil]
+    (%Blind.Parcel.Event.Sent{payload: %{..., note: term()}}, term() -> dynamic(%{binary() => term()}))
+Blind.Parcel.Event.Codec:load_payload/3 [infer, 1 clause(s), domain nil]
+    (Blind.Parcel.Event.Sent, map(), term() -> dynamic({:ok, %Blind.Account.Event.Renamed.Payload{}}))
+Blind.S.Extra:x8_wrapper/2 [infer, 1 clause(s), domain nil]
+    (term(), term() -> dynamic())
+Blind.S.Usecase:get_typed/2 [infer, 1 clause(s), domain nil]
+    (%Blind.Account.ID{}, %Core.Context{} -> dynamic())
+Blind.S.Usecase:get_untyped/2 [infer, 1 clause(s), domain nil]
+    (term(), term() -> dynamic())
+Blind.S.Usecase:open/3 [infer, 1 clause(s), domain nil]
+    (%Blind.Account{}, %Blind.Account.Cmd.Open{}, %Core.Context{} -> dynamic())

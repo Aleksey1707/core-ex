@@ -1,0 +1,47 @@
+A1	{:raised, "FunctionClauseError в Blind.Account.decide/2: no function clause matching in Blind.Account.decide/2"}
+A2	{:raised, "FunctionClauseError в Blind.Account.decide/2: no function clause matching in Blind.Account.decide/2"}
+A5a	{:raised, "KeyError в Blind.S.Execute.a5a_state_typo/2: key :nmae not found in:"}
+A5c	{:raised, "KeyError в Blind.S.Execute.a5c_event_typo/2: key :aggregat_id not found in:"}
+D5	{:raised, "KeyError в Blind.S.Execute.d5_payload_typo/2: key :nmae not found in:"}
+B1	{:raised, "FunctionClauseError в Core.Es.Aggregate.event/6: no function clause matching in Core.Es.Aggregate.event/6"}
+B2	{:raised, "FunctionClauseError в Blind.Account.Event.Opened.new/6: no function clause matching in Blind.Account.Event.Ope" <> ...}
+B3	{:raised, "UndefinedFunctionError в Blind.Account.Event.Opened.new/4: function Blind.Account.Event.Opened.new/4 is undefi" <> ...}
+B4	{:raised, "FunctionClauseError в Core.Es.Aggregate.event/6: no function clause matching in Core.Es.Aggregate.event/6"}
+B5	{:raised, "UndefinedFunctionError в Blind.Account.Event.Opened.new/4: function Blind.Account.Event.Opened.new/4 is undefi" <> ...}
+C1 fold	{:raised, "FunctionClauseError в Blind.BadEvolve.evolve/2: no function clause matching in Blind.BadEvolve.evolve/2"}
+C1 execute	{:raised, "FunctionClauseError в Blind.BadEvolve.evolve/2: no function clause matching in Blind.BadEvolve.evolve/2"}
+C2a execute	{:raised, "KeyError в Blind.BadEvolve.evolve/2: key :nmae not found in:"}
+C3 fold	{:raised, "FunctionClauseError в Core.Es.Aggregate.step/3: no function clause matching in Core.Es.Aggregate.step/3"}
+C4 execute	{:raised, "KeyError в Blind.BadEvolveState.evolve/2: key :nmae not found"}
+C5 fold foreign event	{:raised, "ArgumentError в Core.Es.Aggregate.step/3: Es.Aggregate: событие чужого агрегата в свёртке Blind.Account %Blind" <> ...}
+D2b	{:raised, "FunctionClauseError в Blind.Account.Event.Opened.new/6: no function clause matching in Blind.Account.Event.Ope" <> ...}
+D3b	{:raised, "FunctionClauseError в Blind.Account.Event.Opened.new/6: no function clause matching in Blind.Account.Event.Ope" <> ...}
+E1b	{:raised, "FunctionClauseError в Blind.Account.Repo.Pg.get/4: no function clause matching in Blind.Account.Repo.Pg.get/4"}
+E6	{:raised, "FunctionClauseError в Core.Es.Aggregate.Repo.Pg.-initial_states!/2-inlined-0-/1: no function clause matching i" <> ...}
+E3/E5 (БД)	{:raised, "RuntimeError в Ecto.Repo.Registry.lookup/1: could not lookup Ecto repo Blind.DAO because it was not started or" <> ...}
+F1b	{:raised, "FunctionClauseError в Blind.Account.Process.execute/6: no function clause matching in Blind.Account.Process.ex" <> ...}
+F2 (БД)	{:raised, "RuntimeError в Ecto.Repo.Registry.lookup/1: could not lookup Ecto repo Blind.DAO because it was not started or" <> ...}
+G1 direct	{:raised, "FunctionClauseError в Blind.BadProjection.project/1: no function clause matching in Blind.BadProjection.projec" <> ...}
+G3a	{:raised, "KeyError в Blind.BadProjection.project/1: key :nmae not found in:"}
+G4 (дерево/БД)	{:raised, "RuntimeError в Ecto.Repo.Registry.lookup/1: could not lookup Ecto repo Blind.DAO because it was not started or" <> ...}
+G4b	{:raised, "FunctionClauseError в Core.Es.Projection.Await.subscribed_type/2: no function clause matching in Core.Es.Proje" <> ...}
+H1 dump	{:raised, "FunctionClauseError в Blind.Parcel.Event.Codec.dump_payload/2: no function clause matching in Blind.Parcel.Eve" <> ...}
+H1 load	{:raised, "FunctionClauseError в Blind.Parcel.Event.Codec.load_payload/3: no function clause matching in Blind.Parcel.Eve" <> ...}
+H2 load	{:raised, "FunctionClauseError в Blind.Parcel.Event.Sent.new/6: no function clause matching in Blind.Parcel.Event.Sent.ne" <> ...}
+H3a	{:raised, "KeyError в Blind.S.Codec.h3a_family_typo/1: key :aggregat_id not found in:"}
+H3b	{:raised, "KeyError в Blind.S.Codec.h3b_mod_payload_typo/1: key :nmae not found in:"}
+H3c	{:returned, %Blind.Account.Event.Opened{id: %Core.Es.Event.ID{value: "01a0aad1-5f82-7dc8-8ab4-0784559c9dbc"}, ...}}
+H4b	{:raised, "ArgumentError в Blind.Codec.Internal.load/2: нет codec-плагина для Blind.Order.Cmd.Place"}
+H5	{:raised, "FunctionClauseError в Blind.Account.Event.Codec.dump/2: no function clause matching in Blind.Account.Event.Cod" <> ...}
+H6 dump cmd	{:raised, "ArgumentError в Blind.Codec.Internal.dump/1: нет codec-плагина для Blind.Account.Cmd.Open"}
+I1	{:raised, "FunctionClauseError в Blind.Account.Event.Opened.new/6: no function clause matching in Blind.Account.Event.Ope" <> ...}
+I2	{:raised, "FunctionClauseError в Blind.Account.Event.Opened.new/6: no function clause matching in Blind.Account.Event.Ope" <> ...}
+I3	{:raised, "FunctionClauseError в Blind.Account.Event.Opened.Payload.new/1: no function clause matching in Blind.Account.E" <> ...}
+I4	{:returned, {:ok, [...]}}
+J1 execute	{:raised, "KeyError в Blind.QcStyle.decide/2: key :nmae not found in:"}
+X1	{:raised, "FunctionClauseError в Blind.Account.execute/2: no function clause matching in Blind.Account.execute/2"}
+X2	{:raised, "FunctionClauseError в Blind.Codec.Internal.dump/1: no function clause matching in Blind.Codec.Internal.dump/1"}
+X5 outbox	{:returned, :ok}
+X5 store step	{:raised, "FunctionClauseError в Blind.Order.Event.Codec.type/1: no function clause matching in Blind.Order.Event.Codec.t" <> ...}
+X9b	{:raised, "FunctionClauseError в Blind.Account.Repo.Pg.get/4: no function clause matching in Blind.Account.Repo.Pg.get/4"}
+E3 outbox step	{:raised, "ArgumentError в Blind.Codec.Internal.dump/1: нет codec-плагина для Blind.Account"}

@@ -1,0 +1,10 @@
+E09.Account:evolve/2 [infer, 1 clause(s), domain nil]
+    (%E09.Account{balance: float() or integer()}, %E09.Deposited{amount: float() or integer()} -> dynamic(%E09.Account{balance: float() or integer()}))
+E09.Account:is_struct_guard/1 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: E09.Deposited, amout: term()} -> dynamic())
+E09.Account:struct_key_pattern/1 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: E09.Deposited, amout: term()} -> dynamic())
+E09.Account:var_struct_pattern/1 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: E09.Deposited, amout: term()} -> dynamic())
+E09.Account:field_type_param/1 [infer, 1 clause(s), domain nil]
+    (%E09.Account{balance: bitstring()} -> integer())

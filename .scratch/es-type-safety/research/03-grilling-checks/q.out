@@ -1,0 +1,101 @@
+    warning: the following clause will never match:
+
+        {:error, _} = error ->
+
+    because it attempts to match on the result of:
+
+        Q.Lib.apply_decision(Q.Agg, state, command, decide(command, state))
+
+    which has type:
+
+        dynamic({:ok, {term(), term()}})
+
+    type warning found at:
+    │
+ 40 │   use Q.Using
+    │   ~~~~~~~~~~~
+    │
+    └─ q.ex:40: Q.Agg.execute/2
+
+    warning: incompatible types given to Q.Agg.evolve/2:
+
+        Q.Agg.evolve(s, e2)
+
+    given types:
+
+        dynamic(%Q.Agg{}), -dynamic(%Q.E2{})-
+
+    but expected one of:
+
+        %Q.Agg{}, %Q.E1{}
+
+    where "e2" was given the type:
+
+        # type: dynamic(%Q.E2{})
+        # from: q.ex:51:63
+        %Q.E2{} = e2
+
+    where "s" was given the type:
+
+        # type: dynamic(%Q.Agg{})
+        # from: q.ex:51:36
+        %Q.Agg{} = s
+
+    type warning found at:
+    │
+ 52 │     do: {Q.Agg.evolve(s, e1), Q.Agg.evolve(s, e2)}
+    │                                     ~
+    │
+    └─ q.ex:52:37: Q.Repo.__es_check_evolve__/3
+
+    warning: incompatible types given to Q.Agg.execute/2:
+
+        Q.Agg.execute(s, c)
+
+    given types:
+
+        dynamic(%Q.Agg{}), -dynamic(%Q.Other.Cmd{})-
+
+    but expected one of:
+
+        %Q.Agg{}, %Q.Cmd.A{} or %Q.Cmd.B{}
+
+    where "c" was given the type:
+
+        # type: dynamic(%Q.Other.Cmd{})
+        # from: q.ex:56:44
+        %Q.Other.Cmd{} = c
+
+    where "s" was given the type:
+
+        # type: dynamic(%Q.Agg{})
+        # from: q.ex:56:24
+        %Q.Agg{} = s
+
+    type warning found at:
+    │
+ 56 │   def foreign(%Q.Agg{} = s, %Q.Other.Cmd{} = c), do: Q.Agg.execute(s, c)
+    │                                                            ~
+    │
+    └─ q.ex:56:60: Q.Caller.foreign/2
+
+    warning: unknown key .nmae in expression:
+
+        state.nmae
+
+    the given type does not have the given key:
+
+        dynamic(%Q.Agg{id: term(), version: term(), name: term()})
+
+    where "state" was given the type:
+
+        # type: dynamic(%Q.Agg{})
+        # from: q.ex:59:29
+        {:ok, {_events, state}} = Q.Agg.execute(s, c)
+
+    type warning found at:
+    │
+ 60 │     state.nmae
+    │           ~~~~
+    │
+    └─ q.ex:60:11: Q.Caller.typo/2

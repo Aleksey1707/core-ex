@@ -1,0 +1,6 @@
+    warning: this clause of defp handle/1 is never used (or it will always fail/warn when invoked)
+    │
+  5 │   defp handle(%{kind: :b}), do: :b
+    │        ~
+    │
+    └─ e17_private_clauses.ex:5:8: E17.handle/1

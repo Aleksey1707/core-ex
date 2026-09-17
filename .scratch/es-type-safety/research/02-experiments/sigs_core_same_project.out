@@ -1,0 +1,10 @@
+Core.EsFixture.Account:execute/2 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: Core.EsFixture.Account}, %{..., __struct__: atom()} -> dynamic())
+Core.EsFixture.Account:fold/2 [infer, 1 clause(s), domain nil]
+    (%{..., __struct__: Core.EsFixture.Account}, empty_list() or non_empty_list(term(), term()) -> dynamic())
+Core.EsFixture.Account.Repo.Pg:get/3 [infer, 1 clause(s), domain nil]
+    (%Core.EsFixture.Account.ID{}, %{..., __struct__: Core.Version} or :current, %Core.Context{} -> dynamic())
+Core.EsFixture.Account.Repo.Pg:append/2 [infer, 1 clause(s), domain nil]
+    (empty_list() or non_empty_list(term(), term()), %Core.Context{} -> dynamic())
+Core.EsFixture.Account.Process:execute/4 [infer, 1 clause(s), domain nil]
+    (%Core.EsFixture.Account.ID{}, %{..., __struct__: Core.Version} or :current, %{..., __struct__: atom()}, %Core.Context{} -> dynamic())

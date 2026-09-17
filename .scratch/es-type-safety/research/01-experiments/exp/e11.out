@@ -1,0 +1,99 @@
+    warning: incompatible types given on function call:
+
+        fun.("x")
+
+    given types:
+
+        -binary()-
+
+    but function has type:
+
+        (%E11.Deposited{} -> dynamic(%E11.Deposited{}))
+
+    type warning found at:
+    │
+ 20 │     fun.("x")
+    │        ~
+    │
+    └─ e11_funs.ex:20:8: E11.local_fn_wrong_arg/0
+
+    warning: incompatible types given on function call:
+
+        fun.(%E11.Account{...}, "bad event")
+
+    given types:
+
+        %E11.Account{balance: integer()}, -binary()-
+
+    but function has type:
+
+        (%E11.Account{balance: float() or integer()}, %E11.Deposited{amount: integer()} ->
+           dynamic(%E11.Account{balance: float() or integer()}))
+
+    type warning found at:
+    │
+ 25 │     fun.(%Account{}, "bad event")
+    │        ~
+    │
+    └─ e11_funs.ex:25:8: E11.capture_wrong_arg/0
+
+    warning: expected a 1-arity function on function call:
+
+        fun.(%E11.Account{...})
+
+    but got function with arity 2:
+
+        (%E11.Account{balance: float() or integer()}, %E11.Deposited{amount: integer()} ->
+           dynamic(%E11.Account{balance: float() or integer()}))
+
+    where "fun" was given the type:
+
+        # type: (%E11.Account{balance: float() or integer()}, %E11.Deposited{amount: integer()} ->
+           dynamic(%E11.Account{balance: float() or integer()}))
+        # from: e11_funs.ex:29:9
+        fun = &E11.Account.evolve/2
+
+    type warning found at:
+    │
+ 30 │     fun.(%Account{})
+    │        ~
+    │
+    └─ e11_funs.ex:30:8: E11.capture_wrong_arity/0
+
+    warning: incompatible types given to E11.Transact.run/1:
+
+        E11.Transact.run(fn x -> x end)
+
+    given types:
+
+        -(term() -> dynamic())-
+
+    but expected one of:
+
+        (-> term())
+
+    type warning found at:
+    │
+ 41 │   def transact_wrong_arity, do: Transact.run(fn x -> x end)
+    │                                          ~
+    │
+    └─ e11_funs.ex:41:42: E11.transact_wrong_arity/0
+
+    warning: incompatible types given to E11.Transact.run/1:
+
+        E11.Transact.run(:not_a_fun)
+
+    given types:
+
+        -:not_a_fun-
+
+    but expected one of:
+
+        (-> term())
+
+    type warning found at:
+    │
+ 42 │   def transact_not_fun, do: Transact.run(:not_a_fun)
+    │                                      ~
+    │
+    └─ e11_funs.ex:42:38: E11.transact_not_fun/0

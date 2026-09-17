@@ -1,0 +1,43 @@
+    warning: incompatible types given to E05.Account.evolve/2:
+
+        E05.Account.evolve(%E05.Account{...}, "bad event")
+
+    given types:
+
+        %E05.Account{balance: nil}, -binary()-
+
+    but expected one of:
+
+        %E05.Account{}, {:deposited, integer()}
+
+    type warning found at:
+    │
+ 44 │   def direct, do: E05.Account.evolve(%E05.Account{}, "bad event")
+    │                               ~
+    │
+    └─ e05_spec_callback.ex:44:31: E05.Caller.direct/0
+
+    warning: the following clause will never match:
+
+        b when is_binary(b) ->
+
+    because it attempts to match on the result of:
+
+        E05.Account.bump(1)
+
+    which has type:
+
+        integer()
+
+    where "b" was given the type:
+
+        # type: binary()
+        # from: e05_spec_callback.ex:36:14
+        is_binary(b)
+
+    type warning found at:
+    │
+ 36 │       b when is_binary(b) -> b
+    │       ~
+    │
+    └─ e05_spec_callback.ex:36:7: E05.Caller.spec_contradiction/0

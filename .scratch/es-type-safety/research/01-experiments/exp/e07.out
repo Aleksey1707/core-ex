@@ -1,0 +1,154 @@
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(amount)
+
+    given types:
+
+        -integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    where "amount" was given the type:
+
+        # type: integer()
+        # from: e07_external_data.ex:10:52
+        is_integer(amount)
+
+    type warning found at:
+    │
+ 10 │   def string_key_param(%{"amount" => amount}) when is_integer(amount), do: byte_size(amount)
+    │                                                                            ~
+    │
+    └─ e07_external_data.ex:10:76: E07.string_key_param/1
+
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(Map.get(%{"amount" => 10}, "amount"))
+
+    given types:
+
+        -nil or integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    type warning found at:
+    │
+ 13 │   def map_get_string_key_literal, do: byte_size(Map.get(%{"amount" => 10}, "amount"))
+    │                                       ~
+    │
+    └─ e07_external_data.ex:13:39: E07.map_get_string_key_literal/0
+
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(Map.get(%{amount: 1}, :amount))
+
+    given types:
+
+        -nil or integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    type warning found at:
+    │
+ 15 │   def map_get_atom_key_literal, do: byte_size(Map.get(%{amount: 1}, :amount))
+    │                                     ~
+    │
+    └─ e07_external_data.ex:15:37: E07.map_get_atom_key_literal/0
+
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(%{amount: 1}.amount)
+
+    given types:
+
+        -integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    type warning found at:
+    │
+ 16 │   def dot_atom_key_literal, do: byte_size(%{amount: 1}.amount)
+    │                                 ~
+    │
+    └─ e07_external_data.ex:16:33: E07.dot_atom_key_literal/0
+
+    warning: incompatible types given to Map.get/2:
+
+        Map.get(e, :amout)
+
+    the map:
+
+        dynamic(%E07.Evt{})
+
+    does not have all required keys:
+
+        :amout
+
+    therefore this function will always return nil
+
+    where "e" was given the type:
+
+        # type: dynamic(%E07.Evt{})
+        # from: e07_external_data.ex:18:40
+        %E07.Evt{} = e
+
+    type warning found at:
+    │
+ 18 │   def map_get_missing_on_struct(%Evt{} = e), do: Map.get(e, :amout)
+    │                                                      ~
+    │
+    └─ e07_external_data.ex:18:54: E07.map_get_missing_on_struct/1
+
+    warning: incompatible types given to Map.update!/3:
+
+        Map.update!(e, :amout, & &1)
+
+    the map:
+
+        dynamic(%E07.Evt{})
+
+    does not have all required keys:
+
+        :amout
+
+    therefore this function will always raise
+
+    where "e" was given the type:
+
+        # type: dynamic(%E07.Evt{})
+        # from: e07_external_data.ex:19:38
+        %E07.Evt{} = e
+
+    type warning found at:
+    │
+ 19 │   def map_update_bang_unknown(%Evt{} = e), do: Map.update!(e, :amout, & &1)
+    │                                                    ~
+    │
+    └─ e07_external_data.ex:19:52: E07.map_update_bang_unknown/1
+
+    warning: incompatible types given to Kernel.byte_size/1:
+
+        byte_size(hd([1]))
+
+    given types:
+
+        -integer()-
+
+    but expected one of:
+
+        bitstring()
+
+    type warning found at:
+    │
+ 30 │   def hd_literal, do: byte_size(hd([1]))
+    │                       ~
+    │
+    └─ e07_external_data.ex:30:23: E07.hd_literal/0

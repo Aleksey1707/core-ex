@@ -1,0 +1,6 @@
+E05.Account:deposit/1 [infer, 1 clause(s), domain nil]
+    (term() -> dynamic())
+E05.Account:bump/1 [infer, 1 clause(s), domain nil]
+    (integer() -> integer())
+E05.Aggregate:fold_one/3 [infer, 1 clause(s), domain nil]
+    (atom(), term(), term() -> dynamic())

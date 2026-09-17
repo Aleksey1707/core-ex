@@ -1,0 +1,74 @@
+    warning: incompatible types given to Kernel.+/2:
+
+        Integer.to_string(x) + 1
+
+    given types:
+
+        -binary()-, integer()
+
+    but expected one of:
+
+        #1
+        integer(), integer()
+
+        #2
+        integer(), float()
+
+        #3
+        float(), integer()
+
+        #4
+        float(), float()
+
+    where "x" was given the type:
+
+        # type: integer()
+        # from: e24_misc.ex:17:40
+        Integer.to_string(x)
+
+    type warning found at:
+    │
+ 17 │   def to_string_result(x), do: Integer.to_string(x) + 1
+    │                                                     ~
+    │
+    └─ e24_misc.ex:17:53: E24.to_string_result/1
+
+    warning: incompatible types given to Atom.to_string/1:
+
+        Atom.to_string("not an atom")
+
+    given types:
+
+        -binary()-
+
+    but expected one of:
+
+        atom()
+
+    type warning found at:
+    │
+ 19 │   def erlang_builtin, do: :erlang.atom_to_binary("not an atom")
+    │                                   ~
+    │
+    └─ e24_misc.ex:19:35: E24.erlang_builtin/0
+
+    warning: unknown key .amout in expression:
+
+        e.amout
+
+    the given type does not have the given key:
+
+        dynamic(%E24.Evt{amount: term()})
+
+    where "e" was given the type:
+
+        # type: dynamic(%E24.Evt{})
+        # from: e24_misc.ex:14:33
+        %E24.Evt{} = e
+
+    type warning found at:
+    │
+ 14 │   def pattern_struct(%E24.Evt{} = e), do: e.amout
+    │                                             ~~~~~
+    │
+    └─ e24_misc.ex:14:45: E24.pattern_struct/1

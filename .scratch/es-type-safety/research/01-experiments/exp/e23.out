@@ -1,0 +1,29 @@
+    warning: incompatible types given to E23.Account.evolve/2:
+
+        E23.Account.evolve(%E23.Account{...}, event)
+
+    given types:
+
+        %E23.Account{balance: integer()}, -dynamic(%E23.Withdrawn{amount: integer()})-
+
+    but expected one of:
+
+        %E23.Account{balance: float() or integer()}, %E23.Deposited{amount: float() or integer()}
+
+    where "event" was given the type:
+
+        # type: dynamic(%E23.Withdrawn{amount: integer()})
+        # from: e23_partial_union.ex:23:11
+        event =
+          if flag do
+            %E23.Withdrawn{amount: 2}
+          else
+            %E23.Withdrawn{amount: 1}
+          end
+
+    type warning found at:
+    │
+ 24 │     Account.evolve(%Account{}, event)
+    │             ~
+    │
+    └─ e23_partial_union.ex:24:13: E23.fully_disjoint/1

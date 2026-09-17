@@ -1,0 +1,56 @@
+    warning: incompatible types given to E02.Strict.decide/2:
+
+        E02.Strict.decide("rename", %E02.Strict{...})
+
+    given types:
+
+        -binary()-, %E02.Strict{name: nil}
+
+    but expected one of:
+
+        %E02.Rename{name: binary()}, %E02.Strict{}
+
+    type warning found at:
+    │
+ 23 │   def strict, do: E02.Strict.decide("rename", %E02.Strict{})
+    │                              ~
+    │
+    └─ e02_catch_all.ex:23:30: E02.Caller.strict/0
+
+    warning: the following clause will never match:
+
+        {:error, _} ->
+
+    because it attempts to match on the result of:
+
+        E02.Strict.decide(%E02.Rename{name: "a"}, %E02.Strict{...})
+
+    which has type:
+
+        dynamic({:ok, non_empty_list(binary())})
+
+    type warning found at:
+    │
+ 30 │       {:error, _} -> []
+    │       ~~~~~~~~~~~~~~~~~
+    │
+    └─ e02_catch_all.ex:30: E02.Caller.strict_result/0
+
+    warning: the following clause will never match:
+
+        {:error, _} ->
+
+    because it attempts to match on the result of:
+
+        E02.CatchAllRaise.decide(%E02.Rename{name: "a"}, %E02.CatchAllRaise{...})
+
+    which has type:
+
+        dynamic({:ok, non_empty_list(binary())})
+
+    type warning found at:
+    │
+ 37 │       {:error, _} -> []
+    │       ~~~~~~~~~~~~~~~~~
+    │
+    └─ e02_catch_all.ex:37: E02.Caller.raise_result/0
