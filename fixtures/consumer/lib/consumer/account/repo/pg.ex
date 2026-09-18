@@ -6,5 +6,6 @@ defmodule Consumer.Account.Repo.Pg do
     aggregate: Account,
     id: Account.ID,
     errors: Account.Errors,
-    outbox: Account.Outbox
+    outbox: Account.Outbox,
+    key_reservations: [Account.NameKey]
 end

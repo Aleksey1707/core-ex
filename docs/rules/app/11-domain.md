@@ -102,7 +102,8 @@ MUST NOT: домен контекста не знает.
   код источника». Карта соответствий рядом с модулем MUST NOT: она разойдётся со словарём.
 - Собственный словарь домена объявляется через `values:`: кода у него нет и быть не должно.
 - Описание значений enum в `@moduledoc` — `deps/core/docs/rules/11-domain.md`, «Описание
-  значений в `@moduledoc`». Проверяется: ратчет описаний enum (`19-testing.md`, «Ратчеты»).
+  значений в `@moduledoc`». Проверяется: ратчет описаний enum `use Core.Enum.DocsCase`
+  (`19-testing.md`, «Ратчеты»).
 - Guard'ы в заголовках — `Core.Guard` через `import` (`is/2`, `is_opt/2`, `is_enum/2`,
   `in_enum/3`), а не россыпь `is_*` (`deps/core/docs/rules/20-agreements.md`).
 

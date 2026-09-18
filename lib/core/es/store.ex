@@ -32,6 +32,10 @@ defmodule Core.Es.Store do
   пачке, `actual` — наибольшая версия потока (`nil` у пустого), прочитанная отдельным
   запросом только на пути ошибки.
 
+  `source: :storage` ставится здесь и только здесь: это отказ хранилища, а не сверка ожидаемой
+  версии. Он не означает, что вызывающий видел устаревшее состояние, — голова потока бывает ровно
+  там, где он её видел, — и снимается повтором команды новой транзакцией (`Core.Es.Transact`).
+
   Отказ не переводит транзакцию в aborted, она пригодна для дальнейших запросов. Но события,
   прошедшие проверки, к этому моменту уже записаны — транзакцию откатывает вызывающий
   (`Core.Helper.Transact.run/3` по `{:error, _}`).
@@ -108,11 +112,22 @@ defmodule Core.Es.Store do
           wire: Es.Event.Codec.wire()
         }
 
-  @typedoc "Detail отказа записи: поток, первая версия потока в пачке и голова потока."
+  @typedoc """
+  Источник отказа `:version_mismatch`: `:expected` — сверка ожидаемой версии, вызывающий назвал
+  версию, а действительная другая; `:storage` — отказ хранилища, `append/5` не принял пачку.
+  Повтор команды решается по нему (`Core.Es.Transact`).
+  """
+  @type mismatch_source :: :expected | :storage
+
+  @typedoc """
+  Detail отказа `:version_mismatch`: поток, ожидаемая версия (у `append/5` — первая версия потока
+  в пачке), голова потока и источник отказа.
+  """
   @type mismatch_detail :: %{
           aggregate_id: String.t(),
           expected: pos_integer(),
-          actual: pos_integer() | nil
+          actual: pos_integer() | nil,
+          source: mismatch_source()
         }
 
   # ===== запись =====
@@ -294,7 +309,8 @@ defmodule Core.Es.Store do
     %{
       aggregate_id: aggregate_id,
       expected: Map.fetch!(first_versions(rows), aggregate_id),
-      actual: head_version(type, aggregate_id)
+      actual: head_version(type, aggregate_id),
+      source: :storage
     }
   end
 

@@ -383,6 +383,127 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     refute_receive :handled, 200
   end
 
+  describe "подписка при старте" do
+    test "subscribe: true — сообщения обрабатываются без subscribe/3", %{
+      reader: reader,
+      topic: topic,
+      context: context
+    } do
+      parent = self()
+
+      on = fn message, data, _ctx ->
+        send(parent, {:got, data, message.body})
+        :ok
+      end
+
+      sub =
+        start_sub(reader, topic, "sub-on-start", on,
+          subscribe: true,
+          subscribe_data: :boot,
+          poll_interval_ms: 30
+        )
+
+      assert_receive {:got, :boot, "body"}, 500
+
+      assert {:error, %Error{code: :already_subscribed}} =
+               MqSubscriberReliable.subscribe(sub, :again, context)
+    end
+
+    test "по умолчанию процесс не подписан", %{reader: reader, topic: topic} do
+      sub = start_sub(reader, topic, "sub-default", fn _m, _d, _c -> :ok end)
+
+      assert :not_subscribed = MqSubscriberReliable.run_once(sub)
+    end
+
+    test "недопустимое значение subscribe: — ArgumentError на старте", %{reader: reader, topic: topic} do
+      Process.flag(:trap_exit, true)
+
+      capture_log(fn ->
+        assert {:error, {%ArgumentError{message: message}, _stack}} =
+                 MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe: "yes"))
+
+        assert message =~ ":subscribe — ожидается true или false"
+      end)
+    end
+
+    test "subscribe_data: без subscribe: true — ArgumentError на старте", %{
+      reader: reader,
+      topic: topic
+    } do
+      Process.flag(:trap_exit, true)
+
+      capture_log(fn ->
+        assert {:error, {%ArgumentError{message: message}, _stack}} =
+                 MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe_data: :boot))
+
+        assert message =~ ":subscribe_data — ожидается её отсутствие без subscribe: true"
+      end)
+    end
+  end
+
+  describe "опции старта" do
+    test "child_spec: :name и :shutdown не той формы — ArgumentError" do
+      assert_raise ArgumentError, ~r/PubSub.MqSubscriberReliable: опция :name — ожидается имя процесса/, fn ->
+        MqSubscriberReliable.child_spec(name: "subscriber")
+      end
+
+      assert_raise ArgumentError, ~r/PubSub.MqSubscriberReliable: опция :shutdown — ожидается неотрицательное/, fn ->
+        MqSubscriberReliable.child_spec(shutdown: :kill)
+      end
+    end
+
+    test "неизвестная опция — ArgumentError", %{reader: reader, topic: topic} do
+      assert start_error(sub_opts(reader, topic, dlq: "products.dlq")) =~
+               "PubSub.MqSubscriberReliable: неизвестные опции [:dlq]"
+    end
+
+    test "нет обязательной опции — ArgumentError", %{reader: reader, topic: topic} do
+      for key <- ~w(reader_module reader from_message on_message)a do
+        assert start_error(Keyword.delete(sub_opts(reader, topic, []), key)) =~
+                 "PubSub.MqSubscriberReliable: нет обязательной опции #{inspect(key)}"
+      end
+    end
+
+    test "значение не той формы — ArgumentError с именем опции", %{reader: reader, topic: topic} do
+      for {key, value, expected} <- [
+            {:reader_module, "MqFake.QueueReader", "модуль"},
+            {:reader, nil, "значение"},
+            {:from_message, fn _m, _d -> :ok end, "функция арности 1"},
+            {:on_message, fn _m -> :ok end, "функция арности 3"},
+            {:context_factory, fn _ -> Context.new() end, "функция арности 0"},
+            {:poll_interval_ms, 0, "положительное целое"},
+            {:retry_max_ms, -1, "положительное целое"},
+            {:max_attempts, 0, "положительное целое"},
+            {:dlq_writer, "MqFake.Writer", "модуль"},
+            {:dlq_topic, "", "непустую строку"},
+            {:topic, topic, "непустую строку"}
+          ] do
+        assert start_error(sub_opts(reader, topic, [{key, value}])) =~
+                 "PubSub.MqSubscriberReliable: опция #{inspect(key)} — ожидается #{expected}"
+      end
+    end
+
+    test "dlq_handle: обязателен с dlq_writer и только с ним", %{reader: reader, topic: topic} do
+      assert start_error(sub_opts(reader, topic, dlq_writer: MqFake.Writer)) =~
+               "PubSub.MqSubscriberReliable: нет обязательной опции :dlq_handle"
+
+      assert start_error(sub_opts(reader, topic, dlq_writer: MqFake.Writer, dlq_handle: nil)) =~
+               "PubSub.MqSubscriberReliable: опция :dlq_handle — ожидается значение, получено nil"
+
+      assert start_error(sub_opts(reader, topic, dlq_handle: MqFake.Writer.new())) =~
+               "PubSub.MqSubscriberReliable: опция :dlq_handle — ожидается её отсутствие без :dlq_writer"
+    end
+
+    test "nil в name:, dlq_writer: и dlq_handle: — как их отсутствие", %{reader: reader, topic: topic} do
+      assert %{id: MqSubscriberReliable} = MqSubscriberReliable.child_spec(name: nil)
+
+      {:ok, sub} = MqSubscriberReliable.start_link(sub_opts(reader, topic, name: nil, dlq_writer: nil, dlq_handle: nil))
+
+      assert :not_subscribed = MqSubscriberReliable.run_once(sub)
+      GenServer.stop(sub)
+    end
+  end
+
   describe "трассировка" do
     setup do
       :ok = OtelFixture.attach()
@@ -458,20 +579,34 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
   # ---
 
   defp start_sub(reader, topic, name, on_message, opts \\ []) do
-    child_opts =
-      [
-        reader_module: MqFake.QueueReader,
-        reader: reader,
-        from_message: fn m -> {:ok, m} end,
-        on_message: on_message,
-        topic: Mq.Topic.value(topic),
-        poll_interval_ms: 60_000
-      ]
-      |> Keyword.merge(opts)
+    child_opts = sub_opts(reader, topic, [on_message: on_message] ++ opts)
 
     {:ok, sub} = start_supervised({MqSubscriberReliable, child_opts}, id: {:sub, name})
 
     sub
+  end
+
+  defp sub_opts(reader, topic, opts) do
+    Keyword.merge(
+      [
+        reader_module: MqFake.QueueReader,
+        reader: reader,
+        from_message: fn m -> {:ok, m} end,
+        on_message: fn _m, _d, _c -> :ok end,
+        topic: Mq.Topic.value(topic),
+        poll_interval_ms: 60_000
+      ],
+      opts
+    )
+  end
+
+  defp start_error(opts) do
+    Process.flag(:trap_exit, true)
+
+    assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
+             with_log(fn -> MqSubscriberReliable.start_link(opts) end)
+
+    message
   end
 
   defp message(topic, body, headers \\ %{"name" => "product_created"}) do

@@ -1,7 +1,7 @@
 defmodule Core.EsFixture.Account.RacyProcess do
   @moduledoc """
   Процесс счёта над репозиторием с гонкой записи `Core.EsFixture.Account.RacyRepo` — повтор
-  команды после конфликта версии.
+  команды после отказа записи.
   """
 
   use Core.Es.Aggregate.Process,

@@ -4,7 +4,8 @@ defmodule Core.Outbox.Cleaner do
 
   Обязательные opts: `:repo`, `:published_ttl`, `:interval_ms`.
   Опционально: `:context_factory` (`()-> Context.t()`, вызывается один раз в `init`,
-  default `Context.new/0`), `:name`, `:retry_min_ms`.
+  default `Context.new/0`), `:name`, `:retry_min_ms`. Неизвестная опция, отсутствие обязательной и
+  значение не той формы — `ArgumentError` при старте (`Core.Helper.StartOpts`).
 
   При сбое цикла (недоступная БД) интервал не сохраняется: следующая попытка идёт
   через backoff от `retry_min_ms` с удвоением до `interval_ms` — иначе лежащая база
@@ -16,11 +17,16 @@ defmodule Core.Outbox.Cleaner do
   alias Core.Context
   alias Core.Error
   alias Core.Exc
+  alias Core.Helper.StartOpts
   alias Core.Outbox
   alias Core.Telemetry
 
   require Logger
   require Error
+
+  @label "Outbox.Cleaner"
+
+  @keys ~w(repo published_ttl interval_ms retry_min_ms context_factory name)a
 
   @default_retry_min_ms 1_000
 
@@ -53,7 +59,7 @@ defmodule Core.Outbox.Cleaner do
 
   def child_spec(opts) when is_list(opts) do
     id =
-      case Keyword.get(opts, :name) do
+      case StartOpts.name!(@label, opts, :name) do
         nil -> __MODULE__
         name -> name
       end
@@ -71,17 +77,18 @@ defmodule Core.Outbox.Cleaner do
   @doc false
   @impl true
   def init(opts) do
-    interval_ms = Keyword.fetch!(opts, :interval_ms)
-    retry_min_ms = min(Keyword.get(opts, :retry_min_ms, @default_retry_min_ms), interval_ms)
+    StartOpts.keys!(@label, opts, @keys)
+    interval_ms = StartOpts.pos_integer!(@label, opts, :interval_ms)
+    retry_min_ms = min(StartOpts.pos_integer!(@label, opts, :retry_min_ms, @default_retry_min_ms), interval_ms)
 
     state = %__MODULE__{
-      repo: Keyword.fetch!(opts, :repo),
-      published_ttl: Keyword.fetch!(opts, :published_ttl),
+      repo: StartOpts.module!(@label, opts, :repo),
+      published_ttl: StartOpts.prim!(@label, opts, :published_ttl, Outbox.PublishedTTL),
       interval_ms: interval_ms,
       retry_min_ms: retry_min_ms,
       retry_ms: retry_min_ms,
       timer_ref: nil,
-      context: Keyword.get(opts, :context_factory, &Context.new/0).()
+      context: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0).()
     }
 
     {:ok, schedule(state, interval_ms)}

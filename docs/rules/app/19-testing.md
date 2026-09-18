@@ -66,6 +66,13 @@ end
 `enabled: false, await: :inline` — `deps/core/docs/rules/19-testing.md`, «Event-sourced
 агрегат», «Совместимость событий» и «Проекции».
 
+Ветку ответа на неготовую read-модель (202 по `:projection_timeout` / `:projection_rebuilding`,
+`15-web-api.md`, «Ожидание проекции») приложение MUST проверять **одним** тестом на приложение —
+`Core.Es.Projection.Test.with_rebuilding/2` в `MyAppWeb.ConnCase, async: false`. Путь
+`await` → хелпер ответа → 202 у всех контроллеров один, и остальные ресурсы покрывает тест
+самого хелпера как чистой функции. Механика и запрет доводить тест до `:projection_timeout` —
+`deps/core/docs/rules/19-testing.md`, «Ветка неготовой read-модели».
+
 Тесту, который read-модель не читает, прогон не нужен: версию для следующей команды он берёт
 из возврата usecase, а не из ReadRepo.
 
@@ -89,20 +96,25 @@ end
 | Норма | Где записана |
 |---|---|
 | каждое значение `Core.Enum` описано в `@moduledoc` | `deps/core/docs/rules/11-domain.md`, «Описание значений в `@moduledoc`» |
-| wire-теги событий уникальны и квалифицированы именем агрегата | `14-events-outbox.md` |
+| wire-теги событий уникальны и квалифицированы типом агрегата | `14-events-outbox.md` |
 | `constraint_errors` сходятся с `changeset/2` и с ограничениями БД | `13-repos.md` |
 | новая миграция создаёт индексы `concurrently` | `18-migrations.md` |
 | web-слой не ссылается на `*Repo` и `DAO` | `10-architecture.md` |
 | `watch_list/0` согласован с конфигурацией | `17-otp-concurrency.md` |
 | состав `plugins/0` PromEx и провайдеры публикуют метрику | `21-observability.md`, «Метрики» |
-| старт с включённым outbox и заданной кластеризацией падает | `14-events-outbox.md`, «Единственность поллера» |
+| `start/2` зовёт `Core.Outbox.check_singleton!/1` до подъёма дерева | `14-events-outbox.md`, «Единственность поллера» |
 | примеры тел в спецификации проходят валидацию схем | `15-web-api.md` |
 
-- Ратчет описаний enum — `test/my_app/enum_docs_test.exs`, один на приложение: модули `:my_app`
-  отбирает `Core.Enum.enum?/1`, а не эвристика по экспортам, и у каждого сверяет строки таблицы
-  в `@moduledoc` с `values/0`. Не описанное значение и описанное несуществующее валят сборку.
+- Ратчет описаний enum — `test/my_app/enum_docs_test.exs`, один на приложение:
+  `use Core.Enum.DocsCase, otp_app: :my_app`, а не своя копия сверки; что он сверяет —
+  `deps/core/docs/rules/19-testing.md`, «Enum: описания и внешние коды».
+- Ратчет wire-тегов событий — `test/my_app/es/event_tags_test.exs`, один на приложение:
+  `use Core.Es.Event.TagsCase, otp_app: :my_app`, а не своя копия сверки; зонтичное приложение
+  перечисляет в `otp_app:` все приложения одной базы. Что он сверяет и как снимается проверка
+  с записанного тега без префикса — `deps/core/docs/rules/19-testing.md`, «Wire-теги событий».
 - Ратчет `constraint_errors` — `test/my_app/repo/constraint_errors_test.exs`, один на
-  приложение; что он сверяет — `deps/core/docs/rules/19-testing.md`, «`constraint_errors`».
+  приложение: `use Core.Repo.ConstraintErrorsCase, otp_app: :my_app`, а не своя копия сверки;
+  что он сверяет — `deps/core/docs/rules/19-testing.md`, «`constraint_errors`».
 - Новый ратчет MUST объяснять в `@moduledoc`, какое правило он проверяет и почему проверка
   именно такая: иначе следующий прочтёт его как тест поведения и ослабит.
 - Ратчет со списком-исключением MUST быть заморожен: список пополняется **только** вместе со

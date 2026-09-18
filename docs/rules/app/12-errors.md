@@ -43,9 +43,10 @@
 - repo-коды живут в том же каталоге и подключаются `use Repo.Pg, errors: <Aggregate>.Errors`
   через родителя агрегата, не через leaf-алиас `Errors` (`deps/core/docs/rules/20-agreements.md`,
   «Алиасы модулей»);
-- у event-sourced агрегата в каталоге — `:version_mismatch` и коды, которые возвращает `decide`
-  (`:not_found`, `:already_exists`, …); clause `:unknown_event_type` MUST NOT — эту ошибку
-  строит кодек событий (`ns: :es`);
+- у event-sourced агрегата в каталоге — `:version_mismatch`, `code:` модулей ключа
+  `key_reservations:` и коды, которые возвращает `decide` (`:not_found`, `:already_exists`, …);
+  clause `:unknown_event_type` и `:reservation_unresolved` MUST NOT — эти ошибки строит
+  библиотека сама (`ns: :es`; вторая — прикладная, `kind: :app`);
 - каталог MUST NOT зависеть от usecases и репозиториев: его читают и домен, и persist.
 
 ## Чувствительные данные

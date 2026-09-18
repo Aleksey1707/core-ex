@@ -3,7 +3,7 @@ defmodule Core.Prim.Opts do
   Compile-time проверка **значений** опций Prim-обёрток.
 
   `Core.Helper.Opts` проверяет набор ключей, этот модуль — их значения: границу,
-  регулярку, таймзону, версию UUID. Ошибка в опции обязана падать `CompileError`
+  регулярку, таймзону, версию UUID, namespace UUIDv5. Ошибка в опции обязана падать `CompileError`
   на `use`, потому что в рантайме она приходит доменной ошибкой первого `new/1`,
   где неотличима от невалидного пользовательского ввода.
   """
@@ -58,6 +58,20 @@ defmodule Core.Prim.Opts do
 
   def non_neg_integer!(opts, keys, label) do
     each_given(opts, keys, label, "целое ≥ 0", &(is_integer(&1) and &1 >= 0))
+  end
+
+  @doc "Проверить непустые строковые опции."
+  @spec non_empty_string!(keyword(), [atom()], String.t()) :: :ok
+
+  def non_empty_string!(opts, keys, label) do
+    each_given(opts, keys, label, "непустая строка", &(is_binary(&1) and &1 != ""))
+  end
+
+  @doc "Проверить, что опция — UUID-строка любой версии и формы."
+  @spec uuid!(keyword(), atom(), String.t()) :: :ok
+
+  def uuid!(opts, key, label) do
+    each_given(opts, [key], label, "UUID-строка", &(is_binary(&1) and match?({:ok, _info}, UUID.info(&1))))
   end
 
   @doc "Проверить, что значение опции — одно из `allowed`."

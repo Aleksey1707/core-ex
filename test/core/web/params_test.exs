@@ -47,15 +47,75 @@ defmodule Core.Web.ParamsTest do
     assert {:error, %Error{kind: :domain}} = Web.Params.page(%{"offset" => -1})
   end
 
-  test "version разбирает If-Match, включая `*`" do
-    assert {:ok, :current} = Web.Params.version(%{"If-Match" => "*"})
-    assert {:ok, %Version{value: 3}} = Web.Params.version(%{"If-Match" => "3"})
+  describe "explicit_version" do
+    test "разбирает явную версию" do
+      assert {:ok, %Version{value: 3}} = Web.Params.explicit_version(%{"If-Match" => "3"})
+      assert {:ok, %Version{value: 3}} = Web.Params.explicit_version(%{"If-Match" => 3})
+    end
 
-    assert {:error, %Error{code: :missing_param}} = Web.Params.version(%{})
-    assert {:error, %Error{kind: :domain}} = Web.Params.version(%{"If-Match" => "мусор"})
+    test "отвергает `*` ошибкой :current_not_allowed" do
+      assert {:error, %Error{kind: :domain, ns: :web, code: :current_not_allowed, detail: :"If-Match"}} =
+               Web.Params.explicit_version(%{"If-Match" => "*"})
+    end
+
+    test "требует параметр" do
+      assert {:error, %Error{code: :missing_param}} = Web.Params.explicit_version(%{})
+      assert {:error, %Error{code: :missing_param}} = Web.Params.explicit_version(%{"If-Match" => nil})
+    end
+
+    test "отдаёт ошибку разбора на пустой строке и мусоре" do
+      assert {:error, %Error{kind: :domain, ns: :prim}} = Web.Params.explicit_version(%{"If-Match" => ""})
+      assert {:error, %Error{kind: :domain, ns: :prim}} = Web.Params.explicit_version(%{"If-Match" => "мусор"})
+    end
+
+    test "принимает свой ключ" do
+      assert {:ok, %Version{value: 2}} = Web.Params.explicit_version(%{version: "2"}, :version)
+
+      assert {:error, %Error{code: :current_not_allowed, detail: :version}} =
+               Web.Params.explicit_version(%{version: "*"}, :version)
+    end
   end
 
-  test "version принимает свой ключ" do
-    assert {:ok, :current} = Web.Params.version(%{version: "*"}, :version)
+  describe "expected_version" do
+    test "разбирает явную версию и `*`" do
+      assert {:ok, %Version{value: 3}} = Web.Params.expected_version(%{"If-Match" => "3"})
+      assert {:ok, :current} = Web.Params.expected_version(%{"If-Match" => "*"})
+    end
+
+    test "требует параметр" do
+      assert {:error, %Error{code: :missing_param}} = Web.Params.expected_version(%{})
+      assert {:error, %Error{code: :missing_param}} = Web.Params.expected_version(%{"If-Match" => nil})
+    end
+
+    test "отдаёт ошибку разбора на пустой строке и мусоре" do
+      assert {:error, %Error{kind: :domain, ns: :prim}} = Web.Params.expected_version(%{"If-Match" => ""})
+      assert {:error, %Error{kind: :domain, ns: :prim}} = Web.Params.expected_version(%{"If-Match" => "мусор"})
+    end
+
+    test "принимает свой ключ" do
+      assert {:ok, :current} = Web.Params.expected_version(%{version: "*"}, :version)
+    end
+  end
+
+  describe "optional_version" do
+    test "разбирает явную версию и `*`" do
+      assert {:ok, %Version{value: 3}} = Web.Params.optional_version(%{"If-Match" => "3"})
+      assert {:ok, :current} = Web.Params.optional_version(%{"If-Match" => "*"})
+    end
+
+    test "без параметра отдаёт :current" do
+      assert {:ok, :current} = Web.Params.optional_version(%{})
+      assert {:ok, :current} = Web.Params.optional_version(%{"If-Match" => nil})
+    end
+
+    test "отдаёт ошибку разбора на пустой строке и мусоре" do
+      assert {:error, %Error{kind: :domain, ns: :prim}} = Web.Params.optional_version(%{"If-Match" => ""})
+      assert {:error, %Error{kind: :domain, ns: :prim}} = Web.Params.optional_version(%{"If-Match" => "мусор"})
+    end
+
+    test "принимает свой ключ" do
+      assert {:ok, %Version{value: 2}} = Web.Params.optional_version(%{version: "2"}, :version)
+      assert {:ok, :current} = Web.Params.optional_version(%{"If-Match" => "5"}, :version)
+    end
   end
 end

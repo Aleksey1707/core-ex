@@ -143,6 +143,10 @@ defmodule Core.Repo.PgTest do
     end
   end
 
+  defmodule ManyDao do
+    def all(_query, _opts), do: [%VersionedSchema{id: "1", name: "старое", version: 3}]
+  end
+
   defmodule StubDao do
     def insert(changeset, _opts), do: {:ok, Ecto.Changeset.apply_changes(changeset)}
 
@@ -708,10 +712,12 @@ defmodule Core.Repo.PgTest do
   describe "конкурентная запись" do
     test "delete с %Version{} фильтрует по версии в самом DELETE" do
       pg = versioned_pg()
+      version = Version.new!(3)
 
-      assert {:error, %Error{code: :version_mismatch}} =
-               Core.Repo.Pg.delete(pg, "1", Version.new!(3), Context.new())
+      assert {:error, %Error{code: :version_mismatch} = error} =
+               Core.Repo.Pg.delete(pg, "1", version, Context.new())
 
+      assert error.detail == %{id: "1", expected: version, actual: :stale, source: :expected}
       assert_received {:delete_query, query}
       assert inspect(query) =~ ".version =="
     end
@@ -730,10 +736,35 @@ defmodule Core.Repo.PgTest do
       pg = versioned_pg()
       entity = %{id: "1", name: "новое", version: 4}
 
-      assert {:error, %Error{code: :version_mismatch}} =
+      assert {:error, %Error{code: :version_mismatch} = error} =
                Core.Repo.Pg.update(pg, entity, Context.new())
 
+      assert error.detail == %{id: "1", expected: 4, actual: :stale, source: :expected}
       assert_received {:update_filters, %{version: 3}}
+    end
+
+    test "список detail пачки — source: :expected у каждой пары" do
+      pg = %{versioned_pg() | dao: ManyDao}
+      version = Version.new!(2)
+
+      assert {:error, %Error{code: :version_mismatch} = error} =
+               Core.Repo.Pg.exists_all?(pg, [{"1", version}], Context.new())
+
+      assert error.detail == [%{id: "1", expected: version, actual: 3, source: :expected}]
+    end
+
+    test "сверка версии строки — source: :expected, отличимый от отказа хранилища" do
+      version = Version.new!(2)
+
+      assert {:error, %Error{code: :version_mismatch} = error} =
+               ViewReadRepoPg.get(%FakeId{value: "1"}, version, Context.new())
+
+      assert error.detail == %{
+               id: %FakeId{value: "1"},
+               expected: version,
+               actual: 3,
+               source: :expected
+             }
     end
   end
 

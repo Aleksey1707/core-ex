@@ -187,7 +187,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 |---|---|
 | `use Core.Repo.Pg` (read- и write-репозиторий) | `:not_found`, `:version_mismatch`, `:incomplete_result`, `:no_ids` и каждый код `constraint_errors:` |
 | `use Core.Repo.Pg.StateStored` | коды `Repo.Pg` плюс коды `constraint_errors:` дочерних схем `children:` |
-| `use Core.Es.Aggregate.Repo.Pg` | `:version_mismatch` |
+| `use Core.Es.Aggregate.Repo.Pg` | `:version_mismatch` и `code:` каждого модуля `key_reservations:` |
 
 - Клаузы по коду MUST NOT иметь catch-all: пропущенный код сборка находит по
   `FunctionClauseError`, а catch-all превращает опечатку в валидную ошибку и прячет перечень
@@ -208,10 +208,17 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
   `errors_mod.domain(behaviour, code, detail)`; незамапленный constraint и провал `changeset/2` →
   `%Error{kind: :app}` (`ns: :repo`, `code: :write_failed`) — см. `13-repos.md`.
 - Хранилище событий (`Core.Es.Store.append`): отказ записи → `version_mismatch` →
-  `errors_mod.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`; код и
-  `behaviour` задаёт write-репозиторий (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не
-  хранилище — см. `13-repos.md`. У `get` / `refresh` event-sourced репозитория, когда
-  `%Version{}` не равна голове потока, detail той же формы, у `get_many` — их список.
+  `errors_mod.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual, source:})`;
+  код и `behaviour` задаёт write-репозиторий (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не
+  хранилище — см. `13-repos.md`. У `get` / `get_decision` / `refresh` event-sourced
+  репозитория, когда `%Version{}` не равна голове потока, detail той же формы, у `get_many` — их
+  список. `source:` — источник отказа (`:storage` у хранилища, `:expected` у сверки): по нему
+  решается повтор команды, и вкладывать в `detail` свой ключ с этим именем MUST NOT.
+- Резерв ключа (`append` репозитория с `key_reservations:`): ключ, занятый другим агрегатом, →
+  `errors_mod.domain(behaviour, code, %{scope: scope})`, код — `code:` модуля ключа, значения
+  ключа в detail нет — см. `13-repos.md`, «Резервы ключей». Отказ вставки, который не снял повтор,
+  → `%Error{kind: :app}` (`ns: :es`, `code: :reservation_unresolved`) — это аномалия состязания, а
+  не занятый ключ, и клиенту её показывать нечем.
 - Пачка проекции (`Core.Es.Projection.run_once/2`): `{:error, _}` колбэка и ошибка загрузки
   события — как есть; исключение `project/1` / `clear/0` → `%Error{kind: :app}` (`ns: :es`,
   `code: :projection_raised`) с модулем исключения в detail и без текста; CAS чекпоинта мимо
@@ -233,7 +240,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 | `Core.Enum` | `:enum` | `:domain` | `:invalid_value` |
 | `Core.Context` | `:context` | `:domain` | `:not_found` |
 | `Core.DurationParser` | `:duration_parser` | `:domain` | `:invalid_format`, `:precision_loss`, `:unsupported_component`, `:invalid_component`, `:invalid_input`, `:negative_duration` |
-| `Core.Web.Params` | `:web` | `:domain` | `:missing_param` |
+| `Core.Web.Params` | `:web` | `:domain` | `:missing_param`, `:current_not_allowed` |
 | `Core.Mq.Message` | `:mq` | `:domain` | `:header_not_found`, `:invalid_header_value` |
 | `Core.Mq.Stream.Codec` | `:mq` | `:app` | `:encode_failed`, `:invalid_payload`, `:invalid_body`, `:invalid_topic`, `:invalid_key`, `:invalid_headers` |
 | `Core.Mq.Stream.Reader` | `:mq` | `:app` | `:not_reliable`, `:nothing_to_commit`, `:commit_failed` |
@@ -246,6 +253,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 | `Core.Repo.Pg` | `:repo` | `:app` | `:write_failed` |
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
+| `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |
 | `Core.Es.Projection` (`Batch`, `Checkpoint`, `Await`) | `:es` | `:app` | `:projection_raised`, `:checkpoint_conflict`, `:projection_timeout`, `:projection_rebuilding` |
 
 ## Связанные правила

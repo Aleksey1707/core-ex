@@ -12,6 +12,9 @@ defmodule Core.Es.Aggregate.Repo do
 
   - `get(id, version, context, opts)` → `{:ok, state} | {:error, Error.t()}` — состояние из
     потока агрегата;
+  - `get_decision(id, version, context, fun, opts)` → `{:ok, decision} | {:error, reason}` —
+    решение `fun.(state)` над состоянием из потока; явная версия на пустом потоке сверяется после
+    решения (ADR-0016);
   - `get_many(pairs, context, opts)` → `{:ok, [state]} | {:error, Error.t()}` — состояния в
     порядке пар `{id, version}`;
   - `append(events, context, opts)` → `:ok | {:error, Error.t()}` — запись событий
@@ -56,7 +59,7 @@ defmodule Core.Es.Aggregate.Repo do
   @label "Es.Aggregate.Repo"
   @required_keys ~w(aggregate id)a
   @optional_keys []
-  @callbacks [get: 4, get_many: 3, append: 3, refresh: 4, page_stream: 4]
+  @callbacks [get: 4, get_decision: 5, get_many: 3, append: 3, refresh: 4, page_stream: 4]
 
   # ===== объявление =====
 
@@ -81,6 +84,15 @@ defmodule Core.Es.Aggregate.Repo do
                   context :: Core.Context.t(),
                   opts :: keyword()
                 ) :: {:ok, unquote(aggregate).t()} | {:error, Core.Error.t()}
+
+      @callback get_decision(
+                  id :: unquote(id).t(),
+                  version :: Core.Version.expected(),
+                  context :: Core.Context.t(),
+                  fun :: (unquote(aggregate).t() -> {:ok, decision} | {:error, reason}),
+                  opts :: keyword()
+                ) :: {:ok, decision} | {:error, reason | Core.Error.t()}
+                when decision: var, reason: var
 
       @callback get_many(
                   pairs :: [{unquote(id).t(), Core.Version.expected()}],

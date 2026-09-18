@@ -4,6 +4,63 @@
 
 ### Ломающие изменения контракта
 
+- **Потребитель не ставит `await: :poll` сам — ветка неготовой read-модели проверяется
+  `Core.Es.Projection.Test.with_rebuilding/2`.** Ветку ответа 202
+  (`:projection_timeout` / `:projection_rebuilding`, `app/15-web-api.md`) приложение проверяло
+  своим тестовым хелпером: переставляло отметку дерева на `:poll` своим `start_link`, правило
+  env собственного таймаута ожидания и восстанавливало оба в `on_exit`. Плата — реальное время
+  теста и таймаут приложения, настраиваемый только ради него. Теперь `19-testing.md`,
+  «Проекции» запрещает потребителю ставить `:poll` любым способом, а `19-testing.md` яруса
+  потребителя требует **одного** теста ветки на приложение через хелпер библиотеки; доводить
+  тест до `:projection_timeout` — MUST NOT, ветка ответа та же. Живое дерево `:poll` остаётся
+  только у тестов самого ожидания в библиотеке. Запрет — на ожидание, а не на значение опции:
+  тест, который дерева не поднимает и `await/3` не зовёт, опции с `enabled: true` (и потому с
+  `await: :poll`) собрать MAY — так проверяется ратчет состава `watch_list/0` под тумблерами.
+
+  ```elixir
+  # было — свой `:poll`, свой env, полный таймаут вызывающего
+  Application.put_env(:my_app, MyAppWeb.Helper.Projection, await_timeout_ms: 50)
+  opts = Keyword.put(MyApp.Projections.opts(), :await, :poll)
+  :ignore = Core.Es.Projection.Supervisor.start_link(opts)
+  on_exit(fn -> :ignore = Core.Es.Projection.Supervisor.start_link(MyApp.Projections.opts()) end)
+  conn = patch(authed(ctx), "#{@path}/#{id}", body)
+
+  # стало — исход мгновенный, отметку и строку чекпоинта возвращает хелпер
+  conn =
+    Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Common.Projection, fn ->
+      patch(authed(ctx), "#{@path}/#{id}", body)
+    end)
+  ```
+
+- **`:version_mismatch` несёт источник отказа: `source: :expected | :storage` в detail.** Раньше
+  detail сверки ожидаемой версии и detail отказа записи событий были одной формы
+  (`%{aggregate_id, expected, actual}`, у state-stored сверки строки —
+  `%{id, expected, actual: :stale}`), и снаружи исходы не различались. Теперь ключ есть у всех
+  точек: `Core.Es.Store.append/5` ставит `:storage` (оба write-пути), сверка версии в
+  `Core.Es.Aggregate.Repo.Pg` и в `Core.Repo.Pg` (`version_error/4`, `Ecto.StaleEntryError`,
+  промах `DELETE`, список пар `get_many` / `exists_all?`) — `:expected`. Тип
+  `t:Core.Es.Store.mismatch_detail/0` расширен, добавлен `t:Core.Es.Store.mismatch_source/0`.
+  Правится код, который сравнивает detail целиком; компилятор этого не ловит — detail
+  типизирован `term()`. Почему ключ в detail, а не новый код ошибки, —
+  `docs/adr/0019-retry-by-write-refusal-source.md`.
+
+  ```elixir
+  # было
+  assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 1}
+  # стало
+  assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 1, source: :expected}
+  ```
+
+- **`<Aggregate>.Process.execute` повторяет команду по источнику отказа, а не по ожидаемой
+  версии.** Было: повтор только при `version: :current` и только на отказе `append`. Стало:
+  повторяется отказ хранилища (`source: :storage`) при **любой** ожидаемой версии, включая явную
+  `%Version{}` из `If-Match`, и в том числе пришедший из колбэка `fun.(events)` — например от
+  записи в соседний поток; сверка ожидаемой версии (`source: :expected`) не повторяется никогда.
+  Следствия для потребителя: корректный `If-Match` больше не получает 412 от конкурента по
+  соседнему потоку, а колбэк обязан быть идемпотентным — при повторе он зовётся заново. Тексты
+  логов повтора сменились на контекст «транзакция команды» (`type=` в них больше нет). Обоснование
+  и цена — `docs/adr/0019-retry-by-write-refusal-source.md`.
+
 - **Write-путь возвращает входной агрегат, а не строку из БД.** `Repo.Pg.insert/4` и `update/4`
   больше не декодируют записанную строку через `to_entity`: возвращается тот же агрегат, что
   пришёл на вход, и он же уходит эталоном в `Repo.Sc` регистрацией после commit — эталон стал
@@ -384,7 +441,182 @@
   (накопленный, но ещё не сохранённый дроп), второе показывает недопотреблённый чанк: поле
   `chunk_remaining` в `info/1` было, а метрики по нему не было.
 
+- **`Agg.Process.execute` отдаёт версию после commit.** Результат — `{:ok, Version.t() | nil} |
+  {:error, Error.t()}` вместо `:ok | {:error, Error.t()}`, одинаково при `enabled: false`, через
+  процесс на id и после повторов на `:version_mismatch`; `nil` — команда без событий на пустом
+  потоке. Процесс (вышел в v0.2.0) отбрасывал состояние после записи, а версия нужна usecase для
+  ответа 202 с `{id, version}` (`app/15-web-api.md`, «Ожидание проекции») и клиенту — для
+  следующего `If-Match`: команда, чей ответ несёт версию, шла мимо процесса через `Transact.run`.
+  Наружу уходит только версия, не состояние (CQS). Сгенерированный `execute` сужает результат
+  паттерном: clause `:ok` или `{:ok, %Agg{}}` по нему — предупреждение при сборке. Telemetry и span
+  команды — прежние. Исключение «версии после записи у этого пути нет» убрано из
+  `app/10-architecture.md`, «Usecases»; норма — `13-repos.md`, «Процесс агрегата».
+
+  ```elixir
+  # было
+  with :ok <- Account.Process.execute(id, version, command, context), do: :ok
+  # стало
+  with {:ok, written} <- Account.Process.execute(id, version, command, context), do: {:ok, written}
+  ```
+
+- **`Outbox.Poller`, `Outbox.Cleaner` и `PubSub.MqSubscriberReliable` проверяют опции при старте.**
+  Разбор идёт через `Core.Helper.StartOpts`: ошибка конфигурации роняет старт `ArgumentError` с
+  меткой процесса и именем опции, а не всплывает в цикле и не подменяется молча
+  (`17-otp-concurrency.md`, «`init/1`»). Типы опций и арифметика значений прежние: `retry_max_ms`
+  подписчика не меньше `poll_interval_ms`, `retry_min_ms` cleaner'а не больше `interval_ms`.
+  Теперь роняют старт:
+  - неизвестная опция — было: игнорировалась, и опечатка в необязательной молча давала значение
+    по умолчанию. `shutdown:` у `Outbox.Cleaner` тоже неизвестна — его `child_spec/1` её не читал;
+  - отсутствие обязательной — было `KeyError` без имени процесса;
+  - значение не той формы — было: падало позже и без имени опции. Prim голым значением
+    (`batch_size: 10`, `published_ttl: 60`) и не-модуль в `repo:` давали ошибку каждого цикла и
+    backoff; `from_message:` / `on_message:` не той арности — `:handler_crashed` на каждом
+    сообщении и повторы до DLQ; `context_factory:` не той арности — `BadArityError` в `init/1` у
+    поллера и cleaner'а, у подписчика — падение на первом сообщении и цикл рестартов. Ноль в
+    интервалах и `max_attempts` — было: цикл без паузы (`poll_interval_ms: 0`, `idle_min_ms: 0`,
+    `interval_ms: 0`, `retry_min_ms: 0`) либо DLQ на первой неудаче (`max_attempts: 0`); ноль и
+    отрицательный `retry_max_ms` подписчика молча поднимались до `poll_interval_ms`;
+  - `topic:` / `dlq_topic:` подписчика не непустой строкой — было: подстановка `"unknown"` /
+    `"<topic>.dlq"`, в том числе для `topic: Mq.Topic.new!(...)` вместо строки. Отсутствующие
+    опции получают эти значения по-прежнему;
+  - `dlq_writer:` без `dlq_handle:` — было: `put(nil, _)` проваливался на каждой попытке DLQ;
+    `dlq_handle:` без `dlq_writer:` — было: DLQ молча выключен. Опции задаются только парой;
+    `nil` в них по-прежнему означает отсутствие;
+  - `name:` (у всех трёх) и `shutdown:` (у поллера и подписчика) не той формы — `ArgumentError`
+    из `child_spec/1`; было — отказ супервизора или `GenServer.start_link` без имени процесса.
+    `name: nil` — по-прежнему процесс без имени.
+
+  Правка потребителя — значение, а не удаление проверки:
+
+  ```elixir
+  # было — старт проходил, метки метрик и DLQ-топик — "unknown" / "unknown.dlq"
+  {Core.PubSub.MqSubscriberReliable, topic: Mq.Topic.new!("orders"), ...}
+  # стало — ArgumentError «опция :topic — ожидается непустую строку»
+  {Core.PubSub.MqSubscriberReliable, topic: "orders", ...}
+  ```
+
+- **`Core.Web.Params.version/2` заменён тремя формами разбора `If-Match`.** `version/2` не
+  говорил, какую форму брать команде и чтению, и приложения держали свои хелперы с недостающими
+  формами. У всех трёх `key \\ :"If-Match"` — имя параметра схемы запроса; `""` и мусор — ошибка
+  разбора `Version` (400):
+  - `explicit_version/2` — только явная версия: `*` —
+    `%Error{kind: :domain, ns: :web, code: :current_not_allowed}` (400), нет параметра —
+    `:missing_param`;
+  - `expected_version/2` — семантика прежней `version/2`: `*` → `:current`, нет параметра —
+    `:missing_param`;
+  - `optional_version/2` — нет параметра и `*` → `:current`.
+
+  Результат сужен паттерном: `{:ok, %Version{}}` у `explicit_version/2`,
+  `{:ok, %Version{} | :current}` у двух других; у `version/2` вывод типов давал потребителю
+  `dynamic()`.
+  Норма `app/15-web-api.md`, «Controller»: команда — `explicit_version/2`; `*` на команде —
+  `expected_version/2`, только если исход команды не зависит от состояния, которое видел клиент
+  (выдача роли, увеличение счётчика); чтение по версии — `optional_version/2`; параметр `If-Match`
+  в `operation/2` описывается той же формой. Команда без `If-Match` запрещена: было — нет
+  заголовка → `:current`, и забытый заголовок молча затирал конкурентные изменения; стало —
+  `explicit_version/2` либо явный `*` через `expected_version/2`.
+
+  ```elixir
+  # было
+  with {:ok, version} <- Params.version(params), do: Agg.take(id, version, context)
+  # стало — команда
+  with {:ok, version} <- Params.explicit_version(params), do: Agg.take(id, version, context)
+  # стало — команда, чей исход не зависит от увиденного состояния
+  with {:ok, version} <- Params.expected_version(params), do: Agg.grant(id, version, context)
+
+  # было — чтение и команда без заголовка шли по :current
+  version = if header, do: Version.parse!(header), else: :current
+  # стало — чтение
+  with {:ok, version} <- Params.optional_version(params), do: ReadRepo.get(id, version, context)
+  # стало — команда: explicit_version/2 либо явный `*` через expected_version/2
+  ```
+
 ### Новое
+
+- **`Core.Es.Projection.Test.with_rebuilding/2` — подставленная пересборка на время блока.**
+  При тестовом дереве `await: :inline` ветка неготовой read-модели была недостижима вовсе:
+  `await/3` прогоняет проекцию в процессе теста, а иной исход — `RuntimeError`. Хелпер на время
+  блока переводит отметку дерева на `await: :poll` и снимает строку чекпоинта, поэтому `await/3`
+  внутри отдаёт `:projection_rebuilding` сразу, не читая таймаут вызывающего; в `after`
+  возвращает и отметку, и строку — со своей позицией, так что следующий `run_until_idle/2`
+  досчитывает события, а не зовёт `clear/0`. Контракт `await/3` не менялся: третьего режима нет,
+  опции дерева хелпер берёт из отметки. Принимает модуль или список: отметка общая для ноды, и
+  проекция, которую блок ждёт, но не назвал, ушла бы в опрос до своего таймаута. Дерево не
+  стартовало — `RuntimeError`, проекция не из `projections:` или дерево запущено
+  (`enabled: true`) — `ArgumentError`. Норма — `19-testing.md`, «Ветка неготовой read-модели».
+
+  ```elixir
+  conn =
+    Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Common.Projection, fn ->
+      patch(authed(ctx), "#{@path}/#{id}", body)
+    end)
+
+  assert %{"data" => %{"version" => 2}} = json_response(conn, 202)
+  ```
+
+- **Ратчет wire-тегов событий: `use Core.Es.Event.TagsCase, otp_app: …`.** Норму
+  «тег квалифицирован типом агрегата и уникален на всё приложение» (`app/14-events-outbox.md`)
+  каждое приложение держало своим тестом или не держало вовсе: сборка кодека видит один кодек и
+  столкновение тегов двух агрегатов ей не видно. Теперь библиотека отдаёт тест-модуль на все кодеки
+  приложения (модули с `__es_type__/0`): формат `type:` (`^[a-z][a-z0-9_]*$`), тег — `type:` плюс
+  один и более сегментов `.<snake_case>`, уникальность тега и уникальность `type:` между кодеками.
+  Теги кодека — значения `tags:` плюс ключи `upcasts:`. `otp_app:` принимает и список приложений:
+  `es_events` одна на базу. Записанный тег без префикса снимается адресно — `except_tags:`
+  и `except_types:`; уникальность исключениями не снимается. Контракт `use Core.Es.Event.Codec`
+  не изменился. Почему тест, а не `CompileError`, — `docs/adr/0020-event-tag-ratchet.md`.
+
+  ```elixir
+  # было — своя копия сверки в каждом приложении
+  test "теги событий уникальны" do
+    for mod <- codec_modules(), do: assert_prefixed(mod)
+  end
+
+  # стало — test/my_app/es/event_tags_test.exs
+  defmodule MyApp.Es.EventTagsTest do
+    use Core.Es.Event.TagsCase,
+      otp_app: :my_app,
+      async: true
+  end
+  ```
+
+- **Резерв ключа: неограниченный повтор заменён разбором отказа и кодом
+  `:reservation_unresolved`.** `Core.Es.KeyReservation` после отказа вставки читал владельца по
+  одному ключу и при пустом ответе уходил в `reserve` заново — без счётчика попыток, внутри уже
+  открытой транзакции команды. Теперь отказ разбирается строками области: строка нашего ключа
+  называет владельца, строка пары `(scope, aggregate_id)` с другим ключом означает чужую запись
+  после нашего `DELETE`, пустой ответ — снятый между вставкой и чтением ключ. Обе причины снимает
+  одна следующая попытка, поэтому повтор ровно один; второй отказ подряд —
+  `%Error{kind: :app, ns: :es, code: :reservation_unresolved}` с `scope`, `aggregate_id` и
+  причиной в detail (реестр кодов — `12-errors.md`). Для корректного вызова исход не изменился:
+  занятый ключ по-прежнему `errors.domain(behaviour, code, %{scope: scope})`, clause в каталоге
+  `<Aggregate>.Errors` добавлять не нужно. Потребителю, который разбирает `%Error{}` на границе:
+  новый код доменным не притворяется и уходит в 500 с логом, а не в 400 «ключ занят». Разбор и
+  почему `conflict_target` не сужается — moduledoc `Core.Es.KeyReservation`, «Разбор отказа
+  вставки». Норма яруса потребителя (`app/12-errors.md`): clause `:reservation_unresolved` в
+  каталоге `<Aggregate>.Errors` MUST NOT — как и `:unknown_event_type`, эту ошибку строит
+  библиотека.
+
+- **`Core.Es.Transact` — транзакция команды с повтором по источнику отказа записи.**
+  `run/2` отдаёт результат колбэка, `run_counted/2` — `{результат, число повторов}` для telemetry
+  вызывающего. Сам открывает `Core.Helper.Transact.run/3` на `Core.Config.dao/0` и повторяет всё
+  тело новой транзакцией, пока отказ несёт `source: :storage`; `retries:` по умолчанию 3, паузы
+  между попытками нет, вызов внутри открытой транзакции — `ArgumentError`, повтор — `debug`,
+  исчерпание — `warning`. Не повторяются сверка ожидаемой версии, список detail (`get_many`),
+  detail без `source:` и `{:error, reason}` с не-`%Core.Error{}`. Обёртка повтора в приложении
+  (`MyApp.Transact.run(version, fun)`) заменяется на него: о потоке, который отказал, она не
+  знает. `Core.Es.Aggregate.Process` исполняет команду через `run_counted/2`.
+
+  Норма яруса потребителя: раздел `app/13-repos.md` «Повтор при `:current`» переименован в
+  «Повтор после отказа записи» — команда event-sourced агрегата в теле usecase MUST идти через
+  `Core.Es.Transact.run/2` (либо через процесс агрегата), своя обёртка над `Transact.run` —
+  MUST NOT; команда state-stored агрегата MAY идти тем же путём.
+
+  ```elixir
+  # было — повтор по ожидаемой версии, своя обёртка на приложение
+  MyApp.Transact.run(version, fn -> ... end)
+  # стало
+  Es.Transact.run(fn -> ... end)
+  ```
 
 - **Свод приложения-потребителя (`docs/rules/app/*.md`).** Второй ярус свода: нормы, общие для
   любого приложения на `Core.*` — раскладка слоёв и boundary, конвенция usecase и таблица
@@ -439,11 +671,19 @@
     DLQ; `{:error, _}` — только сбои, которые чинит повтор;
   - конверсия Prim в `evolve/2` — bang, строка `DEBT.md` под неё больше не нужна;
   - старт: `ensure_available!/0` — только у используемых адаптеров брокера,
+    `Core.Outbox.check_singleton!/1` из `start/2` вместо своей копии и ратчет на этот вызов,
     `Core.Outbox.validate_partition!/1` — при нескольких поллерах;
   - `watch_list` — без элементов выключенного поддерева (`required:` плагин не читает); префикс
     имён метрик — `otp_app` из `use PromEx`, а не `telemetry_prefix`;
-  - поддерево подписчиков брокера: DLQ-writer → reader и подписчик → подписка последним
-    ребёнком; сбой подписки завершает ребёнка аварийно, `:already_subscribed` — успех;
+  - поддерево подписчиков брокера: DLQ-writer → reader и подписчик; подписка при старте —
+    опция `Core.PubSub.MqSubscriberReliable` `subscribe: true` (данные — `subscribe_data:`,
+    по умолчанию `nil`, только вместе с `subscribe: true`, иначе `ArgumentError` на старте),
+    а не процесс-bootstrap с `subscribe/3` последним ребёнком: копии такого процесса расходились
+    по семантике отказа, и сбой в лог с нормальным выходом терял подписку молча. Было —
+    свой процесс, зовущий `subscribe(subscriber, nil, context)`; стало — ребёнок удаляется,
+    подписчику добавляется `subscribe: true`. По умолчанию опция `false`: подписчик, которому
+    `subscribe/3` зовут снаружи, работает как раньше, а с опцией внешний вызов получил бы
+    `:already_subscribed`;
   - `MyApp.DataCase` поднимает sandbox `start_owner!(DAO, shared: not tags[:async])`; причины
     `async: false` — три группы из `deps/core/docs/rules/19-testing.md`, «Case-модули» (общему
     sandbox `on_exit` не нужен);
@@ -502,7 +742,11 @@
 - **`Core.Helper.StartOpts`** — проверка опций OTP-процесса в `init/1` (`module!/3`, `atom!/3`,
   `prim!/4`, `binary!/3`, `pos_integer!/4`, `boolean!/4`, `one_of!/5`, `raise_invalid!/4`): `ArgumentError` называет опцию,
   ожидаемое значение и полученное. `Core.Helper.Opts` остаётся про опции `use`-макросов и
-  compile-time.
+  compile-time. Формы для процессов outbox и подписчика: `keys!/3` — неизвестные опции, зовётся
+  первым; обязательные `pos_integer!/3`, `fun!/4` (функция заданной арности) и `term!/3` (любое
+  значение, кроме `nil`); необязательные `module!/4` (модуль или `nil`), `binary!/4`, `fun!/5`,
+  `topics_filter!/4` (`Core.Outbox.topics_filter()`), `name!/3` (`GenServer.name()` или `nil`) и
+  `shutdown!/4` (неотрицательное целое, `:infinity` или `:brutal_kill`).
 - **`Core.Mq.Stream.Buffer`** — буфер записей подписки и учёт кредитов, вынесенные из
   `Mq.Stream.Reader`: `new/0`, `put_chunk/2`, `take/1`, `len/1`, `remaining/1`. Кредит — число
   in-flight чанков, и его счёт держится на трёх счётчиках сразу; отдельной структурой он
@@ -511,6 +755,28 @@
 - **`Core.Mq.Client.ensure_available!/1`** — общая проверка «optional-клиент есть и адаптер собран
   с ним»; `Core.Mq.Stream.ensure_available!/0` и `Core.Mq.Kafka.ensure_available!/0` делегируют ей,
   а новый адаптер получает её строкой опций вместо копии `cond`.
+- **`Core.Outbox.check_singleton!/1`** — отказ старта включённого outbox в кластере: при
+  `enabled?: true` и заданном `cluster_query:` — `ArgumentError` с инструкцией, с
+  `allow_cluster?: true` — старт и `warning`; `cluster_query` `nil`, `:ignore` и `""` —
+  кластеризации нет. Свод требовал этой проверки, а функции не было: каждое приложение держало
+  свою копию в супервизоре очереди, и копии расходились (где-то `""` считался кластером) и не
+  везде были покрыты тестом. Значения передаются опциями — ключ кластеризации принадлежит
+  приложению. Приложение удаляет свою копию (`Outbox.Supervisor.check_singleton!/0` с
+  `clustered?` / `allow_cluster?`), её вызов из `start_link/1` супервизора очереди и её тесты
+  (`describe "check_singleton!/0"`) и зовёт проверку из `start/2` до подъёма дерева:
+
+  ```elixir
+  outbox = Application.get_env(:core, Core.Outbox, [])
+
+  Core.Outbox.check_singleton!(
+    enabled?: Keyword.get(outbox, :enabled, false),
+    cluster_query: Application.get_env(:my_app, :dns_cluster_query),
+    allow_cluster?: Keyword.get(outbox, :allow_cluster, false)
+  )
+  ```
+
+  Ратчет приложения — «`start/2` зовёт `check_singleton!/1`»
+  (`deps/core/docs/rules/app/19-testing.md`, «Ратчеты»).
 - **Трассировка OpenTelemetry на транспорте библиотеки** (`Core.Otel`,
   `Core.Otel.Messaging`, `Core.Otel.LogFilter`). Зависимость — только
   `opentelemetry_api`: без SDK у потребителя все вызовы no-op. Готовые интеграции
@@ -553,10 +819,11 @@
   `Core.Config.dao()`.
 - **`Core.Web.*` — общая часть границы HTTP** (без новых зависимостей: `plug` и `prom_ex`
   уже были в `deps`, Phoenix и OpenApiSpex не добавляются):
-  `Core.Web.Params` (`find` / `get` / `get!` по atom-или-string ключу, `page/2`, `version/2`
-  для `If-Match`), `Core.Web.Response` + `Core.Web.Response.Code` (конверт
-  `%{code, messages[, data]}`), `Core.Web.ErrorMapper` (`%Error{}` → `{статус, код, текст,
-  уровень лога}`, включая правило константного текста на 401), `Core.Web.MetricsPlug`.
+  `Core.Web.Params` (`find` / `get` / `get!` по atom-или-string ключу, `page/2`,
+  `explicit_version/2` / `expected_version/2` / `optional_version/2` для `If-Match`),
+  `Core.Web.Response` + `Core.Web.Response.Code` (конверт `%{code, messages[, data]}`),
+  `Core.Web.ErrorMapper` (`%Error{}` → `{статус, код, текст, уровень лога}`, включая правило
+  константного текста на 401), `Core.Web.MetricsPlug`.
   Потребитель расширяется тремя независимыми шагами: свои клозы `map/1` перед
   делегированием в `ErrorMapper.map/2`; свой словарь кодов (`Core.Enum` поверх
   `Core.Web.Response.Code.codes()`); `use Core.Web.Response, codes: MyCode` — конверт
@@ -693,6 +960,68 @@
     event_codec: User.Event.Codec,
     async: true
   ```
+- **`Core.Repo.ConstraintErrorsCase` — сверку `constraint_errors` проверяет библиотека.**
+  Тест-модуль `use Core.Repo.ConstraintErrorsCase, otp_app: :my_app, async: true` генерирует пять
+  тестов по репозиториям приложения — модулям `otp_app:` с `__constraint_errors__/0`: каждый ключ
+  `constraint_errors:` write-репозитория объявлен в `changeset/2` (по `error_type`); каждое
+  ограничение `changeset/2` покрыто маппингом; имена ограничений `changeset/2` и ключи
+  `constraint_errors:` в `children:` есть у своей таблицы в БД; каждый FK дочерней таблицы, кроме
+  FK по колонке `fk:`, покрыт маппингом; read-репозиторий `constraint_errors:` не объявляет.
+  Write-репозиторий — модуль с любым из `Core.Repo.write_methods/0` (`insert/3` / `update/3` /
+  `save/3`): репозиторий `only: ~w(get save)a` идёт тем же путём, что и с `insert` / `update`.
+  `__constraint_errors__/0` и `__children_constraint_errors__/0` генерируются ради этой сверки, а
+  сам тест приложения копировали почти байт в байт — копии расходятся молча, поэтому case живёт в
+  библиотеке. Списка исключений у case нет. Ратчет приложения заменяется:
+
+  ```elixir
+  # было — test/my_app/repo/constraint_errors_test.exs: свои тесты и запросы к pg_constraint
+  defmodule MyApp.Repo.ConstraintErrorsTest do
+    use MyApp.DataCase, async: true
+
+    test "каждый маппинг constraint_errors объявлен в changeset/2" do
+      for repo <- write_repos(), do: assert_declared(repo)
+    end
+  end
+
+  # стало
+  defmodule MyApp.Repo.ConstraintErrorsTest do
+    use Core.Repo.ConstraintErrorsCase,
+      otp_app: :my_app,
+      async: true
+  end
+  ```
+- **`Core.Enum.DocsCase` — описания значений `Core.Enum` проверяет библиотека.** Тест-модуль
+  `use Core.Enum.DocsCase, otp_app: :my_app, async: true` генерирует три теста по enum приложения —
+  модулям `otp_app:`, которые отбирает `Core.Enum.enum?/1`: у enum есть таблица значений в
+  `@moduledoc` (заголовок `| Значение |`); каждое значение `values/0` описано её строкой; первая
+  ячейка каждой строки — существующее значение. Приложение без единого enum валит тест-модуль:
+  неверный `otp_app:` иначе прошёл бы вхолостую. Норма `11-domain.md` держалась только ратчетом
+  приложения, который копировали из приложения в приложение, и копии уже разошлись: отбор модулей
+  эвристикой по экспортам вместо `Core.Enum.enum?/1`, у одних — `String.to_atom/1` и нестрогая
+  форма ячейки, у других — строгая. Ратчет приложения заменяется:
+
+  ```elixir
+  # было — test/my_app/enum_docs_test.exs: свой отбор модулей и разбор таблицы
+  defmodule MyApp.EnumDocsTest do
+    use ExUnit.Case, async: true
+
+    test "у каждого enum описаны все значения и только они" do
+      for mod <- enum_modules(), do: assert_documented(mod)
+    end
+  end
+
+  # стало
+  defmodule MyApp.EnumDocsTest do
+    use Core.Enum.DocsCase,
+      otp_app: :my_app,
+      async: true
+  end
+  ```
+
+  Форма ячейки теперь записана в норму (`11-domain.md`, «Описание значений в `@moduledoc`»):
+  значение в форме `inspect/1` в обратных кавычках. Ячейка `| new |` после перехода валит тесты
+  «не описано» и «несуществующее значение» — правится в `` `:new` ``; таблица значений под другим
+  заголовком — тест «нет таблицы», заголовок правится в `| Значение |`.
 - **Event-sourced агрегат: `Core.Es.Aggregate`, `Core.Es.Cmd`, `Core.Es.Aggregate.Test`.**
   Агрегат, чей источник истины — события, рядом со state-stored. Автор пишет под
   `use Core.Es.Aggregate, event_codec:` два колбэка: `decide(команда, состояние)` →
@@ -797,10 +1126,21 @@
   ```
 - **Write-репозиторий event-sourced агрегата: `Core.Es.Aggregate.Repo` и
   `Core.Es.Aggregate.Repo.Pg`.** Изменяющий usecase читает состояние, решает и пишет события в
-  теле одной функции — `get` → `Agg.execute/2` → `append` под одним `Transact.run`. Строки
-  состояния нет: `get(id, version, context)` сворачивает поток агрегата через `fold/2`; пустой
-  поток при `:current` — `%Agg{id: id, version: nil}`, а не `:not_found` (существование решает
-  `decide`), `%Version{}` мимо головы потока — `:version_mismatch` (у пустого `actual: nil`).
+  теле одной функции — `get_decision` → `Agg.execute/2` → `append` под одним `Transact.run`.
+  Строки состояния нет: `get(id, version, context)` сворачивает поток агрегата через `fold/2`;
+  пустой поток при `:current` — `%Agg{id: id, version: nil}`, а не `:not_found` (существование
+  решает `decide`), `%Version{}` мимо головы потока — `:version_mismatch` (у пустого `actual: nil`).
+  `get_decision(id, version, context, fun)` — чтение с решением `fun.(state)` → `{:ok, _} |
+  {:error, _}` (`docs/adr/0016-explicit-version-on-unborn-aggregate.md`): явная `%Version{}` на
+  пустом потоке сверяется после решения — ошибка `fun` отдаётся как есть, принятое решение (в том
+  числе без событий) — `:version_mismatch` с `actual: nil`; непустой поток мимо версии —
+  `:version_mismatch` без вызова `fun`. Так существование агрегата решает домен и при `If-Match`:
+  команда над незаведённым агрегатом получает свою доменную ошибку, а не отказ предусловия.
+  `get` / `refresh` / `get_many` контракт не меняют. Команда с явной версией SHOULD идти через
+  `get_decision` или процесс агрегата; свёртка `:version_mismatch` с `actual: nil` в незаведённый
+  агрегат в коде потребителя — MUST NOT, запись в `fun` — MUST NOT (`13-repos.md`;
+  `app/10-architecture.md` и `app/15-web-api.md` — `If-Match` над незаведённым агрегатом,
+  `app/13-repos.md` — тело команды `get_decision` → `Agg.execute/2` → `append`).
   `get_many(pairs, context)` читает все потоки одним запросом и отдаёт одну `:version_mismatch`
   на все расхождения; `refresh(state, version, context)` дочитывает хвост после `state.version`;
   `page_stream(id, limit, offset, context)` — страница потока (пункт «Хранилище событий»).
@@ -812,25 +1152,33 @@
   событий берётся из агрегата. `CompileError`: нет `outbox:`, в `errors:` нет `:version_mismatch`, Prim агрегата
   кодека не равен `id:`, событие `outbox:` не из семейства кодека, `behaviour:` без колбэков
   `Core.Es.Aggregate.Repo`. Telemetry —
-  `[:es, :aggregate, :load]` на вызов и `[:es, :aggregate, :fold]` на поток, span'а нет. Один
-  репозиторий на агрегат в common-слое, без `default_filters`, `Repo.Sc` и `delete`
-  (`13-repos.md`, «Write event-sourced агрегата»). Головы принимают только `%Agg.ID{}` / `%Agg{}`,
-  результат сужен: `get` / `refresh` — `{:ok, %Agg{}}`, `get_many` — `{:ok, list}`, `append` —
-  `:ok | {:error, _}`, `page_stream` — `{:ok, %Pagination.Result{}} | {:error, _}`; опечатка в
-  поле прочитанного состояния и clause `{:ok, _}` по результату `append` — предупреждение при
-  сборке.
+  `[:es, :aggregate, :load]` на вызов (у `get_decision` — `op: :get_decision`, `result` — сверка до
+  решения) и `[:es, :aggregate, :fold]` на поток, span'а нет. Один репозиторий на агрегат в
+  common-слое, без `default_filters`, `Repo.Sc` и `delete` (`13-repos.md`, «Write event-sourced
+  агрегата»). Головы принимают только `%Agg.ID{}` / `%Agg{}`, результат сужен: `get` / `refresh` —
+  `{:ok, %Agg{}}`, `get_decision` — `{:ok, _} | {:error, _}`, `get_many` — `{:ok, list}`,
+  `append` — `:ok | {:error, _}`, `page_stream` — `{:ok, %Pagination.Result{}} | {:error, _}`;
+  опечатка в поле прочитанного состояния и clause `{:ok, _}` по результату `append` —
+  предупреждение при сборке.
 
   ```elixir
+  # было — свёртка отказа предусловия хелпером приложения
   Transact.run(DAO, fn ->
-    with {:ok, account} <- @repo.get(id, version, context),
-         {:ok, {events, _account}} <- Account.execute(account, command) do
-      @repo.append(events, context)
-    end
+    with {:ok, account} <- blank(@repo.get(id, version, context), id),
+         {:ok, {events, _account}} <- Account.execute(account, command),
+         do: @repo.append(events, context)
+  end)
+
+  # стало
+  Transact.run(DAO, fn ->
+    with {:ok, {events, _account}} <-
+           @repo.get_decision(id, version, context, &Account.execute(&1, command)),
+         do: @repo.append(events, context)
   end)
   ```
 
   Снапшоты — `snapshot: [every: N, version: V]`: длинный поток больше не сворачивается с начала
-  на каждом чтении. `get` / `get_many` / `refresh` читают снапшот из `es_snapshots` и хвост
+  на каждом чтении. `get` / `get_decision` / `get_many` / `refresh` читают снапшот из `es_snapshots` и хвост
   потока после него тем же одним запросом; свернули у потока не меньше `every` событий — один
   upsert на вызов после commit, вне транзакции — сразу; `append` снапшоты не пишет. Снапшот —
   кэш, а не источник истины: маркер (md5 модуля агрегата, кодека событий и модулей событий плюс
@@ -1091,7 +1439,7 @@
   ```
 - **Процесс агрегата: `Core.Es.Aggregate.Process`.** Команда одного event-sourced агрегата — вызов
   `Agg.Process.execute(id, version, command, context, fun, opts)` → `:ok | {:error, Error.t()}`
-  вместо тела usecase `get` → `Agg.execute/2` → `append`: команды одного агрегата встают в очередь, а
+  вместо тела usecase `get_decision` → `Agg.execute/2` → `append`: команды одного агрегата встают в очередь, а
   не конфликтуют, и поток не перечитывается целиком на каждую команду. Модуль
   `use Core.Es.Aggregate.Process, repo: Agg.Repo` генерирует `execute/6`, `child_spec/1` и
   `watch_list/1`; реализация `repo:` — `<Behaviour>.Pg`, как у `Core.Config.repo!/1`. Состояние →
@@ -1100,23 +1448,26 @@
   и события, а возврат вне `:ok | {:error, _}` — `CaseClauseError` до commit.
   `:version_mismatch` из `append` при `:current` — повтор новой транзакцией до `retries:` с `debug`
   на повтор, исчерпание — `warning` `type= aggregate_id= retries=` и ошибка вызывающему;
-  `%Version{}` мимо головы потока, в том числе пустого, — `:version_mismatch` без повтора. Опции
-  старта: `enabled:` обязательна, `retries:` 3, `idle_timeout:` 60 000 мс.
+  `%Version{}` мимо головы непустого потока — `:version_mismatch` без повтора; на пустом потоке
+  решение идёт через `get_decision` репозитория — ошибка `decide`, если он команду отклоняет, и
+  `:version_mismatch` с `actual: nil`, если принимает, в том числе без событий, тоже без повтора.
+  Опции старта: `enabled:` обязательна, `retries:` 3, `idle_timeout:` 60 000 мс.
   - `enabled: true` — `Supervisor` под именем модуля процесса из `Registry` и `DynamicSupervisor`
     (имена `<Agg.Process>.Registry` и `<Agg.Process>.Supervisor`), `info` и отметка в
     `:persistent_term`. Команды агрегата идут по одной в его процесс на id (`restart: :temporary`,
-    единственность — на ноду): он стартует в первой команде без запросов, читает состояние `get`,
-    дальше дочитывает хвост `refresh` от состояния последнего commit и уходит по `idle_timeout:`
-    без записи снапшота. Корректность по-прежнему держат проверки `append`: второй процесс того же
+    единственность — на ноду): он стартует в первой команде без запросов, решает через
+    `get_decision`, дальше дочитывает хвост `refresh` от закэшированного заведённого агрегата и
+    уходит по `idle_timeout:` без записи снапшота. Корректность по-прежнему держат проверки `append`: второй процесс того же
     агрегата и запись в обход процесса штатны.
   - Колбэк исполняется в процессе на id; на время команды туда ставятся OTel-контекст и
     `Logger.metadata()` вызывающего, а `:shadow_copy` в `context` заменяется таблицей `Repo.Sc`
     процесса — приватная таблица вызывающего ему недоступна, поэтому `context`, пойманный колбэком
     из замыкания, с `Repo.Sc` не работает.
   - `timeout:` (5 000 мс) — дедлайн: команда, простоявшая в очереди до него, отбрасывается до
-    транзакции, дедлайн, истёкший до commit, откатывает транзакцию. Истечение и падение процесса, в
-    том числе `raise` в `decide` / `evolve` / колбэке, — exit вызывающему; `:noproc` — старт и один
-    повтор вызова.
+    транзакции, дедлайн, истёкший до commit, откатывает транзакцию, а попытка после дедлайна не
+    идёт — повтор после отказа записи обрывается, не читая и не записывая. Истечение и падение
+    процесса, в том числе `raise` в `decide` / `evolve` / колбэке, — exit вызывающему; `:noproc` —
+    старт и один повтор вызова.
   - `enabled: false` — `:ignore`, `info` и отметка, команда исполняется в вызывающем процессе.
 
   Вызов внутри транзакции — `ArgumentError`, нет отметки старта — `RuntimeError`. Span
@@ -1188,6 +1539,75 @@
 
   # MyApp.PromEx.Es
   def processes, do: [MyApp.Domain.<BC>.Common.Account.Process]
+  ```
+- **Резерв изменяемого уникального ключа event-sourced агрегата: `Core.Es.KeyReservation` и
+  таблица `es_key_reservations`.** Неизменяемый ключ задаёт id потока (`Core.Prim.UUID, version:
+  5`), а изменяемый (логин, название роли) библиотека не покрывала: уникального индекса по
+  состоянию у event-sourced агрегата нет, и приложение держало свою таблицу, behaviour и вызов
+  синхронизации в каждом usecase до `append` — забытый на новом пути записи вызов молча пропускал
+  дубль, а процесс агрегата такой агрегат не писал вовсе. Теперь модуль ключа `use
+  Core.Es.KeyReservation, scope:, event:, id:, code:` отображает события агрегата на резерв —
+  `reservation/1` → `{:reserve, value} | :release | :keep` — и задаёт каноническую форму ключа
+  `to_key/1` → строка или список частей (строка равна списку из одной части); генерируется
+  `find(value, context)` → `%Agg.ID{} | nil`. Резервы ставит, переносит и снимает `append`
+  репозитория с `key_reservations:` («Изменения контракта макросов») — на любом пути записи, в
+  том числе `Agg.Process.execute`. У агрегата в области один ключ; ключ другого агрегата — отказ
+  `errors.domain(behaviour, code, %{scope: scope})` без значения ключа в `detail`. DDL — отдельный
+  модуль `Core.Es.KeyReservation.Migration`: потребитель заводит делегирующую миграцию, как для
+  `Core.Es.Migration`. Мотивация, отвергнутые варианты и цена —
+  `docs/adr/0018-mutable-key-reservation.md`; нормы — `13-repos.md`, «Резервы ключей», и
+  `app/13-repos.md`, «Уникальность без индекса состояния»; в ярусе потребителя также код отказа в
+  каталоге агрегата (`app/12-errors.md`) и таблица в «Таблицах библиотеки» (`app/18-migrations.md`).
+  Владелец резерва — `aggregate_id` без типа агрегата: агрегаты разных видов с общим
+  идентификатором из ключа в одной области делят один резерв. Каждый модуль ключа MUST иметь свой
+  тест (`19-testing.md`, «Резерв ключа»): сборка видит наличие clause `reservation/1`, но не её
+  исход, а каноническую форму `to_key/1` не видит вовсе, и usecase-тест её не ловит — обе стороны
+  сравнения идут через тот же `to_key/1`. Требование уникального значения ключа в `async: true`
+  распространено на общую обвязку (`MyAppWeb.ConnCase`, фикстуры): литерал в ней делит одну строку
+  резерва на все async-модули и сериализует их.
+
+  ```elixir
+  # было — своя таблица unique_keys и синхронизация в каждом usecase между get и append
+  with {:ok, user} <- @repo.get(id, version, context),
+       {:ok, {events, changed}} <- User.execute(user, command),
+       :ok <- User.LoginKey.sync(events, changed, context),
+       do: @repo.append(events, context)
+
+  # стало — модуль ключа и опция репозитория, usecase резерв не зовёт
+  defmodule MyApp.Domain.<BC>.Common.User.LoginKey do
+    use Core.Es.KeyReservation,
+      scope: "user.login",
+      event: User.Event,
+      id: User.ID,
+      code: :login_taken
+
+    @impl true
+    def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.login}
+    def reservation(%Event.LoginChanged{payload: payload}), do: {:reserve, payload.login}
+    def reservation(%Event.Blocked{}), do: :keep
+    def reservation(%Event.Deleted{}), do: :release
+
+    @impl true
+    def to_key(%User.Login{} = login), do: User.Login.value(login)
+  end
+
+  use Core.Es.Aggregate.Repo.Pg,
+    # ...
+    outbox: User.Outbox,
+    key_reservations: [User.LoginKey]
+
+  # миграция приложения: таблица библиотеки и перенос прежних резервов до первой записи нового кода;
+  # у агрегата в области один ключ — лишние строки unique_keys агрегата убираются до переноса
+  def up do
+    Core.Es.KeyReservation.Migration.up()
+
+    execute """
+    INSERT INTO es_key_reservations (scope, key, aggregate_id)
+    SELECT scope, ARRAY[key], aggregate_id FROM unique_keys
+    """
+
+    drop table(:unique_keys)
+  end
   ```
 
 ### Изменения контракта макросов
@@ -1291,6 +1711,84 @@
     id: Role.ID,
     event_codec: Role.Event.Codec,
     outbox: Role.Outbox
+  ```
+- **`Core.Prim.UUID`: `version: 5` — идентификатор из ключа, опции `namespace:` и `scope:`.**
+  Id потока из неизменяемого ключа (`app/13-repos.md`, «Уникальность без индекса состояния»)
+  приложению приходилось считать самому: свой модуль с транзитивной `:uuid` и Prim с `version: 7,
+  check_version: false` — проверка версии на разборе снята, а `new/0` генерировал v7, которой у
+  настоящих id не бывает. Теперь `version: 5` требует `namespace:` (UUID-строка) и `scope:` (область
+  ключа, непустая строка); при других версиях обе опции — `CompileError`. Id — вложенный UUIDv5:
+  `uuid5(namespace, scope)`, затем `uuid5(acc, part)` на каждую часть ключа; строка — ключ из одной
+  части. Приложение, считавшее id по этой схеме, при переводе id потоков не меняет. `new/0` у такого
+  Prim не генерируется: вместо него приватный `from_key/1` (строка или непустой список строк),
+  который зовёт публичный `from_<key>` модуля. Prim без `from_<key>` не собирается с
+  `--warnings-as-errors` (`from_key/1` не используется), своя функция `from_key/1` в модуле
+  сталкивается с генерируемой. `check_version: false` при `version: 5` допустим — агрегат,
+  переходящий на идентификатор из ключа, разбирает прежние случайные id. Мотивация, отвергнутые
+  варианты и цена — `docs/adr/0017-stream-id-from-key.md`.
+
+  ```elixir
+  # было — свой модуль схемы, проверка версии снята, пробы в тестах через new/0
+  defmodule MyApp.StreamID do
+    @namespace "1b0f8f5e-8a54-4a7c-9a2b-3f6d2c8e5a11"
+
+    def uuid(scope, parts), do: Enum.reduce(parts, UUID.uuid5(@namespace, scope), &UUID.uuid5(&2, &1))
+  end
+
+  use Core.Prim.UUID,
+    name: first_line(@moduledoc),
+    version: 7,
+    check_version: false
+
+  def from_number(number), do: new!(MyApp.StreamID.uuid("delivery", [number]))
+
+  id = Delivery.ID.new()
+
+  # стало — namespace из функции приложения, пробы — from_<key> от уникального ключа
+  defmodule MyApp.StreamID do
+    def namespace, do: "1b0f8f5e-8a54-4a7c-9a2b-3f6d2c8e5a11"
+  end
+
+  use Core.Prim.UUID,
+    name: first_line(@moduledoc),
+    version: 5,
+    namespace: MyApp.StreamID.namespace(),
+    scope: "delivery"
+
+  def from_number(number), do: from_key(number)
+
+  id = Delivery.ID.from_number("DLV-#{System.unique_integer([:positive])}")
+  ```
+- **`use Core.Es.Aggregate.Repo.Pg`: опция `key_reservations:` — модули ключа агрегата.**
+  Резерв изменяемого ключа (пункт «Резерв изменяемого уникального ключа» в разделе «Новое»)
+  встроен в `append`, а не в usecase: запись идёт события → резервы → outbox одной транзакцией, и
+  конкурентная команда того же потока получает `:version_mismatch`, до резервов не доходя. Сборка
+  сверяет модули ключа с репозиторием — `CompileError`: не список модулей ключа, событие модуля
+  ключа не равно семейству кодека, его `id:` не равен `id:` репозитория, в `errors:` нет clause его
+  `code:`, область повторяется. Полноту `reservation/1` проверяет вывод типов: на каждое событие
+  кодека макрос генерирует функцию-проверку `"reservation/1 принимает <Event>"/1` — нет clause
+  или опечатка в поле несуженной нагрузки дают предупреждение на строке `use`. `code:
+  :version_mismatch` у модуля ключа — `CompileError`: процесс агрегата повторял бы отказ как
+  конфликт записи. Без опции
+  репозиторий прежний; с ней репозиторий зависит от таблицы `es_key_reservations` — без миграции
+  `Core.Es.KeyReservation.Migration` запись падает. Каталог `errors:` получает clause `code:`
+  каждого модуля ключа:
+
+  ```elixir
+  # было
+  use Core.Es.Aggregate.Repo.Pg,
+    # ...
+    outbox: User.Outbox
+
+  # стало
+  use Core.Es.Aggregate.Repo.Pg,
+    # ...
+    outbox: User.Outbox,
+    key_reservations: [User.LoginKey]
+
+  # User.Errors
+  def domain(module, :login_taken = code, detail, message),
+    do: Error.domain(module, code: code, ns: ns(), message: message || "Логин занят", detail: detail)
   ```
 
 ## 0.1.0

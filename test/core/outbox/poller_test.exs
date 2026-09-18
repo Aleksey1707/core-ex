@@ -100,6 +100,72 @@ defmodule Core.Outbox.PollerTest do
   test "child_spec: :id равен :name, иначе модуль" do
     assert %{id: Poller} = Poller.child_spec([])
     assert %{id: :notifications} = Poller.child_spec(name: :notifications)
+    assert %{id: Poller} = Poller.child_spec(name: nil)
+  end
+
+  test "child_spec: :name и :shutdown не той формы — ArgumentError" do
+    assert_raise ArgumentError, ~r/Outbox.Poller: опция :name — ожидается имя процесса/, fn ->
+      Poller.child_spec(name: "notifications")
+    end
+
+    assert_raise ArgumentError, ~r/Outbox.Poller: опция :shutdown — ожидается неотрицательное целое/, fn ->
+      Poller.child_spec(shutdown: "30s")
+    end
+  end
+
+  describe "опции старта" do
+    test "неизвестная опция — ArgumentError" do
+      opts = Keyword.put(poller_opts(), :poll_interval, 1_000)
+
+      assert start_error(opts) =~ "Outbox.Poller: неизвестные опции [:poll_interval]"
+    end
+
+    test "нет обязательной опции — ArgumentError" do
+      for key <- ~w(repo delivery_module delivery poll_interval_ms idle_min_ms batch_size lock_duration max_attempts)a do
+        assert start_error(Keyword.delete(poller_opts(), key)) =~
+                 "Outbox.Poller: нет обязательной опции #{inspect(key)}"
+      end
+    end
+
+    test "значение не той формы — ArgumentError с именем опции" do
+      for {key, value, expected} <- [
+            {:repo, "Repo", "модуль"},
+            {:delivery_module, nil, "модуль"},
+            {:delivery, nil, "значение"},
+            {:poll_interval_ms, 0, "положительное целое"},
+            {:idle_min_ms, "50", "положительное целое"},
+            {:batch_size, 10, "%Core.Outbox.BatchSize{}"},
+            {:lock_duration, 30, "%Core.Outbox.LockDuration{}"},
+            {:max_attempts, 3, "%Core.Outbox.Attempts{}"},
+            {:topics, ["orders"], ":all, {:only, [String.t()]} или {:except, [String.t()]}"},
+            {:context_factory, fn _ -> Context.new() end, "функция арности 0"}
+          ] do
+        assert start_error(Keyword.put(poller_opts(), key, value)) =~
+                 "Outbox.Poller: опция #{inspect(key)} — ожидается #{expected}"
+      end
+    end
+  end
+
+  defp poller_opts do
+    [
+      repo: @repo,
+      delivery_module: Delivery.Mq,
+      delivery: :delivery,
+      poll_interval_ms: 60_000,
+      idle_min_ms: 50,
+      batch_size: Outbox.BatchSize.new!(10),
+      lock_duration: Outbox.LockDuration.new!(30),
+      max_attempts: Outbox.Attempts.new!(3)
+    ]
+  end
+
+  defp start_error(opts) do
+    Process.flag(:trap_exit, true)
+
+    assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
+             with_log(fn -> Poller.start_link(opts) end)
+
+    message
   end
 
   defp append_record(context, name) do

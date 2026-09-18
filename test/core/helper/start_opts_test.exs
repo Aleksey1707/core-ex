@@ -105,6 +105,131 @@ defmodule Core.Helper.StartOptsTest do
     end
   end
 
+  test "keys!: неизвестная опция — ошибка с её именем" do
+    assert StartOpts.keys!(@label, [credit: 2, name: :reader], ~w(credit name)a) == :ok
+    assert StartOpts.keys!(@label, [], ~w(credit)a) == :ok
+
+    assert_raise ArgumentError, ~r/Test.Process: неизвестные опции \[:credti\], допустимые: \[:credit, :name\]/, fn ->
+      StartOpts.keys!(@label, [credti: 2, name: :reader], ~w(credit name)a)
+    end
+  end
+
+  test "pos_integer!/3: обязательное положительное целое" do
+    assert StartOpts.pos_integer!(@label, [interval_ms: 5], :interval_ms) == 5
+
+    assert_raise ArgumentError, ~r/:interval_ms — ожидается положительное целое, получено 0/, fn ->
+      StartOpts.pos_integer!(@label, [interval_ms: 0], :interval_ms)
+    end
+
+    assert_raise ArgumentError, ~r/нет обязательной опции :interval_ms/, fn ->
+      StartOpts.pos_integer!(@label, [], :interval_ms)
+    end
+  end
+
+  test "term!: любое значение, кроме nil" do
+    assert StartOpts.term!(@label, [reader: {:via, Registry, {:r, 1}}], :reader) == {:via, Registry, {:r, 1}}
+
+    assert_raise ArgumentError, ~r/:reader — ожидается значение, получено nil/, fn ->
+      StartOpts.term!(@label, [reader: nil], :reader)
+    end
+
+    assert_raise ArgumentError, ~r/нет обязательной опции :reader/, fn ->
+      StartOpts.term!(@label, [], :reader)
+    end
+  end
+
+  test "fun!/4: обязательная функция заданной арности" do
+    decode = fn message -> {:ok, message} end
+
+    assert StartOpts.fun!(@label, [from_message: decode], :from_message, 1) == decode
+
+    assert_raise ArgumentError, ~r/:from_message — ожидается функция арности 1/, fn ->
+      StartOpts.fun!(@label, [from_message: fn _m, _d -> :ok end], :from_message, 1)
+    end
+
+    assert_raise ArgumentError, ~r/:from_message — ожидается функция арности 1, получено :decode/, fn ->
+      StartOpts.fun!(@label, [from_message: :decode], :from_message, 1)
+    end
+
+    assert_raise ArgumentError, ~r/нет обязательной опции :from_message/, fn ->
+      StartOpts.fun!(@label, [], :from_message, 1)
+    end
+  end
+
+  test "fun!/5: default при отсутствии" do
+    factory = fn -> :context end
+
+    assert StartOpts.fun!(@label, [], :context_factory, 0, factory) == factory
+    assert StartOpts.fun!(@label, [context_factory: &Map.new/0], :context_factory, 0, factory) == (&Map.new/0)
+
+    assert_raise ArgumentError, ~r/:context_factory — ожидается функция арности 0/, fn ->
+      StartOpts.fun!(@label, [context_factory: &Map.new/1], :context_factory, 0, factory)
+    end
+  end
+
+  test "module!/4: default при отсутствии, nil — допустимое значение" do
+    assert StartOpts.module!(@label, [], :dlq_writer, nil) == nil
+    assert StartOpts.module!(@label, [dlq_writer: nil], :dlq_writer, nil) == nil
+    assert StartOpts.module!(@label, [dlq_writer: MyWriter], :dlq_writer, nil) == MyWriter
+
+    assert_raise ArgumentError, ~r/:dlq_writer — ожидается модуль, получено "MyWriter"/, fn ->
+      StartOpts.module!(@label, [dlq_writer: "MyWriter"], :dlq_writer, nil)
+    end
+  end
+
+  test "binary!/4: default при отсутствии, пустая строка — ошибка" do
+    assert StartOpts.binary!(@label, [], :topic, "unknown") == "unknown"
+    assert StartOpts.binary!(@label, [topic: "products"], :topic, "unknown") == "products"
+
+    assert_raise ArgumentError, ~r/:topic — ожидается непустую строку, получено ""/, fn ->
+      StartOpts.binary!(@label, [topic: ""], :topic, "unknown")
+    end
+
+    assert_raise ArgumentError, ~r/:topic — ожидается непустую строку, получено nil/, fn ->
+      StartOpts.binary!(@label, [topic: nil], :topic, "unknown")
+    end
+  end
+
+  test "topics_filter!: :all, {:only, строки} или {:except, строки}" do
+    assert StartOpts.topics_filter!(@label, [], :topics, :all) == :all
+    assert StartOpts.topics_filter!(@label, [topics: {:only, ["orders"]}], :topics, :all) == {:only, ["orders"]}
+    assert StartOpts.topics_filter!(@label, [topics: {:except, []}], :topics, :all) == {:except, []}
+
+    for bad <- [["orders"], {:only, "orders"}, {:only, [:orders]}, {:all, ["orders"]}, nil] do
+      assert_raise ArgumentError, ~r/:topics — ожидается :all, \{:only, \[String.t\(\)\]\} или/, fn ->
+        StartOpts.topics_filter!(@label, [topics: bad], :topics, :all)
+      end
+    end
+  end
+
+  test "name!: необязательное имя процесса" do
+    assert StartOpts.name!(@label, [], :name) == nil
+    assert StartOpts.name!(@label, [name: nil], :name) == nil
+    assert StartOpts.name!(@label, [name: :poller], :name) == :poller
+    assert StartOpts.name!(@label, [name: {:global, :poller}], :name) == {:global, :poller}
+    assert StartOpts.name!(@label, [name: {:via, Registry, {:r, 1}}], :name) == {:via, Registry, {:r, 1}}
+
+    for bad <- ["poller", {:via, "Registry", :poller}, {:local, :poller}] do
+      assert_raise ArgumentError, ~r/:name — ожидается имя процесса/, fn ->
+        StartOpts.name!(@label, [name: bad], :name)
+      end
+    end
+  end
+
+  test "shutdown!: неотрицательное целое, :infinity или :brutal_kill" do
+    assert StartOpts.shutdown!(@label, [], :shutdown, 30_000) == 30_000
+
+    for good <- [0, 5_000, :infinity, :brutal_kill] do
+      assert StartOpts.shutdown!(@label, [shutdown: good], :shutdown, 30_000) == good
+    end
+
+    for bad <- [-1, "30s", :kill, nil] do
+      assert_raise ArgumentError, ~r/:shutdown — ожидается неотрицательное целое, :infinity или :brutal_kill/, fn ->
+        StartOpts.shutdown!(@label, [shutdown: bad], :shutdown, 30_000)
+      end
+    end
+  end
+
   test "raise_invalid!: своё описание ожидаемого" do
     assert_raise ArgumentError, ~r/:offset — ожидается \{:offset, n\}, получено :bogus/, fn ->
       StartOpts.raise_invalid!(@label, :offset, "{:offset, n}", :bogus)

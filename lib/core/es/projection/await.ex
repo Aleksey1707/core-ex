@@ -26,7 +26,7 @@ defmodule Core.Es.Projection.Await do
   def run(projection, declaration, type, %_{} = aggregate_id, timeout)
       when is_atom(projection) and is_binary(type) and is_integer(timeout) and timeout >= 0 do
     ensure_outside_transaction!(declaration.dao.in_transaction?(), declaration)
-    mark = tree_mark!(Projection.Supervisor.Mark.find(), projection, declaration)
+    mark = Projection.Supervisor.Mark.fetch!("Es.Projection.await", projection, declaration.name)
     id = declaration.codec.dump(aggregate_id)
 
     Otel.Es.await(declaration.name, type, id, fn ->
@@ -42,24 +42,6 @@ defmodule Core.Es.Projection.Await do
     raise ArgumentError,
           "Es.Projection.await: проекция #{declaration.name} вызвана внутри транзакции — " <>
             "пачка не видит незакоммиченной записи, ожидание идёт после commit"
-  end
-
-  defp tree_mark!(nil, _projection, _declaration) do
-    raise "Es.Projection.await: дерево проекций не запущено — " <>
-            "Core.Es.Projection.Supervisor на ноде не стартовал"
-  end
-
-  defp tree_mark!(%{projections: projections} = mark, projection, declaration) do
-    :ok = ensure_listed!(projection in projections, declaration)
-    mark
-  end
-
-  defp ensure_listed!(true, _declaration), do: :ok
-
-  defp ensure_listed!(false, declaration) do
-    raise ArgumentError,
-          "Es.Projection.await: проекция #{declaration.name} не из projections: " <>
-            "дерева проекций"
   end
 
   defp measured(declaration, fun) do

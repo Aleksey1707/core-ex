@@ -3,9 +3,9 @@ defmodule Core.Es.Aggregate.RepoTest do
 
   alias Core.EsFixture.Account
 
-  test "объявляет колбэки get/4, get_many/3, append/3, refresh/4, page_stream/4" do
+  test "объявляет колбэки get/4, get_decision/5, get_many/3, append/3, refresh/4, page_stream/4" do
     assert Enum.sort(Account.Repo.behaviour_info(:callbacks)) ==
-             [append: 3, get: 4, get_many: 3, page_stream: 4, refresh: 4]
+             [append: 3, get: 4, get_decision: 5, get_many: 3, page_stream: 4, refresh: 4]
   end
 
   describe "компиляция" do

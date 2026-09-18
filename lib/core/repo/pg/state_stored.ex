@@ -49,8 +49,10 @@ defmodule Core.Repo.Pg.StateStored do
   кодека `event_codec:`. Проверки записи — занятая версия и страж `xid`, без непрерывности
   потока: поток законно начинается не с 1 и имеет разрывы (агрегат создан без события,
   мутация без события). Отказ — `{:error, errors.domain(behaviour, :version_mismatch, detail)}`
-  с detail `%{aggregate_id, expected, actual}` (`t:Core.Es.Store.mismatch_detail/0`), и
-  транзакция откатывается целиком. Событие, которое фасад знает, но которого нет в `tags:` кодека
+  с detail `%{aggregate_id, expected, actual, source: :storage}`
+  (`t:Core.Es.Store.mismatch_detail/0`), и транзакция откатывается целиком: это отказ хранилища,
+  снимается повтором команды (`Core.Es.Transact`), в отличие от сверки версии строки у `get` /
+  `update`, где `source: :expected`. Событие, которое фасад знает, но которого нет в `tags:` кодека
   (событие чужого агрегата), — `FunctionClauseError`.
 
   ## Страница потока
@@ -77,8 +79,8 @@ defmodule Core.Repo.Pg.StateStored do
       составной первичный ключ схемы без `fk`
     - `constraint_errors:` — `[<имя constraint'а в БД>: <код ошибки>]`; у дочерних схем нет
       `changeset/2`, поэтому маппинг идёт по имени constraint'а, а не по полю. Коды
-      проверяются на этапе компиляции по модулю `errors:`, имена — тестом
-      `test/my_app/repo/constraint_errors_test.exs`. FK на **сам агрегат** (колонка `fk:`)
+      проверяются на этапе компиляции по модулю `errors:`, имена —
+      `Core.Repo.ConstraintErrorsCase`. FK на **сам агрегат** (колонка `fk:`)
       не мапится: строка родителя пишется той же транзакцией раньше, нарушить его нечем
 
   Опции `entity:` и `id:` обязательны (в `Repo.Pg` они опциональны): по `entity:` строятся

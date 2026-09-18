@@ -120,4 +120,29 @@ defmodule Consumer.S.Repo do
       {:error, _error} -> :error
     end
   end
+
+  # E9 — ID другого агрегата в `get_decision`
+  def e9_decision_foreign_id(%Order.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context),
+    # expect: incompatible types given to Consumer.Account.Repo.Pg.get_decision/4
+    do: @repo.get_decision(id, :current, context, &Account.execute(&1, command))
+
+  # E9b — целое вместо версии в `get_decision`
+  def e9b_decision_integer_version(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context),
+    # expect: incompatible types given to Consumer.Account.Repo.Pg.get_decision/4
+    do: @repo.get_decision(id, 1, context, &Account.execute(&1, command))
+
+  # E9c — колбэк арности 2 в `get_decision`
+  def e9c_decision_callback_arity(%Account.ID{} = id, %Context{} = context),
+    # expect: incompatible types given to Consumer.Account.Repo.Pg.get_decision/4
+    do: @repo.get_decision(id, :current, context, fn state, _extra -> {:ok, state} end)
+
+  # E9d — `:ok` по результату `get_decision`
+  def e9d_case_decision_ok(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context) do
+    case @repo.get_decision(id, :current, context, &Account.execute(&1, command)) do
+      {:ok, decision} -> decision
+      # expect: the following clause will never match
+      :ok -> nil
+      {:error, _error} -> nil
+    end
+  end
 end

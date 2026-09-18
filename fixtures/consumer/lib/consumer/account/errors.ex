@@ -14,6 +14,9 @@ defmodule Consumer.Account.Errors do
   def domain(module, :invalid_status = code, detail),
     do: Error.domain(module, code: code, ns: ns(), message: "Операция недоступна в статусе счёта", detail: detail)
 
+  def domain(module, :name_taken = code, detail),
+    do: Error.domain(module, code: code, ns: ns(), message: "Название счёта занято", detail: detail)
+
   def domain(module, :version_mismatch = code, detail),
     do: Error.domain(module, code: code, ns: ns(), message: "Версия счёта не совпадает", detail: detail)
 end

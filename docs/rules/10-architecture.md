@@ -148,7 +148,7 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 | Модуль | Роль |
 |---|---|
-| `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `version/2` (`If-Match`) |
+| `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `If-Match` → `Version`: `explicit_version/2` (только явная), `expected_version/2` (`*` → `:current`), `optional_version/2` (нет заголовка → `:current`) |
 | `Core.Web.Response` + `Core.Web.Response.Code` | конверт `%{code, messages[, data]}` и его числовые коды; `use Core.Web.Response, codes:` — конверт на своём словаре |
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, код конверта, текст, уровень лога}` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
@@ -175,6 +175,13 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 - Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту показывать
   нельзя, и она обязана попасть в лог (`12-errors.md`).
+- Доменный `:not_found` — 400 `:domain_error` по строке `kind: :domain`; своя строка 404 в
+  `Core.Web.ErrorMapper.map/2` MUST NOT. `:not_found` домен отдаёт и на ресурс из URI, и на запись,
+  на которую ссылается тело команды, а по `%Error{}` маппер их не различит: 404 на существующий
+  ресурс клиент прочтёт как «ресурса нет». Отказу домена на команде с `If-Match` 404 не нужен —
+  по RFC 9110 §13.2.1 ответу достаточно не быть ни 2xx, ни 412. Приложение, чей домен разводит
+  коды «ресурс не найден» и «ссылка не найдена», MAY отдать 404 своей клозой `map/1` перед
+  делегированием.
 - На 401 наружу MUST уходить константный текст независимо от причины: разные тексты позволяют
   перебирать учётки, сессии и токены. Причина — только в лог (`Error.format_chain/1`).
 - Опции: `auth_codes:` (дефолт `~w(unauthorized auth_failed invalid_token session_not_found)a`),
@@ -183,7 +190,8 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   делегированием в `Core.Web.ErrorMapper.map/2`: `map/2` не макрос и не behaviour, и порядок
   клоз — это приоритет строк.
 
-Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно.
+Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно, `:not_found` → 400 отдельным
+тестом.
 
 Расширение под потребителя — тремя независимыми шагами, каждый нужен только по надобности:
 

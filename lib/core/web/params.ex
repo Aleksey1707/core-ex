@@ -64,19 +64,49 @@ defmodule Core.Web.Params do
   end
 
   @doc """
-  Разобрать ожидаемую версию агрегата из заголовка `If-Match`.
+  Разобрать явную версию агрегата из заголовка `If-Match` — форма команды.
 
-  `"*"` → `:current` (`Version.parse/1`); отсутствие заголовка — `:missing_param`.
+  `"*"` — ошибка `:current_not_allowed`, отсутствие параметра — `:missing_param`.
 
   `key` — имя параметра в схеме запроса, а не заголовок `conn`: `Plug` отдаёт имена
   заголовков в нижнем регистре, и на `Map.new(conn.req_headers)` дефолт не совпадёт.
   """
-  @spec version(map(), atom()) :: {:ok, Version.expected()} | {:error, Error.t()}
+  @spec explicit_version(map(), atom()) :: {:ok, Version.t()} | {:error, Error.t()}
 
-  def version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
-    map
-    |> get(key)
-    |> Result.and_then(&Version.parse/1)
+  def explicit_version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
+    case expected_version(map, key) do
+      {:ok, %Version{} = version} -> {:ok, version}
+      {:ok, :current} -> {:error, current_not_allowed(key)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Разобрать ожидаемую версию агрегата из заголовка `If-Match`: `"*"` → `:current`.
+
+  Отсутствие параметра — `:missing_param`; `key` — как у `explicit_version/2`.
+  """
+  @spec expected_version(map(), atom()) :: {:ok, Version.expected()} | {:error, Error.t()}
+
+  def expected_version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
+    case get(map, key) do
+      {:ok, value} -> parse_version(value)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Разобрать необязательную версию агрегата из заголовка `If-Match` — форма чтения.
+
+  Отсутствие параметра и `"*"` → `:current`; `key` — как у `explicit_version/2`.
+  """
+  @spec optional_version(map(), atom()) :: {:ok, Version.expected()} | {:error, Error.t()}
+
+  def optional_version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
+    case find(map, key) do
+      nil -> {:ok, :current}
+      value -> parse_version(value)
+    end
   end
 
   # ---
@@ -93,11 +123,28 @@ defmodule Core.Web.Params do
     |> Pagination.Offset.new()
   end
 
+  defp parse_version(value) do
+    case Version.parse(value) do
+      {:ok, %Version{} = version} -> {:ok, version}
+      {:ok, :current} -> {:ok, :current}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp missing(key) do
     Error.domain(
       code: :missing_param,
       ns: :web,
       message: "Отсутствует обязательный параметр #{key}",
+      detail: key
+    )
+  end
+
+  defp current_not_allowed(key) do
+    Error.domain(
+      code: :current_not_allowed,
+      ns: :web,
+      message: "* недопустим: нужна явная версия",
       detail: key
     )
   end

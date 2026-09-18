@@ -28,6 +28,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   alias Core.Context
   alias Core.Error
+  alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.Otel
@@ -40,6 +41,13 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   @attr_attempt "core.pubsub.attempt"
   @attr_dlq_topic "core.pubsub.dlq_topic"
+
+  @label "PubSub.MqSubscriberReliable"
+
+  @keys ~w(
+    reader_module reader from_message on_message context_factory poll_interval_ms retry_max_ms max_attempts
+    dlq_writer dlq_handle dlq_topic topic subscribe subscribe_data name shutdown
+  )a
 
   @shutdown_ms 30_000
   @call_timeout 5_000
@@ -92,9 +100,9 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   def child_spec(opts) when is_list(opts) do
     %{
-      id: Keyword.get(opts, :name, __MODULE__),
+      id: StartOpts.name!(@label, opts, :name) || __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
+      shutdown: StartOpts.shutdown!(@label, opts, :shutdown, @shutdown_ms)
     }
   end
 
@@ -105,8 +113,17 @@ defmodule Core.PubSub.MqSubscriberReliable do
   опционально `:context_factory` (вызывается на каждое сообщение), `:poll_interval_ms`,
   `:topic` (string для метрик и имени DLQ), `:name`.
 
-  DLQ: `:dlq_writer` (модуль `Mq.Writer`), `:dlq_handle` (его handle),
-  `:dlq_topic` (по умолчанию `"<topic>.dlq"`), `:max_attempts`, `:retry_max_ms`.
+  DLQ: `:dlq_writer` (модуль `Mq.Writer`), `:dlq_handle` (его handle — обязателен при
+  `:dlq_writer` и без него не задаётся), `:dlq_topic` (по умолчанию `"<topic>.dlq"`),
+  `:max_attempts`, `:retry_max_ms`.
+
+  Подписка при старте: `:subscribe` (по умолчанию `false`) — процесс подписан сразу после
+  `init/1`, и `subscribe/3` снаружи не нужен (повторный вызов вернёт `:already_subscribed`);
+  `:subscribe_data` (по умолчанию `nil`) — данные подписки для `on_message`, как `data` у
+  `subscribe/3`, задаются только вместе с `subscribe: true`.
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` при
+  старте (`Core.Helper.StartOpts`).
   """
   @spec start_link(keyword()) :: GenServer.on_start()
 
@@ -143,22 +160,24 @@ defmodule Core.PubSub.MqSubscriberReliable do
     # Обработка сообщения идёт целиком внутри одного handle_info: trap_exit даёт
     # ей завершиться и закоммитить offset вместо повторной доставки после рестарта.
     Process.flag(:trap_exit, true)
-    poll_interval_ms = Keyword.get(opts, :poll_interval_ms, @default_poll_interval_ms)
-    topic = topic_from_opts(opts)
+    StartOpts.keys!(@label, opts, @keys)
+    poll_interval_ms = StartOpts.pos_integer!(@label, opts, :poll_interval_ms, @default_poll_interval_ms)
+    topic = StartOpts.binary!(@label, opts, :topic, "unknown")
+    dlq_writer = StartOpts.module!(@label, opts, :dlq_writer, nil)
 
     state = %__MODULE__{
-      reader_module: Keyword.fetch!(opts, :reader_module),
-      reader: Keyword.fetch!(opts, :reader),
-      from_message: Keyword.fetch!(opts, :from_message),
-      on_message: Keyword.fetch!(opts, :on_message),
-      context_factory: Keyword.get(opts, :context_factory, &Context.new/0),
+      reader_module: StartOpts.module!(@label, opts, :reader_module),
+      reader: StartOpts.term!(@label, opts, :reader),
+      from_message: StartOpts.fun!(@label, opts, :from_message, 1),
+      on_message: StartOpts.fun!(@label, opts, :on_message, 3),
+      context_factory: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0),
       poll_interval_ms: poll_interval_ms,
       retry_max_ms: retry_max_ms(opts, poll_interval_ms),
       retry_ms: poll_interval_ms,
-      max_attempts: Keyword.get(opts, :max_attempts, @default_max_attempts),
-      dlq_writer: Keyword.get(opts, :dlq_writer),
-      dlq_handle: Keyword.get(opts, :dlq_handle),
-      dlq_topic: dlq_topic(opts, topic),
+      max_attempts: StartOpts.pos_integer!(@label, opts, :max_attempts, @default_max_attempts),
+      dlq_writer: dlq_writer,
+      dlq_handle: dlq_handle!(opts, dlq_writer),
+      dlq_topic: StartOpts.binary!(@label, opts, :dlq_topic, topic <> ".dlq"),
       topic: topic,
       data: nil,
       timer_ref: nil,
@@ -167,7 +186,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
       subscribed?: false
     }
 
-    {:ok, state}
+    {:ok, subscribe_on_start!(state, opts)}
   end
 
   @doc false
@@ -180,8 +199,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   def handle_call({:subscribe, data}, _from, state) do
-    state = %{state | data: data, subscribed?: true}
-    {:reply, :ok, schedule(state, state.poll_interval_ms)}
+    {:reply, :ok, mark_subscribed(state, data)}
   end
 
   def handle_call(:unsubscribe, _from, state) do
@@ -449,6 +467,10 @@ defmodule Core.PubSub.MqSubscriberReliable do
     :exit, reason -> {:error, reader_unavailable_error(reason)}
   end
 
+  defp mark_subscribed(state, data) do
+    schedule(%{state | data: data, subscribed?: true}, state.poll_interval_ms)
+  end
+
   defp reschedule(state, result) when result in ~w(processed dlq)a do
     schedule(state, 0)
   end
@@ -490,21 +512,32 @@ defmodule Core.PubSub.MqSubscriberReliable do
     )
   end
 
-  defp topic_from_opts(opts) do
-    case Keyword.get(opts, :topic) do
-      topic when is_binary(topic) and topic != "" -> topic
-      _ -> "unknown"
-    end
-  end
-
-  defp dlq_topic(opts, topic) do
-    case Keyword.get(opts, :dlq_topic) do
-      dlq when is_binary(dlq) and dlq != "" -> dlq
-      _ -> topic <> ".dlq"
-    end
-  end
-
   defp retry_max_ms(opts, poll_interval_ms) do
-    max(Keyword.get(opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)
+    max(StartOpts.pos_integer!(@label, opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)
+  end
+
+  defp dlq_handle!(opts, nil) do
+    case Keyword.get(opts, :dlq_handle) do
+      nil -> nil
+      handle -> StartOpts.raise_invalid!(@label, :dlq_handle, "её отсутствие без :dlq_writer", handle)
+    end
+  end
+
+  defp dlq_handle!(opts, _dlq_writer), do: StartOpts.term!(@label, opts, :dlq_handle)
+
+  defp subscribe_on_start!(state, opts) do
+    case {StartOpts.boolean!(@label, opts, :subscribe, false), Keyword.fetch(opts, :subscribe_data)} do
+      {true, {:ok, data}} ->
+        mark_subscribed(state, data)
+
+      {true, :error} ->
+        mark_subscribed(state, nil)
+
+      {false, :error} ->
+        state
+
+      {false, {:ok, data}} ->
+        StartOpts.raise_invalid!(@label, :subscribe_data, "её отсутствие без subscribe: true", data)
+    end
   end
 end

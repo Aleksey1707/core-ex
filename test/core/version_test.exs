@@ -41,7 +41,7 @@ defmodule Core.VersionTest do
   end
 
   test "parse/1 отсекает огромную строку цифр доменной ошибкой" do
-    # Источник строки — заголовок `If-Match` (`Core.Web.Params.version/2`).
+    # Источник строки — заголовок `If-Match` (`Core.Web.Params.expected_version/2`).
     assert {:error, %Error{kind: :domain}} = Version.parse(String.duplicate("9", 2_000_000))
   end
 end

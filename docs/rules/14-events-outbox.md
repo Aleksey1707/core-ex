@@ -46,14 +46,16 @@ Dump/load события — только через фасад (`11-domain.md`,
 - `get` / `update` — версия строки не совпала с версией клиента или эталоном `Repo.Sc`;
 - `Core.Es.Store.append` — версия потока занята конкурентной записью (unique
   `(aggregate_type, aggregate_id, aggregate_version)`) либо в потоке есть событие более поздней
-  транзакции (страж `xid`); detail — `%{aggregate_id, expected, actual}`, модуль ошибки —
-  `behaviour:` write-репозитория.
+  транзакции (страж `xid`); detail — `%{aggregate_id, expected, actual, source: :storage}`, модуль
+  ошибки — `behaviour:` write-репозитория.
 
 Отказ стража бывает ложным — транзакция получила `xid` раньше, чем закоммитился конкурент по тому
-же потоку (`docs/adr/0008-shared-event-table-xid8-position.md`), — и отдельного кода у него нет.
-Usecase MAY повторить целиком при любом источнике: `get` заново сверит версию клиента. На строке
-агрегата `optimistic_lock` не используется — `version` проверяется на чтении, а расходится он
-именно на записи событий.
+же потоку (`docs/adr/0008-shared-event-table-xid8-position.md`), — и отдельного кода у него нет:
+и он, и занятая версия — отказ хранилища, `source: :storage`. Usecase MAY повторить команду
+state-stored агрегата целиком — тем же `Core.Es.Transact.run/2` (`13-repos.md`, «Транзакция
+команды (`Core.Es.Transact`)»): `get` заново сверит версию клиента. На строке агрегата
+`optimistic_lock` не используется — `version` проверяется на чтении, а расходится он именно на
+записи событий.
 
 ## Aggregate → Outbox.Record
 
@@ -313,10 +315,18 @@ errors string↔atom keys). `append` чанкует `insert_all` (лимит п�
 Гарантия порядка держится на одном поллере на топик-группу; как приложение обеспечивает это на
 нодах и на старте — `deps/core/docs/rules/app/14-events-outbox.md`, «Единственность поллера».
 
+`Core.Outbox.check_singleton!/1` отказывает `ArgumentError` с инструкцией, если включённый outbox
+(`enabled?:`) стартует при заданной кластеризации (`cluster_query:`); с `allow_cluster?: true`
+пропускает старт и пишет `warning`. `cluster_query` `nil`, `:ignore` и `""` — кластеризации нет.
+Значения передаются опциями, а не читаются из конфигурации: ключ кластеризации принадлежит
+приложению (`10-architecture.md`).
+
 `Core.Outbox.validate_partition!/1` принимает конфиг `pollers` как есть и отказывает
 `ArgumentError`, если фильтры топиков двух поллеров пересекаются; раскладка на один поллер
 проверки не требует. Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`: два
 `{:except, _}` пересекаются всегда.
+
+Проверяется: `test/core/outbox/singleton_test.exs`, `test/core/outbox/partition_test.exs`.
 
 ## Трассировка цепочки
 
@@ -367,8 +377,9 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
   алерты»). Без настроенного `dlq_writer` сообщение не выбрасывается — повторы продолжаются, в
   лог идёт `error`.
 - DLQ-writer подписчику передаётся опциями `dlq_writer` (модуль `Mq.Writer`) и `dlq_handle` (его
-  handle); чей это writer и где он стоит в дереве — `deps/core/docs/rules/app/14-events-outbox.md`,
-  «Подписчики».
+  handle) — только парой, одна без другой роняет старт `ArgumentError`; чей это writer и где он
+  стоит в дереве — `deps/core/docs/rules/app/14-events-outbox.md`, «Подписчики». Проверяется:
+  `test/core/pubsub/mq_subscriber_reliable_test.exs`, describe «опции старта».
 
 ### Runbook: сообщения в DLQ
 

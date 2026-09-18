@@ -1,14 +1,23 @@
 defmodule Core.Prim.UUID do
   @moduledoc """
-  Билдер uuid-Prim: генерация (`new/0`) и валидация UUID-строки.
+  Билдер uuid-Prim: генерация (`new/0`) или идентификатор из ключа (`from_key/1`) и валидация
+  UUID-строки.
 
-  Опции: `name:` (обязательна), `kind:`, `version:` (1 / 4 / 7; default 4),
-  `check_version:` (default `true`), `mutate:` / `validate:`, `sensitive:`.
-  Wire-форму (`:full` / `:hex` / `:urn`) задаёт профиль кодека, не Prim.
+  Опции: `name:` (обязательна), `kind:`, `version:` (1 / 4 / 5 / 7; default 4),
+  `check_version:` (default `true`), `namespace:` / `scope:` (только и обязательно при
+  `version: 5`), `mutate:` / `validate:`, `sensitive:`. Wire-форму (`:full` / `:hex` / `:urn`)
+  задаёт профиль кодека, не Prim.
 
   `version:` задаёт версию для `new/0` и ожидаемую версию для `new/1`; `check_version:
   false` оставляет генерацию, но снимает проверку версии на разборе — для Prim, куда
   приходят чужие идентификаторы.
+
+  `version: 5` — идентификатор из ключа (ADR-0017): `new/0` не генерируется, вместо него —
+  приватный `from_key(String.t() | [String.t(), ...])`, который зовёт публичный `from_<key>`
+  модуля. id — вложенный UUIDv5: `namespace:` (UUID-строка приложения) → `scope:` (область
+  ключа, непустая строка) → части ключа по одной; строка — ключ из одной части.
+  `check_version: false` при `version: 5` снимает проверку версии на разборе — для агрегата,
+  который переходит на идентификатор из ключа и разбирает прежние случайные id.
   """
 
   alias Core.Prim
@@ -18,9 +27,12 @@ defmodule Core.Prim.UUID do
     label: "Prim.UUID",
     native_kind: :uuid,
     required: ~w(name)a,
-    optional: ~w(kind version check_version mutate validate sensitive)a
+    optional: ~w(kind version check_version namespace scope mutate validate sensitive)a
 
-  @versions [1, 4, 7]
+  @versions [1, 4, 5, 7]
+  @key_opts ~w(namespace scope)a
+
+  # ===== объявление =====
 
   @doc "Объявить UUID-Prim (`name:` + опции version)."
   defmacro __using__(opts) do
@@ -49,12 +61,25 @@ defmodule Core.Prim.UUID do
         sensitive: Keyword.get(opts, :sensitive, false),
         value_type: String.t()
 
-      @uuid_version version
+      if version == 5 do
+        @uuid_namespace Keyword.fetch!(opts, :namespace)
+        @uuid_scope Keyword.fetch!(opts, :scope)
 
-      @doc "Сгенерировать новый UUID."
-      @spec new() :: t()
+        @spec from_key(String.t() | [String.t(), ...]) :: t()
 
-      def new, do: new!(Core.Prim.UUID.generate(@uuid_version))
+        # Одна clause: потребитель зовёт одну из форм, и clause другой дала бы ему «never used»,
+        # а рекурсия строки в список теряет сужение результата `new!/1`.
+        defp from_key(key) when is_binary(key) or (is_list(key) and key != []) do
+          new!(Core.Prim.UUID.from_key(@uuid_namespace, @uuid_scope, key))
+        end
+      else
+        @uuid_version version
+
+        @doc "Сгенерировать новый UUID."
+        @spec new() :: t()
+
+        def new, do: new!(Core.Prim.UUID.generate(@uuid_version))
+      end
 
       @doc "Отформатировать UUID (`:full` / `:hex` / `:urn`)."
       @spec format(t(), :full | :hex | :urn) :: String.t()
@@ -76,7 +101,38 @@ defmodule Core.Prim.UUID do
   def validate_opts!(opts) do
     Prim.Opts.allowed!(opts, :version, [nil | @versions], label())
     Prim.Opts.boolean!(opts, ~w(check_version sensitive)a, label())
+    key_opts!(opts, Keyword.get(opts, :version, 4))
+    Prim.Opts.uuid!(opts, :namespace, label())
+    Prim.Opts.non_empty_string!(opts, ~w(scope)a, label())
   end
+
+  # ---
+
+  defp key_opts!(opts, 5) do
+    case Enum.find(@key_opts, &is_nil(Keyword.get(opts, &1))) do
+      nil ->
+        :ok
+
+      key ->
+        raise CompileError,
+          description:
+            "#{label()}: #{key}: обязательна при version: 5 — идентификатор из ключа " <>
+              "считается от namespace приложения и области ключа"
+    end
+  end
+
+  defp key_opts!(opts, _version) do
+    case Enum.find(@key_opts, &Keyword.has_key?(opts, &1)) do
+      nil ->
+        :ok
+
+      key ->
+        raise CompileError,
+          description: "#{label()}: #{key}: допустима только при version: 5 — генерируемый UUID ключа не знает"
+    end
+  end
+
+  # ===== значение =====
 
   @doc "Сгенерировать UUID v4 (дефолтная версия)."
   @spec generate() :: String.t()
@@ -92,6 +148,15 @@ defmodule Core.Prim.UUID do
   def generate(4), do: UUID.uuid4()
   def generate(1), do: UUID.uuid1()
   def generate(7), do: UUIDv7.generate()
+
+  @doc false
+  @spec from_key(String.t(), String.t(), String.t() | [String.t(), ...]) :: String.t()
+
+  def from_key(namespace, scope, key) when is_binary(key), do: from_key(namespace, scope, [key])
+
+  def from_key(namespace, scope, [_ | _] = parts) when is_binary(namespace) and is_binary(scope) do
+    Enum.reduce(parts, UUID.uuid5(namespace, scope), &UUID.uuid5(&2, &1))
+  end
 
   @doc """
   Отформатировать UUID-строку (`:full` / `:hex` / `:urn`).

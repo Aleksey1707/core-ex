@@ -54,7 +54,7 @@ defmodule Core.Es.StoreTest do
       assert {:error, %Error{module: __MODULE__, ns: :fake, code: :version_mismatch} = error} =
                append([event(id, 1)])
 
-      assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 1}
+      assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 1, source: :storage}
       assert wires(Es.Store.Test.events!(@codec, id)) == wires([written])
     end
 
@@ -65,7 +65,7 @@ defmodule Core.Es.StoreTest do
 
       assert {:error, %Error{detail: detail}} = append([event(free, 1), event(taken, 2)])
 
-      assert detail == %{aggregate_id: dump(taken), expected: 2, actual: 2}
+      assert detail == %{aggregate_id: dump(taken), expected: 2, actual: 2, source: :storage}
     end
 
     test "версии потока в пачке не по возрастанию — ArgumentError" do
@@ -96,7 +96,7 @@ defmodule Core.Es.StoreTest do
 
       assert {:error, %Error{detail: detail}} = append([event(id, 2)], continuous?: true)
 
-      assert detail == %{aggregate_id: dump(id), expected: 2, actual: nil}
+      assert detail == %{aggregate_id: dump(id), expected: 2, actual: nil, source: :storage}
       assert versions(id) == []
     end
 
@@ -107,7 +107,7 @@ defmodule Core.Es.StoreTest do
       assert {:error, %Error{detail: detail}} =
                append([event(id, 3), event(id, 4)], continuous?: true)
 
-      assert detail == %{aggregate_id: dump(id), expected: 3, actual: 1}
+      assert detail == %{aggregate_id: dump(id), expected: 3, actual: 1, source: :storage}
       assert versions(id) == [1]
     end
 
@@ -117,7 +117,7 @@ defmodule Core.Es.StoreTest do
 
       assert {:error, %Error{detail: detail}} = append([event(id, 2)], continuous?: true)
 
-      assert detail == %{aggregate_id: dump(id), expected: 2, actual: 3}
+      assert detail == %{aggregate_id: dump(id), expected: 2, actual: 3, source: :storage}
     end
 
     test "поток длиннее чанка записи пишется целиком" do

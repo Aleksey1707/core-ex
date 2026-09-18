@@ -30,15 +30,6 @@
 на несколько `quote` разносит по файлу то, что читается только целиком, и не убирает
 объём — переносит его.
 
-## Опции процессов outbox и подписчика без `StartOpts`
-
-`Core.Outbox.Poller`, `Core.Outbox.Cleaner` и `Core.PubSub.MqSubscriberReliable` разбирают опции
-в `init/1` через `Keyword.fetch!` / `Keyword.get`, а не `Core.Helper.StartOpts`, вопреки
-`17-otp-concurrency.md`, «`init/1`»: опечатка в значении проходит разбор и всплывает позже.
-
-Почему остаётся: процессы написаны до введения `StartOpts` и при нём не переведены. Выход —
-перевод их разбора на `StartOpts`.
-
 ## Kafka — адаптер только на запись
 
 Реализации `Mq.ReaderReliable` для Kafka нет: outbox публиковать может, а

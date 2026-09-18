@@ -49,7 +49,7 @@ defmodule Core.Es.Aggregate.Process.Server do
         }
 
   @typedoc "Ответ процесса: результат команды, число повторов и ожидание в очереди (native)."
-  @type reply :: {:ok | {:error, term()}, non_neg_integer(), non_neg_integer()}
+  @type reply :: {Execution.result(), non_neg_integer(), non_neg_integer()}
 
   @type t :: %__MODULE__{
           cfg: Core.Es.Aggregate.Process.cfg(),
@@ -196,8 +196,8 @@ defmodule Core.Es.Aggregate.Process.Server do
 
   defp run_command(server, request, queue) do
     case in_caller_env(server, request) do
-      {{:ok, state}, retries} ->
-        {:reply, {:ok, retries, queue}, %{server | state: state}, server.idle_timeout}
+      {{:ok, state} = executed, retries} ->
+        {:reply, {Execution.result(executed), retries, queue}, %{server | state: state}, server.idle_timeout}
 
       {:expired, _retries} ->
         dropped(server)

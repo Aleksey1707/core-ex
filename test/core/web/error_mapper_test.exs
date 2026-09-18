@@ -41,6 +41,11 @@ defmodule Core.Web.ErrorMapperTest do
     assert {400, :domain_error, "сообщение домена", nil} = Web.ErrorMapper.map(domain(:invalid))
   end
 
+  test "доменный not_found → 400, а не 404" do
+    assert {400, :domain_error, "не найдено", nil} =
+             Web.ErrorMapper.map(domain(:not_found, "не найдено"))
+  end
+
   test "прикладная ошибка → 500 с шаблоном и error-логом" do
     assert {500, :critical, "Произошла непредвиденная ошибка", :error} =
              Web.ErrorMapper.map(app(:write_failed))

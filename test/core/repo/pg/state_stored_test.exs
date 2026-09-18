@@ -239,7 +239,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
       assert {:error, %Error{module: StateStoredFixture.Repo, code: :version_mismatch} = error} =
                @repo.update(stale, Context.new())
 
-      assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 2}
+      assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 2, source: :storage}
       assert {:ok, %Entity{name: "Приёмка"}} = @repo.get(id, :current, Context.new())
       assert wires(Es.Store.Test.events!(@codec, id)) == wires([first])
       assert outbox_names(id) == [@codec.type(first)]

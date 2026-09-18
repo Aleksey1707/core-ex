@@ -29,7 +29,7 @@ defmodule Core.Repo.Pg do
     `exclusion:`), а сверяется с `error_type` ошибки changeset: у `foreign_key_constraint/3` это
     `:foreign`, а не `:foreign_key`. Перевод делает макрос (`@error_types`) — иначе маппинг FK
     не совпал бы никогда. Соответствие деклараций `changeset/2` проверяет
-    ратчет приложения `test/my_app/repo/constraint_errors_test.exs`.
+    `Core.Repo.ConstraintErrorsCase`.
   - Незамапленный constraint и любой другой провал `changeset/2` — дыра в декларации, то есть
     ошибка программиста: наружу уходит `%Error{kind: :app, ns: :repo, code: :write_failed}`
     (в `detail` — `%{schema:, errors:}`), а не `%Ecto.Changeset{}`: контракт репозитория
@@ -792,7 +792,8 @@ defmodule Core.Repo.Pg do
       pg.errors.domain(pg.module, :version_mismatch, %{
         id: id,
         expected: version,
-        actual: actual
+        actual: actual,
+        source: :expected
       })
     end
   end
@@ -929,7 +930,13 @@ defmodule Core.Repo.Pg do
     end
   rescue
     Ecto.StaleEntryError ->
-      detail = %{id: entity.id, expected: Map.get(entity, pg.version_field), actual: :stale}
+      detail = %{
+        id: entity.id,
+        expected: Map.get(entity, pg.version_field),
+        actual: :stale,
+        source: :expected
+      }
+
       {:error, pg.errors.domain(pg.module, :version_mismatch, detail)}
   end
 
@@ -952,7 +959,8 @@ defmodule Core.Repo.Pg do
   defp delete_miss_error(pg, id, :current), do: pg.errors.domain(pg.module, :not_found, id)
 
   defp delete_miss_error(pg, id, %Version{} = version) do
-    pg.errors.domain(pg.module, :version_mismatch, %{id: id, expected: version, actual: :stale})
+    detail = %{id: id, expected: version, actual: :stale, source: :expected}
+    pg.errors.domain(pg.module, :version_mismatch, detail)
   end
 
   defp map_constraint_error(pg, changeset, entity) do
@@ -1010,7 +1018,8 @@ defmodule Core.Repo.Pg do
           {[row | resolved], not_found, mismatched}
         else
           actual = Map.fetch!(row, pg.version_field)
-          {resolved, not_found, [%{id: id, expected: version, actual: actual} | mismatched]}
+          detail = %{id: id, expected: version, actual: actual, source: :expected}
+          {resolved, not_found, [detail | mismatched]}
         end
     end
   end

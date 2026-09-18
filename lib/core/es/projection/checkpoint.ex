@@ -30,6 +30,13 @@ defmodule Core.Es.Projection.Checkpoint do
   @move_sql "UPDATE es_checkpoints SET xid = $2, number = $3 " <>
               "WHERE name = $1 AND version = $4 " <>
               "AND xid IS NOT DISTINCT FROM $5 AND number IS NOT DISTINCT FROM $6"
+  @delete_sql "DELETE FROM es_checkpoints WHERE name = $1"
+  @restore_sql "INSERT INTO es_checkpoints " <>
+                 "(name, xid, number, version, target_xid, target_number) " <>
+                 "VALUES ($1, $2, $3, $4, $5, $6) " <>
+                 "ON CONFLICT (name) DO UPDATE SET xid = EXCLUDED.xid, number = EXCLUDED.number, " <>
+                 "version = EXCLUDED.version, target_xid = EXCLUDED.target_xid, " <>
+                 "target_number = EXCLUDED.target_number"
 
   @typedoc """
   Строка чекпоинта: позиция (`nil` — начало истории), версия проекции строки и цель пересборки
@@ -146,6 +153,28 @@ defmodule Core.Es.Projection.Checkpoint do
     params = [name, xid, number, version, from_xid, from_number]
 
     compare_and_set(declaration, @move_sql, params)
+  end
+
+  @doc false
+  @spec delete(Projection.t()) :: :ok
+
+  def delete(%{dao: dao, name: name}) do
+    Ecto.Adapters.SQL.query!(dao, @delete_sql, [name])
+    :ok
+  end
+
+  @doc false
+  @spec restore(Projection.t(), t() | nil) :: :ok
+
+  def restore(declaration, nil), do: delete(declaration)
+
+  def restore(%{dao: dao, name: name}, %{position: position, version: version, target: target}) do
+    {xid, number} = columns(position)
+    {target_xid, target_number} = columns(target)
+    params = [name, xid, number, version, target_xid, target_number]
+
+    Ecto.Adapters.SQL.query!(dao, @restore_sql, params)
+    :ok
   end
 
   # ---

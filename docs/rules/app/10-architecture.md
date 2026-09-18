@@ -124,8 +124,7 @@ Authz и резолв актора MUST идти до открытия тран�
 |---|---|
 | Команда | `:ok \| {:error, Error.t()}` |
 | Команда-создание | MAY `{:ok, <Aggregate>.ID.t()}` — идентификатор генерирует домен |
-| Команда event-sourced агрегата через `Transact.run` | `{:ok, Version.t()}`; создание — `{:ok, {<Aggregate>.ID.t(), Version.t()}}` |
-| Команда event-sourced агрегата через `<Aggregate>.Process.execute` | `:ok \| {:error, Error.t()}` — версии после записи у этого пути нет |
+| Команда event-sourced агрегата | `{:ok, Version.t()}`; создание — `{:ok, {<Aggregate>.ID.t(), Version.t()}}` |
 | Запрос | `{:ok, <Aggregate>.View.t()} \| {:error, Error.t()}` — read-путь отдаёт представление |
 
 Идентификатор созданного агрегата и версия после записи — результат собственного выполнения
@@ -135,14 +134,19 @@ Authz и резолв актора MUST идти до открытия тран�
 
 Резолв репозитория — `deps/core/docs/rules/13-repos.md`, «DI».
 
-У команды **event-sourced** агрегата то же тело, но другой состав шагов: `get` → `Agg.execute/2`
-→ `append` под одной транзакцией, либо `<Aggregate>.Process.execute` вместо неё. Путь через
-`Process.execute` отдаёт `:ok`: версии для ответа 202 у него нет, и команда, чей ответ несёт
-версию, идёт через `Transact.run`. Отличия, которые видит usecase (`13-repos.md`, «Event-sourced
-агрегат»):
+У команды **event-sourced** агрегата то же тело, но другой состав шагов: `get_decision` →
+`Agg.execute/2` → `append` под одной транзакцией `Core.Es.Transact.run/2`, либо
+`<Aggregate>.Process.execute` вместо неё. Версию после записи отдают оба пути: у
+`Es.Transact.run` — поле `version` состояния из `Agg.execute/2`, у `Process.execute` — его
+результат `{:ok, version}`. Отличия, которые видит
+usecase (`13-repos.md`, «Event-sourced агрегат»):
 
-- существование агрегата решает `decide` по `version: nil`, а не `:not_found` репозитория;
-- запись по `:current` повторяется после `:version_mismatch`, по явной `%Version{}` — нет;
+- существование агрегата решает `decide` по `version: nil`, а не `:not_found` репозитория; явная
+  `%Version{}` на незаведённом агрегате — ошибка домена, если `decide` команду отклоняет, и отказ
+  предусловия `:version_mismatch`, если принимает;
+- отказ хранилища (`:version_mismatch` с `source: :storage`) повторяется при любой ожидаемой
+  версии, сверка ожидаемой версии (`source: :expected`) — нет; повтор даёт `Core.Es.Transact` или
+  процесс агрегата (`13-repos.md`, «Повтор после отказа записи»);
 - команду собирает usecase (`<Aggregate>.Cmd.<Name>` с `by` и `at` — `11-domain.md`);
 - ответ клиенту, которому нужна свежая read-модель, ждёт проекцию — **после** commit, вне
   транзакции (`15-web-api.md`).
