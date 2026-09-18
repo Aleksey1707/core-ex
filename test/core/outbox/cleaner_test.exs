@@ -40,6 +40,19 @@ defmodule Core.Outbox.CleanerTest do
     {:ok, cleaner: cleaner, context: Context.new()}
   end
 
+  defp cleaner_opts do
+    [repo: @repo, published_ttl: Outbox.PublishedTTL.new!(60), interval_ms: 60_000]
+  end
+
+  defp start_error(opts) do
+    Process.flag(:trap_exit, true)
+
+    assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
+             with_log(fn -> Cleaner.start_link(opts) end)
+
+    message
+  end
+
   defp capture_module_logs(module, level, fun) do
     Logger.put_module_level(module, level)
 
@@ -53,6 +66,40 @@ defmodule Core.Outbox.CleanerTest do
   test "child_spec: :id равен :name, иначе модуль" do
     assert %{id: Cleaner} = Cleaner.child_spec([])
     assert %{id: :notifications_cleaner} = Cleaner.child_spec(name: :notifications_cleaner)
+  end
+
+  test "child_spec: :name не той формы — ArgumentError" do
+    assert_raise ArgumentError, ~r/Outbox.Cleaner: опция :name — ожидается имя процесса/, fn ->
+      Cleaner.child_spec(name: "notifications_cleaner")
+    end
+  end
+
+  describe "опции старта" do
+    test "неизвестная опция — ArgumentError" do
+      opts = Keyword.put(cleaner_opts(), :shutdown, 30_000)
+
+      assert start_error(opts) =~ "Outbox.Cleaner: неизвестные опции [:shutdown]"
+    end
+
+    test "нет обязательной опции — ArgumentError" do
+      for key <- ~w(repo published_ttl interval_ms)a do
+        assert start_error(Keyword.delete(cleaner_opts(), key)) =~
+                 "Outbox.Cleaner: нет обязательной опции #{inspect(key)}"
+      end
+    end
+
+    test "значение не той формы — ArgumentError с именем опции" do
+      for {key, value, expected} <- [
+            {:repo, nil, "модуль"},
+            {:published_ttl, 60, "%Core.Outbox.PublishedTTL{}"},
+            {:interval_ms, 0, "положительное целое"},
+            {:retry_min_ms, "1s", "положительное целое"},
+            {:context_factory, :system, "функция арности 0"}
+          ] do
+        assert start_error(Keyword.put(cleaner_opts(), key, value)) =~
+                 "Outbox.Cleaner: опция #{inspect(key)} — ожидается #{expected}"
+      end
+    end
   end
 
   test "сбой цикла уходит в backoff, а не долбит БД с полной частотой" do

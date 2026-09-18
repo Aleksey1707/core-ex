@@ -28,6 +28,53 @@ defmodule Core.Prim.UUIDTest do
     use Core.Prim.UUID, name: "Ссылка", kind: :ref
   end
 
+  defmodule StreamID do
+    def namespace, do: "1b0f8f5e-8a54-4a7c-9a2b-3f6d2c8e5a11"
+  end
+
+  defmodule DeliveryID do
+    use Core.Prim.UUID,
+      name: "Поставка",
+      version: 5,
+      namespace: StreamID.namespace(),
+      scope: "delivery"
+
+    def from_number(number), do: from_key(number)
+
+    def from_parts(parts), do: from_key(parts)
+  end
+
+  defmodule DeliveryXID do
+    use Core.Prim.UUID,
+      name: "Поставка x",
+      version: 5,
+      namespace: StreamID.namespace(),
+      scope: "delivery:x"
+
+    def from_number(number), do: from_key(number)
+  end
+
+  defmodule ItemInspectionID do
+    use Core.Prim.UUID,
+      name: "Проверка позиции",
+      version: 5,
+      namespace: StreamID.namespace(),
+      scope: "item_inspection"
+
+    def from_item(delivery_id, item_id), do: from_key([delivery_id, item_id])
+  end
+
+  defmodule DeliveryIDNoCheck do
+    use Core.Prim.UUID,
+      name: "Поставка",
+      version: 5,
+      check_version: false,
+      namespace: StreamID.namespace(),
+      scope: "delivery"
+
+    def from_number(number), do: from_key(number)
+  end
+
   @uuid4 "550e8400-e29b-41d4-a716-446655440000"
   @uuid1 "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 
@@ -187,10 +234,92 @@ defmodule Core.Prim.UUIDTest do
     end
   end
 
+  describe "идентификатор из ключа (version: 5)" do
+    test "from_key/1 считает вложенный UUIDv5: namespace → область ключа → части ключа" do
+      assert DeliveryID.value(DeliveryID.from_number("DLV-1")) == "48729eb6-0c8a-5383-a0c4-e8b281bbda54"
+
+      assert ItemInspectionID.value(
+               ItemInspectionID.from_item(
+                 "0190a0c0-0000-7000-8000-000000000001",
+                 "0190a0c0-0000-7000-8000-000000000002"
+               )
+             ) == "c710c79e-cc22-5467-91c7-fd8cc95b5832"
+    end
+
+    test "from_key/1: строка — ключ из одной части" do
+      assert %DeliveryID{} = id = DeliveryID.from_number("x")
+      assert DeliveryID.from_parts(["x"]) == id
+    end
+
+    test "from_key/1: граница области и ключа не склеивается" do
+      refute DeliveryID.value(DeliveryID.from_number("x:y")) ==
+               DeliveryXID.value(DeliveryXID.from_number("y"))
+
+      refute DeliveryID.from_parts(["x", "y"]) == DeliveryID.from_number("x:y")
+    end
+
+    test "new/1 проверяет версию 5, check_version: false её снимает" do
+      assert {:ok, %DeliveryID{}} = DeliveryID.new("48729eb6-0c8a-5383-a0c4-e8b281bbda54")
+      assert {:error, %Core.Error{kind: :domain, code: :version}} = DeliveryID.new(@uuid4)
+      assert {:ok, %DeliveryIDNoCheck{}} = DeliveryIDNoCheck.new(@uuid4)
+    end
+
+    test "new/0 не генерируется, from_key/1 приватен" do
+      Code.ensure_loaded!(DeliveryID)
+
+      refute function_exported?(DeliveryID, :new, 0)
+      refute function_exported?(DeliveryID, :from_key, 1)
+    end
+
+    test "CompileError: нет namespace: или scope: при version: 5" do
+      assert_raise CompileError, ~r/namespace: обязательна при version: 5/, fn ->
+        compile_uuid(version: 5, scope: "delivery")
+      end
+
+      assert_raise CompileError, ~r/scope: обязательна при version: 5/, fn ->
+        compile_uuid(version: 5, namespace: StreamID.namespace())
+      end
+    end
+
+    test "CompileError: невалидный namespace: и пустой scope:" do
+      assert_raise CompileError, ~r/namespace: ожидается UUID-строка, получено: "delivery"/, fn ->
+        compile_uuid(version: 5, namespace: "delivery", scope: "delivery")
+      end
+
+      assert_raise CompileError, ~r/namespace: ожидается UUID-строка, получено: :dns/, fn ->
+        compile_uuid(version: 5, namespace: :dns, scope: "delivery")
+      end
+
+      assert_raise CompileError, ~r/scope: ожидается непустая строка, получено: ""/, fn ->
+        compile_uuid(version: 5, namespace: StreamID.namespace(), scope: "")
+      end
+    end
+
+    test "CompileError: namespace: и scope: при версии, отличной от 5" do
+      assert_raise CompileError, ~r/namespace: допустима только при version: 5/, fn ->
+        compile_uuid(version: 7, namespace: StreamID.namespace())
+      end
+
+      assert_raise CompileError, ~r/scope: допустима только при version: 5/, fn ->
+        compile_uuid(scope: "delivery")
+      end
+    end
+  end
+
   test "generate/0 — UUID v4 без аргумента" do
     uuid = Core.Prim.UUID.generate()
 
     assert String.length(uuid) == 36
     assert <<_::binary-14, "4", _::binary>> = uuid
+  end
+
+  defp compile_uuid(opts) do
+    Code.eval_quoted(
+      quote do
+        defmodule Core.Prim.UUIDTest.KeyID do
+          use Core.Prim.UUID, unquote([name: "ID"] ++ opts)
+        end
+      end
+    )
   end
 end

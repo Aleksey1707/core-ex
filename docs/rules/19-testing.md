@@ -13,6 +13,8 @@
 | `MyApp.DataCase` (в самой библиотеке — `Core.DataCase`) | всё, что ходит в Postgres (Ecto Sandbox) |
 | `Core.Es.EventCompatCase` | golden-фикстуры событий, один тест-модуль на агрегат (см. «Совместимость событий») |
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
+| `Core.Repo.ConstraintErrorsCase` | сверка `constraint_errors` с `changeset/2` и БД, один тест-модуль на приложение (см. «`constraint_errors`») |
+| `Core.Enum.DocsCase` | описание каждого значения `Core.Enum` в `@moduledoc`, один тест-модуль на приложение (см. «Enum: описания и внешние коды») |
 
 Тестовая обвязка библиотеки живёт в `test/support`: `Core.DataCase`, `Core.TestRepo` (роль
 `MyApp.DAO`), `Core.CodecFixture.*` (роль `MyApp.Codec.*`); фикстуры `Core.*Fixture`, дублёр
@@ -141,6 +143,39 @@ defmodule MyApp.Domain.<BC>.Common.Account.EventCompatTest do
 end
 ```
 
+## Wire-теги событий
+
+Квалификацию тега типом агрегата и уникальность тега на всё приложение
+(`app/14-events-outbox.md`, «Wire-тег события») приложение MUST проверять тест-модулем
+`use Core.Es.Event.TagsCase` — один на все свои кодеки: `type:` не в snake_case, тег без префикса
+`type:`, тег или `type:` двух кодеков валят сборку. Кодеки отбираются по `__es_type__/0`, а не
+перечнем; теги кодека — значения `tags:` плюс ключи `upcasts:`; опции и семантика пропуска —
+moduledoc `Core.Es.Event.TagsCase`; место теста в приложении —
+`deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
+
+Сборка кодека тег с `type:` не сверяет и сверять не может: она видит один кодек, а тег
+соседствует с чужими в брокере, в хранилище событий и в странице потока. Почему проверка живёт
+в тесте — ADR-0020 (`docs/adr/0020-event-tag-ratchet.md`).
+
+Записанный тег переименовать нельзя (ADR-0010), поэтому исключения адресные —
+`except_tags: %{Кодек => ["тег"]}` и `except_types: [Кодек]`; уникальность ими не снимается.
+Список MUST быть заморожен и пополняться только вместе со строкой `DEBT.md`
+(`deps/core/docs/rules/app/19-testing.md`, «Ратчеты»).
+
+```elixir
+# плохо — своя копия сверки: свой отбор модулей и своё представление о префиксе
+test "теги событий уникальны" do
+  for mod <- codec_modules(), do: assert_prefixed(mod)
+end
+
+# хорошо — test/my_app/es/event_tags_test.exs
+defmodule MyApp.Es.EventTagsTest do
+  use Core.Es.Event.TagsCase,
+    otp_app: :my_app,
+    async: true
+end
+```
+
 ## Event-sourced агрегат
 
 Решения агрегата тестируются без БД, в `ExUnit.Case, async: true`:
@@ -178,6 +213,50 @@ assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: by, at: at}, state)
 
 ```elixir
 assert [%Event.Opened{}, %Event.Frozen{}] = Core.Es.Store.Test.events!(Account.Event.Codec, id)
+```
+
+### Резерв ключа
+
+Полноту `reservation/1` проверяет сборка репозитория, резерв — библиотека (`13-repos.md`, «Резервы
+ключей»). Каждый модуль ключа MUST иметь свой тест — на DataCase, записью через репозиторий
+агрегата: сборка видит наличие clause `reservation/1`, но не её исход, а каноническую форму
+`to_key/1` (`deps/core/docs/rules/app/13-repos.md`, «Уникальность без индекса состояния») не
+видит вовсе. Usecase-тест её не ловит: обе стороны сравнения идут через тот же `to_key/1`.
+Минимум теста:
+
+- ключ, занятый другим агрегатом, — отказ с `code:` модуля ключа;
+- значение, отличающееся от занятого только тем, что снимает `to_key/1` (регистр, пробелы), — тот
+  же отказ; `to_key/1` без нормализации — свой ключ. Тест пиннит выбранную форму;
+- событие с `:release` освобождает ключ, и он занимается заново;
+- `find/2` по занятому значению — `%Agg.ID{}` того агрегата, по свободному — `nil`.
+
+Значение ключа в тесте с `async: true` MUST быть уникальным (`System.unique_integer/1`) — в том
+числе в общей обвязке (`MyAppWeb.ConnCase`, фикстуры пользователей): литерал делит одну строку
+резерва на все async-модули, и соседний тест стоит на ней до конца чужой sandbox-транзакции, то
+есть до конца чужого теста. Цена — сериализация async-модулей, а при разном порядке захвата двух
+ключей встречное ожидание — deadlock.
+
+```elixir
+# плохо — литерал ключа: соседний async-тест с тем же логином ждёт конца этого теста
+write!(id, [open("admin")])
+
+# хорошо
+login = "user#{System.unique_integer([:positive])}"
+write!(id, [open(login)])
+assert User.LoginKey.find(User.Login.new!(login), Context.new()) == id
+```
+
+```elixir
+# плохо — своего теста у модуля ключа нет: usecase сверяет to_key/1 сам с собой
+assert {:error, %Error{code: :name_taken}} = Usecases.Role.create(%{name: name}, context)
+
+# хорошо — test/my_app/domain/<bc>/common/role/name_key_test.exs
+:ok = @repo.append(created(taken, name), context)
+
+assert {:error, %Error{code: :name_taken}} =
+         @repo.append(created(Role.ID.new(), String.upcase(name)), context)
+
+assert Role.NameKey.find(Role.Name.new!(name), context) == taken
 ```
 
 ## Проекции
@@ -235,7 +314,9 @@ Usecase с `Projection.await/3` тест MUST гонять на тестовом
 `await: :inline` из `config/test.exs`: без него читателей нет, чекпоинт стоит и `await` не
 дождётся ничего, а с ним `await` прогоняет проекцию до `:idle` в процессе теста, как
 `run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой тест —
-тоже `MyApp.DataCase, async: false`. Живое дерево (`await: :poll`) MAY только у тестов самого
+тоже `MyApp.DataCase, async: false`. Ждать на живом дереве — подняв его своим `start_link`,
+правкой отметки или env приложения — потребитель MUST NOT: к ветке неготовой read-модели ведёт
+только хелпер библиотеки (ниже). Живое дерево (`await: :poll`) MAY только у тестов самого
 ожидания в библиотеке: они проверяют опрос и сигнал чекпоинта, которых у `:inline` нет.
 
 ```elixir
@@ -246,10 +327,81 @@ config :my_app, MyApp.Projections, enabled: false
 config :my_app, MyApp.Projections, enabled: false, await: :inline
 ```
 
+Запрет — на ожидание, а не на значение опции. Тест, который дерева не поднимает и `await/3` не
+зовёт, MAY собрать опции с `enabled: true` — а значит и с `await: :poll`, потому что `:inline`
+при `enabled: true` даёт `ArgumentError`. Так проверяется ратчет состава `watch_list/0` под
+тумблерами (`deps/core/docs/rules/app/19-testing.md`, «Ратчеты»): читателей проекций
+`Core.Es.Projection.Supervisor.watch_list/1` отдаёт только при `enabled: true`. Env MUST
+возвращаться в `on_exit`.
+
+```elixir
+# хорошо — ратчет watch_list/0: дерево не поднято, await/3 не зван, опции идут чистой функции
+saved = Application.get_env(:my_app, MyApp.Projections)
+on_exit(fn -> Application.put_env(:my_app, MyApp.Projections, saved) end)
+Application.put_env(:my_app, MyApp.Projections, enabled: true, await: :poll)
+
+assert %{name: MyApp.Domain.<BC>.Common.Projection} in MyApp.PromEx.Workers.watch_list()
+```
+
+### Ветка неготовой read-модели
+
+Ответ на `:projection_rebuilding` / `:projection_timeout` (у HTTP-API — 202,
+`deps/core/docs/rules/app/15-web-api.md`) тест MUST проверять через
+`Core.Es.Projection.Test.with_rebuilding/2`. На время блока хелпер переводит отметку дерева
+на `await: :poll` и снимает строку чекпоинта, поэтому `await/3` внутри
+отдаёт `:projection_rebuilding` сразу, не читая таймаут вызывающего; в `after` он возвращает и
+отметку, и строку — со своей позицией, так что следующий `run_until_idle/2` досчитывает события,
+а не зовёт `clear/0` и не проигрывает историю заново.
+
+- Тест MUST быть `async: false` и идти в sandbox-транзакции: отметка глобальна для ноды, а
+  снятие строки откатывает sandbox. Case-модуль задаёт ярус потребителя.
+- Дерево MUST быть тестовым (`enabled: false`): у живого читатели приняли бы снятую строку за
+  начало истории и стёрли read-модель через `clear/0`. Живое дерево — `ArgumentError`.
+- Отметка общая для ноды: на `await: :poll` внутри блока переходят **все** проекции дерева.
+  Ждёт блок несколько проекций — MUST называть все, иначе неназванная уйдёт в опрос до своего
+  таймаута.
+- Доводить тест до `:projection_timeout` MUST NOT: ветка ответа та же, а цена — полный таймаут
+  вызывающего и таймаут приложения, настраиваемый только ради теста. Сам таймаут проверяют
+  тесты ожидания в библиотеке.
+- Ветка одна на приложение, и тест её MUST держать один —
+  `deps/core/docs/rules/app/19-testing.md`, «Event sourcing».
+
+```elixir
+# плохо — свой `:poll` и короткий таймаут из env: тест платит реальным временем
+Application.put_env(:my_app, MyAppWeb.Helper.Projection, await_timeout_ms: 50)
+opts = Keyword.put(MyApp.Projections.opts(), :await, :poll)
+:ignore = Core.Es.Projection.Supervisor.start_link(opts)
+
+# хорошо — состояние подставлено на время блока, исход мгновенный
+conn =
+  Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Common.Projection, fn ->
+    patch(authed(ctx), "#{@path}/#{id}", body)
+  end)
+
+assert %{"data" => %{"version" => 2}} = json_response(conn, 202)
+```
+
 ## Enum: описания и внешние коды
 
-Описание значений в `@moduledoc` (`11-domain.md`, «Описание значений в `@moduledoc`») держит
-ратчет приложения — `deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
+Описание значений в `@moduledoc` (`11-domain.md`, «Описание значений в `@moduledoc`») приложение
+MUST проверять тест-модулем `use Core.Enum.DocsCase` — один на все свои enum: enum без таблицы
+значений, не описанное значение и описанное несуществующее валят сборку. Enum отбирает
+`Core.Enum.enum?/1`, а не перечень; разбор таблицы и опции — moduledoc `Core.Enum.DocsCase`; место
+теста в приложении — `deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
+
+```elixir
+# плохо — своя копия сверки: у каждого приложения своя регулярка и свой отбор модулей
+test "у каждого enum описаны все значения" do
+  for mod <- enum_modules(), do: assert_documented(mod)
+end
+
+# хорошо — test/my_app/enum_docs_test.exs
+defmodule MyApp.EnumDocsTest do
+  use Core.Enum.DocsCase,
+    otp_app: :my_app,
+    async: true
+end
+```
 
 Enum с `codes:` MUST иметь round-trip по **всем** `values/0`
 (`from_code(to_code(value)) == {:ok, value}`) и проверку нескольких известных кодов
@@ -289,8 +441,8 @@ end
 
 Маппинг DB-ограничения в доменный код — декларация, которая при расхождении с `changeset/2`
 не падает: наружу уходит прикладной `%Error{kind: :app, code: :write_failed}` (500 и лог)
-вместо доменного кода с текстом для клиента. Поэтому декларации MUST сверяться с реальностью
-тестом на все репозитории:
+вместо доменного кода с текстом для клиента. Поэтому приложение MUST иметь тест-модуль
+`use Core.Repo.ConstraintErrorsCase` — один на все свои репозитории. Он сверяет:
 
 1. каждый ключ `constraint_errors` объявлен в `changeset/2` (сверка по `error_type`, не по типу
    ограничения — `foreign_key_constraint/3` пишет `:foreign`);
@@ -298,13 +450,28 @@ end
 3. имена ограничений (`unique_constraint(name:)`, ключи `children:`) существуют в БД —
    `pg_constraint` плюс имена индексов, `unique_index` строки в `pg_constraint` не создаёт;
 4. каждый FK дочерней таблицы, кроме колонки `fk:` на сам агрегат, покрыт маппингом;
-5. read-репозиторий (без `insert` / `update`) `constraint_errors` не объявляет: маппинг
+5. read-репозиторий (без `insert` / `update` / `save`) `constraint_errors` не объявляет: маппинг
    срабатывает только на записи, а у схемы read-репозитория нет `changeset/2` (`13-repos.md`).
 
-Источник списка репозиториев — сгенерированные `__constraint_errors__/0` (есть у каждого
-`use Core.Repo.Pg`) и `__children_constraint_errors__/0` (`use Core.Repo.Pg.StateStored`), а не
-ручной перечень: новый репозиторий попадает под проверку сам. Место теста в приложении —
-`deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
+Источник списка репозиториев — модули `otp_app:` со сгенерированными `__constraint_errors__/0`
+(есть у каждого `use Core.Repo.Pg`) и `__children_constraint_errors__/0`
+(`use Core.Repo.Pg.StateStored`), а не ручной перечень: новый репозиторий попадает под проверку
+сам. Опции и границы проверки — moduledoc `Core.Repo.ConstraintErrorsCase`; место теста в
+приложении — `deps/core/docs/rules/app/19-testing.md`, «Ратчеты».
+
+```elixir
+# плохо — своя копия сверки: у каждого приложения расходится с тем, что генерирует библиотека
+test "каждый маппинг constraint_errors объявлен в changeset/2" do
+  for repo <- write_repos(), do: assert_declared(repo)
+end
+
+# хорошо — test/my_app/repo/constraint_errors_test.exs
+defmodule MyApp.Repo.ConstraintErrorsTest do
+  use Core.Repo.ConstraintErrorsCase,
+    otp_app: :my_app,
+    async: true
+end
+```
 
 ## ACL
 

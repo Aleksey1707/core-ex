@@ -1,7 +1,7 @@
 defmodule Core.Es.Aggregate.Process do
   @moduledoc """
   Билдер процесса агрегата (`use`): кэш состояния и очередь команд одного event-sourced агрегата
-  на ноде; команда — с повтором после конфликта версии.
+  на ноде; команда — с повтором после отказа записи.
 
       defmodule MyApp.Domain.<BC>.Common.Account.Process do
         use Core.Es.Aggregate.Process,
@@ -21,24 +21,37 @@ defmodule Core.Es.Aggregate.Process do
 
   ## Команда
 
-  `execute(id, version, command, context, fun, opts)` → `:ok | {:error, Error.t()}`; `fun` и
-  `opts` необязательны. Одна транзакция `Core.Helper.Transact.run/3` на `Core.Config.dao/0`:
-  состояние агрегата → `Agg.execute/2` → `append(events, context)` → `fun.(events)`. Состояние
-  читает `get(id, version, context)` репозитория; процесс на id после первого commit дочитывает
-  его `refresh(state, version, context)`. Колбэк — сопутствующие записи (Oban, `DAO`) под
-  ограничениями `Transact.run`, возвращает `:ok | {:error, _}`. Ошибка `decide`, `append` или
-  колбэка откатывает транзакцию и уходит вызывающему.
+  `execute(id, version, command, context, fun, opts)` → `{:ok, Version.t() | nil} |
+  {:error, Error.t()}`; `fun` и `opts` необязательны. Одна транзакция `Core.Es.Transact` на
+  `Core.Config.dao/0`: состояние агрегата → `Agg.execute/2` → `append(events, context)` →
+  `fun.(events)`. Решение идёт через `get_decision(id, version, context, &Agg.execute(&1,
+  command))` репозитория; процесс на id дочитывает закэшированный заведённый агрегат
+  `refresh(state, version, context)`, а незаведённый — снова через `get_decision`. Колбэк —
+  сопутствующие записи (Oban, `DAO`) под ограничениями `Transact.run`, возвращает
+  `:ok | {:error, _}`. Ошибка `decide`, `append` или колбэка откатывает транзакцию: отказ
+  хранилища повторяется, остальное уходит вызывающему.
 
-  Голова принимает только `%Agg.ID{}`, результат сужен паттерном до `:ok | {:error, _}`:
-  невозможная clause по результату — предупреждение при сборке. Домен команды — любой struct:
-  процесс не видит `decide/2` агрегата, и команду другого агрегата сборка не ловит.
+  Успех — версия состояния после commit, в том числе после повторов: по ней вызывающий отвечает
+  клиенту и шлёт следующий `If-Match`. Команда без событий версию не меняет, на пустом потоке —
+  `{:ok, nil}`. Само состояние наружу не уходит.
 
-  - `:version_mismatch` из `append` при `version: :current` — конкурентная запись: повтор новой
-    транзакцией, колбэк зовётся заново; `debug` на каждый повтор. После `retries:` повторов —
-    `warning` и ошибка вызывающему.
+  Голова принимает только `%Agg.ID{}`, результат сужен паттерном до `{:ok, %Version{}} |
+  {:ok, nil} | {:error, _}`: невозможная clause по результату — предупреждение при сборке. Домен
+  команды — любой struct: процесс не видит `decide/2` агрегата, и команду другого агрегата сборка
+  не ловит.
+
+  - Отказ хранилища — `:version_mismatch` с `source: :storage` в detail — при **любой**
+    ожидаемой версии: повтор новой транзакцией (`Core.Es.Transact`), колбэк зовётся заново;
+    `debug` на каждый повтор. После `retries:` повторов — `warning` и ошибка вызывающему. Отказ
+    приходит и из `append`, и из колбэка (запись в соседний поток), и повторяется одинаково —
+    колбэк обязан быть идемпотентным.
   - Колбэк вернул не `:ok | {:error, _}` — `CaseClauseError` до commit, транзакция откатывается.
-  - `%Version{}` мимо версии потока, в том числе пустого, — `:version_mismatch` без повтора: из
-    `get` или `refresh` и из `append`.
+  - Сверка ожидаемой версии — `:version_mismatch` с `source: :expected` — повтора не даёт
+    никогда: `%Version{}` мимо головы непустого потока из `get_decision` или `refresh`, клиент
+    видел устаревшее состояние, и повтор его не исправит.
+  - `%Version{}` на пустом потоке (ADR-0016) — ошибка `decide`, если он команду отклоняет, и
+    `:version_mismatch` с `actual: nil`, если принимает, в том числе без событий: без `append`,
+    колбэка и повтора.
   - Вызов внутри транзакции — `ArgumentError`: команда идёт своей транзакцией, и откат попытки
     отменил бы внешнюю.
   - Нет отметки старта — `RuntimeError`: `{Agg.Process, opts}` не стоит в дереве супервизии.
@@ -52,7 +65,7 @@ defmodule Core.Es.Aggregate.Process do
   (`Core.Es.Aggregate.Process.Server`), колбэк исполняется там же. Процесс держит состояние
   агрегата после последнего commit, и это кэш: корректность держат проверки `append`. Второй
   процесс того же агрегата (другая нода) и запись в обход процесса штатны — их события дочитает
-  `refresh`, а гонку на записи снимет повтор после `:version_mismatch`.
+  `refresh`, а гонку на записи снимет повтор после отказа хранилища.
 
   - Старт — лениво в первой команде, без запросов: имени id в `Registry` дерева нет (`:noproc`) —
     процесс стартует под `DynamicSupervisor`, и вызов повторяется один раз. Процесс, ушедший по
@@ -61,8 +74,9 @@ defmodule Core.Es.Aggregate.Process do
     `context`, в котором `:shadow_copy` заменён собственной таблицей `Core.Repo.Sc` процесса:
     приватная ETS вызывающего процессу недоступна. `context` между командами не хранится.
   - `timeout:` — дедлайн: команда, простоявшая в очереди до дедлайна, отбрасывается до
-    транзакции; дедлайн, истёкший до commit, откатывает транзакцию. Вызывающему по истечении —
-    exit `GenServer.call`, как и при падении процесса.
+    транзакции; дедлайн, истёкший до commit, откатывает транзакцию; попытка после дедлайна не
+    идёт — повтор после отказа записи обрывается, не читая и не записывая. Вызывающему по
+    истечении — exit `GenServer.call`, как и при падении процесса.
   - Исключение в `decide`, `evolve` или колбэке роняет процесс: транзакция откатывается,
     вызывающему — exit. Процессы `restart: :temporary` — следующая команда стартует новый.
   - Простой `idle_timeout:` — уход `{:stop, :normal}`; снапшот при уходе не пишется.
@@ -78,7 +92,7 @@ defmodule Core.Es.Aggregate.Process do
     `Registry` процессов на id (единственность — на ноду) и их `DynamicSupervisor`; `info`
     «запущен» и отметка опций в `:persistent_term`. `false` — `:ignore`, `info` «отключён» и
     отметка: `execute` исполняет команду в вызывающем процессе.
-  - `retries:` — повторов после конфликта версии, по умолчанию 3
+  - `retries:` — повторов после отказа записи, по умолчанию 3
   - `idle_timeout:` — мс простоя процесса на id до ухода, по умолчанию 60 000
 
   Числа — положительные целые.
@@ -184,7 +198,7 @@ defmodule Core.Es.Aggregate.Process do
 
       @doc """
       Исполнить команду агрегата одной транзакцией: состояние → `execute/2` → `append` →
-      `fun.(events)`; конфликт версии при `:current` повторяется.
+      `fun.(events)`; отказ хранилища повторяется. Успех — версия после commit.
       """
       @spec execute(
               unquote(id).t(),
@@ -193,7 +207,7 @@ defmodule Core.Es.Aggregate.Process do
               Core.Context.t(),
               ([Core.Es.Event.t()] -> :ok | {:error, Core.Error.t()}) | nil,
               keyword()
-            ) :: :ok | {:error, Core.Error.t()}
+            ) :: {:ok, Core.Version.t() | nil} | {:error, Core.Error.t()}
 
       def execute(
             %unquote(id){} = id,
@@ -208,7 +222,8 @@ defmodule Core.Es.Aggregate.Process do
         call = %{id: id, version: version, command: command, context: context, fun: fun}
 
         case Core.Es.Aggregate.Process.execute(__MODULE__, @es_aggregate_process, call, opts) do
-          :ok -> :ok
+          {:ok, %Core.Version{} = version} -> {:ok, version}
+          {:ok, nil} -> {:ok, nil}
           {:error, reason} -> {:error, reason}
         end
       end
@@ -245,7 +260,8 @@ defmodule Core.Es.Aggregate.Process do
   # ===== команда =====
 
   @doc false
-  @spec execute(module(), cfg(), call(), keyword()) :: :ok | {:error, Error.t()}
+  @spec execute(module(), cfg(), call(), keyword()) ::
+          {:ok, Version.t() | nil} | {:error, Error.t()}
 
   def execute(process, cfg, call, opts) when is_atom(process) and is_list(opts) do
     timeout = timeout!(opts)
@@ -336,7 +352,7 @@ defmodule Core.Es.Aggregate.Process do
     )
   end
 
-  defp result_tag(:ok), do: :ok
+  defp result_tag({:ok, _version}), do: :ok
   defp result_tag({:error, %Error{code: :version_mismatch}}), do: :version_mismatch
   defp result_tag({:error, _error}), do: :error
 

@@ -31,6 +31,14 @@ defmodule Consumer.Usecase do
     end)
   end
 
+  def freeze(%Account.ID{} = id, %Version{} = version, %Account.Cmd.Freeze{} = command, %Context{} = context) do
+    Transact.run(DAO, fn ->
+      with {:ok, {events, _account}} <- @repo.get_decision(id, version, context, &Account.execute(&1, command)) do
+        @repo.append(events, context)
+      end
+    end)
+  end
+
   def rename(%Account{} = state, %Account.Cmd.Rename{} = command) do
     case Account.execute(state, command) do
       {:ok, {[], executed}} -> {:unchanged, executed.name}
@@ -43,6 +51,13 @@ defmodule Consumer.Usecase do
     case @repo.refresh(state, Version.new(), context) do
       {:ok, refreshed} -> refreshed.status
       {:error, %Error{code: :version_mismatch}} -> nil
+    end
+  end
+
+  def owner(%Account.Name{} = name, %Context{} = context) do
+    case Account.NameKey.find(name, context) do
+      %Account.ID{} = id -> {:taken, id}
+      nil -> :free
     end
   end
 
@@ -60,7 +75,8 @@ defmodule Consumer.Usecase do
 
   def process(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context) do
     case Account.Process.execute(id, :current, command, context, fn _events -> :ok end) do
-      :ok -> :ok
+      {:ok, %Version{} = version} -> {:ok, Version.value(version)}
+      {:ok, nil} -> {:ok, nil}
       {:error, %Error{}} = error -> error
     end
   end

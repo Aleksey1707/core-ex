@@ -30,12 +30,22 @@ defmodule Consumer.S.Process do
     # expect: incompatible types given to Consumer.Account.Process.execute/6
     do: Account.Process.execute(id, :current, command, context, nil, %{timeout: 1})
 
-  # F5 — `{:ok, state}` по результату `Process.execute`
-  def f5_case_ok_state(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context) do
+  # F5 — `:ok` по результату `Process.execute`
+  def f5_case_ok(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context) do
     case Account.Process.execute(id, :current, command, context) do
-      :ok -> nil
       # expect: the following clause will never match
-      {:ok, state} -> state
+      :ok -> nil
+      {:ok, version} -> version
+      {:error, _error} -> nil
+    end
+  end
+
+  # F5b — состояние агрегата по результату `Process.execute`
+  def f5b_case_ok_state(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context) do
+    case Account.Process.execute(id, :current, command, context) do
+      # expect: the following clause will never match
+      {:ok, %Account{} = state} -> state
+      {:ok, version} -> version
       {:error, _error} -> nil
     end
   end

@@ -64,10 +64,11 @@
 Не логировать штатный per-item/per-batch на `info`. Тексты и наличие сообщений не убирать «для
 тишины» — понижать уровень. Phoenix request-логи (`Plug.Telemetry`) — вне этой политики.
 
-Повтор команды после `:version_mismatch` (`Agg.Process.execute`) — штатная конкурентная запись, а
-не аномалия: `debug` на каждый повтор; исчерпание предела повторов — `warning`.
+Повтор команды после отказа записи (`Core.Es.Transact`) — штатная конкурентная запись, а не
+аномалия: `debug` на каждый повтор; исчерпание предела повторов — `warning`.
 
-Проверяется: `test/core/es/aggregate/process_test.exs`, describe «повтор после конфликта».
+Проверяется: `test/core/es/transact_test.exs`; через процесс агрегата —
+`test/core/es/aggregate/process_test.exs`, describe «повтор после отказа записи».
 
 Формат сообщения: `"<контекст>: key=#{value} …"`.
 
@@ -128,9 +129,9 @@ publish в брокер, кеш, `sleep`, ожидание проекции `Pro
 ## Load/save агрегата — в одной функции
 
 Чтение агрегата через репозиторий (`get` / `get!` / `get_by_*` / `find_many` / `get_many` /
-`list_*`) и его запись (`insert` / `update` / `save` / `delete`, у event-sourced агрегата —
-`append`) MUST находиться в теле одной функции — вместе с `Transact.run`, охватывающим обе
-операции.
+`list_*`, у event-sourced агрегата — `get_decision`) и его запись (`insert` / `update` / `save` /
+`delete`, у event-sourced агрегата — `append`) MUST находиться в теле одной функции — вместе с
+`Transact.run`, охватывающим обе операции.
 
 - Мутации домена, разбор результата чтения и логирование выносить в чистые helper'ы без
   repo-вызовов.
@@ -165,13 +166,12 @@ Transact.run(DAO, fn ->
   end
 end)
 
-# event-sourced — получить → решить → записать события; следующая команда той же функции
-# идёт от состояния из execute/2 без повторного get
-Transact.run(DAO, fn ->
-  with {:ok, account} <- @repo.get(id, version, context),
-       {:ok, {events, _account}} <- Account.execute(account, command) do
-    @repo.append(events, context)
-  end
+# event-sourced — получить и решить → записать события; следующая команда той же функции
+# идёт от состояния из execute/2 без повторного чтения; транзакцию открывает Es.Transact
+Es.Transact.run(fn ->
+  with {:ok, {events, _account}} <-
+         @repo.get_decision(id, version, context, &Account.execute(&1, command)),
+       do: @repo.append(events, context)
 end)
 ```
 
@@ -592,7 +592,9 @@ bang-mappers (`to_entity!` / `to_model!`) на call site своих строк /
 реконструкция события `InCodec.load!` в тестах (`Core.Es.Store.Test.events!`); аксессор текущего
 пользователя (`use Core.Context.Accessor`) `get!/1` в ACL-фильтре; compile-time константы
 (Prim-константа в атрибуте модуля (`new!`) и т.п.); OTP/config init; `codec.load!` при свёртке
-потока в `Core.Es.Aggregate.Repo.Pg` (нечитаемый поток — исключение, `13-repos.md`); конверсия
+потока в `Core.Es.Aggregate.Repo.Pg` (нечитаемый поток — исключение, `13-repos.md`); `codec.load!`
+id владельца в `find/2` модуля ключа (`use Core.Es.KeyReservation`) — строку резерва пишет `append`
+репозитория, и нечитаемый id — исключение; конверсия
 Prim в `evolve/2` event-sourced агрегата — колбэк возвращает голое состояние
 (`@callback evolve(state, event) :: struct()`), вернуть `{:error, _}` ему некуда, и нечитаемое
 событие — исключение, как `codec.load!` при свёртке.

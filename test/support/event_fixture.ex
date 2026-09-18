@@ -117,6 +117,10 @@ defmodule Core.EventFixture do
     def domain(module, :no_ids = code, detail) do
       Error.domain(module, code: code, ns: :fake, message: "Нет идентификаторов", detail: detail)
     end
+
+    def domain(module, :name_taken = code, detail) do
+      Error.domain(module, code: code, ns: :fake, message: "Название занято", detail: detail)
+    end
   end
 
   defmodule Event.Codec do

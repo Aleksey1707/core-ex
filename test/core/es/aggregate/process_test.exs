@@ -3,7 +3,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
   use Core.DataCase, async: false
 
   import Core.EsAggregateRepoContract,
-    only: [close: 0, dump: 1, freeze: 0, open: 1, rename: 1, stream_tags: 1, write!: 3]
+    only: [check: 0, close: 0, dump: 1, freeze: 0, open: 1, rename: 1, stream_tags: 1, write!: 3]
 
   import ExUnit.CaptureLog
 
@@ -23,8 +23,8 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
   @logging [
     Es.Aggregate.Process,
-    Es.Aggregate.Process.Execution,
-    Es.Aggregate.Process.Server
+    Es.Aggregate.Process.Server,
+    Es.Transact
   ]
 
   defmodule Unstarted do
@@ -57,7 +57,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       )
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
-    on_exit(fn -> Enum.each([Account.Process, Account.RacyProcess], &erase_mark/1) end)
+    on_exit(fn -> Enum.each([Account.Process, Account.RacyProcess, Account.KeyedProcess], &erase_mark/1) end)
   end
 
   describe "старт" do
@@ -117,21 +117,15 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert %{active: 0} = DynamicSupervisor.count_children(Account.Process.Supervisor)
     end
 
-    test "первая команда стартует процесс лениво, дальше команды идут в нём: get, затем refresh" do
+    test "первая команда стартует процесс лениво, дальше команды идут в нём: get_decision, затем refresh" do
       start_tree!(Account.Process)
       id = Account.ID.new()
       :ok = attach_load()
 
       log =
         capture_at(:debug, fn ->
-          assert :ok =
-                   Account.Process.execute(
-                     id,
-                     :current,
-                     open("Счёт"),
-                     Context.new(),
-                     report(self())
-                   )
+          assert Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self())) ==
+                   {:ok, Version.new!(1)}
         end)
 
       assert log =~ "процесс агрегата: запущен: type=account aggregate_id=#{dump(id)}"
@@ -139,16 +133,10 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:ran_in, server}
       assert server != self()
       assert [{^server, _value}] = Registry.lookup(Account.Process.Registry, id)
-      assert_received {:load, %{op: :get, result: :ok}}
+      assert_received {:load, %{op: :get_decision, result: :ok}}
 
-      assert :ok =
-               Account.Process.execute(
-                 id,
-                 Version.new!(1),
-                 close(),
-                 Context.new(),
-                 report(self())
-               )
+      assert Account.Process.execute(id, Version.new!(1), close(), Context.new(), report(self())) ==
+               {:ok, Version.new!(3)}
 
       assert_received {:ran_in, ^server}
       assert_received {:load, %{op: :refresh, result: :ok}}
@@ -167,7 +155,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       start_tree!(Account.Process)
       id = Account.ID.new()
       test_pid = self()
-      :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
 
       tasks =
         for n <- 1..5 do
@@ -182,7 +170,8 @@ defmodule Core.Es.Aggregate.ProcessTest do
           end)
         end
 
-      assert Enum.map(tasks, &Task.await/1) == List.duplicate(:ok, 5)
+      versions = for {:ok, version} <- Enum.map(tasks, &Task.await/1), do: Version.value(version)
+      assert Enum.sort(versions) == [2, 3, 4, 5, 6]
 
       servers =
         for _command <- 1..5 do
@@ -203,11 +192,12 @@ defmodule Core.Es.Aggregate.ProcessTest do
     test "запись в обход процесса через репозиторий дочитывает refresh следующей команды" do
       start_tree!(Account.Process)
       id = Account.ID.new()
-      :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
       _written = write!(Account.Repo.Pg, id, [rename("Отгрузка")])
       :ok = attach_load()
 
-      assert :ok = Account.Process.execute(id, Version.new!(2), freeze(), Context.new())
+      assert Account.Process.execute(id, Version.new!(2), freeze(), Context.new()) ==
+               {:ok, Version.new!(3)}
 
       assert_received {:load, %{op: :refresh, result: :ok}}
       refute_received {:load, _metadata}
@@ -215,21 +205,15 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:execute, %{mode: :process, result: :ok}, %{retries: 0}}
     end
 
-    test ":version_mismatch из append в процессе — повтор новой транзакцией с дочитыванием хвоста" do
+    test "отказ записи в процессе — повтор новой транзакцией с дочитыванием хвоста" do
       start_tree!(Account.RacyProcess)
       id = Account.ID.new()
-      :ok = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
       :ok = Account.RacyRepo.Pg.race(id, 2)
       :ok = attach_load()
 
-      assert :ok =
-               Account.RacyProcess.execute(
-                 id,
-                 :current,
-                 rename("Отгрузка"),
-                 Context.new(),
-                 record(self())
-               )
+      assert Account.RacyProcess.execute(id, :current, rename("Отгрузка"), Context.new(), record(self())) ==
+               {:ok, Version.new!(2)}
 
       for _attempt <- 1..3, do: assert_received({:load, %{op: :refresh, result: :ok}})
       refute_received {:load, _metadata}
@@ -239,7 +223,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert stream_tags(id) == ["account.opened", "account.renamed"]
       assert_received {:execute, %{mode: :process, result: :ok}, %{retries: 0}}
       assert_received {:execute, %{mode: :process, result: :ok}, %{retries: 2}}
-      assert :ok = Account.RacyProcess.execute(id, Version.new!(2), freeze(), Context.new())
+      assert {:ok, _version} = Account.RacyProcess.execute(id, Version.new!(2), freeze(), Context.new())
     end
 
     test "watch_list — верхний супервизор при enabled: true, пусто при enabled: false" do
@@ -258,7 +242,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
     test "простой idle_timeout: — {:stop, :normal}, stop :idle и debug; следующая команда — новый процесс" do
       start_tree!(Account.Process, idle_timeout: 30_000)
       id = Account.ID.new()
-      :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
       assert_received {:ran_in, server}
       ref = Process.monitor(server)
 
@@ -276,7 +260,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:stop, %{type: "account", reason: :idle}}
       assert Registry.lookup(Account.Process.Registry, id) == []
 
-      assert :ok =
+      assert {:ok, _version} =
                Account.Process.execute(
                  id,
                  Version.new!(1),
@@ -326,15 +310,15 @@ defmodule Core.Es.Aggregate.ProcessTest do
       log =
         capture_log(fn ->
           send(server, :release)
-          assert :ok = Task.await(blocker)
-          assert :ok = Account.Process.execute(id, :current, freeze(), Context.new())
+          assert {:ok, _version} = Task.await(blocker)
+          assert {:ok, _version} = Account.Process.execute(id, :current, freeze(), Context.new())
         end)
 
       assert log =~
                "процесс агрегата: просроченная команда отброшена: type=account " <>
                  "aggregate_id=#{dump(id)}"
 
-      assert_received {:load, %{op: :get}}
+      assert_received {:load, %{op: :get_decision}}
       assert_received {:load, %{op: :refresh}}
       refute_received {:load, _metadata}
       refute_received {:callback, _events}
@@ -374,7 +358,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       log =
         capture_log(fn ->
           send(server, :release)
-          assert :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+          assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
         end)
 
       assert log =~ "процесс агрегата: просроченная команда отброшена: type=account"
@@ -388,7 +372,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       start_tree!(Account.Process)
       id = Account.ID.new()
       %{at: at, by: by} = open("Счёт")
-      :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
       assert_received {:ran_in, server}
       ref = Process.monitor(server)
 
@@ -410,7 +394,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:stop, %{type: "account", reason: :error}}
       assert_received {:execute, %{mode: :process, result: :exit}, %{queue: 0, retries: 0}}
 
-      assert :ok =
+      assert {:ok, _version} =
                Account.Process.execute(
                  id,
                  Version.new!(1),
@@ -427,12 +411,12 @@ defmodule Core.Es.Aggregate.ProcessTest do
     test "процесс ушёл между командами — :noproc: старт нового и повтор вызова" do
       start_tree!(Account.Process)
       id = Account.ID.new()
-      :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
       assert_received {:ran_in, server}
       :ok = DynamicSupervisor.terminate_child(Account.Process.Supervisor, server)
       :ok = attach_load()
 
-      assert :ok =
+      assert {:ok, _version} =
                Account.Process.execute(
                  id,
                  Version.new!(1),
@@ -443,7 +427,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
       assert_received {:ran_in, restarted}
       assert restarted != server
-      assert_received {:load, %{op: :get, result: :ok}}
+      assert_received {:load, %{op: :get_decision, result: :ok}}
       for _start <- 1..2, do: assert_received({:start, %{type: "account"}})
     end
 
@@ -512,14 +496,14 @@ defmodule Core.Es.Aggregate.ProcessTest do
         :ok
       end
 
-      assert :ok = Account.Process.execute(id, :current, open("Счёт"), context, env)
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), context, env)
       assert_received {:env, server, metadata, [_table]}
       assert metadata[:request_id] == "r-1"
       assert shadow_copies.(server) == []
       assert Repo.Sc.find(context, Account, id) == stored
 
       :ok = Logger.reset_metadata()
-      assert :ok = Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), env)
+      assert {:ok, _version} = Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), env)
       assert_received {:env, ^server, metadata, [_table]}
       refute Keyword.has_key?(metadata, :request_id)
     end
@@ -530,16 +514,10 @@ defmodule Core.Es.Aggregate.ProcessTest do
       start!(Account.Process)
       id = Account.ID.new()
 
-      assert :ok = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      assert Account.Process.execute(id, :current, open("Счёт"), Context.new()) == {:ok, Version.new!(1)}
 
-      assert :ok =
-               Account.Process.execute(
-                 id,
-                 Version.new!(1),
-                 close(),
-                 Context.new(),
-                 record(self())
-               )
+      assert Account.Process.execute(id, Version.new!(1), close(), Context.new(), record(self())) ==
+               {:ok, Version.new!(3)}
 
       assert_received {:callback, [%Account.Event.Frozen{}, %Account.Event.Closed{}]}
       assert stream_tags(id) == ["account.opened", "account.frozen", "account.closed"]
@@ -555,7 +533,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       id = Account.ID.new()
       failed = Error.app(code: :callback_failed, ns: :fake)
 
-      assert :ok =
+      assert {:ok, _version} =
                Account.Process.execute(id, :current, open("Счёт"), Context.new(), record(self()))
 
       assert names() == ["events=1"]
@@ -575,6 +553,23 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert names() == ["events=1"]
       assert stream_tags(id) == ["account.opened"]
       assert_received {:execute, %{result: :error}, %{retries: 0}}
+    end
+
+    test "команда без событий — версия прежняя, на пустом потоке {:ok, nil}" do
+      start!(Account.Process)
+      id = Account.ID.new()
+
+      assert Account.Process.execute(id, :current, check(), Context.new(), record(self())) == {:ok, nil}
+      assert_received {:callback, []}
+      assert stream_tags(id) == []
+
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+
+      assert Account.Process.execute(id, Version.new!(1), check(), Context.new()) ==
+               {:ok, Version.new!(1)}
+
+      assert stream_tags(id) == ["account.opened"]
+      for _call <- 1..3, do: assert_received({:execute, %{result: :ok}, %{retries: 0}})
     end
 
     test "колбэк вернул не :ok | {:error, _} — исключение до commit, без записи" do
@@ -609,37 +604,85 @@ defmodule Core.Es.Aggregate.ProcessTest do
     end
   end
 
-  describe "повтор после конфликта" do
-    test ":version_mismatch из append при :current — повтор новой транзакцией с колбэком" do
+  describe "явная версия на пустом потоке" do
+    test "enabled: false — отказ decide как есть, принятое решение — :version_mismatch без записи и повтора" do
+      start!(Account.Process)
+
+      assert_unborn_version(Account.ID.new())
+
+      for result <- ~w(error version_mismatch version_mismatch)a,
+          do: assert_received({:execute, %{mode: :inline, result: ^result}, %{retries: 0}})
+    end
+
+    test "enabled: true — то же при чтении процесса и от закэшированного незаведённого агрегата" do
+      start_tree!(Account.Process)
+      id = Account.ID.new()
+
+      assert_unborn_version(id)
+      assert Account.Process.execute(id, :current, check(), Context.new()) == {:ok, nil}
+      assert_unborn_version(id)
+
+      for result <- ~w(error version_mismatch version_mismatch ok error version_mismatch version_mismatch)a,
+          do: assert_received({:execute, %{mode: :process, result: ^result}, %{retries: 0}})
+
+      assert_received {:start, _metadata}
+      refute_received {:start, _metadata}
+    end
+  end
+
+  describe "резерв ключа" do
+    test "enabled: false — резервы пишет append без колбэка: занятое название — отказ без записи" do
+      start!(Account.KeyedProcess)
+      [id, rival] = [Account.ID.new(), Account.ID.new()]
+
+      assert {:ok, _version} = Account.KeyedProcess.execute(id, :current, open("Счёт"), Context.new())
+      assert Account.NameKey.find(Account.Name.new!("Счёт"), Context.new()) == id
+
+      assert {:error, %Error{module: Account.KeyedRepo, code: :name_taken}} =
+               Account.KeyedProcess.execute(rival, :current, open("Счёт"), Context.new())
+
+      assert stream_tags(rival) == []
+      assert_received {:execute, %{mode: :inline, result: :ok}, %{retries: 0}}
+      assert_received {:execute, %{mode: :inline, result: :error}, %{retries: 0}}
+    end
+
+    test "enabled: true — переименование в процессе на id переносит ключ" do
+      start_tree!(Account.KeyedProcess)
+      id = Account.ID.new()
+
+      assert {:ok, _version} = Account.KeyedProcess.execute(id, :current, open("Счёт"), Context.new())
+      assert {:ok, _version} = Account.KeyedProcess.execute(id, :current, rename("Отгрузка"), Context.new())
+
+      assert Account.NameKey.find(Account.Name.new!("Счёт"), Context.new()) == nil
+      assert Account.NameKey.find(Account.Name.new!("Отгрузка"), Context.new()) == id
+      assert_received {:execute, %{mode: :process, result: :ok}, %{retries: 0}}
+    end
+  end
+
+  describe "повтор после отказа записи" do
+    test "отказ append при :current — повтор новой транзакцией с колбэком" do
       start!(Account.RacyProcess)
       id = Account.ID.new()
       name = Account.Name.new!("Отгрузка")
-      :ok = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
       :ok = Account.RacyRepo.Pg.race(id, 2)
       :ok = attach_load()
 
       log =
         capture_at(:debug, fn ->
-          assert :ok =
-                   Account.RacyProcess.execute(
-                     id,
-                     :current,
-                     rename("Отгрузка"),
-                     Context.new(),
-                     record(self())
-                   )
+          assert Account.RacyProcess.execute(id, :current, rename("Отгрузка"), Context.new(), record(self())) ==
+                   {:ok, Version.new!(2)}
         end)
 
       assert log =~
-               "процесс агрегата: повтор после конфликта версии: type=account " <>
-                 "aggregate_id=#{dump(id)} retry=1"
+               "транзакция команды: повтор после отказа записи: aggregate_id=#{dump(id)} retry=1"
 
       assert log =~ "retry=2"
       refute log =~ "retry=3"
 
       assert_received {:callback, [%Account.Event.Renamed{}]}
       refute_received {:callback, _events}
-      for _attempt <- 1..3, do: assert_received({:load, %{op: :get, result: :ok}})
+      for _attempt <- 1..3, do: assert_received({:load, %{op: :get_decision, result: :ok}})
       refute_received {:load, _metadata}
       assert names() == ["events=1"]
       assert stream_tags(id) == ["account.opened", "account.renamed"]
@@ -647,12 +690,62 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
       assert_received {:execute, %{result: :ok}, %{retries: 0}}
       assert_received {:execute, %{result: :ok}, %{retries: 2}}
+      assert retry_lines(log) == 2
     end
 
-    test "исчерпание retries: — :version_mismatch вызывающему и warning" do
+    test "отказ append при явной версии — повтор: сверка прошла, отказало хранилище" do
+      start!(Account.RacyProcess)
+      id = Account.ID.new()
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      :ok = Account.RacyRepo.Pg.race(id, 1)
+
+      log =
+        capture_at(:debug, fn ->
+          assert Account.RacyProcess.execute(
+                   id,
+                   Version.new!(1),
+                   rename("Отгрузка"),
+                   Context.new(),
+                   record(self())
+                 ) == {:ok, Version.new!(2)}
+        end)
+
+      assert retry_lines(log) == 1
+      assert names() == ["events=1"]
+      assert stream_tags(id) == ["account.opened", "account.renamed"]
+      assert_received {:execute, %{result: :ok}, %{retries: 1}}
+    end
+
+    test "отказ хранилища из колбэка по соседнему потоку — повтор вместе с командой" do
+      start!(Account.RacyProcess)
+      [id, neighbour] = [Account.ID.new(), Account.ID.new()]
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      :ok = Account.RacyRepo.Pg.race(neighbour, 1)
+
+      log =
+        capture_at(:debug, fn ->
+          assert Account.RacyProcess.execute(
+                   id,
+                   Version.new!(1),
+                   rename("Отгрузка"),
+                   Context.new(),
+                   open_neighbour(self(), neighbour)
+                 ) == {:ok, Version.new!(2)}
+        end)
+
+      assert retry_lines(log) == 1
+      assert_received {:callback, [%Account.Event.Renamed{}]}
+      assert_received {:callback, [%Account.Event.Renamed{}]}
+      refute_received {:callback, _events}
+      assert stream_tags(id) == ["account.opened", "account.renamed"]
+      assert stream_tags(neighbour) == ["account.opened"]
+      assert_received {:execute, %{result: :ok}, %{retries: 1}}
+    end
+
+    test "исчерпание retries: — отказ вызывающему и warning" do
       start!(Account.RacyProcess, retries: 1)
       id = Account.ID.new()
-      :ok = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
       :ok = Account.RacyRepo.Pg.race(id, 2)
 
       log =
@@ -668,7 +761,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
         end)
 
       assert log =~
-               "процесс агрегата: повторы после конфликта версии исчерпаны: type=account " <>
+               "транзакция команды: повторы после отказа записи исчерпаны: " <>
                  "aggregate_id=#{dump(id)} retries=1"
 
       refute_received {:callback, _events}
@@ -677,43 +770,80 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:execute, %{result: :version_mismatch}, %{retries: 1}}
     end
 
-    test "%Version{} мимо версии потока, в том числе пустого, — :version_mismatch без повтора" do
+    test "сверка ожидаемой версии повтора не даёт: source: :expected" do
       start!(Account.RacyProcess)
       id = Account.ID.new()
       dumped = dump(id)
 
-      assert {:error, %Error{code: :version_mismatch} = empty} =
-               Account.RacyProcess.execute(id, Version.new!(1), open("Счёт"), Context.new())
-
-      assert empty.detail == %{aggregate_id: dumped, expected: 1, actual: nil}
-
-      :ok = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
-
-      assert {:error, %Error{code: :version_mismatch} = stale} =
-               Account.RacyProcess.execute(id, Version.new!(2), rename("Отгрузка"), Context.new())
-
-      assert stale.detail == %{aggregate_id: dumped, expected: 2, actual: 1}
-
-      :ok = Account.RacyRepo.Pg.race(id, 1)
-
       log =
         capture_at(:debug, fn ->
-          assert {:error, %Error{code: :version_mismatch}} =
+          assert {:error, %Error{code: :version_mismatch} = empty} =
+                   Account.RacyProcess.execute(id, Version.new!(1), open("Счёт"), Context.new())
+
+          assert empty.detail ==
+                   %{aggregate_id: dumped, expected: 1, actual: nil, source: :expected}
+
+          {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+
+          assert {:error, %Error{code: :version_mismatch} = stale} =
                    Account.RacyProcess.execute(
                      id,
-                     Version.new!(1),
+                     Version.new!(2),
                      rename("Отгрузка"),
                      Context.new(),
                      record(self())
                    )
+
+          assert stale.detail ==
+                   %{aggregate_id: dumped, expected: 2, actual: 1, source: :expected}
         end)
 
-      refute log =~ "повтор"
+      assert retry_lines(log) == 0
       refute_received {:callback, _events}
       assert stream_tags(id) == ["account.opened"]
+      assert_received {:execute, %{result: :version_mismatch}, %{retries: 0}}
+      assert_received {:execute, %{result: :ok}, %{retries: 0}}
+      assert_received {:execute, %{result: :version_mismatch}, %{retries: 0}}
+    end
 
-      for _call <- 1..3,
-          do: assert_received({:execute, %{result: :version_mismatch}, %{retries: 0}})
+    test "дедлайн истёк на попытке — следующая не стартует: без чтения, записи и колбэка" do
+      start_tree!(Account.RacyProcess)
+      id = Account.ID.new()
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      :ok = Account.RacyRepo.Pg.race(id, 1)
+      :ok = attach_load()
+      :ok = block_load()
+
+      log =
+        capture_log(fn ->
+          assert {:timeout, _call} =
+                   catch_exit(
+                     Account.RacyProcess.execute(
+                       id,
+                       :current,
+                       rename("Отгрузка"),
+                       Context.new(),
+                       record(self()),
+                       timeout: 50
+                     )
+                   )
+
+          # Чтение попытки держится до exit вызывающего: дальше она идёт с истёкшим дедлайном.
+          assert_received {:blocked, server}
+          send(server, :release)
+
+          assert {:ok, _version} = Account.RacyProcess.execute(id, :current, freeze(), Context.new())
+        end)
+
+      assert log =~ "процесс агрегата: просроченная команда отброшена: type=account"
+
+      # Чтения — по одному на попытку: отказавшая попытка команды и команда после неё.
+      for _read <- 1..2, do: assert_received({:load, %{op: :refresh, result: :ok}})
+      refute_received {:load, _metadata}
+      refute_received {:callback, _events}
+      assert names() == []
+      assert stream_tags(id) == ["account.opened", "account.frozen"]
+      assert_received {:execute, %{mode: :process, result: :exit}, _measurements}
     end
   end
 
@@ -770,12 +900,12 @@ defmodule Core.Es.Aggregate.ProcessTest do
     test "execute <тип> — в трейсе вызывающего: адрес, команда, режим и число повторов" do
       start!(Account.RacyProcess)
       id = Account.ID.new()
-      :ok = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
       :ok = Account.RacyRepo.Pg.race(id, 1)
       _spans = OtelFixture.drain(0)
 
       Otel.span("usecase", [], fn ->
-        assert :ok = Account.RacyProcess.execute(id, :current, rename("Отгрузка"), Context.new())
+        assert {:ok, _version} = Account.RacyProcess.execute(id, :current, rename("Отгрузка"), Context.new())
       end)
 
       spans = OtelFixture.drain()
@@ -824,7 +954,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       _spans = OtelFixture.drain(0)
 
       Otel.span("usecase", [], fn ->
-        assert :ok =
+        assert {:ok, _version} =
                  Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
                    send(test_pid, {:ran_in, self()})
                    Otel.span("callback", [], fn -> :ok end)
@@ -893,7 +1023,49 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
   defp names, do: TestRepo.all(from(r in EsFixture.Projection.Row, select: r.name))
 
-  # Восстановление агрегата в процессе теста — факт `get` каждой попытки.
+  defp retry_lines(log) do
+    log
+    |> String.split("\n")
+    |> Enum.count(&(&1 =~ "транзакция команды: повтор после отказа записи:"))
+  end
+
+  # Колбэк команды, который пишет в соседний поток: поставленная на него гонка отказывает
+  # отказом хранилища, и повторяется вся команда, а не запись соседа.
+  defp open_neighbour(test_pid, neighbour) do
+    fn events ->
+      send(test_pid, {:callback, events})
+      context = Context.new()
+      decide = &Account.execute(&1, open("Соседний"))
+
+      case Account.RacyRepo.Pg.get_decision(neighbour, :current, context, decide) do
+        {:ok, {neighbour_events, _state}} ->
+          Account.RacyRepo.Pg.append(neighbour_events, context)
+
+        {:error, _reason} = error ->
+          error
+      end
+    end
+  end
+
+  # Команды с `%Version{}` над пустым потоком: переименование decide отклоняет, открытие и сверку —
+  # принимает, с событиями и без.
+  defp assert_unborn_version(id) do
+    assert {:error, %Error{kind: :domain, code: :not_found}} =
+             Account.Process.execute(id, Version.new!(1), rename("Отгрузка"), Context.new(), record(self()))
+
+    for command <- [open("Счёт"), check()] do
+      assert {:error, %Error{code: :version_mismatch} = error} =
+               Account.Process.execute(id, Version.new!(1), command, Context.new(), record(self()))
+
+      assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: nil, source: :expected}
+    end
+
+    refute_received {:callback, _events}
+    assert stream_tags(id) == []
+    assert names() == []
+  end
+
+  # Восстановление агрегата в процессе теста — факт чтения каждой попытки.
   defp attach_load do
     handler_id = "es-aggregate-load-#{inspect(self())}"
 
@@ -903,6 +1075,29 @@ defmodule Core.Es.Aggregate.ProcessTest do
         Telemetry.event([:es, :aggregate, :load]),
         fn _event, _measurements, metadata, test_pid -> send(test_pid, {:load, metadata}) end,
         self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
+
+  # Первое восстановление агрегата держится до `:release` от теста — попытка длиннее дедлайна
+  # команды; хендлер снимает себя сам, следующие чтения идут без задержки.
+  defp block_load do
+    handler_id = "es-aggregate-block-load-#{inspect(self())}"
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        Telemetry.event([:es, :aggregate, :load]),
+        fn _event, _measurements, _metadata, {test_pid, id} ->
+          :ok = :telemetry.detach(id)
+          send(test_pid, {:blocked, self()})
+
+          receive do
+            :release -> :ok
+          end
+        end,
+        {self(), handler_id}
       )
 
     on_exit(fn -> :telemetry.detach(handler_id) end)

@@ -14,7 +14,8 @@ defmodule Core.Outbox.Poller do
   `:idle_min_ms`, `:batch_size`, `:lock_duration`, `:max_attempts`.
   Опционально: `:topics` (`Outbox.topics_filter()`, default `:all`),
   `:context_factory` (`()-> Context.t()`, вызывается один раз в `init`,
-  default `Context.new/0`), `:name`.
+  default `Context.new/0`), `:name`, `:shutdown` (`child_spec/1`). Неизвестная опция, отсутствие
+  обязательной и значение не той формы — `ArgumentError` при старте (`Core.Helper.StartOpts`).
   """
 
   use GenServer
@@ -22,6 +23,7 @@ defmodule Core.Outbox.Poller do
   alias Core.Context
   alias Core.Error
   alias Core.Exc
+  alias Core.Helper.StartOpts
   alias Core.Outbox
   alias Core.Outbox.Delivery
   alias Core.Outbox.Record
@@ -29,6 +31,13 @@ defmodule Core.Outbox.Poller do
 
   require Logger
   require Error
+
+  @label "Outbox.Poller"
+
+  @keys ~w(
+    repo delivery_module delivery poll_interval_ms idle_min_ms batch_size lock_duration max_attempts
+    topics context_factory name shutdown
+  )a
 
   @shutdown_ms 30_000
 
@@ -87,7 +96,7 @@ defmodule Core.Outbox.Poller do
 
   def child_spec(opts) when is_list(opts) do
     id =
-      case Keyword.get(opts, :name) do
+      case StartOpts.name!(@label, opts, :name) do
         nil -> __MODULE__
         name -> name
       end
@@ -95,7 +104,7 @@ defmodule Core.Outbox.Poller do
     %{
       id: id,
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
+      shutdown: StartOpts.shutdown!(@label, opts, :shutdown, @shutdown_ms)
     }
   end
 
@@ -133,21 +142,22 @@ defmodule Core.Outbox.Poller do
     # handle_info: trap_exit даёт ему дописать результат, иначе пачка осталась бы
     # `:in_work` до истечения аренды.
     Process.flag(:trap_exit, true)
-    idle_min_ms = Keyword.fetch!(opts, :idle_min_ms)
+    StartOpts.keys!(@label, opts, @keys)
+    idle_min_ms = StartOpts.pos_integer!(@label, opts, :idle_min_ms)
 
     state = %__MODULE__{
-      repo: Keyword.fetch!(opts, :repo),
-      delivery_module: Keyword.fetch!(opts, :delivery_module),
-      delivery: Keyword.fetch!(opts, :delivery),
-      context: Keyword.get(opts, :context_factory, &Context.new/0).(),
-      poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
+      repo: StartOpts.module!(@label, opts, :repo),
+      delivery_module: StartOpts.module!(@label, opts, :delivery_module),
+      delivery: StartOpts.term!(@label, opts, :delivery),
+      context: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0).(),
+      poll_interval_ms: StartOpts.pos_integer!(@label, opts, :poll_interval_ms),
       idle_min_ms: idle_min_ms,
       idle_ms: idle_min_ms,
       timer_ref: nil,
-      batch_size: Keyword.fetch!(opts, :batch_size),
-      lock_duration: Keyword.fetch!(opts, :lock_duration),
-      max_attempts: Keyword.fetch!(opts, :max_attempts),
-      topics: Keyword.get(opts, :topics, :all)
+      batch_size: StartOpts.prim!(@label, opts, :batch_size, Outbox.BatchSize),
+      lock_duration: StartOpts.prim!(@label, opts, :lock_duration, Outbox.LockDuration),
+      max_attempts: StartOpts.prim!(@label, opts, :max_attempts, Outbox.Attempts),
+      topics: StartOpts.topics_filter!(@label, opts, :topics, :all)
     }
 
     {:ok, schedule(state, idle_min_ms)}

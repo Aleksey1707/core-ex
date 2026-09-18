@@ -13,8 +13,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           outbox: Account.Outbox
       end
 
-  Строки состояния нет: `get` / `get_many` / `refresh` сворачивают события потока через
-  `Agg.fold/2`; тип агрегата и семейство событий — из кодека `__es_event_codec__/0` агрегата.
+  Строки состояния нет: `get` / `get_decision` / `get_many` / `refresh` сворачивают события потока
+  через `Agg.fold/2`; тип агрегата и семейство событий — из кодека `__es_event_codec__/0` агрегата.
   `Repo.Sc`, `default_filters` и `delete` не участвуют: доступ решают usecase и `decide`,
   удаление — доменное событие.
 
@@ -23,14 +23,20 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `get(id, version, context, opts)` — пустой поток — `%Agg{id: id, version: nil}`, а не
     `:not_found`: существование агрегата решает `decide`. `%Version{}`, не равная голове потока
     после свёртки, — `:version_mismatch`, у пустого потока `actual: nil`.
+  - `get_decision(id, version, context, fun, opts)` — читающая, `fun: state -> {:ok, decision} |
+    {:error, reason}` (ADR-0016): версия сошлась или `:current` — `fun.(state)`, у пустого потока
+    при `:current` — от `%Agg{id: id, version: nil}`; пустой поток при `%Version{}` —
+    `fun.(незаведённый)`, `{:error, _}` отдаётся как есть, `{:ok, _}` становится
+    `:version_mismatch` с `actual: nil`; непустой поток мимо версии — `:version_mismatch`, `fun`
+    не вызывается. Возврат `fun` вне `{:ok, _} | {:error, _}` — `CaseClauseError`.
   - `get_many(pairs, context, opts)` — все потоки одним запросом, состояния в порядке пар `{id,
     version}`; все расхождения — одна `:version_mismatch` со списком detail в порядке пар; `[]` —
     `{:ok, []}` без запросов; повтор id — `ArgumentError`.
   - `append(events, context, opts)` — `[]` — `:ok` без запросов; иначе в
     `Core.Helper.Transact.run/3`: `outbox.from_events` → `Core.Es.Store.append/5` с
-    непрерывностью потока → `Core.Config.outbox_repo().append`. События нескольких потоков одного
-    типа пишутся пачкой, отказ в любом потоке откатывает всю; событие не из `tags:` кодека —
-    `FunctionClauseError`.
+    непрерывностью потока → резервы ключей `key_reservations:` → `Core.Config.outbox_repo().append`.
+    События нескольких потоков одного типа пишутся пачкой, отказ в любом потоке откатывает всю;
+    событие не из `tags:` кодека — `FunctionClauseError`.
   - `refresh(state, version, context, opts)` — события потока после `state.version`, свёрнутые
     от `state`; `version` сверяется, как у `get`.
   - `page_stream(id, limit, offset, context)` — страница потока агрегата по возрастанию версии,
@@ -40,19 +46,37 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
 
   Головы принимают только `%Agg.ID{}` и `%Agg{}`, результат сужен паттерном: `get` / `refresh` —
-  `{:ok, %Agg{}} | {:error, _}`, `get_many` — `{:ok, list} | {:error, _}`, `append` —
-  `:ok | {:error, _}`, `page_stream` — `{:ok, %Core.Pagination.Result{}} | {:error, _}`. Компилятор
-  у вызывающего знает состояние агрегата и страницу, и ID другого агрегата, опечатка в поле или
-  невозможная clause по результату — предупреждение при сборке; элементы списков `get_many` и
-  страницы он не видит.
+  `{:ok, %Agg{}} | {:error, _}`, `get_decision` — `{:ok, _} | {:error, _}`, `get_many` —
+  `{:ok, list} | {:error, _}`, `append` — `:ok | {:error, _}`, `page_stream` —
+  `{:ok, %Core.Pagination.Result{}} | {:error, _}`. Компилятор у вызывающего знает состояние
+  агрегата и страницу, и ID другого агрегата, опечатка в поле или невозможная clause по результату
+  — предупреждение при сборке; элементы списков `get_many` и страницы, состояние в `fun` и решение
+  `get_decision` он не видит.
 
   `:version_mismatch` — `errors.domain(behaviour, :version_mismatch, detail)`, detail —
-  `%{aggregate_id, expected, actual}` (`t:Core.Es.Store.mismatch_detail/0`): у `append` его
-  строит хранилище, у чтения `expected` — значение `version`, `actual` — версия после свёртки.
+  `%{aggregate_id, expected, actual, source}` (`t:Core.Es.Store.mismatch_detail/0`): у `append`
+  его строит хранилище с `source: :storage`, у чтения `expected` — значение `version`, `actual` —
+  версия после свёртки, `source: :expected`. По `source:` решается повтор команды
+  (`Core.Es.Transact`): отказ хранилища снимается повтором, сверка ожидаемой версии — нет.
 
-  Нечитаемый поток у `get` / `get_many` / `refresh` — исключение: неизвестный тег — `Core.Exc`
-  загрузки фасадом, разрыв версий — `ArgumentError` из `Agg.fold/2`. `page_stream` отдаёт ошибку
-  загрузки `{:error, _}` на всю страницу.
+  Нечитаемый поток у `get` / `get_decision` / `get_many` / `refresh` — исключение: неизвестный
+  тег — `Core.Exc` загрузки фасадом, разрыв версий — `ArgumentError` из `Agg.fold/2`.
+  `page_stream` отдаёт ошибку загрузки `{:error, _}` на всю страницу.
+
+  ## Резервы ключей
+
+  `key_reservations: [User.LoginKey]` — модули изменяемых уникальных ключей агрегата
+  (`use Core.Es.KeyReservation`, `docs/adr/0018-mutable-key-reservation.md`). `append` держит их
+  резервы в `es_key_reservations` той же транзакцией, после записи событий: конкурентная команда
+  того же потока получает `:version_mismatch` до резервов. Ключ, занятый другим агрегатом, —
+  `errors.domain(behaviour, code, %{scope: scope})` с `code:` модуля ключа, события не записаны.
+  Исходы резерва — `Core.Es.KeyReservation`, «Резерв».
+
+  Сборка проверяет `reservation/1` модулей ключа по кодеку агрегата: на каждое событие макрос
+  генерирует функцию-проверку (`Core.Es.Check`) `"reservation/1 принимает <Event>"` — литеральный
+  вызов `Key.reservation(%Event.Mod{payload: %Payload{}} = event)` каждого модуля ключа.
+  Событие без clause и опечатка в поле нагрузки, не суженной паттерном, — предупреждение на строке
+  `use`.
 
   ## Снапшоты
 
@@ -77,11 +101,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   Имена — `Core.Telemetry.event/1`; span'а у восстановления нет, на нечитаемом потоке события
   не шлются.
 
-  - `[:es, :aggregate, :load]` — на вызов `get` / `get_many` / `refresh`:
-    измерения `duration` (native, без записи снапшотов), `streams`, `events` (свёрнутые),
+  - `[:es, :aggregate, :load]` — на вызов `get` / `get_decision` / `get_many` / `refresh`:
+    измерения `duration` (native, без записи снапшотов и `fun`), `streams`, `events` (свёрнутые),
     `snapshot_hit`, `snapshot_miss`, `snapshot_rejected` (потоки; без `snapshot:` — нули);
-    метаданные `type` (тип агрегата), `op` (`:get`, `:get_many`, `:refresh`), `result` (`:ok`,
-    `:version_mismatch`).
+    метаданные `type` (тип агрегата), `op` (`:get`, `:get_decision`, `:get_many`, `:refresh`),
+    `result` (`:ok`, `:version_mismatch`). У `get_decision` `result` — сверка до решения: пустой
+    поток при `%Version{}` — `:ok`.
   - `[:es, :aggregate, :fold]` — на свёрнутый поток: измерение `events`; метаданные `type`,
     `snapshot` (`:hit`, `:miss`, `:rejected`, без `snapshot:` — `:off`).
   - `[:es, :snapshot, :write]` — на upsert снапшотов: измерения `duration` (native), `rows`
@@ -95,22 +120,26 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `errors:` — каталог ошибок с clause `:version_mismatch`
   - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`)
   - `repo:` — Ecto-репозиторий транзакции `append` и восстановления состояния (`get` /
-    `get_many` / `refresh`); по умолчанию `Core.Config.dao/0` в рантайме. Сами события `Core.Es.Store.append/5` пишет, а страницу
-    потока `page_stream` читает через `Core.Config.dao/0`
+    `get_decision` / `get_many` / `refresh`); по умолчанию `Core.Config.dao/0` в рантайме. Сами
+    события `Core.Es.Store.append/5` пишет, а страницу потока `page_stream` читает через
+    `Core.Config.dao/0`
   - `codec:` — фасад дампа id и загрузки событий при восстановлении состояния; по умолчанию
     `Core.Config.codec/0` в рантайме. Страница потока грузится через `Core.Config.codec/0`
   - `snapshot:` — `[every: N, version: V]`, без опции снапшоты выключены: `every:` — сколько
     свёрнутых событий потока дают запись снапшота, целое больше нуля, обязательна; `version:` —
     ручная часть маркера, целое, по умолчанию 1
+  - `key_reservations:` — список модулей ключа (`use Core.Es.KeyReservation`), по умолчанию `[]`
 
   На компиляции `CompileError`, если `behaviour:` не объявляет колбэки
   `Core.Es.Aggregate.Repo`, `aggregate:` — не event-sourced агрегат, и на сверках
   `Core.Es.Store.Opts`: кодек агрегата без `type:`, его Prim агрегата не равен `id:`, событие
   `outbox:` не равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
   не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля или `version:` не
-  целое.
+  целое; `key_reservations:` — не список модулей ключа, у модуля ключа событие не равно семейству
+  кодека или `id:` — `id:` репозитория, в `errors:` нет clause его `code:`, область повторяется.
 
-  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo` и приватную `es_aggregate_repo/0`.
+  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0` и,
+  с `key_reservations:`, имена функций-проверок `"reservation/1 принимает <Event>"/1`.
   """
 
   import Core.Version, only: [is_version: 1]
@@ -129,7 +158,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   @label "Es.Aggregate.Repo.Pg"
   @required_keys ~w(behaviour aggregate id errors outbox)a
-  @optional_keys ~w(repo codec snapshot)a
+  @optional_keys ~w(repo codec snapshot key_reservations)a
   @stream_types %{index: :integer, aggregate_id: :binary_id, after_version: :integer}
 
   # ===== объявление =====
@@ -140,8 +169,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     cfg = validate_opts!(lit)
     dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
+    checks = Es.KeyReservation.checks(cfg.key_reservations, cfg.event_codec, __CALLER__.line)
 
     quote generated: true do
+      unquote_splicing(checks)
+
       @behaviour unquote(cfg.behaviour)
 
       @es_aggregate_repo unquote(Macro.escape(cfg))
@@ -154,6 +186,16 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           when is_version(version) and is_list(opts) do
         case Core.Es.Aggregate.Repo.Pg.get(es_aggregate_repo(), id, version, context, opts) do
           {:ok, %unquote(cfg.aggregate){} = state} -> {:ok, state}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+
+      @doc "Решение `fun` над состоянием агрегата; явная версия на пустом потоке сверяется после решения."
+      @impl true
+      def get_decision(%unquote(cfg.id){} = id, version, %Core.Context{} = context, fun, opts \\ [])
+          when is_version(version) and is_function(fun, 1) and is_list(opts) do
+        case Core.Es.Aggregate.Repo.Pg.get_decision(es_aggregate_repo(), id, version, context, fun, opts) do
+          {:ok, decision} -> {:ok, decision}
           {:error, reason} -> {:error, reason}
         end
       end
@@ -209,6 +251,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
       defoverridable get: 3,
                      get: 4,
+                     get_decision: 4,
+                     get_decision: 5,
                      get_many: 2,
                      get_many: 3,
                      append: 2,
@@ -249,7 +293,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       type: event_codec.__es_type__(),
       errors: errors,
       outbox: outbox,
-      snapshot: snapshot!(opts)
+      snapshot: snapshot!(opts),
+      key_reservations:
+        Es.KeyReservation.declarations!(Keyword.get(opts, :key_reservations, []), event_codec, id, errors, @label)
     }
   end
 
@@ -283,6 +329,25 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts),
     do: load_stream(cfg, :get, struct(cfg.aggregate, id: id), version, opts)
+
+  @doc false
+  @spec get_decision(
+          map(),
+          struct(),
+          Version.expected(),
+          Context.t(),
+          (struct() -> {:ok, decision} | {:error, reason}),
+          keyword()
+        ) :: {:ok, decision} | {:error, reason | Error.t()}
+        when decision: var, reason: var
+
+  def get_decision(cfg, id, version, %Context{}, fun, opts)
+      when is_version(version) and is_function(fun, 1) and is_list(opts) do
+    verify = fn [state] -> verify_born_version(cfg, state, version) end
+
+    with {:ok, state} <- load(cfg, :get_decision, [struct(cfg.aggregate, id: id)], opts, verify),
+         do: decision(cfg, state, version, fun)
+  end
 
   @doc false
   @spec get_many(map(), [{struct(), Version.expected()}], Context.t(), keyword()) ::
@@ -332,6 +397,20 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp load_stream(cfg, op, state, version, opts),
     do: load(cfg, op, [state], opts, fn [state] -> verify_version(cfg, state, version) end)
+
+  # Пустой поток при `%Version{}` — не гонка, а ссылка на состояние, которого не было: отказ или
+  # принятие решает `fun` на незаведённом агрегате (ADR-0016).
+  defp verify_born_version(_cfg, %{version: nil} = state, _version), do: {:ok, state}
+  defp verify_born_version(cfg, state, version), do: verify_version(cfg, state, version)
+
+  defp decision(cfg, %{version: nil} = state, %Version{} = version, fun) do
+    case fun.(state) do
+      {:ok, _decision} -> {:error, version_mismatch(cfg, mismatch_detail(state, version, cfg.codec))}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp decision(_cfg, state, _version, fun), do: fun.(state)
 
   # Восстановление и сверка версий — один замер `[:es, :aggregate, :load]`; снапшоты пишутся
   # после него: вне транзакции upsert идёт сразу и в длительность чтения не входит.
@@ -516,7 +595,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     %{
       aggregate_id: codec.dump(state.id),
       expected: Version.value(expected),
-      actual: state.version && Version.value(state.version)
+      actual: state.version && Version.value(state.version),
+      source: :expected
     }
   end
 
@@ -539,9 +619,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp write(cfg, events, context, opts) do
     mismatch = &version_mismatch(cfg, &1)
+    taken = &cfg.errors.domain(cfg.behaviour, &1, &2)
 
     with {:ok, records} <- cfg.outbox.from_events(events),
-         :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true) do
+         :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true),
+         :ok <- Es.KeyReservation.append(cfg.key_reservations, events, context, taken) do
       Config.outbox_repo().append(records, context, opts)
     end
   end

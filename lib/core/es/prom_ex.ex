@@ -233,7 +233,7 @@ defmodule Core.Es.PromEx do
         prefix ++ [:aggregate, :process, :execute, :retries, :total],
         event_name: execute,
         measurement: :retries,
-        description: "Число повторов команды после конфликта версии",
+        description: "Число повторов команды после отказа записи",
         tags: [:type]
       ),
       counter(

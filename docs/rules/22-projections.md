@@ -128,7 +128,7 @@ notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST"), port: 5432]
 
 ## Read-after-write
 
-Когда клиент сразу после команды читает read-модель, вызывающий после `:ok` usecase ждёт проекцию
+Когда клиент сразу после команды читает read-модель, вызывающий после успеха usecase ждёт проекцию
 — `Projection.await(Agg, %Agg.ID{} = aggregate_id, timeout)` у модуля своей проекции. Цель —
 последнее событие потока агрегата на момент вызова; `Agg` — модуль, в котором лежит кодек событий
 `<Aggregate>.Event.Codec`, то есть сам агрегат. `await/3` генерирует `use Core.Es.Projection` —
@@ -167,7 +167,7 @@ with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, c
 Core.Es.Projection.Await.run(projection, projection.__es_projection__(), "account", order_id, 5_000)
 
 # хорошо — usecase записал и закоммитил, вызывающий ждёт проекцию и читает read-модель
-with :ok <- Accounts.Open.call(id, params, context),
+with {:ok, _version} <- Accounts.Open.call(id, params, context),
      :ok <- AccountList.Projection.await(Account, id, 5_000) do
   AccountList.ReadRepo.get(id, :current, context)
 end

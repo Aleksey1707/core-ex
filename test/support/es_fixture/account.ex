@@ -6,6 +6,7 @@ defmodule Core.EsFixture.Account do
 
   - `not_found` / `already_exists` — ошибки `decide` по `version: nil`;
   - переименование в то же имя — `{:ok, []}`;
+  - сверка — `{:ok, []}` в любом состоянии, в том числе на пустом потоке;
   - закрытие открытого счёта — два события одной команды через `fold/3`;
   - `Frozen` / `Closed` — события без нагрузки;
   - `Opened` — записанные `account.opened.v1` и `account.opened.v2` грузятся апкастом;
@@ -86,7 +87,18 @@ defmodule Core.EsFixture.Account do
       @type t :: %__MODULE__{by: UserID.t(), at: Es.Event.At.t()}
     end
 
-    @type t :: Open.t() | Rename.t() | Freeze.t() | Close.t()
+    defmodule Check do
+      @moduledoc "Сверить счёт: решение без событий."
+
+      use Core.Es.Cmd
+
+      @enforce_keys ~w(by at)a
+      defstruct @enforce_keys
+
+      @type t :: %__MODULE__{by: UserID.t(), at: Es.Event.At.t()}
+    end
+
+    @type t :: Open.t() | Rename.t() | Freeze.t() | Close.t() | Check.t()
   end
 
   defstruct id: nil, version: nil, name: nil, status: nil
@@ -115,6 +127,8 @@ defmodule Core.EsFixture.Account do
 
   def decide(%command{}, %__MODULE__{version: nil}) when command in @on_existing,
     do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
+
+  def decide(%Cmd.Check{}, %__MODULE__{}), do: {:ok, []}
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
 

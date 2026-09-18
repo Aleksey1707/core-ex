@@ -46,7 +46,13 @@ defmodule Core.Repo.Pg.StateStoredRaceTest do
     assert {:error, %Error{module: StateStoredFixture.Repo, code: :version_mismatch} = error} =
              step(older, fn -> @repo.update(entity(id, 3), Context.new()) end)
 
-    assert error.detail == %{aggregate_id: Config.codec().dump(id), expected: 3, actual: 2}
+    assert error.detail == %{
+             aggregate_id: Config.codec().dump(id),
+             expected: 3,
+             actual: 2,
+             source: :storage
+           }
+
     assert {:error, :rollback} = commit(older)
 
     assert {:ok, %Entity{version: version}} =

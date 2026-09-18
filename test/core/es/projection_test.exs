@@ -634,6 +634,146 @@ defmodule Core.Es.ProjectionTest do
     end
   end
 
+  describe "Test.with_rebuilding/2" do
+    setup do
+      on_exit(fn -> :persistent_term.erase(Es.Projection.Supervisor.Mark) end)
+      :ok
+    end
+
+    test "внутри блока — :projection_rebuilding сразу; после — отметка и строка на месте" do
+      :ok = mark!()
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      checkpoint = checkpoint!()
+      write!(@account_repo, account, [close()])
+
+      # Таймаут 30 000 мс: опрос отдал бы исход только по его истечении.
+      assert {:error, %Error{kind: :app, ns: :es, code: :projection_rebuilding} = error} =
+               Es.Projection.Test.with_rebuilding(@projection, fn ->
+                 @projection.await(Account, account, 30_000)
+               end)
+
+      assert error.detail == %{projection: "es_fixture"}
+      assert Es.Projection.Supervisor.Mark.find().await == :inline
+      assert checkpoint!() == checkpoint
+    end
+
+    test "прогон после блока досчитывает события: clear/0 не зовётся" do
+      :ok = mark!()
+      account = Account.ID.new()
+      other = EventFixture.AggID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+
+      # Строка мимо проекции: старт с начала истории стёр бы её через clear/0 и не вернул.
+      :ok = insert_row!("fixture", other, "Чужая")
+      write!(@account_repo, account, [close()])
+
+      assert {:error, %Error{code: :projection_rebuilding}} =
+               Es.Projection.Test.with_rebuilding(@projection, fn ->
+                 @projection.await(Account, account, 30_000)
+               end)
+
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+
+      assert Enum.sort(rows()) == [
+               {"account", dump(account), "Счёт", true},
+               {"fixture", dump(other), "Чужая", false}
+             ]
+    end
+
+    test "исключение в блоке — отметка и строка всё равно возвращаются" do
+      :ok = mark!()
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      checkpoint = checkpoint!()
+
+      assert_raise RuntimeError, "блок", fn ->
+        Es.Projection.Test.with_rebuilding(@projection, fn -> raise "блок" end)
+      end
+
+      assert Es.Projection.Supervisor.Mark.find().await == :inline
+      assert checkpoint!() == checkpoint
+    end
+
+    test "список проекций — неготовы все названные" do
+      :ok = mark!([@projection, FailingClear])
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      write!(@account_repo, account, [close()])
+
+      assert {{:error, %Error{code: :projection_rebuilding}}, {:error, %Error{code: :projection_rebuilding}}} =
+               Es.Projection.Test.with_rebuilding([@projection, FailingClear], fn ->
+                 {@projection.await(Account, account, 30_000), FailingClear.await(Account, account, 30_000)}
+               end)
+
+      assert checkpoint!() != nil
+    end
+
+    test "строки чекпоинта не было — после блока её снова нет" do
+      :ok = mark!()
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert checkpoint!() == nil
+
+      assert {:error, %Error{code: :projection_rebuilding}} =
+               Es.Projection.Test.with_rebuilding(@projection, fn ->
+                 @projection.await(Account, account, 30_000)
+               end)
+
+      assert checkpoint!() == nil
+    end
+
+    test "строка чекпоинта заново создана внутри блока — после блока прежняя" do
+      :ok = mark!()
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      checkpoint = checkpoint!()
+
+      assert :ok =
+               Es.Projection.Test.with_rebuilding(@projection, fn ->
+                 Es.Projection.Test.run_until_idle(@projection)
+               end)
+
+      assert checkpoint!() == checkpoint
+    end
+
+    test "дерево запущено — ArgumentError до снятия строки" do
+      :ok = mark!()
+      assert :processed = Es.Projection.run_once(@projection)
+      checkpoint = checkpoint!()
+
+      # Отметка живого дерева без самого дерева: проверка обязана сработать до снятия строки.
+      :ok = Es.Projection.Supervisor.Mark.put(%{Es.Projection.Supervisor.Mark.find() | enabled: true})
+
+      assert_raise ArgumentError, ~r/дерево запущено \(enabled: true\)/, fn ->
+        Es.Projection.Test.with_rebuilding(@projection, fn -> :ok end)
+      end
+
+      assert checkpoint!() == checkpoint
+    end
+
+    test "дерево проекций не запущено — RuntimeError" do
+      :persistent_term.erase(Es.Projection.Supervisor.Mark)
+
+      assert_raise RuntimeError, ~r/дерево проекций не запущено/, fn ->
+        Es.Projection.Test.with_rebuilding(@projection, fn -> :ok end)
+      end
+    end
+
+    test "проекция не из projections: дерева — ArgumentError" do
+      :ok = mark!([FailingClear])
+
+      assert_raise ArgumentError, ~r/не из projections:/, fn ->
+        Es.Projection.Test.with_rebuilding(@projection, fn -> :ok end)
+      end
+    end
+  end
+
   describe "span" do
     setup do
       :ok = OtelFixture.attach()
@@ -803,6 +943,17 @@ defmodule Core.Es.ProjectionTest do
       select: {r.aggregate_type, r.aggregate_id, r.name, r.closed}
     )
     |> TestRepo.all()
+  end
+
+  defp mark!(projections \\ [@projection]) do
+    :ignore =
+      Es.Projection.Supervisor.start_link(
+        projections: projections,
+        enabled: false,
+        await: :inline
+      )
+
+    :ok
   end
 
   defp checkpoint!(name \\ "es_fixture") do

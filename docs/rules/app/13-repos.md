@@ -1,9 +1,9 @@
 # Репозитории приложения
 
 - **Область.** `lib/my_app/domain/<bc>/{common,<actor>}/<aggregate>/{repo,read_repo,view}*`,
-  `lib/my_app/dao.ex`, DI-ключи репозиториев в `config/**`.
-- **Читать перед.** Новым репозиторием, Ecto-схемой, View или Specs; правкой
-  `default_filters`, `constraint_errors` и DI.
+  `<aggregate>/<name>_key.ex`, `lib/my_app/dao.ex`, DI-ключи репозиториев в `config/**`.
+- **Читать перед.** Новым репозиторием, Ecto-схемой, View, Specs или модулем ключа; правкой
+  `default_filters`, `constraint_errors`, `key_reservations:` и DI.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
 Контракты `use Core.Repo{,.Pg,.Pg.StateStored,.Pg.Schema}`, `use Core.Es.Aggregate.Repo{,.Pg}`,
@@ -35,6 +35,7 @@ Event-sourced агрегат добавляет к этому свои моду�
 <bc>/common/<aggregate>/{cmd,cmd/*.ex}           # команды: use Core.Es.Cmd
 <bc>/common/<aggregate>/repo{.ex,/pg.ex}         # use Core.Es.Aggregate.Repo{,.Pg}
 <bc>/common/<aggregate>/process.ex               # опционально: use Core.Es.Aggregate.Process
+<bc>/common/<aggregate>/<name>_key.ex            # опционально: use Core.Es.KeyReservation
 <bc>/common/projection.ex                        # проекция BC: use Core.Es.Projection
 <bc>/common/<aggregate>/read_repo/pg/projector.ex  # запись строк read-модели этим агрегатом
 ```
@@ -102,25 +103,40 @@ def insert(%<Aggregate>{} = agg, %Context{} = context, opts \\ []),
 
 ## Event-sourced агрегат
 
-Один репозиторий в `Common`, тело команды `get` → `Agg.execute/2` → `append`, следующая команда
-без повторного `get`, отсутствие `:not_found` и команда на несколько агрегатов путём
+Один репозиторий в `Common`, тело команды `get_decision` → `Agg.execute/2` → `append`, следующая
+команда без повторного чтения, отсутствие `:not_found` и команда на несколько агрегатов путём
 usecase → repo — `deps/core/docs/rules/13-repos.md`, «Write event-sourced агрегата».
 
 Проверять существование соседнего агрегата usecase MUST по `version: nil` его состояния, а не по
 строке read-модели: её пишет проекция асинхронно.
 
-### Повтор при `:current`
+### Повтор после отказа записи
 
-Запись по `:current` MAY получить `:version_mismatch` без конфликта версии — страж `xid`
-хранилища отвергает запись, если конкурент по тому же потоку закоммитил событие транзакции с
-`xid` больше её собственного (`deps/core/docs/rules/13-repos.md`,
-«Хранилище событий (`Core.Es.Store`)»). Поэтому команда с `:current` MUST повторяться новой
-транзакцией, а с явной `%Version{}` (пришедшей в `If-Match`) — MUST NOT: клиент видел устаревшее
-состояние, и повтор его не исправит.
+Запись MAY получить `:version_mismatch` без конфликта версии — страж `xid` хранилища отвергает
+запись, если конкурент по тому же потоку закоммитил событие транзакции с `xid` больше её
+собственного (`deps/core/docs/rules/13-repos.md`, «Хранилище событий (`Core.Es.Store`)»). Это
+отказ хранилища: в detail у него `source: :storage`, а у сверки ожидаемой версии —
+`source: :expected`.
 
-Повтор даёт либо `Core.Es.Aggregate.Process` («Процесс агрегата»), либо обёртка приложения над
-`Transact.run` — одна на приложение, а не по копии в usecase. Предел повторов и его исчерпание —
-`warning`, каждый повтор — `debug` (`deps/core/docs/rules/20-agreements.md`, «Логирование»).
+Повторяется отказ хранилища при **любой** ожидаемой версии, включая явную `%Version{}` из
+`If-Match`: чтение по ней прошло, значит клиент видел актуальное состояние. Сверка ожидаемой
+версии MUST NOT повторяться — повтор её не исправит. Ожидаемая версия в решении о повторе не
+участвует.
+
+Повтор MUST давать библиотека — `Core.Es.Transact.run/2` в теле usecase либо
+`Core.Es.Aggregate.Process` («Процесс агрегата»); своя обёртка над `Transact.run` в приложении
+MUST NOT. Тело команды и колбэк MUST быть идемпотентными: повтор зовёт их заново. Предел повторов
+и его исчерпание — `warning`, каждый повтор — `debug`
+(`deps/core/docs/rules/20-agreements.md`, «Логирование»). Правило и цена —
+`deps/core/docs/rules/13-repos.md`, «Транзакция команды (`Core.Es.Transact`)».
+
+```elixir
+# плохо — своя обёртка повтора: об отказе соседнего потока она не знает
+MyApp.Transact.run(version, fn -> ... end)
+
+# хорошо
+Es.Transact.run(fn -> ... end)
+```
 
 ### Процесс агрегата
 
@@ -144,12 +160,18 @@ commit.
 
 У event-sourced агрегата уникального индекса по состоянию нет: строки пишет проекция, а её
 `clear/0` очищает таблицу при пересборке. Поэтому неизменяемый естественный ключ агрегата MUST
-задавать **id его потока** — детерминированный UUIDv5 от ключа.
+задавать **id его потока** — идентификатор из ключа: Prim `use Core.Prim.UUID, version: 5`
+(`deps/core/docs/rules/11-domain.md`, «Типизированные обёртки»; схема id —
+`deps/core/docs/adr/0017-stream-id-from-key.md`).
 
 - Namespace UUIDv5 — один на приложение и неизменяемый: другая константа переименовала бы потоки
-  всех таких агрегатов.
-- Конструктор MUST лежать в Prim идентификатора агрегата (`<Aggregate>.ID.from_<key>/1`), а не в
-  usecase: id вычисляется в нескольких местах, а правило одно.
+  всех таких агрегатов. `namespace:` MUST браться из одной публичной функции модуля приложения
+  (`MyApp.StreamID.namespace()`, имя — на выбор приложения); литерал в Prim MUST NOT.
+- `scope:` — область ключа — MUST быть у каждого идентификатора из ключа и неизменяема, как тип
+  агрегата. Идентификатор, общий у нескольких агрегатов, — одна область.
+- Конструктор MUST лежать в Prim идентификатора агрегата (`<Aggregate>.ID.from_<key>` любой
+  арности, тело зовёт приватный `from_key/1`), а не в usecase: id вычисляется в нескольких местах,
+  а правило одно. Части ключа в строки переводит `from_<key>`.
 - Команда-создание такого агрегата идемпотентна: `decide` на `version: nil` отдаёт событие
   заведения, на непустом потоке — обновление либо прежний доменный отказ.
 
@@ -159,6 +181,83 @@ id = Agg.ID.new()
 
 # хорошо — id потока вычислим из ключа, индекс не нужен
 id = Agg.ID.from_external(source.external_id)
+```
+
+```elixir
+# плохо — литерал namespace в Prim: опечатка в одном из них молча переименует потоки
+use Core.Prim.UUID,
+  name: first_line(@moduledoc),
+  version: 5,
+  namespace: "1b0f8f5e-8a54-4a7c-9a2b-3f6d2c8e5a11",
+  scope: "agg_member"
+
+# хорошо — namespace из одной функции приложения, составной ключ — списком строк
+use Core.Prim.UUID,
+  name: first_line(@moduledoc),
+  version: 5,
+  namespace: MyApp.StreamID.namespace(),
+  scope: "agg_member"
+
+def from_member(%Agg.ID{} = agg_id, %Actor.ID{} = actor_id),
+  do: from_key([Agg.ID.value(agg_id), Actor.ID.value(actor_id)])
+```
+
+Изменяемый ключ (логин, название роли) id потока не задаёт: id постоянен, а ключ меняется событием.
+Его уникальность MUST держать резерв ключа — модуль `<Aggregate>.<Name>Key`
+(`common/<aggregate>/<name>_key.ex`, `use Core.Es.KeyReservation`) в `key_reservations:`
+репозитория агрегата (`deps/core/docs/rules/13-repos.md`, «Резервы ключей»; решение —
+`deps/core/docs/adr/0018-mutable-key-reservation.md`).
+
+- Событие, которое занимает ключ, MUST нести ключ в нагрузке: `reservation/1` видит только
+  событие. Восстановление после удаления тоже кладёт ключ в нагрузку.
+- `reservation/1` MUST иметь clause на каждое событие агрегата, catch-all MUST NOT: новое событие,
+  меняющее ключ, прошло бы как `:keep`.
+- Каноническая форма ключа MUST задаваться только `to_key/1`: ключи сравниваются побайтно, и
+  нормализация (регистр, пробелы) в usecase или в базе разойдётся с `find/2`. Правка `to_key/1`
+  или `scope:` после первых данных — миграция строк `es_key_reservations`.
+- Составной ключ MUST отдаваться списком строк, склейка частей MUST NOT: `["x:y", "z"]` и
+  `["x", "y:z"]` склеиваются в один ключ.
+- Набор ключей одной области у агрегата не выражается: у агрегата в области один ключ, и набор
+  моделируется агрегатом на элемент с идентификатором из ключа.
+- `code:` модуля ключа — код каталога агрегата (`12-errors.md`, «Каталоги агрегатов»).
+- `key_reservations:` у агрегата с историей MUST выходить вместе с миграцией, которая заполняет
+  резервы существующих потоков в форме `to_key/1`, до первой записи нового кода: без неё дубли
+  прежних ключей проходят молча.
+
+```elixir
+# плохо — catch-all: новое событие, меняющее логин, резерв не перенесёт
+def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.login}
+def reservation(_event), do: :keep
+
+# хорошо — clause на каждое событие, каноническая форма — в to_key/1
+def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.login}
+def reservation(%Event.LoginChanged{payload: payload}), do: {:reserve, payload.login}
+def reservation(%Event.Blocked{}), do: :keep
+def reservation(%Event.Deleted{}), do: :release
+
+def to_key(%Agg.Login{} = login), do: String.downcase(Agg.Login.value(login))
+```
+
+```elixir
+# плохо — склейка частей: раздел "x:y" с кодом "z" и раздел "x" с кодом "y:z" дают один ключ
+def to_key(%Agg.Code{} = code), do: "#{Agg.Code.section(code)}:#{Agg.Code.value(code)}"
+
+# хорошо — части списком
+def to_key(%Agg.Code{} = code), do: [Agg.Code.section(code), Agg.Code.value(code)]
+```
+
+```elixir
+# плохо — заполнение резервов не в форме to_key/1: find/2 прежних логинов не найдёт
+execute """
+INSERT INTO es_key_reservations (scope, key, aggregate_id)
+SELECT 'agg.login', ARRAY[login], id FROM agg_logins
+"""
+
+# хорошо — форма ключа та же, что у to_key/1
+execute """
+INSERT INTO es_key_reservations (scope, key, aggregate_id)
+SELECT 'agg.login', ARRAY[lower(login)], id FROM agg_logins
+"""
 ```
 
 ## Страница потока
@@ -237,7 +336,7 @@ def project(%Agg.Event.Completed{} = event),
   принадлежит той таблице, где он объявлен.
 - Коды берутся из каталога агрегата (`12-errors.md`), не выдумываются на месте.
 
-Проверяется: ратчет `constraint_errors` (`19-testing.md`).
+Проверяется: ратчет `constraint_errors` — `use Core.Repo.ConstraintErrorsCase` (`19-testing.md`).
 
 ## DI
 
@@ -260,7 +359,7 @@ def project(%Agg.Event.Completed{} = event),
 | PK / FK | `:binary_id`; идентификаторы — строки UUID через `InCodec.dump/1` |
 | Soft delete | `deleted_at` / `deleted_by_id` + фрагмент `not_deleted` в `Specs` |
 | Схема | `<Aggregate>.Repo.Pg.Schema` (+ вложенные `Schema.<Child>`) |
-| Таблицы event sourcing | `es_events`, `es_snapshots`, `es_checkpoints` — колонки задаёт `Core.Es.Migration`, своих у приложения нет (`18-migrations.md`) |
+| Таблицы event sourcing | `es_events`, `es_snapshots`, `es_checkpoints` — колонки задаёт `Core.Es.Migration`, `es_key_reservations` — `Core.Es.KeyReservation.Migration`; своих у приложения нет (`18-migrations.md`) |
 
 ## Связанные правила
 

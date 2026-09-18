@@ -39,6 +39,19 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
   @impl true
   defdelegate get(id, version, context, opts \\ []), to: Account.Repo.Pg
 
+  @doc "Решение `fun` над состоянием счёта из его потока."
+  @spec get_decision(
+          Account.ID.t(),
+          Version.expected(),
+          Context.t(),
+          (Account.t() -> {:ok, decision} | {:error, reason}),
+          keyword()
+        ) :: {:ok, decision} | {:error, reason | Error.t()}
+        when decision: var, reason: var
+
+  @impl true
+  defdelegate get_decision(id, version, context, fun, opts \\ []), to: Account.Repo.Pg
+
   @doc "Состояния счетов по парам `{id, version}`."
   @spec get_many([{Account.ID.t(), Version.expected()}], Context.t(), keyword()) ::
           {:ok, [Account.t()]} | {:error, Error.t()}

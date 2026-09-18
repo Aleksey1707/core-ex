@@ -1,14 +1,26 @@
 defmodule Core.Outbox do
   @moduledoc """
-  Transactional outbox: примитивы и статусы записи.
+  Transactional outbox: примитивы, статусы записи и проверки старта поллера —
+  `check_singleton!/1`, `validate_partition!/1`.
   """
 
   import Core.Helper.String, only: [first_line: 1]
 
   alias Core.Error
 
+  require Logger
+
   @typedoc "Фильтр топиков при reserve: все / только / кроме."
   @type topics_filter :: :all | {:only, [String.t()]} | {:except, [String.t()]}
+
+  @typedoc "DNS-запрос кластеризации: `nil`, `:ignore` и `\"\"` — кластеризации нет."
+  @type cluster_query :: String.t() | :ignore | nil
+
+  @typedoc "Опция `check_singleton!/1`."
+  @type singleton_opt ::
+          {:enabled?, boolean()} | {:cluster_query, cluster_query()} | {:allow_cluster?, boolean()}
+
+  # ===== фильтры топиков =====
 
   @doc "Пересекается ли набор топиков с фильтром поллера."
   @spec topics_match?(MapSet.t(String.t()), topics_filter()) :: boolean()
@@ -29,11 +41,11 @@ defmodule Core.Outbox do
   Порядок доставки держится на одном поллере на топик-группу
   (`14-events-outbox.md`). `FOR UPDATE SKIP LOCKED` защищает от дублей, но не от
   перестановки: два поллера с пересекающимися фильтрами разложат общий топик в брокер
-  вперемешку — молча, без единой ошибки. Отказ старта при `DNS_CLUSTER_QUERY` ловит ту же
-  ошибку между нодами; эта проверка — внутри одной.
+  вперемешку — молча, без единой ошибки. `check_singleton!/1` ловит ту же ошибку между
+  нодами; эта проверка — внутри одной.
 
-  Звать из `start/2` приложения-потребителя рядом с проверкой единственности поллера
-  приложения, передавая конфигурацию `:pollers` как есть.
+  Звать из `start/2` приложения-потребителя рядом с `check_singleton!/1`, передавая
+  конфигурацию `:pollers` как есть.
 
       Core.Outbox.validate_partition!(
         Application.get_env(:core, Core.Outbox, [])[:pollers] || []
@@ -96,6 +108,78 @@ defmodule Core.Outbox do
       "#{inspect(a_name)} #{inspect(a_topics)} и #{inspect(b_name)} #{inspect(b_topics)}. " <>
       "Разведите топики по поллерам через {:only, [...]} без общих элементов " <>
       "(deps/core/docs/rules/14-events-outbox.md, «Единственность поллера»)"
+  end
+
+  # ===== единственность поллера =====
+
+  @doc """
+  Проверить, что включённый outbox не стартует в кластере без явного разрешения.
+
+  Та же ошибка, что ловит `validate_partition!/1`, но между нодами: при кластеризации каждая нода
+  с включённым outbox поднимет свой поллер. Поэтому включённый outbox вместе с `cluster_query`
+  отказывает `ArgumentError` с инструкцией. `allow_cluster?: true` — осознанный отказ от гарантии
+  порядка: старт разрешён, в лог уходит `warning`.
+
+  Опции:
+
+  - `:enabled?` — поднимается ли поддерево очереди (`OUTBOX_ENABLED`), обязательная;
+  - `:cluster_query` — запрос кластеризации (`DNS_CLUSTER_QUERY`), обязательная: `nil`, `:ignore`
+    и `""` — кластеризации нет;
+  - `:allow_cluster?` — разрешить старт в кластере (`OUTBOX_ALLOW_CLUSTER`), по умолчанию `false`.
+
+  Звать из `start/2` приложения-потребителя до подъёма дерева, рядом с `validate_partition!/1`.
+
+      outbox = Application.get_env(:core, Core.Outbox, [])
+
+      Core.Outbox.check_singleton!(
+        enabled?: Keyword.get(outbox, :enabled, false),
+        cluster_query: Application.get_env(:my_app, :dns_cluster_query),
+        allow_cluster?: Keyword.get(outbox, :allow_cluster, false)
+      )
+  """
+  @spec check_singleton!([singleton_opt()]) :: :ok
+
+  def check_singleton!(opts) when is_list(opts) do
+    opts = Keyword.validate!(opts, [:enabled?, :cluster_query, allow_cluster?: false])
+    cluster_query = Keyword.fetch!(opts, :cluster_query)
+
+    singleton!(
+      Keyword.fetch!(opts, :enabled?),
+      clustered?(cluster_query),
+      Keyword.fetch!(opts, :allow_cluster?),
+      cluster_query
+    )
+  end
+
+  # ---
+
+  defp clustered?(cluster_query) when cluster_query in [nil, :ignore, ""], do: false
+
+  defp clustered?(cluster_query) when is_binary(cluster_query), do: true
+
+  defp singleton!(false, _clustered?, allow_cluster?, _cluster_query) when is_boolean(allow_cluster?), do: :ok
+
+  defp singleton!(true, false, allow_cluster?, _cluster_query) when is_boolean(allow_cluster?), do: :ok
+
+  defp singleton!(true, true, true, cluster_query) do
+    Logger.warning(
+      "Core.Outbox: старт в кластере по allow_cluster?: true (OUTBOX_ALLOW_CLUSTER=true), " <>
+        "порядок доставки между нодами не гарантирован: cluster_query=#{inspect(cluster_query)}"
+    )
+
+    :ok
+  end
+
+  defp singleton!(true, true, false, cluster_query) do
+    raise ArgumentError, singleton_error(cluster_query)
+  end
+
+  defp singleton_error(cluster_query) do
+    "Core.Outbox: outbox включён вместе с кластеризацией cluster_query=#{inspect(cluster_query)}: " <>
+      "каждая нода поднимет свой поллер, и порядок доставки нарушится. " <>
+      "Оставьте OUTBOX_ENABLED=true на одном инстансе без DNS_CLUSTER_QUERY либо, если порядок " <>
+      "не важен, передайте allow_cluster?: true (OUTBOX_ALLOW_CLUSTER=true) " <>
+      "(deps/core/docs/rules/app/14-events-outbox.md, «Единственность поллера»)"
   end
 
   defmodule Status do

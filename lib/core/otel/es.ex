@@ -29,6 +29,7 @@ defmodule Core.Otel.Es do
   alias Core.Error
   alias Core.Es
   alias Core.Otel
+  alias Core.Version
 
   @attr_projection_name "core.es.projection.name"
   @attr_projection_version "core.es.projection.version"
@@ -139,8 +140,8 @@ defmodule Core.Otel.Es do
   Выполнить `fun` — команду `command` агрегата — в span'е `execute <тип>` внутри трейса
   вызывающего; прикладная `{:error, _}` результата отмечается `Core.Otel.record_error/1`.
   """
-  @spec execute(String.t(), String.t(), module(), (-> :ok | {:error, Error.t()})) ::
-          :ok | {:error, Error.t()}
+  @spec execute(String.t(), String.t(), module(), (-> {:ok, Version.t() | nil} | {:error, Error.t()})) ::
+          {:ok, Version.t() | nil} | {:error, Error.t()}
 
   def execute(type, aggregate_id, command, fun)
       when is_binary(type) and is_binary(aggregate_id) and is_atom(command) and
@@ -154,7 +155,7 @@ defmodule Core.Otel.Es do
     Otel.span("execute #{type}", [attributes: attributes], fn -> app_recorded(fun.()) end)
   end
 
-  @doc "Отметить исполнение команды: режим и число повторов после конфликта версии."
+  @doc "Отметить исполнение команды: режим и число повторов после отказа записи."
   @spec executed(:inline | :process, non_neg_integer()) :: :ok
 
   def executed(mode, retries)

@@ -160,7 +160,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
                @repo.get(id, Core.Version.new!(2), Context.new())
 
-      assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 3}
+      assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 3, source: :expected}
     end
 
     test "маркер не совпал — полная свёртка тем же запросом без warning" do

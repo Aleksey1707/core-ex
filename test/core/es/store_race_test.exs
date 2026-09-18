@@ -91,6 +91,25 @@ defmodule Core.Es.StoreRaceTest do
     assert versions(id) == [1, 2]
   end
 
+  test "ложный отказ стража внутри Es.Transact.run_counted — запись со второй попытки" do
+    id = AggID.new()
+    %Task{pid: writer} = task = retrying(id)
+
+    # Первая попытка получила xid и ждёт: конкурент коммитит поверх неё.
+    assert_receive {:attempt, ^writer}, @timeout
+    rival = participant()
+    assert :ok = step(rival, fn -> append([event(id, 1)]) end)
+    assert :ok = commit(rival)
+    send(writer, :go)
+
+    # Вторая попытка идёт новой транзакцией — её xid уже старше коммита конкурента.
+    assert_receive {:attempt, ^writer}, @timeout
+    send(writer, :go)
+
+    assert Task.await(task, @timeout) == {:ok, 1}
+    assert versions(id) == [1, 2]
+  end
+
   # Участник держит свою транзакцию вне sandbox и исполняет присланные шаги по одному,
   # пока не получит `:commit`.
   defp participant do
@@ -109,6 +128,26 @@ defmodule Core.Es.StoreRaceTest do
 
       :commit ->
         :ok
+    end
+  end
+
+  # Пишущий вне sandbox через `Es.Transact.run_counted/2`: каждая попытка берёт xid, отмечается
+  # тесту и ждёт разрешения — иначе конкурент не успел бы закоммитить между попытками.
+  defp retrying(id) do
+    test = self()
+
+    Task.async(fn -> Sandbox.unboxed_run(TestRepo, fn -> counted_append(test, id) end) end)
+  end
+
+  defp counted_append(test, id),
+    do: Es.Transact.run_counted(fn -> guarded_append(test, id) end)
+
+  defp guarded_append(test, id) do
+    TestRepo.query!("SELECT pg_current_xact_id()")
+    send(test, {:attempt, self()})
+
+    receive do
+      :go -> append([event(id, 2)])
     end
   end
 

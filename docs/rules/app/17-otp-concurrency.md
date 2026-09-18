@@ -33,27 +33,22 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 детей в порядке:
 
 1. свой DLQ-writer (`14-events-outbox.md`, «Подписчики»);
-2. на каждый топик — `Core.Mq.Stream.Reader` и его `MqSubscriberReliable`;
-3. подписка (`MqSubscriberReliable.subscribe/3` по всем подписчикам) — последним ребёнком:
-   `subscribe/3` — вызов процесса подписчика, и в `init/1` супервизора, до старта детей, его
-   ещё нет.
+2. на каждый топик — `Core.Mq.Stream.Reader` и его `MqSubscriberReliable`.
 
-- Сбой подписки MUST завершать ребёнка аварийно: его перезапускает супервизор, а повторяющийся
-  сбой роняет поддерево, и его видно по `WorkerDown`. Сбой, записанный в лог с нормальным
-  выходом, оставляет читателя и подписчика живыми — алерт молчит, а сообщения не читаются.
-- `{:error, %Error{code: :already_subscribed}}` — успех: после рестарта ребёнка подписка уже
-  действует.
+Подписка при старте MUST задаваться опцией подписчика `subscribe: true` (данные подписки —
+`subscribe_data:`), а не процессом-bootstrap, который зовёт `subscribe/3` последним ребёнком:
+копии такого процесса расходятся по семантике отказа, и сбой, записанный в лог с нормальным
+выходом, оставляет читателя и подписчика живыми — `WorkerDown` молчит, а сообщения не читаются.
+Опция подписывает в `init/1` и в брокер не ходит: отказать ей нечем, а подписчик после рестарта
+снова подписан.
 
 ```elixir
-# плохо — сбой в лог и нормальный выход: процессы живы, WorkerDown молчит
-{:error, %Error{} = error} -> Logger.error("сбой подписки: #{Error.format_chain(error)}")
+# плохо — отдельный процесс зовёт subscribe/3, у каждой копии своя семантика отказа
+children = [dlq_writer, reader, subscriber, {MyApp.<BC>.Subscribe, subscribers: [subscriber]}]
 
-# хорошо — повтор подписки успешен, иной сбой — аварийный выход и рестарт
-case Core.PubSub.MqSubscriberReliable.subscribe(subscriber, nil, context) do
-  :ok -> :ok
-  {:error, %Error{code: :already_subscribed}} -> :ok
-  {:error, %Error{} = error} -> exit({:subscribe_failed, subscriber, error})
-end
+# хорошо — подписчик подписан сразу после init/1
+subscriber = {Core.PubSub.MqSubscriberReliable, Keyword.put(opts, :subscribe, true)}
+children = [dlq_writer, reader, subscriber]
 ```
 
 ## Отключаемые поддеревья

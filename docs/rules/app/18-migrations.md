@@ -107,9 +107,9 @@ MUST NOT в одной миграции: `rename` колонки, `remove` ко�
 
 ## Таблицы библиотеки
 
-DDL очереди (`outbox`) и event sourcing (`es_events`, `es_snapshots`, `es_checkpoints`) живёт в
-библиотеке — `Core.Outbox.Migration` и `Core.Es.Migration`; миграция приложения только
-делегирует:
+DDL очереди (`outbox`) и event sourcing (`es_events`, `es_snapshots`, `es_checkpoints`; резервы
+ключей `es_key_reservations`) живёт в библиотеке — `Core.Outbox.Migration`, `Core.Es.Migration` и
+`Core.Es.KeyReservation.Migration`; миграция приложения только делегирует:
 
 ```elixir
 defmodule MyApp.DAO.Migrations.CreateOutbox do

@@ -137,16 +137,28 @@ def start(_type, _args) do
   # опционально — только если приложение действительно поднимает адаптер:
   Core.Mq.Stream.ensure_available!()
   Core.Mq.Kafka.ensure_available!()
-  # обязательно, если поллеров несколько (конфиг `pollers`):
-  Core.Outbox.validate_partition!(
-    Application.get_env(:core, Core.Outbox, [])[:pollers] || []
+  # обязательно, если приложение ставит outbox в дерево:
+  outbox = Application.get_env(:core, Core.Outbox, [])
+
+  Core.Outbox.check_singleton!(
+    enabled?: Keyword.get(outbox, :enabled, false),
+    cluster_query: Application.get_env(:my_app, :dns_cluster_query),
+    allow_cluster?: Keyword.get(outbox, :allow_cluster, false)
   )
+
+  # обязательно, если поллеров несколько (конфиг `pollers`):
+  Core.Outbox.validate_partition!(outbox[:pollers] || [])
   ...
 end
 ```
 
 `validate!/0` проверяет, что обязательные ключи заданы, `dao` и `codec` загружаются
 и экспортируют нужные функции, а `tz` известен базе часовых поясов.
+
+`Core.Outbox.check_singleton!/1` отказывает в старте, если outbox включён при заданной
+кластеризации: каждая нода поднимет свой поллер, и порядок доставки нарушится.
+`allow_cluster?: true` разрешает старт ценой порядка и пишет `warning`. Значения передаёт
+приложение: ключ кластеризации — его, а не библиотеки.
 
 `Core.Outbox.validate_partition!/1` отказывает в старте, если фильтры топиков двух
 поллеров пересекаются: `FOR UPDATE SKIP LOCKED` защищает от дублей, но не от перестановки,
@@ -213,6 +225,19 @@ end
 
    Строку `es_checkpoints` проекции, убранной из кода, удаляет миграция потребителя вместе с её
    таблицами — `Core.Es.Migration.delete_checkpoint/1`; библиотека строк сама не удаляет.
+
+   Резервы изменяемых уникальных ключей event-sourced агрегатов `es_key_reservations`
+   (`key_reservations:` у `use Core.Es.Aggregate.Repo.Pg`) — отдельной миграцией, DDL живёт в
+   `Core.Es.KeyReservation.Migration`:
+
+   ```elixir
+   defmodule MyApp.Repo.Migrations.CreateEsKeyReservations do
+     use Ecto.Migration
+
+     defdelegate up, to: Core.Es.KeyReservation.Migration
+     defdelegate down, to: Core.Es.KeyReservation.Migration
+   end
+   ```
 
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
    `:failed` в очередь (runbook в `deps/core/docs/rules/app/14-events-outbox.md`). Задача поднимает
@@ -377,7 +402,7 @@ Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_
 
 | Метрика | Метки | Что это |
 |---|---|---|
-| `es_aggregate_load_total`, `es_aggregate_load_duration_milliseconds` | `type`, `op`, `result` | восстановление агрегата `get` / `get_many` / `refresh`; `result`: `ok` / `version_mismatch` |
+| `es_aggregate_load_total`, `es_aggregate_load_duration_milliseconds` | `type`, `op`, `result` | восстановление агрегата `get` / `get_decision` / `get_many` / `refresh`; `result`: `ok` / `version_mismatch` (у `get_decision` — сверка до решения) |
 | `es_aggregate_fold_events` | `type`, `snapshot` | длина свёрнутого хвоста потока; `snapshot`: `hit` / `miss` / `rejected` / `off` — по ней выбирается `every:` |
 | `es_snapshot_write_total`, `es_snapshot_write_duration_milliseconds` | `type`, `result` | запись снапшотов после commit; `result`: `ok` / `error` |
 | `es_snapshot_write_rows_total` | `type` | записанные строки снапшотов |
@@ -387,7 +412,7 @@ Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_
 | `es_projection_await_total`, `es_projection_await_duration_milliseconds` | `projection`, `result` | ожидание проекции; `result`: `ok` / `timeout` / `rebuilding` |
 | `es_aggregate_process_execute_total`, `es_aggregate_process_execute_duration_milliseconds` | `type`, `mode`, `result` | команды процесса агрегата, длительность — с очередью; `result`: `ok` / `version_mismatch` / `error` / `exit` |
 | `es_aggregate_process_execute_queue_milliseconds` | `type` | ожидание в очереди процесса на id (`mode="process"`) |
-| `es_aggregate_process_execute_retries_total` | `type` | повторы команды после конфликта версии |
+| `es_aggregate_process_execute_retries_total` | `type` | повторы команды после отказа записи |
 | `es_aggregate_process_start_total`, `es_aggregate_process_stop_total` | `type`; у `stop` — `reason` | старт процесса на id и уход: `idle` / `error` |
 | `es_projection_lag_seconds` | `projection` | отставание проекции |
 | `es_projection_rebuilding` | `projection` | 1 — пересборка: строки чекпоинта нет, её версия ниже `version:` или чекпоинт ниже цели |

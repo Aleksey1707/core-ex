@@ -1,19 +1,20 @@
 defmodule Core.Es.Aggregate.Process.Execution do
   @moduledoc """
   Исполнение команды процесса агрегата: транзакция «состояние → `Agg.execute/2` → `append` →
-  колбэк» и повтор после конфликта версии. Одно на оба режима `Core.Es.Aggregate.Process`: в
-  вызывающем процессе (`enabled: false`) состояние всегда читает `get`, в процессе на id
-  (`Core.Es.Aggregate.Process.Server`) после первого commit — `refresh` от закэшированного.
-  Исходы — `@moduledoc` `Core.Es.Aggregate.Process`, «Команда».
+  колбэк» и повтор после отказа записи. Транзакцию с повтором держит `Core.Es.Transact`, здесь —
+  тело попытки и дедлайн команды: он проверяется на обеих границах попытки — до чтения, чтобы
+  попытка после дедлайна не шла, и перед commit, чтобы записи после дедлайна не было. Одно на оба
+  режима `Core.Es.Aggregate.Process`: в вызывающем процессе (`enabled: false`) решение всегда идёт
+  через `get_decision`, в процессе на id (`Core.Es.Aggregate.Process.Server`) закэшированный
+  заведённый агрегат дочитывает `refresh`. Исходы — `@moduledoc` `Core.Es.Aggregate.Process`,
+  «Команда».
   """
 
-  alias Core.Config
-  alias Core.Error
-  alias Core.Helper.Transact
+  alias Core.Es
+  alias Core.Result
+  alias Core.Version
 
-  require Logger
-
-  @typedoc "Адрес агрегата в логах, предел повторов и дедлайн команды — мс монотонного времени."
+  @typedoc "Адрес агрегата в span, предел повторов и дедлайн команды — мс монотонного времени."
   @type target :: %{aggregate_id: String.t(), limit: pos_integer(), deadline: integer() | nil}
 
   @typedoc """
@@ -22,11 +23,18 @@ defmodule Core.Es.Aggregate.Process.Execution do
   """
   @type outcome :: {:ok, struct()} | {:error, term()} | :expired
 
+  @typedoc """
+  Результат команды для вызывающего: версия агрегата после commit — `nil`, если команда на пустом
+  потоке не дала событий, — или её ошибка.
+  """
+  @type result :: {:ok, Version.t() | nil} | {:error, term()}
+
   # ===== исполнение =====
 
   @doc """
-  Исполнить команду `call` от состояния `cached` (`nil` — прочитать `get`, иначе дочитать
-  `refresh`): исход и число повторов после конфликта версии. Дедлайн `nil` не проверяется.
+  Исполнить команду `call` от состояния `cached` (заведённый агрегат — дочитать `refresh`, `nil`
+  или незаведённый — решение через `get_decision`): исход и число повторов после отказа записи.
+  Дедлайн `nil` не проверяется.
   """
   @spec run(
           Core.Es.Aggregate.Process.cfg(),
@@ -35,50 +43,37 @@ defmodule Core.Es.Aggregate.Process.Execution do
           struct() | nil
         ) :: {outcome(), non_neg_integer()}
 
-  def run(cfg, call, target, cached) when is_struct(cached) or is_nil(cached),
-    do: attempt(cfg, call, target, cached, 0)
+  def run(cfg, call, target, cached) when is_struct(cached) or is_nil(cached) do
+    {result, retries} =
+      Es.Transact.run_counted(fn -> attempt(cfg, call, target, cached) end, retries: target.limit)
+
+    {outcome(result), retries}
+  end
 
   # ---
 
-  # Метки конфликта и дедлайна — с именем модуля: колбэк отдаёт свой `{:error, _}`, и голое
-  # `{:error, :expired}` из него неотличимо от служебного.
-  defp attempt(cfg, call, target, cached, retries) do
-    case transact(cfg, call, target.deadline, cached) do
-      {:error, {__MODULE__, :conflict, error}} ->
-        conflict(cfg, call, target, cached, retries, error)
-
-      {:error, {__MODULE__, :expired}} ->
-        {:expired, retries}
-
-      outcome ->
-        {outcome, retries}
+  defp attempt(cfg, call, target, cached) do
+    with :ok <- in_time(target.deadline),
+         {:ok, {events, executed}} <- decided(cfg, call, cached),
+         :ok <- cfg.repo.append(events, call.context),
+         :ok <- callback(call.fun, events),
+         :ok <- in_time(target.deadline) do
+      {:ok, executed}
     end
   end
 
-  defp transact(cfg, call, deadline, cached) do
-    Transact.run(Config.dao(), fn ->
-      loaded =
-        case cached do
-          nil -> cfg.repo.get(call.id, call.version, call.context)
-          state -> cfg.repo.refresh(state, call.version, call.context)
-        end
-
-      with {:ok, state} <- loaded,
-           {:ok, {events, executed}} <- cfg.aggregate.execute(state, call.command),
-           :ok <- tag_conflict(cfg.repo.append(events, call.context), call.version),
-           :ok <- callback(call.fun, events),
-           :ok <- in_time(deadline) do
-        {:ok, executed}
-      end
-    end)
+  # Незаведённый агрегат перечитывается `get_decision`: явная версия на пустом потоке сверяется
+  # после решения, а `refresh` отказал бы до него.
+  defp decided(cfg, call, %{version: %Version{}} = cached) do
+    cached
+    |> cfg.repo.refresh(call.version, call.context)
+    |> Result.and_then(&cfg.aggregate.execute(&1, call.command))
   end
 
-  # Конфликт `append` при `:current` снимается повтором; `%Version{}` мимо головы потока повтор
-  # не исправит.
-  defp tag_conflict({:error, %Error{code: :version_mismatch} = error}, :current),
-    do: {:error, {__MODULE__, :conflict, error}}
-
-  defp tag_conflict(result, _version), do: result
+  defp decided(cfg, call, _uncached_or_unborn) do
+    decide = &cfg.aggregate.execute(&1, call.command)
+    cfg.repo.get_decision(call.id, call.version, call.context, decide)
+  end
 
   defp callback(nil, _events), do: :ok
 
@@ -92,7 +87,8 @@ defmodule Core.Es.Aggregate.Process.Execution do
   end
 
   # Вызывающий по истечении дедлайна уже получил exit: команду, которую он не ждёт, commit не
-  # записывает.
+  # записывает, а попытка после дедлайна не идёт вовсе — `:expired` отказом хранилища не является,
+  # и цикл повтора обрывается на ней.
   defp in_time(nil), do: :ok
 
   defp in_time(deadline) do
@@ -101,29 +97,16 @@ defmodule Core.Es.Aggregate.Process.Execution do
       else: {:error, {__MODULE__, :expired}}
   end
 
-  defp conflict(cfg, call, target, cached, retries, _error) when retries < target.limit do
-    Logger.debug(
-      "процесс агрегата: повтор после конфликта версии: type=#{cfg.type} " <>
-        "aggregate_id=#{target.aggregate_id} retry=#{retries + 1}"
-    )
-
-    attempt(cfg, call, target, cached, retries + 1)
-  end
-
-  defp conflict(cfg, _call, target, _cached, retries, error) do
-    Logger.warning(
-      "процесс агрегата: повторы после конфликта версии исчерпаны: type=#{cfg.type} " <>
-        "aggregate_id=#{target.aggregate_id} retries=#{retries}"
-    )
-
-    {{:error, error}, retries}
-  end
+  # Метка дедлайна — с именем модуля: колбэк отдаёт свой `{:error, _}`, и голое
+  # `{:error, :expired}` из него неотличимо от служебного.
+  defp outcome({:error, {__MODULE__, :expired}}), do: :expired
+  defp outcome(result), do: result
 
   # ===== результат =====
 
-  @doc "Результат команды для вызывающего: `:ok` или её ошибка."
-  @spec result({:ok, struct()} | {:error, term()}) :: :ok | {:error, term()}
+  @doc "Результат команды для вызывающего: версия состояния после commit или её ошибка."
+  @spec result({:ok, struct()} | {:error, term()}) :: result()
 
-  def result({:ok, _state}), do: :ok
+  def result({:ok, %{version: version}}), do: {:ok, version}
   def result({:error, _reason} = error), do: error
 end

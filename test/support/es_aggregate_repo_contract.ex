@@ -39,6 +39,7 @@ defmodule Core.EsAggregateRepoContract do
       @repo_impl unquote(impl)
 
       unquote(get_tests())
+      unquote(get_decision_tests())
       unquote(get_many_tests())
       unquote(append_tests())
       unquote(refresh_tests())
@@ -64,7 +65,7 @@ defmodule Core.EsAggregateRepoContract do
           assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
                    @repo_impl.get(id, Version.new!(1), Context.new())
 
-          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: nil}
+          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: nil, source: :expected}
         end
 
         test "состояние свёрнуто из потока и сверено с головой" do
@@ -84,7 +85,7 @@ defmodule Core.EsAggregateRepoContract do
           assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
                    @repo_impl.get(id, Version.new!(1), Context.new())
 
-          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 2}
+          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 2, source: :expected}
         end
 
         test "неизвестный тег в потоке — исключение загрузки" do
@@ -104,6 +105,56 @@ defmodule Core.EsAggregateRepoContract do
           assert_raise ArgumentError, ~r/разрыв версий/, fn ->
             @repo_impl.get(id, :current, Context.new())
           end
+        end
+      end
+    end
+  end
+
+  defp get_decision_tests do
+    quote do
+      describe "контракт Es.Aggregate.Repo: get_decision" do
+        test "версия сошлась — решение над состоянием; пустой поток при :current — над незаведённым" do
+          [id, empty] = [Account.ID.new(), Account.ID.new()]
+          state = write!(@repo_impl, id, [open()])
+
+          assert {:ok, ^state} = @repo_impl.get_decision(id, Version.new!(1), Context.new(), &{:ok, &1})
+          assert {:ok, ^state} = @repo_impl.get_decision(id, :current, Context.new(), &{:ok, &1})
+
+          assert {:ok, %Account{id: ^empty, version: nil, status: nil}} =
+                   @repo_impl.get_decision(empty, :current, Context.new(), &{:ok, &1})
+        end
+
+        test "пустой поток при %Version{} — отказ решения как есть" do
+          id = Account.ID.new()
+
+          assert {:error, %Error{kind: :domain, code: :not_found}} =
+                   @repo_impl.get_decision(id, Version.new!(1), Context.new(), &Account.execute(&1, freeze()))
+        end
+
+        test "пустой поток при %Version{} — принятое решение, с событиями и без, — :version_mismatch с actual: nil" do
+          id = Account.ID.new()
+
+          for command <- [open(), check()] do
+            assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
+                     @repo_impl.get_decision(id, Version.new!(1), Context.new(), &Account.execute(&1, command))
+
+            assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: nil, source: :expected}
+          end
+        end
+
+        test "непустой поток мимо версии — :version_mismatch без решения" do
+          id = Account.ID.new()
+          write!(@repo_impl, id, [open(), rename("Отгрузка")])
+          test_pid = self()
+
+          assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
+                   @repo_impl.get_decision(id, Version.new!(1), Context.new(), fn state ->
+                     send(test_pid, {:decided, state})
+                     {:ok, state}
+                   end)
+
+          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 2, source: :expected}
+          refute_received {:decided, _state}
         end
       end
     end
@@ -146,8 +197,8 @@ defmodule Core.EsAggregateRepoContract do
                    @repo_impl.get_many(pairs, Context.new())
 
           assert error.detail == [
-                   %{aggregate_id: dump(first), expected: 2, actual: 1},
-                   %{aggregate_id: dump(third), expected: 3, actual: 1}
+                   %{aggregate_id: dump(first), expected: 2, actual: 1, source: :expected},
+                   %{aggregate_id: dump(third), expected: 3, actual: 1, source: :expected}
                  ]
         end
 
@@ -225,7 +276,7 @@ defmodule Core.EsAggregateRepoContract do
           assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
                    @repo_impl.append(frozen, Context.new())
 
-          assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 2}
+          assert error.detail == %{aggregate_id: dump(id), expected: 2, actual: 2, source: :storage}
           assert stream_tags(id) == ~w(account.opened account.renamed)
           assert outbox_names(id) == ~w(account.opened account.renamed)
         end
@@ -238,7 +289,7 @@ defmodule Core.EsAggregateRepoContract do
           assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
                    @repo_impl.append(frozen, Context.new())
 
-          assert error.detail == %{aggregate_id: dump(id), expected: 4, actual: 1}
+          assert error.detail == %{aggregate_id: dump(id), expected: 4, actual: 1, source: :storage}
           assert stream_tags(id) == ~w(account.opened)
         end
 
@@ -256,7 +307,7 @@ defmodule Core.EsAggregateRepoContract do
           assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
                    @repo_impl.append(first_renamed ++ second_renamed, Context.new())
 
-          assert error.detail == %{aggregate_id: dump(second), expected: 2, actual: 2}
+          assert error.detail == %{aggregate_id: dump(second), expected: 2, actual: 2, source: :storage}
           assert stream_tags(first) == ~w(account.opened)
           assert outbox_names(first) == ~w(account.opened)
         end
@@ -292,7 +343,7 @@ defmodule Core.EsAggregateRepoContract do
           assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
                    @repo_impl.refresh(opened, Version.new!(1), Context.new())
 
-          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 2}
+          assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: 2, source: :expected}
         end
 
         test "состояние без версии — весь поток" do
@@ -361,6 +412,11 @@ defmodule Core.EsAggregateRepoContract do
   @spec close() :: Cmd.Close.t()
 
   def close, do: %Cmd.Close{by: by(), at: at()}
+
+  @doc "Команда «сверить счёт»: решение без событий."
+  @spec check() :: Cmd.Check.t()
+
+  def check, do: %Cmd.Check{by: by(), at: at()}
 
   # ---
 

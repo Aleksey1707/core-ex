@@ -3,8 +3,8 @@
 - **Область.** `lib/core/repo/**`, `lib/core/es/**`; у потребителя — `<aggregate>/repo*`,
   `read_repo*`, `view.ex`, Ecto-схемы и Specs.
 - **Читать перед.** Новым репозиторием, Ecto-схемой или View; правкой `use Repo.Pg` /
-  `Repo.Pg.StateStored` / `Es.Aggregate.Repo.Pg`, `constraint_errors`, `default_filters`;
-  разделением read- и write-пути.
+  `Repo.Pg.StateStored` / `Es.Aggregate.Repo.Pg`, `constraint_errors`, `default_filters`,
+  `key_reservations:`; разделением read- и write-пути.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Слои и пути
@@ -491,8 +491,9 @@ use Repo.Pg.StateStored,
 Непрерывность потока при записи не проверяется: поток state-stored агрегата MAY начинаться не с 1
 (агрегат создан без события) и иметь разрывы — мутация без события, но только без эталона
 (`shadow_copy?: false` или агрегат в этом контексте не читался). Отказ `append` —
-`errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`, транзакция
-откатывается целиком («Хранилище событий»).
+`errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual, source: :storage})`,
+транзакция откатывается целиком («Хранилище событий»). Сверка версии строки у `get` / `update` —
+тот же код с detail `%{id, expected, actual, source: :expected}`: повтора она не даёт.
 
 Стратегия записи детей (`Core.Repo.Pg.Children`):
 
@@ -564,31 +565,47 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
 | Функция | Возврат | Исходы |
 |---|---|---|
 | `get(id, version, context)` | `{:ok, state} \| {:error, Error.t()}` | пустой поток при `:current` — `%Agg{id: id, version: nil}`; `%Version{}` мимо головы потока — `:version_mismatch`, у пустого `actual: nil` |
+| `get_decision(id, version, context, fun)` | `{:ok, decision} \| {:error, reason \| Error.t()}` | версия сошлась или `:current` — `fun.(state)`, у пустого потока при `:current` — от незаведённого агрегата; пустой поток при `%Version{}` — `fun.(незаведённый)`: `{:error, _}` как есть, `{:ok, _}` — `:version_mismatch` с `actual: nil`; непустой поток мимо версии — `:version_mismatch`, `fun` не вызывается |
 | `get_many(pairs, context)` | `{:ok, [state]} \| {:error, Error.t()}` | один запрос, состояния в порядке пар; все расхождения — одна `:version_mismatch`; повтор id — `ArgumentError` |
-| `append(events, context)` | `:ok \| {:error, Error.t()}` | `[]` — без запросов; пачка потоков одного типа атомарна; событие не из `tags:` кодека — `FunctionClauseError` |
+| `append(events, context)` | `:ok \| {:error, Error.t()}` | `[]` — без запросов; пачка потоков одного типа атомарна; ключ, занятый другим агрегатом, — `code:` модуля ключа («Резервы ключей»); событие не из `tags:` кодека — `FunctionClauseError` |
 | `refresh(state, version, context)` | `{:ok, state} \| {:error, Error.t()}` | хвост потока после `state.version` → `fold/2` → сверка `version` |
 | `page_stream(id, limit, offset, context)` | `{:ok, Pagination.Result.t(Es.Event)} \| {:error, Error.t()}` | «Страница потока» |
 
-- `get` / `get_many` / `refresh` / `page_stream` — читающие, `append` — изменяющая: изменяющий
-  usecase держит
-  `get` → `Agg.execute/2` → `append` в теле одной функции под одним `Transact.run`
-  (`20-agreements.md`, «Load/save агрегата — в одной функции»).
-- `:not_found` репозиторий не отдаёт: существование агрегата решает `decide` по `version: nil`.
+- `get` / `get_decision` / `get_many` / `refresh` / `page_stream` — читающие, `append` —
+  изменяющая: изменяющий usecase держит `get_decision` (`get`) → `Agg.execute/2` → `append` в
+  теле одной функции под одним `Transact.run` (`20-agreements.md`, «Load/save агрегата — в одной
+  функции»).
+- `:not_found` репозиторий не отдаёт: существование агрегата решает `decide` по `version: nil`,
+  и при явной `%Version{}` на пустом потоке тоже — `get_decision` прогоняет решение на
+  незаведённом агрегате (ADR-0016).
+- Команда с явной `%Version{}` SHOULD идти через `get_decision` или `Agg.Process.execute`: `get`
+  отказывает на пустом потоке `:version_mismatch` до решения домена (ADR-0016).
+- Свёртка `:version_mismatch` с `actual: nil` в незаведённый агрегат в коде потребителя MUST NOT:
+  на создающей команде она молча пропускает `If-Match` (ADR-0016).
+- `fun` у `get_decision` MUST NOT писать: функция читающая, а решение, принятое на пустом потоке
+  при `%Version{}`, отбрасывается уже после чтений `fun` (ADR-0016).
+- `get_many` — исключение: явную версию сверяет до решения, пустой поток при `%Version{}` —
+  `:version_mismatch`; команда на несколько агрегатов не даёт отдельного решения на каждый
+  (ADR-0016).
 - Следующая команда той же функции MAY идти от состояния из `Agg.execute/2` без повторного `get`:
   оно уже учитывает записываемые события.
 - `append` сам открывает `Transact.run(dao)`: `<Aggregate>.Outbox.from_events` →
-  `Core.Es.Store.append` с непрерывностью потока → `Outbox.Repo.append`. Отказ —
-  `errors.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual})`; у `get` /
-  `refresh` detail той же формы, у `get_many` — их список в порядке пар. Реакция одна — повтор
-  usecase.
-- Нечитаемый поток (неизвестный тег, разрыв версий, чужой `aggregate_id`) у `get` / `get_many` /
-  `refresh` — исключение, а не `{:error, _}`; `page_stream` отдаёт ошибку загрузки `{:error, _}`
-  на всю страницу («Страница потока»).
+  `Core.Es.Store.append` с непрерывностью потока → резервы ключей («Резервы ключей») →
+  `Outbox.Repo.append`. Отказ записи событий —
+  `errors.domain(behaviour, :version_mismatch, detail)` с detail
+  `%{aggregate_id, expected, actual, source: :storage}`; у `get` / `get_decision` / `refresh`
+  detail той же формы с `source: :expected`, у `get_many` — их список в порядке пар. Реакцию
+  задаёт `source:`: отказ хранилища MUST повторяться («Транзакция команды (`Core.Es.Transact`)»),
+  сверка ожидаемой версии — MUST NOT.
+- Нечитаемый поток (неизвестный тег, разрыв версий, чужой `aggregate_id`) у `get` /
+  `get_decision` / `get_many` / `refresh` — исключение, а не `{:error, _}`; `page_stream` отдаёт
+  ошибку загрузки `{:error, _}` на всю страницу («Страница потока»).
 - Форму результата вызывающему знает компилятор: головы — `%Agg.ID{}` / `%Agg{}`, `get` /
-  `refresh` сужены до `{:ok, %Agg{}}`, `get_many` — до `{:ok, list}`, `append` — до `:ok`,
-  `page_stream` — до `{:ok, %Pagination.Result{}}`. Чужой ID, опечатка в поле прочитанного
-  состояния или страницы и невозможная clause — предупреждение при сборке; элементы списков
-  `get_many`, `append` и страницы компилятор не сверяет. Переопределение функции
+  `refresh` сужены до `{:ok, %Agg{}}`, `get_decision` — до `{:ok, _} | {:error, _}`, `get_many` —
+  до `{:ok, list}`, `append` — до `:ok`, `page_stream` — до `{:ok, %Pagination.Result{}}`. Чужой
+  ID, опечатка в поле прочитанного состояния или страницы и невозможная clause — предупреждение
+  при сборке; элементы списков `get_many`, `append` и страницы, состояние в `fun` и решение
+  `get_decision` компилятор не сверяет. Переопределение функции
   (`defoverridable`) MUST сохранять закрытую голову и сужение (`20-agreements.md`, «Генерируемые
   функции»).
 
@@ -608,11 +625,34 @@ defmodule MyApp.Domain.<BC>.<Actor>.Account.Repo.Pg do
 end
 
 # хорошо — один common-репозиторий; роль проверяет usecase, владение — decide по by команды
-Transact.run(DAO, fn ->
-  with {:ok, account} <- @repo.get(id, version, context),
-       {:ok, {events, _account}} <- Account.execute(account, command) do
-    @repo.append(events, context)
-  end
+Es.Transact.run(fn ->
+  with {:ok, {events, _account}} <-
+         @repo.get_decision(id, version, context, &Account.execute(&1, command)),
+       do: @repo.append(events, context)
+end)
+```
+
+```elixir
+# плохо — свёртка отказа предусловия: создающая команда с If-Match проходит на пустом потоке
+with {:ok, account} <- blank(@repo.get(id, version, context), id),
+     {:ok, {events, _account}} <- Account.execute(account, command),
+     do: @repo.append(events, context)
+
+defp blank({:error, %Error{code: :version_mismatch, detail: %{actual: nil}}}, id),
+  do: {:ok, %Account{id: id}}
+
+# плохо — запись в fun: решение, отброшенное :version_mismatch, уже оставило свою запись
+@repo.get_decision(id, version, context, fn account ->
+  with {:ok, {events, _account}} <- Account.execute(account, command),
+       :ok <- @repo.append(events, context),
+       do: {:ok, events}
+end)
+
+# хорошо — решение на незаведённом агрегате: отказ — ошибка decide, принятие — :version_mismatch
+Es.Transact.run(fn ->
+  with {:ok, {events, _account}} <-
+         @repo.get_decision(id, version, context, &Account.execute(&1, command)),
+       do: @repo.append(events, context)
 end)
 ```
 
@@ -634,7 +674,8 @@ use Core.Es.Aggregate.Repo.Pg,
 
 - Снапшот — кэш свёртки в `es_snapshots`, а не источник истины: удаление строк корректность не
   меняет, версию проверяет `append`. Инструмента очистки нет — подъём `version:` или `DELETE`.
-- `get` / `get_many` / `refresh` читают снапшот и хвост потока после него тем же одним запросом.
+- `get` / `get_decision` / `get_many` / `refresh` читают снапшот и хвост потока после него тем
+  же одним запросом.
   Свернули у потока не меньше `every` событий — upsert после commit, вне транзакции — сразу;
   `append` снапшоты не пишет. Эта запись — наполнение кэша, наблюдаемого результата она не
   меняет: `get` остаётся читающей (`20-agreements.md`, «Разделение изменения и чтения»).
@@ -659,13 +700,134 @@ snapshot: [every: 100, version: 2]
 Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo.Pg` — `snapshot:` без `every:`, с
 неизвестной опцией, `every:` не целое больше нуля или `version:` не целое.
 
+### Резервы ключей
+
+Изменяемый уникальный ключ event-sourced агрегата (логин, название) держит резерв ключа: модуль
+ключа `use Core.Es.KeyReservation` и опция `key_reservations:` репозитория. Раскладка модуля ключа
+и нормы его содержимого — `deps/core/docs/rules/app/13-repos.md`, «Уникальность без индекса
+состояния»; решение — ADR-0018.
+
+```elixir
+defmodule MyApp.Domain.<BC>.Common.User.LoginKey do
+  alias MyApp.Domain.<BC>.Common.User
+  alias MyApp.Domain.<BC>.Common.User.Event
+
+  use Core.Es.KeyReservation,
+    scope: "user.login",
+    event: User.Event,
+    id: User.ID,
+    code: :login_taken
+
+  @impl true
+  def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.login}
+  def reservation(%Event.LoginChanged{payload: payload}), do: {:reserve, payload.login}
+  def reservation(%Event.Blocked{}), do: :keep
+  def reservation(%Event.Deleted{}), do: :release
+
+  @impl true
+  def to_key(%User.Login{} = login), do: User.Login.value(login)
+end
+
+use Core.Es.Aggregate.Repo.Pg,
+  behaviour: MyApp.Domain.<BC>.Common.User.Repo,
+  aggregate: User,
+  id: User.ID,
+  errors: User.Errors,
+  outbox: User.Outbox,
+  key_reservations: [User.LoginKey]
+```
+
+- `append` пишет события → резервы → outbox одной транзакцией: конкурентная команда того же потока
+  получает `:version_mismatch`, до резервов не доходя.
+- На каждое событие пачки в её порядке: `{:reserve, value}` занимает `to_key(value)` за агрегатом
+  события и снимает его прежний ключ в области, ключ, уже занятый этим агрегатом, — успех;
+  `:release` снимает ключ агрегата; `:keep` — без запросов. У агрегата в области один ключ.
+- Пачка, где ключ освобождает один агрегат, а занимает другой, MUST идти освобождением вперёд, а
+  прямой обмен ключами двух агрегатов MUST разводиться парковкой на третий ключ или разными
+  пачками. Что видит шаг — moduledoc `Core.Es.KeyReservation`, «Порядок в пачке».
+- Владелец резерва — `aggregate_id` без типа агрегата: в общей области агрегаты разных видов
+  сталкиваются по ключу, а с общим идентификатором из ключа — делят один резерв.
+- Ключ другого агрегата — `errors.domain(behaviour, code, %{scope: scope})` с `code:` модуля ключа,
+  `append` откатывается. Это доменный отказ, а не конфликт: повтор команды его не снимает.
+- Отказ вставки резерва, который не снял внутренний повтор, — `%Error{kind: :app}` (`ns: :es`,
+  `code: :reservation_unresolved`): аномалия состязания, а не занятый ключ. Отдавать её клиенту
+  как «ключ занят» MUST NOT — маппер уводит прикладную ошибку в 500 с логом (`12-errors.md`).
+  Разбор отказа и почему повтор один — moduledoc `Core.Es.KeyReservation`, «Разбор отказа
+  вставки».
+- Поиск агрегата по ключу («найти или создать») MUST идти через `find(value, context)` модуля
+  ключа → `Agg.ID.t() | nil`, а не через read-модель: её пишет проекция асинхронно.
+- Таблица — `es_key_reservations`, DDL — `Core.Es.KeyReservation.Migration`.
+
+```elixir
+# плохо — «найти или создать» по read-модели: логин, записанный секунду назад, не найдётся
+case @read_repo.get_by_login(login, context) do
+  {:ok, user} -> {:ok, user.id}
+  {:error, %Error{code: :not_found}} -> create(login, context)
+end
+
+# хорошо — резерв пишется в транзакции команды, find видит его сразу после commit
+case User.LoginKey.find(login, context) do
+  %User.ID{} = id -> {:ok, id}
+  nil -> create(login, context)
+end
+```
+
+Проверяется: `CompileError` в `use Core.Es.KeyReservation` — опции, `code: :version_mismatch`; в
+`use Core.Es.Aggregate.Repo.Pg` — событие модуля ключа не из семейства кодека, его `id:` не равен
+`id:` репозитория, в `errors:` нет clause `code:`, область повторяется; предупреждение на строке
+`use` репозитория — событие кодека без clause `reservation/1`, опечатка в поле несуженной нагрузки
+(`make consumer-check`); порядок шагов пачки — `test/core/es/key_reservation_test.exs`, describe
+«резерв».
+
+### Транзакция команды (`Core.Es.Transact`)
+
+Команда event-sourced агрегата, написанная телом usecase, MUST идти через
+`Core.Es.Transact.run/2`, а не через `Core.Helper.Transact.run/3`: отказ хранилища снимается
+только повтором, и обёртка повтора в приложении MUST NOT — она уже есть здесь. Команда
+state-stored агрегата MAY идти тем же путём (`14-events-outbox.md`). Опции, исходы и
+классификация — moduledoc `Core.Es.Transact`, обоснование —
+`docs/adr/0019-retry-by-write-refusal-source.md`.
+
+- Повторяется отказ хранилища — `:version_mismatch` с `source: :storage` в detail — при **любой**
+  ожидаемой версии: чтение по этой версии прошло, значит вызывающий видел актуальное состояние, а
+  голова потока бывает ровно там, где он её видел
+  (`docs/adr/0008-shared-event-table-xid8-position.md`, «Цена»). Настоящий конфликт отдаст 412
+  от сверки одной транзакцией позже.
+- Сверка ожидаемой версии — `source: :expected` — MUST NOT повторяться: клиент видел устаревшее
+  состояние. Ожидаемая версия в решении о повторе не участвует: сверка при `:current` невозможна,
+  значит любая сверка — уже явная версия.
+- Колбэк и всё тело MUST быть идемпотентными: повтор зовёт их заново, включая сопутствующие
+  записи.
+- Классификация по detail, а не по месту вызова: отказ соседнего потока в теле команды
+  повторяется так же, как отказ своего.
+- `run_counted/2` MAY брать вызывающий, который шлёт своё telemetry-измерение `retries`.
+
+```elixir
+# плохо — повтор по ожидаемой версии: отказ соседнего потока отдаст клиенту 412
+Transact.run(DAO, fn ->
+  with {:ok, {events, _account}} <- @repo.get_decision(id, version, context, decide),
+       :ok <- @repo.append(events, context),
+       do: Notifications.enqueue(events, context)
+end)
+
+# хорошо — повтор по источнику отказа
+Es.Transact.run(fn ->
+  with {:ok, {events, _account}} <- @repo.get_decision(id, version, context, decide),
+       :ok <- @repo.append(events, context),
+       do: Notifications.enqueue(events, context)
+end)
+```
+
+Проверяется: `test/core/es/transact_test.exs`; ложный отказ стража на живых соперниках —
+`test/core/es/store_race_test.exs`.
+
 ### Процесс агрегата
 
 Команду одного event-sourced агрегата MAY исполнять `Agg.Process.execute` вместо тела usecase
-`get` → `Agg.execute/2` → `append`. Модуль `use Core.Es.Aggregate.Process, repo: Agg.Repo` лежит
-рядом с репозиторием (`common/<aggregate>/process.ex`), реализация `repo:` резолвится по конвенции
-(«DI»), элемент `{Agg.Process, enabled: …}` ставит дерево потребителя. Опции, исходы и
-наблюдаемость — moduledoc `Core.Es.Aggregate.Process`.
+`get_decision` → `Agg.execute/2` → `append`. Модуль `use Core.Es.Aggregate.Process, repo:
+Agg.Repo` лежит рядом с репозиторием (`common/<aggregate>/process.ex`), реализация `repo:`
+резолвится по конвенции («DI»), элемент `{Agg.Process, enabled: …}` ставит дерево потребителя.
+Опции, исходы и наблюдаемость — moduledoc `Core.Es.Aggregate.Process`.
 
 ```elixir
 defmodule MyApp.Domain.<BC>.Common.Account.Process do
@@ -679,17 +841,28 @@ Account.Process.execute(id, version, command, context, fn events ->
 end)
 ```
 
-- `execute` — изменяющая, `:ok | {:error, Error.t()}`: `get(id, version, context)` →
-  `Agg.execute/2` → `append` → `fun.(events)` одной транзакцией `Core.Config.dao/0`; процесс на id
-  (`enabled: true`) после первой команды вместо `get` дочитывает хвост `refresh(state, version,
-  context)` от состояния последнего commit. При `enabled: false` команда идёт тем же путём в
-  вызывающем процессе, без процесса на id.
+- `execute` — изменяющая, `{:ok, Version.t() | nil} | {:error, Error.t()}`:
+  `get_decision(id, version, context, &Agg.execute(&1, command))` → `append` → `fun.(events)`
+  одной транзакцией `Core.Config.dao/0`; процесс на id (`enabled: true`), закэшировав заведённый
+  агрегат, вместо `get_decision` дочитывает хвост `refresh(state, version, context)` от
+  состояния последнего commit. При `enabled: false` команда
+  идёт тем же путём в вызывающем процессе, без процесса на id.
+- Успех — версия агрегата после commit, в том числе после повторов: результат собственного
+  выполнения команды (`20-agreements.md`, «Разделение изменения и чтения (CQS)»), по ней граница
+  отвечает 202 и клиент шлёт следующий `If-Match` (`deps/core/docs/rules/app/15-web-api.md`,
+  «Ожидание проекции»). Команда без событий версию не меняет, на пустом потоке — `{:ok, nil}`.
+  Состояние агрегата наружу не уходит.
 - Колбэк `fun.(events)` → `:ok | {:error, _}` — сопутствующие записи (Oban, `DAO`) в транзакции
   команды, под ограничениями `Transact.run` (`20-agreements.md`, «Разделение изменения и
   чтения»): отказ колбэка откатывает и события, при повторе колбэк зовётся заново.
-- `:version_mismatch` из `append` при `:current` повторяется новой транзакцией до `retries:`;
-  `%Version{}` мимо головы потока — `:version_mismatch` без повтора: клиент видел устаревшее
-  состояние, и повтор его не исправит.
+- Отказ хранилища (`source: :storage`) повторяется новой транзакцией до `retries:` при любой
+  ожидаемой версии, в том числе пришедший из колбэка, — `execute` идёт через `Core.Es.Transact`
+  («Транзакция команды»). Сверка ожидаемой версии (`source: :expected`) — `:version_mismatch` без
+  повтора: клиент видел устаревшее состояние, и повтор его не исправит. Пустой поток при
+  `%Version{}` — по правилу `get_decision` («Write event-sourced агрегата»): ошибка `decide` или
+  `:version_mismatch` с `actual: nil`, тоже без повтора.
+- Резервы ключей `key_reservations:` пишет `append` репозитория и на этом пути; ставить резерв в
+  колбэке MUST NOT («Резервы ключей»).
 - Внутри `Transact.run` MUST NOT вызываться: транзакцию открывает сам `execute`, и откат его
   попытки отменил бы внешнюю (`ArgumentError`; `20-agreements.md`, «Разделение изменения и
   чтения (CQS)»).
@@ -700,12 +873,12 @@ end)
 ```elixir
 # плохо — две команды процессов в транзакции usecase: ArgumentError, а атомарности нет и так
 Transact.run(DAO, fn ->
-  with :ok <- Account.Process.execute(from, :current, withdraw, context),
+  with {:ok, _version} <- Account.Process.execute(from, :current, withdraw, context),
        do: Account.Process.execute(to, :current, deposit, context)
 end)
 
 # хорошо — команда на два агрегата: usecase → repo одной транзакцией
-Transact.run(DAO, fn ->
+Es.Transact.run(fn ->
   pairs = [{from, :current}, {to, :current}]
 
   with {:ok, [source, target]} <- @repo.get_many(pairs, context),
@@ -739,9 +912,10 @@ event-sourced и state-stored агрегатов. Поток — тип агре
   (`use Core.Repo.Pg.StateStored`, `use Core.Es.Aggregate.Repo.Pg`) и тестов самого
   `Core.Es.Store`; MAY — тестовые дублёры в `test/support`. Usecase читает поток только через
   `page_stream/4` репозитория агрегата («Страница потока»).
-- Любой отказ — `{:error, mismatch.(detail)}` с detail `%{aggregate_id, expected, actual}`: ns и
-  код ошибки задаёт вызывающий write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`),
-  а не хранилище.
+- Любой отказ — `{:error, mismatch.(detail)}` с detail
+  `%{aggregate_id, expected, actual, source: :storage}`: ns и код ошибки задаёт вызывающий
+  write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`), а не хранилище. `source:`
+  ставится здесь и только здесь — это единственная точка `:storage` в библиотеке.
 - Отказ не переводит транзакцию в aborted, но события, прошедшие проверки, к нему уже записаны:
   write-builder MUST возвращать `{:error, _}` от `append` из `Transact.run`, откатывая транзакцию.
 - Версии потока в пачке не по возрастанию (с `continuous?: true` — не подряд) и событие не из
@@ -822,7 +996,8 @@ Core.Es.Store.read_stream(Agg.Event.Codec, other_id, limit, offset, context)
 
 Имена схем и таблиц, ключи и soft delete — `deps/core/docs/rules/app/13-repos.md`,
 «Наименование»; таблицы библиотеки — `es_events` и `es_snapshots` («Хранилище событий»,
-«Снапшоты»), колонки задаёт `Core.Es.Migration`.
+«Снапшоты»), колонки задаёт `Core.Es.Migration`; `es_key_reservations` («Резервы ключей») —
+`Core.Es.KeyReservation.Migration`.
 
 ## DI
 

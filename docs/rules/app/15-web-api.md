@@ -63,7 +63,21 @@ lib/my_app_web/{error_mapper,fallback_controller}.ex
 - `%Context{}` берётся из `conn.assigns`.
 - Параметры → доменные Prim через `Core.Web.Params` и `Result.and_then/2`; разбор тела в
   `attrs` — отдельным модулем, а не россыпью в экшене.
-- Optimistic lock: заголовок `If-Match` → `Version` через `Core.Web.Params.version/2`.
+- Optimistic lock: заголовок `If-Match` → `Version` через `Core.Web.Params`, форма разбора — по
+  экшену:
+  - команда MUST — `explicit_version/2` (`*` отвергается 400 `:current_not_allowed`), кроме
+    случая ниже;
+  - `*` на команде MAY — `expected_version/2`, если исход команды не зависит от состояния,
+    которое видел клиент (выдача роли, увеличение счётчика);
+  - команда без `If-Match` MUST NOT: забытый заголовок молча затирает конкурентные изменения,
+    а `*` — видимое намерение;
+  - чтение по версии MUST — `optional_version/2`: нет заголовка → `:current`;
+  - параметр `If-Match` в `operation/2` SHOULD описываться той же формой, что и разбор:
+    `required` и тип — целое либо «целое | `*`».
+
+  `If-Match` над незаведённым event-sourced агрегатом — ошибка домена, если команда отклонена,
+  и отказ предусловия, если принята (`deps/core/docs/rules/13-repos.md`, «Write event-sourced
+  агрегата»).
 - Тело, где «ключ не передан» отличается от «передан `null`», разбирается функцией с явной
   семантикой (`{:ok, value} | :skip`), а не `Map.get/2`.
 - Каждый экшен описывается `operation/2`; `@spec` у экшенов не требуется — контракт задаёт
@@ -81,15 +95,31 @@ def create(conn, _params) do
 end
 ```
 
+```elixir
+# плохо — забытый If-Match на команде становится :current и затирает конкурентную запись
+with {:ok, version} <- Params.optional_version(params),
+     {:ok, written} <- Usecases.Agg.take(id, version, context),
+     do: respond_taken(conn, id, written)
+
+# хорошо — команда требует явную версию
+with {:ok, version} <- Params.explicit_version(params),
+     {:ok, written} <- Usecases.Agg.take(id, version, context),
+     do: respond_taken(conn, id, written)
+
+# хорошо — чтение по версии: нет заголовка → :current
+with {:ok, version} <- Params.optional_version(params),
+     {:ok, view} <- Usecases.Agg.get(id, version, context),
+     do: json(conn, Response.success(OutCodec.dump(view)))
+```
+
 ## Ожидание проекции
 
 Команда event-sourced агрегата отвечает представлением из read-модели, но его пишет проекция.
 После успешного usecase экшен MUST дождаться её — **вне** транзакции, по потоку агрегата
 (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
 
-- Usecase команды отдаёт версию после записи, у заведения — пару `{id, version}`; путь через
-  `<Aggregate>.Process.execute` версии не отдаёт (`10-architecture.md`, «Usecases»). Ждать
-  проекцию и читать представление — дело экшена.
+- Usecase команды отдаёт версию после записи, у заведения — пару `{id, version}`
+  (`10-architecture.md`, «Usecases»). Ждать проекцию и читать представление — дело экшена.
 - `:projection_timeout` и `:projection_rebuilding` — ответ 202 с `{id, version}`, а не ошибка:
   запись применена, повтор команды по ним запрещает свод библиотеки.
 - Операция такой команды MUST объявлять ответ `accepted:` со своей схемой.
@@ -101,6 +131,8 @@ end
   `events:`. Хелпер, который зовёт
   `projection.await(agg, id, timeout)` сам, MUST NOT: через модуль-переменную сборка не
   проверяет ни агрегат, ни ID.
+- Ветку 202 MUST проверять один тест на приложение, через
+  `Core.Es.Projection.Test.with_rebuilding/2` (`19-testing.md`, «Event sourcing»).
 
 ```elixir
 # плохо — чтение сразу после команды: проекция ещё не обработала запись

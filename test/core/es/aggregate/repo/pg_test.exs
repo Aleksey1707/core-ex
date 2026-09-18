@@ -61,6 +61,24 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
                        %{op: :get, result: :version_mismatch}}
     end
 
+    test "get_decision — load до решения: пустой поток при %Version{} — result: :ok" do
+      [id, stale] = [Account.ID.new(), Account.ID.new()]
+      write!(@repo, stale, [open(), freeze()])
+      attach_telemetry()
+
+      assert {:error, %Error{code: :version_mismatch}} =
+               @repo.get_decision(id, Core.Version.new!(1), Context.new(), &Account.execute(&1, open()))
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 1, events: 0},
+                       %{op: :get_decision, result: :ok}}
+
+      assert {:error, %Error{code: :version_mismatch}} =
+               @repo.get_decision(stale, Core.Version.new!(1), Context.new(), &{:ok, &1})
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 1, events: 2},
+                       %{op: :get_decision, result: :version_mismatch}}
+    end
+
     test "get_many — один load на вызов, fold на каждый поток" do
       [first, second] = [Account.ID.new(), Account.ID.new()]
       write!(@repo, first, [open()])
@@ -171,7 +189,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     end
 
     test "behaviour объявляет колбэки Es.Aggregate.Repo" do
-      message = ~r/должен объявлять \[get_many: 3, append: 3, refresh: 4, page_stream: 4\]/
+      message = ~r/должен объявлять \[get_decision: 5, get_many: 3, append: 3, refresh: 4, page_stream: 4\]/
 
       assert_raise CompileError, message, fn ->
         compile!(StateStoredBehaviour, behaviour: Core.StateStoredFixture.Repo)
