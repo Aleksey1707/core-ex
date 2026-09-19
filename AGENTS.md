@@ -137,3 +137,8 @@ Codec-фикстуры и Prim-фикстуры — в `test/support`, табл�
 ### Domain docs
 
 Single-context: `CONTEXT.md` и `docs/adr/` в корне. См. `docs/agents/domain.md`.
+
+### Release check
+
+Проверка незапушенных изменений на приложении-потребителе (`path:`-зависимость, симлинк
+`deps/core`, PLT dialyzer). См. `docs/agents/release-check.md`.
