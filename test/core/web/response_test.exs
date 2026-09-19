@@ -31,8 +31,20 @@ defmodule Core.Web.ResponseTest do
     assert Response.success(%{id: "1"}) == %{code: 0, messages: [], data: %{id: "1"}}
   end
 
+  test "success с сообщениями" do
+    assert Response.success(%{id: "1"}, ["частично"]) ==
+             %{code: 0, messages: ["частично"], data: %{id: "1"}}
+
+    assert Response.success(%{id: "1"}, []) == %{code: 0, messages: [], data: %{id: "1"}}
+  end
+
   test "error кладёт текст в messages" do
     assert Response.error(:domain_error, "нельзя") == %{code: 2, messages: ["нельзя"]}
+  end
+
+  test "error с данными" do
+    assert Response.error(:domain_error, "нельзя", %{field: "name"}) ==
+             %{code: 2, messages: ["нельзя"], data: %{field: "name"}}
   end
 
   describe "свой словарь кодов" do
@@ -66,6 +78,12 @@ defmodule Core.Web.ResponseTest do
       assert CustomResponse.error(:domain_error, "нельзя") == %{code: 2, messages: ["нельзя"]}
       assert CustomResponse.success(%{id: "1"}) == %{code: 0, messages: [], data: %{id: "1"}}
       assert CustomResponse.success() == %{code: 0, messages: []}
+
+      assert CustomResponse.success(%{id: "1"}, ["частично"]) ==
+               %{code: 0, messages: ["частично"], data: %{id: "1"}}
+
+      assert CustomResponse.error(:not_found, "нет", %{id: "1"}) ==
+               %{code: 10, messages: ["нет"], data: %{id: "1"}}
     end
 
     test "код вне словаря — FunctionClauseError" do
