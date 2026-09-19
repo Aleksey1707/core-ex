@@ -57,6 +57,12 @@ defmodule Core.Web.Response do
 
       def success(data), do: Core.Web.Response.__success__(@response_codes, data)
 
+      @doc "Успешный ответ с данными и сообщениями."
+      @spec success(term(), [String.t()]) :: map()
+
+      def success(data, messages),
+        do: Core.Web.Response.__success__(@response_codes, data, messages)
+
       @doc """
       Ответ с ошибкой.
 
@@ -66,6 +72,16 @@ defmodule Core.Web.Response do
       @spec error(atom(), String.t()) :: map()
 
       def error(code, message), do: Core.Web.Response.__error__(@response_codes, code, message)
+
+      @doc """
+      Ответ с ошибкой и данными.
+
+      Требования к `code` — те же, что у `error/2`.
+      """
+      @spec error(atom(), String.t(), term()) :: map()
+
+      def error(code, message, data),
+        do: Core.Web.Response.__error__(@response_codes, code, message, data)
 
       @doc """
       Данные страницы — `%{count, items}` через presenter.
@@ -88,10 +104,20 @@ defmodule Core.Web.Response do
 
   def success(data), do: __success__(Response.Code, data)
 
+  @doc "Успешный ответ с данными и сообщениями."
+  @spec success(term(), [String.t()]) :: map()
+
+  def success(data, messages), do: __success__(Response.Code, data, messages)
+
   @doc "Ответ с ошибкой."
   @spec error(Response.Code.t(), String.t()) :: map()
 
   def error(code, message), do: __error__(Response.Code, code, message)
+
+  @doc "Ответ с ошибкой и данными."
+  @spec error(Response.Code.t(), String.t(), term()) :: map()
+
+  def error(code, message, data), do: __error__(Response.Code, code, message, data)
 
   @doc """
   Данные страницы — `%{count, items}` через presenter.
@@ -138,13 +164,25 @@ defmodule Core.Web.Response do
   @doc false
   @spec __success__(module(), term()) :: map()
 
-  def __success__(codes, data), do: %{code: codes.to_code(:success), messages: [], data: data}
+  def __success__(codes, data), do: __success__(codes, data, [])
+
+  @doc false
+  @spec __success__(module(), term(), [String.t()]) :: map()
+
+  def __success__(codes, data, messages) when is_list(messages),
+    do: %{code: codes.to_code(:success), messages: messages, data: data}
 
   @doc false
   @spec __error__(module(), atom(), String.t()) :: map()
 
   def __error__(codes, code, message) when is_atom(code) and is_binary(message),
     do: %{code: codes.to_code(code), messages: [message]}
+
+  @doc false
+  @spec __error__(module(), atom(), String.t(), term()) :: map()
+
+  def __error__(codes, code, message, data) when is_atom(code) and is_binary(message),
+    do: %{code: codes.to_code(code), messages: [message], data: data}
 
   @doc false
   @spec __page_data__(Pagination.Result.t(item), (item -> map())) :: map() when item: var
