@@ -28,7 +28,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 
 ```elixir
 # mix.exs потребителя
-{:core, git: "https://github.com/Aleksey1707/core-ex", tag: "v0.3.0"}
+{:core, git: "https://github.com/Aleksey1707/core-ex", tag: "v0.3.1"}
 ```
 
 ## Опциональные зависимости: адаптеры брокеров
