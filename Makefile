@@ -20,6 +20,17 @@ rules-check:
 layout-check:
 	elixir scripts/layout_lint.exs
 
+# Сведение версии выпуска: `mix.exs`, `README.md` и верхний раздел `CHANGELOG.md` — одна версия,
+# и та же, что у тега на коммите. Вне выпуска («Не выпущено» в CHANGELOG) — всегда зелёный.
+.PHONY: release-check
+release-check:
+	elixir scripts/release_lint.exs
+
+# Свести версию в трёх местах разом: make release VERSION=X.Y.Z. Коммит и тег — за оператором.
+.PHONY: release
+release:
+	elixir scripts/release.exs $(VERSION)
+
 .PHONY: iex
 iex:
 	iex -S mix
