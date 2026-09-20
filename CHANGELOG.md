@@ -1,5 +1,40 @@
 # Changelog
 
+## Не выпущено
+
+### Изменения контракта макросов
+
+- **`outbox: :none` — агрегат, не публикующий события наружу** (`use Core.Repo.Pg.StateStored`,
+  `use Core.Es.Aggregate.Repo.Pg`). Опция `outbox:` требовала модуль `<Aggregate>.Outbox`
+  всегда, и агрегату, чьи события наружу не уезжают, приходилось заводить маппер с выдуманным
+  топиком: записи копились в `outbox`, поллер их публиковал, читателя у топика не было. Теперь
+  значением MAY быть `:none` — события пишутся в хранилище событий как раньше, записей outbox
+  нет, семейство событий не сверяется. Опция осталась **обязательной**: пропуск ключа
+  по-прежнему `CompileError`, иначе забытая опция выключала бы публикацию молча. Существующий
+  код потребителя не правится.
+
+  ```elixir
+  # было — маппер ради обязательной опции
+  defmodule Agg.Outbox do
+    use Core.Es.Outbox, topic: "aggs", event: Agg.Event
+  end
+
+  use Core.Es.Aggregate.Repo.Pg,
+    behaviour: Agg.Repo,
+    aggregate: Agg,
+    id: Agg.ID,
+    errors: Agg.Errors,
+    outbox: Agg.Outbox
+
+  # стало — модуля нет
+  use Core.Es.Aggregate.Repo.Pg,
+    behaviour: Agg.Repo,
+    aggregate: Agg,
+    id: Agg.ID,
+    errors: Agg.Errors,
+    outbox: :none
+  ```
+
 ## 0.3.2
 
 ### Новое

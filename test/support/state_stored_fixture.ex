@@ -158,4 +158,28 @@ defmodule Core.StateStoredFixture do
       outbox: Core.StateStoredFixture.Outbox,
       children: [[schema: Child, fk: :entity_id]]
   end
+
+  defmodule Repo.Pg.Unpublished do
+    @moduledoc "Write-репозиторий агрегата без публикации наружу: `outbox: :none`."
+
+    alias Core.EventFixture
+    alias Core.StateStoredFixture.Child
+    alias Core.StateStoredFixture.Entity
+    alias Core.StateStoredFixture.Schema
+
+    use Core.Repo.Pg.StateStored,
+      behaviour: Core.StateStoredFixture.Repo,
+      schema: Schema,
+      to_entity: &Schema.to_entity!/1,
+      to_model: &Schema.to_model!/1,
+      to_id: &Schema.dump_id/1,
+      query: Schema.base_query(),
+      shadow_copy?: true,
+      id: EventFixture.AggID,
+      entity: Entity,
+      errors: EventFixture.Errors,
+      event_codec: EventFixture.Event.Codec,
+      outbox: :none,
+      children: [[schema: Child, fk: :entity_id]]
+  end
 end

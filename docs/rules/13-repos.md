@@ -467,10 +467,18 @@ use Repo.Pg.StateStored,
 | Опция | Обяз. | Значение |
 |---|---|---|
 | `event_codec:` | да | `<Aggregate>.Event.Codec`; его `type:` — тип агрегата в потоке хранилища событий |
-| `outbox:` | да | `<Aggregate>.Outbox`; `event:` сверяется на компиляции с семейством кодека |
+| `outbox:` | да | `<Aggregate>.Outbox` (`event:` сверяется с семейством кодека) либо `:none` |
 | `children:` | нет | `[[schema:, fk:, key:, constraint_errors:], …]`; строки — из `Schema.Child.to_models/1` |
 | `entity:` | да | в `Repo.Pg` опциональна, здесь обязательна (по ней строятся заголовки) |
 | `id:` | да | в `Repo.Pg` опциональна, здесь обязательна: сверяется на компиляции с Prim агрегата кодека |
+
+`outbox: :none` — агрегат не публикует события наружу: они пишутся в хранилище, записей outbox
+нет, семейство сверять не с чем. Опция остаётся обязательной у обоих write-builder'ов: отказ от
+публикации MUST объявляться явно, пропуск ключа — `CompileError`. Опциональный ключ выключал бы
+публикацию молча — забытая опция видна только в проде, по неуехавшим событиям.
+
+Проверяется: `CompileError` «нет обязательных опций: [:outbox]» и записи outbox при `:none` —
+`test/core/repo/pg/state_stored_test.exs`, `test/core/es/aggregate/repo/pg_test.exs`.
 
 Что макрос генерирует (одна транзакция на запись):
 
@@ -555,8 +563,9 @@ end
 ```
 
 Кодек событий берётся из `event_codec:` агрегата, отдельной опции нет; `repo:` и `codec:` —
-опциональны, по умолчанию `Core.Config`; `snapshot:` — «Снапшоты» ниже. Реализация резолвится по
-конвенции `<Behaviour>.Pg` («DI»).
+опциональны, по умолчанию `Core.Config`; `snapshot:` — «Снапшоты» ниже; `outbox: :none` — как у
+state-stored («Write state-stored агрегата»). Реализация резолвится по конвенции `<Behaviour>.Pg`
+(«DI»).
 
 Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo.Pg` — нет `outbox:`, в `errors:` нет
 clause `:version_mismatch`, Prim агрегата кодека не равен `id:`, событие `outbox:` не из

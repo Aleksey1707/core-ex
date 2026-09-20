@@ -175,6 +175,11 @@ defmodule Core.Repo.Pg.StateStoredTest do
       end
     end
 
+    test "outbox: :none — модуль публикации не требуется" do
+      assert {{:module, module, _binary, _}, []} = compile!(NoneOutbox, outbox: :none)
+      assert function_exported?(module, :insert, 3)
+    end
+
     test "отклоняет нелитеральные opts" do
       assert_raise CompileError,
                    ~r/Repo\.Pg\.StateStored: ожидается литеральный keyword opts/,
@@ -201,6 +206,17 @@ defmodule Core.Repo.Pg.StateStoredTest do
       assert {:ok, ^written} = @repo.get(id, :current, Context.new())
       assert wires(Es.Store.Test.events!(@codec, id)) == wires([created])
       assert outbox_names(id) == [@codec.type(created)]
+    end
+
+    test "outbox: :none: события потока записаны, записей outbox нет" do
+      id = AggID.new()
+      created = event(EventFixture.created(), id, 1)
+      repo = StateStoredFixture.Repo.Pg.Unpublished
+
+      assert {:ok, _written} = repo.insert(entity(id, 1, [created]), Context.new())
+
+      assert wires(Es.Store.Test.events!(@codec, id)) == wires([created])
+      assert outbox_names(id) == []
     end
 
     test "поток не с 1 и с разрывами: агрегат создан без события, мутация без события" do

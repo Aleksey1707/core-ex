@@ -71,7 +71,8 @@ defmodule Core.Repo.Pg.StateStored do
 
   - `event_codec:` — кодек событий агрегата (`use Core.Es.Event.Codec`); его `type:` — тип
     агрегата в адресе потока
-  - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`)
+  - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`) либо `:none`: агрегат не публикует
+    события наружу, записей outbox нет
   - `children:` — список описаний дочерних таблиц:
     - `schema:` — Ecto-схема с `to_models/1` (обязательно)
     - `fk:` — колонка внешнего ключа на агрегат (обязательно)
@@ -261,7 +262,7 @@ defmodule Core.Repo.Pg.StateStored do
       entity: Helper.Opts.module!(opts, :entity, @label),
       id: id,
       event_codec: event_codec,
-      outbox: outbox!(opts, event_codec),
+      outbox: Es.Store.Opts.outbox!(opts, event_codec, @label),
       children: children!(opts),
       behaviour: behaviour!(opts)
     }
@@ -289,14 +290,6 @@ defmodule Core.Repo.Pg.StateStored do
         end
       end
     end
-  end
-
-  defp outbox!(opts, event_codec) do
-    outbox =
-      Helper.Opts.module!(opts, :outbox, @label, exports: [from_events: 1, __es_event__: 0])
-
-    Es.Store.Opts.ensure_outbox_event!(outbox, event_codec, @label)
-    outbox
   end
 
   defp behaviour!(opts) do
