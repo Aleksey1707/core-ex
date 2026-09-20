@@ -10,6 +10,9 @@ defmodule Core.Es.Store.Opts do
   `label` — имя builder'а: по тексту `CompileError` видно, какой `use` его поднял.
   """
 
+  alias Core.Es.Outbox
+  alias Core.Helper
+
   @doc "Кодек событий с `type:` (`use Core.Es.Event.Codec`)."
   @spec event_codec!(module(), String.t()) :: module()
 
@@ -40,6 +43,28 @@ defmodule Core.Es.Store.Opts do
     end
 
     :ok
+  end
+
+  @doc """
+  Модуль outbox агрегата: `<Aggregate>.Outbox` либо `Core.Es.Outbox.None` при `outbox: :none`.
+
+  `:none` — агрегат не публикует события наружу: сверять с семейством кодека нечего, записей
+  outbox нет. Опция остаётся обязательной — отказ от публикации объявляется явно, а не
+  пропуском ключа.
+  """
+  @spec outbox!(keyword(), module(), String.t()) :: module()
+
+  def outbox!(opts, event_codec, label)
+      when is_list(opts) and is_atom(event_codec) and is_binary(label) do
+    case Keyword.get(opts, :outbox) do
+      :none ->
+        Outbox.None
+
+      _module ->
+        outbox = Helper.Opts.module!(opts, :outbox, label, exports: [from_events: 1, __es_event__: 0])
+        ensure_outbox_event!(outbox, event_codec, label)
+        outbox
+    end
   end
 
   @doc "Событие outbox (`__es_event__/0`) — семейство кодека событий."

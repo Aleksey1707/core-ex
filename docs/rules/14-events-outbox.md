@@ -70,6 +70,9 @@ use Es.Outbox,
 `topic` валидируется `Outbox.Topic` на этапе компиляции: опечатка — `CompileError`, а не ошибка
 в рантайме на каждом событии.
 
+Агрегат, чьи события наружу не публикуются, модуля `<Aggregate>.Outbox` не заводит: его
+write-репозиторий объявляет `outbox: :none` (`13-repos.md`).
+
 API:
 
 - `from_event/1` → `{:ok, Record.t()} | {:error, Error.t()}`

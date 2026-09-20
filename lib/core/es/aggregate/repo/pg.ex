@@ -118,7 +118,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `aggregate:` — `use Core.Es.Aggregate`
   - `id:` — Prim идентификатора агрегата
   - `errors:` — каталог ошибок с clause `:version_mismatch`
-  - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`)
+  - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`) либо `:none`: агрегат не публикует
+    события наружу, записей outbox нет
   - `repo:` — Ecto-репозиторий транзакции `append` и восстановления состояния (`get` /
     `get_decision` / `get_many` / `refresh`); по умолчанию `Core.Config.dao/0` в рантайме. Сами
     события `Core.Es.Store.append/5` пишет, а страницу потока `page_stream` читает через
@@ -278,11 +279,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     id = Helper.Opts.module!(opts, :id, @label)
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
 
-    outbox =
-      Helper.Opts.module!(opts, :outbox, @label, exports: [from_events: 1, __es_event__: 0])
+    outbox = Es.Store.Opts.outbox!(opts, event_codec, @label)
 
     Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
-    Es.Store.Opts.ensure_outbox_event!(outbox, event_codec, @label)
     Es.Store.Opts.ensure_version_mismatch!(errors, @label)
 
     %{

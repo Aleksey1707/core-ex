@@ -119,11 +119,27 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     end
   end
 
+  describe "outbox: :none" do
+    test "события потока записаны, записей outbox нет" do
+      id = Account.ID.new()
+
+      write!(Account.Repo.Pg.Unpublished, id, [open(), freeze()])
+
+      assert stream_tags(id) == ~w(account.opened account.frozen)
+      assert outbox_names(id) == []
+    end
+  end
+
   describe "компиляция" do
     test "требует outbox" do
       assert_raise CompileError,
                    ~r/Es\.Aggregate\.Repo\.Pg: нет обязательных опций: \[:outbox\]/,
                    fn -> compile!(NoOutbox, outbox: :__drop__) end
+    end
+
+    test "outbox: :none — модуль публикации не требуется" do
+      assert {{:module, module, _binary, _}, []} = compile!(NoneOutbox, outbox: :none)
+      assert function_exported?(module, :append, 3)
     end
 
     test "кодек событий берётся из агрегата, а не из опции" do
