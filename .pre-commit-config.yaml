@@ -1,3 +1,6 @@
+# Хуки без явной стадии — только на commit: иначе pre-commit гоняет весь набор ещё раз на push.
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -104,3 +107,14 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+
+      # Только на push: тег `vX.Y.Z` уезжает вместе с коммитом, и версия в нём должна быть
+      # сведена. На коммитах ветки проверять нечего — там штатное «Не выпущено».
+      - id: release-lint
+        name: "Release: версия сведена с тегом"
+        entry: elixir scripts/release_lint.exs
+        language: system
+        require_serial: true
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

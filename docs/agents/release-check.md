@@ -14,3 +14,7 @@
 - Сборка ловит не каждую прежнюю форму: после `mix compile --force --warnings-as-errors` код
   проходится по «было → стало» раздела «Не выпущено» `CHANGELOG.md` и по карте устаревших форм
   `docs/rules/app/00-index.md`.
+
+Проверка пройдена — дальше сам выпуск: сведение версии в `mix.exs`, `README.md` и
+`CHANGELOG.md` одной командой `make release VERSION=X.Y.Z` и тег на коммите сведения
+(`AGENTS.md`, «Выпуск»).
