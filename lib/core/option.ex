@@ -55,7 +55,7 @@ defmodule Core.Option do
   @doc "Извлечь значение; на `nil` — `ArgumentError`."
   @spec unwrap!(t(a)) :: a when a: var
 
-  def unwrap!(nil), do: raise(ArgumentError, "called Option.unwrap!/1 on a nil value")
+  def unwrap!(nil), do: raise(ArgumentError, "Option.unwrap!/1 вызван на nil")
   def unwrap!(value), do: value
 
   @doc "В valued Result: значение → `{:ok, value}`, nil → `{:error, :none}`."
