@@ -145,15 +145,6 @@ defmodule Core.ResultTest do
     end
   end
 
-  test "expect!/2 allows {:ok, nil}" do
-    assert Result.expect!(Result.ok(nil), "missing") == nil
-    assert Result.expect!(Result.ok(1), "missing") == 1
-
-    assert_raise RuntimeError, "missing", fn ->
-      Result.expect!(Result.error(:e), "missing")
-    end
-  end
-
   test "unwrap_or/2" do
     assert Result.unwrap_or(Result.ok(1), 0) == 1
     assert Result.unwrap_or(Result.error(:e), 0) == 0
@@ -193,7 +184,6 @@ defmodule Core.ResultTest do
     assert_raise FunctionClauseError, fn -> Result.map_or_else(u, fn _ -> 0 end, &(&1 + 1)) end
     assert_raise FunctionClauseError, fn -> Result.and_then(u, fn _ -> Result.ok(1) end) end
     assert_raise FunctionClauseError, fn -> Result.unwrap!(u) end
-    assert_raise FunctionClauseError, fn -> Result.expect!(u, "missing") end
     assert_raise FunctionClauseError, fn -> Result.unwrap_or(u, 0) end
     assert_raise FunctionClauseError, fn -> Result.unwrap_or_else(u, fn -> 0 end) end
     assert_raise FunctionClauseError, fn -> Result.to_option(u) end

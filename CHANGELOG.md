@@ -29,6 +29,30 @@
   Result.tap(Result.ok(user), &Logger.debug("user: id=#{&1.id}"))
   ```
 
+- **`Result.expect!/2` и `Option.expect!/2` удалены** (`Core.Result`, `Core.Option`). Обе поднимали
+  голый текст вызывающего (`raise message`), то есть `%RuntimeError{}`: на причине `%Error{}`
+  структура уничтожалась целиком — ни `ns`, ни `code`, ни `detail`, ни цепочки `parent` у того, кто
+  ловит исключение, уже не было. `12-errors.md` требует на bang-границе `raise Exc, error`, и
+  соседняя `Result.unwrap!/1` так и делает: `%Error{}` доезжает в поле `error` исключения `Exc`.
+  Держать вторую bang-дверь, ведущую мимо `Exc`, незачем — полезный случай (свой текст поверх
+  причины) собирается композицией `map_error/2` + `unwrap!/1`. Единственная bang-дверь
+  `Core.Result` — теперь `unwrap!/1`; остальные функции обоих модулей поведения не меняют.
+
+  Как править код потребителя: `grep -rn "Result.expect!(\|Option.expect!("`.
+
+  ```elixir
+  # было — текст вместо ошибки
+  Result.expect!(res, "нет агрегата")
+  Option.expect!(value, "нет значения")
+
+  # стало — причина %Error{}: внешнее звено цепочки + Exc
+  res |> Result.map_error(&Error.wrap(outer, &1)) |> Result.unwrap!()
+
+  # стало — иная причина: свой текст на call site
+  Result.unwrap_or_else(res, fn -> raise "нет агрегата" end)
+  Option.unwrap_or_else(value, fn -> raise "нет значения" end)
+  ```
+
 ### Новое
 
 - **Публичные типы результата — `Result.t/0,1,2`, `Result.unit/0,1`, `Option.t/0,1`**
