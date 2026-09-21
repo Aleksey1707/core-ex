@@ -705,6 +705,23 @@ if Result.ok?(res), do: handle(res), else: :skip
 Enum.split_with(results, &Result.ok?/1)
 ```
 
+Домен обоих обходов — список: `traverse/2` и `traverse_all/2` принимают `[a]`, а не
+`Enumerable.t()`. Пачку иной формы (карта, `MapSet`, поток) call site MUST приводить к списку сам —
+`Map.to_list/1`, `Map.values/1`, `Enum.to_list/1`. Так guard `is_list/1` держит связь «список на
+входе → список на выходе», а промах виден предупреждением компиляции при известном типе входа.
+Замеры call sites и отвергнутое расширение — ADR-0022.
+
+```elixir
+# плохо — карта прямо в обход: предупреждение инференса, а на dynamic-значении — отказ в рантайме
+Result.traverse(params, &load_param(&1, codec))
+
+# хорошо — приведение на call site; видно и то, что колбэк получает пары {k, v}
+Result.traverse(Map.to_list(params), &load_param(&1, codec))
+```
+
+Проверяется: `test/core/result_test.exs`, тесты «traverse/2 rejects non-list at runtime» и
+«traverse_all/2 rejects non-list at runtime».
+
 Набор функций `Core.Result` делится по форме успеха на входе: функция, которой значение нужно,
 на `:ok` даёт `FunctionClauseError`. Состав групп — таблица в `@moduledoc Core.Result`.
 
