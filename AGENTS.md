@@ -45,7 +45,7 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 |---|---|---|
 | `docs/rules/10-architecture.md` | `architecture` | границы библиотеки, `Core.Config`, способы получения зависимостей |
 | `docs/rules/11-domain.md` | `domain` | `Prim`, `Enum`, `Codec`, `Core.View`, `Context`, `Es.Event`, `Version` |
-| `docs/rules/12-errors.md` | `errors` | `%Error{}` (`:domain` / `:app`), каталоги ошибок, cause-цепочки |
+| `docs/rules/12-errors.md` | `errors` | `%Error{}` (`:domain` / `:app`), каталоги ошибок, cause-цепочки, множество ошибок |
 | `docs/rules/13-repos.md` | `repos` | `Repo` behaviour / `Repo.Pg` / `Schema` / `Specs`, read vs write |
 | `docs/rules/14-events-outbox.md` | `events-outbox` | domain events, flush в одной TX, outbox lifecycle |
 | `docs/rules/17-otp-concurrency.md` | `otp-concurrency` | дерево процессов, `init/1` / `handle_continue`, таймауты, mailbox |

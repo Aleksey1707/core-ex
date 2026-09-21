@@ -3,7 +3,7 @@
 - **Область.** `lib/core/error.ex`, `lib/core/exc.ex`, `lib/core/security/secret.ex`; у потребителя
   — каталоги `<Aggregate>.Errors` и обработчики на границе.
 - **Читать перед.** Введением нового кода ошибки или каталога агрегата, работой с чувствительными
-  данными, правкой cause-цепочек и обработчиков `%Error{}`.
+  данными, сборкой множества независимых отказов, правкой cause-цепочек и обработчиков `%Error{}`.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 Типичная реализация: struct `%Error{}` + обёртка `defexception` для `raise` (например `Exc`).
@@ -22,7 +22,7 @@
 
 ## Структура
 
-`%Error{kind, ns, module, code, message, detail, parent}`:
+`%Error{kind, ns, module, code, message, detail, parent, errors}`:
 
 | Поле | Назначение |
 |---|---|
@@ -33,9 +33,10 @@
 | `message` | текст для клиента / логов; **обязателен для `:domain`**, опционален для `:app` (`nil` или `""` → `String.Chars` fallback `"#{ns}/#{code}"`) |
 | `detail` | произвольный контекст ошибки (`term()`) — без фиксированной формы; `nil`, map, struct, exception, … |
 | `parent` | опциональная внутренняя ошибка (cause); default `nil` |
+| `errors` | состав множества независимых отказов; default `[]` — см. «Множество ошибок» |
 
-Конструкторы: макросы `Error.domain/1|2`, `Error.app/1|2`. На call site нужен `require Error` (рядом
-с `alias`).
+Конструкторы: макросы `Error.domain/1|2`, `Error.app/1|2`, `Error.many/1|2` («Множество ошибок»).
+На call site нужен `require Error` (рядом с `alias`).
 
 - `/1` — только attrs; `module` = `__CALLER__.module` (прямые call site'ы).
 - `/2` — явный `module` + attrs (каталоги `*.Errors`, чужой источник).
@@ -45,13 +46,13 @@
   отсутствие обязательного — `KeyError` (`Keyword.fetch!`), лишний ключ — `ArgumentError`.
 - Не путать с `Helper.Opts.validate!` (для `__using__` / compile opts модулей).
 - `parent:` принимает только `%Error{}` или `nil`; иное — `FunctionClauseError` (ошибка
-  программиста), как и у `wrap/2`. Множество ошибок причиной не бывает: контейнер
-  (`%Error{errors: [_ | _]}`) в `parent:` или вторым аргументом `wrap/2` — `ArgumentError`.
+  программиста), как и у `wrap/2`. Контейнер множества причиной не бывает — «Множество ошибок».
 
 | Kind | Обязательные attrs | Опциональные attrs |
 |---|---|---|
 | `:domain` | `code:`, `ns:`, `message:` | `detail:`, `parent:` |
 | `:app` | `code:`, `ns:` | `message:`, `detail:`, `parent:` |
+| выводится (`many`) | `code:`, `ns:`, `message:`, `errors:` | `detail:`, `parent:` |
 
 ```elixir
 Error.domain(code: :not_found, ns: :product, message: "…", detail: id)
@@ -146,6 +147,87 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 - `%Error{}` — `Enumerable`: итерация = `[outer, …, root]`
   (`Enum.any?(err, &(&1.code == :not_found))` / `Error.has?(err, code: :not_found)`). Обратная
   сторона: `%Error{}` вместо списка проходит через `Enum.*` молча — форму проверять до итерации.
+
+## Множество ошибок
+
+Несколько независимых отказов одной операции (невалидные поля формы, провалившиеся строки
+пачки) — поле `errors: [t()]` в том же `%Error{}`, а не отдельный тип (ADR-0021). Контейнер
+остаётся обычной ошибкой: где про поле не знают, наружу уходит его `message` «в целом», где
+знают — раскрывается состав. `parent` отвечает «почему», `errors` — «что ещё не так»; поля
+независимы.
+
+| Функция | Назначение |
+|---|---|
+| `Error.many` | собрать контейнер; арности и attrs — «Структура» |
+| `Error.messages/1` | тексты клиенту: у контейнера — `to_string/1` каждого элемента в порядке состава, у обычной ошибки — `[to_string(error)]` |
+| `Error.format_chain/1` | печать состава в лог (см. «Оборачивание (cause-цепочка)») |
+| `Exc.message/1` | текст bang-границы: у контейнера — `format_chain/1`, у обычной ошибки — `to_string/1` |
+| `Result.traverse_all/2` | пройти список целиком и собрать все провалы: `{:ok, [b]}` либо `{:error, [Error.t()]}` |
+
+Состав:
+
+- непустой: `errors: []` — `ArgumentError`; один элемент собирается наравне с прочими;
+- только `%Error{}`: элемент иной формы — `ArgumentError`;
+- плоский: элемент с непустым `errors` — `ArgumentError`, адресация поля идёт в `detail`
+  элемента;
+- порядок входа сохраняется, дубли `{ns, code}` не схлопываются;
+- `ns` и `code` контейнера — из словаря потребителя: общего кода библиотека не вводит.
+
+`kind` контейнера опцией не принимается, а выводится по слабейшему звену состава: хотя бы один
+элемент `kind: :app` → контейнер `:app`, иначе `:domain`.
+
+Контейнер не бывает причиной: `parent:` любого конструктора и второй аргумент `wrap/2` его не
+принимают — `ArgumentError`. Обратное направление (`many(parent: обычная)`) разрешено.
+
+Граница обхода: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2` и `Enumerable` читают
+**только** цепочку причин — состав им не виден (`has?/2` по коду элемента даёт `false`,
+`Enum.count/1` считает цепочку). Состав читается из поля: `messages/1` и `format_chain/1`.
+
+Проверяется: `test/core/error_test.exs` — describe «many», «контейнер не бывает причиной»,
+«обход не касается состава».
+
+### Сборка на call site
+
+`Result.traverse_all/2` отдаёт **голый список** ошибок. Наружу он MUST NOT уходить: на reason
+формы `[%Error{}]` `ErrorMapper.map/2` отдаёт 500 `:critical`. Список MUST заворачиваться в
+`Error.many` в теле той же функции — `ns`, `code` и текст «в целом» знает только она.
+
+```elixir
+# плохо — голый список наружу
+def validate_rows(rows), do: Result.traverse_all(rows, &validate/1)
+
+# хорошо — контейнер собирается здесь же
+def validate_rows(rows) do
+  rows
+  |> Result.traverse_all(&validate/1)
+  |> Result.map_error(
+    &Error.many(code: :invalid, ns: :form, message: "Форма невалидна", errors: &1)
+  )
+end
+```
+
+Проверяется: `test/core/result_test.exs` — `traverse_all/2`: порядок, пустой список, часть
+провалена.
+
+### Состав на границе HTTP
+
+`ErrorMapper.map/2` состава не видит: контейнер уходит строкой таблицы по своим `kind` и `code`
+и даёт клиенту один текст — `message` контейнера на доменных строках, константу на 401 и 500
+(`10-architecture.md`, «Граница HTTP»). Состав подставляет
+fallback-контроллер потребителя через `Error.messages/1`, и MUST раскрываться только там, где
+маппер вернул код `:domain_error`: на 401 и 500 наружу MUST уходить константа маппера, а не
+тексты элементов.
+
+```elixir
+# плохо — состав уходит на любом коде: 401 и 500 перестают быть константой
+json(conn, Response.error(code, Error.messages(error)))
+
+# хорошо — состав только на доменном ответе
+messages = if code == :domain_error, do: Error.messages(error), else: [text]
+json(conn, Response.error(code, messages))
+```
+
+Конверт со списком строк собирает `Response.error/2,3`; пустой список — `FunctionClauseError`.
 
 ## Матрица категорий
 
