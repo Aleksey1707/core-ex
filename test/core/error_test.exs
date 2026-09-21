@@ -329,6 +329,183 @@ defmodule Core.ErrorTest do
     end
   end
 
+  describe "many" do
+    setup do
+      first = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+      second = Error.domain(__MODULE__, code: :too_long, ns: :form, message: "длинно")
+
+      %{first: first, second: second}
+    end
+
+    test "собирает контейнер из состава", %{first: first, second: second} do
+      err =
+        Error.many(__MODULE__,
+          code: :invalid,
+          ns: :form,
+          message: "форма невалидна",
+          errors: [first, second]
+        )
+
+      assert %Error{
+               kind: :domain,
+               ns: :form,
+               code: :invalid,
+               module: __MODULE__,
+               message: "форма невалидна",
+               detail: nil,
+               parent: nil,
+               errors: [^first, ^second]
+             } = err
+    end
+
+    test "many/1 берёт module из __CALLER__", %{first: first} do
+      assert %Error{module: __MODULE__, code: :invalid} =
+               Error.many(code: :invalid, ns: :form, message: "форма", errors: [first])
+    end
+
+    test "обычная ошибка несёт пустой errors" do
+      assert %Error{errors: []} = Error.domain(__MODULE__, code: :x, ns: :test, message: "x")
+      assert %Error{errors: []} = Error.app(__MODULE__, code: :x, ns: :test)
+    end
+
+    test "kind выводится по слабейшему звену", %{first: first, second: second} do
+      app = Error.app(__MODULE__, code: :timeout, ns: :infra, message: "таймаут")
+
+      assert %Error{kind: :domain} = many([first, second])
+      assert %Error{kind: :app} = many([first, app])
+      assert %Error{kind: :app} = many([app, app])
+    end
+
+    test "kind опцией не принимается" do
+      assert_raise CompileError, ~r/неизвестные опции: \[:kind\]/, fn ->
+        compile_factory(~s|Core.Error.many(code: :x, ns: :t, message: "m", errors: [], kind: :app)|)
+      end
+    end
+
+    test "errors обязателен в литерале" do
+      assert_raise CompileError, ~r/нет обязательных опций: \[:errors\]/, fn ->
+        compile_factory(~s|Core.Error.many(code: :x, ns: :t, message: "m")|)
+      end
+
+      assert_raise CompileError, ~r/нет обязательных опций: \[:message\]/, fn ->
+        compile_factory(~s|Core.Error.many(__MODULE__, code: :x, ns: :t, errors: [])|)
+      end
+
+      assert_raise CompileError, ~r/дублирующиеся опции: \[:errors\]/, fn ->
+        compile_factory(~s|Core.Error.many(code: :x, ns: :t, message: "m", errors: [], errors: [])|)
+      end
+    end
+
+    test "динамический attrs без errors → KeyError" do
+      opts = [code: :x, ns: :test, message: "x"]
+
+      assert_raise KeyError, fn ->
+        Error.many(__MODULE__, opts)
+      end
+    end
+
+    test "пустой состав → ArgumentError" do
+      assert_raise ArgumentError, ~r/множество ошибок не может быть пустым/, fn ->
+        many([])
+      end
+    end
+
+    test "элемент не %Error{} → ArgumentError", %{first: first} do
+      assert_raise ArgumentError, ~r/элемент множества ошибок должен быть %Core.Error\{\}/, fn ->
+        many([first, :nope])
+      end
+    end
+
+    test "элемент с непустым errors → ArgumentError", %{first: first, second: second} do
+      nested = many([first])
+
+      assert_raise ArgumentError, ~r/множество ошибок плоское/, fn ->
+        many([second, nested])
+      end
+    end
+
+    test "порядок входа сохраняется, дубли не схлопываются", %{first: first} do
+      same = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто ещё раз")
+      other = Error.domain(__MODULE__, code: :bad, ns: :form, message: "плохо")
+
+      assert %Error{errors: [^other, ^first, ^same]} = many([other, first, same])
+    end
+
+    test "множество из одного элемента", %{first: first} do
+      assert %Error{errors: [^first], kind: :domain} = many([first])
+    end
+
+    test "parent у контейнера независим от состава", %{first: first, second: second} do
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      err =
+        Error.many(__MODULE__,
+          code: :invalid,
+          ns: :form,
+          message: "форма невалидна",
+          errors: [first, second],
+          parent: cause
+        )
+
+      assert %Error{parent: ^cause, errors: [^first, ^second]} = err
+      assert Error.chain(err) == [err, cause]
+      assert Error.root(err) == cause
+    end
+
+    test "контейнер можно обернуть причиной", %{first: first} do
+      container = many([first])
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      assert %Error{errors: [^first], parent: ^cause} = Error.wrap(container, cause)
+    end
+  end
+
+  describe "контейнер не бывает причиной" do
+    setup do
+      element = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+
+      %{container: many([element])}
+    end
+
+    test "wrap вторым аргументом", %{container: container} do
+      err = Error.domain(__MODULE__, code: :x, ns: :test, message: "x")
+
+      assert_raise ArgumentError, ~r/множество ошибок не может быть причиной/, fn ->
+        Error.wrap(err, container)
+      end
+    end
+
+    test "parent: у domain", %{container: container} do
+      assert_raise ArgumentError, ~r/множество ошибок не может быть причиной/, fn ->
+        Error.domain(__MODULE__, code: :x, ns: :test, message: "x", parent: container)
+      end
+    end
+
+    test "parent: у app", %{container: container} do
+      assert_raise ArgumentError, ~r/множество ошибок не может быть причиной/, fn ->
+        Error.app(__MODULE__, code: :x, ns: :test, parent: container)
+      end
+    end
+
+    test "parent: у many", %{container: container} do
+      element = Error.domain(__MODULE__, code: :bad, ns: :form, message: "плохо")
+
+      assert_raise ArgumentError, ~r/множество ошибок не может быть причиной/, fn ->
+        Error.many(__MODULE__,
+          code: :invalid,
+          ns: :form,
+          message: "форма",
+          errors: [element],
+          parent: container
+        )
+      end
+    end
+  end
+
+  defp many(errors) do
+    Error.many(__MODULE__, code: :invalid, ns: :form, message: "множество", errors: errors)
+  end
+
   defp compile_error_factory(attrs) do
     compile_factory("Core.Error.domain(__MODULE__, #{attrs})")
   end

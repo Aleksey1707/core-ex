@@ -10,23 +10,23 @@
 
 **Spec:** [Множество ошибок](../spec.md) — «Тип и конструктор»
 
-- [ ] `defstruct` получает `errors: []`; поле вне `@enforce_keys`, `@type t` дополнен
+- [x] `defstruct` получает `errors: []`; поле вне `@enforce_keys`, `@type t` дополнен
       `errors: [t()]`; `@moduledoc` называет отличие `errors` от `parent`.
-- [ ] `Error.many/1` (module из `__CALLER__`) и `Error.many/2` (явный module) — макросы рядом с
+- [x] `Error.many/1` (module из `__CALLER__`) и `Error.many/2` (явный module) — макросы рядом с
       `domain` / `app`; литеральный kwlist проверяется на compile-time тем же
       `validate_factory_opts!`: обязательны `code:`, `ns:`, `message:`, `errors:`, опциональны
       `detail:`, `parent:`. Динамический attrs — runtime-проверка, как у существующих.
-- [ ] `kind` не принимается опцией: хотя бы один элемент `kind: :app` → контейнер `:app`, иначе
+- [x] `kind` не принимается опцией: хотя бы один элемент `kind: :app` → контейнер `:app`, иначе
       `:domain`.
-- [ ] `ArgumentError` с текстом правила: пустой `errors:`; элемент не `%Error{}`; элемент с
+- [x] `ArgumentError` с текстом правила: пустой `errors:`; элемент не `%Error{}`; элемент с
       непустым `errors` (множество плоское).
-- [ ] Контейнер не бывает причиной: `wrap(_, %Error{errors: [_ | _]})` и `parent:` с контейнером
+- [x] Контейнер не бывает причиной: `wrap(_, %Error{errors: [_ | _]})` и `parent:` с контейнером
       у `domain` / `app` / `many` — `ArgumentError` «множество ошибок не может быть причиной».
       Обратное направление (`many(parent: обычная)`) работает.
-- [ ] Порядок элементов — порядок входа; дубли `{ns, code}` не схлопываются; множество из одного
+- [x] Порядок элементов — порядок входа; дубли `{ns, code}` не схлопываются; множество из одного
       элемента собирается наравне с прочими.
-- [ ] `test/core/error_test.exs`: конструктор и compile-check ключей, вывод `kind` (все `:domain`,
+- [x] `test/core/error_test.exs`: конструктор и compile-check ключей, вывод `kind` (все `:domain`,
       один `:app`, все `:app`), каждый `ArgumentError`, порядок и дубли, `parent` у контейнера,
       независимость `errors` и `parent`.
-- [ ] Разметка `error.ex` — блоки `# ===== … =====` по `20-agreements.md`, раз публичных групп
+- [x] Разметка `error.ex` — блоки `# ===== … =====` по `20-agreements.md`, раз публичных групп
       становится больше одной.
