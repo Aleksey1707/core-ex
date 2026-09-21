@@ -116,6 +116,14 @@ defmodule Core.ResultTest do
              Result.error([{:bad, 1}, {:bad, 2}])
   end
 
+  test "traverse_all/2 rejects non-list at runtime" do
+    not_a_list = dyn(:not_a_list)
+
+    assert_raise FunctionClauseError, fn ->
+      Result.traverse_all(not_a_list, &Result.ok/1)
+    end
+  end
+
   test "traverse/2 и traverse_all/2 отвергают колбэк чужой арности" do
     fun = dyn(fn -> Result.ok(1) end)
 

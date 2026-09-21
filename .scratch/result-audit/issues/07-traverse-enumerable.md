@@ -19,7 +19,7 @@
 **Вероятный исход** — wontfix: тогда решение записывается в `DEBT.md` либо одной строкой в
 `11-domain.md`, чтобы вопрос не поднимался заново.
 
-- [ ] решение принято и записано (код, `DEBT.md` или свод)
+- [x] решение принято и записано: норма — `11-domain.md`, обоснование — ADR-0022
 
 ## Comments
 
@@ -76,6 +76,22 @@ Guard `is_function(fun, 1)` обеих функций к этому решени
 **Передача из 06 закрыта здесь:** зеркальный тест `traverse_all/2 rejects non-list at runtime` входит
 в состав этого тикета. Guard `is_function(fun, 1)` обеих функций остаётся за тикетом 06.
 
+### Реализация 22.09.2026
+
+**Замеры триажа перепроверены перед записью в ADR, расхождений нет:** 36 + 26 + 7 = 69 вызовов
+`Result.traverse` в трёх приложениях плюс 3 в `lib/` — 72; приведение к списку в трёх call sites,
+все три — `Map.to_list/1` над картой в кодеке (`messages-back` ×2, `gar-back` ×1). Прогон инференса
+на Elixir 1.20.3 повторён: map-литерал, range и `MapSet.new/1` на входе `traverse/2` дают
+предупреждение компиляции, `Map.values(m)` проходит чисто.
+
+**Мутация прогнана:** снятие `is_list(list)` у `traverse_all/2` валит новый тест — вместо
+`FunctionClauseError` получается `Protocol.UndefinedError` (`Enumerable` не реализован для `Atom`).
+Guard возвращён, `lib/core/result.ex` не изменён.
+
+**Состав правки:** `docs/adr/0022-traversal-domain-is-list.md`, норма в `11-domain.md`,
+«Result / Option» (с примером «плохо / хорошо» и строкой `Проверяется:`), тест
+`traverse_all/2 rejects non-list at runtime`. `make` зелёный.
+
 ## Agent Brief
 
 **Category:** enhancement
@@ -110,13 +126,13 @@ Guard `is_function(fun, 1)` обеих функций к этому решени
   идёт с `--warnings-as-errors`.
 
 **Acceptance criteria:**
-- [ ] `11-domain.md` несёт норму о списочном домене обходов со ссылкой `ADR-0022`; `make rules-check` зелёный
-- [ ] ADR-0022 заведён: контекст, оба рассмотренных варианта (расширить до `Enumerable.t()` / оставить
+- [x] `11-domain.md` несёт норму о списочном домене обходов со ссылкой `ADR-0022`; `make rules-check` зелёный
+- [x] ADR-0022 заведён: контекст, оба рассмотренных варианта (расширить до `Enumerable.t()` / оставить
       список), решение, цена; замеры «3 из 72 call sites» и поведение инференса 1.20 — в нём
-- [ ] `test/core/result_test.exs` содержит `traverse_all/2 rejects non-list at runtime`; `mix test` зелёный
-- [ ] мутация проверена: снятие `is_list/1` у `traverse_all/2` валит тест
-- [ ] `lib/core/result.ex` не изменён
-- [ ] `make` зелёный
+- [x] `test/core/result_test.exs` содержит `traverse_all/2 rejects non-list at runtime`; `mix test` зелёный
+- [x] мутация проверена: снятие `is_list/1` у `traverse_all/2` валит тест
+- [x] `lib/core/result.ex` не изменён
+- [x] `make` зелёный
 
 **Out of scope:**
 - расширение домена до `Enumerable.t()` — отклонено триажем; переоткрывать только с новым замером call sites;
