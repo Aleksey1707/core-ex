@@ -45,14 +45,6 @@ defmodule Core.OptionTest do
     end
   end
 
-  test "expect!/2" do
-    assert Option.expect!(1, "missing") == 1
-
-    assert_raise RuntimeError, "missing", fn ->
-      Option.expect!(nil, "missing")
-    end
-  end
-
   test "to_result/1" do
     assert Option.to_result(1) == Result.ok(1)
     assert Option.to_result(nil) == Result.error(:none)

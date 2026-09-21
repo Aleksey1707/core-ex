@@ -171,12 +171,6 @@ defmodule Core.Result do
     raise ArgumentError, "Result.unwrap!/1 вызван на ошибке: #{inspect(reason)}"
   end
 
-  @doc "Извлечь значение или raise message."
-  @spec expect!(t(a, term()), String.t()) :: a when a: var
-
-  def expect!({:ok, value}, _message), do: value
-  def expect!({:error, _reason}, message) when is_binary(message), do: raise(message)
-
   @doc "Значение успеха или default."
   @spec unwrap_or(t(a, term()), a) :: a when a: var
 

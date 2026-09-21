@@ -58,12 +58,6 @@ defmodule Core.Option do
   def unwrap!(nil), do: raise(ArgumentError, "called Option.unwrap!/1 on a nil value")
   def unwrap!(value), do: value
 
-  @doc "Извлечь значение или raise message."
-  @spec expect!(t(a), String.t()) :: a when a: var
-
-  def expect!(nil, message) when is_binary(message), do: raise(message)
-  def expect!(value, _message), do: value
-
   @doc "В valued Result: значение → `{:ok, value}`, nil → `{:error, :none}`."
   @spec to_result(t(a)) :: Result.t(a, :none) when a: var
 
