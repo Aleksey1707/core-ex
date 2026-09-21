@@ -34,6 +34,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   alias Core.Otel
   alias Core.PubSub
   alias Core.Repo
+  alias Core.Result
   alias Core.Telemetry
 
   require Logger
@@ -79,7 +80,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @type domain_message :: term()
   @type subscriber_data :: term()
 
-  @type from_message :: (Message.t() -> {:ok, domain_message()} | {:error, Error.t()})
+  @type from_message :: (Message.t() -> Result.t(domain_message()))
 
   @type on_message ::
           (domain_message(), subscriber_data(), Context.t() -> PubSub.handler_result())

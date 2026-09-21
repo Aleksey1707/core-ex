@@ -10,9 +10,11 @@ defmodule Core.Validator do
   форм разворачивает `Core.Prim`.
   """
 
+  alias Core.Result
+
   @type code :: atom()
   @type detail :: String.t()
-  @type result :: :ok | {:error, {code(), detail()}}
+  @type result :: Result.unit({code(), detail()})
   @type validate_spec ::
           {module(), keyword()}
           | (term() -> result())

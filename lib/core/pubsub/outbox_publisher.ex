@@ -8,12 +8,13 @@ defmodule Core.PubSub.OutboxPublisher do
   alias Core.Context
   alias Core.Error
   alias Core.Outbox.Record
+  alias Core.Result
 
   defstruct [:repo, :to_record]
 
   @type message :: term()
   @type metadata :: term()
-  @type to_record :: (message(), metadata() -> {:ok, Record.t()} | {:error, Error.t()})
+  @type to_record :: (message(), metadata() -> Result.t(Record.t()))
 
   @type t :: %__MODULE__{
           repo: module(),

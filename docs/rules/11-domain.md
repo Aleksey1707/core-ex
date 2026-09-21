@@ -1,8 +1,8 @@
 # Домен
 
 - **Область.** `lib/core/prim/**`, `lib/core/enum.ex`, `lib/core/validator/**`, `lib/core/codec/**`,
-  `lib/core/view.ex`, `lib/core/context*`, `lib/core/es/**`; у потребителя — агрегаты, профили Codec
-  и entity-фасады.
+  `lib/core/view.ex`, `lib/core/context*`, `lib/core/result.ex`, `lib/core/option.ex`,
+  `lib/core/es/**`; у потребителя — агрегаты, профили Codec и entity-фасады.
 - **Читать перед.** Новым Prim, Enum, кодеком, событием, командой или View; правкой агрегата,
   профиля Codec, `Core.View`; выбором между агрегатом и представлением.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
@@ -624,6 +624,36 @@ Repo-методы `page/4` возвращают `Pagination.Result`.
 
 Combinators под CQS (`Result.and_then/2`, `Option.map/2` и т.п.). Использовать на границах (web →
 Prim, nullable FK → Prim).
+
+Формы результата названы типами `Core.Result` и `Core.Option`:
+
+| Тип | Форма | Когда |
+|---|---|---|
+| `Result.t(a)` | `{:ok, a} \| {:error, Error.t()}` | значение `a`, ошибка библиотеки — частый случай |
+| `Result.t(a, e)` | `{:ok, a} \| {:error, e}` | причина не `%Error{}`: `:none`, `{code, detail}`, `term()` |
+| `Result.t()` | `Result.t(term(), Error.t())` | значение произвольно |
+| `Result.unit()` | `:ok \| {:error, Error.t()}` | CQS-команда без возвращаемого значения |
+| `Result.unit(e)` | `:ok \| {:error, e}` | то же, причина не `%Error{}` |
+| `Option.t(a)` | `a \| nil` | опциональное значение |
+
+Локальный `@type`, чья форма совпадает с результатом, MUST выражаться этими типами, а не заводить
+форме второе имя: имя результата одно на библиотеку, а параметр называет причину. Тип с третьим
+вариантом (`{:skip, _}` у `Core.PubSub.handler_result`) или объединяющий unit с valued
+(`Core.Helper.Savepoint.result`) MAY оставаться таплом: через типы он длиннее и читается хуже.
+
+```elixir
+# плохо — форма переписана прописью в каждом модуле
+@type result :: :ok | {:error, {code(), detail()}}
+@type to_message :: (message(), metadata() -> {:ok, Message.t()} | {:error, Error.t()})
+
+# хорошо — имя одно, параметр называет причину
+@type result :: Result.unit({code(), detail()})
+@type to_message :: (message(), metadata() -> Result.t(Message.t()))
+```
+
+В `@spec` функции развёрнутая форма MAY оставаться: там она — контракт, читаемый глазами на месте,
+и так записаны спеки repo-методов, `@callback` behaviour'ов и таблицы возвратов `13-repos.md`.
+Правило про второе имя формы касается `@type`, где имя как раз и заводится.
 
 ## Связанные правила
 

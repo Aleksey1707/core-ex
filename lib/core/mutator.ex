@@ -11,9 +11,11 @@ defmodule Core.Mutator do
   читаются одинаково, а список любой из форм разворачивает `Core.Prim`.
   """
 
+  alias Core.Result
+
   @type code :: atom()
   @type detail :: String.t()
-  @type result :: term() | {:ok, term()} | {:error, {code(), detail()}}
+  @type result :: term() | Result.t(term(), {code(), detail()})
   @type mutate_spec ::
           {module(), keyword()}
           | (term() -> result())
