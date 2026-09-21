@@ -9,12 +9,13 @@ defmodule Core.PubSub.MqPublisher do
   alias Core.Error
   alias Core.Helper.Transact
   alias Core.Mq.Message
+  alias Core.Result
 
   defstruct [:writer_module, :writer, :to_message]
 
   @type message :: term()
   @type metadata :: term()
-  @type to_message :: (message(), metadata() -> {:ok, Message.t()} | {:error, Error.t()})
+  @type to_message :: (message(), metadata() -> Result.t(Message.t()))
 
   @type t :: %__MODULE__{
           writer_module: module(),

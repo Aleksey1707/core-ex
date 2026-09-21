@@ -3,16 +3,41 @@ defmodule Core.Result do
   Результат операции: успех со значением (`{:ok, v}`), успех без значения (`:ok`)
   или ошибка (`{:error, reason}`).
 
-  - `{:ok, result} | {:error, reason}` — запросы и операции с payload
-  - `:ok | {:error, reason}` — команды CQS без возвращаемого значения
+  - `t/0`, `t/1`, `t/2` — `{:ok, result} | {:error, reason}`: запросы и операции с payload
+  - `unit/0`, `unit/1` — `:ok | {:error, reason}`: команды CQS без возвращаемого значения
   """
 
   alias Core.Error
   alias Core.Exc
+  alias Core.Option
+
+  @typedoc """
+  Результат со значением: успех несёт `a`, ошибка — причину `e`.
+
+  Двухпараметрическая форма берётся там, где причина не `%Error{}`: комбинаторы этого модуля
+  пропускают reason любой формы, `Core.Option.to_result/1` отдаёт `:none`, `Core.Validator` —
+  `{code, detail}`.
+  """
+  @type t(a, e) :: {:ok, a} | {:error, e}
+
+  @typedoc "Результат со значением `a` и ошибкой библиотеки — частый случай на границах домена."
+  @type t(a) :: t(a, Error.t())
+
+  @typedoc "Результат с произвольным значением и ошибкой библиотеки."
+  @type t :: t(term(), Error.t())
+
+  @typedoc """
+  Unit-результат CQS-команды: успех без значения или ошибка причины `e`.
+
+  Параметризованная форма — по тому же поводу, что у `t/2`: причина не `%Error{}`.
+  """
+  @type unit(e) :: :ok | {:error, e}
+
+  @typedoc "Unit-результат с ошибкой библиотеки."
+  @type unit :: unit(Error.t())
 
   @doc "Применить функцию к значению успеха."
-  @spec map({:ok, a} | {:error, term()}, (a -> b)) :: {:ok, b} | {:error, term()}
-        when a: var, b: var
+  @spec map(t(a, e), (a -> b)) :: t(b, e) when a: var, b: var, e: var
 
   def map({:ok, value}, fun), do: ok(fun.(value))
   def map({:error, _reason} = err, _fun), do: err
@@ -22,8 +47,7 @@ defmodule Core.Result do
 
   Для обогащения ошибки на границе слоя: `Result.map_error(res, &Error.wrap(outer, &1))`.
   """
-  @spec map_error({:ok, a} | :ok | {:error, e}, (e -> f)) :: {:ok, a} | :ok | {:error, f}
-        when a: var, e: var, f: var
+  @spec map_error(t(a, e) | unit(e), (e -> f)) :: t(a, f) | unit(f) when a: var, e: var, f: var
 
   def map_error({:error, reason}, fun), do: {:error, fun.(reason)}
   def map_error(ok, _fun), do: ok
@@ -33,8 +57,7 @@ defmodule Core.Result do
 
   Для логирования в конвейере, где значение менять не нужно.
   """
-  @spec tap({:ok, a} | :ok | {:error, e}, (a -> any())) :: {:ok, a} | :ok | {:error, e}
-        when a: var, e: var
+  @spec tap(t(a, e) | unit(e), (a -> any())) :: t(a, e) | unit(e) when a: var, e: var
 
   def tap({:ok, value} = result, fun) do
     _ = fun.(value)
@@ -44,35 +67,32 @@ defmodule Core.Result do
   def tap(other, _fun), do: other
 
   @doc "Как `map/2`, иначе вернуть default."
-  @spec map_or({:ok, a} | {:error, term()}, b, (a -> b)) :: b when a: var, b: var
+  @spec map_or(t(a, term()), b, (a -> b)) :: b when a: var, b: var
 
   def map_or({:ok, value}, _default, fun), do: fun.(value)
   def map_or({:error, _reason}, default, _fun), do: default
 
   @doc "Как `map/2`, иначе вычислить default из reason."
-  @spec map_or_else({:ok, a} | {:error, e}, (e -> b), (a -> b)) :: b when a: var, b: var, e: var
+  @spec map_or_else(t(a, e), (e -> b), (a -> b)) :: b when a: var, b: var, e: var
 
   def map_or_else({:ok, value}, _default_fun, fun), do: fun.(value)
   def map_or_else({:error, reason}, default_fun, _fun), do: default_fun.(reason)
 
   @doc "Если первый успешен (`:ok` или `{:ok, _}`), вернуть второй; иначе — ошибку."
-  @spec and_(:ok | {:ok, term()} | {:error, term()}, result) :: result when result: var
+  @spec and_(t(term(), term()) | unit(term()), result) :: result when result: var
 
   def and_(:ok, other), do: other
   def and_({:ok, _value}, other), do: other
   def and_({:error, _reason} = err, _other), do: err
 
   @doc "Если успех со значением — применить fun."
-  @spec and_then({:ok, a} | {:error, term()}, (a -> {:ok, b} | {:error, term()})) ::
-          {:ok, b} | {:error, term()}
-        when a: var, b: var
+  @spec and_then(t(a, e), (a -> t(b, f))) :: t(b, e | f) when a: var, b: var, e: var, f: var
 
   def and_then({:ok, value}, fun), do: fun.(value)
   def and_then({:error, _reason} = err, _fun), do: err
 
   @doc "Применить fun к каждому элементу; на первой ошибке — halt. Порядок сохраняется."
-  @spec traverse([a], (a -> {:ok, b} | {:error, e})) :: {:ok, [b]} | {:error, e}
-        when a: var, b: var, e: var
+  @spec traverse([a], (a -> t(b, e))) :: t([b], e) when a: var, b: var, e: var
 
   def traverse(list, fun) when is_list(list) and is_function(fun, 1) do
     list
@@ -104,9 +124,7 @@ defmodule Core.Result do
         )
       end
   """
-  @spec traverse_all([a], (a -> {:ok, b} | {:error, Error.t()})) ::
-          {:ok, [b]} | {:error, [Error.t()]}
-        when a: var, b: var
+  @spec traverse_all([a], (a -> t(b))) :: t([b], [Error.t()]) when a: var, b: var
 
   def traverse_all(list, fun) when is_list(list) and is_function(fun, 1) do
     {values, errors} =
@@ -123,22 +141,14 @@ defmodule Core.Result do
   end
 
   @doc "Если успех — вернуть его; иначе — other."
-  @spec or_(
-          :ok | {:ok, a} | {:error, term()},
-          :ok | {:ok, a} | {:error, term()}
-        ) :: :ok | {:ok, a} | {:error, term()}
-        when a: var
+  @spec or_(t(a, e) | unit(e), t(a, e) | unit(e)) :: t(a, e) | unit(e) when a: var, e: var
 
   def or_(:ok, _other), do: :ok
   def or_({:ok, _value} = ok, _other), do: ok
   def or_({:error, _reason}, other), do: other
 
   @doc "Если успех — вернуть его; иначе вызвать fun."
-  @spec or_else(
-          :ok | {:ok, a} | {:error, term()},
-          (-> :ok | {:ok, a} | {:error, term()})
-        ) :: :ok | {:ok, a} | {:error, term()}
-        when a: var
+  @spec or_else(t(a, e) | unit(e), (-> t(a, e) | unit(e))) :: t(a, e) | unit(e) when a: var, e: var
 
   def or_else(:ok, _fun), do: :ok
   def or_else({:ok, _value} = ok, _fun), do: ok
@@ -150,7 +160,7 @@ defmodule Core.Result do
   - `{:error, %Error{}}` → `raise Exc, error`
   - иной `{:error, reason}` → `ArgumentError`
   """
-  @spec unwrap!({:ok, a} | {:error, term()}) :: a when a: var
+  @spec unwrap!(t(a, term())) :: a when a: var
 
   def unwrap!({:ok, value}), do: value
   def unwrap!({:error, %Error{} = error}), do: raise(Exc, error)
@@ -160,19 +170,19 @@ defmodule Core.Result do
   end
 
   @doc "Извлечь значение или raise message."
-  @spec expect!({:ok, a} | {:error, term()}, String.t()) :: a when a: var
+  @spec expect!(t(a, term()), String.t()) :: a when a: var
 
   def expect!({:ok, value}, _message), do: value
   def expect!({:error, _reason}, message) when is_binary(message), do: raise(message)
 
   @doc "Значение успеха или default."
-  @spec unwrap_or({:ok, a} | {:error, term()}, a) :: a when a: var
+  @spec unwrap_or(t(a, term()), a) :: a when a: var
 
   def unwrap_or({:ok, value}, _default), do: value
   def unwrap_or({:error, _reason}, default), do: default
 
   @doc "Значение успеха или результат fun."
-  @spec unwrap_or_else({:ok, a} | {:error, term()}, (-> a)) :: a when a: var
+  @spec unwrap_or_else(t(a, term()), (-> a)) :: a when a: var
 
   def unwrap_or_else({:ok, value}, _fun), do: value
   def unwrap_or_else({:error, _reason}, fun) when is_function(fun, 0), do: fun.()
@@ -193,21 +203,21 @@ defmodule Core.Result do
   def error(reason), do: {:error, reason}
 
   @doc "Успех (`:ok` или `{:ok, _}`)?"
-  @spec ok?(:ok | {:ok, term()} | {:error, term()}) :: boolean()
+  @spec ok?(t(term(), term()) | unit(term())) :: boolean()
 
   def ok?(:ok), do: true
   def ok?({:ok, _value}), do: true
   def ok?({:error, _reason}), do: false
 
   @doc "Ошибка?"
-  @spec error?(:ok | {:ok, term()} | {:error, term()}) :: boolean()
+  @spec error?(t(term(), term()) | unit(term())) :: boolean()
 
   def error?({:error, _reason}), do: true
   def error?(:ok), do: false
   def error?({:ok, _value}), do: false
 
   @doc "В Option (`a | nil`)."
-  @spec to_option({:ok, a} | {:error, term()}) :: a | nil when a: var
+  @spec to_option(t(a, term())) :: Option.t(a) when a: var
 
   def to_option({:ok, value}), do: value
   def to_option({:error, _reason}), do: nil

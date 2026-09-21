@@ -21,13 +21,13 @@ defmodule Core.Es.Aggregate.Process.Execution do
   Исход команды: состояние агрегата после commit, её ошибка или `:expired` — дедлайн истёк до
   commit, и транзакция откатилась.
   """
-  @type outcome :: {:ok, struct()} | {:error, term()} | :expired
+  @type outcome :: Result.t(struct(), term()) | :expired
 
   @typedoc """
   Результат команды для вызывающего: версия агрегата после commit — `nil`, если команда на пустом
   потоке не дала событий, — или её ошибка.
   """
-  @type result :: {:ok, Version.t() | nil} | {:error, term()}
+  @type result :: Result.t(Version.t() | nil, term())
 
   # ===== исполнение =====
 
