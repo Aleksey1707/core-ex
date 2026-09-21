@@ -7,6 +7,12 @@ defmodule Core.Web.ResponseTest do
 
   require Error
 
+  # Process.get/1 → dynamic(); намеренный misuse пустого списка без type warning
+  defp empty_messages do
+    Process.put({__MODULE__, :empty_messages}, [])
+    Process.get({__MODULE__, :empty_messages})
+  end
+
   test "коды конверта round-trip по всем значениям" do
     for value <- Response.Code.values() do
       assert {:ok, ^value} = Response.Code.from_code(Response.Code.to_code(value))
@@ -47,6 +53,46 @@ defmodule Core.Web.ResponseTest do
              %{code: 2, messages: ["нельзя"], data: %{field: "name"}}
   end
 
+  test "error кладёт список сообщений как есть" do
+    assert Response.error(:domain_error, ["имя пусто", "срок в прошлом"]) ==
+             %{code: 2, messages: ["имя пусто", "срок в прошлом"]}
+  end
+
+  test "error со списком сообщений и данными" do
+    assert Response.error(:domain_error, ["имя пусто", "срок в прошлом"], %{field: "name"}) ==
+             %{code: 2, messages: ["имя пусто", "срок в прошлом"], data: %{field: "name"}}
+  end
+
+  test "error с пустым списком — FunctionClauseError" do
+    empty = empty_messages()
+
+    assert_raise FunctionClauseError, fn -> Response.error(:domain_error, empty) end
+
+    assert_raise FunctionClauseError, fn ->
+      Response.error(:domain_error, empty, %{field: "name"})
+    end
+  end
+
+  test "error со списком не-строк — FunctionClauseError" do
+    assert_raise FunctionClauseError, fn -> Response.error(:domain_error, [:not_a_string]) end
+  end
+
+  test "error принимает состав множества ошибок" do
+    error =
+      Error.many(
+        code: :invalid,
+        ns: :test,
+        message: "форма невалидна",
+        errors: [
+          Error.domain(code: :blank, ns: :test, message: "имя пусто"),
+          Error.domain(code: :past, ns: :test, message: "срок в прошлом")
+        ]
+      )
+
+    assert Response.error(:domain_error, Error.messages(error)) ==
+             %{code: 2, messages: ["имя пусто", "срок в прошлом"]}
+  end
+
   describe "свой словарь кодов" do
     defmodule Code do
       @moduledoc """
@@ -84,6 +130,24 @@ defmodule Core.Web.ResponseTest do
 
       assert CustomResponse.error(:not_found, "нет", %{id: "1"}) ==
                %{code: 10, messages: ["нет"], data: %{id: "1"}}
+    end
+
+    test "конверт потребителя принимает список сообщений" do
+      assert CustomResponse.error(:domain_error, ["имя пусто", "срок в прошлом"]) ==
+               %{code: 2, messages: ["имя пусто", "срок в прошлом"]}
+
+      assert CustomResponse.error(:not_found, ["нет"], %{id: "1"}) ==
+               %{code: 10, messages: ["нет"], data: %{id: "1"}}
+    end
+
+    test "конверт потребителя с пустым списком — FunctionClauseError" do
+      empty = empty_messages()
+
+      assert_raise FunctionClauseError, fn -> CustomResponse.error(:domain_error, empty) end
+
+      assert_raise FunctionClauseError, fn ->
+        CustomResponse.error(:domain_error, empty, %{id: "1"})
+      end
     end
 
     test "код вне словаря — FunctionClauseError" do
