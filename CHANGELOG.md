@@ -53,25 +53,38 @@
   Option.unwrap_or_else(value, fn -> raise "нет значения" end)
   ```
 
-- **`Option.or_else/2` и `Option.unwrap_or_else/2` требуют нуль-арный колбэк на обеих формах входа**
-  (`Core.Option`). Guard `is_function(fun, 0)` стоял только на клозе `nil`, а вторая клоза брала
-  второй аргумент любой формы (`def or_else(value, _fun), do: value`) — и `nil` проваливался в неё:
-  `Option.or_else(nil, fn _ -> default end)` молча возвращал `nil`, не вызвав колбэк, вместо того
-  чтобы отвергнуть неверную арность. Guard дописан во вторую клозу обеих функций — колбэк не нулевой
-  арности теперь даёт `FunctionClauseError` на любом входе, как у соседней `Option.map/2`, где
-  `is_function(fun, 1)` стоит на обеих клозах. Тёзки из `Core.Result` арность проверяют только на
-  ветке `{:error, _}`, где колбэк и вызывается: `Result.or_else(:ok, fn _ -> … end)` по-прежнему
-  отдаёт `:ok`. Поведение `Core.Option` на верном колбэке не изменилось.
+- **Колбэк проверяется на арность на каждой клозе обоих модулей результата** (`Core.Result`,
+  `Core.Option`). Guard стоял только там, где колбэк вызывается, и в разных функциях по-разному:
+  `Result.or_else/2` и `Result.unwrap_or_else/2` проверяли арность на ветке `{:error, _}`,
+  `Result.map/2`, `map_error/2`, `tap/2`, `map_or/3`, `map_or_else/3` и `and_then/2` — нигде, а у
+  `Option.or_else/2` и `Option.unwrap_or_else/2` `is_function(fun, 0)` стоял только на клозе `nil`,
+  и `nil` проваливался во вторую клозу (`def or_else(value, _fun), do: value`). Неверный колбэк
+  проходил и сборку, и рантайм: `Option.or_else(nil, fn _ -> default end)` молча отдавал `nil`, не
+  вызвав колбэк, `Result.or_else(:ok, fn _ -> … end)` — `:ok`, `Result.map({:error, :e}, fn -> … end)`
+  — `{:error, :e}`, `Result.map_error(:ok, :not_a_function)` — `:ok`; отказ наступал, только если
+  исполнение доходило до клозы с вызовом, и это был `BadArityError`, а не `FunctionClauseError`.
+  Теперь guard арности стоит на каждой клозе каждой функции обоих модулей, принимающей колбэк:
+  домен аргумента не зависит от формы результата на входе (`20-agreements.md`, «Домен функции и
+  инференс типов»). Колбэк неверной арности и не-функция дают `FunctionClauseError`, а на call site
+  с литеральным колбэком — предупреждение инференса, то есть падение сборки на
+  `mix compile --warnings-as-errors`. Поведение на верном колбэке, `@spec` и `@doc` не изменились;
+  норма — `11-domain.md`, «Result / Option».
 
-  Как править код потребителя: `grep -rn "Option.or_else(\|Option.unwrap_or_else("` — колбэк должен
-  быть нуль-арным.
+  Как править код потребителя: `grep -rn "Result\.\(map\|map_error\|tap\|map_or\|map_or_else\)("`,
+  `grep -rn "Result\.\(and_then\|or_else\|unwrap_or_else\)("`,
+  `grep -rn "Option\.\(map\|or_else\|unwrap_or_else\)("` — арность колбэка должна совпадать со
+  спекой: нуль-арный у `or_else/2` и `unwrap_or_else/2`, одноарный — у остальных.
 
   ```elixir
-  # было — арность не та, вызов молча отдавал nil
+  # было — арность не та, вызов молча отдавал вход
   Option.or_else(value, fn _ -> default end)
+  Result.or_else(res, fn _reason -> fallback end)
+  Result.map(res, fn -> default end)
 
   # стало
   Option.or_else(value, fn -> default end)
+  Result.or_else(res, fn -> fallback end)
+  Result.map(res, fn value -> transform(value) end)
   ```
 
 ### Новое
