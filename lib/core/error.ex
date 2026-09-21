@@ -36,7 +36,13 @@ defmodule Core.Error do
   `ArgumentError`.
 
   Оборачивание: `wrap/2` или `parent:` в attrs.
-  Обход цепочки: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2`, `format_chain/1`.
+  Обход цепочки: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2`.
+
+  Граница обхода: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2` и `Enumerable` читают
+  **только** цепочку причин — состав множества им не виден (`has?/2` по коду элемента даёт
+  `false`, `Enum.count/1` считает цепочку). Состав читается из поля `errors`: `messages/1` —
+  тексты элементов для клиента, `format_chain/1` — печать `"outer (e1 | e2): root"` для лога.
+  Решение о форме и цена — ADR-0021.
 
   `%Error{}` реализует `Enumerable`: итерация = cause-цепочка `[outer, …, root]`
   (`Enum.find/2`, `for`, `in` и т.п.). Обратная сторона: `%Error{}`, попавший в `Enum.*`
@@ -369,11 +375,16 @@ defmodule Core.Error do
   def find(%__MODULE__{} = error, fun) when is_function(fun, 1),
     do: Enum.find(error, fun)
 
-  @doc "Сообщения цепочки через `\": \"` (для логов, не для HTTP-клиента)."
+  @doc """
+  Сообщения цепочки через `\": \"` (для логов, не для HTTP-клиента).
+
+  Узел с непустым `errors` печатается вместе с составом: `"outer (e1 | e2): root"`;
+  элемент состава — своей цепочкой причин. У ошибки с пустым `errors` вывод прежний.
+  """
   @spec format_chain(t()) :: String.t()
 
   def format_chain(%__MODULE__{} = error),
-    do: Enum.map_join(error, ": ", &to_string/1)
+    do: Enum.map_join(error, ": ", &format_node/1)
 
   # ---
 
@@ -393,6 +404,24 @@ defmodule Core.Error do
   defp validate_filter_key!(other) do
     raise ArgumentError, "критерий has? должен быть keyword-парой, получено: #{inspect(other)}"
   end
+
+  defp format_node(%__MODULE__{errors: []} = error), do: to_string(error)
+
+  defp format_node(%__MODULE__{errors: errors} = error),
+    do: "#{error} (#{Enum.map_join(errors, " | ", &format_chain/1)})"
+
+  # ===== состав =====
+
+  @doc """
+  Тексты для клиента: у контейнера — `to_string/1` каждого элемента в порядке состава,
+  у обычной ошибки — `[to_string(error)]`.
+
+  Цепочку причин не читает: наружу уходит то, что относится к самой ошибке.
+  """
+  @spec messages(t()) :: [String.t()]
+
+  def messages(%__MODULE__{errors: []} = error), do: [to_string(error)]
+  def messages(%__MODULE__{errors: [_ | _] = errors}), do: Enum.map(errors, &to_string/1)
 
   defimpl String.Chars do
     @impl true
