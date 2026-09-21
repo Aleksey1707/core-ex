@@ -25,14 +25,40 @@ defmodule Core.ResultTest do
     assert Result.map(Result.ok(1), &Result.ok(&1 + 1)) == {:ok, {:ok, 2}}
   end
 
+  test "map/2 отвергает колбэк чужой арности на обеих клозах" do
+    fun = dyn(fn -> :x end)
+
+    assert_raise FunctionClauseError, fn -> Result.map(Result.ok(1), fun) end
+    assert_raise FunctionClauseError, fn -> Result.map(Result.error(:e), fun) end
+  end
+
   test "map_or/3 returns bare value" do
     assert Result.map_or(Result.ok(1), 0, &(&1 + 1)) == 2
     assert Result.map_or(Result.error(:e), 0, &(&1 + 1)) == 0
   end
 
+  test "map_or/3 отвергает колбэк чужой арности на обеих клозах" do
+    fun = dyn(fn -> :x end)
+
+    assert_raise FunctionClauseError, fn -> Result.map_or(Result.ok(1), 0, fun) end
+    assert_raise FunctionClauseError, fn -> Result.map_or(Result.error(:e), 0, fun) end
+  end
+
   test "map_or_else/3 returns bare value and uses reason" do
     assert Result.map_or_else(Result.ok(1), fn _ -> 0 end, &(&1 + 1)) == 2
     assert Result.map_or_else(Result.error(:e), &to_string/1, &(&1 + 1)) == "e"
+  end
+
+  test "map_or_else/3 отвергает колбэк чужой арности в обеих позициях и на обеих клозах" do
+    fun = dyn(fn -> :x end)
+
+    assert_raise FunctionClauseError, fn -> Result.map_or_else(Result.ok(1), fn _ -> 0 end, fun) end
+    assert_raise FunctionClauseError, fn -> Result.map_or_else(Result.ok(1), fun, &(&1 + 1)) end
+    assert_raise FunctionClauseError, fn -> Result.map_or_else(Result.error(:e), fun, &(&1 + 1)) end
+
+    assert_raise FunctionClauseError, fn ->
+      Result.map_or_else(Result.error(:e), &to_string/1, fun)
+    end
   end
 
   test "and_/2" do
@@ -48,6 +74,13 @@ defmodule Core.ResultTest do
     assert Result.and_then(Result.ok(1), &Result.ok(&1 + 1)) == Result.ok(2)
     assert Result.and_then(Result.error(:e), &Result.ok(&1 + 1)) == Result.error(:e)
     assert Result.and_then(Result.ok(1), fn _value -> Result.error(:e) end) == Result.error(:e)
+  end
+
+  test "and_then/2 отвергает колбэк чужой арности на обеих клозах" do
+    fun = dyn(fn -> Result.ok(2) end)
+
+    assert_raise FunctionClauseError, fn -> Result.and_then(Result.ok(1), fun) end
+    assert_raise FunctionClauseError, fn -> Result.and_then(Result.error(:e), fun) end
   end
 
   test "traverse/2 preserves order and empty list" do
@@ -170,10 +203,13 @@ defmodule Core.ResultTest do
     assert Result.unwrap_or_else(Result.error(:e), fn -> 0 end) == 0
   end
 
-  test "or_else/2 и unwrap_or_else/2 отвергают колбэк чужой арности на ошибке" do
+  test "or_else/2 и unwrap_or_else/2 отвергают колбэк чужой арности на каждой форме входа" do
     fun = dyn(fn _reason -> Result.ok(2) end)
 
+    assert_raise FunctionClauseError, fn -> Result.or_else(Result.ok(), fun) end
+    assert_raise FunctionClauseError, fn -> Result.or_else(Result.ok(1), fun) end
     assert_raise FunctionClauseError, fn -> Result.or_else(Result.error(:e), fun) end
+    assert_raise FunctionClauseError, fn -> Result.unwrap_or_else(Result.ok(1), fun) end
     assert_raise FunctionClauseError, fn -> Result.unwrap_or_else(Result.error(:e), fun) end
   end
 
@@ -217,6 +253,14 @@ defmodule Core.ResultTest do
     assert Result.map_error({:error, :boom}, &{:wrapped, &1}) == {:error, {:wrapped, :boom}}
   end
 
+  test "map_error/2 отвергает колбэк чужой арности на всех трёх клозах" do
+    fun = dyn(fn -> :other end)
+
+    assert_raise FunctionClauseError, fn -> Result.map_error({:error, :boom}, fun) end
+    assert_raise FunctionClauseError, fn -> Result.map_error({:ok, 1}, fun) end
+    assert_raise FunctionClauseError, fn -> Result.map_error(:ok, fun) end
+  end
+
   test "tap/2 выполняет эффект и возвращает исходный результат" do
     parent = self()
 
@@ -228,6 +272,14 @@ defmodule Core.ResultTest do
 
     assert Result.tap(:ok, &send(parent, {:seen, &1})) == :ok
     refute_received {:seen, _}
+  end
+
+  test "tap/2 отвергает колбэк чужой арности на всех трёх клозах" do
+    fun = dyn(fn -> :effect end)
+
+    assert_raise FunctionClauseError, fn -> Result.tap({:ok, 42}, fun) end
+    assert_raise FunctionClauseError, fn -> Result.tap({:error, :boom}, fun) end
+    assert_raise FunctionClauseError, fn -> Result.tap(:ok, fun) end
   end
 
   test "map_error/2 and tap/2 reject alien term at runtime" do

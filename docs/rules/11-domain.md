@@ -722,6 +722,28 @@ Result.traverse(Map.to_list(params), &load_param(&1, codec))
 Проверяется: `test/core/result_test.exs`, тесты «traverse/2 rejects non-list at runtime» и
 «traverse_all/2 rejects non-list at runtime».
 
+Guard арности MUST стоять на **каждой** клозе функции и на каждом аргументе, который контракт
+объявляет колбэком (у `map_or_else/3` их два), а не только там, где колбэк вызывается:
+`is_function(fun, 0)` — у нуль-арных (`or_else/2`, `unwrap_or_else/2` обоих модулей),
+`is_function(fun, 1)` — у остальных. Домен аргумента не зависит от формы результата на входе:
+колбэк чужой арности недопустим по `@spec` на любой ветке. Без guard'а на клозе, которая колбэк
+не зовёт, неверная арность проходит и сборку, и рантайм — функция молча отдаёт свой обычный
+результат; с ним литеральный колбэк даёт предупреждение инференса на call site, а спрятанный за
+`dynamic()` — `FunctionClauseError`.
+
+```elixir
+# плохо — guard только на клозе с вызовом: or_else(:ok, fn _ -> ... end) молча отдаёт :ok
+def or_else(:ok, _fun), do: :ok
+def or_else({:error, _reason}, fun) when is_function(fun, 0), do: fun.()
+
+# хорошо — домен аргумента один на все формы входа
+def or_else(:ok, fun) when is_function(fun, 0), do: :ok
+def or_else({:error, _reason}, fun) when is_function(fun, 0), do: fun.()
+```
+
+Проверяется: `test/core/result_test.exs` и `test/core/option_test.exs`, тесты «отвергает колбэк
+чужой арности»; снятие guard'а с любой клозы без вызова валит прогон.
+
 Набор функций `Core.Result` делится по форме успеха на входе: функция, которой значение нужно,
 на `:ok` даёт `FunctionClauseError`. Состав групп — таблица в `@moduledoc Core.Result`.
 

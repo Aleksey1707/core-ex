@@ -54,8 +54,8 @@ defmodule Core.Result do
   """
   @spec map(t(a, e), (a -> b)) :: t(b, e) when a: var, b: var, e: var
 
-  def map({:ok, value}, fun), do: ok(fun.(value))
-  def map({:error, _reason} = err, _fun), do: err
+  def map({:ok, value}, fun) when is_function(fun, 1), do: ok(fun.(value))
+  def map({:error, _reason} = err, fun) when is_function(fun, 1), do: err
 
   @doc """
   Применить функцию к причине ошибки (успех проходит как есть).
@@ -64,9 +64,9 @@ defmodule Core.Result do
   """
   @spec map_error(t(a, e) | unit(e), (e -> f)) :: t(a, f) | unit(f) when a: var, e: var, f: var
 
-  def map_error({:error, reason}, fun), do: {:error, fun.(reason)}
-  def map_error({:ok, _value} = ok, _fun), do: ok
-  def map_error(:ok, _fun), do: :ok
+  def map_error({:error, reason}, fun) when is_function(fun, 1), do: {:error, fun.(reason)}
+  def map_error({:ok, _value} = ok, fun) when is_function(fun, 1), do: ok
+  def map_error(:ok, fun) when is_function(fun, 1), do: :ok
 
   @doc """
   Выполнить побочный эффект над значением успеха и вернуть исходный результат.
@@ -75,25 +75,30 @@ defmodule Core.Result do
   """
   @spec tap(t(a, e) | unit(e), (a -> any())) :: t(a, e) | unit(e) when a: var, e: var
 
-  def tap({:ok, value} = result, fun) do
+  def tap({:ok, value} = result, fun) when is_function(fun, 1) do
     _ = fun.(value)
     result
   end
 
-  def tap({:error, _reason} = err, _fun), do: err
-  def tap(:ok, _fun), do: :ok
+  def tap({:error, _reason} = err, fun) when is_function(fun, 1), do: err
+  def tap(:ok, fun) when is_function(fun, 1), do: :ok
 
   @doc "Как `map/2`, иначе вернуть default."
   @spec map_or(t(a, term()), b, (a -> b)) :: b when a: var, b: var
 
-  def map_or({:ok, value}, _default, fun), do: fun.(value)
-  def map_or({:error, _reason}, default, _fun), do: default
+  def map_or({:ok, value}, _default, fun) when is_function(fun, 1), do: fun.(value)
+  def map_or({:error, _reason}, default, fun) when is_function(fun, 1), do: default
 
   @doc "Как `map/2`, иначе вычислить default из reason."
   @spec map_or_else(t(a, e), (e -> b), (a -> b)) :: b when a: var, b: var, e: var
 
-  def map_or_else({:ok, value}, _default_fun, fun), do: fun.(value)
-  def map_or_else({:error, reason}, default_fun, _fun), do: default_fun.(reason)
+  def map_or_else({:ok, value}, default_fun, fun)
+      when is_function(default_fun, 1) and is_function(fun, 1),
+      do: fun.(value)
+
+  def map_or_else({:error, reason}, default_fun, fun)
+      when is_function(default_fun, 1) and is_function(fun, 1),
+      do: default_fun.(reason)
 
   @doc "Если первый успешен (`:ok` или `{:ok, _}`), вернуть второй; иначе — ошибку."
   @spec and_(t(term(), term()) | unit(term()), result) :: result when result: var
@@ -105,8 +110,8 @@ defmodule Core.Result do
   @doc "Если успех со значением — применить fun."
   @spec and_then(t(a, e), (a -> t(b, f))) :: t(b, e | f) when a: var, b: var, e: var, f: var
 
-  def and_then({:ok, value}, fun), do: fun.(value)
-  def and_then({:error, _reason} = err, _fun), do: err
+  def and_then({:ok, value}, fun) when is_function(fun, 1), do: fun.(value)
+  def and_then({:error, _reason} = err, fun) when is_function(fun, 1), do: err
 
   @doc "Применить fun к каждому элементу; на первой ошибке — halt. Порядок сохраняется."
   @spec traverse([a], (a -> t(b, e))) :: t([b], e) when a: var, b: var, e: var
@@ -167,8 +172,8 @@ defmodule Core.Result do
   @doc "Если успех — вернуть его; иначе вызвать fun."
   @spec or_else(t(a, e) | unit(e), (-> t(a, e) | unit(e))) :: t(a, e) | unit(e) when a: var, e: var
 
-  def or_else(:ok, _fun), do: :ok
-  def or_else({:ok, _value} = ok, _fun), do: ok
+  def or_else(:ok, fun) when is_function(fun, 0), do: :ok
+  def or_else({:ok, _value} = ok, fun) when is_function(fun, 0), do: ok
   def or_else({:error, _reason}, fun) when is_function(fun, 0), do: fun.()
 
   @doc """
@@ -195,7 +200,7 @@ defmodule Core.Result do
   @doc "Значение успеха или результат fun."
   @spec unwrap_or_else(t(a, term()), (-> a)) :: a when a: var
 
-  def unwrap_or_else({:ok, value}, _fun), do: value
+  def unwrap_or_else({:ok, value}, fun) when is_function(fun, 0), do: value
   def unwrap_or_else({:error, _reason}, fun) when is_function(fun, 0), do: fun.()
 
   @doc "Unit-успех без значения (CQS-команда)."
