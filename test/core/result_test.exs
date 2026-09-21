@@ -8,16 +8,10 @@ defmodule Core.ResultTest do
 
   require Error
 
-  # Process.get/1 → dynamic(); намеренный misuse unit без type warning
-  defp unit_ok do
-    Process.put({__MODULE__, :unit_ok}, Result.ok())
-    Process.get({__MODULE__, :unit_ok})
-  end
-
-  # Process.get/1 → dynamic(); намеренный misuse чужим термом без type warning
-  defp alien do
-    Process.put({__MODULE__, :alien}, :whatever)
-    Process.get({__MODULE__, :alien})
+  # Process.get/1 → dynamic(); намеренный misuse без предупреждения инференса
+  defp dyn(term) do
+    Process.put({__MODULE__, :dyn}, term)
+    Process.get({__MODULE__, :dyn})
   end
 
   defp domain_error(n), do: Error.domain(code: :invalid, ns: :test, message: "e#{n}")
@@ -25,6 +19,10 @@ defmodule Core.ResultTest do
   test "map/2" do
     assert Result.map(Result.ok(1), &(&1 + 1)) == Result.ok(2)
     assert Result.map(Result.error(:e), &(&1 + 1)) == Result.error(:e)
+  end
+
+  test "map/2 вкладывает результат колбэка как значение" do
+    assert Result.map(Result.ok(1), &Result.ok(&1 + 1)) == {:ok, {:ok, 2}}
   end
 
   test "map_or/3 returns bare value" do
@@ -42,11 +40,14 @@ defmodule Core.ResultTest do
     assert Result.and_(Result.error(:e), Result.ok(2)) == Result.error(:e)
     assert Result.and_(Result.ok(), Result.ok(2)) == Result.ok(2)
     assert Result.and_(Result.ok(), Result.ok()) == Result.ok()
+    assert Result.and_(Result.ok(1), Result.error(:e)) == Result.error(:e)
+    assert Result.and_(Result.ok(), Result.error(:e)) == Result.error(:e)
   end
 
   test "and_then/2" do
     assert Result.and_then(Result.ok(1), &Result.ok(&1 + 1)) == Result.ok(2)
     assert Result.and_then(Result.error(:e), &Result.ok(&1 + 1)) == Result.error(:e)
+    assert Result.and_then(Result.ok(1), fn _value -> Result.error(:e) end) == Result.error(:e)
   end
 
   test "traverse/2 preserves order and empty list" do
@@ -74,9 +75,7 @@ defmodule Core.ResultTest do
   end
 
   test "traverse/2 rejects non-list at runtime" do
-    # Process.get/1 → dynamic(); намеренный misuse без type warning
-    Process.put({__MODULE__, :not_a_list}, :not_a_list)
-    not_a_list = Process.get({__MODULE__, :not_a_list})
+    not_a_list = dyn(:not_a_list)
 
     assert_raise FunctionClauseError, fn ->
       Result.traverse(not_a_list, &Result.ok/1)
@@ -117,6 +116,13 @@ defmodule Core.ResultTest do
              Result.error([{:bad, 1}, {:bad, 2}])
   end
 
+  test "traverse/2 и traverse_all/2 отвергают колбэк чужой арности" do
+    fun = dyn(fn -> Result.ok(1) end)
+
+    assert_raise FunctionClauseError, fn -> Result.traverse([1], fun) end
+    assert_raise FunctionClauseError, fn -> Result.traverse_all([1], fun) end
+  end
+
   test "or_/2" do
     assert Result.or_(Result.ok(1), Result.ok(2)) == Result.ok(1)
     assert Result.or_(Result.error(:e), Result.ok(2)) == Result.ok(2)
@@ -133,6 +139,7 @@ defmodule Core.ResultTest do
 
   test "unwrap!/1" do
     assert Result.unwrap!(Result.ok(1)) == 1
+    assert Result.unwrap!(Result.ok(nil)) == nil
 
     assert_raise ArgumentError, fn ->
       Result.unwrap!(Result.error(:e))
@@ -153,6 +160,13 @@ defmodule Core.ResultTest do
   test "unwrap_or_else/2" do
     assert Result.unwrap_or_else(Result.ok(1), fn -> 0 end) == 1
     assert Result.unwrap_or_else(Result.error(:e), fn -> 0 end) == 0
+  end
+
+  test "or_else/2 и unwrap_or_else/2 отвергают колбэк чужой арности на ошибке" do
+    fun = dyn(fn _reason -> Result.ok(2) end)
+
+    assert_raise FunctionClauseError, fn -> Result.or_else(Result.error(:e), fun) end
+    assert_raise FunctionClauseError, fn -> Result.unwrap_or_else(Result.error(:e), fun) end
   end
 
   test "ok/0, ok/1, error/1" do
@@ -177,7 +191,7 @@ defmodule Core.ResultTest do
   end
 
   test "value ops reject unit at runtime" do
-    u = unit_ok()
+    u = dyn(Result.ok())
 
     assert_raise FunctionClauseError, fn -> Result.map(u, &(&1 + 1)) end
     assert_raise FunctionClauseError, fn -> Result.map_or(u, 0, &(&1 + 1)) end
@@ -209,7 +223,7 @@ defmodule Core.ResultTest do
   end
 
   test "map_error/2 and tap/2 reject alien term at runtime" do
-    alien = alien()
+    alien = dyn(:whatever)
 
     assert_raise FunctionClauseError, fn -> Result.map_error(alien, fn _ -> :other end) end
     assert_raise FunctionClauseError, fn -> Result.tap(alien, & &1) end

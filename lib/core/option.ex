@@ -38,7 +38,7 @@ defmodule Core.Option do
   @spec or_else(t(a), (-> t(a))) :: t(a) when a: var
 
   def or_else(nil, fun) when is_function(fun, 0), do: fun.()
-  def or_else(value, _fun), do: value
+  def or_else(value, fun) when is_function(fun, 0), do: value
 
   @doc "Значение или default, если `nil`."
   @spec unwrap_or(t(a), a) :: a when a: var
@@ -50,7 +50,7 @@ defmodule Core.Option do
   @spec unwrap_or_else(t(a), (-> a)) :: a when a: var
 
   def unwrap_or_else(nil, fun) when is_function(fun, 0), do: fun.()
-  def unwrap_or_else(value, _fun), do: value
+  def unwrap_or_else(value, fun) when is_function(fun, 0), do: value
 
   @doc "Извлечь значение; на `nil` — `ArgumentError`."
   @spec unwrap!(t(a)) :: a when a: var
