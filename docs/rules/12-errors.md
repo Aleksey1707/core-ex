@@ -131,7 +131,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 | `chain/1` | `[outer, …, root]` |
 | `has?/2` | есть ли в цепочке узел по keyword (`ns:`, `code:`, `kind:`, `module:`); критерий непустой, иной ключ или не keyword-пара — `ArgumentError` |
 | `find/2` | первый узел по предикату |
-| `format_chain/1` | `"outer: …: root"` по `message` (или fallback `ns/code`) — для логов |
+| `format_chain/1` | `"outer: …: root"` по `message` (или fallback `ns/code`) — для логов; узел с непустым `errors` печатается вместе с составом — `"outer (e1 | e2): root"`, элемент состава — своей цепочкой причин |
 
 Правила:
 

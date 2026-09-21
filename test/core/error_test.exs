@@ -2,6 +2,7 @@ defmodule Core.ErrorTest do
   use ExUnit.Case, async: true
 
   alias Core.Error
+  alias Core.Exc
   require Error
 
   describe "domain/app" do
@@ -499,6 +500,134 @@ defmodule Core.ErrorTest do
           parent: container
         )
       end
+    end
+  end
+
+  describe "format_chain с составом" do
+    setup do
+      first = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+      second = Error.domain(__MODULE__, code: :too_long, ns: :form, message: "длинно")
+
+      %{first: first, second: second}
+    end
+
+    test "контейнер печатается вместе с составом", %{first: first, second: second} do
+      assert Error.format_chain(many([first, second])) == "множество (пусто | длинно)"
+    end
+
+    test "контейнер с причиной", %{first: first, second: second} do
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      assert Error.format_chain(Error.wrap(many([first, second]), cause)) ==
+               "множество (пусто | длинно): база"
+    end
+
+    test "цепочка элемента печатается рекурсивно", %{first: first, second: second} do
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      assert Error.format_chain(many([Error.wrap(first, cause), second])) ==
+               "множество (пусто: база | длинно)"
+    end
+
+    test "элемент без message — fallback ns/code" do
+      assert Error.format_chain(many([Error.app(__MODULE__, code: :timeout, ns: :infra)])) ==
+               "множество (infra/timeout)"
+    end
+
+    test "множество из одного элемента", %{first: first} do
+      assert Error.format_chain(many([first])) == "множество (пусто)"
+    end
+
+    test "у ошибки с пустым errors вывод прежний", %{first: first} do
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      assert Error.format_chain(first) == "пусто"
+      assert Error.format_chain(Error.wrap(first, cause)) == "пусто: база"
+    end
+  end
+
+  describe "messages/1" do
+    test "контейнер — тексты элементов в порядке состава" do
+      first = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+      second = Error.domain(__MODULE__, code: :too_long, ns: :form, message: "длинно")
+
+      assert Error.messages(many([first, second])) == ["пусто", "длинно"]
+    end
+
+    test "контейнер — только состав, без outer и причины" do
+      element = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      assert Error.messages(Error.wrap(many([element]), cause)) == ["пусто"]
+    end
+
+    test "обычная ошибка — один текст, цепочка не читается" do
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+      err = Error.wrap(Error.domain(__MODULE__, code: :bad, ns: :form, message: "плохо"), cause)
+
+      assert Error.messages(err) == ["плохо"]
+    end
+
+    test "ошибка без message — fallback ns/code" do
+      assert Error.messages(Error.app(__MODULE__, code: :timeout, ns: :infra)) ==
+               ["infra/timeout"]
+    end
+
+    test "элемент без message — fallback ns/code" do
+      element = Error.app(__MODULE__, code: :timeout, ns: :infra)
+      other = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+
+      assert Error.messages(many([element, other])) == ["infra/timeout", "пусто"]
+    end
+  end
+
+  describe "Exc" do
+    test "контейнер — format_chain с составом" do
+      first = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+      second = Error.domain(__MODULE__, code: :too_long, ns: :form, message: "длинно")
+
+      assert Exception.message(Exc.exception(many([first, second]))) ==
+               "множество (пусто | длинно)"
+    end
+
+    test "обычная ошибка — свой текст без цепочки" do
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+      err = Error.wrap(Error.domain(__MODULE__, code: :bad, ns: :form, message: "плохо"), cause)
+
+      assert Exception.message(Exc.exception(err)) == "плохо"
+    end
+  end
+
+  describe "обход не касается состава" do
+    setup do
+      element = Error.domain(__MODULE__, code: :blank, ns: :form, message: "пусто")
+      cause = Error.app(__MODULE__, code: :db, ns: :infra, message: "база")
+
+      %{container: Error.wrap(many([element]), cause), element: element, cause: cause}
+    end
+
+    test "has? по коду элемента — false", %{container: container} do
+      refute Error.has?(container, code: :blank)
+      refute Error.has?(container, ns: :form, code: :blank)
+      assert Error.has?(container, code: :db)
+      assert Error.has?(container, code: :invalid)
+    end
+
+    test "find не видит элемент", %{container: container} do
+      assert Error.find(container, &(&1.code == :blank)) == nil
+      assert %Error{code: :db} = Error.find(container, &(&1.code == :db))
+    end
+
+    test "chain, root и Enumerable читают цепочку причин", %{
+      container: container,
+      element: element,
+      cause: cause
+    } do
+      assert Error.chain(container) == [container, cause]
+      assert Error.root(container) == cause
+      assert Error.unwrap(container) == cause
+      assert Enum.count(container) == 2
+      refute element in Enum.to_list(container)
     end
   end
 
