@@ -655,6 +655,11 @@ Prim, nullable FK → Prim).
 и так записаны спеки repo-методов, `@callback` behaviour'ов и таблицы возвратов `13-repos.md`.
 Правило про второе имя формы касается `@type`, где имя как раз и заводится.
 
+Набор функций `Core.Result` делится по форме успеха на входе: функция, которой значение нужно,
+на `:ok` даёт `FunctionClauseError`. Состав групп — таблица в `@moduledoc Core.Result`.
+
+Проверяется: `test/core/result_test.exs`, тест «value ops reject unit at runtime».
+
 ## Связанные правила
 
 - Архитектура / usecases — `10-architecture.md`
