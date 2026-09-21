@@ -46,7 +46,12 @@ defmodule Core.Result do
   @typedoc "Unit-результат с ошибкой библиотеки."
   @type unit :: unit(Error.t())
 
-  @doc "Применить функцию к значению успеха."
+  @doc """
+  Применить функцию к значению успеха.
+
+  Результат, который вернул колбэк, вкладывается как значение (`{:ok, {:ok, v}}`) — для
+  связывания результатов нужен `and_then/2`.
+  """
   @spec map(t(a, e), (a -> b)) :: t(b, e) when a: var, b: var, e: var
 
   def map({:ok, value}, fun), do: ok(fun.(value))

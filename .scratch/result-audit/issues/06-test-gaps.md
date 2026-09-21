@@ -20,8 +20,9 @@
 спека объявляет (unit у `tap/2`) или отвергает (не-список у `traverse_all/2`), не проверяется, и правки
 тикетов 01–03 некуда опереть.
 
-- [ ] случаи дописаны; `mix test test/core/result_test.exs` зелёный
-- [ ] мутация проверена: снятие клоза `tap(:ok, …)` и guard `is_list` у `traverse_all/2` валит тесты
+- [x] случаи дописаны; `mix test test/core/result_test.exs` зелёный
+- [x] мутация проверена — по составу триажа (см. Acceptance criteria): `tap(:ok, …)` ушёл в тикет 02,
+      `is_list` у `traverse_all/2` — в тикет 07
 
 ## Comments
 
@@ -57,6 +58,34 @@
 неожиданно. Поведение не трогаем.
 
 **Очередь:** после 02 и 03 — оба правят те же тесты и тот же код.
+
+### Реализация 22.09.2026
+
+**`Option.or_else/2` и `unwrap_or_else/2` требовали правки `lib/`, а не только теста.** Брифом
+заявлен `FunctionClauseError` на колбэке не нулевой арности; фактически обе функции возвращали `nil`:
+guard `is_function(fun, 0)` стоял только на клозе `nil`, а вторая клоза (`def or_else(value, _fun)`)
+принимала второй аргумент любой формы, и `nil` проваливался в неё. Решение пользователя (22.09.2026) —
+дописать guard во вторую клозу обеих функций, как у соседней `Option.map/2`. Правка поведения,
+видимая потребителю, поэтому заведён пункт в `CHANGELOG.md`, «Ломающие изменения контракта».
+
+**Мутации прогнаны, каждая красная:** guard `is_function(fun, 0)` у `Result.or_else/2`,
+`is_function(fun, 1)` у `Result.traverse/2` и `traverse_all/2`, клоза `and_(:ok, other)`,
+guard `is_function(fun, 1)` у `Option.map/2`, новые guard у `Option.or_else/2` и
+`unwrap_or_else/2`, плоскость `and_then/2` (обёртка результата колбэка).
+
+**Dynamic-хелпер:** misuse-аргумент прячется за `Process.get/1` — литеральный колбэк неверной арности
+дал бы предупреждение инференса на сборке `--warnings-as-errors`. Хелперов в `result_test.exs` было
+три штуки одного приёма (`unit_ok/0` и `alien/0` тикетов 02–03 плюс инлайн-копия в тесте не-списка);
+по требованию брифа «переиспользовать, а не плодить второй» они сведены в один параметрический
+`dyn/1` — по одному на файл (общий модуль в `test/support` потянул бы за собой три копии из
+`error_test.exs`, это вне объёма).
+
+**Открыто, вынесено в тикет 09:** `Result.or_else/2` и `unwrap_or_else/2` проверяют арность колбэка
+только на клозе `{:error, _}` — `Result.or_else(:ok, fn _ -> :x end)` молча отдаёт `:ok`. После
+правки `Core.Option` строже `Core.Result` на той же оси. Точечная правка двух success-клоз закрыла бы
+букву Key interfaces, но завела бы новое расхождение внутри `Core.Result`, где `map/2`, `tap/2`,
+`and_then/2`, `map_or/3`, `map_or_else/3`, `map_error/2` арность не проверяют вовсе; решение
+пользователя (22.09.2026) — политику на весь интерфейс решать отдельным тикетом.
 
 ## Agent Brief
 
@@ -96,12 +125,12 @@
   переиспользовать его, а не плодить второй.
 
 **Acceptance criteria:**
-- [ ] перечисленные случаи покрыты в `test/core/result_test.exs` и `test/core/option_test.exs`
-- [ ] `@doc map/2` в `Core.Result` предупреждает о двойной обёртке и отсылает к `and_then/2`
-- [ ] в тестовых файлах нет предупреждений инференса: `mix test` и `make compile` чистые
-- [ ] мутация валит тесты: снятие guard `is_function(fun, 0)` у `or_else/2`, `is_function(fun, 1)`
+- [x] перечисленные случаи покрыты в `test/core/result_test.exs` и `test/core/option_test.exs`
+- [x] `@doc map/2` в `Core.Result` предупреждает о двойной обёртке и отсылает к `and_then/2`
+- [x] в тестовых файлах нет предупреждений инференса: `mix test` и `make compile` чистые
+- [x] мутация валит тесты: снятие guard `is_function(fun, 0)` у `or_else/2`, `is_function(fun, 1)`
       у `traverse_all/2` и клозы `and_(:ok, other)` — каждое даёт красный прогон
-- [ ] `mix test test/core/result_test.exs test/core/option_test.exs` зелёный; `make` зелёный
+- [x] `mix test test/core/result_test.exs test/core/option_test.exs` зелёный; `make` зелёный
 
 **Out of scope:**
 - `tap/2` на `:ok` и чужой терм у `map_error/2` / `tap/2` — тикет 02 (его же тесты);

@@ -53,6 +53,27 @@
   Option.unwrap_or_else(value, fn -> raise "нет значения" end)
   ```
 
+- **`Option.or_else/2` и `Option.unwrap_or_else/2` требуют нуль-арный колбэк на обеих формах входа**
+  (`Core.Option`). Guard `is_function(fun, 0)` стоял только на клозе `nil`, а вторая клоза брала
+  второй аргумент любой формы (`def or_else(value, _fun), do: value`) — и `nil` проваливался в неё:
+  `Option.or_else(nil, fn _ -> default end)` молча возвращал `nil`, не вызвав колбэк, вместо того
+  чтобы отвергнуть неверную арность. Guard дописан во вторую клозу обеих функций — колбэк не нулевой
+  арности теперь даёт `FunctionClauseError` на любом входе, как у соседней `Option.map/2`, где
+  `is_function(fun, 1)` стоит на обеих клозах. Тёзки из `Core.Result` арность проверяют только на
+  ветке `{:error, _}`, где колбэк и вызывается: `Result.or_else(:ok, fn _ -> … end)` по-прежнему
+  отдаёт `:ok`. Поведение `Core.Option` на верном колбэке не изменилось.
+
+  Как править код потребителя: `grep -rn "Option.or_else(\|Option.unwrap_or_else("` — колбэк должен
+  быть нуль-арным.
+
+  ```elixir
+  # было — арность не та, вызов молча отдавал nil
+  Option.or_else(value, fn _ -> default end)
+
+  # стало
+  Option.or_else(value, fn -> default end)
+  ```
+
 ### Новое
 
 - **Публичные типы результата — `Result.t/0,1,2`, `Result.unit/0,1`, `Option.t/0,1`**

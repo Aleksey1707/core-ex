@@ -4,12 +4,25 @@ defmodule Core.OptionTest do
   alias Core.Option
   alias Core.Result
 
+  # Process.get/1 → dynamic(); намеренный misuse без предупреждения инференса
+  defp dyn(term) do
+    Process.put({__MODULE__, :dyn}, term)
+    Process.get({__MODULE__, :dyn})
+  end
+
   test "map/2 returns nil for nil" do
     assert Option.map(nil, &String.upcase/1) == nil
   end
 
   test "map/2 applies function to value" do
     assert Option.map("abc", &String.upcase/1) == "ABC"
+  end
+
+  test "map/2 отвергает колбэк чужой арности на обеих формах входа" do
+    fun = dyn(fn -> :called end)
+
+    assert_raise FunctionClauseError, fn -> Option.map(nil, fun) end
+    assert_raise FunctionClauseError, fn -> Option.map("abc", fun) end
   end
 
   test "some?/1" do
@@ -25,6 +38,15 @@ defmodule Core.OptionTest do
   test "or_else/2" do
     assert Option.or_else(1, fn -> 2 end) == 1
     assert Option.or_else(nil, fn -> 2 end) == 2
+  end
+
+  test "or_else/2 и unwrap_or_else/2 отвергают колбэк чужой арности" do
+    fun = dyn(fn _value -> 2 end)
+
+    assert_raise FunctionClauseError, fn -> Option.or_else(nil, fun) end
+    assert_raise FunctionClauseError, fn -> Option.or_else(1, fun) end
+    assert_raise FunctionClauseError, fn -> Option.unwrap_or_else(nil, fun) end
+    assert_raise FunctionClauseError, fn -> Option.unwrap_or_else(1, fun) end
   end
 
   test "unwrap_or/2" do
