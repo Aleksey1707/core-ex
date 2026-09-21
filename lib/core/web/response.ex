@@ -68,20 +68,23 @@ defmodule Core.Web.Response do
 
       `code` обязан входить в словарь `codes:`; иначе — `FunctionClauseError` из его
       `to_code/1`. В `@spec` тип словаря не выразить: модуль приходит опцией `use`.
-      """
-      @spec error(atom(), String.t()) :: map()
 
-      def error(code, message), do: Core.Web.Response.__error__(@response_codes, code, message)
+      Второй аргумент — текст или непустой список текстов (состав множества ошибок,
+      `Core.Error.messages/1`). Пустой список — `FunctionClauseError`.
+      """
+      @spec error(atom(), String.t() | [String.t()]) :: map()
+
+      def error(code, messages), do: Core.Web.Response.__error__(@response_codes, code, messages)
 
       @doc """
       Ответ с ошибкой и данными.
 
-      Требования к `code` — те же, что у `error/2`.
+      Требования к `code` и сообщениям — те же, что у `error/2`.
       """
-      @spec error(atom(), String.t(), term()) :: map()
+      @spec error(atom(), String.t() | [String.t()], term()) :: map()
 
-      def error(code, message, data),
-        do: Core.Web.Response.__error__(@response_codes, code, message, data)
+      def error(code, messages, data),
+        do: Core.Web.Response.__error__(@response_codes, code, messages, data)
 
       @doc """
       Данные страницы — `%{count, items}` через presenter.
@@ -109,15 +112,24 @@ defmodule Core.Web.Response do
 
   def success(data, messages), do: __success__(Response.Code, data, messages)
 
-  @doc "Ответ с ошибкой."
-  @spec error(Response.Code.t(), String.t()) :: map()
+  @doc """
+  Ответ с ошибкой.
 
-  def error(code, message), do: __error__(Response.Code, code, message)
+  Сообщение — текст или непустой список текстов (состав множества ошибок,
+  `Core.Error.messages/1`). Пустой список — `FunctionClauseError`.
+  """
+  @spec error(Response.Code.t(), String.t() | [String.t()]) :: map()
 
-  @doc "Ответ с ошибкой и данными."
-  @spec error(Response.Code.t(), String.t(), term()) :: map()
+  def error(code, messages), do: __error__(Response.Code, code, messages)
 
-  def error(code, message, data), do: __error__(Response.Code, code, message, data)
+  @doc """
+  Ответ с ошибкой и данными.
+
+  Требования к сообщениям — те же, что у `error/2`.
+  """
+  @spec error(Response.Code.t(), String.t() | [String.t()], term()) :: map()
+
+  def error(code, messages, data), do: __error__(Response.Code, code, messages, data)
 
   @doc """
   Данные страницы — `%{count, items}` через presenter.
@@ -173,16 +185,24 @@ defmodule Core.Web.Response do
     do: %{code: codes.to_code(:success), messages: messages, data: data}
 
   @doc false
-  @spec __error__(module(), atom(), String.t()) :: map()
+  @spec __error__(module(), atom(), String.t() | [String.t()]) :: map()
 
   def __error__(codes, code, message) when is_atom(code) and is_binary(message),
-    do: %{code: codes.to_code(code), messages: [message]}
+    do: __error__(codes, code, [message])
+
+  def __error__(codes, code, [message | _] = messages)
+      when is_atom(code) and is_binary(message),
+      do: %{code: codes.to_code(code), messages: messages}
 
   @doc false
-  @spec __error__(module(), atom(), String.t(), term()) :: map()
+  @spec __error__(module(), atom(), String.t() | [String.t()], term()) :: map()
 
   def __error__(codes, code, message, data) when is_atom(code) and is_binary(message),
-    do: %{code: codes.to_code(code), messages: [message], data: data}
+    do: __error__(codes, code, [message], data)
+
+  def __error__(codes, code, [message | _] = messages, data)
+      when is_atom(code) and is_binary(message),
+      do: %{code: codes.to_code(code), messages: messages, data: data}
 
   @doc false
   @spec __page_data__(Pagination.Result.t(item), (item -> map())) :: map() when item: var

@@ -19,8 +19,8 @@
       потребителя: контракт задаёт библиотека.
 - [ ] `description` скилла `errors` дополнен множеством ошибок (требование
       `docs/rules/00-index.md`, «Доставка: скиллы»).
-- [ ] `CHANGELOG.md`, «Не выпущено» → «Новое»: `Error.many/1,2`, поле `errors`,
+- [x] `CHANGELOG.md`, «Не выпущено» → «Новое»: `Error.many/1,2`, поле `errors`,
       `Error.messages/1`, `Result.traverse_all/2`, список в `Response.error/2,3`; сказано, что
-      существующие API не изменились.
+      существующие API не изменились. — внесено тикетами 01–04 своим коммитом каждый.
 - [ ] `make` зелёный: `rules-check`, `layout-check`, `format-check`, `compile`, `dialyzer`,
       `credo`.
