@@ -11,18 +11,29 @@ defmodule Core.Error do
   - `message` — текст для клиента / логов
   - `detail` — произвольный контекст (`term()`), без фиксированной формы
   - `parent` — опциональная внутренняя ошибка (cause), аналог Go `errors.Unwrap`
+  - `errors` — состав множества ошибок, по умолчанию `[]`
 
-  Фабрики: макросы `domain/1`, `domain/2`, `app/1`, `app/2`.
+  `parent` и `errors` — разные отношения и независимы друг от друга: `parent` отвечает
+  «почему» (линейная цепочка причин), `errors` — «что ещё не так» (плоский набор независимых
+  отказов одной операции). Решение о форме — ADR-0021.
+
+  Фабрики: макросы `domain/1`, `domain/2`, `app/1`, `app/2`, `many/1`, `many/2`.
   На call site: `require Error` (рядом с `alias`).
 
   - `/1` — `module` из `__CALLER__.module` (прямые call site'ы).
   - `/2` — явный `module` (каталоги `*.Errors`, чужой источник).
   - `domain`: обязательны `code:`, `ns:`, `message:`; опциональны `detail:`, `parent:`
   - `app`: обязательны `code:`, `ns:`; опциональны `message:`, `detail:`, `parent:`
+  - `many`: обязательны `code:`, `ns:`, `message:`, `errors:`; опциональны `detail:`, `parent:`
+
+  `many` не принимает `kind:` — он выводится по слабейшему звену состава: хотя бы один
+  элемент `:app` → контейнер `:app`. Состав плоский и непустой, порядок входа сохраняется.
+  Контейнер не бывает причиной: `wrap/2` вторым аргументом и `parent:` его не принимают.
 
   Литеральный keyword-список attrs проверяется на этапе компиляции (required / unknown / дубли).
-  Динамический attrs (переменная) — без compile-check; runtime через `__domain__/2` / `__app__/2`:
-  отсутствие обязательного — `KeyError`, лишний ключ — `ArgumentError`.
+  Динамический attrs (переменная) — без compile-check; runtime через `__domain__/2` /
+  `__app__/2` / `__many__/2`: отсутствие обязательного — `KeyError`, лишний ключ —
+  `ArgumentError`.
 
   Оборачивание: `wrap/2` или `parent:` в attrs.
   Обход цепочки: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2`, `format_chain/1`.
@@ -33,7 +44,7 @@ defmodule Core.Error do
   """
 
   @enforce_keys ~w(kind ns code module message detail)a
-  defstruct [:kind, :ns, :module, :code, :message, :detail, parent: nil]
+  defstruct [:kind, :ns, :module, :code, :message, :detail, parent: nil, errors: []]
 
   @type kind :: :domain | :app
   @type t :: %__MODULE__{
@@ -43,7 +54,8 @@ defmodule Core.Error do
           code: atom(),
           message: String.t() | nil,
           detail: term(),
-          parent: t() | nil
+          parent: t() | nil,
+          errors: [t()]
         }
 
   @type filter :: [{:ns | :code | :kind | :module, term()}, ...]
@@ -54,6 +66,12 @@ defmodule Core.Error do
   @domain_optional ~w(detail parent)a
   @app_required ~w(code ns)a
   @app_optional ~w(message detail parent)a
+  @many_required ~w(code ns message errors)a
+  @many_optional ~w(detail parent)a
+
+  @not_a_cause "множество ошибок не может быть причиной"
+
+  # ===== конструкторы =====
 
   @doc """
   Собрать доменную ошибку; `module` = `__CALLER__.module`.
@@ -117,6 +135,39 @@ defmodule Core.Error do
     end
   end
 
+  @doc """
+  Собрать множество ошибок; `module` = `__CALLER__.module`.
+
+  См. `many/2`.
+  """
+  defmacro many(attrs) do
+    module = __CALLER__.module
+
+    quote do
+      unquote(__MODULE__).many(unquote(module), unquote(attrs))
+    end
+  end
+
+  @doc """
+  Собрать множество независимых отказов одной операции.
+
+  Обязательные attrs: `code:`, `ns:`, `message:`, `errors:`.
+  Опциональные: `detail:`, `parent:`.
+
+  `kind` выводится из состава: хотя бы один элемент `:app` → контейнер `:app`.
+
+  Литеральный keyword-список — проверка ключей на compile-time.
+  """
+  defmacro many(module, attrs) do
+    if literal_keyword_ast?(attrs) do
+      validate_factory_opts!(attrs, @many_required, @many_optional, __CALLER__)
+    end
+
+    quote do
+      unquote(__MODULE__).__many__(unquote(module), unquote(attrs))
+    end
+  end
+
   @doc false
   @spec __domain__(module(), keyword()) :: t()
 
@@ -131,13 +182,146 @@ defmodule Core.Error do
     build(:app, module, take_attrs(attrs, @app_required, @app_optional))
   end
 
+  @doc false
+  @spec __many__(module(), keyword()) :: t()
+
+  def __many__(module, attrs) when is_atom(module) and is_list(attrs) do
+    %{errors: errors} = fields = take_attrs(attrs, @many_required, @many_optional)
+
+    validate_errors!(errors)
+
+    %{build(weakest_kind(errors), module, fields) | errors: errors}
+  end
+
+  # ---
+
+  defp take_attrs(attrs, required, optional) do
+    validate_attr_keys!(attrs, required ++ optional)
+
+    fields = Map.new(required, &{&1, Keyword.fetch!(attrs, &1)})
+
+    Enum.into(optional, fields, &{&1, Keyword.get(attrs, &1)})
+  end
+
+  defp validate_attr_keys!(attrs, allowed) do
+    unknown =
+      attrs
+      |> Keyword.keys()
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in allowed))
+
+    if unknown != [], do: raise(ArgumentError, "неизвестные опции: #{inspect(unknown)}")
+  end
+
+  defp build(kind, module, %{code: code, ns: ns, message: message} = fields) do
+    %{detail: detail, parent: parent} = fields
+
+    error = %__MODULE__{
+      kind: kind,
+      module: module,
+      code: code,
+      ns: ns,
+      message: message,
+      detail: detail,
+      parent: nil,
+      errors: []
+    }
+
+    put_parent(error, parent)
+  end
+
+  defp put_parent(error, nil), do: error
+  defp put_parent(_error, %__MODULE__{errors: [_ | _]}), do: raise(ArgumentError, @not_a_cause)
+  defp put_parent(error, %__MODULE__{} = parent), do: %{error | parent: parent}
+
+  defp validate_errors!([]), do: raise(ArgumentError, "множество ошибок не может быть пустым")
+
+  defp validate_errors!([_ | _] = errors), do: Enum.each(errors, &validate_element!/1)
+
+  defp validate_element!(%__MODULE__{errors: []}), do: :ok
+
+  defp validate_element!(%__MODULE__{}) do
+    raise ArgumentError, "множество ошибок плоское: элемент не может нести собственное множество"
+  end
+
+  defp validate_element!(other) do
+    raise ArgumentError,
+          "элемент множества ошибок должен быть %Core.Error{}, получено: #{inspect(other)}"
+  end
+
+  defp weakest_kind(errors) do
+    if Enum.any?(errors, &match?(%__MODULE__{kind: :app}, &1)),
+      do: :app,
+      else: :domain
+  end
+
+  defp literal_keyword_ast?(attrs) when is_list(attrs) do
+    Enum.all?(attrs, fn
+      {key, _value} when is_atom(key) -> true
+      _ -> false
+    end)
+  end
+
+  defp literal_keyword_ast?(_attrs), do: false
+
+  defp validate_factory_opts!(attrs, required, optional, caller) do
+    keys =
+      Enum.map(attrs, fn
+        {key, _value} when is_atom(key) -> key
+      end)
+
+    missing = Enum.reject(required, &(&1 in keys))
+
+    if missing != [] do
+      raise CompileError,
+        file: caller.file,
+        line: caller.line,
+        description: "нет обязательных опций: #{inspect(missing)}"
+    end
+
+    duplicated =
+      keys
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_key, count} -> count > 1 end)
+      |> Enum.map(fn {key, _count} -> key end)
+
+    if duplicated != [] do
+      raise CompileError,
+        file: caller.file,
+        line: caller.line,
+        description: "дублирующиеся опции: #{inspect(duplicated)}"
+    end
+
+    allowed = required ++ optional
+
+    unknown =
+      keys
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in allowed))
+
+    if unknown != [] do
+      raise CompileError,
+        file: caller.file,
+        line: caller.line,
+        description: "неизвестные опции: #{inspect(unknown)}"
+    end
+
+    :ok
+  end
+
+  # ===== цепочка причин =====
+
   @doc """
   Обернуть ошибку: установить `parent` (cause).
 
   Если у `error` уже есть цепочка, новый cause подцепляется в её **конец** и становится
   `root/1`: иначе `wrap` молча терял бы всё, что ниже.
+
+  Множество ошибок причиной не бывает: контейнер вторым аргументом — `ArgumentError`.
   """
   @spec wrap(t(), t()) :: t()
+
+  def wrap(%__MODULE__{}, %__MODULE__{errors: [_ | _]}), do: raise(ArgumentError, @not_a_cause)
 
   def wrap(%__MODULE__{parent: nil} = error, %__MODULE__{} = parent),
     do: %{error | parent: parent}
@@ -193,43 +377,6 @@ defmodule Core.Error do
 
   # ---
 
-  defp take_attrs(attrs, required, optional) do
-    validate_attr_keys!(attrs, required ++ optional)
-
-    fields = Map.new(required, &{&1, Keyword.fetch!(attrs, &1)})
-
-    Enum.into(optional, fields, &{&1, Keyword.get(attrs, &1)})
-  end
-
-  defp validate_attr_keys!(attrs, allowed) do
-    unknown =
-      attrs
-      |> Keyword.keys()
-      |> Enum.uniq()
-      |> Enum.reject(&(&1 in allowed))
-
-    if unknown != [], do: raise(ArgumentError, "неизвестные опции: #{inspect(unknown)}")
-  end
-
-  defp build(kind, module, %{code: code, ns: ns, message: message} = fields) do
-    %{detail: detail, parent: parent} = fields
-
-    error = %__MODULE__{
-      kind: kind,
-      module: module,
-      code: code,
-      ns: ns,
-      message: message,
-      detail: detail,
-      parent: nil
-    }
-
-    put_parent(error, parent)
-  end
-
-  defp put_parent(error, nil), do: error
-  defp put_parent(error, %__MODULE__{} = parent), do: %{error | parent: parent}
-
   defp do_chain(%__MODULE__{parent: nil} = error, acc), do: Enum.reverse([error | acc])
   defp do_chain(%__MODULE__{parent: parent} = error, acc), do: do_chain(parent, [error | acc])
 
@@ -245,60 +392,6 @@ defmodule Core.Error do
 
   defp validate_filter_key!(other) do
     raise ArgumentError, "критерий has? должен быть keyword-парой, получено: #{inspect(other)}"
-  end
-
-  defp literal_keyword_ast?(attrs) when is_list(attrs) do
-    Enum.all?(attrs, fn
-      {key, _value} when is_atom(key) -> true
-      _ -> false
-    end)
-  end
-
-  defp literal_keyword_ast?(_attrs), do: false
-
-  defp validate_factory_opts!(attrs, required, optional, caller) do
-    keys =
-      Enum.map(attrs, fn
-        {key, _value} when is_atom(key) -> key
-      end)
-
-    missing = Enum.reject(required, &(&1 in keys))
-
-    if missing != [] do
-      raise CompileError,
-        file: caller.file,
-        line: caller.line,
-        description: "нет обязательных опций: #{inspect(missing)}"
-    end
-
-    duplicated =
-      keys
-      |> Enum.frequencies()
-      |> Enum.filter(fn {_key, count} -> count > 1 end)
-      |> Enum.map(fn {key, _count} -> key end)
-
-    if duplicated != [] do
-      raise CompileError,
-        file: caller.file,
-        line: caller.line,
-        description: "дублирующиеся опции: #{inspect(duplicated)}"
-    end
-
-    allowed = required ++ optional
-
-    unknown =
-      keys
-      |> Enum.uniq()
-      |> Enum.reject(&(&1 in allowed))
-
-    if unknown != [] do
-      raise CompileError,
-        file: caller.file,
-        line: caller.line,
-        description: "неизвестные опции: #{inspect(unknown)}"
-    end
-
-    :ok
   end
 
   defimpl String.Chars do

@@ -45,7 +45,8 @@
   отсутствие обязательного — `KeyError` (`Keyword.fetch!`), лишний ключ — `ArgumentError`.
 - Не путать с `Helper.Opts.validate!` (для `__using__` / compile opts модулей).
 - `parent:` принимает только `%Error{}` или `nil`; иное — `FunctionClauseError` (ошибка
-  программиста), как и у `wrap/2`.
+  программиста), как и у `wrap/2`. Множество ошибок причиной не бывает: контейнер
+  (`%Error{errors: [_ | _]}`) в `parent:` или вторым аргументом `wrap/2` — `ArgumentError`.
 
 | Kind | Обязательные attrs | Опциональные attrs |
 |---|---|---|
