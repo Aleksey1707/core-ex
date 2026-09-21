@@ -3,8 +3,18 @@ defmodule Core.Result do
   Результат операции: успех со значением (`{:ok, v}`), успех без значения (`:ok`)
   или ошибка (`{:error, reason}`).
 
-  - `t/0`, `t/1`, `t/2` — `{:ok, result} | {:error, reason}`: запросы и операции с payload
-  - `unit/0`, `unit/1` — `:ok | {:error, reason}`: команды CQS без возвращаемого значения
+  - `t:t/0`, `t:t/1`, `t:t/2` — `{:ok, result} | {:error, reason}`: запросы и операции с payload
+  - `t:unit/0`, `t:unit/1` — `:ok | {:error, reason}`: команды CQS без возвращаемого значения
+
+  Valued-результат (`t:t/2`) несёт значение, unit-результат (`t:unit/1`) — только факт, и
+  функция, которой значение нужно, на `:ok` даёт `FunctionClauseError`: применять нечего.
+
+  | Вход | Функции |
+  |---|---|
+  | `t:t/2` и `t:unit/1` | `map_error/2`, `tap/2`, `and_/2`, `or_/2`, `or_else/2`, `ok?/1`, `error?/1` |
+  | только `t:t/2` — колбэк к значению | `map/2`, `map_or/3`, `map_or_else/3`, `and_then/2` |
+  | только `t:t/2` — значение наружу | `unwrap!/1`, `unwrap_or/2`, `unwrap_or_else/2`, `to_option/1` |
+  | результата на входе нет | `ok/0`, `ok/1`, `error/1`, `traverse/2`, `traverse_all/2` |
   """
 
   alias Core.Error
