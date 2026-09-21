@@ -14,6 +14,8 @@ defmodule Core.ResultTest do
     Process.get({__MODULE__, :unit_ok})
   end
 
+  defp domain_error(n), do: Error.domain(code: :invalid, ns: :test, message: "e#{n}")
+
   test "map/2" do
     assert Result.map(Result.ok(1), &(&1 + 1)) == Result.ok(2)
     assert Result.map(Result.error(:e), &(&1 + 1)) == Result.error(:e)
@@ -73,6 +75,40 @@ defmodule Core.ResultTest do
     assert_raise FunctionClauseError, fn ->
       Result.traverse(not_a_list, &Result.ok/1)
     end
+  end
+
+  test "traverse_all/2 preserves order and empty list" do
+    assert Result.traverse_all([], &Result.ok/1) == Result.ok([])
+    assert Result.traverse_all([1, 2, 3], &Result.ok(&1 * 2)) == Result.ok([2, 4, 6])
+  end
+
+  test "traverse_all/2 collects every error in input order" do
+    assert {:error, errors} = Result.traverse_all([1, 2, 3], &Result.error(domain_error(&1)))
+    assert Enum.map(errors, &to_string/1) == ["e1", "e2", "e3"]
+  end
+
+  test "traverse_all/2 walks the whole list and returns failures only" do
+    parent = self()
+
+    fun = fn n ->
+      send(parent, {:called, n})
+
+      if rem(n, 2) == 0,
+        do: Result.error(domain_error(n)),
+        else: Result.ok(n)
+    end
+
+    assert {:error, errors} = Result.traverse_all([1, 2, 3, 4], fun)
+    assert Enum.map(errors, &to_string/1) == ["e2", "e4"]
+    assert_received {:called, 1}
+    assert_received {:called, 2}
+    assert_received {:called, 3}
+    assert_received {:called, 4}
+  end
+
+  test "traverse_all/2 collects a non-Error reason as is" do
+    assert Result.traverse_all([1, 2], &Result.error({:bad, &1})) ==
+             Result.error([{:bad, 1}, {:bad, 2}])
   end
 
   test "or_/2" do

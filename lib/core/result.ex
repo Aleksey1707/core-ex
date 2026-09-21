@@ -88,6 +88,40 @@ defmodule Core.Result do
     end
   end
 
+  @doc """
+  Применить fun к каждому элементу; пройти список целиком и собрать все провалы.
+
+  Порядок значений и порядок провалов — порядок входа.
+
+  Голый список наружу не отдаётся: он заворачивается в `Error.many/1,2` в теле той же
+  функции — `ns`, `code` и общий `message` знает только call site.
+
+      def validate_rows(rows) do
+        rows
+        |> Result.traverse_all(&validate/1)
+        |> Result.map_error(
+          &Error.many(code: :invalid, ns: :form, message: "Форма невалидна", errors: &1)
+        )
+      end
+  """
+  @spec traverse_all([a], (a -> {:ok, b} | {:error, Error.t()})) ::
+          {:ok, [b]} | {:error, [Error.t()]}
+        when a: var, b: var
+
+  def traverse_all(list, fun) when is_list(list) and is_function(fun, 1) do
+    {values, errors} =
+      Enum.reduce(list, {[], []}, fn item, {values, errors} ->
+        case fun.(item) do
+          {:ok, value} -> {[value | values], errors}
+          {:error, reason} -> {values, [reason | errors]}
+        end
+      end)
+
+    if errors == [],
+      do: {:ok, Enum.reverse(values)},
+      else: {:error, Enum.reverse(errors)}
+  end
+
   @doc "Если успех — вернуть его; иначе — other."
   @spec or_(
           :ok | {:ok, a} | {:error, term()},
