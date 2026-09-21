@@ -52,7 +52,7 @@
 |---|---|---|---|
 | `10-architecture.md` | `architecture` | границы библиотеки, `Core.Config`, способы получения зависимостей | правкой конфигурации, адаптеров брокеров, границы HTTP; любой ссылкой на потребителя |
 | `11-domain.md` | `domain` | `Prim`, `Enum`, `Codec`, `Context`, `Es.Event`, `Version` | новым Prim / Enum / кодеком, правкой агрегата или профиля Codec |
-| `12-errors.md` | `errors` | `%Error{}` (`:domain` / `:app`), каталоги ошибок, cause-цепочки | введением нового кода ошибки, работой с чувствительными данными |
+| `12-errors.md` | `errors` | `%Error{}` (`:domain` / `:app`), каталоги ошибок, cause-цепочки, множество ошибок | введением нового кода ошибки, сборкой множества отказов, работой с чувствительными данными |
 | `13-repos.md` | `repos` | `Repo` behaviour / `Repo.Pg` / `Schema` / `Specs`, read vs write | новым репозиторием, схемой, View; правкой `use Repo.Pg*`, `constraint_errors` |
 | `14-events-outbox.md` | `events-outbox` | domain events, flush в одной TX, outbox lifecycle | новым событием, правкой outbox, разбором записей в `:failed` и DLQ |
 | `17-otp-concurrency.md` | `otp-concurrency` | дерево процессов, `init/1` / `handle_continue`, таймауты, mailbox | новым GenServer или supervisor'ом, правкой таймаутов, backoff, shutdown |

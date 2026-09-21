@@ -5,22 +5,22 @@
 
 **Blocked by:** 01, 02, 03, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Spec:** [Множество ошибок](../spec.md) — «Документы»
 
-- [ ] Раздел «Множество ошибок» в `docs/rules/12-errors.md` после «Оборачивание (cause-цепочка)»:
+- [x] Раздел «Множество ошибок» в `docs/rules/12-errors.md` после «Оборачивание (cause-цепочка)»:
       таблица функций, инварианты состава, вывод `kind`, граница обхода, ссылка на ADR-0021.
       Обоснования в своде нет — оно в ADR.
-- [ ] Норма call site: `traverse_all/2` заворачивается в `Error.many` в теле той же функции;
+- [x] Норма call site: `traverse_all/2` заворачивается в `Error.many` в теле той же функции;
       голый список наружу — MUST NOT.
-- [ ] Норма границы: состав отдаётся клиенту только там, где `ErrorMapper.map/2` вернул
+- [x] Норма границы: состав отдаётся клиенту только там, где `ErrorMapper.map/2` вернул
       `:domain_error`; на 401 и 500 уходит константа. Строка — в `12-errors.md`, а не в своде
       потребителя: контракт задаёт библиотека.
-- [ ] `description` скилла `errors` дополнен множеством ошибок (требование
+- [x] `description` скилла `errors` дополнен множеством ошибок (требование
       `docs/rules/00-index.md`, «Доставка: скиллы»).
 - [x] `CHANGELOG.md`, «Не выпущено» → «Новое»: `Error.many/1,2`, поле `errors`,
       `Error.messages/1`, `Result.traverse_all/2`, список в `Response.error/2,3`; сказано, что
       существующие API не изменились. — внесено тикетами 01–04 своим коммитом каждый.
-- [ ] `make` зелёный: `rules-check`, `layout-check`, `format-check`, `compile`, `dialyzer`,
+- [x] `make` зелёный: `rules-check`, `layout-check`, `format-check`, `compile`, `dialyzer`,
       `credo`.
