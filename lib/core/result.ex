@@ -50,7 +50,8 @@ defmodule Core.Result do
   @spec map_error(t(a, e) | unit(e), (e -> f)) :: t(a, f) | unit(f) when a: var, e: var, f: var
 
   def map_error({:error, reason}, fun), do: {:error, fun.(reason)}
-  def map_error(ok, _fun), do: ok
+  def map_error({:ok, _value} = ok, _fun), do: ok
+  def map_error(:ok, _fun), do: :ok
 
   @doc """
   Выполнить побочный эффект над значением успеха и вернуть исходный результат.
@@ -64,7 +65,8 @@ defmodule Core.Result do
     result
   end
 
-  def tap(other, _fun), do: other
+  def tap({:error, _reason} = err, _fun), do: err
+  def tap(:ok, _fun), do: :ok
 
   @doc "Как `map/2`, иначе вернуть default."
   @spec map_or(t(a, term()), b, (a -> b)) :: b when a: var, b: var

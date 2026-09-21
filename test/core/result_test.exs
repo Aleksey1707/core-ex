@@ -14,6 +14,12 @@ defmodule Core.ResultTest do
     Process.get({__MODULE__, :unit_ok})
   end
 
+  # Process.get/1 → dynamic(); намеренный misuse чужим термом без type warning
+  defp alien do
+    Process.put({__MODULE__, :alien}, :whatever)
+    Process.get({__MODULE__, :alien})
+  end
+
   defp domain_error(n), do: Error.domain(code: :invalid, ns: :test, message: "e#{n}")
 
   test "map/2" do
@@ -207,5 +213,15 @@ defmodule Core.ResultTest do
 
     assert Result.tap({:error, :boom}, &send(parent, {:seen, &1})) == {:error, :boom}
     refute_received {:seen, _}
+
+    assert Result.tap(:ok, &send(parent, {:seen, &1})) == :ok
+    refute_received {:seen, _}
+  end
+
+  test "map_error/2 and tap/2 reject alien term at runtime" do
+    alien = alien()
+
+    assert_raise FunctionClauseError, fn -> Result.map_error(alien, fn _ -> :other end) end
+    assert_raise FunctionClauseError, fn -> Result.tap(alien, & &1) end
   end
 end
