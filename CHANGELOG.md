@@ -87,6 +87,23 @@
   Result.map(res, fn value -> transform(value) end)
   ```
 
+- **PromEx стартует раньше пула БД** (`docs/rules/app/17-otp-concurrency.md`, «Дерево процессов»).
+  Свод ставил пул БД первым, а сбор метрик — вторым, вопреки требованию PromEx: `PromEx.Plugins.Ecto`
+  слушает `[:ecto, :repo, :init]`, и Repo, поднятый раньше PromEx, эмитит событие в пустоту —
+  метрики `repo.init.*` пусты, дашборд Ecto их не показывает. Самому PromEx БД на старте не нужна:
+  опрос очереди `Core.Outbox.PromEx` идёт через `Core.PromEx.Safe` и до подъёма пула пропускает цикл
+  с `warning`, а не роняет процесс.
+
+  Как править код потребителя: в `MyApp.Application` поставить `MyApp.PromEx` первым ребёнком.
+
+  ```elixir
+  # было
+  children = [MyApp.DAO, MyApp.PromEx, ...]
+
+  # стало
+  children = [MyApp.PromEx, MyApp.DAO, ...]
+  ```
+
 ### Новое
 
 - **Публичные типы результата — `Result.t/0,1,2`, `Result.unit/0,1`, `Option.t/0,1`**
