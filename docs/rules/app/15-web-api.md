@@ -71,7 +71,12 @@ lib/my_app_web/{error_mapper,fallback_controller}.ex
     которое видел клиент (выдача роли, увеличение счётчика);
   - команда без `If-Match` MUST NOT: забытый заголовок молча затирает конкурентные изменения,
     а `*` — видимое намерение;
-  - чтение по версии MUST — `optional_version/2`: нет заголовка → `:current`;
+  - чтение по версии SHOULD — `expected_version/2`: нет заголовка → 400 `:missing_param`,
+    `*` → `:current`; `*` — видимое намерение читать текущее, как на команде, а клиент, который
+    всегда шлёт `If-Match`, при гонке получает 412, а не молча чужую версию;
+  - чтение по версии MAY — `optional_version/2`: нет заголовка → `:current`;
+  - форма чтения выбирается проектом одна на все чтения по версии; другая форма в отдельном
+    экшене MUST NOT — клиент API не угадывает, какому чтению нужен заголовок;
   - параметр `If-Match` в `operation/2` SHOULD описываться той же формой, что и разбор:
     `required` и тип — целое либо «целое | `*`».
 
@@ -106,7 +111,12 @@ with {:ok, version} <- Params.explicit_version(params),
      {:ok, written} <- Usecases.Agg.take(id, version, context),
      do: respond_taken(conn, id, written)
 
-# хорошо — чтение по версии: нет заголовка → :current
+# хорошо — чтение по версии: нет заголовка → 400, `*` → :current
+with {:ok, version} <- Params.expected_version(params),
+     {:ok, view} <- Usecases.Agg.get(id, version, context),
+     do: json(conn, Response.success(OutCodec.dump(view)))
+
+# допустимо, если проект выбрал необязательный заголовок: нет заголовка → :current
 with {:ok, version} <- Params.optional_version(params),
      {:ok, view} <- Usecases.Agg.get(id, version, context),
      do: json(conn, Response.success(OutCodec.dump(view)))
