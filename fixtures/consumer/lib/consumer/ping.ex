@@ -1,6 +1,7 @@
 defmodule Consumer.Ping do
   @moduledoc "Агрегат, у кодека которого нет событий с нагрузкой."
 
+  alias Consumer.Ping.Cmd
   alias Consumer.Ping.Event
 
   use Core.Es.Aggregate,
@@ -10,13 +11,6 @@ defmodule Consumer.Ping do
     use Core.Prim.UUID,
       name: "Пинг",
       version: 7
-  end
-
-  defmodule Cmd.Hit do
-    use Core.Es.Cmd
-
-    @enforce_keys ~w(by at)a
-    defstruct @enforce_keys
   end
 
   defstruct id: nil, version: nil, count: 0
