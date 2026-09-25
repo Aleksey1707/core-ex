@@ -1,20 +1,8 @@
 defmodule Consumer.Ping.Event do
-  alias Consumer.Ping
-  alias Consumer.UserID
+  @moduledoc "События пинга."
 
-  defmodule Pinged do
-    use Core.Es.Event,
-      aggregate_id: Ping.ID,
-      by: UserID,
-      payload: nil
-  end
-
-  defmodule Ponged do
-    use Core.Es.Event,
-      aggregate_id: Ping.ID,
-      by: UserID,
-      payload: nil
-  end
+  alias Consumer.Ping.Event.Pinged
+  alias Consumer.Ping.Event.Ponged
 
   @type t :: Pinged.t() | Ponged.t()
 end

@@ -9,6 +9,7 @@
 Контракты `Es.Event`, `Es.Event.Codec`, `Es.Outbox`, lifecycle записи (`:new` → `:in_work` →
 `:published` / `:failed`), аренду поллера, delivery, DLQ и правила совместимости событий
 нормирует `deps/core/docs/rules/14-events-outbox.md`. Здесь — как это заводится в приложении.
+Раскладка — по файлу на событие (`13-repos.md`, «Событие и команда»).
 
 ## Хранилище событий
 

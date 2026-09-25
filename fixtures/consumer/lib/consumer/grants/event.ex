@@ -1,20 +1,8 @@
 defmodule Consumer.Grants.Event do
-  alias Consumer.Grants
-  alias Consumer.UserID
+  @moduledoc "События выдачи ролей."
 
-  defmodule Granted do
-    use Core.Es.Event,
-      aggregate_id: Grants.ID,
-      by: UserID,
-      payload: Grants.RoleID
-  end
-
-  defmodule Revoked do
-    use Core.Es.Event,
-      aggregate_id: Grants.ID,
-      by: UserID,
-      payload: Grants.RoleID
-  end
+  alias Consumer.Grants.Event.Granted
+  alias Consumer.Grants.Event.Revoked
 
   @type t :: Granted.t() | Revoked.t()
 end

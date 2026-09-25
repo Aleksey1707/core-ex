@@ -1,5 +1,66 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Событие и команда — каждое в своём файле** (`docs/rules/app/13-repos.md`, «Событие и
+  команда»). Свод держал все события агрегата одним `event.ex` вложенными `defmodule`, а раскладку
+  команд записывал неоднозначно (`{cmd,cmd/*.ex}`); на деле команды жили одним `cmd.ex` или прямо в
+  модуле агрегата. Файл событий с нагрузками дорастал до сотен строк, а вложенность `Event` →
+  `<Name>` → `Payload` прятала модуль: найти его по имени, не читая файл, было нельзя. Теперь
+  событие (у агрегата любого вида) и команда MUST лежать в `event/<name>.ex` / `cmd/<name>.ex`,
+  сколько бы их ни было; своя нагрузка события — вложенный `Payload` в том же файле. `event.ex` и
+  `cmd.ex` — семейство: `@moduledoc`, `@type t` — объединение `t` членов — и помощники приложения
+  над ним (`name/1`, `names/0`). Порога «одним файлом, пока маленький» нет — агрегат на границе
+  переезжал бы туда и обратно. Имена модулей, wire-теги и кодек не меняются: правка — только
+  перенос файлов, сборка кода на старой раскладке не ломается.
+
+  Как править код потребителя: каждый вложенный `defmodule` из `event.ex` / `cmd.ex` (или `Cmd`
+  из модуля агрегата) — в свой файл с полным именем модуля; алиасы, которые давала вложенность,
+  прописать явно. У агрегата, где `Cmd` был вложен, добавить `alias <Aggregate>.Cmd`. Команде без
+  `@type t` объявить его: `use Core.Es.Cmd` тип не даёт, а объединение в `cmd.ex` на него ссылается.
+
+  ```elixir
+  # было — <aggregate>/event.ex
+  defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Event do
+    defmodule Opened do
+      defmodule Payload do ... end
+
+      use Es.Event,
+        aggregate_id: <Aggregate>.ID,
+        by: MyApp.Domain.Users.Common.User.ID,
+        payload: Payload
+    end
+
+    defmodule Closed do ... end
+
+    @type t :: Opened.t() | Closed.t()
+  end
+
+  # стало — <aggregate>/event/opened.ex
+  defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Event.Opened do
+    alias MyApp.Domain.<BC>.Common.<Aggregate>
+
+    defmodule Payload do ... end
+
+    use Es.Event,
+      aggregate_id: <Aggregate>.ID,
+      by: MyApp.Domain.Users.Common.User.ID,
+      payload: Payload
+  end
+
+  # стало — <aggregate>/event.ex
+  defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Event do
+    @moduledoc "События агрегата."
+
+    alias MyApp.Domain.<BC>.Common.<Aggregate>.Event.Closed
+    alias MyApp.Domain.<BC>.Common.<Aggregate>.Event.Opened
+
+    @type t :: Opened.t() | Closed.t()
+  end
+  ```
+
 ## 0.4.0
 
 ### Ломающие изменения контракта

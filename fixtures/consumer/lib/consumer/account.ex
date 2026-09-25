@@ -4,10 +4,9 @@ defmodule Consumer.Account do
   командой через `fold/3`, события с нагрузкой и без, `evolve/2` с паттерном `%Payload{}` и без.
   """
 
+  alias Consumer.Account.Cmd
   alias Consumer.Account.Errors
   alias Consumer.Account.Event
-  alias Consumer.UserID
-  alias Core.Es
   alias Core.Version
 
   use Core.Es.Aggregate,
@@ -24,38 +23,6 @@ defmodule Consumer.Account do
       name: "Название счёта",
       min_len: 1,
       max_len: 50
-  end
-
-  defmodule Cmd do
-    defmodule Open do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(name by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{name: Name.t(), by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Rename do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(name by at)a
-      defstruct @enforce_keys
-    end
-
-    defmodule Freeze do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(by at)a
-      defstruct @enforce_keys
-    end
-
-    defmodule Close do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(by at)a
-      defstruct @enforce_keys
-    end
   end
 
   defstruct id: nil, version: nil, name: nil, status: nil

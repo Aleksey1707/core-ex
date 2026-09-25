@@ -85,7 +85,8 @@
 ### Команда
 
 Команда event-sourced агрегата — `<Aggregate>.Cmd.<Name>` (`use Core.Es.Cmd`); её контракт
-(`by` и `at` в `@enforce_keys`) — `deps/core/docs/rules/11-domain.md`, «Команда».
+(`by` и `at` в `@enforce_keys`) — `deps/core/docs/rules/11-domain.md`, «Команда». Раскладка — по
+файлу на команду (`13-repos.md`, «Событие и команда»).
 
 Собирает команду usecase: `by` — из `CurrentUser.get(context)`, `at` — из текущего времени
 (`Es.Event.At.now/0` либо момента внешнего источника). Брать автора внутри `decide` из контекста

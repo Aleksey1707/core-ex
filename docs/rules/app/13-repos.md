@@ -1,9 +1,10 @@
 # Репозитории приложения
 
 - **Область.** `lib/my_app/domain/<bc>/{common,<actor>}/<aggregate>/{repo,read_repo,view}*`,
-  `<aggregate>/<name>_key.ex`, `lib/my_app/dao.ex`, DI-ключи репозиториев в `config/**`.
-- **Читать перед.** Новым репозиторием, Ecto-схемой, View, Specs или модулем ключа; правкой
-  `default_filters`, `constraint_errors`, `key_reservations:` и DI.
+  `<aggregate>/{event,cmd}*`, `<aggregate>/<name>_key.ex`, `lib/my_app/dao.ex`, DI-ключи
+  репозиториев в `config/**`.
+- **Читать перед.** Новым репозиторием, Ecto-схемой, View, Specs, модулем ключа, событием или
+  командой; правкой `default_filters`, `constraint_errors`, `key_reservations:` и DI.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
 Контракты `use Core.Repo{,.Pg,.Pg.StateStored,.Pg.Schema}`, `use Core.Es.Aggregate.Repo{,.Pg}`,
@@ -26,13 +27,17 @@
 <bc>/common/<aggregate>/read_repo/pg{,/schema.ex}  # своя read-only схема (to_view/1)
 <bc>/common/<aggregate>/read_repo/pg/specs.ex    # фрагменты запросов read-пути («Specs»)
 <bc>/common/<aggregate>/read_repo/{cached,invalidator}.ex   # опционально (16-caching.md)
-<bc>/common/<aggregate>/{event.ex,event/codec.ex,outbox.ex}  # события, их кодек, маппинг в очередь
+<bc>/common/<aggregate>/event.ex                 # семейство событий: @moduledoc, @type t
+<bc>/common/<aggregate>/event/<name>.ex          # одно событие; своя нагрузка — вложенный Payload
+<bc>/common/<aggregate>/event/codec.ex           # кодек событий
+<bc>/common/<aggregate>/outbox.ex                # маппинг событий в очередь
 ```
 
 Event-sourced агрегат добавляет к этому свои модули и **не имеет** схемы состояния:
 
 ```text
-<bc>/common/<aggregate>/{cmd,cmd/*.ex}           # команды: use Core.Es.Cmd
+<bc>/common/<aggregate>/cmd.ex                   # семейство команд: @moduledoc, @type t
+<bc>/common/<aggregate>/cmd/<name>.ex            # одна команда: use Core.Es.Cmd
 <bc>/common/<aggregate>/repo{.ex,/pg.ex}         # use Core.Es.Aggregate.Repo{,.Pg}
 <bc>/common/<aggregate>/process.ex               # опционально: use Core.Es.Aggregate.Process
 <bc>/common/<aggregate>/<name>_key.ex            # опционально: use Core.Es.KeyReservation
@@ -52,6 +57,58 @@ Event-sourced агрегат добавляет к этому свои моду�
 - View лежит в каталоге агрегата, а не под репозиторием: его видят behaviour, usecase,
   презентер и кеш.
 - Алиас доменного репозитория — `20-agreements.md`, «Алиасы приложения».
+
+### Событие и команда
+
+- Событие (у агрегата любого вида) и команда MUST лежать каждое в своём файле
+  `event/<name>.ex` / `cmd/<name>.ex`, сколько бы их ни было у агрегата; своя нагрузка события —
+  вложенный `Payload` в том же файле. Имя модуля раскладка не меняет: `<Aggregate>.Event.<Name>`,
+  `<Aggregate>.Cmd.<Name>`.
+- `event.ex` и `cmd.ex` — семейство: `@moduledoc`, `@type t` — объединение `t` членов — и
+  помощники приложения над семейством (`name/1`, `names/0`). Вложенные `defmodule` событий и
+  команд в них MUST NOT. `t` события даёт `use Es.Event`; команда объявляет `@type t` сама,
+  рядом со struct.
+
+Почему: модуль находится по имени без чтения файла, а порог «одним файлом, пока он маленький»
+произволен — агрегат на границе переезжал бы туда и обратно.
+
+```elixir
+# плохо — <aggregate>/event.ex: события вложены в семейство
+defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Event do
+  defmodule Opened do
+    defmodule Payload do ... end
+
+    use Es.Event,
+      aggregate_id: <Aggregate>.ID,
+      by: MyApp.Domain.Users.Common.User.ID,
+      payload: Payload
+  end
+
+  @type t :: Opened.t() | Closed.t()
+end
+
+# хорошо — <aggregate>/event/opened.ex
+defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Event.Opened do
+  alias MyApp.Domain.<BC>.Common.<Aggregate>
+
+  defmodule Payload do ... end
+
+  use Es.Event,
+    aggregate_id: <Aggregate>.ID,
+    by: MyApp.Domain.Users.Common.User.ID,
+    payload: Payload
+end
+
+# хорошо — <aggregate>/event.ex
+defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Event do
+  @moduledoc "События агрегата."
+
+  alias MyApp.Domain.<BC>.Common.<Aggregate>.Event.Closed
+  alias MyApp.Domain.<BC>.Common.<Aggregate>.Event.Opened
+
+  @type t :: Opened.t() | Closed.t()
+end
+```
 
 ### Actor-репозиторий
 

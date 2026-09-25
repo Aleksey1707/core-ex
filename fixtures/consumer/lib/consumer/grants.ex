@@ -1,9 +1,8 @@
 defmodule Consumer.Grants do
   @moduledoc "Агрегат, у кодека которого два события делят модуль нагрузки."
 
+  alias Consumer.Grants.Cmd
   alias Consumer.Grants.Event
-  alias Consumer.UserID
-  alias Core.Es
 
   use Core.Es.Aggregate,
     event_codec: Consumer.Grants.Event.Codec
@@ -18,24 +17,6 @@ defmodule Consumer.Grants do
     use Core.Prim.UUID,
       name: "Роль",
       version: 7
-  end
-
-  defmodule Cmd do
-    defmodule Grant do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(role by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{role: RoleID.t(), by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Revoke do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(role by at)a
-      defstruct @enforce_keys
-    end
   end
 
   defstruct id: nil, version: nil, roles: MapSet.new()

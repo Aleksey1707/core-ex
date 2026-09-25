@@ -1,8 +1,7 @@
 defmodule Consumer.Order do
+  alias Consumer.Order.Cmd
   alias Consumer.Order.Errors
   alias Consumer.Order.Event
-  alias Consumer.UserID
-  alias Core.Es
 
   use Core.Es.Aggregate,
     event_codec: Consumer.Order.Event.Codec
@@ -17,24 +16,6 @@ defmodule Consumer.Order do
     use Core.Prim.Integer,
       name: "Сумма",
       min: 1
-  end
-
-  defmodule Cmd do
-    defmodule Place do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(amount by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{amount: Amount.t(), by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Cancel do
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(by at)a
-      defstruct @enforce_keys
-    end
   end
 
   defstruct id: nil, version: nil, amount: nil, cancelled?: false
