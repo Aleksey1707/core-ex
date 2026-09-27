@@ -8,7 +8,7 @@
 # Предупреждения — диагностики компиляции через Mix API, а не разбор текста вывода. Ожидание — маркер
 # отдельной строкой над ошибочной строкой:
 #
-#     # expect: incompatible types given to Consumer.Account.execute/2
+#     # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
 #     def a3(%Order{} = state, %Account.Cmd.Open{} = command), do: Account.execute(state, command)
 #
 # Маркер относится к ближайшей следующей строке кода; несколько маркеров подряд — к одной строке.
@@ -32,9 +32,8 @@ defmodule ConsumerCheck do
     warnings = compile_warnings(root)
 
     markers =
-      root
-      |> Path.join("lib/**/*.ex")
-      |> Path.wildcard()
+      Mix.Project.config()[:elixirc_paths]
+      |> Enum.flat_map(&Path.wildcard(Path.join([root, &1, "**/*.ex"])))
       |> Enum.sort()
       |> Enum.flat_map(&markers(&1, root))
 

@@ -60,12 +60,13 @@ compile:
 compile-no-optional:
 	mix compile --no-optional-deps --warnings-as-errors
 
-# Храповик вывода типов: предупреждения компилятора фикстуры-потребителя против маркеров
-# `# expect:` в её исходниках (`fixtures/consumer/README.md`). Зависимости фикстуры тянутся,
-# только когда их нет или lock библиотеки ушёл вперёд; окружение — всегда `dev`, один `_build`.
+# Фикстура-потребитель (`fixtures/consumer/README.md`): её `lib/` — образец раскладки bounded context
+# под `boundary_lint --consumer`, а предупреждения компилятора сверяются с маркерами `# expect:` в её
+# исходниках (храповик вывода типов). Зависимости фикстуры тянутся, только когда их нет или lock
+# библиотеки ушёл вперёд; окружение — всегда `dev`, один `_build`.
 .PHONY: consumer-check
 consumer-check:
-	cd fixtures/consumer && export MIX_ENV=dev && \
+	cd fixtures/consumer && elixir ../../scripts/boundary_lint.exs --consumer && export MIX_ENV=dev && \
 		(mix deps.loadpaths --no-compile >/dev/null 2>&1 || mix deps.get) && \
 		mix run --no-start --no-compile check.exs
 

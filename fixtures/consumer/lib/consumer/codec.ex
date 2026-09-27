@@ -10,18 +10,12 @@ defmodule Consumer.Codec do
 
   @plugins [
     Core.Outbox.Codec,
-    Consumer.Account.Event.Codec,
-    Consumer.Order.Event.Codec,
-    Consumer.Ping.Event.Codec,
-    Consumer.Grants.Event.Codec,
-    Consumer.Account.Card.Codec
+    Consumer.Domain.Sales.Common.Account.Event.Codec,
+    Consumer.Domain.Sales.Common.Order.Event.Codec,
+    Consumer.Domain.Sales.Common.Ping.Event.Codec,
+    Consumer.Domain.Sales.Common.Grants.Event.Codec,
+    Consumer.Domain.Sales.Common.Account.Card.Codec
   ]
 
   def plugins, do: @plugins
-end
-
-defmodule Consumer.Codec.Internal do
-  use Core.Codec.Facade,
-    prim: Consumer.Codec.Prim.Internal,
-    plugins: Consumer.Codec.plugins()
 end

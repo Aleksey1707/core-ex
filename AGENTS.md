@@ -117,7 +117,7 @@ make boundary-check      # главный инвариант: библиотек
 make rules-check         # оба яруса docs/rules против стандартов 00-index.md
 make layout-check        # разделители внутри модуля: # --- и # ===== <имя> =====
 make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
-make consumer-check      # храповик вывода типов: предупреждения фикстуры-потребителя против маркеров
+make consumer-check      # фикстура-потребитель: раскладка под boundary_lint --consumer и храповик вывода типов
 make release-check       # версия сведена в mix.exs, README.md и CHANGELOG.md (и с тегом на коммите)
 make release VERSION=X.Y.Z # свести версию в трёх местах: «Не выпущено» → ## X.Y.Z
 make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
@@ -140,7 +140,7 @@ mix docs
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
 | `compile` | `mix compile --warnings-as-errors` |
 | `compile-no-optional` | сборка без optional-клиентов брокеров (`docs/rules/10-architecture.md`) |
-| `consumer-check` | предупреждения фикстуры-потребителя `fixtures/consumer` против маркеров `# expect:` (ADR-0014) |
+| `consumer-check` | фикстура-потребитель `fixtures/consumer`: `boundary_lint --consumer` над её `lib/` и предупреждения против маркеров `# expect:` (ADR-0014) |
 | `deps-clean` | `mix deps.clean --unused` — неиспользуемые зависимости |
 | `xref` | `mix xref graph --format cycles` — храповик на циклы компиляции |
 | `dialyzer` | `mix dialyzer` |
