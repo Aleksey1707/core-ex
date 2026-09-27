@@ -74,6 +74,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | свой `EventCompatCase` в `test/support` | `use Core.Es.EventCompatCase` (`19-testing.md`) |
 | ключ конфигурации на каждый репозиторий | конвенция `<Behaviour>.Pg`, ключ — только на подмену (`13-repos.md`, «DI») |
 | `tagged:` / `tags:` у плагина кодека, `dump_tagged` / `load_tagged` у фасада | `types:` и `union:`, у фасада только `dump/1`, `load/2`, `load!/2` (`deps/core/docs/rules/11-domain.md`) |
+| процессы и проверки старта компонента в `Application`, тумблеры компонентов в реестре `watch_list/0`, свой супервизор подписчиков с DLQ | корень `<Component>.Supervisor` с тумблером, опциями, проверками и `watch_list/0`; дерево `Core.PubSub.MqSubscriberReliable.Supervisor` (`17-otp-concurrency.md`, «Компонент») |
 | clause `:unknown_event_type` в каталоге `<Aggregate>.Errors` | ошибку строит `Core.Es.Event.Codec` (`ns: :es`), clause в каталоге MUST NOT (`deps/core/docs/rules/14-events-outbox.md`, «Domain events») |
 
 Встреченная в приложении устаревшая форма — не повод для точечной правки посреди чужой задачи:
@@ -136,7 +137,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | `14-events-outbox.md` | теги событий, топики, поллер, подписчики, идемпотентность | есть |
 | `15-web-api.md` | Controller / Schemas / Presenter, конверт, аутентификация | нет |
 | `16-caching.md` | `<ReadRepo>.Cached`, ACL в ключе, инвалидация | нет |
-| `17-otp-concurrency.md` | дерево процессов, тумблеры, наблюдение, циклы | есть |
+| `17-otp-concurrency.md` | дерево процессов, компоненты и тумблеры, наблюдение, циклы | есть |
 | `18-migrations.md` | блокировки, expand/contract, backfill, append-only | нет |
 | `19-testing.md` | case-модули, фикстуры, ратчеты, внешние зависимости | есть |
 | `20-agreements.md` | пайплайн `make`, граф зависимостей, решения Credo, алиасы | есть |

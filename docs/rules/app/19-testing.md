@@ -121,7 +121,7 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 | web-слой не ссылается на `*Repo` и `DAO` | `10-architecture.md` |
 | `watch_list/0` согласован с конфигурацией | `17-otp-concurrency.md` |
 | состав `plugins/0` PromEx и провайдеры публикуют метрику | `21-observability.md`, «Метрики» |
-| `start/2` зовёт `Core.Outbox.check_singleton!/1` до подъёма дерева | `14-events-outbox.md`, «Единственность поллера» |
+| корень очереди зовёт `Core.Outbox.check_singleton!/1` до подъёма своих детей | `14-events-outbox.md`, «Единственность поллера» |
 | примеры тел в спецификации проходят валидацию схем | `15-web-api.md` |
 
 - Ратчет описаний enum — `test/my_app/enum_docs_test.exs`, один на приложение:

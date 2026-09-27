@@ -162,6 +162,64 @@
   defmodule MyAppWeb.Schemas.Envelope do
   ```
 
+- **Компонент и его корень `<Component>.Supervisor`: `Application` перечисляет корни плоско**
+  (`docs/rules/app/17-otp-concurrency.md`, «Дерево процессов», «Компонент», «Наблюдение за
+  процессами»). Процессы одного назначения протекали в `Application`: кеш и его инвалидатор стояли
+  разными детьми, проверки старта компонента лежали в `start/2`, реестр наблюдаемых процессов
+  повторно вычислял тумблер каждого компонента, а дерево подписчика с DLQ копировалось в каждый
+  супервизор. Теперь компонент — единица тумблера: всё, что включается вместе, MUST жить под одним
+  корнем `<Component>.Supervisor`, и корень сам владеет тумблером (`:ignore` и `info`), сборкой
+  опций, проверками старта и `watch_list/0`, отфильтрованной тем же тумблером. В `Application`
+  остаются `Core.Config.validate!()`, проверки разделяемой инфраструктуры, сама инфраструктура и
+  корни компонентов; процесс компонента отдельным ребёнком, проверка компонента в `start/2` и корень
+  над корнями компонентов — MUST NOT. `watch_list/0` приложения — конкатенация списков компонентов;
+  вычислять тумблер компонента в реестре второй раз — MUST NOT. Компонент лежит в срезе своего инициатора (зовёт
+  usecases), в подсистеме (без доменной логики) или в каталоге read-модели (кеш); в `Common` вне
+  каталога read-модели — MUST NOT. `Core.Outbox.check_singleton!/1` и
+  `Core.Outbox.validate_partition!/1` переехали из `start/2` в корень очереди
+  `MyApp.Outbox.Supervisor`, ратчет приложения — на вызов оттуда. Решение и отвергнутые варианты —
+  `docs/adr/0024-component-owns-its-subtree.md`.
+
+  Как править код потребителя: процессы компонента и его проверки старта переезжают из
+  `Application` в корень компонента, реестр наблюдаемых процессов склеивает `watch_list/0` корней,
+  компонент из `Common` переезжает в срез своего инициатора или в подсистему:
+
+  ```elixir
+  # было
+  def start(_type, _args) do
+    Core.Config.validate!()
+    Core.Outbox.check_singleton!(outbox_opts)
+    MyApp.<Subsystem>.Registry.load!()
+
+    children = [
+      MyApp.DAO,
+      {Cachex, name: <ReadRepo>.Cache},
+      <ReadRepo>.Supervisor,
+      MyApp.Outbox.Supervisor,
+      MyApp.<Subsystem>.Supervisor
+    ]
+  end
+
+  def watch_list do
+    if Application.fetch_env!(:my_app, MyApp.<Subsystem>.Supervisor)[:enabled],
+      do: [%{component: "<subsystem>", name: MyApp.<Subsystem>.Worker}],
+      else: []
+  end
+
+  # стало — Cachex под <ReadRepo>.Supervisor, check_singleton! и load! в start_link/1 своих корней
+  def start(_type, _args) do
+    Core.Config.validate!()
+
+    children = [MyApp.DAO, <ReadRepo>.Supervisor, MyApp.Outbox.Supervisor, MyApp.<Subsystem>.Supervisor]
+  end
+
+  def watch_list do
+    <ReadRepo>.Supervisor.watch_list() ++
+      MyApp.Outbox.Supervisor.watch_list() ++
+      MyApp.<Subsystem>.Supervisor.watch_list()
+  end
+  ```
+
 ### Новое
 
 - **Дерево подписчиков брокера с DLQ — `Core.PubSub.MqSubscriberReliable.Supervisor`**
@@ -174,8 +232,9 @@
   `Core.Es.Projection.Supervisor`; `watch_list/1` принимает те же опции, что и старт. Config и env
   библиотека не читает.
 
-  Как править код потребителя: собственный супервизор подписчиков заменяется деревом, опции
-  собирает одна функция компонента; её же принимает `watch_list/1`.
+  Как править код потребителя: собственный супервизор подписчиков заменяется деревом — теперь это
+  MUST свода потребителя (`app/17-otp-concurrency.md`, «Дерево процессов»); опции собирает корень
+  компонента, он же отдаёт их `watch_list/1`.
 
   ```elixir
   # было — порядок детей и связки опций в каждом компоненте свои

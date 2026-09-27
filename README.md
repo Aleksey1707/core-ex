@@ -137,7 +137,16 @@ def start(_type, _args) do
   # опционально — только если приложение действительно поднимает адаптер:
   Core.Mq.Stream.ensure_available!()
   Core.Mq.Kafka.ensure_available!()
-  # обязательно, если приложение ставит outbox в дерево:
+  ...
+end
+```
+
+Проверки старта компонента стоят в его корне, а не в `start/2`
+(`docs/rules/app/17-otp-concurrency.md`, «Компонент»). Корень очереди `MyApp.Outbox.Supervisor`,
+если приложение ставит outbox в дерево:
+
+```elixir
+def start_link(_arg) do
   outbox = Application.get_env(:core, Core.Outbox, [])
 
   Core.Outbox.check_singleton!(

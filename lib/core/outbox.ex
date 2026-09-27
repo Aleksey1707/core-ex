@@ -44,7 +44,7 @@ defmodule Core.Outbox do
   вперемешку — молча, без единой ошибки. `check_singleton!/1` ловит ту же ошибку между
   нодами; эта проверка — внутри одной.
 
-  Звать из `start/2` приложения-потребителя рядом с `check_singleton!/1`, передавая
+  Звать из корня компонента очереди у потребителя рядом с `check_singleton!/1`, передавая
   конфигурацию `:pollers` как есть.
 
       Core.Outbox.validate_partition!(
@@ -127,7 +127,8 @@ defmodule Core.Outbox do
     и `""` — кластеризации нет;
   - `:allow_cluster?` — разрешить старт в кластере (`OUTBOX_ALLOW_CLUSTER`), по умолчанию `false`.
 
-  Звать из `start/2` приложения-потребителя до подъёма дерева, рядом с `validate_partition!/1`.
+  Звать из корня компонента очереди у потребителя до подъёма его детей, рядом с
+  `validate_partition!/1`.
 
       outbox = Application.get_env(:core, Core.Outbox, [])
 

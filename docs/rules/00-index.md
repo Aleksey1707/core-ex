@@ -113,6 +113,8 @@
 | `<Aggregate>` | `<aggregate>` | агрегат |
 | `<ReadModel>` | `<read_model>` | read-модель: View, ReadRepo и проекция одного каталога |
 | `<Scenario>` | — | сценарий модуля usecases; по умолчанию имя агрегата |
+| `<Subsystem>` | `<subsystem>` | подсистема приложения вне `Domain`, без агрегатов |
+| `<Component>` | `<component>` | компонент: процессы одного тумблера под корнем `<Component>.Supervisor` |
 | `<Value>` | `<value>` | значение (Prim) |
 | `<Api>`, `<Version>`, `<Resource>` | `<api>`, `<version>`, `<resource>` | web: поверхность, версия API, ресурс |
 | — | `<scope>` | часть контекста: `common` или срез `<actor>` |
