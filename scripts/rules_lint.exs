@@ -48,7 +48,7 @@ defmodule RulesLint do
     Core MyApp MyAppWeb
     Ecto ExUnit Credo Logger Oban Cachex Phoenix PromEx OpenApiSpex
     Consistency Design Readability Refactor Warning
-    Application Enum Keyword Map Process String
+    Application Enum Keyword Map Mix Process String
     Actor Agg Caches Codec Config Context DAO Error Errors Es Event Helper InCodec OutCodec
     Outbox Params Prim Projection Projections Repo ReadRepo Response Result Schema Sc
     Specs Status Step Steps Store Transact Usecases Version View Workers

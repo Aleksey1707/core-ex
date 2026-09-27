@@ -1,5 +1,35 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Путь файла = имя модуля: `boundary_lint --consumer` проверяет раскладку `lib/`**
+  (`docs/rules/app/10-architecture.md`, «Раскладка»). Таблица namespaces и деревья файлов свода
+  потребителя не несли модальности и формально были пояснением, а модуль не по пути не находился
+  по имени ни читателем, ни агентом. Теперь путь файла от `lib/` MUST совпадать с
+  `Macro.underscore` имени модуля (`MyApp.HTTPClient` — `lib/my_app/http_client.ex`), в файле
+  MUST быть один верхнеуровневый модуль (вложенные следуют за родителем), mix-таска лежит по
+  конвенции Mix (`Mix.Tasks.Foo.Bar` — `lib/mix/tasks/foo.bar.ex`). Проверка включена сразу
+  ошибкой шага `boundary-check`; `test/` проверяется, как и прежде, только на DI. Таблица
+  namespaces дополнена `MyApp.StreamID`, `MyApp.MetricsServer`, `MyApp.Release`, `Mix.Tasks.*`;
+  явно записано: потребитель — один Mix-проект, один `otp_app`, один `DAO`, umbrella не
+  поддерживается. Решение и отвергнутые варианты — `docs/adr/0023-consumer-layout-enforced.md`.
+
+  Как править код потребителя: модуль переносится в файл по своему имени, второй верхнеуровневый
+  модуль — в свой файл. Сознательное отступление — строка в `DEBT.md` и маркер в блоке
+  комментариев прямо над `defmodule`; он гасит только правило `module-path` и только в своём
+  модуле, без ссылки на раздел `DEBT.md` не гасит ничего:
+
+  ```elixir
+  # было — lib/my_app/domain/<bc>/common/<aggregate>/repository.ex
+  defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
+
+  # стало — lib/my_app/domain/<bc>/common/<aggregate>/repo.ex, либо отступление на месте
+  # boundary-lint: allow module-path — DEBT.md, «Файл не по имени модуля»
+  defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
+  ```
+
 ## 0.5.0
 
 ### Ломающие изменения контракта
