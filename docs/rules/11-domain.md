@@ -146,7 +146,8 @@ reserved; проверка `Prim.validate_kind!/2`); тогда в профил�
 Импорт `import Core.Helper.String, only: [first_line: 1]` пишет сам модуль: ни `use Core.Prim`
 с обёртками, ни `use Core.Enum` его не делают.
 
-Примитивы объявлять **вложенными модулями** внутри агрегата:
+Prim вложен в агрегат-владелец **по имени** (`<Aggregate>.Name`); где лежат его файл и значение
+без владельца — `deps/core/docs/rules/app/11-domain.md`, «Prim и Enum». В файле агрегата:
 
 ```elixir
 defmodule MyApp.Domain.<BC>.Common.<Aggregate> do
@@ -552,8 +553,8 @@ end
 закрыт кодом, а не приходит извне. `inspect/1` печатает только список ключей — контекст целиком
 уходит в crash-репорты OTP-процессов, а его значения чувствительны (`12-errors.md`).
 
-`Context.Accessor` — типизированный доступ к ключу (пример: `MyApp.Domain.<BC>.CurrentUser` с
-`use Core.Context.Accessor` → `:current_user_id`):
+`Context.Accessor` — типизированный доступ к ключу (пример:
+`MyApp.Domain.<BC>.Common.CurrentUser` с `use Core.Context.Accessor` → `:current_user_id`):
 
 - `key:` (обязательна) — атом ключа;
 - `type:` — модуль значения; спеки сужаются до `<Mod>.t()`, а `put/2` принимает только

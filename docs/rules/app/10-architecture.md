@@ -205,6 +205,34 @@ Core.Security.Secret.ensure_configured!()
 - При нескольких поллерах outbox (конфиг `pollers`) MUST стоять
   `Core.Outbox.validate_partition!/1` (`deps/core/docs/rules/14-events-outbox.md`).
 
+## Файлы `config/`
+
+Место значения задаёт момент, когда его читают: на компиляции, на старте релиза или только в
+тестах.
+
+| Файл | Что в нём |
+|---|---|
+| `config.exs` | `compile_env` и DI-подмены: `config :core` (`otp_app`, `telemetry_prefix`), подмена `<Behaviour>.Pg` (`13-repos.md`, «DI»), `.Cached` и TTL кеша (`16-caching.md`, «Конфигурация») |
+| `runtime.exs` | env и тумблеры: `OUTBOX_*` (`14-events-outbox.md`, «Конфигурация»), тумблеры поддеревьев и опции процессов, `ES_PROJECTIONS_*` (`17-otp-concurrency.md`), тумблер инвалидатора кеша (`16-caching.md`) |
+| `test.exs` | тестовый overlay: очередь выключена (`14-events-outbox.md`), кеш на `.Pg` (`16-caching.md`), тестовый plug HTTP-клиентов (`19-testing.md`, «Внешние зависимости»), сервер метрик и PromEx выключены (`21-observability.md`, «Сервер метрик») |
+| `dev.exs`, `prod.exs` | настройки окружения без секретов и env: уровень логов, `debug_errors`, `force_ssl` |
+
+Секреты площадок и чтение env в `dev.exs` / `prod.exs` MUST NOT, их место — `runtime.exs`:
+`prod.exs` исполняется на сборке, и значение запекается в релиз — секрет попадает в артефакт, а env
+берётся с машины сборки, а не с площадки; env в `dev.exs` — второй источник рядом с
+`runtime.exs`, и они разойдутся. Локальные учётные данные разработки (пароль базы в контейнере)
+секретом площадки не являются.
+
+```elixir
+# плохо — config/prod.exs: значение машины сборки, секрет в артефакте
+config :my_app, MyApp.DAO, password: System.fetch_env!("DB_PASSWORD")
+
+# хорошо — config/runtime.exs
+if config_env() == :prod do
+  config :my_app, MyApp.DAO, password: System.fetch_env!("DB_PASSWORD")
+end
+```
+
 ## Boundary
 
 | Boundary | `deps:` | Что внутри |
@@ -247,7 +275,24 @@ Bounded context делится на `Common` и срезы инициаторо�
 
 ## Usecases
 
-Имя — `MyApp.Domain.<BC>.<Actor>.Usecases.<Aggregate>`. Конвенция тела:
+Модуль usecases MUST называться `MyApp.Domain.<BC>.<Actor>.Usecases.<Scenario>`: `<Scenario>` —
+сценарий, по умолчанию имя агрегата, над которым он работает (`Usecases.Order`). Операция над
+несколькими агрегатами SHOULD получать свой модуль по сценарию, а не ложиться в модуль одного из
+них: второй агрегат из имени не виден, и сценарий ищут не там, где он лежит.
+
+```elixir
+# плохо — оформление меняет корзину и заказ, а лежит в модуле корзины
+defmodule MyApp.Domain.Orders.Client.Usecases.Cart do
+  def checkout(cart_id, context), do: ...
+end
+
+# хорошо
+defmodule MyApp.Domain.Orders.Client.Usecases.Checkout do
+  def run(cart_id, context), do: ...
+end
+```
+
+Конвенция тела:
 
 1. Authz — до открытия транзакции.
 2. Актор: `CurrentUser.get(context)` → `by` — там же, до транзакции.

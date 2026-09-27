@@ -30,7 +30,7 @@
 |---|---|
 | `use` | это DSL на алиасах (`use Repo.Pg.Schema, entity: Agg, id: Agg.ID`), а `use Repo.Pg.Schema` обязан идти **после** блока `schema` — иначе нет `defstruct` (`13-repos.md`) |
 | module attribute | опции `use` часто ссылаются на атрибут (`use Es.Event.Codec, tags: @tag_by_mod`) |
-| вложенный `defmodule` | Prim-модули объявляются внутри агрегата (`11-domain.md`) |
+| вложенный `defmodule` | Prim-модуль MAY объявляться внутри агрегата (`11-domain.md`) |
 | `defstruct`, `@type` / `@typep` / `@opaque` / `@callback` | следуют за своим `use` / `schema` |
 
 Следствия:

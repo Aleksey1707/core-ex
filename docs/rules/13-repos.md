@@ -11,8 +11,8 @@
 
 | Слой | Пример модуля | Роль |
 |---|---|---|
-| Behaviour | `<BC>.Common.Repo`, `<BC>.Common.<Aggregate>.Repo` | `@callback` API; без SQL |
-| Pg impl | `*.Repo.Pg`, `*.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
+| Behaviour | `<BC>.Common.<Aggregate>.Repo` | `@callback` API; без SQL |
+| Pg impl | `<BC>.Common.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
 | Schema | `*.Repo.Pg.Schema` (+ nested `Schema.<Child>`, …) | Ecto schema; write — `to_entity`/`to_model` (+ bang), read — `to_view` |
 | View | `<ReadModel>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
 | Specs | `*.Repo.Pg.Specs` | `dynamic` / `from` query fragments |
@@ -31,7 +31,7 @@
 
 | Вид | Модуль | Файл |
 |---|---|---|
-| Запись | `<Aggregate>.Repo` / `Repo` (common) | `<aggregate>/repo.ex` / `repo.ex` |
+| Запись | `<Aggregate>.Repo` | `<aggregate>/repo.ex` |
 | Чтение | `<ReadModel>.ReadRepo` (по умолчанию `<Aggregate>.ReadRepo`) | `<read_model>/read_repo.ex` |
 
 ### Write (`<Aggregate>.Repo`)
@@ -1025,7 +1025,7 @@ alias Core.Config
 
 require Config
 
-@repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
+@repo Config.repo!(MyApp.Domain.<BC>.Common.<Aggregate>.Repo)
 ```
 
 Реализация репозитория MUST лежать в `<Behaviour>.Pg` — та же раскладка, что задаёт
@@ -1035,7 +1035,8 @@ app-env **потребителя**, под именем приложения и�
 
 ```elixir
 # config/config.exs потребителя — только при подмене
-config :my_app, MyApp.Domain.Orders.Order.Repo, MyApp.Domain.Orders.Order.Repo.Memory
+config :my_app, MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
+  MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Memory
 ```
 
 Модуль-реализация проверяется на компиляции call site — и выведенный по конвенции, и
@@ -1050,8 +1051,8 @@ config :my_app, MyApp.Domain.Orders.Order.Repo, MyApp.Domain.Orders.Order.Repo.M
 for behaviour <- [Order.Repo, Invoice.Repo], do: Config.repo!(behaviour)
 
 # хорошо
-@order_repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
-@invoice_repo Config.repo!(MyApp.Domain.Orders.Invoice.Repo)
+@order_repo Config.repo!(MyApp.Domain.Orders.Common.Order.Repo)
+@invoice_repo Config.repo!(MyApp.Domain.Orders.Common.Invoice.Repo)
 ```
 
 Инфраструктурный репозиторий самой библиотеки живёт по той же конвенции:

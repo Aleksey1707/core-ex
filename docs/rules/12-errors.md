@@ -280,7 +280,7 @@ json(conn, Response.error(code, messages))
 Проверяется: `CompileError` в `use Core.Repo.Pg`, `use Core.Repo.Pg.StateStored` и
 `use Core.Es.Aggregate.Repo.Pg` — у модуля `errors:` нет `domain/3` или clause обязательного кода.
 
-Раскладка каталога в приложении — путь, `ns/0`, `domain/4`, тексты по умолчанию —
+Каталог в приложении — имя (путь следует из него), `ns/0`, `domain/4`, тексты по умолчанию —
 `deps/core/docs/rules/app/12-errors.md`, «Каталоги агрегатов».
 
 ## Источники `%Error{}` в проекте

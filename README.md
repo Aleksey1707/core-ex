@@ -198,7 +198,7 @@ end
    миграцию со своим timestamp и делегирует туда:
 
    ```elixir
-   defmodule MyApp.Repo.Migrations.CreateOutbox do
+   defmodule MyApp.DAO.Migrations.CreateOutbox do
      use Ecto.Migration
 
      defdelegate up, to: Core.Outbox.Migration
@@ -215,7 +215,7 @@ end
    `es_checkpoints` — так же, DDL всех трёх таблиц живёт в `Core.Es.Migration`:
 
    ```elixir
-   defmodule MyApp.Repo.Migrations.CreateEsEvents do
+   defmodule MyApp.DAO.Migrations.CreateEsEvents do
      use Ecto.Migration
 
      defdelegate up, to: Core.Es.Migration
@@ -231,7 +231,7 @@ end
    `Core.Es.KeyReservation.Migration`:
 
    ```elixir
-   defmodule MyApp.Repo.Migrations.CreateEsKeyReservations do
+   defmodule MyApp.DAO.Migrations.CreateEsKeyReservations do
      use Ecto.Migration
 
      defdelegate up, to: Core.Es.KeyReservation.Migration
@@ -251,15 +251,15 @@ end
 
    require Config
 
-   @repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
+   @repo Config.repo!(MyApp.Domain.<BC>.Common.<Aggregate>.Repo)
    ```
 
-   Без ключа берётся `MyApp.Domain.Orders.Order.Repo.Pg`. Ключ под своим `otp_app` нужен
-   только при подмене:
+   Без ключа берётся `MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Pg`. Ключ под своим `otp_app`
+   нужен только при подмене:
 
    ```elixir
-   config :my_app, MyApp.Domain.Orders.Order.Repo,
-          MyApp.Domain.Orders.Order.Repo.Memory
+   config :my_app, MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
+     MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Memory
    ```
 
    Прямой `Application.compile_env!/2` на доменный behaviour — нарушение

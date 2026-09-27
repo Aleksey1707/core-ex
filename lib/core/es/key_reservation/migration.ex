@@ -5,7 +5,7 @@ defmodule Core.Es.KeyReservation.Migration do
 
   Потребитель заводит миграцию со своим timestamp и делегирует DDL сюда:
 
-      defmodule MyApp.Repo.Migrations.CreateEsKeyReservations do
+      defmodule MyApp.DAO.Migrations.CreateEsKeyReservations do
         use Ecto.Migration
 
         defdelegate up, to: Core.Es.KeyReservation.Migration

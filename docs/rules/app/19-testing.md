@@ -43,6 +43,25 @@ setup tags do
 end
 ```
 
+## Раскладка `test/`
+
+- Тест модуля SHOULD лежать по пути модуля: `MyApp.Domain.<BC>.Common.<Aggregate>` —
+  `test/my_app/domain/<bc>/common/<aggregate>_test.exs`. Тест находится по имени модуля так же, как
+  сам модуль (`10-architecture.md`, «Раскладка»); линтер дерево `test/` не проверяет.
+- Тест, который держит норму на всём дереве, — архитектурный тест
+  (`test/my_app/architecture_test.exs`, `10-architecture.md`, «Boundary») и ратчеты («Ратчеты») —
+  MUST лежать в `test/my_app/`: модуля, по пути которого его положить, у него нет.
+- Case-модули (`MyApp.DataCase`, `MyAppWeb.ConnCase`) и прочая обвязка MUST лежать в
+  `test/support/` («Case-модули», «Обвязка `test/support`»): это не тесты, а код, который
+  компилируется в `:test`.
+
+```text
+test/my_app/domain/<bc>/common/<aggregate>_test.exs   # тест модуля — по его пути
+test/my_app/architecture_test.exs                     # норма на всём дереве
+test/my_app/enum_docs_test.exs                        # ратчет
+test/support/{data_case,conn_case}.ex                 # обвязка
+```
+
 ## Обвязка `test/support`
 
 | Модуль | Роль |

@@ -123,6 +123,45 @@
   end
   ```
 
+- **Usecases по сценарию и нормы раскладки слоёв** (`docs/rules/app/10-architecture.md`,
+  «Usecases», «Файлы `config/`»). На вопросы «куда класть X» свод не отвечал, а примеры README и
+  свода библиотеки называли модули иначе, чем ярус потребителя. Теперь:
+  - модуль usecases — `MyApp.Domain.<BC>.<Actor>.Usecases.<Scenario>`, по умолчанию имя агрегата;
+    операция над несколькими агрегатами SHOULD получать свой модуль по сценарию, а не ложиться в
+    модуль одного из них;
+  - таблица «файл `config/` → что в нём»: `config.exs` — `compile_env` и DI-подмены, `runtime.exs` —
+    env и тумблеры, `test.exs` — тестовый overlay; секреты и env в `dev.exs` / `prod.exs` MUST NOT —
+    оба файла исполняются на сборке и запекают значение в релиз;
+  - Prim вложен в агрегат-владелец по имени, файл отдельный или тот же — MAY; значение без
+    владельца MUST лежать в `<BC>.Common.<Value>` (`docs/rules/app/11-domain.md`, «Prim и Enum»);
+  - web: поверхность `MyAppWeb.<Api>` со своим `ApiSpec` и `<Version>.<Resource>`; общее для
+    поверхностей (`FallbackController`, `ErrorMapper`, `Presenters`, `Plugs`, `Schemas`) — в корне
+    `MyAppWeb`; вложенный ресурс — вложенный namespace (`docs/rules/app/15-web-api.md`,
+    «Раскладка»);
+  - тест модуля SHOULD лежать по пути модуля; архитектурный тест и ратчеты — в `test/my_app/`,
+    `ConnCase` и `DataCase` — в `test/support/` (`docs/rules/app/19-testing.md`, «Раскладка
+    `test/`»).
+
+  Как править код потребителя: сценарий над несколькими агрегатами переезжает в свой модуль
+  usecases, общая схема web — в `Schemas` ближайшего общего уровня, чтение env из `dev.exs` /
+  `prod.exs` — в `runtime.exs`:
+
+  ```elixir
+  # было
+  defmodule MyApp.Domain.<BC>.<Actor>.Usecases.Cart do
+    def checkout(cart_id, context), do: ...
+  end
+
+  defmodule MyAppWeb.<Api>.V1.Schemas.Envelope do   # общая для поверхностей
+
+  # стало
+  defmodule MyApp.Domain.<BC>.<Actor>.Usecases.Checkout do
+    def run(cart_id, context), do: ...
+  end
+
+  defmodule MyAppWeb.Schemas.Envelope do
+  ```
+
 ### Новое
 
 - **Дерево подписчиков брокера с DLQ — `Core.PubSub.MqSubscriberReliable.Supervisor`**

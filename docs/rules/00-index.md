@@ -112,6 +112,9 @@
 | `<Actor>` | `<actor>` | actor / role-срез |
 | `<Aggregate>` | `<aggregate>` | агрегат |
 | `<ReadModel>` | `<read_model>` | read-модель: View, ReadRepo и проекция одного каталога |
+| `<Scenario>` | — | сценарий модуля usecases; по умолчанию имя агрегата |
+| `<Value>` | `<value>` | значение (Prim) |
+| `<Api>`, `<Version>`, `<Resource>` | `<api>`, `<version>`, `<resource>` | web: поверхность, версия API, ресурс |
 | — | `<scope>` | часть контекста: `common` или срез `<actor>` |
 
 В путях и именах файлов понятие пишется snake_case: `lib/my_app/domain/<bc>/<actor>/`.

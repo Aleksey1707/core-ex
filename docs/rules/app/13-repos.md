@@ -20,6 +20,9 @@
 модулей `<Aggregate>Repo` не бывает. Чтение раскладывается по read-моделям («Read-модель»):
 
 ```text
+<bc>/common/<aggregate>.ex                       # агрегат; Prim — вложенные модули или свои файлы
+<bc>/common/<aggregate>/<value>.ex               # опционально: Prim агрегата отдельным файлом
+<bc>/common/<aggregate>/errors.ex                # каталог ошибок
 <bc>/common/<aggregate>/repo.ex                  # write behaviour
 <bc>/common/<aggregate>/repo/pg.ex               # use Repo.Pg (без событий) / Repo.Pg.StateStored
 <bc>/common/<aggregate>/repo/pg/schema.ex        # Ecto-схема write-пути

@@ -26,19 +26,52 @@
 
 ## Раскладка
 
+Путь файла следует из имени модуля (`10-architecture.md`, «Раскладка»).
+
+| Модуль | Что держит |
+|---|---|
+| `MyAppWeb.<Api>` | поверхность: namespace её версий и ресурсов |
+| `MyAppWeb.<Api>.ApiSpec` | спецификация поверхности и её схема аутентификации |
+| `MyAppWeb.<Api>.<Version>.<Resource>.Controller` | контроллер ресурса |
+| `MyAppWeb.<Api>.<Version>.<Resource>.Schemas.*` | схемы этого ресурса |
+| `MyAppWeb.<Api>.<Version>.<Resource>.<Nested>.*` | вложенный ресурс (`/orders/:id/items`) |
+| `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
+| `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
+| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка |
+| `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация |
+| `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов |
+
 ```text
+lib/my_app_web/<api>/api_spec.ex
 lib/my_app_web/<api>/<version>/<resource>/controller.ex
-lib/my_app_web/<api>/<version>/<resource>/schemas/*.ex   # схемы этого ресурса
-lib/my_app_web/<api>/<version>/schemas/*.ex              # общие: конверт, страницы, ошибка
-lib/my_app_web/presenters/*.ex                           # View / domain → map ответа
-lib/my_app_web/plugs/*.ex                                # контекст и аутентификация
+lib/my_app_web/<api>/<version>/<resource>/schemas/*.ex
+lib/my_app_web/<api>/<version>/<resource>/<nested>/controller.ex
+lib/my_app_web/<api>/<version>/schemas/*.ex
+lib/my_app_web/<api>/schemas/*.ex
+lib/my_app_web/schemas/*.ex
+lib/my_app_web/{presenters,plugs}/*.ex
 lib/my_app_web/{error_mapper,fallback_controller}.ex
 ```
 
-- Ресурс — каталог: контроллер и его схемы лежат рядом, а не по типам файлов.
-- Схема, которую делят два ресурса или две поверхности, поднимается в общий каталог, а не
-  импортируется из соседнего ресурса.
-- Презентеры общие для всех поверхностей: одна форма агрегата на весь HTTP-слой.
+- Поверхность MUST быть своим namespace `MyAppWeb.<Api>`: префикс, пайплайн и `ApiSpec` у
+  поверхностей разные («Поверхности и версии»).
+- Общее для нескольких поверхностей — `FallbackController`, `ErrorMapper`, `Presenters`, `Plugs`,
+  `Schemas` — MUST лежать в корне `MyAppWeb`, а не в одной из поверхностей: иначе вторая
+  поверхность ссылается на первую.
+- Ресурс — каталог: контроллер и его схемы лежат рядом, а не по типам файлов. Вложенный ресурс
+  MUST быть вложенным namespace родителя, а не соседним ресурсом.
+- Схема, которую делят два ресурса, две версии или две поверхности, поднимается в `Schemas`
+  ближайшего общего уровня (таблица выше), а не импортируется из соседнего ресурса.
+
+```elixir
+# плохо — схема, общая для поверхностей, лежит в одной из них; вложенный ресурс — сосед родителя
+defmodule MyAppWeb.Public.V1.Schemas.Envelope do
+defmodule MyAppWeb.Public.V1.OrderItem.Controller do
+
+# хорошо
+defmodule MyAppWeb.Schemas.Envelope do
+defmodule MyAppWeb.Public.V1.Order.Item.Controller do
+```
 
 ## Аутентификация в плагах
 

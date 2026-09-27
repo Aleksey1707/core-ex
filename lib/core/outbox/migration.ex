@@ -4,7 +4,7 @@ defmodule Core.Outbox.Migration do
 
   Потребитель заводит миграцию со своим timestamp и делегирует DDL сюда:
 
-      defmodule MyApp.Repo.Migrations.CreateOutbox do
+      defmodule MyApp.DAO.Migrations.CreateOutbox do
         use Ecto.Migration
 
         defdelegate up, to: Core.Outbox.Migration

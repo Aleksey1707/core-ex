@@ -29,9 +29,11 @@
 
 ## Каталоги агрегатов
 
-Каталог — `MyApp.Domain.<BC>.Common.<Aggregate>.Errors` с `ns/0` и `domain/3,4`. Какие коды
-в нём проверяет сборка репозитория и почему catch-all MUST NOT —
-`deps/core/docs/rules/12-errors.md`, «Каталог агрегата (`<Aggregate>.Errors`)».
+Каталог — `MyApp.Domain.<BC>.Common.<Aggregate>.Errors` с `ns/0` и `domain/3,4`. Отдельной
+нормы пути у него нет: путь следует из имени (`10-architecture.md`, «Раскладка») —
+`lib/my_app/domain/<bc>/common/<aggregate>/errors.ex`, в каталоге агрегата. Какие коды в нём
+проверяет сборка репозитория и почему catch-all MUST NOT — `deps/core/docs/rules/12-errors.md`,
+«Каталог агрегата (`<Aggregate>.Errors`)».
 
 - клозы объявляются pattern-matching по коду, без `@type code`;
 - клоза собирает ошибку без повтора атома кода:
