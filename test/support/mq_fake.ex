@@ -14,6 +14,9 @@ defmodule Core.MqFake do
 
     `fail_at:` — индекс, начиная с которого публикация возвращает ошибку
     (`put_many` останавливается на нём, как `Stream.Writer`).
+
+    Ребёнок дерева супервизии (`start_link/1`) — агент под именем `name:`, handle — само имя,
+    как у `Mq.Stream.Writer`.
     """
 
     @behaviour Core.Mq.Writer
@@ -25,7 +28,10 @@ defmodule Core.MqFake do
 
     defstruct [:agent, :fail_at]
 
-    @type t :: %__MODULE__{agent: pid(), fail_at: non_neg_integer() | nil}
+    @type t :: %__MODULE__{agent: pid() | atom(), fail_at: non_neg_integer() | nil}
+
+    @typedoc "Writer или имя его агента из `start_link/1`."
+    @type handle :: t() | atom()
 
     @doc "Создать writer поверх нового агента."
     @spec new(keyword()) :: t()
@@ -35,8 +41,21 @@ defmodule Core.MqFake do
       %__MODULE__{agent: agent, fail_at: Keyword.get(opts, :fail_at)}
     end
 
+    @doc "Спецификация ребёнка: агент под именем `name:`."
+    @spec child_spec(keyword()) :: Supervisor.child_spec()
+
+    def child_spec(opts) when is_list(opts),
+      do: %{id: Keyword.fetch!(opts, :name), start: {__MODULE__, :start_link, [opts]}}
+
+    @doc "Запустить агент writer'а под именем `name:`."
+    @spec start_link(keyword()) :: Agent.on_start()
+
+    def start_link(opts) when is_list(opts), do: Agent.start_link(fn -> [] end, name: Keyword.fetch!(opts, :name))
+
     @doc "Опубликованные сообщения в порядке публикации."
-    @spec published(t()) :: [Message.t()]
+    @spec published(handle()) :: [Message.t()]
+
+    def published(name) when is_atom(name), do: published(%__MODULE__{agent: name})
 
     def published(%__MODULE__{agent: agent}), do: Agent.get(agent, &Enum.reverse/1)
 
@@ -47,6 +66,8 @@ defmodule Core.MqFake do
 
     @doc false
     @impl true
+    def put(name, %Message{} = message) when is_atom(name), do: put(%__MODULE__{agent: name}, message)
+
     def put(%__MODULE__{} = writer, %Message{} = message) do
       case put_many(writer, [message]) do
         :ok -> :ok
@@ -56,6 +77,8 @@ defmodule Core.MqFake do
 
     @doc false
     @impl true
+    def put_many(name, messages) when is_atom(name), do: put_many(%__MODULE__{agent: name}, messages)
+
     def put_many(%__MODULE__{} = writer, messages) when is_list(messages) do
       messages
       |> Enum.with_index()
@@ -90,6 +113,9 @@ defmodule Core.MqFake do
     `Mq.ReaderReliable` поверх очереди сообщений, наполняемой тестом.
 
     До `commit/1` повторно отдаёт то же сообщение — как reliable-чтение из брокера.
+
+    Ребёнок дерева супервизии (`start_link/1`) — агент под именем `name:` с очередью `messages:`,
+    handle — само имя, как у `Mq.Stream.Reader`.
     """
 
     @behaviour Core.Mq.ReaderReliable
@@ -98,7 +124,10 @@ defmodule Core.MqFake do
 
     defstruct [:agent]
 
-    @type t :: %__MODULE__{agent: pid()}
+    @type t :: %__MODULE__{agent: pid() | atom()}
+
+    @typedoc "Reader или имя его агента из `start_link/1`."
+    @type handle :: t() | atom()
 
     @doc "Создать reader с начальной очередью."
     @spec new([Message.t()]) :: t()
@@ -108,20 +137,39 @@ defmodule Core.MqFake do
       %__MODULE__{agent: agent}
     end
 
+    @doc "Спецификация ребёнка: агент под именем `name:`."
+    @spec child_spec(keyword()) :: Supervisor.child_spec()
+
+    def child_spec(opts) when is_list(opts),
+      do: %{id: Keyword.fetch!(opts, :name), start: {__MODULE__, :start_link, [opts]}}
+
+    @doc "Запустить агент очереди `messages:` под именем `name:`."
+    @spec start_link(keyword()) :: Agent.on_start()
+
+    def start_link(opts) when is_list(opts) do
+      Agent.start_link(fn -> Keyword.get(opts, :messages, []) end, name: Keyword.fetch!(opts, :name))
+    end
+
     @doc "Добавить сообщение в конец очереди."
-    @spec push(t(), Message.t()) :: :ok
+    @spec push(handle(), Message.t()) :: :ok
+
+    def push(name, %Message{} = message) when is_atom(name), do: push(%__MODULE__{agent: name}, message)
 
     def push(%__MODULE__{agent: agent}, %Message{} = message) do
       Agent.update(agent, &(&1 ++ [message]))
     end
 
     @doc "Сколько сообщений осталось непрочитанными."
-    @spec pending(t()) :: non_neg_integer()
+    @spec pending(handle()) :: non_neg_integer()
+
+    def pending(name) when is_atom(name), do: pending(%__MODULE__{agent: name})
 
     def pending(%__MODULE__{agent: agent}), do: Agent.get(agent, &length/1)
 
     @doc false
     @impl true
+    def get(name, timeout) when is_atom(name), do: get(%__MODULE__{agent: name}, timeout)
+
     def get(%__MODULE__{agent: agent}, _timeout) do
       case Agent.get(agent, & &1) do
         [] -> :empty
@@ -131,6 +179,8 @@ defmodule Core.MqFake do
 
     @doc false
     @impl true
+    def commit(name) when is_atom(name), do: commit(%__MODULE__{agent: name})
+
     def commit(%__MODULE__{agent: agent}) do
       Agent.update(agent, fn
         [] -> []

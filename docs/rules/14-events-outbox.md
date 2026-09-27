@@ -383,6 +383,13 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
   handle) — только парой, одна без другой роняет старт `ArgumentError`; чей это writer и где он
   стоит в дереве — `deps/core/docs/rules/app/14-events-outbox.md`, «Подписчики». Проверяется:
   `test/core/pubsub/mq_subscriber_reliable_test.exs`, describe «опции старта».
+- Дерево подписчиков с DLQ — `Core.PubSub.MqSubscriberReliable.Supervisor`: `:rest_for_one`,
+  DLQ-writer (если задан), затем на каждый топик читатель и его подписчик с `subscribe: true`.
+  Handle читателя и DLQ-writer'а — их `name:`; дерево само передаёт их подписчику, и опции
+  `reader_module:`, `reader:`, `dlq_writer:`, `dlq_handle:`, `subscribe:` в опциях подписчика —
+  `ArgumentError`. Тумблер `enabled:` и `watch_list/1` по опциям старта — как у
+  `Core.Es.Projection.Supervisor` (`17-otp-concurrency.md`, «Дерево процессов»). Проверяется:
+  `test/core/pubsub/mq_subscriber_reliable/supervisor_test.exs`.
 
 ### Runbook: сообщения в DLQ
 

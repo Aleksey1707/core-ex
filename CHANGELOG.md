@@ -30,6 +30,41 @@
   defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
   ```
 
+### Новое
+
+- **Дерево подписчиков брокера с DLQ — `Core.PubSub.MqSubscriberReliable.Supervisor`**
+  (`docs/rules/14-events-outbox.md`, «Идемпотентность потребителей»). Порядок детей поддерева
+  подписчиков — MUST свода (`app/17-otp-concurrency.md`, «Дерево процессов»), но держался он
+  копией супервизора в каждом компоненте приложения, и копии расходились. Теперь дерево строит
+  библиотека: `rest_for_one`, DLQ-writer (если задан), затем на каждый топик читатель и его
+  подписчик с `subscribe: true`; handle читателя и DLQ-writer'а — их `name:`, дерево само передаёт
+  их подписчику. `enabled: false` и `topics: []` — `:ignore` с `info`, как у
+  `Core.Es.Projection.Supervisor`; `watch_list/1` принимает те же опции, что и старт. Config и env
+  библиотека не читает.
+
+  Как править код потребителя: собственный супервизор подписчиков заменяется деревом, опции
+  собирает одна функция компонента; её же принимает `watch_list/1`.
+
+  ```elixir
+  # было — порядок детей и связки опций в каждом компоненте свои
+  children = [
+    {Core.Mq.Stream.Writer, dlq_opts},
+    {Core.Mq.Stream.Reader, reader_opts},
+    {Core.PubSub.MqSubscriberReliable,
+     subscriber_opts ++
+       [reader_module: Core.Mq.Stream.Reader, reader: Reader, dlq_writer: Core.Mq.Stream.Writer,
+        dlq_handle: Dlq, subscribe: true]}
+  ]
+
+  Supervisor.init(children, strategy: :rest_for_one)
+
+  # стало
+  {Core.PubSub.MqSubscriberReliable.Supervisor,
+   enabled: true,
+   dlq_writer: {Core.Mq.Stream.Writer, dlq_opts},
+   topics: [[reader: {Core.Mq.Stream.Reader, reader_opts}, subscriber: subscriber_opts]]}
+  ```
+
 ### Изменения контракта макросов
 
 - **`use Core.Es.Projection`: событие вне семейства `<Aggregate>.Event` — `CompileError`.** Кодек

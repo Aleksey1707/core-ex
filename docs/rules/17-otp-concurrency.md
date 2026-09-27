@@ -19,7 +19,9 @@
 Отключаемое поддерево MUST возвращать `:ignore` из `start_link/1` (а не стартовать пустым) и
 писать в лог причину на уровне `info` — «запущен» / «отключён» / «пропущен: нет зависимости».
 Так устроены `Core.Es.Projection.Supervisor` (`enabled: false` — «отключён», `projections: []` —
-«пропущен: нет проекций») и `<Aggregate>.Process` (`enabled: false` — «отключён»).
+«пропущен: нет проекций»), `Core.PubSub.MqSubscriberReliable.Supervisor` (`enabled: false` —
+«отключён», `topics: []` — «пропущен: нет топиков») и `<Aggregate>.Process` (`enabled: false` —
+«отключён»).
 
 `Core.Workers.PromEx` поле `required:` не читает: процесс из `watch:`, которого нет на ноде, даёт
 `up=0` и алерт `WorkerDown` (`21-observability.md`, «Рекомендованные алерты»). Поэтому элемент
@@ -27,6 +29,7 @@
 те же опции, что его `start_link/1`, и при выключенном поддереве отдавать `[]`.
 
 Проверяется: `test/core/es/projection/supervisor_test.exs` (describe «старт», «watch_list/1»),
+`test/core/pubsub/mq_subscriber_reliable/supervisor_test.exs`,
 `test/core/es/aggregate/process_test.exs`.
 
 ```elixir
