@@ -5,7 +5,7 @@ defmodule Core.EsFixture.Catalog do
   """
 
   alias Core.Es
-  alias Core.EventFixture.ActorID
+  alias Core.EsFixture.Catalog.Cmd
   alias Core.EventFixture.AggID
   alias Core.EventFixture.Event
   alias Core.EventFixture.Name
@@ -13,23 +13,6 @@ defmodule Core.EsFixture.Catalog do
 
   use Core.Es.Aggregate,
     event_codec: Core.EventFixture.Event.Codec
-
-  defmodule Cmd do
-    @moduledoc "Команды каталога."
-
-    defmodule Create do
-      @moduledoc "Завести каталог по пути: части разделены `/`."
-
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(path by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{path: Name.t(), by: ActorID.t(), at: Es.Event.At.t()}
-    end
-
-    @type t :: Create.t()
-  end
 
   defstruct id: nil, version: nil, path: nil, closed?: false
 

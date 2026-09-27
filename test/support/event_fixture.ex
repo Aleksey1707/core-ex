@@ -35,39 +35,8 @@ defmodule Core.EventFixture do
   defmodule Event do
     @moduledoc "События фейкового агрегата: с нагрузкой (`Created`) и без неё (`Closed`)."
 
-    defmodule Created do
-      @moduledoc "Агрегат создан."
-
-      defmodule Payload do
-        @moduledoc "Нагрузка `Created`."
-
-        alias Core.EventFixture.Name
-
-        @enforce_keys ~w(name)a
-        defstruct @enforce_keys
-
-        @type t :: %__MODULE__{name: Name.t()}
-
-        @doc "Собрать нагрузку."
-        @spec new(Name.t()) :: t()
-
-        def new(%Name{} = name), do: %__MODULE__{name: name}
-      end
-
-      use Core.Es.Event,
-        aggregate_id: Core.EventFixture.AggID,
-        by: Core.EventFixture.ActorID,
-        payload: Payload
-    end
-
-    defmodule Closed do
-      @moduledoc "Агрегат закрыт."
-
-      use Core.Es.Event,
-        aggregate_id: Core.EventFixture.AggID,
-        by: Core.EventFixture.ActorID,
-        payload: nil
-    end
+    alias Core.EventFixture.Event.Closed
+    alias Core.EventFixture.Event.Created
 
     @type t :: Created.t() | Closed.t()
 

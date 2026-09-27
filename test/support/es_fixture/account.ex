@@ -15,9 +15,9 @@ defmodule Core.EsFixture.Account do
   """
 
   alias Core.Es
+  alias Core.EsFixture.Account.Cmd
   alias Core.EsFixture.Account.Errors
   alias Core.EsFixture.Account.Event
-  alias Core.EsFixture.UserID
   alias Core.Version
 
   use Core.Es.Aggregate,
@@ -38,67 +38,6 @@ defmodule Core.EsFixture.Account do
       name: "Название счёта",
       min_len: 1,
       max_len: 50
-  end
-
-  defmodule Cmd do
-    @moduledoc "Команды счёта."
-
-    defmodule Open do
-      @moduledoc "Открыть счёт."
-
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(name by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{name: Name.t(), by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Rename do
-      @moduledoc "Переименовать счёт."
-
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(name by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{name: Name.t(), by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Freeze do
-      @moduledoc "Заморозить счёт."
-
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Close do
-      @moduledoc "Закрыть счёт; открытый сначала замораживается."
-
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    defmodule Check do
-      @moduledoc "Сверить счёт: решение без событий."
-
-      use Core.Es.Cmd
-
-      @enforce_keys ~w(by at)a
-      defstruct @enforce_keys
-
-      @type t :: %__MODULE__{by: UserID.t(), at: Es.Event.At.t()}
-    end
-
-    @type t :: Open.t() | Rename.t() | Freeze.t() | Close.t() | Check.t()
   end
 
   defstruct id: nil, version: nil, name: nil, status: nil
