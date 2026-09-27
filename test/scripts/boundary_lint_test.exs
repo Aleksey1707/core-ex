@@ -162,6 +162,131 @@ defmodule BoundaryLintTest do
     refute out =~ @layout
   end
 
+  test "`Common` → срез своего контекста по полному имени", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/common/order/projection.ex", """
+    defmodule MyApp.Domain.Orders.Common.Order.Projection do
+      def run, do: MyApp.Domain.Orders.Admin.Order.Projector.project()
+    end
+    """)
+
+    assert {out, 1} = lint(dir)
+    assert out =~ "lib/my_app/domain/orders/common/order/projection.ex:2: "
+    assert out =~ "MyApp.Domain.Orders.Admin.Order.Projector"
+    assert out =~ "правила — #{@layout}"
+  end
+
+  test "`Common` → срез своего контекста через алиас; алиас от `__MODULE__` перекрывает прежний", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/common/order.ex", """
+    defmodule MyApp.Domain.Orders.Common.Order do
+      alias MyApp.Domain.Orders.Admin.Usecases
+      alias MyApp.Domain.Orders.Admin.{Item, Line}
+      alias __MODULE__.Line
+      alias __MODULE__.{Item}
+
+      def run, do: {Usecases.Order.run(), Line.new(), Item.new()}
+    end
+    """)
+
+    assert {out, 1} = lint(dir)
+    assert out =~ "lib/my_app/domain/orders/common/order.ex:7: "
+    assert out =~ "MyApp.Domain.Orders.Admin.Usecases.Order"
+    assert out =~ "нарушений — 1"
+  end
+
+  test "контекст → срез чужого контекста через многоимённый алиас", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/client/usecases/order.ex", """
+    defmodule MyApp.Domain.Orders.Client.Usecases.Order do
+      alias MyApp.Domain.Billing.{Admin, Common}
+      alias MyApp.Domain.Billing.Admin.Usecases.Invoice, as: AdminInvoice
+      require MyApp.Domain.Billing.Admin.Macros, as: AdminMacros
+
+      def run do
+        Common.Invoice.Repo.get()
+        Admin.Usecases.Invoice.run()
+        AdminInvoice.run()
+        AdminMacros.m()
+      end
+    end
+    """)
+
+    assert {out, 1} = lint(dir)
+    assert out =~ "lib/my_app/domain/orders/client/usecases/order.ex:4: "
+    assert out =~ "lib/my_app/domain/orders/client/usecases/order.ex:8: "
+    assert out =~ "lib/my_app/domain/orders/client/usecases/order.ex:9: "
+    assert out =~ "lib/my_app/domain/orders/client/usecases/order.ex:10: "
+    assert out =~ "MyApp.Domain.Billing.Admin.Usecases.Invoice"
+    assert out =~ "нарушений — 4"
+  end
+
+  test "`Common` → `Common` чужого контекста, срез → свои `Common` и срез, web → любой срез — без нарушений",
+       %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/common/order.ex", """
+    defmodule MyApp.Domain.Orders.Common.Order do
+      alias MyApp.Domain.Billing
+
+      def run, do: Billing.Common.Invoice.new()
+    end
+    """)
+
+    write(dir, "lib/my_app/domain/orders/admin/usecases/order.ex", """
+    defmodule MyApp.Domain.Orders.Admin.Usecases.Order do
+      alias MyApp.Domain.Orders.{Client, Common}
+
+      def run, do: {Common.Order.new(), Client.Usecases.Order.run(), __MODULE__}
+    end
+    """)
+
+    write(dir, "lib/my_app_web/orders_controller.ex", """
+    defmodule MyAppWeb.OrdersController do
+      def index, do: MyApp.Domain.Billing.Admin.Usecases.Invoice.run()
+    end
+    """)
+
+    write(dir, "test/my_app/domain/orders/common/order_test.exs", """
+    defmodule MyApp.Domain.Orders.Common.OrderTest do
+      def run, do: MyApp.Domain.Orders.Admin.Usecases.Order.run()
+    end
+    """)
+
+    assert {out, 0} = lint(dir)
+    assert out =~ "нарушений нет"
+  end
+
+  test "вложенный модуль — под родителем, даже если его имя уже алиас", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/client/order.ex", """
+    defmodule MyApp.Domain.Orders.Client.Order do
+      alias MyApp.Domain.Orders.Common.Line
+
+      defmodule Line do
+        def run, do: MyApp.Domain.Orders.Admin.X.run()
+      end
+    end
+    """)
+
+    assert {_out, 0} = lint(dir)
+  end
+
+  test "маркер гасит правило направления и не гасит соседнее", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/common/order.ex", """
+    # boundary-lint: allow common-slice — DEBT.md, «Проекция Common зовёт срез»
+    defmodule MyApp.Domain.Orders.Common.Order do
+      def run, do: {MyApp.Domain.Orders.Admin.X.run(), MyApp.Domain.Billing.Admin.Y.run()}
+    end
+    """)
+
+    write(dir, "lib/my_app/domain/orders/client/order.ex", """
+    # boundary-lint: allow foreign-slice — DEBT.md, «Срез зовёт чужой срез»
+    defmodule MyApp.Domain.Orders.Client.Order do
+      def run, do: MyApp.Domain.Billing.Admin.Y.run()
+    end
+    """)
+
+    assert {out, 1} = lint(dir)
+    assert out =~ "lib/my_app/domain/orders/common/order.ex:3: "
+    assert out =~ "MyApp.Domain.Billing.Admin.Y"
+    assert out =~ "нарушений — 1"
+  end
+
   defp write(dir, path, source) do
     path = Path.join(dir, path)
     File.mkdir_p!(Path.dirname(path))

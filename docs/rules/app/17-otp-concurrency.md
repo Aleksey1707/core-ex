@@ -46,7 +46,7 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 
 ```elixir
 # плохо — отдельный процесс зовёт subscribe/3, у каждой копии своя семантика отказа
-children = [dlq_writer, reader, subscriber, {MyApp.<BC>.Subscribe, subscribers: [subscriber]}]
+children = [dlq_writer, reader, subscriber, {MyApp.Domain.<BC>.System.Subscribe, subscribers: [subscriber]}]
 
 # хорошо — подписчик подписан сразу после init/1
 subscriber = {Core.PubSub.MqSubscriberReliable, Keyword.put(opts, :subscribe, true)}

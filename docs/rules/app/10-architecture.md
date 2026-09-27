@@ -20,7 +20,7 @@
 | `Core` | зависимость `:core` | shared-фундамент: `Prim`, `Enum`, `Codec`, `View`, `Context`, `Error`, `Es`, `Repo`, `Outbox`, `Mq`, `PubSub`, `Web`, `Helper` |
 | `MyApp.Application` | `lib/my_app/application.ex` | композиционный корень: проверки конфигурации на старте и дерево процессов, включая процессы Core |
 | `MyApp.Codec` | `lib/my_app/codec/` | Prim-профили `Prim.{Internal,External}`, entity-фасады `{Internal,External}`, реестр плагинов |
-| `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>/` | bounded context: `common` + actor-срезы |
+| `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>/` | bounded context: `Common` + срезы (см. «Раскладка») |
 | `MyApp.Outbox` | `lib/my_app/outbox/` | OTP-дерево очереди: writer + поллер + cleaner |
 | `MyApp.Projections` | `lib/my_app/projections.ex` | список проекций и опции их дерева (`17-otp-concurrency.md`, «Проекции и процессы агрегата») |
 | `MyApp.PromEx` | `lib/my_app/prom_ex*` | плагины метрик и MFA-провайдеры списков |
@@ -32,8 +32,8 @@
 | `Mix.Tasks.*` | `lib/mix/tasks/` | mix-таски приложения (см. «Boundary» и «Раскладка») |
 | `MyAppWeb` | `lib/my_app_web/` | HTTP-поверхности, плаги, презентеры |
 
-Модуль верхнего уровня, не попавший в таблицу, — либо подсистема приложения (актуализация,
-хранилище, интеграция), либо признак того, что слой выбран неверно.
+Модуль верхнего уровня, не попавший в таблицу, — либо подсистема приложения (см. «Раскладка»),
+либо признак того, что слой выбран неверно.
 
 ## Раскладка
 
@@ -49,6 +49,70 @@
 - Mix-таска MUST лежать по конвенции Mix — по имени задачи, а не по имени модуля:
   `Mix.Tasks.Foo.Bar` (задача `mix foo.bar`) — в `lib/mix/tasks/foo.bar.ex`.
 - Дерево `test/` правилом не проверяется.
+
+Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `module-path`.
+
+### Состав контекста
+
+Bounded context `MyApp.Domain.<BC>` MUST состоять из `<BC>.Common` и срезов; модуль в корне
+контекста — вне `Common` и срезов — MUST NOT: четвёртый сегмент имени называет часть контекста, и
+такой модуль читается как срез. Модуль без привязки к инициатору лежит в `Common`, модуль одного
+инициатора — в его срезе.
+
+```elixir
+# плохо — агрегат и каталог ошибок в корне контекста
+defmodule MyApp.Domain.<BC>.<Aggregate> do
+defmodule MyApp.Domain.<BC>.Errors do
+
+# хорошо
+defmodule MyApp.Domain.<BC>.Common.<Aggregate> do
+defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Errors do
+```
+
+- Срез — операции одного инициатора: роли пользователя или системного процесса (фоновые задачи,
+  импорт, подписчики брокера). Имя среза — по инициатору и свободно: `Admin`, `Client`; `System` —
+  пример среза системного процесса. Состав частей — «Actor / role slices».
+- Часть приложения без агрегатов (хранилище файлов, интеграция с внешним сервисом, реестр прав)
+  MAY выноситься в подсистему `MyApp.<Subsystem>` вне `Domain`. Агрегат в подсистеме MUST NOT:
+  появился агрегат — это bounded context.
+
+### Направления зависимостей
+
+- `Common` MUST NOT ссылаться на срезы своего контекста: общая модель не зависит от конкретного
+  инициатора. Нужное `Common` и срезу переезжает в `Common`.
+- Контекст MUST NOT ссылаться на срезы чужого контекста — только на его `Common`: срез — операции
+  чужого инициатора, и ссылка на него связывает контексты ролями, а не моделью.
+- Web-слой и точки входа вне `MyApp.Domain` (`MyAppWeb`, mix-таски, `MyApp.Release`) MAY звать
+  usecases любого среза любого контекста.
+
+```elixir
+# плохо — Common зовёт срез своего контекста, usecase — срез чужого
+defmodule MyApp.Domain.Orders.Common.Order.Projection do
+  alias MyApp.Domain.Orders.Admin.Usecases
+  def project(event), do: Usecases.Order.refresh(event)
+end
+
+defmodule MyApp.Domain.Orders.Client.Usecases.Checkout do
+  alias MyApp.Domain.Billing.Admin.Usecases
+  def run(id, context), do: Usecases.Invoice.run(id, context)
+end
+
+# хорошо — чужой контекст через его Common
+defmodule MyApp.Domain.Orders.Client.Usecases.Checkout do
+  alias MyApp.Domain.Billing.Common.Invoice.ReadRepo
+  @read_repo Core.Config.repo!(ReadRepo)
+  def run(id, context), do: @read_repo.get(id, context)
+end
+```
+
+Ссылка разрешается с учётом `alias` (в том числе `alias A.{B, C}` и `as:`), `__MODULE__` и полного
+имени; нарушение ставится на строку вызова, а не на `alias`. Корень приложения берётся из имени
+модуля, где стоит ссылка.
+
+Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правила `common-slice` и
+`foreign-slice`, ссылки из модулей `MyApp.Domain.<BC>` в `lib/`.
+
+### Отступление
 
 Отступление MUST быть записано строкой в `DEBT.md` приложения и отмечено маркером в блоке
 комментариев прямо над `defmodule`. Маркер называет правило и строку `DEBT.md`:
@@ -68,9 +132,11 @@ defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
 | Правило маркера | Что проверяет |
 |---|---|
 | `module-path` | путь файла = имя модуля, один верхнеуровневый модуль в файле, конвенция Mix |
+| `common-slice` | `Common` ссылается на срез своего контекста |
+| `foreign-slice` | контекст ссылается на срез чужого контекста |
 
 Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` (шаг `boundary-check`,
-`20-agreements.md`) — только `lib/`.
+`20-agreements.md`) — правила таблицы, только `lib/`.
 
 ## Обязательства перед библиотекой
 
@@ -133,19 +199,20 @@ Core.Security.Secret.ensure_configured!()
 
 ## Actor / role slices
 
-Bounded context делится на `common` и actor-срезы. Это **actor-based** структура, а не
-отдельные доменные модели.
+Bounded context делится на `Common` и срезы инициаторов («Раскладка», «Состав контекста»). Это
+**actor-based** структура, а не отдельные доменные модели.
 
 | Часть | Что держит |
 |---|---|
-| `<BC>.Common` | агрегаты, Prim, события, кодеки событий, outbox-маппинг, репозитории и схемы |
-| `<BC>.<Actor>` | usecases под свою роль; при надобности actor-domain и actor-specific Repo |
+| `<BC>.Common` | всё без привязки к инициатору: агрегаты, значения, события, кодеки, outbox-маппинг, репозитории записи и схемы, read-модели, компоненты |
+| `<BC>.<Actor>` | операции одного инициатора: usecases, его воркеры, подписчики и компоненты; при надобности actor-domain, свой репозиторий записи и своя read-модель |
 
 - Actor в предметном BC MAY не совпадать с типом учётной записи: это роль в контексте.
 - Срез, который зовут не из web, а из воркеров, подписчиков и mix-тасок, MUST получать актора
   от `ContextFactory` (`11-domain.md`), а не собирать контекст на месте.
-- Actor-специфичный репозиторий заводится там, где у среза **свой ACL-фильтр**; в остальных
-  случаях срезы читают и пишут общий репозиторий из `Common` (`13-repos.md`).
+- Репозиторий записи и read-модель лежат в `Common`; в срез они переезжают вместе со **своим
+  ACL-фильтром** или **своей формой данных** — в остальных случаях срезы читают и пишут общие
+  модули из `Common` (`13-repos.md`).
 
 ## Usecases
 

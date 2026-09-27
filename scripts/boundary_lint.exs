@@ -7,7 +7,8 @@
 # Режим библиотеки проверяет главный инвариант «Core не знает потребителя»
 # (`docs/rules/10-architecture.md`), режим потребителя — что DI репозиториев (`Repo` и
 # `ReadRepo`) идёт через `Core.Config.repo!/1` (`docs/rules/13-repos.md`, «DI»), а в `lib/` —
-# что путь файла равен имени модуля (`docs/rules/app/10-architecture.md`, «Раскладка»). Норму ввела
+# что путь файла равен имени модуля и `Common` и чужой контекст не ссылаются на срезы
+# (`docs/rules/app/10-architecture.md`, «Раскладка»). Норму ввела
 # библиотека, поэтому инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`,
 # и путь правил в его сообщениях — от корня потребителя.
 
@@ -21,6 +22,8 @@ defmodule BoundaryLint do
   @repos "deps/core/docs/rules/13-repos.md"
   @layout "deps/core/docs/rules/app/10-architecture.md"
   @module_path "module-path"
+  @common_slice "common-slice"
+  @foreign_slice "foreign-slice"
   @marker ~r/^#\s*boundary-lint:\s*allow\s+(\S+)\s.*DEBT\.md,\s*«[^»]+»/u
   @env_funs ~w(get_env fetch_env fetch_env! compile_env compile_env!)a
   @compile_env_funs ~w(compile_env compile_env!)a
@@ -84,7 +87,7 @@ defmodule BoundaryLint do
     {_ast, errors} = Macro.prewalk(ast, [], fn node, acc -> {node, acc ++ violations(node, path, mode)} end)
     markers = markers(ast, comments, String.split(source, "\n"))
 
-    (errors ++ module_path_violations(ast, path, root))
+    (errors ++ module_path_violations(ast, path, root) ++ direction_violations(ast, path, root))
     |> Enum.reject(&allowed?(&1, markers))
     |> Enum.sort_by(& &1.line)
   end
@@ -188,6 +191,148 @@ defmodule BoundaryLint do
   defp module_file(name), do: Macro.underscore(name) <> ".ex"
 
   defp layout_err(path, line, message), do: violation(path, line, message, @module_path, @layout)
+
+  # ===== потребитель: направления зависимостей контекста =====
+
+  # Контекст — `<Root>.Domain.<BC>`, его части — `Common` и срезы; корень берётся из имени модуля,
+  # где стоит ссылка. `Common` не видит срезов своего контекста, чужой контекст виден только через
+  # его `Common`. Вне `Domain` (web, подсистемы, точки входа) правил нет. Модуль в корне контекста
+  # норма запрещает, поэтому любая часть кроме `Common` считается срезом.
+  defp direction_violations(_ast, _path, nil), do: []
+
+  defp direction_violations(ast, path, _root) do
+    {_env, refs} = walk(ast, %{module: nil, aliases: %{}})
+    Enum.flat_map(refs, fn {from, to, line} -> direction(from, to, line, path) end)
+  end
+
+  defp direction(from, to, line, path) do
+    case {bc_part(from), bc_part(to)} do
+      {{root, bc, :Common}, {root, bc, part}} when part not in [:Common, nil] ->
+        [
+          violation(
+            path,
+            line,
+            "`Common` контекста `#{bc}` ссылается на `#{module_name(to)}` — срез своего контекста, а не `Common`",
+            @common_slice,
+            @layout
+          )
+        ]
+
+      {{root, bc, _part}, {root, other, part}} when other != bc and part not in [:Common, nil] ->
+        [
+          violation(
+            path,
+            line,
+            "ссылка на `#{module_name(to)}` — срез чужого контекста: контекст `#{other}` виден через `#{other}.Common`",
+            @foreign_slice,
+            @layout
+          )
+        ]
+
+      _other ->
+        []
+    end
+  end
+
+  # ---
+
+  defp bc_part([root, :Domain, bc, part | _rest]), do: {root, bc, part}
+  defp bc_part([root, :Domain, bc]), do: {root, bc, nil}
+  defp bc_part(_module), do: nil
+
+  defp module_name(module), do: Enum.map_join(module, ".", &Atom.to_string/1)
+
+  # Обход с лексическими алиасами: блок передаёт алиас следующим выражениям, прочий узел — только
+  # своим детям. Строка `alias` ссылкой не считается: нарушение отмечается там, где модуль зовут.
+  defp walk({:__block__, _meta, exprs}, env) do
+    {_env, refs} =
+      Enum.reduce(exprs, {env, []}, fn expr, {env, refs} ->
+        {env, more} = walk(expr, env)
+        {env, refs ++ more}
+      end)
+
+    {env, refs}
+  end
+
+  defp walk({:defmodule, _meta, [{:__aliases__, _, parts}, body]}, env) do
+    {module, env} = define_module(parts, env)
+    {_env, refs} = walk(body, %{env | module: module})
+    {env, refs}
+  end
+
+  defp walk({:alias, _meta, [target | opts]}, env), do: {define_aliases(target, List.flatten(opts), env), []}
+
+  defp walk({:require, _meta, [target, opts]}, env) when is_list(opts) do
+    {_env, refs} = walk(target, env)
+    {if(opts[:as], do: define_aliases(target, opts, env), else: env), refs}
+  end
+
+  defp walk({{:., _, [base, :{}]}, meta, children}, env) do
+    {env, for(module <- multi_targets(base, children, env), do: {env.module, module, meta[:line]})}
+  end
+
+  defp walk({:__aliases__, meta, parts}, env) do
+    case expand(parts, env) do
+      nil -> {env, []}
+      module -> {env, [{env.module, module, meta[:line]}]}
+    end
+  end
+
+  defp walk({form, _meta, args}, env) when is_list(args), do: {env, children([form | args], env)}
+  defp walk({left, right}, env), do: {env, children([left, right], env)}
+  defp walk(list, env) when is_list(list), do: {env, children(list, env)}
+  defp walk(_node, env), do: {env, []}
+
+  # ---
+
+  defp children(nodes, env), do: Enum.flat_map(nodes, &(&1 |> walk(env) |> elem(1)))
+
+  # Вложенный `defmodule Line` внутри `A` — это `A.Line` даже при алиасе `Line`, и `Line` становится
+  # алиасом в `A`; `defmodule Elixir.Line` вложенностью не считается.
+  defp define_module([first | _rest] = parts, %{module: parent} = env)
+       when is_list(parent) and is_atom(first) and first != :"Elixir" do
+    {parent ++ parts, put_in(env.aliases[first], parent ++ [first])}
+  end
+
+  defp define_module(parts, env), do: {expand(parts, env), env}
+
+  defp define_aliases({{:., _, [base, :{}]}, _, children}, _opts, env) do
+    base
+    |> multi_targets(children, env)
+    |> Enum.reduce(env, &define_alias(&1, nil, &2))
+  end
+
+  defp define_aliases({:__aliases__, _, parts}, opts, env), do: define_alias(expand(parts, env), opts[:as], env)
+  defp define_aliases({:__MODULE__, _, _}, opts, env), do: define_alias(env.module, opts[:as], env)
+  defp define_aliases(_target, _opts, env), do: env
+
+  defp define_alias(nil, _as, env), do: env
+  defp define_alias(module, {:__aliases__, _, [as]}, env), do: put_in(env.aliases[as], module)
+  defp define_alias(module, _as, env), do: put_in(env.aliases[List.last(module)], module)
+
+  # `A.{B, C.D}` и `__MODULE__.{B}` — модули `A.B`, `A.C.D` и `<модуль>.B`.
+  defp multi_targets(base, children, env) do
+    base_parts =
+      case base do
+        {:__aliases__, _, parts} -> parts
+        {:__MODULE__, _, _} -> [base]
+        _other -> nil
+      end
+
+    if base_parts,
+      do: for({:__aliases__, _, parts} <- children, module = expand(base_parts ++ parts, env), do: module),
+      else: []
+  end
+
+  defp expand(parts, env) do
+    module = resolve(parts, env)
+    if is_list(module) and Enum.all?(module, &is_atom/1), do: module
+  end
+
+  defp resolve([{:__MODULE__, _, _} | rest], %{module: module}) when is_list(module), do: module ++ rest
+  defp resolve([:"Elixir" | rest], _env), do: rest
+  defp resolve([first | rest], env) when is_atom(first), do: Map.get(env.aliases, first, [first]) ++ rest
+  defp resolve(_parts, _env), do: nil
 
   # ===== исключение: маркер у `defmodule` =====
 

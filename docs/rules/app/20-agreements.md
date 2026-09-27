@@ -30,7 +30,7 @@ dialyzer → test → credo → security → audit
 
 | Шаг | Что проверяет |
 |---|---|
-| `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` путь файла = имя модуля (`10-architecture.md`, «Раскладка») |
+| `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` путь файла = имя модуля и направления зависимостей контекста (`10-architecture.md`, «Раскладка») |
 | `rules-check` | `deps/core/scripts/rules_lint.exs --consumer` — форма локального свода, его карты и ссылки на оба яруса (`00-index.md`) |
 | `layout-check` | `deps/core/scripts/layout_lint.exs` — разделители внутри модуля (`deps/core/docs/rules/20-agreements.md`) |
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
