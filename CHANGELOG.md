@@ -30,6 +30,30 @@
   defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
   ```
 
+### Изменения контракта макросов
+
+- **`use Core.Es.Projection`: событие вне семейства `<Aggregate>.Event` — `CompileError`.** Кодек
+  события и агрегат `await/3` проекция находит по родителю модуля события. Событие из семейства с
+  другим именем (`<Aggregate>.Events.<Name>` рядом с `<Aggregate>.Events.Codec`) собиралось, но
+  clause `await/3` для его агрегата молча не создавалась, и ошибка всплывала `FunctionClauseError`
+  в рантайме. Теперь сборка падает с текстом, называющим событие и форму
+  `<Aggregate>.Event.<Name>` (`docs/rules/app/13-repos.md`, «Событие и команда»).
+
+  Как править код потребителя: семейство событий переименовывается в `<Aggregate>.Event`, кодек —
+  в `<Aggregate>.Event.Codec`, файлы — по раскладке:
+
+  ```elixir
+  # было
+  use Core.Es.Projection,
+    name: "accounts",
+    events: [Account.Events.Opened]
+
+  # стало
+  use Core.Es.Projection,
+    name: "accounts",
+    events: [Account.Event.Opened]
+  ```
+
 ## 0.5.0
 
 ### Ломающие изменения контракта
@@ -1594,11 +1618,11 @@
   (`docs/adr/0009-projections-read-event-store.md`). Объявление —
   `use Core.Es.Projection, name:, events:, version:` (+ `repo:`, `codec:` из `Core.Config`) с
   колбэками `project(event)` и `clear()` → `:ok | {:error, Error.t()}`. `events:` — модули
-  событий; их кодек — `<Aggregate>.Event.Codec` по раскладке `11-domain.md`, тип агрегата — его
-  `type:`. Тег, известный кодеку, но не объявленный, пачка пропускает без загрузки, неизвестный
-  кодеку — ошибка без сдвига чекпоинта. `CompileError`: нет `project/1` или `clear/0`; `name:` не
-  непустая строка; `version:` не целое ≥ 1; в `events:` семейство, не событие, событие без кодека
-  `<Aggregate>.Event.Codec` с `type:` или вне его `tags:`.
+  событий; их кодек — `<Aggregate>.Event.Codec` по раскладке `docs/rules/app/13-repos.md`, тип
+  агрегата — его `type:`. Тег, известный кодеку, но не объявленный, пачка пропускает без загрузки,
+  неизвестный кодеку — ошибка без сдвига чекпоинта. `CompileError`: нет `project/1` или `clear/0`;
+  `name:` не непустая строка; `version:` не целое ≥ 1; в `events:` семейство, не событие, событие
+  без кодека `<Aggregate>.Event.Codec` с `type:` или вне его `tags:`.
 
   `Core.Es.Projection.run_once(projection, batch_size: 100)` — одна пачка в транзакции `DAO`:
   `pg_try_advisory_xact_lock` по имени (не взята — `:locked`); строки чекпоинта нет или её версия
@@ -1732,8 +1756,8 @@
   проекция обработает последнее событие потока агрегата, и читает read-модель уже с ним:
   `Projection.await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `:ok | {:error, Error.t()}` у
   модуля проекции. `Agg` — модуль `<Aggregate>` любого вида с кодеком событий
-  `<Aggregate>.Event.Codec` (по раскладке `11-domain.md` — сам агрегат): той же раскладкой
-  проекция находит кодек модуля события. `await/3` генерирует `use Core.Es.Projection` — clause
+  `<Aggregate>.Event.Codec` (по раскладке `docs/rules/app/13-repos.md` — сам агрегат): той же
+  раскладкой проекция находит кодек модуля события. `await/3` генерирует `use Core.Es.Projection` — clause
   на каждый агрегат, чьи события есть в `events:`: голова — литерал агрегата и закрытый struct его
   ID, результат сужен до `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`, ID другого
   агрегата и невозможная clause по результату — предупреждение при сборке вызывающего; кодек,

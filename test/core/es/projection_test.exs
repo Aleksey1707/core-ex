@@ -80,6 +80,28 @@ defmodule Core.Es.ProjectionTest do
       tags: %{Core.Es.ProjectionTest.Twin.Event.Done => "twin.done"}
   end
 
+  defmodule Loose.Events do
+    @moduledoc false
+
+    defmodule Done do
+      @moduledoc false
+
+      use Core.Es.Event,
+        aggregate_id: Core.EventFixture.AggID,
+        by: Core.EventFixture.ActorID,
+        payload: nil
+    end
+  end
+
+  defmodule Loose.Events.Codec do
+    @moduledoc false
+
+    use Core.Es.Event.Codec,
+      event: Core.Es.ProjectionTest.Loose.Events,
+      type: "loose",
+      tags: %{Core.Es.ProjectionTest.Loose.Events.Done => "loose.done"}
+  end
+
   defmodule RaisingClear do
     @moduledoc false
 
@@ -206,6 +228,14 @@ defmodule Core.Es.ProjectionTest do
       assert_raise CompileError, ~r/Account\.Event — семейство событий/, fn ->
         compile!(Family, events: [Account.Event])
       end
+    end
+
+    test "событие вне семейства <Aggregate>.Event — CompileError" do
+      assert_raise CompileError,
+                   ~r/Loose\.Events\.Done — событие вне семейства <Aggregate>\.Event, ожидается <Aggregate>\.Event\.<Name>/,
+                   fn ->
+                     compile!(Loose, events: [Loose.Events.Done])
+                   end
     end
 
     test "модуль события, у кодека которого нет type:, — CompileError" do

@@ -102,13 +102,12 @@ defmodule Core.Es.Projection do
   `await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `:ok | {:error, Error.t()}` модуля проекции
   после commit записи ждёт, пока проекция обработает последнее событие потока агрегата, —
   read-after-write. Агрегат — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec`:
-  по раскладке `11-domain.md` это сам агрегат любого вида.
+  по раскладке потребителя (`docs/rules/app/13-repos.md`, «Раскладка») это сам агрегат любого вида.
 
   Функцию генерирует `use` — clause на каждый агрегат, чьи события есть в `events:`: голова —
   литерал агрегата и закрытый struct его ID (`__es_aggregate_id__/0` кодека), результат сужен до
   `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`, ID другого агрегата и невозможная
-  clause по результату — предупреждение при сборке вызывающего. Кодек, названный не
-  `<Aggregate>.Event.Codec`, clause не получает; без clauses функции нет.
+  clause по результату — предупреждение при сборке вызывающего.
 
   Цель — позиция последнего события потока на момент вызова:
 
@@ -162,8 +161,9 @@ defmodule Core.Es.Projection do
 
   На компиляции `CompileError`: нет `project/1` или `clear/0`; `name:` не непустая строка;
   `version:` не целое ≥ 1; `events:` пустой, с повтором, с модулем, который не событие, с
-  семейством `<Aggregate>.Event`, с событием без кодека `<Aggregate>.Event.Codec`, с кодеком без
-  `type:` или не объявившим событие в `tags:`, с двумя кодеками одного типа агрегата.
+  семейством `<Aggregate>.Event`, с событием вне семейства `<Aggregate>.Event`, с событием без
+  кодека `<Aggregate>.Event.Codec`, с кодеком без `type:` или не объявившим событие в `tags:`, с
+  двумя кодеками одного типа агрегата.
 
   Макрос занимает в вызывающем модуле имена `@es_projection`, `@es_use_line`, `await/3` и
   функций-проверок, по одному на модуль `events:`.
@@ -258,33 +258,27 @@ defmodule Core.Es.Projection do
   end
 
   defp await_ast(module) do
-    case aggregates(Module.get_attribute(module, :es_projection).streams) do
-      [] ->
-        nil
+    aggregates = aggregates(Module.get_attribute(module, :es_projection).streams)
+    modules = union(for {aggregate, _id, _type} <- aggregates, do: aggregate)
+    ids = union(for {_aggregate, id, _type} <- aggregates, do: quote(do: unquote(id).t()))
 
-      aggregates ->
-        modules = union(for {aggregate, _id, _type} <- aggregates, do: aggregate)
-        ids = union(for {_aggregate, id, _type} <- aggregates, do: quote(do: unquote(id).t()))
+    quote do
+      @doc """
+      Дождаться, пока проекция обработает последнее событие потока агрегата `aggregate_id`, —
+      не дольше `timeout` мс; первый аргумент — модуль агрегата. Исходы — `Core.Es.Projection`,
+      «Ожидание».
+      """
+      @spec await(unquote(modules), unquote(ids), non_neg_integer()) :: :ok | {:error, Core.Error.t()}
 
-        quote do
-          @doc """
-          Дождаться, пока проекция обработает последнее событие потока агрегата `aggregate_id`, —
-          не дольше `timeout` мс; первый аргумент — модуль агрегата. Исходы — `Core.Es.Projection`,
-          «Ожидание».
-          """
-          @spec await(unquote(modules), unquote(ids), non_neg_integer()) :: :ok | {:error, Core.Error.t()}
-
-          unquote_splicing(Enum.map(aggregates, &await_clause/1))
-        end
+      unquote_splicing(Enum.map(aggregates, &await_clause/1))
     end
   end
 
-  # Агрегат — модуль, в котором лежит кодек `<Aggregate>.Event.Codec` (`11-domain.md`); кодек с
-  # другим именем ожиданию недоступен.
+  # Агрегат — модуль, в котором лежит кодек `<Aggregate>.Event.Codec`: семейство каждого события
+  # проверено при сборке объявления (`event_family!/1`).
   defp aggregates(streams) do
     for {type, %{codec: codec}} <- streams,
-        ["Codec", "Event" | [_ | _] = parts] <- [Enum.reverse(Module.split(codec))],
-        do: {aggregate_name(Enum.reverse(parts)), codec.__es_aggregate_id__(), type}
+        do: {aggregate_name(Enum.drop(Module.split(codec), -2)), codec.__es_aggregate_id__(), type}
   end
 
   # Имя агрегата вычисляется на компиляции: `safe_concat` непригоден — у событий без модуля
@@ -382,7 +376,7 @@ defmodule Core.Es.Projection do
         raise CompileError, description: "#{@label}: events: модуль #{inspect(mod)} не найден"
 
       function_exported?(mod, :__es_payload__, 0) ->
-        codec!(mod, codec_name(Enum.drop(Module.split(mod), -1)))
+        codec!(mod, codec_name(event_family!(mod)))
 
       family?(mod) ->
         raise CompileError,
@@ -397,6 +391,20 @@ defmodule Core.Es.Projection do
   defp event_codec!(other) do
     raise CompileError,
       description: "#{@label}: events: ожидается модуль события, получено #{inspect(other)}"
+  end
+
+  # Родитель события — семейство `<Aggregate>.Event`: по нему находятся кодек и агрегат `await/3`.
+  defp event_family!(mod) do
+    case Enum.reverse(Module.split(mod)) do
+      [_name | ["Event", _aggregate | _] = family] ->
+        Enum.reverse(family)
+
+      _parts ->
+        raise CompileError,
+          description:
+            "#{@label}: events: #{inspect(mod)} — событие вне семейства <Aggregate>.Event, ожидается " <>
+              "<Aggregate>.Event.<Name>"
+    end
   end
 
   defp codec!(mod, codec) do
@@ -429,7 +437,8 @@ defmodule Core.Es.Projection do
       codec.__codec_union__() == mod
   end
 
-  # Кодек событий агрегата — `<Aggregate>.Event.Codec` рядом с модулями событий (`11-domain.md`).
+  # Кодек событий агрегата — `<Aggregate>.Event.Codec` рядом с модулями событий (раскладка
+  # потребителя — `docs/rules/app/13-repos.md`, «Раскладка»).
   # Имя вычисляется на компиляции: `safe_concat` непригоден — атома имени модуля, которого нет,
   # ещё может не быть, а отсутствие кодека — ошибка компиляции с внятным текстом.
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom

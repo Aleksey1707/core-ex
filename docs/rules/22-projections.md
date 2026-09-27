@@ -26,11 +26,11 @@
   начала истории, и забытая таблица сохранит строки прошлого прогона.
 
 Проверяется: `CompileError` в `use Core.Es.Projection` — нет `project/1` или `clear/0`; в
-`events:` семейство, не событие или событие вне `tags:` кодека `<Aggregate>.Event.Codec`;
-предупреждение при сборке на строке `use Core.Es.Projection` — у `project/1` нет clause модуля
-`events:` или опечатка в поле нагрузки без паттерна `%Payload{}` (`make consumer-check`);
-`use Core.Es.ProjectionCase` — `clear/0` очищает каждую таблицу, которую `project/1` пишет на
-golden-фикстурах.
+`events:` семейство, не событие, событие вне семейства `<Aggregate>.Event` или вне `tags:` кодека
+`<Aggregate>.Event.Codec`; предупреждение при сборке на строке `use Core.Es.Projection` — у
+`project/1` нет clause модуля `events:` или опечатка в поле нагрузки без паттерна `%Payload{}`
+(`make consumer-check`); `use Core.Es.ProjectionCase` — `clear/0` очищает каждую таблицу, которую
+`project/1` пишет на golden-фикстурах.
 
 ```elixir
 # плохо — семейство вместо модулей событий и catch-all: необъявленное событие теряется молча
