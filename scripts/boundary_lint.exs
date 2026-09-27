@@ -7,8 +7,8 @@
 # Режим библиотеки проверяет главный инвариант «Core не знает потребителя»
 # (`docs/rules/10-architecture.md`), режим потребителя — что DI репозиториев (`Repo` и
 # `ReadRepo`) идёт через `Core.Config.repo!/1` (`docs/rules/13-repos.md`, «DI»), а в `lib/` —
-# что путь файла равен имени модуля и `Common` и чужой контекст не ссылаются на срезы
-# (`docs/rules/app/10-architecture.md`, «Раскладка»). Норму ввела
+# что путь файла равен имени модуля, у контекста есть модуль-оглавление, а `Common` и чужой контекст
+# не ссылаются на срезы (`docs/rules/app/10-architecture.md`, «Раскладка»). Норму ввела
 # библиотека, поэтому инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`,
 # и путь правил в его сообщениях — от корня потребителя.
 
@@ -24,6 +24,7 @@ defmodule BoundaryLint do
   @module_path "module-path"
   @common_slice "common-slice"
   @foreign_slice "foreign-slice"
+  @bc_index "bc-index"
   @marker ~r/^#\s*boundary-lint:\s*allow\s+(\S+)\s.*DEBT\.md,\s*«[^»]+»/u
   @env_funs ~w(get_env fetch_env fetch_env! compile_env compile_env!)a
   @compile_env_funs ~w(compile_env compile_env!)a
@@ -66,11 +67,16 @@ defmodule BoundaryLint do
       System.halt(2)
     end
 
-    dir
-    |> Path.join(sources(mode))
-    |> Path.wildcard()
-    |> Enum.sort()
-    |> Enum.flat_map(&check_file(&1, mode, layout_root(dir, mode)))
+    root = layout_root(dir, mode)
+
+    files =
+      dir
+      |> Path.join(sources(mode))
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.map(&parse/1)
+
+    Enum.flat_map(files, &check_file(&1, mode, root)) ++ index_violations(files, root)
   end
 
   # Путь файла сверяется с именем модуля только в `lib/` потребителя: дерево тестов — не норма линтера.
@@ -81,11 +87,14 @@ defmodule BoundaryLint do
   defp sources(:library), do: "**/*.ex"
   defp sources(:consumer), do: "**/*.{ex,exs}"
 
-  defp check_file(path, mode, root) do
+  defp parse(path) do
     source = File.read!(path)
     {ast, comments} = Code.string_to_quoted_with_comments!(source, token_metadata: true)
+    %{path: path, ast: ast, markers: markers(ast, comments, String.split(source, "\n"))}
+  end
+
+  defp check_file(%{path: path, ast: ast, markers: markers}, mode, root) do
     {_ast, errors} = Macro.prewalk(ast, [], fn node, acc -> {node, acc ++ violations(node, path, mode)} end)
-    markers = markers(ast, comments, String.split(source, "\n"))
 
     (errors ++ module_path_violations(ast, path, root) ++ direction_violations(ast, path, root))
     |> Enum.reject(&allowed?(&1, markers))
@@ -171,18 +180,6 @@ defmodule BoundaryLint do
   end
 
   # ---
-
-  defp top_modules({:defmodule, meta, [{:__aliases__, _, parts}, _body]}) do
-    if Enum.all?(parts, &is_atom/1),
-      do: [{Enum.map_join(parts, ".", &Atom.to_string/1), meta[:line]}],
-      else: []
-  end
-
-  defp top_modules({:defmodule, _meta, _args}), do: []
-  defp top_modules({left, _meta, args}) when is_list(args), do: top_modules(left) ++ top_modules(args)
-  defp top_modules({left, right}), do: top_modules(left) ++ top_modules(right)
-  defp top_modules(list) when is_list(list), do: Enum.flat_map(list, &top_modules/1)
-  defp top_modules(_node), do: []
 
   # Конвенция Mix: `Mix.Tasks.Foo.Bar` — задача `foo.bar`, файл `mix/tasks/foo.bar.ex`.
   defp module_file("Mix.Tasks." <> task),
@@ -334,12 +331,53 @@ defmodule BoundaryLint do
   defp resolve([first | rest], env) when is_atom(first), do: Map.get(env.aliases, first, [first]) ++ rest
   defp resolve(_parts, _env), do: nil
 
+  # ===== потребитель: модуль-оглавление контекста =====
+
+  # Каталог `domain/<bc>/` требует модуль `<Root>.Domain.<BC>`: его ищут среди верхнеуровневых модулей
+  # `lib/` по `Macro.underscore`, как и путь файла, — так аббревиатура в имени контекста не даёт ложного
+  # нарушения. Содержание не проверяется. Нарушение принадлежит каталогу, а не модулю, поэтому его гасит
+  # маркер над любым `defmodule` в файлах контекста.
+  defp index_violations(_files, nil), do: []
+
+  defp index_violations(files, root) do
+    defined =
+      for %{ast: ast} <- files, {name, _line} <- top_modules(ast), into: MapSet.new(), do: Macro.underscore(name)
+
+    root
+    |> Path.join("*/domain/*")
+    |> Path.wildcard()
+    |> Enum.filter(&File.dir?/1)
+    |> Enum.sort()
+    |> Enum.reject(&MapSet.member?(defined, Path.relative_to(Path.expand(&1), Path.expand(root))))
+    |> Enum.reject(&index_allowed?(&1, files))
+    |> Enum.map(fn dir ->
+      violation(
+        dir <> "/",
+        0,
+        "контекст без модуля-оглавления: его `@moduledoc` — карта контекста, файл — #{dir}.ex",
+        @bc_index,
+        @layout
+      )
+    end)
+  end
+
+  # ---
+
+  defp index_allowed?(dir, files) do
+    prefix = Path.expand(dir) <> "/"
+
+    Enum.any?(files, fn %{path: path, markers: markers} ->
+      String.starts_with?(Path.expand(path), prefix) and Enum.any?(markers, &match?({@bc_index, _first, _last}, &1))
+    end)
+  end
+
   # ===== исключение: маркер у `defmodule` =====
 
   # Маркер — строка комментария в блоке прямо над `defmodule`:
   # `# boundary-lint: allow <правило> — DEBT.md, «<раздел>»`. Он гасит нарушения своего правила
-  # в строках своего модуля; без ссылки на раздел `DEBT.md` не гасит ничего. Хвостовой комментарий
-  # строки кода маркером не считается. Нарушения без правила (главный инвариант, DI) не гасятся.
+  # в строках своего модуля (`bc-index` — во всём каталоге контекста); без ссылки на раздел `DEBT.md`
+  # не гасит ничего. Хвостовой комментарий строки кода маркером не считается. Нарушения без правила
+  # (главный инвариант, DI) не гасятся.
   defp markers(ast, comments, lines) do
     by_line =
       for %{line: line, text: text} <- comments,
@@ -378,6 +416,18 @@ defmodule BoundaryLint do
   end
 
   # ===== общее =====
+
+  defp top_modules({:defmodule, meta, [{:__aliases__, _, parts}, _body]}) do
+    if Enum.all?(parts, &is_atom/1),
+      do: [{Enum.map_join(parts, ".", &Atom.to_string/1), meta[:line]}],
+      else: []
+  end
+
+  defp top_modules({:defmodule, _meta, _args}), do: []
+  defp top_modules({left, _meta, args}) when is_list(args), do: top_modules(left) ++ top_modules(args)
+  defp top_modules({left, right}), do: top_modules(left) ++ top_modules(right)
+  defp top_modules(list) when is_list(list), do: Enum.flat_map(list, &top_modules/1)
+  defp top_modules(_node), do: []
 
   defp err(path, meta, message, doc), do: violation(path, Keyword.get(meta, :line, 0), message, nil, doc)
 

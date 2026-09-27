@@ -20,7 +20,7 @@
 | `Core` | зависимость `:core` | shared-фундамент: `Prim`, `Enum`, `Codec`, `View`, `Context`, `Error`, `Es`, `Repo`, `Outbox`, `Mq`, `PubSub`, `Web`, `Helper` |
 | `MyApp.Application` | `lib/my_app/application.ex` | композиционный корень: проверки конфигурации на старте и дерево процессов, включая процессы Core |
 | `MyApp.Codec` | `lib/my_app/codec/` | Prim-профили `Prim.{Internal,External}`, entity-фасады `{Internal,External}`, реестр плагинов |
-| `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>/` | bounded context: `Common` + срезы (см. «Раскладка») |
+| `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>.ex`, `lib/my_app/domain/<bc>/` | bounded context: модуль-оглавление, `Common` + срезы (см. «Раскладка») |
 | `MyApp.Outbox` | `lib/my_app/outbox/` | OTP-дерево очереди: writer + поллер + cleaner |
 | `MyApp.Projections` | `lib/my_app/projections.ex` | список проекций и опции их дерева (`17-otp-concurrency.md`, «Проекции и процессы агрегата») |
 | `MyApp.PromEx` | `lib/my_app/prom_ex*` | плагины метрик и MFA-провайдеры списков |
@@ -76,6 +76,34 @@ defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Errors do
   MAY выноситься в подсистему `MyApp.<Subsystem>` вне `Domain`. Агрегат в подсистеме MUST NOT:
   появился агрегат — это bounded context.
 
+### Модуль-оглавление
+
+У каждого контекста MUST быть модуль-оглавление `MyApp.Domain.<BC>` в `lib/my_app/domain/<bc>.ex` —
+точка входа, из которой видно, из чего контекст состоит; без неё состав читается только по дереву
+каталогов. Оглавление лежит на уровне `domain/`, рядом с каталогом контекста, а не внутри него:
+правило «модуль в корне контекста — MUST NOT» («Состав контекста») оно не нарушает.
+
+`@moduledoc` оглавления SHOULD давать карту контекста: назначение, агрегаты, срезы и их
+инициаторов, read-модели, компоненты, ссылки на другие контексты.
+
+```elixir
+defmodule MyApp.Domain.Orders do
+  @moduledoc """
+  Заказы: оформление, оплата и отгрузка заказа клиента.
+
+  - Агрегаты (`Common`): `Order` (event-sourced), `Cart`.
+  - Срезы: `Client` — оформление и отмена; `Admin` — ручная отгрузка; `System` — отмена
+    неоплаченных по таймеру.
+  - Read-модели: карточка заказа `Order` в `Common`, очередь отгрузки `Backlog` в `Admin`.
+  - Компоненты: воркер отмены `Expiry` в `System`.
+  - Другие контексты: цены и счета — `MyApp.Domain.Billing`, через его `Common`.
+  """
+end
+```
+
+Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `bc-index`: каталог
+`lib/my_app/domain/<bc>/` без модуля `MyApp.Domain.<BC>`; содержание `@moduledoc` не проверяется.
+
 ### Направления зависимостей
 
 - `Common` MUST NOT ссылаться на срезы своего контекста: общая модель не зависит от конкретного
@@ -123,7 +151,9 @@ defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
 ```
 
 - Маркер гасит нарушения только своего правила и только в строках своего модуля: нарушение DI
-  (`13-repos.md`) в том же модуле ловится по-прежнему.
+  (`13-repos.md`) в том же модуле ловится по-прежнему. Исключение — `bc-index`: нарушение
+  принадлежит каталогу контекста, а не модулю, и его гасит маркер над любым `defmodule` в файлах
+  `lib/my_app/domain/<bc>/`.
 - Маркер без ссылки на раздел `DEBT.md` (`DEBT.md, «<раздел>»`) не гасит ничего; хвостовой
   комментарий строки кода маркером не считается.
 - Список исключений в конфигурации линтера MUST NOT: он расходится с кодом, а маркер виден на
@@ -134,6 +164,7 @@ defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
 | `module-path` | путь файла = имя модуля, один верхнеуровневый модуль в файле, конвенция Mix |
 | `common-slice` | `Common` ссылается на срез своего контекста |
 | `foreign-slice` | контекст ссылается на срез чужого контекста |
+| `bc-index` | каталог контекста без модуля-оглавления |
 
 Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` (шаг `boundary-check`,
 `20-agreements.md`) — правила таблицы, только `lib/`.

@@ -163,6 +163,8 @@ defmodule BoundaryLintTest do
   end
 
   test "`Common` → срез своего контекста по полному имени", %{tmp_dir: dir} do
+    write_index(dir, "Orders")
+
     write(dir, "lib/my_app/domain/orders/common/order/projection.ex", """
     defmodule MyApp.Domain.Orders.Common.Order.Projection do
       def run, do: MyApp.Domain.Orders.Admin.Order.Projector.project()
@@ -176,6 +178,8 @@ defmodule BoundaryLintTest do
   end
 
   test "`Common` → срез своего контекста через алиас; алиас от `__MODULE__` перекрывает прежний", %{tmp_dir: dir} do
+    write_index(dir, "Orders")
+
     write(dir, "lib/my_app/domain/orders/common/order.ex", """
     defmodule MyApp.Domain.Orders.Common.Order do
       alias MyApp.Domain.Orders.Admin.Usecases
@@ -194,6 +198,8 @@ defmodule BoundaryLintTest do
   end
 
   test "контекст → срез чужого контекста через многоимённый алиас", %{tmp_dir: dir} do
+    write_index(dir, "Orders")
+
     write(dir, "lib/my_app/domain/orders/client/usecases/order.ex", """
     defmodule MyApp.Domain.Orders.Client.Usecases.Order do
       alias MyApp.Domain.Billing.{Admin, Common}
@@ -220,6 +226,8 @@ defmodule BoundaryLintTest do
 
   test "`Common` → `Common` чужого контекста, срез → свои `Common` и срез, web → любой срез — без нарушений",
        %{tmp_dir: dir} do
+    write_index(dir, "Orders")
+
     write(dir, "lib/my_app/domain/orders/common/order.ex", """
     defmodule MyApp.Domain.Orders.Common.Order do
       alias MyApp.Domain.Billing
@@ -253,6 +261,8 @@ defmodule BoundaryLintTest do
   end
 
   test "вложенный модуль — под родителем, даже если его имя уже алиас", %{tmp_dir: dir} do
+    write_index(dir, "Orders")
+
     write(dir, "lib/my_app/domain/orders/client/order.ex", """
     defmodule MyApp.Domain.Orders.Client.Order do
       alias MyApp.Domain.Orders.Common.Line
@@ -267,6 +277,8 @@ defmodule BoundaryLintTest do
   end
 
   test "маркер гасит правило направления и не гасит соседнее", %{tmp_dir: dir} do
+    write_index(dir, "Orders")
+
     write(dir, "lib/my_app/domain/orders/common/order.ex", """
     # boundary-lint: allow common-slice — DEBT.md, «Проекция Common зовёт срез»
     defmodule MyApp.Domain.Orders.Common.Order do
@@ -287,11 +299,51 @@ defmodule BoundaryLintTest do
     assert out =~ "нарушений — 1"
   end
 
+  test "каталог контекста без модуля-оглавления", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/common/order.ex", "defmodule MyApp.Domain.Orders.Common.Order do\nend\n")
+    write(dir, "lib/my_app/domain/billing/common/invoice.ex", "defmodule MyApp.Domain.Billing.Common.Invoice do\nend\n")
+    write_index(dir, "Billing")
+
+    assert {out, 1} = lint(dir)
+    assert out =~ "lib/my_app/domain/orders/:0: "
+    assert out =~ "lib/my_app/domain/orders.ex"
+    assert out =~ "нарушений — 1"
+    assert out =~ "правила — #{@layout}"
+  end
+
+  test "модуль-оглавление с аббревиатурой в имени контекста — без нарушения", %{tmp_dir: dir} do
+    write_index(dir, "CRM")
+    write(dir, "lib/my_app/domain/crm/common/lead.ex", "defmodule MyApp.Domain.CRM.Common.Lead do\nend\n")
+
+    assert {_out, 0} = lint(dir)
+  end
+
+  test "маркер в модуле контекста гасит отсутствие оглавления, маркер чужого правила — нет", %{tmp_dir: dir} do
+    write(dir, "lib/my_app/domain/orders/common/order.ex", """
+    # boundary-lint: allow bc-index — DEBT.md, «Контекст без оглавления»
+    defmodule MyApp.Domain.Orders.Common.Order do
+    end
+    """)
+
+    write(dir, "lib/my_app/domain/billing/common/invoice.ex", """
+    # boundary-lint: allow module-path — DEBT.md, «Файл не по имени модуля»
+    defmodule MyApp.Domain.Billing.Common.Invoice do
+    end
+    """)
+
+    assert {out, 1} = lint(dir)
+    assert out =~ "lib/my_app/domain/billing/:0: "
+    assert out =~ "нарушений — 1"
+  end
+
   defp write(dir, path, source) do
     path = Path.join(dir, path)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, source)
   end
+
+  defp write_index(dir, bc),
+    do: write(dir, "lib/my_app/domain/#{Macro.underscore(bc)}.ex", "defmodule MyApp.Domain.#{bc} do\nend\n")
 
   defp lint(dir, dirs \\ ["lib", "test"]) do
     File.mkdir_p!(Path.join(dir, "test"))
