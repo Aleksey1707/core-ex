@@ -111,6 +111,8 @@
 | `<BC>` | `<bc>` | bounded context |
 | `<Actor>` | `<actor>` | actor / role-срез |
 | `<Aggregate>` | `<aggregate>` | агрегат |
+| `<ReadModel>` | `<read_model>` | read-модель: View, ReadRepo и проекция одного каталога |
+| — | `<scope>` | часть контекста: `common` или срез `<actor>` |
 
 В путях и именах файлов понятие пишется snake_case: `lib/my_app/domain/<bc>/<actor>/`.
 

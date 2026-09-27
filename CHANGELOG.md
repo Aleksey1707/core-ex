@@ -67,6 +67,62 @@
   defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Repo do
   ```
 
+- **Read-модель — единица раскладки чтения: View, ReadRepo и проекция в одном каталоге, проекция
+  на read-модель пишет свои таблицы сама** (`docs/rules/app/13-repos.md`, «Read-модель», «Проекции
+  read-модели»). Чтение event-sourced агрегата было разнесено на три места — View и ReadRepo под
+  агрегатом, `<Aggregate>.ReadRepo.Pg.Projector` под ReadRepo и одна проекция контекста в
+  `common/projection.ex`, — read-модель через два агрегата лежала под одним из них, а подъём
+  `version:` единственной проекции пересобирал все таблицы контекста. Своды расходились и в том,
+  где лежат View и репозиторий: в `Common` или в срезе роли. Теперь read-модель лежит в каталоге
+  `<bc>/<scope>/<read_model>/` (`<scope>` — `common` или срез) с `view.ex`, `read_repo*` и
+  `projection.ex`; имя — по назначению, по умолчанию имя агрегата, и тогда каталог общий с ним;
+  чтение state-stored агрегата из своей таблицы лежит в каталоге агрегата. Проекция MUST быть одна
+  на read-модель (`<ReadModel>.Projection`, `name:` SHOULD называть read-модель) и MUST писать свои
+  таблицы сама; отдельный модуль записи MUST NOT. На время перехода на новую проекцию вторая
+  лежит в том же каталоге (`AccountList.ProjectionV2` в примерах `docs/rules/22-projections.md`). Репозиторий записи и read-модель лежат в
+  `Common`, в срез переезжают вместе со своим ACL-фильтром или своей формой. Кеш read-модели и его
+  супервизор `<ReadRepo>.Supervisor` лежат в её каталоге (`docs/rules/app/16-caching.md`).
+
+  Как править код потребителя: проекция контекста делится на проекции read-моделей, тела
+  проекторов переезжают приватными функциями в свою проекцию, View и ReadRepo — к ней в каталог.
+  Проекция под новым `name:` стартует с начала истории, поэтому переход идёт по «Новая проекция»,
+  а строка чекпоинта прежней проекции удаляется по «Удаление» (`docs/rules/22-projections.md`).
+
+  ```elixir
+  # было — lib/my_app/domain/<bc>/common/projection.ex
+  defmodule MyApp.Domain.<BC>.Common.Projection do
+    use Core.Es.Projection,
+      name: "<bc>",
+      events: [Order.Event.Placed, Shipment.Event.Sent]
+
+    @impl true
+    def project(%Order.Event.Placed{} = event), do: Order.ReadRepo.Pg.Projector.placed(event)
+
+    def project(%Shipment.Event.Sent{} = event), do: Order.ReadRepo.Pg.Projector.sent(event)
+  end
+
+  # стало — lib/my_app/domain/<bc>/common/order/projection.ex и common/backlog/projection.ex
+  defmodule MyApp.Domain.<BC>.Common.Order.Projection do
+    use Core.Es.Projection,
+      name: "order",
+      events: [Order.Event.Placed]
+
+    @impl true
+    def project(%Order.Event.Placed{} = event), do: insert_row(event)
+  end
+
+  defmodule MyApp.Domain.<BC>.Common.Backlog.Projection do
+    use Core.Es.Projection,
+      name: "backlog",
+      events: [Order.Event.Placed, Shipment.Event.Sent]
+
+    @impl true
+    def project(%Order.Event.Placed{} = event), do: insert_row(event)
+
+    def project(%Shipment.Event.Sent{} = event), do: mark_sent(event)
+  end
+  ```
+
 ### Новое
 
 - **Дерево подписчиков брокера с DLQ — `Core.PubSub.MqSubscriberReliable.Supervisor`**

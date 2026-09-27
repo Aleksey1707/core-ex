@@ -9,11 +9,14 @@
 
 ## Объявление
 
-Проекция — модуль `use Core.Es.Projection`; его место в приложении —
-`deps/core/docs/rules/app/13-repos.md`, «Проекции read-модели». Она строит read-модель из событий
+Проекция — модуль `use Core.Es.Projection`, один на read-модель: `<ReadModel>.Projection` лежит в
+каталоге read-модели рядом с её View и ReadRepo и пишет её таблицы сама
+(`deps/core/docs/rules/app/13-repos.md`, «Проекции read-модели»). Она строит read-модель из событий
 хранилища агрегатов обоих видов в порядке глобальной позиции и пишет чекпоинт в той же транзакции
 пачки (ADR-0009). Перечень опций, шагов пачки и исходов — moduledoc `Core.Es.Projection`.
 
+- `name:` SHOULD называть read-модель (`"account_list"` у `AccountList.Projection`): имя чекпоинта
+  в метриках и логах тогда указывает на таблицы, которые проекция пишет.
 - `name:` MUST NOT меняться: строка чекпоинта привязана к имени, другое имя — новая проекция,
   которая стартует с начала истории.
 - `events:` — модули событий `<Aggregate>.Event.<Name>`, а не семейство `<Aggregate>.Event`;
@@ -57,7 +60,7 @@ def project(%Account.Event.Closed{} = event), do: close_row(event)
 
 @impl true
 def clear do
-  {_count, nil} = DAO.delete_all(AccountList.Row)
+  {_count, nil} = DAO.delete_all(AccountList.ReadRepo.Pg.Schema)
   :ok
 end
 ```
@@ -70,7 +73,8 @@ end
 - Таблицу read-модели MUST писать ровно одна проекция — в `project/1` и `clear/0`: `clear/0`
   соседней проекции стёр бы чужие строки, а usecase или воркер, пишущий в таблицу, разошёлся бы
   с историей.
-- ReadRepo MAY читать таблицы нескольких проекций.
+- ReadRepo MAY читать и таблицы чужой read-модели (join, подзапрос); пишет их по-прежнему только
+  её проекция.
 - Таблицы read-модели MUST лежать в той же базе, что `es_events`: read-модель и чекпоинт пишет одна
   транзакция (ADR-0009). Read-модель в другом сервисе — интеграция через брокер.
 
@@ -81,11 +85,13 @@ def project(%Account.Event.Closed{} = event) do
   close_row(event)
 end
 
-# плохо — таблицу AccountList.Row пишет и DeliveryList.Projection: её clear/0 сотрёт чужие строки
-def project(%Delivery.Event.Registered{} = event), do: DAO.insert_all(AccountList.Row, rows(event))
+# плохо — таблицу AccountList пишет и DeliveryList.Projection: её clear/0 сотрёт чужие строки
+def project(%Delivery.Event.Registered{} = event),
+  do: DAO.insert_all(AccountList.ReadRepo.Pg.Schema, rows(event))
 
 # плохо — read-модель в другой базе: строки и чекпоинт пишут разные транзакции
-def project(%Account.Event.Opened{} = event), do: ReportsRepo.insert_all(AccountList.Row, rows(event))
+def project(%Account.Event.Opened{} = event),
+  do: ReportsRepo.insert_all(AccountList.ReadRepo.Pg.Schema, rows(event))
 
 # хорошо — проекция пишет только свою таблицу в DAO, уведомление шлёт подписчик брокера
 def project(%Account.Event.Closed{} = event), do: close_row(event)
@@ -241,11 +247,11 @@ Read-модель без окна неполных данных строит н�
 
 ```text
 # плохо — таблицу account_list удаляет миграция выкладки, которая убирает её проекцию и ReadRepo
-выкладка 1: AccountListV2.Projection, create table(:account_list_v2)
+выкладка 1: AccountList.ProjectionV2, create table(:account_list_v2)
 выкладка 2: ReadRepo → account_list_v2, AccountList.Projection удалён, drop table(:account_list)
 
 # хорошо
-выкладка 1: AccountListV2.Projection, create table(:account_list_v2); ждать info о цели
+выкладка 1: AccountList.ProjectionV2, create table(:account_list_v2); ждать info о цели
 выкладка 2: ReadRepo → account_list_v2, AccountList.Projection удалён
 выкладка 3: drop table(:account_list), delete_checkpoint("account_list")
 ```

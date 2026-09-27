@@ -66,6 +66,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | агрегат с событиями только state-stored | `use Core.Es.Aggregate` с `decide/2` и `evolve/2` и команды `use Core.Es.Cmd` (`11-domain.md`) |
 | `{Event.X, payload}` / `Event.X` в результате `decide` | `Event.X.draft(payload)` / `Event.X.draft()` (`deps/core/docs/rules/11-domain.md`) |
 | read-модель пишет usecase или репозиторий | её пишет проекция `use Core.Es.Projection` (`13-repos.md`, «Проекции read-модели») |
+| View и ReadRepo под агрегатом, одна проекция контекста `<BC>.Common.Projection` и `<Aggregate>.ReadRepo.Pg.Projector` | каталог read-модели с View, ReadRepo и её проекцией, которая пишет свои таблицы сама (`13-repos.md`, «Read-модель», «Проекции read-модели») |
 | чтение read-модели сразу после команды | ожидание проекции и 202 на таймаут (`15-web-api.md`) |
 | `Core.Es.Projection.await(Projection, Agg, id, timeout)` | `Projection.await(Agg, id, timeout)` у модуля проекции (`deps/core/docs/rules/22-projections.md`) |
 | `Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` | `@repo.page_stream(id, limit, offset, context)` у репозитория агрегата (`deps/core/docs/rules/13-repos.md`, «Страница потока») |

@@ -11,10 +11,10 @@
 
 | Слой | Пример модуля | Роль |
 |---|---|---|
-| Behaviour | `<BC>.Common.Repo`, `<Actor>.<Aggregate>.Repo` | `@callback` API; без SQL |
+| Behaviour | `<BC>.Common.Repo`, `<BC>.Common.<Aggregate>.Repo` | `@callback` API; без SQL |
 | Pg impl | `*.Repo.Pg`, `*.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
 | Schema | `*.Repo.Pg.Schema` (+ nested `Schema.<Child>`, …) | Ecto schema; write — `to_entity`/`to_model` (+ bang), read — `to_view` |
-| View | `<Aggregate>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
+| View | `<ReadModel>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
 | Specs | `*.Repo.Pg.Specs` | `dynamic` / `from` query fragments |
 | Core | `Core.Repo`, `Core.Repo.Pg`, `Core.Repo.Pg.Children`, `Core.Repo.Sc` | генерация behaviour; generic CRUD; синхронизация дочерних строк; shadow copy |
 | Core (ES) | `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate.Repo`, `Core.Es.Aggregate.Repo.Pg`, `Core.Es.Aggregate.Process`, `Core.Repo.Pg.Schema`, `Core.Es.Store`, `Core.Es.Projection` | write-репо state-stored агрегата; behaviour и write-репо event-sourced агрегата; команда event-sourced агрегата; производные функции схемы; хранилище событий; проекция read-модели |
@@ -22,6 +22,8 @@
 Раскладка этих модулей у потребителя — где лежат репозиторий, схема, Specs, View, `Outbox`,
 процесс агрегата и проекция, — `deps/core/docs/rules/app/13-repos.md`, «Раскладка»; алиас
 репозитория агрегата — `deps/core/docs/rules/app/20-agreements.md`, «Алиасы приложения».
+Репозиторий записи и read-модель (View, ReadRepo, проекция) лежат в `<BC>.Common`; в срез
+`<BC>.<Actor>` они переезжают вместе со своим ACL-фильтром или своей формой данных.
 
 ## Read/Write репозитории
 
@@ -30,7 +32,7 @@
 | Вид | Модуль | Файл |
 |---|---|---|
 | Запись | `<Aggregate>.Repo` / `Repo` (common) | `<aggregate>/repo.ex` / `repo.ex` |
-| Чтение | `<Aggregate>.ReadRepo` / `ReadRepo` | `<aggregate>/read_repo.ex` / `read_repo.ex` |
+| Чтение | `<ReadModel>.ReadRepo` (по умолчанию `<Aggregate>.ReadRepo`) | `<read_model>/read_repo.ex` |
 
 ### Write (`<Aggregate>.Repo`)
 
@@ -85,7 +87,7 @@ View объявляется билдером `Core.View`: одна деклар�
 dump-only кодек.
 
 ```elixir
-defmodule MyApp.Domain.<BC>.<Actor>.<Aggregate>.View do
+defmodule MyApp.Domain.<BC>.Common.<Aggregate>.View do
   @moduledoc """
   Представление <Aggregate> для read-пути
   """
@@ -223,7 +225,7 @@ Version-аргумент: `%Version{} | :current`.
 
 ```elixir
 use Repo.Pg,
-  behaviour: MyApp.Domain.<BC>.<Actor>.<Aggregate>.Repo,
+  behaviour: MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
   schema: Schema,
   to_entity: &Schema.to_entity!/1,
   to_model: &Schema.to_model!/1,
@@ -269,7 +271,7 @@ Read-репозиторий — тот же макрос, другой деко�
 
 ```elixir
 use Repo.Pg,
-  behaviour: MyApp.Domain.<BC>.<Actor>.<Aggregate>.ReadRepo,
+  behaviour: MyApp.Domain.<BC>.Common.<Aggregate>.ReadRepo,
   schema: Schema,
   to_view: &Schema.to_view/1,
   to_id: &Schema.dump_id/1,

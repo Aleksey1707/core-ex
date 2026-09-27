@@ -105,12 +105,13 @@ Config и env библиотека не читает.
 
 ```elixir
 # плохо — список и опции собраны на месте старта: await и метрики видят другой список
-{Core.Es.Projection.Supervisor, projections: [MyApp.Domain.<BC>.Common.Projection], enabled: true}
+{Core.Es.Projection.Supervisor,
+ projections: [MyApp.Domain.<BC>.Common.<ReadModel>.Projection], enabled: true}
 
 # хорошо — одна функция; её же читают watch_list/1 и Core.Es.PromEx
 defmodule MyApp.Projections do
   def opts do
-    [projections: [MyApp.Domain.<BC>.Common.Projection]] ++
+    [projections: [MyApp.Domain.<BC>.Common.<ReadModel>.Projection]] ++
       Application.fetch_env!(:my_app, __MODULE__)
   end
 end

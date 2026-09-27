@@ -1,7 +1,8 @@
 # Кеширование
 
-- **Область.** `lib/my_app/domain/**/read_repo/{cached,invalidator,supervisor}.ex`, ключи кеша
-  и TTL в `config/**`, провайдер размеров в PromEx приложения.
+- **Область.** Кеш read-модели
+  `lib/my_app/domain/<bc>/<scope>/<read_model>/read_repo/{cached,invalidator,supervisor}.ex`, ключи
+  кеша и TTL в `config/**`, провайдер размеров в PromEx приложения.
 - **Читать перед.** Включением кеша на read-репозитории; правкой `.Cached`, `.Invalidator` и
   их конфигурации.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
@@ -11,8 +12,8 @@
 
 ## Когда кешировать
 
-- Кешировать MAY **только** `<Aggregate>.ReadRepo` (query-путь). В кеше лежит
-  `<Aggregate>.View` либо проекция — иммутабельная структура из примитивных значений
+- Кешировать MAY **только** `<ReadModel>.ReadRepo` (query-путь). В кеше лежит
+  `<ReadModel>.View` либо проекция — иммутабельная структура из примитивных значений
   (`13-repos.md`), не агрегат.
 - Write-репозиторий MUST NOT знать про кеш; usecases команд кеш не зовут.
 - `default_filters` кешируемого репозитория MUST NOT зависеть от `%Context{}`.
@@ -46,7 +47,9 @@
 
 ## Фасад `<ReadRepo>.Cached`
 
-Реализует тот же `@behaviour`, что и сам read-репозиторий, и оборачивает store:
+Реализует тот же `@behaviour`, что и сам read-репозиторий, и оборачивает store. Фасад,
+инвалидатор и супервизор кеша MUST лежать в каталоге своей read-модели, под её ReadRepo
+(`13-repos.md`, «Read-модель»): кеш переезжает и удаляется вместе с ней.
 
 ```text
 Usecases (query) → ReadRepo (behaviour)
@@ -64,7 +67,8 @@ Usecases (query) → ReadRepo (behaviour)
 | `list` / `page` / `count` / `find_many` / `exists?` | нет |
 
 - Backend — один именованный процесс на репозиторий (`<ReadRepo>.Cache`); его поднимает
-  композиционный корень.
+  супервизор кеша `<ReadRepo>.Supervisor` вместе с подписчиком инвалидации, а композиционный
+  корень ставит супервизор.
 - Store задаётся опцией фасада, а не вычисляется внутри: в тестах на место `.Pg` встаёт
   дублёр.
 - Недоступный кеш (процесс не запущен или упал) MUST читаться **мимо кеша**: отказ вместо
@@ -118,13 +122,16 @@ Usecases (query) → ReadRepo (behaviour)
 
 ```elixir
 # config/config.exs — подмена реализации и TTL (compile-time)
-config :my_app, MyApp.Domain.<BC>.<Actor>.<Aggregate>.ReadRepo,
-       MyApp.Domain.<BC>.<Actor>.<Aggregate>.ReadRepo.Cached
+config :my_app, MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo,
+       MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Cached
 
-config :my_app, MyApp.Domain.<BC>.<Actor>.<Aggregate>.ReadRepo.Cached,
-  store: MyApp.Domain.<BC>.<Actor>.<Aggregate>.ReadRepo.Pg,
+config :my_app, MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Cached,
+  store: MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Pg,
   ttl_ms: :timer.minutes(10)
 ```
+
+Read-модель среза (`13-repos.md`, «Read-модель») даёт те же ключи со своим именем
+`MyApp.Domain.<BC>.<Actor>.<ReadModel>.ReadRepo`.
 
 `config/test.exs` возвращает репозиторий на `.Pg` и выключает инвалидатор: кеш проверяется
 адресно, а не участвует в каждом тесте.

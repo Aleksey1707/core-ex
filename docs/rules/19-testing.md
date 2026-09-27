@@ -275,10 +275,10 @@ test "clear/0 очищает read-модель" do
   assert DAO.aggregate(Account.ReadRepo.Pg.Schema, :count) == 0
 end
 
-# хорошо — test/my_app/domain/<bc>/common/projection_case_test.exs
-defmodule MyApp.Domain.<BC>.Common.ProjectionCaseTest do
+# хорошо — test/my_app/domain/<bc>/common/account/projection_case_test.exs
+defmodule MyApp.Domain.<BC>.Common.Account.ProjectionCaseTest do
   use Core.Es.ProjectionCase,
-    projection: MyApp.Domain.<BC>.Common.Projection,
+    projection: MyApp.Domain.<BC>.Common.Account.Projection,
     async: false
 end
 ```
@@ -300,13 +300,13 @@ sandbox-транзакции, и пачка соседнего теста пол
 # плохо — прогон в async: true: пачку проекции держит sandbox-транзакция соседнего теста
 use MyApp.DataCase, async: true
 
-assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Projection)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Account.Projection)
 
 # хорошо — test/my_app/domain/<bc>/<actor>/usecases/account_test.exs
 use MyApp.DataCase, async: false
 
 {:ok, {id, _version}} = Usecases.Account.open(params, context)
-assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Projection)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Account.Projection)
 assert {:ok, %Account.View{status: :open}} = Account.ReadRepo.get(id, :current, context)
 ```
 
@@ -340,7 +340,7 @@ saved = Application.get_env(:my_app, MyApp.Projections)
 on_exit(fn -> Application.put_env(:my_app, MyApp.Projections, saved) end)
 Application.put_env(:my_app, MyApp.Projections, enabled: true, await: :poll)
 
-assert %{name: MyApp.Domain.<BC>.Common.Projection} in MyApp.PromEx.Workers.watch_list()
+assert %{name: MyApp.Domain.<BC>.Common.Account.Projection} in MyApp.PromEx.Workers.watch_list()
 ```
 
 ### Ветка неготовой read-модели
@@ -374,7 +374,7 @@ opts = Keyword.put(MyApp.Projections.opts(), :await, :poll)
 
 # хорошо — состояние подставлено на время блока, исход мгновенный
 conn =
-  Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Common.Projection, fn ->
+  Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Common.Account.Projection, fn ->
     patch(authed(ctx), "#{@path}/#{id}", body)
   end)
 

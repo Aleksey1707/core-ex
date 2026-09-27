@@ -287,11 +287,13 @@ end
     max_attempts: Core.Outbox.Attempts.new!(10)}
    ```
 
-   Проекции гоняет одно дерево `Core.Es.Projection.Supervisor` со всем списком проекций приложения
-   на каждой ноде; опции и дефолты — в его moduledoc. Config и env библиотека не читает:
-   рекомендуемые env — `ES_PROJECTIONS_*` в `config/runtime.exs`, длительности — через
-   `Core.DurationParser`. Список и опции удобно собрать одной функцией — её же принимает
-   `watch_list/1`:
+   Проекция — одна на read-модель: `<ReadModel>.Projection` лежит в каталоге read-модели рядом
+   с её View и ReadRepo, `name:` называет read-модель (`deps/core/docs/rules/app/13-repos.md`,
+   «Read-модель»). Проекции гоняет одно дерево `Core.Es.Projection.Supervisor` со всем списком
+   проекций приложения на каждой ноде; опции и дефолты — в его moduledoc. Config и env
+   библиотека не читает: рекомендуемые env — `ES_PROJECTIONS_*` в `config/runtime.exs`,
+   длительности — через `Core.DurationParser`. Список и опции удобно собрать одной функцией —
+   её же принимает `watch_list/1`:
 
    ```elixir
    # config/runtime.exs
@@ -312,7 +314,7 @@ end
    # lib/my_app/projections.ex
    defmodule MyApp.Projections do
      def opts do
-       [projections: [MyApp.Domain.Accounts.AccountList.Projection]] ++
+       [projections: [MyApp.Domain.Accounts.Common.AccountList.Projection]] ++
          Application.fetch_env!(:my_app, __MODULE__)
      end
    end

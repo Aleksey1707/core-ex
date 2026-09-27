@@ -1,10 +1,12 @@
 # Репозитории приложения
 
-- **Область.** `lib/my_app/domain/<bc>/{common,<actor>}/<aggregate>/{repo,read_repo,view}*`,
-  `<aggregate>/{event,cmd}*`, `<aggregate>/<name>_key.ex`, `lib/my_app/dao.ex`, DI-ключи
+- **Область.** `lib/my_app/domain/<bc>/<scope>/<aggregate>/{repo,event,cmd}*`,
+  `<aggregate>/<name>_key.ex`, каталоги read-моделей
+  `<bc>/<scope>/<read_model>/{view,read_repo,projection}*`, `lib/my_app/dao.ex`, DI-ключи
   репозиториев в `config/**`.
-- **Читать перед.** Новым репозиторием, Ecto-схемой, View, Specs, модулем ключа, событием или
-  командой; правкой `default_filters`, `constraint_errors`, `key_reservations:` и DI.
+- **Читать перед.** Новым репозиторием, Ecto-схемой, read-моделью, View, проекцией, Specs, модулем
+  ключа, событием или командой; правкой `default_filters`, `constraint_errors`,
+  `key_reservations:` и DI.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
 Контракты `use Core.Repo{,.Pg,.Pg.StateStored,.Pg.Schema}`, `use Core.Es.Aggregate.Repo{,.Pg}`,
@@ -13,8 +15,9 @@
 
 ## Раскладка
 
-Всё, что относится к агрегату, лежит **внутри** его каталога; файлов `<aggregate>_repo.ex` и
-модулей `<Aggregate>Repo` не бывает:
+Деревья ниже — примеры правила «путь файла = имя модуля» (`10-architecture.md`, «Раскладка»).
+Всё, что относится к агрегату, MUST лежать **внутри** его каталога; файлов `<aggregate>_repo.ex` и
+модулей `<Aggregate>Repo` не бывает. Чтение раскладывается по read-моделям («Read-модель»):
 
 ```text
 <bc>/common/<aggregate>/repo.ex                  # write behaviour
@@ -22,11 +25,6 @@
 <bc>/common/<aggregate>/repo/pg/schema.ex        # Ecto-схема write-пути
 <bc>/common/<aggregate>/repo/pg/schema/*.ex      # дочерние таблицы
 <bc>/common/<aggregate>/repo/pg/specs.ex         # фрагменты запросов write-пути
-<bc>/common/<aggregate>/view.ex                  # View + вложенный View.Codec (dump-only)
-<bc>/common/<aggregate>/read_repo.ex             # read behaviour (only: :read, view:)
-<bc>/common/<aggregate>/read_repo/pg{,/schema.ex}  # своя read-only схема (to_view/1)
-<bc>/common/<aggregate>/read_repo/pg/specs.ex    # фрагменты запросов read-пути («Specs»)
-<bc>/common/<aggregate>/read_repo/{cached,invalidator}.ex   # опционально (16-caching.md)
 <bc>/common/<aggregate>/event.ex                 # семейство событий: @moduledoc, @type t
 <bc>/common/<aggregate>/event/<name>.ex          # одно событие; своя нагрузка — вложенный Payload
 <bc>/common/<aggregate>/event/codec.ex           # кодек событий
@@ -41,8 +39,6 @@ Event-sourced агрегат добавляет к этому свои моду�
 <bc>/common/<aggregate>/repo{.ex,/pg.ex}         # use Core.Es.Aggregate.Repo{,.Pg}
 <bc>/common/<aggregate>/process.ex               # опционально: use Core.Es.Aggregate.Process
 <bc>/common/<aggregate>/<name>_key.ex            # опционально: use Core.Es.KeyReservation
-<bc>/common/projection.ex                        # проекция BC: use Core.Es.Projection
-<bc>/common/<aggregate>/read_repo/pg/projector.ex  # запись строк read-модели этим агрегатом
 ```
 
 - Схема write-пути MUST жить под `Repo.Pg.Schema`, схема read-модели — под
@@ -50,13 +46,51 @@ Event-sourced агрегат добавляет к этому свои моду�
 - Своего хранилища событий у агрегата нет — `deps/core/docs/rules/13-repos.md`,
   «Хранилище событий (`Core.Es.Store`)».
 - Кодек событий и `Outbox` лежат в `common/<aggregate>/`: их видят оба среза.
-- Репозиторий, схема и View лежат в `Common`, пока агрегат читают и пишут несколько акторов.
-  Переезд в срез (`<bc>/<actor>/<aggregate>/`) — вместе с расхождением формы, а не заранее.
+- Репозиторий записи и read-модель лежат в `Common`; в срез (`<bc>/<actor>/…`) они переезжают
+  вместе со своим ACL-фильтром («Actor-репозиторий») или своей формой данных, а не заранее
+  (`10-architecture.md`, «Actor / role slices»).
 - В actor-срезе каталог `<aggregate>/` — namespace actor-domain (`<Actor>.<Aggregate>.…`,
-  `10-architecture.md`): репозиторий, View и роль-специфичные операции среза лежат в нём рядом.
-- View лежит в каталоге агрегата, а не под репозиторием: его видят behaviour, usecase,
-  презентер и кеш.
+  `10-architecture.md`): actor-репозиторий, read-модель среза с именем агрегата и
+  роль-специфичные операции среза лежат в нём рядом.
 - Алиас доменного репозитория — `20-agreements.md`, «Алиасы приложения».
+
+### Read-модель
+
+Read-модель — единица раскладки чтения: View, ReadRepo и проекция, которая пишет её таблицы, MUST
+лежать в одном каталоге `<bc>/<scope>/<read_model>/`, где `<scope>` — `common` или срез. Правка
+read-модели затрагивает одно место, а её пересборка — только её таблицы.
+
+```text
+<bc>/<scope>/<read_model>/
+  view.ex                                      # View + вложенный View.Codec (dump-only)
+  read_repo.ex                                 # read behaviour (only: :read, view:)
+  read_repo/pg{,/schema.ex}                    # своя read-only схема (to_view/1)
+  read_repo/pg/specs.ex                        # фрагменты запросов read-пути («Specs»)
+  read_repo/{cached,invalidator,supervisor}.ex # опционально: кеш (16-caching.md)
+  projection.ex                                # use Core.Es.Projection, если таблицы пишет проекция
+```
+
+- Имя read-модели — по назначению (`Backlog`, `Delivery`); по умолчанию — имя агрегата, и тогда
+  каталог общий с агрегатом: `common/<aggregate>/view.ex` рядом с `repo.ex`. Read-модель над
+  несколькими агрегатами MUST NOT лежать под одним из них: у неё своё имя и свой каталог.
+- Чтение state-stored агрегата из его собственной таблицы (read-схема над таблицей write-пути,
+  без проекции) MUST лежать в каталоге агрегата: таблица принадлежит агрегату.
+- View лежит в каталоге read-модели, а не под ReadRepo: его видят behaviour, usecase, презентер и
+  кеш.
+
+```text
+# плохо — чтение агрегата в трёх местах, схема строк второго агрегата лежит под первым
+<bc>/common/order/view.ex
+<bc>/common/order/read_repo/pg/projector.ex
+<bc>/common/order/read_repo/pg/schema/shipment.ex
+<bc>/common/projection.ex
+
+# хорошо — read-модель агрегата в его каталоге, read-модель двух агрегатов — в своём
+<bc>/common/order/{view,read_repo,projection}.ex
+<bc>/common/order/read_repo/pg{,/schema.ex}
+<bc>/common/backlog/{view,read_repo,projection}.ex
+<bc>/common/backlog/read_repo/pg{,/schema.ex}
+```
 
 ### Событие и команда
 
@@ -132,7 +166,7 @@ def insert(%<Aggregate>{} = agg, %Context{} = context, opts \\ []),
 | Путь | Что отдаёт | Кто зовёт |
 |---|---|---|
 | `<Aggregate>.Repo` | агрегат на доменных Prim | usecases команд, включая внутренний `get` перед мутацией |
-| `<Aggregate>.ReadRepo` | `<Aggregate>.View` из примитивных значений | usecases запросов: HTTP GET, списки, страницы |
+| `<ReadModel>.ReadRepo` | `<ReadModel>.View` из примитивных значений | usecases запросов: HTTP GET, списки, страницы |
 
 - Write-репозиторий содержит то, что нужно command-flow: `get` / `get!`, `insert` / `update` /
   `save` / `delete`, у event-sourced агрегата — `append`. `count` / `page` / `exists?` в него
@@ -334,9 +368,14 @@ SELECT 'agg.login', ARRAY[lower(login)], id FROM agg_logins
 Таблицы, которые читают ReadRepo event-sourced агрегатов, пишут проекции
 (`deps/core/docs/rules/22-projections.md`). Раскладка в приложении:
 
-- модуль проекции — один на BC, в `common/projection.ex`: `project/1` только разбирает события
-  клаузами, а строки конкретного агрегата пишет `<Aggregate>.ReadRepo.Pg.Projector` рядом со
-  схемой, которую этот ReadRepo читает, функцией на событие;
+- проекция MUST быть одна на read-модель — `<ReadModel>.Projection` в её каталоге («Read-модель»),
+  `name:` SHOULD называть read-модель. Одна проекция на контекст MUST NOT: подъём её `version:`
+  пересобирал бы таблицы всех read-моделей контекста. На время перехода на новую проекцию
+  (`deps/core/docs/rules/22-projections.md`, «Новая проекция») вторая проекция лежит в том же
+  каталоге;
+- проекция MUST писать свои таблицы сама — приватной функцией на событие под клаузой `project/1`.
+  Отдельный модуль записи (`<Aggregate>.ReadRepo.Pg.Projector`) MUST NOT: у таблицы один хозяин и
+  один модуль, и из `project/1` видно, какое событие что пишет;
 - таблица сохраняет форму, которую читает ReadRepo: даты и авторов строка берёт из `at` / `by`
   события, `version` — из его версии;
 - внешние ключи на таблицы проекций и между ними MUST NOT: их ломает `clear/0` пересборки.
@@ -344,12 +383,29 @@ SELECT 'agg.login', ARRAY[lower(login)], id FROM agg_logins
 - проекция регистрируется в общем списке приложения (`17-otp-concurrency.md`).
 
 ```elixir
-# плохо — делегирование события целиком: из `project/1` не видно, какое событие чем пишется
-def project(%mod{} = event) when mod in @agg_events, do: Projector.project(event)
+# плохо — одна проекция на контекст, строки пишет проектор под ReadRepo
+defmodule MyApp.Domain.<BC>.Common.Projection do
+  def project(%Agg.Event.Completed{} = event),
+    do: Agg.ReadRepo.Pg.Projector.completed(event)
+end
 
-# хорошо — клауза на модуль события
-def project(%Agg.Event.Completed{} = event),
-  do: Agg.ReadRepo.Pg.Projector.completed(event)
+# хорошо — проекция read-модели в её каталоге пишет свою таблицу сама
+defmodule MyApp.Domain.<BC>.Common.<Aggregate>.Projection do
+  use Core.Es.Projection,
+    name: "<aggregate>",
+    events: [Agg.Event.Opened, Agg.Event.Completed]
+
+  @impl true
+  def project(%Agg.Event.Opened{} = event), do: insert_row(event)
+
+  def project(%Agg.Event.Completed{} = event), do: complete_row(event)
+
+  @impl true
+  def clear do
+    {_count, nil} = DAO.delete_all(Agg.ReadRepo.Pg.Schema)
+    :ok
+  end
+end
 ```
 
 ## View
@@ -366,7 +422,7 @@ def project(%Agg.Event.Completed{} = event),
 ## Specs
 
 У read-репозитория **свои** `Specs` — `read_repo/pg/specs.ex`: фрагменты запросов строятся над
-его собственной схемой («Раскладка»). У event-sourced агрегата write-Specs нет — строки
+его собственной схемой («Read-модель»). У event-sourced агрегата write-Specs нет — строки
 состояния нет, и `Specs` есть только у read-пути.
 
 - Фрагменты, общие для write- и read-пути, MAY выноситься в одно место и композироваться

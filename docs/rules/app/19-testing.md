@@ -79,7 +79,7 @@ end
 ```elixir
 # плохо — прогон и чтение ради версии: её уже вернул usecase
 {:ok, {id, _version}} = Usecases.open(context)
-:ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Projection)
+:ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.<ReadModel>.Projection)
 {:ok, view} = Usecases.get(id, :current, context)
 {:ok, _version} = Usecases.close(id, Version.new!(view.version), context)
 
