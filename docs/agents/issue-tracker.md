@@ -9,6 +9,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- `.scratch/` is committed to this shared library: never name a consumer application there (repo, app atom, module prefix, `/home/…` paths). Write facts anonymised as «потребитель A/B/…» — see `AGENTS.md`, «Потребители — обезличенно»
 
 ## When a skill says "publish to the issue tracker"
 

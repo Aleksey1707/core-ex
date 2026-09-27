@@ -25,7 +25,7 @@
   (`reserve` / `rename` / `release` / `find`, отказ `{:error, :taken}`), Pg-реализация (`ON CONFLICT DO NOTHING` со
   сверкой числа строк, идемпотентность по `aggregate_id`, `rename` = резерв нового + снятие старого), таблица
   `unique_keys (scope text, key text)` PK → `aggregate_id`, тест гонки через `unboxed_run`, нормы в своде и
-  ADR-0005 потребителя A. Специфично только отображение событий агрегата на резерв (`*Key.sync/3`) и коды ошибок каталога.
+  ADR-0005 Ð¿Ð¾ÑÑÐµÐ±Ð¸ÑÐµÐ»Ñ A. Специфично только отображение событий агрегата на резерв (`*Key.sync/3`) и коды ошибок каталога.
 - потребитель A: резерв у трёх агрегатов — `User` (`user.login`), `Role` (`role.name`), `Perm` (`perm.name`); `sync` зовётся в
   пяти usecase (admin трёх агрегатов, два `quick_start`) после `get` и до `append`; процесс агрегата не используется,
   повтор — своя обёртка `AppA.Transact`. `find` зовут только `quick_start` и `seed_demo` («найти или создать»).
