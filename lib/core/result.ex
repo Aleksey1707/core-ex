@@ -11,8 +11,8 @@ defmodule Core.Result do
 
   | Вход | Функции |
   |---|---|
-  | `t:t/2` и `t:unit/1` | `map_error/2`, `tap/2`, `and_/2`, `or_/2`, `or_else/2`, `ok?/1`, `error?/1` |
-  | только `t:t/2` — колбэк к значению | `map/2`, `map_or/3`, `map_or_else/3`, `and_then/2` |
+  | `t:t/2` и `t:unit/1` | `map_error/2`, `tap/2`, `and_/2`, `and_then/2`, `or_/2`, `or_else/2`, `ok?/1`, `error?/1` |
+  | только `t:t/2` — колбэк к значению | `map/2`, `map_or/3`, `map_or_else/3` |
   | только `t:t/2` — значение наружу | `unwrap!/1`, `unwrap_or/2`, `unwrap_or_else/2`, `to_option/1` |
   | результата на входе нет | `ok/0`, `ok/1`, `error/1`, `traverse/2`, `traverse_all/2` |
   """
@@ -107,11 +107,21 @@ defmodule Core.Result do
   def and_({:ok, _value}, other), do: other
   def and_({:error, _reason} = err, _other), do: err
 
-  @doc "Если успех со значением — применить fun."
-  @spec and_then(t(a, e), (a -> t(b, f))) :: t(b, e | f) when a: var, b: var, e: var, f: var
+  @doc """
+  Связать результат со следующим шагом: на успехе вызвать fun, ошибку вернуть как есть.
+
+  Арность колбэка задаёт форма успеха: `{:ok, v}` — `fun.(v)`, `:ok` — `fun.()`.
+  """
+  @spec and_then(t(a, e), (a -> t(b, f) | unit(f))) :: t(b, e | f) | unit(e | f)
+        when a: var, b: var, e: var, f: var
+  @spec and_then(unit(e), (-> t(b, f) | unit(f))) :: t(b, e | f) | unit(e | f)
+        when b: var, e: var, f: var
 
   def and_then({:ok, value}, fun) when is_function(fun, 1), do: fun.(value)
-  def and_then({:error, _reason} = err, fun) when is_function(fun, 1), do: err
+  def and_then(:ok, fun) when is_function(fun, 0), do: fun.()
+
+  def and_then({:error, _reason} = err, fun) when is_function(fun, 1) or is_function(fun, 0),
+    do: err
 
   @doc "Применить fun к каждому элементу; на первой ошибке — halt. Порядок сохраняется."
   @spec traverse([a], (a -> t(b, e))) :: t([b], e) when a: var, b: var, e: var

@@ -310,6 +310,23 @@
 
 ### Новое
 
+- **Шаг с результатом в `bind`: `Result.and_then/2` принимает `:ok`** (`Core.Result`, `Core.Bind`).
+  `bind` снимал лестницу только у bracket-шагов, а цепочку результатов свод отдавал `with`, и
+  смешанная цепочка оставалась `with` внутри `Transact.run(DAO, fn -> … end)`. Теперь справа от
+  `<-` стоит `Result.and_then(call)` — форма `result.try` из Gleam: `x <-` принимает `{:ok, x}`,
+  `[] <-` — `:ok`, ошибка становится итогом блока. Для этого `and_then/2` на `:ok` вызывает
+  нуль-арный колбэк (было `FunctionClauseError`), на `{:error, _}` пропускает колбэк любой из двух
+  арностей; `:ok` с одноарным и `{:ok, v}` с нуль-арным колбэком — по-прежнему
+  `FunctionClauseError`; `@spec` обеих клауз допускают колбэк с unit-результатом. `else` у `bind`
+  нет: ошибка шага правится `Result.map_error/2` справа до `and_then`, ошибка блока —
+  `bind do … end |> Result.map_error(…)` или `|> case do … end`. Запрет свода на цепочку
+  результатов в `bind` снят, норма — `20-agreements.md`, «Вложенные колбэки: `bind`»; решение —
+  `docs/adr/0026-bind-result-steps.md`.
+
+  Как править код потребителя: править не нужно; смешанную цепочку MAY переписать —
+  `Transact.run(DAO, fn -> with {:ok, s} <- get(…), {:ok, _} <- save(s, …) do :ok end end)` →
+  `bind do [] <- Transact.run(DAO, _); s <- Result.and_then(get(…)); … end`.
+
 - **Повтор метки в `watch:` и `readers:` больше не скрывает упавший процесс**
   (`Core.Workers.PromEx`, `Core.Mq.PromEx`). Метку процесса задаёт строка списка потребителя, и два
   элемента с одной меткой ничто не запрещало: `last_value` оставлял значение последнего, и живой

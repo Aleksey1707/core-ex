@@ -38,11 +38,28 @@ defmodule Core.Bind do
   Справа от `<-` `bind` стоять не может: там ожидается вызов, принимающий колбэк
   последним аргументом.
 
-  Промах паттерна слева — `FunctionClauseError` из сгенерированной `fn`: `else` у `bind` нет
-  и не будет, ветвление по ошибке — дело `with`.
+  Промах паттерна слева — `FunctionClauseError` из сгенерированной `fn`.
 
-  Когда `bind` не нужен: цепочка `{:ok, _} | {:error, _}` — это `with` (у него есть `else`),
-  а шаг, которому подходит имя, — приватная функция: имя объясняет шаг, `bind` — нет.
+  Шаг с результатом — `Core.Result.and_then/2` справа (`result.try` из Gleam): успех
+  разворачивается в параметр колбэка, ошибка становится итогом блока, сквозь bracket-шаги —
+  как есть (`Transact.run` откатывает по `{:error, _}`).
+
+      bind do
+        [] <- Transact.run(DAO, _)
+        settings <- Result.and_then(@repo.get_by_owner_id(owner_id, version, context))
+        [] <- Result.and_then(check(settings))
+        @repo.save(settings, context)
+      end
+
+  `x <-` принимает `{:ok, x}`, `[] <-` — `:ok`; не-результат справа — `FunctionClauseError`,
+  а не молчаливый проход, как у `with`.
+
+  `else` у `bind` нет: ошибка шага правится `Result.map_error/2` справа до `Result.and_then/2`,
+  ошибка блока — `bind do … end |> Result.map_error(…)` или `|> case do … end` с клаузой
+  пропуска успеха (ADR-0026).
+
+  Когда `bind` не нужен: ветвление по ошибке — это `with` с `else`, а шаг, которому подходит
+  имя, — приватная функция: имя объясняет шаг, `bind` — нет.
   Плата за макрос — стектрейсы указывают внутрь сгенерированных `fn`, а вызов, который колбэка
   не принимает, макрос пропускает: арность разойдётся сообщением компилятора или
   `UndefinedFunctionError` в рантайме.
@@ -68,7 +85,8 @@ defmodule Core.Bind do
       [],
       __CALLER__,
       "принимается только `do`-блок, получено: #{inspect(Keyword.keys(opts))} — " <>
-        "ветвление по ошибке даёт `with` с `else`, не `bind`"
+        "ошибку шага правит `Result.map_error/2` справа до `Result.and_then/2`, ошибку блока — " <>
+        "`bind do … end |> Result.map_error(…)` или `|> case`, ветвление по ошибке — `with` с `else`"
     )
   end
 

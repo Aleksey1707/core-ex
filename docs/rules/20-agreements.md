@@ -558,11 +558,18 @@ Bracket-функция принимает колбэк последним арг
 
 - Шаг, которому подходит имя, SHOULD выносить в приватную функцию, а не в строку `bind`:
   имя объясняет шаг, `bind` — нет.
-- Цепочку `{:ok, _} | {:error, _}` `bind` MUST NOT заменять — это `with` с `else`: промах
-  паттерна слева падает `FunctionClauseError`, ветки ошибки у `bind` нет.
+- Шаг с результатом — `pattern <- Result.and_then(call)` (`Core.Result.and_then/2`, `result.try`
+  из Gleam): `x <-` принимает `{:ok, x}`, `[] <-` — `:ok`, ошибка становится итогом блока,
+  не-результат справа — `FunctionClauseError`.
+- Смешанная цепочка (bracket-шаги и шаги с результатом) MAY через `bind`; чистая цепочка
+  результатов — `with` или `bind`, выбор автора.
+- Ошибку, которой нужна обработка по клаузам, SHOULD разбирать `with` с `else`. У `bind` `else`
+  нет: ошибка шага правится `Result.map_error/2` справа до `Result.and_then/2`, ошибка блока —
+  `bind do … end |> Result.map_error(…)` или `|> case do … end` с клаузой пропуска успеха.
+  Почему `else` у `bind` не будет — ADR-0026 (`docs/adr/0026-bind-result-steps.md`).
 - Форма слева задаёт параметры колбэка: `x` / `{:ok, x}` — один, `[]` — нуль-арный,
-  `[a, b]` — двухарный. Список-паттерн MUST оборачивать в список параметров: `[[a, b]] <-`
-  даёт `fn [a, b] ->`.
+  `[a, b]` — двухарный; промах паттерна — `FunctionClauseError`. Список-паттерн MUST оборачивать
+  в список параметров: `[[a, b]] <-` даёт `fn [a, b] ->`.
 - Хвост после колбэка задаётся маркером `_` среди аргументов верхнего уровня
   (`Transact.run(DAO, _, timeout: :infinity)`).
 - Справа от `<-` MUST стоять вызов, принимающий колбэк последним аргументом; литерал,
@@ -582,7 +589,19 @@ bind do
   [] <- :timer.tc()
   IO.read(io, :line)
 end
+
+# смешанная цепочка одним блоком — равноправно с `with` внутри `Transact.run(DAO, fn -> … end)`
+bind do
+  [] <- Transact.run(DAO, _)
+  settings <- Result.and_then(@repo.get_by_owner_id(owner_id, version, context))
+  settings <- Result.and_then(apply_attrs(settings, owner_id, attrs))
+  _saved <- Result.and_then(@repo.save(settings, context))
+  :ok
+end
 ```
+
+Проверяется: `test/core/bind_test.exs` — шаг с результатом, не-результат справа,
+`CompileError` на `else` и на не-вызов справа от `<-`.
 
 ### Safe vs bang
 

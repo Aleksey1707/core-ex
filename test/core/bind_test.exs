@@ -3,6 +3,8 @@ defmodule Core.BindTest do
 
   import Core.Bind
 
+  alias Core.Result
+
   defmodule Fixture do
     @moduledoc false
 
@@ -264,8 +266,63 @@ defmodule Core.BindTest do
     end
   end
 
-  test "блок с else — CompileError" do
-    assert_raise CompileError, ~r/принимается только `do`-блок/, fn ->
+  test "шаг с результатом: успех разворачивается в значение, ошибка — итог блока" do
+    step = fn
+      :fail -> {:error, :boom}
+      value -> {:ok, value}
+    end
+
+    ok =
+      bind do
+        x <- Result.and_then(step.(1))
+        y <- step.(2) |> Result.and_then()
+        {:ok, x + y}
+      end
+
+    error =
+      bind do
+        x <- Result.and_then(step.(1))
+        _y <- Result.and_then(step.(:fail))
+        {:ok, x}
+      end
+
+    assert ok == {:ok, 3}
+    assert error == {:error, :boom}
+  end
+
+  test "шаг с unit-результатом даёт нуль-арный колбэк" do
+    value =
+      bind do
+        [] <- Result.and_then(Result.ok())
+        x <- Result.and_then(Result.ok(1))
+        {:ok, x}
+      end
+
+    assert value == {:ok, 1}
+  end
+
+  test "ошибка шага проходит сквозь bracket-шаг как есть" do
+    value =
+      bind do
+        [] <- Fixture.zero()
+        [] <- Result.and_then(Result.error(:boom))
+        :ok
+      end
+
+    assert value == {:error, :boom}
+  end
+
+  test "не-результат справа от шага с результатом падает" do
+    assert_raise FunctionClauseError, fn ->
+      bind do
+        x <- Result.and_then(dyn(nil))
+        {:ok, x}
+      end
+    end
+  end
+
+  test "блок с else — CompileError с рецептом обработки ошибки" do
+    assert_raise CompileError, ~r/принимается только `do`-блок.*Result\.map_error/s, fn ->
       eval("""
       bind do
         x <- Core.BindTest.Fixture.one(1)
@@ -310,6 +367,12 @@ defmodule Core.BindTest do
   end
 
   # ---
+
+  # Process.get/1 → dynamic(); намеренный misuse без предупреждения инференса
+  defp dyn(term) do
+    Process.put({__MODULE__, :dyn}, term)
+    Process.get({__MODULE__, :dyn})
+  end
 
   defp eval(source), do: Code.eval_string("import Core.Bind\n" <> source, [], __ENV__)
 end

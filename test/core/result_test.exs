@@ -76,11 +76,16 @@ defmodule Core.ResultTest do
     assert Result.and_then(Result.ok(1), fn _value -> Result.error(:e) end) == Result.error(:e)
   end
 
-  test "and_then/2 отвергает колбэк чужой арности на обеих клозах" do
-    fun = dyn(fn -> Result.ok(2) end)
+  test "and_then/2 на unit-результате зовёт нуль-арный колбэк" do
+    assert Result.and_then(Result.ok(), fn -> Result.ok(2) end) == Result.ok(2)
+    assert Result.and_then(Result.ok(), fn -> Result.ok() end) == Result.ok()
+    assert Result.and_then(Result.error(:e), fn -> Result.ok(2) end) == Result.error(:e)
+  end
 
-    assert_raise FunctionClauseError, fn -> Result.and_then(Result.ok(1), fun) end
-    assert_raise FunctionClauseError, fn -> Result.and_then(Result.error(:e), fun) end
+  test "and_then/2 отвергает колбэк чужой арности" do
+    assert_raise FunctionClauseError, fn -> Result.and_then(Result.ok(1), dyn(fn -> Result.ok(2) end)) end
+    assert_raise FunctionClauseError, fn -> Result.and_then(Result.ok(), dyn(fn _ -> Result.ok(2) end)) end
+    assert_raise FunctionClauseError, fn -> Result.and_then(Result.error(:e), dyn(fn _, _ -> :ok end)) end
   end
 
   test "traverse/2 preserves order and empty list" do
