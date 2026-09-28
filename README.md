@@ -342,8 +342,8 @@ end
    пулер уведомлений не получает — keyword с прямым хостом, опции соединения поверх
    `repo.config()`: `notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST")]`.
 
-   Процесс event-sourced агрегата (`use Core.Es.Aggregate.Process`) — элемент `{Agg.Process,
-   enabled: …}` на агрегат; опции и дефолты — в moduledoc `Core.Es.Aggregate.Process`. `enabled:`
+   Процесс event-sourced агрегата (`use Core.Es.Aggregate.Process`) — элемент `{Agg.Process, opts}`
+   с `enabled:` на агрегат; опции и дефолты — в moduledoc `Core.Es.Aggregate.Process`. `enabled:`
    обязательна. `true` — дерево из `Registry` и `DynamicSupervisor`: команды агрегата идут в его
    процесс на id, который стартует в первой команде и уходит по простою; в `watch_list` плагина
    `Core.Workers.PromEx` — `Agg.Process.watch_list/1` с теми же опциями. `false` — элемент не
@@ -351,7 +351,12 @@ end
    ставится в тестах.
 
    ```elixir
-   children = [MyApp.DAO, {MyApp.Domain.Accounts.Common.Account.Process, enabled: true}]
+   defmodule MyApp.Processes do
+     def list, do: [MyApp.Domain.Accounts.Common.Account.Process]
+     def opts(process), do: Application.fetch_env!(:my_app, process)
+   end
+
+   children = [MyApp.DAO | Enum.map(MyApp.Processes.list(), &{&1, MyApp.Processes.opts(&1)})]
    ```
 
 6. **Регистрация PromEx-плагинов** в модуле `use PromEx`:
@@ -367,7 +372,7 @@ end
        {Core.Es.PromEx,
         poll_rate: 5_000,
         projections: {MyApp.Projections, :opts, []},
-        processes: {MyApp.PromEx.Es, :processes, []}}
+        processes: {MyApp.Processes, :list, []}}
      ]
    end
    ```
@@ -378,8 +383,8 @@ end
    `Core.Es.PromEx` без `projections:` и `processes:` строит только event-метрики. `projections:` —
    тот же провайдер опций дерева, что у `{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}`:
    из него плагин берёт список проекций ноды для отставания, пересборки, `outdated` и сирот
-   чекпоинтов. `processes:` — список модулей процесса агрегата:
-   `def processes, do: [MyApp.Domain.Accounts.Common.Account.Process]`.
+   чекпоинтов. `processes:` — список модулей процесса агрегата, тот же `MyApp.Processes.list/0`, что
+   у дерева.
 
 ## Имена метрик
 

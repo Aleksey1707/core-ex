@@ -31,6 +31,25 @@ defmodule Core.PromEx.Safe do
       log_skipped(label, "exit reason=#{inspect(reason)}")
   end
 
+  @doc """
+  Собрать значения источника, проглотив исключение и `exit`: сбой — `[]`, причина — в лог.
+
+  Для сбора, которому нужен результат (значения одного процесса внутри общего цикла).
+  """
+  @spec collect(String.t(), (-> list())) :: list()
+
+  def collect(label, fun) when is_binary(label) and is_function(fun, 0) do
+    fun.()
+  rescue
+    exception ->
+      log_skipped(label, Exception.format(:error, exception, __STACKTRACE__))
+      []
+  catch
+    :exit, reason ->
+      log_skipped(label, "exit reason=#{inspect(reason)}")
+      []
+  end
+
   # ---
 
   defp log_skipped(label, detail) do

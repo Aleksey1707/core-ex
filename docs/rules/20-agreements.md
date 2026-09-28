@@ -85,7 +85,8 @@ Logger.debug(
 
 `IO.puts` вместо `Logger` — MUST NOT: вывод мимо `Logger` теряет уровень, metadata и
 `trace_id`. Вывод точки входа оператора (mix-таска) — не лог, а ответ оператору:
-`Mix.shell().info/1`.
+`Mix.shell().info/1`. Задача релиза (`MyApp.Release.*`, `bin/my_app eval`) Mix не видит: её ответ
+оператору — `IO.puts`, исключение `Credo` — на её файлы.
 
 Проверяется: `mix credo --strict` (`Credo.Check.Refactor.IoPuts`, исключён `test/`).
 
@@ -397,6 +398,7 @@ Prim.String.new(value)
 | `Core.Prim`, `Core.Validator` | `String`, `Integer`, `Date`, `DateTime`, `Decimal` | одноимённые модули Elixir и `decimal` |
 | `Core.Repo` | `Pg`, `Sc` | рядом нужен сам `Core.Repo` (`use Repo.Pg`, `@behaviour Core.Repo`) |
 | `Core.Codec` | `Facade`, `Plugin`, `Redump` | рядом нужен сам `Core.Codec` (`use Core.Codec`) |
+| `MyAppWeb.<Api>.<Version>.<Resource>` | `Params` | лист занят `Core.Web.Params` (`alias Core.Web.Params` в контроллере): разбор входа ресурса адресуется через родителя (`<Resource>.Params.Filter`) |
 
 Совпадение со **std-модулем, которого в файле нет**, конфликтом не считается: `alias Core.Version`
 затеняет `Version` из Elixir осознанно — semver в домене не используется. Появилась нужда в

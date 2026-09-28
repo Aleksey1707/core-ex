@@ -11,11 +11,17 @@ defmodule Core.Mq.PromEx do
   как `watch:` у `Core.Workers.PromEx`: список процессов принадлежит рантайму
   потребителя, а не моменту сборки метрик (`10-architecture.md`). Без опции
   polling-группа не строится.
+
+  Reader'ы с одной парой `component` и `topic` сводятся в одно значение: `subscribed` — минимум,
+  `pending` — максимум, `buffer_len` и `chunk_remaining` — сумма; повтор — `error` в лог
+  (`Core.PromEx.Labels`). Топик reader'а известен только живому процессу, поэтому сводятся только
+  живые: упавший reader этими метриками не виден — его видит `up` плагина `Core.Workers.PromEx`.
   """
 
   use PromEx.Plugin
 
   alias Core.Mq.Stream.Reader
+  alias Core.PromEx.Labels
   alias Core.PromEx.Safe
   alias Core.Telemetry
 
@@ -120,17 +126,22 @@ defmodule Core.Mq.PromEx do
     end
   end
 
-  # Два уровня `Safe.execute/2` делают разное: внешний ловит сбой самого провайдера
-  # (список reader'ов не собрался — цикл пропускается целиком), внутренний —
+  # Два уровня `Safe` делают разное: внешний `execute/2` ловит сбой самого провайдера
+  # (список reader'ов не собрался — цикл пропускается целиком), внутренний `collect/2` —
   # недоступность одного reader'а, чтобы она не уносила метрики остальных.
   @doc false
   @spec execute_reader_metrics({module(), atom(), [term()]}) :: :ok
 
   def execute_reader_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
     Safe.execute("mq readers", fn ->
-      mod
-      |> apply(fun, args)
-      |> Enum.each(&emit_reader_metrics/1)
+      groups =
+        mod
+        |> apply(fun, args)
+        |> Enum.flat_map(&reader_sample/1)
+        |> Labels.group(&{&1.component, &1.topic})
+
+      Labels.report("mq_readers mfa=#{inspect({mod, fun, args})}", groups)
+      Enum.each(groups, &emit_reader_group/1)
     end)
   end
 
@@ -183,25 +194,40 @@ defmodule Core.Mq.PromEx do
     )
   end
 
-  defp emit_reader_metrics(%{component: component, name: name}) do
-    Safe.execute("mq reader #{component}", fn ->
+  defp reader_sample(%{component: component, name: name}) do
+    Safe.collect("mq reader #{component}", fn ->
       case Process.whereis(name) do
-        pid when is_pid(pid) -> emit_reader_info(component, Reader.info(pid))
-        nil -> :ok
+        pid when is_pid(pid) -> [sample(component, name, Reader.info(pid))]
+        nil -> []
       end
     end)
   end
 
-  defp emit_reader_info(component, info) do
-    meta = %{component: component, topic: info.topic}
-    pending = if info.pending?, do: 1, else: 0
-    subscribed = if info.subscribed?, do: 1, else: 0
-
-    :telemetry.execute(@buffer_len_event, %{value: info.buffer_len}, meta)
-    :telemetry.execute(@chunk_remaining_event, %{value: info.chunk_remaining}, meta)
-    :telemetry.execute(@pending_event, %{value: pending}, meta)
-    :telemetry.execute(@subscribed_event, %{value: subscribed}, meta)
+  defp sample(component, name, info) do
+    %{
+      component: component,
+      name: name,
+      topic: info.topic,
+      buffer_len: info.buffer_len,
+      chunk_remaining: info.chunk_remaining,
+      pending: flag(info.pending?),
+      subscribed: flag(info.subscribed?)
+    }
   end
+
+  defp flag(true), do: 1
+  defp flag(false), do: 0
+
+  defp emit_reader_group({{component, topic}, samples}) do
+    meta = %{component: component, topic: topic}
+
+    :telemetry.execute(@buffer_len_event, %{value: Enum.sum(values(samples, :buffer_len))}, meta)
+    :telemetry.execute(@chunk_remaining_event, %{value: Enum.sum(values(samples, :chunk_remaining))}, meta)
+    :telemetry.execute(@pending_event, %{value: Enum.max(values(samples, :pending))}, meta)
+    :telemetry.execute(@subscribed_event, %{value: Enum.min(values(samples, :subscribed))}, meta)
+  end
+
+  defp values(samples, key), do: Enum.map(samples, &Map.fetch!(&1, key))
 
   defp publish_tag_values(%{result: result, topic: topic}) do
     %{result: to_string(result), topic: topic}

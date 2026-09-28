@@ -15,10 +15,12 @@
 
 ## Поверхности и версии
 
-- Поверхность (публичная, системная, callback внешней системы) — свой префикс, свой
-  `ApiSpec` и свой пайплайн плагов. Спецификация — `<префикс>/openapi`, UI — `<префикс>/swaggerui`.
-- Версия API — каталог `v1`: следующая версия заводится соседним каталогом, а не флагом внутри
-  существующих модулей.
+- Поверхность (публичная, системная, callback внешней системы) — свой префикс и свой пайплайн
+  плагов.
+- Версия API — каталог `v1` со своим `ApiSpec` (`MyAppWeb.<Api>.<Version>.ApiSpec`): `servers` и
+  `info.version` одни на документ, поэтому спецификация — на версию. Спецификация —
+  `<префикс версии>/openapi`, UI — `<префикс версии>/swaggerui`. Следующая версия заводится
+  соседним каталогом со своим `ApiSpec`, а не флагом внутри существующих модулей.
 - Выборка с фильтрами — `POST /<resource>/search` с телом, чтение по идентификатору — `GET`,
   действие над агрегатом — `POST /<resource>/:id/<action>`.
 - Литеральный сегмент MUST объявляться раньше параметра (`/spec` до `/:id`): маршрутизатор
@@ -26,34 +28,45 @@
 
 ## Раскладка
 
-Путь файла следует из имени модуля (`10-architecture.md`, «Раскладка»).
+Путь файла следует из имени модуля (`10-architecture.md`, «Раскладка»). Корень `MyAppWeb` MUST
+состоять из поверхностей и модулей таблицы: модуль без роли в корне (`Helper`, `Parse`) не
+находится по имени, и под него заводят второй такой же.
 
 | Модуль | Что держит |
 |---|---|
 | `MyAppWeb.<Api>` | поверхность: namespace её версий и ресурсов |
-| `MyAppWeb.<Api>.ApiSpec` | спецификация поверхности и её схема аутентификации |
+| `MyAppWeb.<Api>.<Version>.ApiSpec` | спецификация версии поверхности и её схема аутентификации |
 | `MyAppWeb.<Api>.<Version>.<Resource>.Controller` | контроллер ресурса |
 | `MyAppWeb.<Api>.<Version>.<Resource>.Schemas.*` | схемы этого ресурса |
+| `MyAppWeb.<Api>.<Version>.<Resource>.Params.*` | разбор входа ресурса: query и body → Prim, фильтр, attrs |
 | `MyAppWeb.<Api>.<Version>.<Resource>.<Nested>.*` | вложенный ресурс (`/orders/:id/items`) |
+| `MyAppWeb.<Api>.<Version>.<Group>.<Resource>.*` | ресурс группы без своего ресурса (`/security/roles`): `<Group>` — только namespace, его `Schemas` и `Params` — по той же лестнице |
 | `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
 | `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
 | `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка |
-| `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация |
-| `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов |
+| `MyAppWeb.Params.*` | разбор входа, общий для поверхностей; общий для версий или ресурсов — `<Api>.Params.*`, `<Api>.<Version>.Params.*` |
+| `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
+| `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
+| `MyAppWeb.ErrorJSON` | ответ Phoenix на исключение (`render_errors:` у `Endpoint`) |
+| `MyAppWeb.Accepted` | ответ 202 после ожидания проекции, один на приложение («Ожидание проекции») |
+| `MyAppWeb.Response`, `MyAppWeb.Response.Code` | конверт ответа `use Core.Web.Response, codes: MyAppWeb.Response.Code` (`deps/core/docs/rules/10-architecture.md`) |
+| `MyAppWeb.Endpoint`, `MyAppWeb.Router`, `MyAppWeb.Telemetry` | обвязка Phoenix |
 
 ```text
-lib/my_app_web/<api>/api_spec.ex
+lib/my_app_web/<api>/<version>/api_spec.ex
 lib/my_app_web/<api>/<version>/<resource>/controller.ex
 lib/my_app_web/<api>/<version>/<resource>/schemas/*.ex
+lib/my_app_web/<api>/<version>/<resource>/params/*.ex
 lib/my_app_web/<api>/<version>/<resource>/<nested>/controller.ex
 lib/my_app_web/<api>/<version>/schemas/*.ex
 lib/my_app_web/<api>/schemas/*.ex
-lib/my_app_web/schemas/*.ex
+lib/my_app_web/{schemas,params}/*.ex
 lib/my_app_web/{presenters,plugs}/*.ex
-lib/my_app_web/{error_mapper,fallback_controller}.ex
+lib/my_app_web/{error_mapper,fallback_controller,error_json,accepted,response}.ex
+lib/my_app_web/{endpoint,router,telemetry}.ex
 ```
 
-- Поверхность MUST быть своим namespace `MyAppWeb.<Api>`: префикс, пайплайн и `ApiSpec` у
+- Поверхность MUST быть своим namespace `MyAppWeb.<Api>`: префикс, пайплайн и спецификации у
   поверхностей разные («Поверхности и версии»).
 - Общее для нескольких поверхностей — `FallbackController`, `ErrorMapper`, `Presenters`, `Plugs`,
   `Schemas` — MUST лежать в корне `MyAppWeb`, а не в одной из поверхностей: иначе вторая
@@ -61,7 +74,12 @@ lib/my_app_web/{error_mapper,fallback_controller}.ex
 - Ресурс — каталог: контроллер и его схемы лежат рядом, а не по типам файлов. Вложенный ресурс
   MUST быть вложенным namespace родителя, а не соседним ресурсом.
 - Схема, которую делят два ресурса, две версии или две поверхности, поднимается в `Schemas`
-  ближайшего общего уровня (таблица выше), а не импортируется из соседнего ресурса.
+  ближайшего общего уровня (таблица выше), а не импортируется из соседнего ресурса. Разбор входа
+  (`Params`), презентеры и плаги поднимаются по той же лестнице.
+- Модуль одной поверхности лежит в её namespace, общий для поверхностей — в корне под ролью из
+  таблицы. `Helper` и другие имена без роли — MUST NOT: новая роль корня — новая строка таблицы.
+- `ErrorJSON` MUST лежать в `lib/my_app_web/error_json.ex`, а не в `controllers/`, куда его кладёт
+  генератор Phoenix: путь — по имени модуля, `render_errors:` ссылается на модуль, а не на файл.
 
 ```elixir
 # плохо — схема, общая для поверхностей, лежит в одной из них; вложенный ресурс — сосед родителя
@@ -71,7 +89,24 @@ defmodule MyAppWeb.Public.V1.OrderItem.Controller do
 # хорошо
 defmodule MyAppWeb.Schemas.Envelope do
 defmodule MyAppWeb.Public.V1.Order.Item.Controller do
+
+# плохо — модули без роли в корне web
+defmodule MyAppWeb.Parse.OrderFilter do
+defmodule MyAppWeb.Helper.Projection do
+
+# хорошо — разбор входа у своего ресурса, ответ 202 — роль корня
+defmodule MyAppWeb.Public.V1.Order.Params.Filter do
+defmodule MyAppWeb.Accepted do
 ```
+
+Поверхность — namespace `MyAppWeb.<Api>` хотя бы с одним `MyAppWeb.<Api>.<Version>.ApiSpec`, где
+`<Version>` — `V<N>`. `ApiSpec` на уровне поверхности (`<Api>.ApiSpec`), в корне
+(`MyAppWeb.ApiSpec`) или глубже (`Helper.Deep.ApiSpec`) поверхностью не делает. Отступление — маркер
+`web-root` и строка `DEBT.md` (`10-architecture.md`, «Отступление»).
+
+Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `web-root`: второй сегмент
+`MyAppWeb.<X>` — модуль таблицы или поверхность. Нарушение — одно на namespace `MyAppWeb.<X>`: на
+модуле `MyAppWeb.<X>.ApiSpec`, если он есть, иначе на первом модуле; маркер ставится туда же.
 
 ## Аутентификация в плагах
 
@@ -86,7 +121,7 @@ defmodule MyAppWeb.Public.V1.Order.Item.Controller do
   (`12-errors.md`).
 - Существование и права пользователя плаг не проверяет — это работа usecase, иначе authz
   растечётся по двум слоям.
-- Схема аутентификации MUST быть объявлена в `ApiSpec` своей поверхности, иначе UI не даёт
+- Схема аутентификации MUST быть объявлена в `ApiSpec` своей версии поверхности, иначе UI не даёт
   подставить заголовок.
 
 ## Controller
@@ -167,7 +202,7 @@ with {:ok, version} <- Params.optional_version(params),
   запись применена, повтор команды по ним запрещает свод библиотеки.
 - Операция такой команды MUST объявлять ответ `accepted:` со своей схемой.
 - Ответ 202 по `:projection_timeout` / `:projection_rebuilding` собирает один хелпер
-  приложения — `MyAppWeb.Helper.Projection`. Проекцию ждёт литеральный вызов
+  приложения — `MyAppWeb.Accepted` («Раскладка»). Проекцию ждёт литеральный вызов
   `Projection.await(Agg, id, timeout)` в экшене или в его `defp`, хелпер принимает результат.
   ID на месте вызова MUST быть сужен до `%Agg.ID{}` — паттерном в голове функции с вызовом или
   в `with`: ID из параметра без сужения сборка не сверяет, и ловится только агрегат не из
@@ -183,11 +218,11 @@ with {:ok, _version} <- Usecases.Agg.take(id, version, context),
      do: reload(conn, id)
 
 # плохо — модуль проекции параметром хелпера: ID другого агрегата сборка не видит
-MyAppWeb.Helper.Projection.await(conn, Projection, Agg, id, written, &reload(&1, id))
+MyAppWeb.Accepted.await(conn, Projection, Agg, id, written, &reload(&1, id))
 
 # плохо — ID параметром defp без сужения: ID другого агрегата сборка не видит
 defp respond_taken(conn, id, version) do
-  MyAppWeb.Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+  MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
 end
 
 # хорошо — литерал в defp экшена, ID сужен в голове, ответ 202 получает {id, version}
@@ -195,7 +230,7 @@ with {:ok, version} <- Usecases.Agg.take(id, expected, context),
      do: respond_taken(conn, id, version)
 
 defp respond_taken(conn, %Agg.ID{} = id, version) do
-  MyAppWeb.Helper.Projection.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+  MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
 end
 ```
 

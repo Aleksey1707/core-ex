@@ -388,8 +388,12 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
   Handle читателя и DLQ-writer'а — их `name:`; дерево само передаёт их подписчику, и опции
   `reader_module:`, `reader:`, `dlq_writer:`, `dlq_handle:`, `subscribe:` в опциях подписчика —
   `ArgumentError`. Тумблер `enabled:` и `watch_list/1` по опциям старта — как у
-  `Core.Es.Projection.Supervisor` (`17-otp-concurrency.md`, «Дерево процессов»). Проверяется:
-  `test/core/pubsub/mq_subscriber_reliable/supervisor_test.exs`.
+  `Core.Es.Projection.Supervisor` (`17-otp-concurrency.md`, «Дерево процессов»). Метку `component`
+  метрик строит обязательная строка `component:` дерева и топик подписчика —
+  `mq_reader:<component>:<топик>`, — а не имя процесса: перенос модуля компонента ряды метрик не
+  рвёт; повтор топика в дереве — `ArgumentError`. `readers/1` отдаёт stream-читателей дерева для
+  `readers:` плагина `Core.Mq.PromEx` с той же меткой, что у `mq_reader` в `watch_list/1`.
+  Проверяется: `test/core/pubsub/mq_subscriber_reliable/supervisor_test.exs`.
 
 ### Runbook: сообщения в DLQ
 

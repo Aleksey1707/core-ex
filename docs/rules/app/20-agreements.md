@@ -30,7 +30,7 @@ dialyzer → test → credo → security → audit
 
 | Шаг | Что проверяет |
 |---|---|
-| `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` путь файла = имя модуля, модуль-оглавление контекста и направления зависимостей контекста (`10-architecture.md`, «Раскладка») |
+| `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` правила раскладки из таблицы маркеров `10-architecture.md`, «Отступление»: путь файла, оглавление и корень контекста, направления, проекции, корень web |
 | `rules-check` | `deps/core/scripts/rules_lint.exs --consumer` — форма локального свода, его карты и ссылки на оба яруса (`00-index.md`) |
 | `layout-check` | `deps/core/scripts/layout_lint.exs` — разделители внутри модуля (`deps/core/docs/rules/20-agreements.md`) |
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
@@ -81,19 +81,19 @@ dialyzer → test → credo → security → audit
 
 | Чек | Правило |
 |---|---|
-| `Readability.Specs` | `@spec` у публичных функций; исключены `test/` и web-слой |
+| `Readability.Specs` | `@spec` у публичных функций; исключены `test/` и контроллеры (`**/controller.ex`) |
 | `Warning.UnsafeToAtom` | атомы из внешних данных; исключён `test/` |
 | `Warning.LeakyEnvironment` | утечка окружения в подпроцессы |
 | `Warning.MixEnv` | runtime-конфиг вместо `Mix.env/0` |
 | `Refactor.PassAsyncInTestCases` | явный `async:` в тестах (`deps/core/docs/rules/19-testing.md`) |
-| `Refactor.IoPuts` | `Logger` вместо `IO.puts` (`deps/core/docs/rules/20-agreements.md`, «Логирование (`Logger`)»); исключён `test/` |
+| `Refactor.IoPuts` | `Logger` вместо `IO.puts` (`deps/core/docs/rules/20-agreements.md`, «Логирование (`Logger`)»); исключены `test/`, `lib/my_app/release.ex` и `lib/my_app/release/` (строки без `*` Credo сравнивает префиксом, фигурные скобки не раскрывает) — в релизе нет `Mix.shell()`, и ответ оператору задачи `MyApp.Release.*` печатает `IO.puts` |
 
 Отключены осознанно:
 
 | Чек | Почему |
 |---|---|
 | `Readability.AliasAs` | конфликтует с профилями Codec: они алиасятся через `as:` |
-| `Readability.Specs` в web-слое | контракт экшена описывает `operation/2` (`15-web-api.md`) |
+| `Readability.Specs` в контроллерах | контракт экшена описывает `operation/2` (`15-web-api.md`); `Params`, `Presenters`, `Plugs` и прочий web — со `@spec`, как везде |
 | `Readability.StrictModuleLayout` для `use`, атрибутов, вложенных модулей | их место диктует компилятор (`deps/core/docs/rules/20-agreements.md`, «Шапка модуля») |
 | `Design.AliasUsage` | противоречит адресации через родителя: чек требует алиасить лист |
 | `Consistency.UnusedVariableNames` | `_` и `_name` несут разный смысл: «значение не важно вообще» (`{:ok, _}`) против «не важно, но читателю стоит знать, что это» (`_reason`); чек требует единообразия при любой настройке и ловит только идиоматичные места |

@@ -66,7 +66,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | агрегат с событиями только state-stored | `use Core.Es.Aggregate` с `decide/2` и `evolve/2` и команды `use Core.Es.Cmd` (`11-domain.md`) |
 | `{Event.X, payload}` / `Event.X` в результате `decide` | `Event.X.draft(payload)` / `Event.X.draft()` (`deps/core/docs/rules/11-domain.md`) |
 | read-модель пишет usecase или репозиторий | её пишет проекция `use Core.Es.Projection` (`13-repos.md`, «Проекции read-модели») |
-| View и ReadRepo под агрегатом, одна проекция контекста `<BC>.Common.Projection` и `<Aggregate>.ReadRepo.Pg.Projector` | каталог read-модели с View, ReadRepo и её проекцией, которая пишет свои таблицы сама (`13-repos.md`, «Read-модель», «Проекции read-модели») |
+| View под ReadRepo, read-модель нескольких агрегатов под одним из них, одна проекция контекста `<BC>.Common.Projection` и `<Aggregate>.ReadRepo.Pg.Projector` | каталог read-модели с View, ReadRepo и её проекцией, которая пишет свои таблицы сама (`13-repos.md`, «Read-модель», «Проекции read-модели») |
 | чтение read-модели сразу после команды | ожидание проекции и 202 на таймаут (`15-web-api.md`) |
 | `Core.Es.Projection.await(Projection, Agg, id, timeout)` | `Projection.await(Agg, id, timeout)` у модуля проекции (`deps/core/docs/rules/22-projections.md`) |
 | `Core.Es.Store.page_stream(Agg.Event.Codec, id, limit, offset, context)` | `@repo.page_stream(id, limit, offset, context)` у репозитория агрегата (`deps/core/docs/rules/13-repos.md`, «Страница потока») |
@@ -75,6 +75,8 @@ MUST NOT — копия расходится с оригиналом на пер
 | ключ конфигурации на каждый репозиторий | конвенция `<Behaviour>.Pg`, ключ — только на подмену (`13-repos.md`, «DI») |
 | `tagged:` / `tags:` у плагина кодека, `dump_tagged` / `load_tagged` у фасада | `types:` и `union:`, у фасада только `dump/1`, `load/2`, `load!/2` (`deps/core/docs/rules/11-domain.md`) |
 | процессы и проверки старта компонента в `Application`, тумблеры компонентов в реестре `watch_list/0`, свой супервизор подписчиков с DLQ | корень `<Component>.Supervisor` с тумблером, опциями, проверками и `watch_list/0`; дерево `Core.PubSub.MqSubscriberReliable.Supervisor` (`17-otp-concurrency.md`, «Компонент») |
+| `MyAppWeb.Helper.Projection`, `MyAppWeb.Parse.*`, `MyAppWeb.Helper.*` | ответ 202 — `MyAppWeb.Accepted`; разбор входа — `Params` ресурса или ближайшего общего уровня; прочее — namespace поверхности (`15-web-api.md`, «Раскладка») |
+| `MyApp.QuickStart`, `MyApp.SeedDemo` — задачи оператора верхнего уровня | `MyApp.Release.<Name>` (`10-architecture.md`, «Направления зависимостей») |
 | clause `:unknown_event_type` в каталоге `<Aggregate>.Errors` | ошибку строит `Core.Es.Event.Codec` (`ns: :es`), clause в каталоге MUST NOT (`deps/core/docs/rules/14-events-outbox.md`, «Domain events») |
 
 Встреченная в приложении устаревшая форма — не повод для точечной правки посреди чужой задачи:

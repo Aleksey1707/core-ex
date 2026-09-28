@@ -292,7 +292,9 @@ use Repo.Pg,
 Guard по типу результата у read-методов не заводится: представление никогда не приходит
 аргументом — на вход идут id, пагинация и `%Context{}`.
 
-Read-репозиторий MUST иметь **собственную** Ecto-схему `<Aggregate>.ReadRepo.Pg.Schema` на той же
+Read-репозиторий над таблицей (исключение — read-модель без таблицы,
+`deps/core/docs/rules/app/13-repos.md`, «Read-модель») MUST иметь **собственную** Ecto-схему
+`<Aggregate>.ReadRepo.Pg.Schema` на той же
 таблице: только нужные колонки, без `changeset/2` и без аудит-`belongs_to`. Схема write-репо не
 переиспользуется — иначе read-срез становится зависим от формы записи, а запись оказывается
 в одном шаге от read-пути. Цена — продублированный список полей; расхождение с миграцией
@@ -835,10 +837,11 @@ end)
 ### Процесс агрегата
 
 Команду одного event-sourced агрегата MAY исполнять `Agg.Process.execute` вместо тела usecase
-`get_decision` → `Agg.execute/2` → `append`. Модуль `use Core.Es.Aggregate.Process, repo:
-Agg.Repo` лежит рядом с репозиторием (`common/<aggregate>/process.ex`), реализация `repo:`
-резолвится по конвенции («DI»), элемент `{Agg.Process, enabled: …}` ставит дерево потребителя.
-Опции, исходы и наблюдаемость — moduledoc `Core.Es.Aggregate.Process`.
+`get_decision` → `Agg.execute/2` → `append`. Модуль `use Core.Es.Aggregate.Process, repo: Agg.Repo`
+лежит рядом с репозиторием (`common/<aggregate>/process.ex`), реализация `repo:` резолвится по
+конвенции («DI»), элемент `{Agg.Process, opts}` с `enabled:` ставит дерево потребителя (список и
+опции — `deps/core/docs/rules/app/17-otp-concurrency.md`, «Проекции и процессы агрегата»). Опции,
+исходы и наблюдаемость — moduledoc `Core.Es.Aggregate.Process`.
 
 ```elixir
 defmodule MyApp.Domain.<BC>.Common.Account.Process do

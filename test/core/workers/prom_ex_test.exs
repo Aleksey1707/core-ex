@@ -1,6 +1,8 @@
 defmodule Core.Workers.PromExTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Core.Workers.PromEx
 
   defmodule StubWorker do
@@ -14,6 +16,16 @@ defmodule Core.Workers.PromExTest do
     def empty, do: []
 
     def one(component, name), do: [%{component: component, name: name}]
+
+    def many(items), do: items
+
+    def from(agent), do: Agent.get(agent, & &1)
+  end
+
+  setup do
+    on_exit(fn ->
+      for {{Core.PromEx.Labels, _source} = key, _value} <- :persistent_term.get(), do: :persistent_term.erase(key)
+    end)
   end
 
   test "polling_metrics содержит workers.up" do
@@ -55,6 +67,73 @@ defmodule Core.Workers.PromExTest do
     PromEx.execute_worker_metrics({StubWatch, :one, ["stub_component", name]})
 
     assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 1}, %{component: "stub_component"}}
+  end
+
+  test "повтор метки: up — минимум, error в лог один раз на набор повторов" do
+    alive = :"workers_promex_alive_#{System.unique_integer([:positive])}"
+    absent = :"workers_promex_absent_#{System.unique_integer([:positive])}"
+    start_supervised!({StubWorker, name: alive})
+    attach_up_handler("workers-promex-dup-#{inspect(self())}")
+
+    watch = {StubWatch, :many, [[%{component: "twin", name: alive}, %{component: "twin", name: absent}]]}
+
+    log = capture_log(fn -> PromEx.execute_worker_metrics(watch) end)
+
+    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 0}, %{component: "twin"}}
+    refute_received {:telemetry, [:prom_ex, :plugin, :workers, :up], %{value: 1}, %{component: "twin"}}
+    assert log =~ "PromEx: метка повторяется, значения сведены: source=workers"
+    assert log =~ inspect(absent)
+
+    assert capture_log(fn -> PromEx.execute_worker_metrics(watch) end) == ""
+  end
+
+  test "повтор метки: порядок элементов в списке набор повторов не меняет" do
+    items = [%{component: "twin", name: :workers_promex_a}, %{component: "twin", name: :workers_promex_b}]
+    agent = start_supervised!({Agent, fn -> items end})
+    watch = {StubWatch, :from, [agent]}
+
+    assert capture_log(fn -> PromEx.execute_worker_metrics(watch) end) =~ "метка повторяется"
+
+    Agent.update(agent, &Enum.reverse/1)
+    assert capture_log(fn -> PromEx.execute_worker_metrics(watch) end) == ""
+  end
+
+  test "повтор метки: mailbox — максимум, memory — сумма; экземпляры плагина помнят повторы раздельно" do
+    first = :"workers_promex_first_#{System.unique_integer([:positive])}"
+    second = :"workers_promex_second_#{System.unique_integer([:positive])}"
+    start_supervised!(%{id: :first, start: {StubWorker, :start_link, [[name: first]]}})
+    start_supervised!(%{id: :second, start: {StubWorker, :start_link, [[name: second]]}})
+    :sys.suspend(first)
+    send(Process.whereis(first), :queued)
+    handler_id = "workers-promex-fold-#{inspect(self())}"
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        [[:prom_ex, :plugin, :workers, :message_queue_len], [:prom_ex, :plugin, :workers, :memory]],
+        fn event, measurements, metadata, test_pid -> send(test_pid, {:telemetry, event, measurements, metadata}) end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+    twins = {StubWatch, :many, [[%{component: "twin", name: first}, %{component: "twin", name: second}]]}
+    single = {StubWatch, :one, ["single", first]}
+    {:memory, second_memory} = Process.info(Process.whereis(second), :memory)
+
+    log =
+      capture_log(fn ->
+        PromEx.execute_worker_metrics(twins)
+        PromEx.execute_worker_metrics(single)
+        PromEx.execute_worker_metrics(twins)
+      end)
+
+    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :message_queue_len], %{value: mailbox},
+                    %{component: "twin"}}
+
+    assert mailbox >= 1
+    assert_receive {:telemetry, [:prom_ex, :plugin, :workers, :memory], %{value: total}, %{component: "twin"}}
+    assert total >= second_memory
+    assert length(String.split(log, "метка повторяется")) == 2
   end
 
   defp attach_up_handler(handler_id) do

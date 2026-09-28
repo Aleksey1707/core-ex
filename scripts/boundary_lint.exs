@@ -7,8 +7,10 @@
 # Режим библиотеки проверяет главный инвариант «Core не знает потребителя»
 # (`docs/rules/10-architecture.md`), режим потребителя — что DI репозиториев (`Repo` и
 # `ReadRepo`) идёт через `Core.Config.repo!/1` (`docs/rules/13-repos.md`, «DI»), а в `lib/` —
-# что путь файла равен имени модуля, у контекста есть модуль-оглавление, а `Common` и чужой контекст
-# не ссылаются на срезы (`docs/rules/app/10-architecture.md`, «Раскладка»). Норму ввела
+# что путь файла равен имени модуля, у контекста есть модуль-оглавление и нет модулей в корне, а
+# `Common`, чужой контекст и подсистема не ссылаются на срезы (`docs/rules/app/10-architecture.md`,
+# «Раскладка»), проекция лежит в каталоге read-модели (`docs/rules/app/13-repos.md`), а корень web
+# состоит из поверхностей и модулей своей таблицы (`docs/rules/app/15-web-api.md`). Норму ввела
 # библиотека, поэтому инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`,
 # и путь правил в его сообщениях — от корня потребителя.
 
@@ -24,12 +26,23 @@ defmodule BoundaryLint do
   @module_path "module-path"
   @common_slice "common-slice"
   @foreign_slice "foreign-slice"
+  @subsystem_slice "subsystem-slice"
+  @sibling_slice "sibling-slice"
   @bc_index "bc-index"
-  @marker ~r/^#\s*boundary-lint:\s*allow\s+(\S+)\s.*DEBT\.md,\s*«[^»]+»/u
+  @bc_root "bc-root"
+  @projection_layout "projection-layout"
+  @repos_layout "deps/core/docs/rules/app/13-repos.md"
+  @web_root "web-root"
+  @web_layout "deps/core/docs/rules/app/15-web-api.md"
+  @marker ~r/^#\s*boundary-lint:\s*allow\s+(\S+)\s.*(?<![\w.])DEBT\.md,\s*«[^»]+»/u
   @env_funs ~w(get_env fetch_env fetch_env! compile_env compile_env!)a
   @compile_env_funs ~w(compile_env compile_env!)a
   @own_apps ~w(core argon2_elixir)a
   @repo_keys ~w(Repo ReadRepo)a
+  @wiring_modules ~w(Application Projections)a
+  @wiring_namespaces ~w(Codec PromEx Release)a
+  @web_parts ~w(Endpoint Router Telemetry ErrorJSON FallbackController ErrorMapper Accepted Response
+                Schemas Presenters Plugs Params)
 
   def run(["--consumer" | dirs]) do
     check(:consumer, if(dirs == [], do: @consumer_dirs, else: dirs))
@@ -76,7 +89,8 @@ defmodule BoundaryLint do
       |> Enum.sort()
       |> Enum.map(&parse/1)
 
-    Enum.flat_map(files, &check_file(&1, mode, root)) ++ index_violations(files, root)
+    known = known(files, root)
+    Enum.flat_map(files, &check_file(&1, mode, root, known)) ++ index_violations(files, root)
   end
 
   # Путь файла сверяется с именем модуля только в `lib/` потребителя: дерево тестов — не норма линтера.
@@ -89,22 +103,114 @@ defmodule BoundaryLint do
 
   defp parse(path) do
     source = File.read!(path)
-    {ast, comments} = Code.string_to_quoted_with_comments!(source, token_metadata: true)
-    %{path: path, ast: ast, markers: markers(ast, comments, String.split(source, "\n"))}
+
+    case Code.string_to_quoted_with_comments(source, token_metadata: true, file: path) do
+      {:ok, ast, comments} ->
+        %{path: path, ast: ast, markers: markers(ast, comments, String.split(source, "\n"))}
+
+      {:error, {location, message, token}} ->
+        IO.puts(:stderr, "boundary-check: #{path}:#{location[:line]}: не разобран: #{inspect(message)}#{token}")
+        System.halt(2)
+    end
   end
 
-  defp check_file(%{path: path, ast: ast, markers: markers}, mode, root) do
-    {_ast, errors} = Macro.prewalk(ast, [], fn node, acc -> {node, acc ++ violations(node, path, mode)} end)
+  defp check_file(%{path: path, ast: ast, markers: markers}, mode, root, known) do
+    as_aliases = as_aliases(ast)
 
-    (errors ++ module_path_violations(ast, path, root) ++ direction_violations(ast, path, root))
+    {_ast, errors} =
+      Macro.prewalk(ast, [], fn node, acc -> {node, acc ++ violations(node, path, mode, as_aliases)} end)
+
+    (errors ++
+       module_path_violations(ast, path, root) ++
+       bc_root_violations(ast, path, root, known) ++
+       direction_violations(ast, path, root, known.bc_roots) ++
+       web_root_violations(ast, path, known) ++ projection_violations(ast, path, root))
     |> Enum.reject(&allowed?(&1, markers))
+    |> Enum.uniq_by(&{&1.line, &1.text})
     |> Enum.sort_by(& &1.line)
+  end
+
+  # Сведения, которым нужны все файлы: модули в корне контекста (кроме среза, объявленного модулем),
+  # поверхности web, `ApiSpec` на уровне поверхности, корни приложения и имена всех модулей.
+  defp known(_files, nil),
+    do: %{
+      bc_roots: MapSet.new(),
+      surfaces: MapSet.new(),
+      deep_specs: %{},
+      roots: MapSet.new(),
+      names: MapSet.new(),
+      web_anchors: %{}
+    }
+
+  defp known(files, _root) do
+    all = for %{ast: ast, markers: markers} <- files, module <- modules(ast), do: {module, markers}
+    names = for {%{name: name}, _markers} <- all, into: MapSet.new(), do: name
+    placed = for %{path: path, ast: ast} <- files, module <- modules(ast), do: Map.put(module, :path, path)
+
+    known = %{
+      bc_roots: bc_roots(all, names),
+      surfaces:
+        for(
+          {%{name: name}, _} <- all,
+          [web, surface, version, "ApiSpec"] <- [String.split(name, ".")],
+          Regex.match?(~r/^V\d+$/, version),
+          into: MapSet.new(),
+          do: {web, surface}
+        ),
+      deep_specs: deep_specs(all),
+      roots:
+        for(
+          {%{name: name}, _} <- all,
+          [first | _] <- [String.split(name, ".")],
+          not String.ends_with?(first, "Web"),
+          into: MapSet.new(),
+          do: first
+        ),
+      names: names
+    }
+
+    Map.put(known, :web_anchors, web_anchors(placed, known))
+  end
+
+  # ---
+
+  # Нарушение `web-root` — одно на namespace `<Web>.<X>`: правка у них одна. Оно ставится на модуль с
+  # `ApiSpec` не на месте, если он есть, иначе на первый по пути и строке; там же — число прочих модулей.
+  defp web_anchors(placed, known) do
+    placed
+    |> Enum.filter(&web_offender?(&1.name, known))
+    |> Enum.group_by(&(&1.name |> String.split(".") |> Enum.take(2) |> List.to_tuple()))
+    |> Map.new(fn {key, modules} ->
+      spec = key |> Tuple.to_list() |> Enum.join(".") |> Kernel.<>(".ApiSpec")
+      anchor = Enum.find(modules, &(&1.name == spec)) || Enum.min_by(modules, &{&1.path, &1.line})
+      {key, %{path: anchor.path, line: anchor.line, others: length(modules) - 1}}
+    end)
+  end
+
+  defp web_offender?(name, known) do
+    case String.split(name, ".") do
+      [web, part | _rest] ->
+        String.ends_with?(web, "Web") and MapSet.member?(known.roots, String.replace_suffix(web, "Web", "")) and
+          part not in @web_parts and not MapSet.member?(known.surfaces, {web, part})
+
+      _other ->
+        false
+    end
+  end
+
+  # `ApiSpec` на уровне поверхности (`<Web>.<Api>.ApiSpec`) — подсказка опустить его на версию; прочий
+  # `ApiSpec` не на месте (`Helper.Deep.ApiSpec`) поверхности не делает и подсказки нет.
+  defp deep_specs(all) do
+    for {%{name: name}, _markers} <- all,
+        [web, surface, "ApiSpec"] <- [String.split(name, ".")],
+        into: %{},
+        do: {{web, surface}, name}
   end
 
   # ===== библиотека: `Core` не знает потребителя =====
 
   # Сборочный контекст потребителя: у библиотеки его нет.
-  defp violations({:__aliases__, meta, [:Mix, :Project]}, path, :library) do
+  defp violations({:__aliases__, meta, [:Mix, :Project]}, path, :library, _as_aliases) do
     [err(path, meta, "`Mix.Project` — сборочный контекст потребителя", @architecture)]
   end
 
@@ -112,7 +218,8 @@ defmodule BoundaryLint do
   defp violations(
          {{:., _, [{:__aliases__, _, [:Application]}, fun]}, meta, [app | _]},
          path,
-         :library
+         :library,
+         _as_aliases
        )
        when fun in @env_funs and is_atom(app) do
     if app in @own_apps,
@@ -123,7 +230,7 @@ defmodule BoundaryLint do
   # Имя приложения-потребителя приходит переменной, поэтому правило выше его не видит:
   # единственный источник этого имени — `Core.Config.otp_app/0`, и звать его вправе
   # только сам `Core.Config`.
-  defp violations({{:., _, [{:__aliases__, _, mods}, :otp_app]}, meta, []}, path, :library) do
+  defp violations({{:., _, [{:__aliases__, _, mods}, :otp_app]}, meta, []}, path, :library, _as_aliases) do
     if List.last(mods) == :Config and path != @config,
       do: [err(path, meta, "`otp_app/0` вне `#{@config}`: app-env потребителя читается там", @architecture)],
       else: []
@@ -136,18 +243,44 @@ defmodule BoundaryLint do
   defp violations(
          {{:., _, [{:__aliases__, _, [:Application]}, fun]}, meta, [_app, {:__aliases__, _, mods} = key | _]},
          path,
-         :consumer
+         :consumer,
+         as_aliases
        )
        when fun in @compile_env_funs do
     message =
       "`Application.#{fun}` на #{Macro.to_string(key)}: реализация резолвится `Core.Config.repo!/1`"
 
-    if List.last(mods) in @repo_keys,
+    if List.last(resolve_as(mods, as_aliases)) in @repo_keys,
       do: [err(path, meta, message, @repos)],
       else: []
   end
 
-  defp violations(_node, _path, _mode), do: []
+  defp violations(_node, _path, _mode, _as_aliases), do: []
+
+  # `alias A.B.Repo, as: OrderRepo` — ключ `OrderRepo` в `compile_env` разрешается в `A.B.Repo`.
+  # Карта на файл, а не лексическая: имя `as:`, объявленное в файле с разными целями, не разрешается.
+  defp as_aliases(ast) do
+    {_ast, found} =
+      Macro.prewalk(ast, %{}, fn
+        {:alias, _meta, [{:__aliases__, _, target}, opts]} = node, acc when is_list(opts) ->
+          case opts[:as] do
+            {:__aliases__, _, [as]} -> {node, Map.update(acc, as, [target], &Enum.uniq([target | &1]))}
+            _other -> {node, acc}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    for {as, [target]} <- found, into: %{}, do: {as, target}
+  end
+
+  defp resolve_as([first | rest] = mods, as_aliases) do
+    case as_aliases do
+      %{^first => target} -> target ++ rest
+      %{} -> mods
+    end
+  end
 
   # ===== потребитель: путь файла = имя модуля =====
 
@@ -157,11 +290,33 @@ defmodule BoundaryLint do
   defp module_path_violations(_ast, _path, nil), do: []
 
   defp module_path_violations(ast, path, root) do
-    ast
-    |> top_modules()
-    |> Enum.uniq_by(fn {name, _line} -> name end)
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {{name, line}, index} -> module_path(name, line, index, path, root) end)
+    top =
+      ast
+      |> top_modules()
+      |> Enum.uniq_by(fn {name, _line} -> name end)
+
+    top_names = MapSet.new(top, fn {name, _line} -> name end)
+
+    Enum.flat_map(Enum.with_index(top), fn {{name, line}, index} -> module_path(name, line, index, path, root) end) ++
+      nested_member_violations(ast, top_names, path, root)
+  end
+
+  # Событие и команда — свой файл, даже вложенные в семейство `<Aggregate>.Event` / `<Aggregate>.Cmd`
+  # (`13-repos.md`, «Событие и команда»): вложенный модуль следует за родителем, но у члена семейства
+  # родитель — семейство, а не он сам.
+  # Член семейства — `<Root>.Domain.<BC>.<Part>.<Aggregate>.{Event,Cmd}.<Name>`: вложенный Prim агрегата с
+  # именем `Event` (`…Common.Event.ID`), модуль вне `Domain` и кодек семейства правилом не считаются.
+  defp nested_member_violations(ast, top_names, path, root) do
+    for %{name: name, line: line} <- modules(ast),
+        not MapSet.member?(top_names, name),
+        [_root, "Domain", _bc, _part, _aggregate, family, member] <- [String.split(name, ".")],
+        family in ["Event", "Cmd"] and member != "Codec",
+        do:
+          layout_err(
+            path,
+            line,
+            "`#{name}` вложен в семейство: событие и команда — свой файл, #{Path.join(root, module_file(name))}"
+          )
   end
 
   defp module_path(name, line, index, path, root) do
@@ -191,16 +346,31 @@ defmodule BoundaryLint do
 
   # ===== потребитель: направления зависимостей контекста =====
 
-  # Контекст — `<Root>.Domain.<BC>`, его части — `Common` и срезы; корень берётся из имени модуля,
-  # где стоит ссылка. `Common` не видит срезов своего контекста, чужой контекст виден только через
-  # его `Common`. Вне `Domain` (web, подсистемы, точки входа) правил нет. Модуль в корне контекста
-  # норма запрещает, поэтому любая часть кроме `Common` считается срезом.
-  defp direction_violations(_ast, _path, nil), do: []
+  # Контекст — `<Root>.Domain.<BC>`, его части — `Common` и срезы; корень берётся из модуля, на который
+  # ссылаются. `Common` не видит срезов своего контекста, чужой контекст виден только через его
+  # `Common`. Подсистема — любой модуль вне `Domain` и сборки приложения: `<Root>.<X>` вне `@wiring` и
+  # модуль с другим корнем, кроме `<Root>Web` и `Mix.Tasks`. Срез — namespace, а не модуль: часть,
+  # объявленная модулем `<Root>.Domain.<BC>.<X>`, — модуль в корне контекста. Его ловит `bc-root` на
+  # объявлении, а ссылки на него правила срезов не считают — правка одна, перенос модуля.
+  defp direction_violations(_ast, _path, nil, _bc_roots), do: []
 
-  defp direction_violations(ast, path, _root) do
+  defp direction_violations(ast, path, _root, bc_roots) do
     {_env, refs} = walk(ast, %{module: nil, aliases: %{}})
-    Enum.flat_map(refs, fn {from, to, line} -> direction(from, to, line, path) end)
+
+    refs
+    |> Enum.reject(fn {from, to, _line} -> root_ref?(bc_roots, from, to) end)
+    |> Enum.flat_map(fn {from, to, line} -> direction(from, to, line, path) end)
   end
+
+  # Ссылка на модуль в корне контекста — и ссылка такого модуля на свой контекст — правилами срезов не
+  # считается: его ловит `bc-root`, правка одна — перенос.
+  defp root_ref?(bc_roots, from, to) do
+    MapSet.member?(bc_roots, bc_part(to)) or
+      (MapSet.member?(bc_roots, bc_part(from)) and same_context?(bc_part(from), bc_part(to)))
+  end
+
+  defp same_context?({root, bc, _from_part}, {root, bc, _part}), do: true
+  defp same_context?(_from, _to), do: false
 
   defp direction(from, to, line, path) do
     case {bc_part(from), bc_part(to)} do
@@ -209,8 +379,22 @@ defmodule BoundaryLint do
           violation(
             path,
             line,
-            "`Common` контекста `#{bc}` ссылается на `#{module_name(to)}` — срез своего контекста, а не `Common`",
+            "`Common` контекста `#{bc}` ссылается на `#{module_name(to)}` — срез своего контекста, а не `Common`: " <>
+              "нужное обоим — в `Common`, компонент или проекция read-модели среза — в срез",
             @common_slice,
+            @layout
+          )
+        ]
+
+      {{root, bc, from_part}, {root, bc, part}}
+      when from_part not in [:Common, nil] and part not in [:Common, nil, from_part] ->
+        [
+          violation(
+            path,
+            line,
+            "срез `#{from_part}` контекста `#{bc}` ссылается на `#{module_name(to)}` — соседний срез: " <>
+              "общее — в `#{bc}.Common`",
+            @sibling_slice,
             @layout
           )
         ]
@@ -226,12 +410,58 @@ defmodule BoundaryLint do
           )
         ]
 
+      {nil, {root, _bc, part}} when part not in [:Common, nil] ->
+        subsystem_violations(from, to, root, line, path)
+
+      {{from_root, _bc, _part}, {root, _other, part}} when from_root != root and part not in [:Common, nil] ->
+        subsystem_violations(from, to, root, line, path)
+
       _other ->
         []
     end
   end
 
   # ---
+
+  defp subsystem_violations(nil, _to, _root, _line, _path), do: []
+  defp subsystem_violations([root, top], _to, root, _line, _path) when top in @wiring_modules, do: []
+
+  defp subsystem_violations([root, top | _rest] = from, to, root, line, path) when top in @wiring_modules,
+    do: [
+      subsystem_err(module_name(from), to, line, path, " (к сборке относится только `#{root}.#{top}`, без вложенных)")
+    ]
+
+  defp subsystem_violations([root, top | _rest], _to, root, _line, _path) when top in @wiring_namespaces, do: []
+  defp subsystem_violations([root], to, root, line, path), do: [subsystem_err("#{root}", to, line, path)]
+
+  defp subsystem_violations([root, top | _rest], to, root, line, path),
+    do: [subsystem_err("#{root}.#{top}", to, line, path)]
+
+  defp subsystem_violations([:Mix, :Tasks | _rest], _to, _root, _line, _path), do: []
+
+  defp subsystem_violations([from_root | _rest], to, root, line, path) do
+    if from_root == :"#{root}Web",
+      do: [],
+      else: [subsystem_err("#{from_root}", to, line, path)]
+  end
+
+  defp subsystem_err(subsystem, [root | _rest] = to, line, path, note \\ "") do
+    hint =
+      if :Usecases in to,
+        do:
+          "; задача оператора — в `#{root}.Release.<Name>`, компонент, который ссылается на срез, — в срез инициатора",
+        else: ""
+
+    violation(
+      path,
+      line,
+      "подсистема `#{subsystem}`#{note} ссылается на `#{module_name(to)}` — срез контекста: " <>
+        "контекст виден через `Common`" <>
+        hint,
+      @subsystem_slice,
+      @layout
+    )
+  end
 
   defp bc_part([root, :Domain, bc, part | _rest]), do: {root, bc, part}
   defp bc_part([root, :Domain, bc]), do: {root, bc, nil}
@@ -258,6 +488,14 @@ defmodule BoundaryLint do
   end
 
   defp walk({:alias, _meta, [target | opts]}, env), do: {define_aliases(target, List.flatten(opts), env), []}
+
+  # Верхнеуровневый `defimpl … for: T` принадлежит модулю `T`: его ссылки — ссылки `T`.
+  defp walk({:defimpl, _meta, [protocol | rest]}, %{module: nil} = env) do
+    case Keyword.get(List.flatten(rest), :for) do
+      {:__aliases__, _, parts} -> {env, children([protocol | rest], %{env | module: expand(parts, env)})}
+      _other -> {env, children([protocol | rest], env)}
+    end
+  end
 
   defp walk({:require, _meta, [target, opts]}, env) when is_list(opts) do
     {_env, refs} = walk(target, env)
@@ -354,7 +592,8 @@ defmodule BoundaryLint do
       violation(
         dir <> "/",
         0,
-        "контекст без модуля-оглавления: его `@moduledoc` — карта контекста, файл — #{dir}.ex",
+        "контекст без модуля-оглавления: его `@moduledoc` — карта контекста, файл — #{dir}.ex; " <>
+          "контекст без агрегатов — не контекст, а подсистема",
         @bc_index,
         @layout
       )
@@ -370,6 +609,183 @@ defmodule BoundaryLint do
       String.starts_with?(Path.expand(path), prefix) and Enum.any?(markers, &match?({@bc_index, _first, _last}, &1))
     end)
   end
+
+  # ===== потребитель: модуль в корне контекста =====
+
+  # Срез — namespace, модулем он не объявляется; модуль `<Root>.Domain.<BC>.<X>` при `X` не `Common` —
+  # модуль в корне контекста, вложенный или верхнеуровневый. Ссылки на него и на модули под ним правила
+  # срезов не считают, в том числе под маркером `bc-root`: правка одна — перенос. Исключение — срез,
+  # объявленный модулем (под ним есть `.Usecases.`): его направления проверяются как у среза.
+  defp bc_roots(all, names) do
+    for {%{parts: [_root, :Domain, _bc, part], name: name} = module, _markers} <- all,
+        part != :Common,
+        not slice_module?(name, names),
+        into: MapSet.new(),
+        do: bc_part(module.parts)
+  end
+
+  # Срез, объявленный модулем: под ним лежат usecases (`10-architecture.md`, «Usecases»).
+  defp slice_module?(name, names), do: Enum.any?(names, &String.starts_with?(&1, name <> ".Usecases."))
+
+  defp bc_root_violations(_ast, _path, nil, _known), do: []
+
+  defp bc_root_violations(ast, path, _root, known) do
+    for %{parts: [root, :Domain, bc, part], name: name, line: line, uses: uses} <- modules(ast),
+        part != :Common,
+        [:Core, :Es, :Projection] not in uses,
+        do: violation(path, line, bc_root_message(name, root, bc, known.names), @bc_root, @layout)
+  end
+
+  # ---
+
+  defp bc_root_message(name, root, bc, names) do
+    place =
+      "`#{name}` — модуль в корне контекста `#{bc}`: его место — `#{root}.Domain.#{bc}.Common`, " <>
+        "срез инициатора или подсистема `#{root}.<Subsystem>` (механизм без агрегатов; контекст без агрегатов " <>
+        "целиком — подсистема)"
+
+    if slice_module?(name, names),
+      do:
+        "`#{name}` — срез, объявленный модулем: срез — namespace, модуль убрать, " <>
+          "карту — в оглавление `#{root}.Domain.#{bc}`",
+      else: place
+  end
+
+  # ===== потребитель: проекция в каталоге read-модели =====
+
+  # Проекция — ровно `<Root>.Domain.<BC>.<Part>.<ReadModel>.Projection` (или `ProjectionV<N>` на время
+  # перехода): модуль с `use Core.Es.Projection` в другом месте — проекция контекста или модуль под
+  # read-моделью. `use` разрешается через `alias`, код в `quote` макроса-обёртки не проверяется. Отдельный
+  # модуль записи — `*.Projector` под `ReadRepo`: слово `Projector` вне `ReadRepo` бывает доменным.
+  defp projection_violations(_ast, _path, nil), do: []
+
+  defp projection_violations(ast, path, _root) do
+    for %{parts: parts, name: name, line: line, uses: uses} <- modules(ast),
+        message <- projection_message(Enum.map(parts, &Atom.to_string/1), name, [:Core, :Es, :Projection] in uses),
+        do: violation(path, line, message, @projection_layout, @repos_layout)
+  end
+
+  # ---
+
+  defp projection_message(parts, name, uses?) do
+    cond do
+      List.last(parts) == "Projector" and "ReadRepo" in parts ->
+        ["`#{name}` — отдельный модуль записи проекции: таблицы пишет сама `<ReadModel>.Projection`"]
+
+      uses? and not read_model_projection?(parts) ->
+        ["`#{name}` — проекция вне каталога read-модели: ожидается `<BC>.<Part>.<ReadModel>.Projection`"]
+
+      true ->
+        []
+    end
+  end
+
+  defp read_model_projection?([_root, "Domain", _bc, _part, _read_model, projection]),
+    do: Regex.match?(~r/^Projection(V\d+)?$/, projection)
+
+  defp read_model_projection?(_parts), do: false
+
+  # ===== потребитель: корень web =====
+
+  # Второй сегмент модуля `<Root>Web.<X>` — из закрытого списка корня web либо поверхность. Поверхность —
+  # namespace хотя бы с одним `<Root>Web.<X>.V<N>.ApiSpec` (вложенным или своим файлом): спецификация — на
+  # версию. `ApiSpec` в другом месте поверхностью не делает — подсказка называет найденный. Корень web — только
+  # `<Root>Web` при корне `<Root>` модулей `lib/`: чужой `OtherWeb` проверяется как подсистема.
+  defp web_root_violations(_ast, path, known) do
+    for {{web, part}, %{path: ^path, line: line, others: others}} <- known.web_anchors,
+        do:
+          violation(path, line, web_root_message(web, part, known.deep_specs) <> others(others), @web_root, @web_layout)
+  end
+
+  # ---
+
+  defp others(0), do: ""
+  defp others(count), do: "; прочих модулей namespace с тем же нарушением: #{count}, правка одна"
+
+  # ---
+
+  defp web_root_message(web, part, deep_specs) do
+    base =
+      "`#{web}.#{part}` — не часть корня web: поверхность (`#{web}.<Api>` с `<Api>.V<N>.ApiSpec`) или " <>
+        Enum.join(@web_parts, ", ")
+
+    case deep_specs do
+      _root_spec when part == "ApiSpec" ->
+        base <> "; `ApiSpec` — у версии поверхности: `#{web}.<Api>.<Version>.ApiSpec`"
+
+      %{{^web, ^part} => spec} ->
+        base <> "; `#{spec}` — спецификация на версию: `#{web}.#{part}.<Version>.ApiSpec`"
+
+      %{} ->
+        base <>
+          "; модуль одного ресурса — в `#{web}.<Api>.<Version>.<Resource>.<Роль>`, в корне — только общее " <>
+          "для поверхностей"
+    end
+  end
+
+  # ===== модули файла =====
+
+  # Все модули файла с полными именами — верхнеуровневые, вложенные и `defprotocol` — вместе с `use`,
+  # разрешёнными через `alias` тела. Код внутри `quote` принадлежит модулю, куда он инжектится, и не
+  # обходится.
+  defp modules(ast) do
+    {_env, found} = collect_modules(ast, %{module: nil, aliases: %{}})
+    found
+  end
+
+  # ---
+
+  defp collect_modules({:__block__, _meta, exprs}, env) do
+    Enum.reduce(exprs, {env, []}, fn expr, {env, found} ->
+      {env, more} = collect_modules(expr, env)
+      {env, found ++ more}
+    end)
+  end
+
+  defp collect_modules({kind, meta, [{:__aliases__, _, parts}, body]}, env) when kind in [:defmodule, :defprotocol] do
+    case define_module(parts, env) do
+      {nil, env} ->
+        {env, []}
+
+      {module, env} ->
+        inner = %{env | module: module}
+        {_env, nested} = collect_modules(body, inner)
+        {_env, uses} = use_targets(body, inner)
+        {env, [%{parts: module, name: module_name(module), line: meta[:line], uses: uses} | nested]}
+    end
+  end
+
+  defp collect_modules({:alias, _meta, [target | opts]}, env), do: {define_aliases(target, List.flatten(opts), env), []}
+  defp collect_modules({:quote, _meta, _args}, env), do: {env, []}
+  defp collect_modules({form, _meta, args}, env) when is_list(args), do: {env, collected([form | args], env)}
+  defp collect_modules({left, right}, env), do: {env, collected([left, right], env)}
+  defp collect_modules(list, env) when is_list(list), do: {env, collected(list, env)}
+  defp collect_modules(_node, env), do: {env, []}
+
+  defp collected(nodes, env), do: Enum.flat_map(nodes, &(&1 |> collect_modules(env) |> elem(1)))
+
+  defp use_targets({:__block__, _meta, exprs}, env) do
+    Enum.reduce(exprs, {env, []}, fn expr, {env, found} ->
+      {env, more} = use_targets(expr, env)
+      {env, found ++ more}
+    end)
+  end
+
+  defp use_targets({:use, _meta, [{:__aliases__, _, parts} | _opts]}, env) do
+    case expand(parts, env) do
+      nil -> {env, []}
+      module -> {env, [module]}
+    end
+  end
+
+  defp use_targets({:alias, _meta, [target | opts]}, env), do: {define_aliases(target, List.flatten(opts), env), []}
+  defp use_targets({kind, _meta, _args}, env) when kind in [:defmodule, :defprotocol, :quote], do: {env, []}
+  defp use_targets({form, _meta, args}, env) when is_list(args), do: {env, used([form | args], env)}
+  defp use_targets({left, right}, env), do: {env, used([left, right], env)}
+  defp use_targets(list, env) when is_list(list), do: {env, used(list, env)}
+  defp use_targets(_node, env), do: {env, []}
+
+  defp used(nodes, env), do: Enum.flat_map(nodes, &(&1 |> use_targets(env) |> elem(1)))
 
   # ===== исключение: маркер у `defmodule` =====
 
@@ -387,8 +803,11 @@ defmodule BoundaryLint do
 
     {_ast, markers} =
       Macro.prewalk(ast, [], fn
-        {:defmodule, meta, [_name, _body]} = node, acc -> {node, acc ++ module_markers(meta, by_line)}
-        node, acc -> {node, acc}
+        {kind, meta, [_name, _body]} = node, acc when kind in [:defmodule, :defprotocol] ->
+          {node, acc ++ module_markers(meta, last_line(node), by_line)}
+
+        node, acc ->
+          {node, acc}
       end)
 
     markers
@@ -399,9 +818,8 @@ defmodule BoundaryLint do
 
   # ---
 
-  defp module_markers(meta, by_line) do
+  defp module_markers(meta, last, by_line) do
     first = meta[:line]
-    last = get_in(meta, [:end, :line]) || first
 
     (first - 1)
     |> Stream.iterate(&(&1 - 1))
@@ -415,15 +833,30 @@ defmodule BoundaryLint do
     end)
   end
 
+  # У `defmodule … do … end` последняя строка — `end`, у формы `defmodule X, do: …` — самая дальняя строка
+  # тела.
+  defp last_line({_kind, meta, _args} = node) do
+    {_node, last} =
+      Macro.prewalk(node, meta[:line], fn
+        {_form, node_meta, _args} = child, acc when is_list(node_meta) ->
+          {child, Enum.max([acc, node_meta[:line] || acc, get_in(node_meta, [:end, :line]) || acc])}
+
+        child, acc ->
+          {child, acc}
+      end)
+
+    last
+  end
+
   # ===== общее =====
 
-  defp top_modules({:defmodule, meta, [{:__aliases__, _, parts}, _body]}) do
+  defp top_modules({kind, meta, [{:__aliases__, _, parts}, _body]}) when kind in [:defmodule, :defprotocol] do
     if Enum.all?(parts, &is_atom/1),
       do: [{Enum.map_join(parts, ".", &Atom.to_string/1), meta[:line]}],
       else: []
   end
 
-  defp top_modules({:defmodule, _meta, _args}), do: []
+  defp top_modules({kind, _meta, _args}) when kind in [:defmodule, :defprotocol], do: []
   defp top_modules({left, _meta, args}) when is_list(args), do: top_modules(left) ++ top_modules(args)
   defp top_modules({left, right}), do: top_modules(left) ++ top_modules(right)
   defp top_modules(list) when is_list(list), do: Enum.flat_map(list, &top_modules/1)

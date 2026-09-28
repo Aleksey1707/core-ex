@@ -368,7 +368,7 @@ assert %{name: MyApp.Domain.<BC>.Common.Account.Projection} in MyApp.PromEx.Work
 
 ```elixir
 # плохо — свой `:poll` и короткий таймаут из env: тест платит реальным временем
-Application.put_env(:my_app, MyAppWeb.Helper.Projection, await_timeout_ms: 50)
+Application.put_env(:my_app, MyAppWeb.Accepted, await_timeout_ms: 50)
 opts = Keyword.put(MyApp.Projections.opts(), :await, :poll)
 :ignore = Core.Es.Projection.Supervisor.start_link(opts)
 

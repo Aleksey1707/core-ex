@@ -112,12 +112,20 @@
 | `<Actor>` | `<actor>` | actor / role-срез |
 | `<Aggregate>` | `<aggregate>` | агрегат |
 | `<ReadModel>` | `<read_model>` | read-модель: View, ReadRepo и проекция одного каталога |
-| `<Scenario>` | — | сценарий модуля usecases; по умолчанию имя агрегата |
+| `<Usecase>` | — | имя модуля usecases; по умолчанию имя агрегата |
 | `<Subsystem>` | `<subsystem>` | подсистема приложения вне `Domain`, без агрегатов |
-| `<Component>` | `<component>` | компонент: процессы одного тумблера под корнем `<Component>.Supervisor` |
+| `<Component>` | `<component>` | компонент: процессы одного назначения (и одного тумблера, кроме подчинённого, если он есть) под корнем `<Component>.Supervisor` |
 | `<Value>` | `<value>` | значение (Prim) |
 | `<Api>`, `<Version>`, `<Resource>` | `<api>`, `<version>`, `<resource>` | web: поверхность, версия API, ресурс |
-| — | `<scope>` | часть контекста: `common` или срез `<actor>` |
+| `<Nested>`, `<Group>` | `<nested>`, `<group>` | web: вложенный ресурс; группа ресурсов без своего ресурса |
+| `<Part>` | `<scope>` | часть контекста: `Common` или срез `<Actor>` (в путях — `common` или `<actor>`) |
+| `<Owner>` | — | модуль-владелец каталога ошибок, который возвращает не агрегат |
+| `<Behaviour>` | — | behaviour, реализацию которого резолвит конвенция `<Behaviour>.Pg` |
+| `<Name>` | `<name>` | имя модуля, не покрытое другими плейсхолдерами (событие, команда, задача оператора) |
+| `<ReadRepo>` | — | репозиторий чтения read-модели, `<ReadModel>.ReadRepo` |
+| `<X>` | — | произвольный сегмент имени в описании правила линтера |
+| `<Other>` | — | другая read-модель или агрегат (схема join `ReadRepo.Pg.Schema.<Other>`) |
+| `<N>` | — | номер версии API (`V<N>`) или проекции (`ProjectionV<N>`) |
 
 В путях и именах файлов понятие пишется snake_case: `lib/my_app/domain/<bc>/<actor>/`.
 

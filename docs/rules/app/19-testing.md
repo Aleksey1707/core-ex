@@ -50,7 +50,10 @@ end
   сам модуль (`10-architecture.md`, «Раскладка»); линтер дерево `test/` не проверяет.
 - Тест, который держит норму на всём дереве, — архитектурный тест
   (`test/my_app/architecture_test.exs`, `10-architecture.md`, «Boundary») и ратчеты («Ратчеты») —
-  MUST лежать в `test/my_app/`: модуля, по пути которого его положить, у него нет.
+  MUST лежать в `test/my_app/`: модуля, по пути которого его положить, у него нет. Исключение —
+  ратчет, чей тест-модуль назван в namespace web (`MyAppWeb.IfMatchSpecTest`, сверка спецификаций
+  поверхностей): он лежит в `test/my_app_web/`, путь следует за именем модуля. Архитектурный тест
+  «web не ссылается на `*Repo` и `DAO`» — `MyApp.ArchitectureTest` в `test/my_app/`.
 - Case-модули (`MyApp.DataCase`, `MyAppWeb.ConnCase`) и прочая обвязка MUST лежать в
   `test/support/` («Case-модули», «Обвязка `test/support`»): это не тесты, а код, который
   компилируется в `:test`.
@@ -67,7 +70,7 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 | Модуль | Роль |
 |---|---|
 | `*_fixture.ex` | доменные фабрики агрегатов |
-| `*_seed.ex` | наполнение БД связанными агрегатами под сценарий |
+| `*_seed.ex` | наполнение БД связанными агрегатами под тест |
 | `*_contract.ex` | общие наборы тестов behaviour (`deps/core/docs/rules/19-testing.md`, «Контрактные тесты behaviour») |
 | дублёры внешних систем | канал, брокер, каталог пользователей без сети |
 | `test/support/fixtures/events/**` | снимки wire-формата событий |
@@ -97,14 +100,14 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 
 ```elixir
 # плохо — прогон и чтение ради версии: её уже вернул usecase
-{:ok, {id, _version}} = Usecases.open(context)
+{:ok, {id, _version}} = Usecases.<Aggregate>.open(context)
 :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.<ReadModel>.Projection)
-{:ok, view} = Usecases.get(id, :current, context)
-{:ok, _version} = Usecases.close(id, Version.new!(view.version), context)
+{:ok, view} = Usecases.<Aggregate>.get(id, :current, context)
+{:ok, _version} = Usecases.<Aggregate>.close(id, Version.new!(view.version), context)
 
 # хорошо
-{:ok, {id, version}} = Usecases.open(context)
-{:ok, _version} = Usecases.close(id, version, context)
+{:ok, {id, version}} = Usecases.<Aggregate>.open(context)
+{:ok, _version} = Usecases.<Aggregate>.close(id, version, context)
 ```
 
 ## Ратчеты

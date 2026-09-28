@@ -5,10 +5,15 @@ defmodule Core.Workers.PromEx do
   Обязательная опция `watch:` — MFA-провайдер списка процессов
   (`[%{component: String.t(), name: atom()}]`), например
   `{MyApp.PromEx.Workers, :watch_list, []}`.
+
+  Элементы с одной меткой `component` сводятся в одно значение: `up` — минимум (любой мёртвый
+  процесс даёт 0), `message_queue_len` — максимум, `memory` — сумма; повтор — `error` в лог
+  (`Core.PromEx.Labels`).
   """
 
   use PromEx.Plugin
 
+  alias Core.PromEx.Labels
   alias Core.PromEx.Safe
 
   @up_event [:prom_ex, :plugin, :workers, :up]
@@ -64,40 +69,42 @@ defmodule Core.Workers.PromEx do
 
   def execute_worker_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
     Safe.execute("workers", fn ->
-      mod
-      |> apply(fun, args)
-      |> Enum.each(&emit_process/1)
+      groups =
+        mod
+        |> apply(fun, args)
+        |> Labels.group(& &1.component)
+
+      Labels.report("workers mfa=#{inspect({mod, fun, args})}", groups)
+      Enum.each(groups, &emit_component/1)
     end)
   end
 
   # ---
 
-  defp emit_process(%{component: component, name: name}) do
+  defp emit_component({component, items}) do
+    samples = Enum.map(items, &sample/1)
     meta = %{component: component}
 
-    case Process.whereis(name) do
-      pid when is_pid(pid) ->
-        emit_alive(pid, meta)
+    :telemetry.execute(@up_event, %{value: Enum.min(values(samples, :up))}, meta)
+    :telemetry.execute(@mailbox_event, %{value: Enum.max(values(samples, :mailbox))}, meta)
+    :telemetry.execute(@memory_event, %{value: Enum.sum(values(samples, :memory))}, meta)
+  end
 
-      nil ->
-        emit_down(meta)
+  defp values(samples, key), do: Enum.map(samples, &Map.fetch!(&1, key))
+
+  defp sample(%{name: name}) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) -> alive_sample(pid)
+      nil -> %{up: 0, mailbox: 0, memory: 0}
     end
   end
 
-  defp emit_alive(pid, meta) do
-    info = Process.info(pid, [:message_queue_len, :memory]) || []
-    mailbox = Keyword.get(info, :message_queue_len, 0)
-    memory = Keyword.get(info, :memory, 0)
-
-    :telemetry.execute(@up_event, %{value: 1}, meta)
-    :telemetry.execute(@mailbox_event, %{value: mailbox}, meta)
-    :telemetry.execute(@memory_event, %{value: memory}, meta)
-  end
-
-  defp emit_down(meta) do
-    :telemetry.execute(@up_event, %{value: 0}, meta)
-    :telemetry.execute(@mailbox_event, %{value: 0}, meta)
-    :telemetry.execute(@memory_event, %{value: 0}, meta)
+  # Процесс мог умереть между `whereis` и `info`: `nil` — тот же сэмпл, что у отсутствующего.
+  defp alive_sample(pid) do
+    case Process.info(pid, [:message_queue_len, :memory]) do
+      [message_queue_len: mailbox, memory: memory] -> %{up: 1, mailbox: mailbox, memory: memory}
+      nil -> %{up: 0, mailbox: 0, memory: 0}
+    end
   end
 
   defp component_tag_values(%{component: component}) do

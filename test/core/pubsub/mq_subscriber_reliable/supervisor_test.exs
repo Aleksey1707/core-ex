@@ -80,17 +80,24 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
 
     test "topics: [] — :ignore, info «пропущен: нет топиков»" do
       log =
-        capture_info(fn -> assert :ignore = MqSubscriberReliable.Supervisor.start_link(enabled: true, topics: []) end)
+        capture_info(fn ->
+          assert :ignore = MqSubscriberReliable.Supervisor.start_link(enabled: true, component: "catalog", topics: [])
+        end)
 
       assert log =~ "супервизор подписчиков: пропущен: нет топиков"
     end
 
     test "child_spec: id — name: дерева, по умолчанию модуль" do
       assert %{id: MqSubscriberReliable.Supervisor, type: :supervisor} =
-               MqSubscriberReliable.Supervisor.child_spec(enabled: true, topics: [])
+               MqSubscriberReliable.Supervisor.child_spec(enabled: true, component: "catalog", topics: [])
 
       assert %{id: :other_tree} =
-               MqSubscriberReliable.Supervisor.child_spec(enabled: true, topics: [], name: :other_tree)
+               MqSubscriberReliable.Supervisor.child_spec(
+                 enabled: true,
+                 component: "catalog",
+                 topics: [],
+                 name: :other_tree
+               )
     end
   end
 
@@ -98,8 +105,51 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
     test "проверяются при любом enabled:" do
       for enabled <- [true, false] do
         assert_raise ArgumentError, ~r/нет обязательной опции :topics/, fn ->
-          MqSubscriberReliable.Supervisor.start_link(enabled: enabled)
+          MqSubscriberReliable.Supervisor.start_link(enabled: enabled, component: "catalog")
         end
+      end
+    end
+
+    test "component: — обязательная непустая строка" do
+      assert_raise ArgumentError, ~r/нет обязательной опции :component/, fn ->
+        MqSubscriberReliable.Supervisor.start_link(Keyword.delete(tree_opts(), :component))
+      end
+
+      assert_raise ArgumentError, ~r/опция :component — ожидается непустую строку/, fn ->
+        MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :component, ""))
+      end
+    end
+
+    test "component: с `:` — ArgumentError: `:` — разделитель метки" do
+      assert_raise ArgumentError, ~r/опция :component — ожидается строку без `:`/, fn ->
+        MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :component, "cat:alog"))
+      end
+    end
+
+    test "повтор имени процесса в дереве — ArgumentError до старта" do
+      opts =
+        Keyword.update!(tree_opts(), :topics, fn [products, orders] ->
+          [products, put_in(orders, [:subscriber, :name], @products_reader)]
+        end)
+
+      assert_raise ArgumentError, ~r/имена процессов без повторов.*ProductsReader/, fn ->
+        MqSubscriberReliable.Supervisor.start_link(opts)
+      end
+    end
+
+    test "повтор топика в дереве — ArgumentError: по топику строится метка" do
+      [products | _] = Keyword.fetch!(tree_opts(), :topics)
+
+      twin = fn n ->
+        products
+        |> put_in([:subscriber, :name], :"twin_subscriber_#{n}")
+        |> Keyword.put(:reader, {MqFake.QueueReader, name: :"twin_reader_#{n}"})
+      end
+
+      opts = Keyword.update!(tree_opts(), :topics, &(&1 ++ [twin.(1), twin.(2)]))
+
+      assert_raise ArgumentError, ~r/опция :topics — ожидается топики без повторов.*получено \["products"\]$/, fn ->
+        MqSubscriberReliable.Supervisor.start_link(opts)
       end
     end
 
@@ -125,6 +175,7 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
       assert_raise ArgumentError, ~r/опция :reader — ожидается \{модуль, опции с name: атомом\}/, fn ->
         MqSubscriberReliable.Supervisor.start_link(
           enabled: true,
+          component: "catalog",
           topics: [[reader: MqFake.QueueReader, subscriber: []]]
         )
       end
@@ -134,7 +185,7 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
         topic = Keyword.update!(topic, :subscriber, &Keyword.delete(&1, key))
 
         assert_raise ArgumentError, ~r/нет обязательной опции #{inspect(key)}/, fn ->
-          MqSubscriberReliable.Supervisor.start_link(enabled: true, topics: [topic])
+          MqSubscriberReliable.Supervisor.start_link(enabled: true, component: "catalog", topics: [topic])
         end
       end
     end
@@ -153,17 +204,43 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
       assert Enum.map(MqSubscriberReliable.Supervisor.watch_list(opts), & &1.name) == Enum.reverse(running)
 
       assert MqSubscriberReliable.Supervisor.watch_list(opts) == [
-               %{component: "mq_dlq_writer:#{inspect(@dlq)}", name: @dlq},
-               %{component: "mq_reader:#{inspect(@products_reader)}", name: @products_reader},
-               %{component: "mq_subscriber:#{inspect(@products_sub)}", name: @products_sub},
-               %{component: "mq_reader:#{inspect(@orders_reader)}", name: @orders_reader},
-               %{component: "mq_subscriber:#{inspect(@orders_sub)}", name: @orders_sub}
+               %{component: "mq_dlq_writer:catalog", name: @dlq},
+               %{component: "mq_reader:catalog:products", name: @products_reader},
+               %{component: "mq_subscriber:catalog:products", name: @products_sub},
+               %{component: "mq_reader:catalog:orders", name: @orders_reader},
+               %{component: "mq_subscriber:catalog:orders", name: @orders_sub}
              ]
+    end
+
+    test "метка не зависит от имён процессов" do
+      renamed =
+        Keyword.update!(tree_opts(), :topics, fn topics ->
+          Enum.map(topics, &put_in(&1, [:subscriber, :name], :"renamed_#{&1[:subscriber][:topic]}"))
+        end)
+
+      components = &Enum.map(MqSubscriberReliable.Supervisor.watch_list(&1), fn item -> item.component end)
+
+      assert components.(renamed) == components.(tree_opts())
     end
 
     test "дерево не стартует — пусто: enabled: false, topics: [] при заданном dlq_writer:" do
       assert MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :enabled, false)) == []
       assert MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :topics, [])) == []
+    end
+  end
+
+  describe "readers/1" do
+    test "только stream-читатели, метка — как у mq_reader в watch_list/1" do
+      opts = stream_orders_opts()
+      reader = %{component: "mq_reader:catalog:orders", name: @orders_reader}
+
+      assert MqSubscriberReliable.Supervisor.readers(opts) == [reader]
+      assert reader in MqSubscriberReliable.Supervisor.watch_list(opts)
+    end
+
+    test "дерево не стартует — пусто" do
+      assert MqSubscriberReliable.Supervisor.readers(Keyword.put(stream_orders_opts(), :enabled, false)) == []
+      assert MqSubscriberReliable.Supervisor.readers(Keyword.put(stream_orders_opts(), :topics, [])) == []
     end
   end
 
@@ -178,6 +255,7 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
 
     [
       enabled: true,
+      component: "catalog",
       name: @tree,
       dlq_writer: {MqFake.Writer, name: @dlq},
       topics: [
@@ -191,6 +269,12 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
         ]
       ]
     ]
+  end
+
+  defp stream_orders_opts do
+    Keyword.update!(tree_opts(), :topics, fn [products, orders] ->
+      [products, Keyword.put(orders, :reader, {Core.Mq.Stream.Reader, name: @orders_reader})]
+    end)
   end
 
   defp start_tree!(opts) do

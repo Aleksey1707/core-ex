@@ -74,24 +74,46 @@ read-модели затрагивает одно место, а её перес
 ```
 
 - Имя read-модели — по назначению (`Backlog`, `Delivery`); по умолчанию — имя агрегата, и тогда
-  каталог общий с агрегатом: `common/<aggregate>/view.ex` рядом с `repo.ex`. Read-модель над
-  несколькими агрегатами MUST NOT лежать под одним из них: у неё своё имя и свой каталог.
+  каталог общий с агрегатом: `common/<aggregate>/view.ex` рядом с `repo.ex`.
+- Строка read-модели — один агрегат (его id и `version`), а поля других агрегатов в ней — копии,
+  которые проекция берёт из их событий: такая read-модель лежит у этого агрегата, даже если её
+  проекция слушает события нескольких. Своё имя и свой каталог нужны, когда строка не равна
+  агрегату (очередь, сводка, строка на пару агрегатов): тогда read-модель MUST NOT лежать под одним
+  из них.
+- ReadRepo MAY читать таблицы чужой read-модели (join, подзапрос) своей вложенной read-only схемой
+  `<ReadModel>.ReadRepo.Pg.Schema.<Other>` только с нужными полями, а если View вкладывает
+  `<Other>.View` целиком — ассоциацией на `<Other>.ReadRepo.Pg.Schema` и её `to_view`: копия схемы и
+  маппинга всех полей разошлась бы с владельцем. Оба случая — только если это read-модель `Common`
+  своего или чужого контекста. Таблицу read-модели среза читает только сам срез: join на неё из
+  `Common` или чужого контекста — та же зависимость от среза, что и ссылка на его модуль
+  (`10-architecture.md`, «Направления зависимостей»), только невидимая линтеру. Join через таблицы
+  двух проекций видит их разное отставание: граница, которой нужна свежая строка, ждёт и проекцию
+  присоединённой таблицы (`15-web-api.md`, «Ожидание проекции»).
+- Read-модель без таблицы — значение, которое `ReadRepo` собирает на чтении сворачиванием потоков
+  (эффективные права пользователя по его ролям), — MAY читать write-репозитории (`get`, `get_many`),
+  если своей проекции у неё нет. Как любая read-модель, она только отдаёт данные: решение над ними
+  (есть ли доступ) принимает тот, кто её читает, — механизм или usecase. Это исключение из «Read»
+  свода библиотеки (`deps/core/docs/rules/13-repos.md`): своей Ecto-схемы у неё нет и
+  `use Core.Repo.Pg` она не объявляет, реализация `ReadRepo` — обычный модуль над
+  write-репозиториями. Отдаётся она `<ReadModel>.View` из примитивных значений, лежит там же, где
+  read-модель с таблицей; кеш — по `16-caching.md`.
 - Чтение state-stored агрегата из его собственной таблицы (read-схема над таблицей write-пути,
   без проекции) MUST лежать в каталоге агрегата: таблица принадлежит агрегату.
 - View лежит в каталоге read-модели, а не под ReadRepo: его видят behaviour, usecase, презентер и
   кеш.
 
 ```text
-# плохо — чтение агрегата в трёх местах, схема строк второго агрегата лежит под первым
+# плохо — чтение агрегата в трёх местах, отдельный проектор, схема второго агрегата вместо его
+# собственной read-модели
 <bc>/common/order/view.ex
 <bc>/common/order/read_repo/pg/projector.ex
 <bc>/common/order/read_repo/pg/schema/shipment.ex
 <bc>/common/projection.ex
 
 # хорошо — read-модель агрегата в его каталоге, read-модель двух агрегатов — в своём
-<bc>/common/order/{view,read_repo,projection}.ex
+<bc>/common/order/{view,read_repo,projection}.ex    # строка — заказ, поля отгрузки — копии
 <bc>/common/order/read_repo/pg{,/schema.ex}
-<bc>/common/backlog/{view,read_repo,projection}.ex
+<bc>/common/backlog/{view,read_repo,projection}.ex  # строка — не заказ и не отгрузка
 <bc>/common/backlog/read_repo/pg{,/schema.ex}
 ```
 
@@ -108,6 +130,10 @@ read-модели затрагивает одно место, а её перес
 
 Почему: модуль находится по имени без чтения файла, а порог «одним файлом, пока он маленький»
 произволен — агрегат на границе переезжал бы туда и обратно.
+
+Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `module-path`: модуль
+`MyApp.Domain.<BC>.<Part>.<Aggregate>.{Event,Cmd}.<Name>`, вложенный в семейство (кодек семейства —
+не член).
 
 ```elixir
 # плохо — <aggregate>/event.ex: события вложены в семейство
@@ -152,6 +178,11 @@ end
 Actor-репозиторий заводится под свой ACL-фильтр среза (`10-architecture.md`); без него срез
 читает и пишет репозиторий из `Common`.
 
+- Read-модель среза, которая отличается от общей только ACL-фильтром, — actor-ReadRepo: в срезе
+  лежат только `<scope>/<read_model>/read_repo*` и `read_repo/pg/specs.ex` со своими
+  `default_filters`, а таблица, проекция, View и схема остаются в read-модели `Common`. Копия
+  таблицы и проекции на срез MUST NOT; своя View в срезе — только при своей форме данных.
+
 - Чтения идут через `use Core.Repo.Pg` со своими `default_filters` среза, запись делегируется
   в `Repo.Pg` из `Common`. Узкий срез MAY не иметь `insert` — только `update` / `save`.
 - State-stored агрегат с событиями пишет `use Core.Repo.Pg.StateStored` из `Common`; у
@@ -175,7 +206,8 @@ def insert(%<Aggregate>{} = agg, %Context{} = context, opts \\ []),
   `save` / `delete`, у event-sourced агрегата — `append`. `count` / `page` / `exists?` в него
   не входят: это отдача наружу.
 - `list` / `find_many` / `get_many` в write-репозитории MAY — только когда команда мутирует
-  множество агрегатов и метод служит **источником для mutate**. Загрузка пачки и её сохранение
+  множество агрегатов и метод служит **источником для mutate**, либо его зовёт `ReadRepo`
+  read-модели без таблицы («Read-модель»). Загрузка пачки и её сохранение
   живут в теле одной функции (`deps/core/docs/rules/20-agreements.md`, «Load/save агрегата»).
 - Кастомный `get_by_*`, объявление read-репозитория, его собственная схема и
   `shadow_copy?: false` — `deps/core/docs/rules/13-repos.md`, «Read/Write репозитории».
@@ -238,7 +270,8 @@ Es.Transact.run(fn -> ... end)
 команду одного агрегата вместо тела usecase. Колбэк, `enabled: false` и запрет вызова внутри
 `Transact.run` — `deps/core/docs/rules/13-repos.md`, «Процесс агрегата».
 
-- Элемент `{<Aggregate>.Process, enabled: …}` ставит дерево приложения (`17-otp-concurrency.md`).
+- Элемент `{<Aggregate>.Process, MyApp.Processes.opts(<Aggregate>.Process)}` ставит дерево
+  приложения; список и опции собирает `MyApp.Processes` (`17-otp-concurrency.md`).
 - Сопутствующие записи (постановка фоновой задачи, строка соседней таблицы) идут колбэком
   `fun.(events)`; что в нём допустимо — `10-architecture.md`, «Что можно внутри `Transact.run`».
 
@@ -384,6 +417,12 @@ SELECT 'agg.login', ARRAY[lower(login)], id FROM agg_logins
 - внешние ключи на таблицы проекций и между ними MUST NOT: их ломает `clear/0` пересборки.
   Существование цели проверяет usecase («Event-sourced агрегат»);
 - проекция регистрируется в общем списке приложения (`17-otp-concurrency.md`).
+
+Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `projection-layout`: модуль
+с `use Core.Es.Projection` — `MyApp.Domain.<BC>.<Part>.<ReadModel>.Projection` (или
+`ProjectionV<N>`) ровно в каталоге read-модели; модуль `*.Projector` под `ReadRepo` — MUST NOT
+(слово `Projector` вне `ReadRepo` бывает доменным и не проверяется). Отступление — маркер и строка
+`DEBT.md` (`10-architecture.md`, «Отступление»).
 
 ```elixir
 # плохо — одна проекция на контекст, строки пишет проектор под ReadRepo
