@@ -37,7 +37,7 @@ defmodule Core.PromEx.Labels do
 
   Элементы групп несут `name:` — имя процесса, оно попадает в лог.
   """
-  @spec report(String.t(), [{term(), [%{name: atom()}, ...]}]) :: :ok
+  @spec report(String.t(), [{term(), [%{name: GenServer.name()}, ...]}]) :: :ok
 
   def report(source, groups) when is_binary(source) and is_list(groups) do
     repeated =

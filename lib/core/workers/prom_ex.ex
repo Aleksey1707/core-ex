@@ -3,8 +3,11 @@ defmodule Core.Workers.PromEx do
   PromEx plugin: polling gauges критичных OTP-процессов (up / mailbox / memory).
 
   Обязательная опция `watch:` — MFA-провайдер списка процессов
-  (`[%{component: String.t(), name: atom()}]`), например
-  `{MyApp.PromEx.Workers, :watch_list, []}`.
+  (`[%{component: String.t(), name: GenServer.name()}]`), например
+  `{MyApp.PromEx.Workers, :watch_list, []}`. Имя разрешает `GenServer.whereis/1`: атом,
+  `{:global, term}` и `{:via, module, term}`. Реестр `{:via, …}`, который не запущен или отвечает
+  исключением, даёт сэмпл отсутствующего процесса, а не отказ всего цикла. Процесс на другой ноде
+  кластера — `up` 1, а mailbox и память 0: их публикует нода, где он живёт.
 
   Элементы с одной меткой `component` сводятся в одно значение: `up` — минимум (любой мёртвый
   процесс даёт 0), `message_queue_len` — максимум, `memory` — сумма; повтор — `error` в лог
@@ -106,10 +109,19 @@ defmodule Core.Workers.PromEx do
   defp values(samples, key), do: Enum.map(samples, &Map.fetch!(&1, key))
 
   defp sample(%{name: name}) do
-    case Process.whereis(name) do
-      pid when is_pid(pid) -> alive_sample(pid)
+    case whereis(name) do
+      pid when is_pid(pid) and node(pid) == node() -> alive_sample(pid)
+      pid when is_pid(pid) -> %{up: 1, mailbox: 0, memory: 0}
       nil -> %{up: 0, mailbox: 0, memory: 0}
     end
+  end
+
+  defp whereis(name) do
+    GenServer.whereis(name)
+  rescue
+    _exception -> nil
+  catch
+    :exit, _reason -> nil
   end
 
   # Процесс мог умереть между `whereis` и `info`: `nil` — тот же сэмпл, что у отсутствующего.

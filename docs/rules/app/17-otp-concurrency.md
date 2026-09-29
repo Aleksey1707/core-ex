@@ -363,7 +363,9 @@ top-level boundary, и ссылка из одной в другую — цикл
   (`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево процессов»). Вычислять тумблер компонента
   второй раз в реестре приложения MUST NOT: у тумблера два места, и они расходятся молча.
 - Имя процесса берётся у его владельца (функция супервизора, `cache/0` фасада), а не
-  повторяется литералом в двух местах.
+  повторяется литералом в двух местах. `name:` элемента `watch_list/0` — `GenServer.name()`: атом,
+  `{:global, _}` или `{:via, _, _}`; процесс под реестром (`Oban` — `Oban.Registry`) ставится под
+  наблюдение тем же элементом, имя отдаёт реестр (`Oban.Registry.via/1`).
 - Читателей проекций перечисляет само дерево (`Core.Es.Projection.Supervisor.watch_list/1`), а не
   третий список в реестре приложения: иначе он разойдётся с деревом молча.
 - Stream-читателей для `readers:` плагина `Core.Mq.PromEx` MUST перечислять деревья подписчиков
@@ -388,6 +390,7 @@ end
 # хорошо — конкатенация списков, каждый отфильтрован своим корнем
 def watch_list do
   [%{component: "mq_connection", name: MyApp.Mq.Connection}] ++
+    [%{component: "oban", name: Oban.Registry.via(Oban)}] ++
     MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Supervisor.watch_list() ++
     MyApp.Outbox.Supervisor.watch_list() ++
     MyApp.<Subsystem>.Supervisor.watch_list() ++
