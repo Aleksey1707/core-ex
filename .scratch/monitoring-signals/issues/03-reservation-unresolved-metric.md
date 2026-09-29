@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Spec:** [Сигналы мониторинга](../spec.md) — «`:reservation_unresolved`»
 

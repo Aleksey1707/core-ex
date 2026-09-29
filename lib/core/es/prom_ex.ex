@@ -9,9 +9,14 @@ defmodule Core.Es.PromEx do
        processes: {MyApp.Processes, :list, []}}
 
   Event-метрики строятся всегда — по telemetry `[:es, :aggregate, :load]`,
-  `[:es, :aggregate, :fold]`, `[:es, :snapshot, :write]`, `[:es, :projection, :cycle]`,
-  `[:es, :projection, :await]`, `[:es, :projection, :signal, :sent | :received]` и
+  `[:es, :aggregate, :fold]`, `[:es, :snapshot, :write]`, `[:es, :key_reservation]`,
+  `[:es, :projection, :cycle]`, `[:es, :projection, :await]`,
+  `[:es, :projection, :signal, :sent | :received]` и
   `[:es, :aggregate, :process, :execute | :start | :stop]` (`Core.Telemetry.event/1`).
+
+  Исход резерва ключа — `key_reservation.total{scope, result}` (`Core.Es.KeyReservation`,
+  «Telemetry»): `scope` — область модуля ключа, `result` — `reserved` / `taken` / `unresolved`.
+  Значения ключа и `aggregate_id` в тегах нет: растущая кардинальность и ПДн.
 
   Сигнал чекпоинта — `projection.signal.sent.total{repo}` и `projection.signal.received.total{repo}`:
   `sum` по `count`, а не `counter` — слушатель засевает обе серии нулём, `counter` прибавил бы 1 на
@@ -91,6 +96,7 @@ defmodule Core.Es.PromEx do
     load_tags = ~w(type op result)a
     fold_tags = ~w(type snapshot)a
     write_tags = ~w(type result)a
+    reservation_tags = ~w(scope result)a
 
     Event.build(:es_aggregate_event_metrics, [
       counter(
@@ -142,6 +148,13 @@ defmodule Core.Es.PromEx do
         measurement: :rows,
         description: "Число записанных строк снапшотов агрегата",
         tags: [:type]
+      ),
+      counter(
+        prefix ++ [:key_reservation, :total],
+        event_name: Telemetry.event([:es, :key_reservation]),
+        description: "Число исходов резерва ключа event-sourced агрегата",
+        tags: reservation_tags,
+        tag_values: tag_values(reservation_tags)
       )
     ])
   end

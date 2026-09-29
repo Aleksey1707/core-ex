@@ -28,6 +28,20 @@
   Что завести у себя: алерт `PromExCollectFailing` из таблицы со своим `for:`. Конфигурацию
   плагинов менять не нужно.
 
+- **Исход резерва ключа: `my_app_prom_ex_es_key_reservation_total{scope, result}` и алерт
+  `EsKeyReservationUnresolved`** (`docs/rules/21-observability.md`, «Рекомендованные алерты»).
+  `:reservation_unresolved` у `Core.Es.KeyReservation` — аномалия состязания (`:app`), но уходила
+  только вызывающему: рост таких отказов был виден лишь по ошибкам на границе. Теперь итоговый исход
+  каждого `{:reserve, value}` эмитит telemetry `[:es, :key_reservation]` с метаданными `scope` и
+  `result` (`:reserved` / `:taken` / `:unresolved`), а event-группа `Core.Es.PromEx` считает его
+  счётчиком `my_app_prom_ex_es_key_reservation_total`. Повтор внутри резерва второго события не
+  даёт, `:release` и `:keep` событий не дают; значения ключа и `aggregate_id` в метках нет — ПДн и
+  растущая кардинальность. Условие алерта — с правой веткой `x unless x offset 5m`: отказ единичный,
+  а серии нулём засеять некому — у резервов нет процесса-владельца.
+
+  Что завести у себя: алерт `EsKeyReservationUnresolved` из таблицы. Код и конфигурацию
+  `Core.Es.PromEx` менять не нужно — метрика строится всегда.
+
 - **Метрики сигнала чекпоинта и алерт `EsProjectionSignalLost`** (`docs/rules/22-projections.md`,
   «Эксплуатация»). Потеря соединения слушателя `Core.Es.Projection.Listener` и `LISTEN` за pgbouncer
   в transaction mode не были видны ничем: `await` молча доходил шагами страховки. Теперь event-группа

@@ -81,6 +81,7 @@ defmodule Core.Es.PromExTest do
             snapshot.write.total
             snapshot.write.duration.milliseconds
             snapshot.write.rows.total
+            key_reservation.total
             projection.cycles.total
             projection.duration.milliseconds
             projection.events.total

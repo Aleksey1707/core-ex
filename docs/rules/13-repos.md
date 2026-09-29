@@ -766,7 +766,9 @@ use Core.Es.Aggregate.Repo.Pg,
   `code: :reservation_unresolved`): аномалия состязания, а не занятый ключ. Отдавать её клиенту
   как «ключ занят» MUST NOT — маппер уводит прикладную ошибку в 500 с логом (`12-errors.md`).
   Разбор отказа и почему повтор один — moduledoc `Core.Es.KeyReservation`, «Разбор отказа
-  вставки».
+  вставки». Исходы резерва считает `key_reservation.total{scope, result}` (`Core.Es.PromEx`),
+  алерт на `:unresolved` — `EsKeyReservationUnresolved` (`21-observability.md`, «Рекомендованные
+  алерты»).
 - Поиск агрегата по ключу («найти или создать») MUST идти через `find(value, context)` модуля
   ключа → `Agg.ID.t() | nil`, а не через read-модель: её пишет проекция асинхронно.
 - Таблица — `es_key_reservations`, DDL — `Core.Es.KeyReservation.Migration`.

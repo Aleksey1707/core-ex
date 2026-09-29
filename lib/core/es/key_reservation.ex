@@ -91,6 +91,16 @@ defmodule Core.Es.KeyReservation do
   Резервы пишутся и читаются через `Core.Config.dao/0`, id агрегата дампит и грузит
   `Core.Config.codec/0` — как у `Core.Es.Store`.
 
+  ## Telemetry
+
+  `[:es, :key_reservation]` (`Core.Telemetry.event/1`) — на итоговый исход каждого
+  `{:reserve, value}`, а не на попытку повтора: измерение `count` (1); метаданные `scope` (область
+  модуля ключа) и `result` — `:reserved` (ключ за агрегатом), `:taken` (занят другим),
+  `:unresolved` (`:reservation_unresolved`). `:release` и `:keep` событий не дают. Исход шага не
+  зависит от судьбы транзакции: `:reserved` засчитан и тогда, когда `append` откатывает её отказом
+  следующего шага, а повтор команды после отказа записи (`Core.Es.Transact`) даёт новый исход. Значения ключа и `aggregate_id` в метаданных нет — ПДн и растущая
+  кардинальность. Счётчик — `Core.Es.PromEx`, `key_reservation.total{scope, result}`.
+
   ## Генерируемые функции
 
   - `find(value, context)` → `Agg.ID.t() | nil` — агрегат, занявший ключ `to_key(value)`; `nil` —
@@ -122,6 +132,7 @@ defmodule Core.Es.KeyReservation do
   alias Core.Es
   alias Core.Es.KeyReservation.Schema
   alias Core.Helper
+  alias Core.Telemetry
 
   require Error
 
@@ -363,10 +374,16 @@ defmodule Core.Es.KeyReservation do
 
   defp write_step(%{module: module, scope: scope}, event, aggregate_id) do
     case module.reservation(event) do
-      {:reserve, value} -> reserve(scope, parts(module.to_key(value)), aggregate_id, 0)
+      {:reserve, value} -> reserve_reported(scope, parts(module.to_key(value)), aggregate_id)
       :release -> delete(keys_of(scope, aggregate_id))
       :keep -> :ok
     end
+  end
+
+  defp reserve_reported(scope, key, aggregate_id) do
+    resolved = reserve(scope, key, aggregate_id, 0)
+    emit(scope, resolved)
+    resolved
   end
 
   # Сначала снимается прежний ключ агрегата: иначе вставка упёрлась бы в `(scope, aggregate_id)`.
@@ -397,6 +414,18 @@ defmodule Core.Es.KeyReservation do
     )
     |> Config.dao().all()
   end
+
+  defp emit(scope, resolved) do
+    :telemetry.execute(
+      Telemetry.event([:es, :key_reservation]),
+      %{count: 1},
+      %{scope: scope, result: result(resolved)}
+    )
+  end
+
+  defp result(:ok), do: :reserved
+  defp result(:taken), do: :taken
+  defp result({:unresolved, _reason}), do: :unresolved
 
   defp unresolved(declaration, aggregate_id, reason) do
     Error.app(
