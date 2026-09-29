@@ -177,18 +177,18 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 | Алерт | PromQL | Смысл |
 |---|---|---|
 | `OutboxQueueFailedGrowing` | `max(my_app_prom_ex_outbox_queue_count{status="failed"}) > 0`, `for: <порог>` | записи в `:failed` ждут оператора: `Cleaner` их не удаляет |
-| `OutboxFailedDelivery` | `sum(increase(my_app_prom_ex_outbox_delivery_total{outcome="failed"}[5m])) > 0` | запись исчерпала `max_attempts` и ушла в `:failed` |
+| `OutboxFailedDelivery` | `sum(increase(my_app_prom_ex_outbox_delivery_total{outcome="failed"}[5m])) > 0 or sum(my_app_prom_ex_outbox_delivery_total{outcome="failed"} unless last_over_time(my_app_prom_ex_outbox_delivery_total{outcome="failed"}[5m] offset 5m)) > 0` | запись исчерпала `max_attempts` и ушла в `:failed` |
 | `OutboxOldestNewHigh` | `max(my_app_prom_ex_outbox_queue_oldest_age_seconds) > <порог>`, `for: <порог>` | очередь не разгребается: поллер не запущен, брокер недоступен или голова очереди раз за разом уходит в backoff |
 | `OutboxExpiredLocks` | `max(my_app_prom_ex_outbox_queue_expired_locks_count) > 0`, `for: <порог>` | аренда `:in_work` истекла: поллер остановлен посреди пачки или цикл дольше `lock_duration` |
-| `MqPublishErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_publish_total{result!="ok"}[5m])) > 0` | публикация в RabbitMQ Stream отказала или не подтверждена брокером; у Kafka — `my_app_prom_ex_mq_kafka_publish_total{result="error"}` |
-| `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching |
-| `MqSubscriberDlq` | `sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0` | подписчик отправил «ядовитое» сообщение в DLQ (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
+| `MqPublishErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_publish_total{result!="ok"}[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_publish_total{result!="ok"} unless last_over_time(my_app_prom_ex_mq_publish_total{result!="ok"}[5m] offset 5m)) > 0` | публикация в RabbitMQ Stream отказала или не подтверждена брокером; у Kafka — то же условие по `my_app_prom_ex_mq_kafka_publish_total{result="error"}` |
+| `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_decode_drop_total unless last_over_time(my_app_prom_ex_mq_decode_drop_total[5m] offset 5m)) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching |
+| `MqSubscriberDlq` | `sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0 or sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total unless last_over_time(my_app_prom_ex_mq_subscriber_dlq_total[5m] offset 5m)) > 0` | подписчик отправил «ядовитое» сообщение в DLQ (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
 | `WorkerDown` | `my_app_prom_ex_workers_up == 0`, `for: <порог>` | процесса из `watch:` нет на ноде |
 | `WorkerMailboxHigh` | `my_app_prom_ex_workers_message_queue_len > <порог>`, `for: <порог>` | mailbox процесса растёт быстрее, чем он обрабатывает сообщения (`17-otp-concurrency.md`, «Mailbox и backpressure») |
-| `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
-| `CacheStoreErrors` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="store_error"}[5m])) > 0` | отказывает store за кешем, а не кеш: сброс кеша не поможет |
+| `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0 or sum by (cache) (my_app_prom_ex_cache_requests_total{result="cache_error"} unless last_over_time(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m] offset 5m)) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
+| `CacheStoreErrors` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="store_error"}[5m])) > 0 or sum by (cache) (my_app_prom_ex_cache_requests_total{result="store_error"} unless last_over_time(my_app_prom_ex_cache_requests_total{result="store_error"}[5m] offset 5m)) > 0` | отказывает store за кешем, а не кеш: сброс кеша не поможет |
 | `PromExCollectFailing` | `sum by (instance, collector) (increase({__name__=~"my_app_prom_ex_.+_collect_errors_total"}[5m])) > 0`, `for: <порог>` | сбор polling-группы `collector` отказывает (`Core.PromEx.Safe`): её gauge'и застыли на последнем значении, и алерты на них недостоверны |
-| `EsKeyReservationUnresolved` | `sum by (scope) (increase(my_app_prom_ex_es_key_reservation_total{result="unresolved"}[5m])) > 0 or sum by (scope) (my_app_prom_ex_es_key_reservation_total{result="unresolved"} unless my_app_prom_ex_es_key_reservation_total{result="unresolved"} offset 5m) > 0` | резерв ключа области `scope` не разрешился после повтора (`:reservation_unresolved`): конкурентная запись в области сверх ожидаемой (`13-repos.md`, «Резервы ключей») |
+| `EsKeyReservationUnresolved` | `sum by (scope) (increase(my_app_prom_ex_es_key_reservation_total{result="unresolved"}[5m])) > 0 or sum by (scope) (my_app_prom_ex_es_key_reservation_total{result="unresolved"} unless last_over_time(my_app_prom_ex_es_key_reservation_total{result="unresolved"}[5m] offset 5m)) > 0` | резерв ключа области `scope` не разрешился после повтора (`:reservation_unresolved`): конкурентная запись в области сверх ожидаемой (`13-repos.md`, «Резервы ключей») |
 
 - Условие MUST брать имя метрики с префиксом PromEx: серии без префикса не существует, и алерт
   на неё молчит всегда, не выдавая ошибки.
@@ -199,13 +199,9 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
   (`17-otp-concurrency.md`, «Дерево процессов»).
 - `PromExCollectFailing` SHOULD нести `for:`: единичный отказ опроса (таймаут пула на пике)
   gauge'и не портит — следующий цикл их обновит; недостоверны они, только пока сбор отказывает
-  подряд. Первый инкремент новой серии, которого `increase` не видит, алерт не глушит: отказ
-  повторяется на каждом опросе (`poll_rate:`), и его поднимает рост со второго отказа.
-- `EsKeyReservationUnresolved` поднимается на единичное событие, и повтора, который поднял бы
-  его ростом, нет: у `increase` по серии, появившейся сразу с 1, нет прироста. Правая ветка —
-  серия, которая есть сейчас и которой не было окно назад; `offset` MUST равняться окну
-  `increase`, фильтр `result="unresolved"` повторяется в каждом `x`. Засеять серию нулём некому:
-  у резервов нет процесса-владельца. Отказ `:taken` — доменный исход, алерта на него нет.
+  подряд.
+- `EsKeyReservationUnresolved`: засеять серию нулём некому — у резервов нет процесса-владельца.
+  Отказ `:taken` — доменный исход, алерта на него нет.
 
 ```yaml
 # плохо — имя без префикса PromEx: такой серии нет, алерт не сработает никогда
@@ -216,6 +212,106 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - alert: OutboxQueueFailedGrowing
   expr: max(my_app_prom_ex_outbox_queue_count{status="failed"}) > 0
   for: 10m
+```
+
+### Первое событие серии счётчика
+
+Серия `counter` у `telemetry_metrics_prometheus_core` появляется после первого события сразу со
+значением 1, и `increase(x[w]) > 0` этот инкремент не видит: прироста в окне нет. Условие алерта на
+единичное событие по незасеянному счётчику MUST нести правую ветку — серию, которая есть сейчас и
+у которой не было точек окно назад (ADR-0029). В таблице это все строки на `increase(...) > 0` без
+`for:`.
+
+```text
+sum by (<метки>) (increase(x{<фильтр>}[w])) > 0
+  or sum by (<метки>) (x{<фильтр>} unless last_over_time(x{<фильтр>}[w] offset w)) > 0
+```
+
+- `offset` и диапазон `last_over_time` MUST равняться окну `increase`: при меньшем `offset` серия,
+  появившаяся раньше него, но внутри окна, выпадает из обеих веток; при меньшем диапазоне ложное
+  срабатывание даёт уже разрыв скрейпа длиннее диапазона.
+- `x offset w` вместо `last_over_time` — MUST NOT: единичный пропуск скрейпа оставляет staleness
+  marker, и через окно правая ветка поднимает алерт по каждой ненулевой серии цели.
+- Фильтр по меткам MUST повторяться в каждом `x`: без него правая ветка подняла бы алерт на новую
+  серию чужого исхода (`result="ok"`).
+- Значение правой ветки — полный счёт серии с запуска ноды, а не прирост за окно.
+- Цена — ложное срабатывание, когда скрейп цели не проходил дольше окна: серия вернулась со старым
+  значением, и правая ветка видит её новой. Проверка `up` в условии MUST NOT: после простоя ноды
+  дольше окна она снова прячет первое событие.
+- `EsProjectionRetrying` (`22-projections.md`) и `PromExCollectFailing` правой ветки не несут: у
+  них `for:`, а отказ повторяется каждый цикл, пока длится, — второй инкремент рост видит.
+
+```yaml
+# плохо — серия появилась сразу с 1: прироста в окне нет, первое сообщение в DLQ молчит
+- alert: MqSubscriberDlq
+  expr: sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0
+
+# хорошо
+- alert: MqSubscriberDlq
+  expr: >
+    sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0
+    or sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total
+      unless last_over_time(my_app_prom_ex_mq_subscriber_dlq_total[5m] offset 5m)) > 0
+```
+
+Новый счётчик под алерт на единичное событие с закрытым множеством меток SHOULD объявляться `sum`
+по measurement `count` и засеваться `count: 0` по каждому значению меток при старте
+процесса-владельца: серия существует до первого события, и условию в таблице хватает
+`increase(x[w]) > 0`. Засевает владелец, а не плагин PromEx: метрики плагина подключаются к
+telemetry после его сборки. `counter` прибавил бы 1 на событие засева; `sum` экспортируется в
+Prometheus с типом `counter`, имя серии не меняется. Так засеяны
+`es_projection_signal_{sent,received}_total` (`Core.Es.Projection.Listener`, ADR-0028).
+
+```elixir
+# плохо — `counter` прибавляет 1 на событие: засев `count: 0` дал бы серию с 1
+counter(
+  prefix ++ [:sync, :failed, :total],
+  event_name: Telemetry.event([:sync, :failed]),
+  tags: [:reason]
+)
+
+# хорошо — плагин считает `sum` по `count`
+sum(
+  prefix ++ [:sync, :failed, :total],
+  event_name: Telemetry.event([:sync, :failed]),
+  measurement: :count,
+  tags: [:reason]
+)
+
+# хорошо — процесс-владелец засевает каждое значение закрытой метки при старте,
+# отказ эмитит с `%{count: 1}`
+@impl true
+def handle_continue(:seed, state) do
+  for reason <- ~w(timeout rejected)a,
+      do: :telemetry.execute(Telemetry.event([:sync, :failed]), %{count: 0}, %{reason: reason})
+
+  {:noreply, state}
+end
+```
+
+Тест `MqSubscriberDlq` на `promtool test rules` (правило «хорошо» в `alerts.yml`): серия `orders`
+появляется сразу с 1 — алерт; `users` стоит на 1 с начала — тишина; `bills` растёт — алерт;
+`audit` пропустила один скрейп — тишина.
+
+```yaml
+rule_files: [alerts.yml]
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'my_app_prom_ex_mq_subscriber_dlq_total{topic="orders", dlq_topic="orders.dlq"}'
+        values: '_x5 1x20'
+      - series: 'my_app_prom_ex_mq_subscriber_dlq_total{topic="users", dlq_topic="users.dlq"}'
+        values: '1x25'
+      - series: 'my_app_prom_ex_mq_subscriber_dlq_total{topic="bills", dlq_topic="bills.dlq"}'
+        values: '1+1x25'
+      - series: 'my_app_prom_ex_mq_subscriber_dlq_total{topic="audit", dlq_topic="audit.dlq"}'
+        values: '1x2 stale 1x21'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: MqSubscriberDlq
+        exp_alerts:
+          - exp_labels: {topic: orders, dlq_topic: orders.dlq}
+          - exp_labels: {topic: bills, dlq_topic: bills.dlq}
 ```
 
 ## Связанные правила

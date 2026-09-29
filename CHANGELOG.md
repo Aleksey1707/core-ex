@@ -12,6 +12,25 @@
 
 ### Новое
 
+- **Алерты на единичное событие поднимаются на первое событие новой серии счётчика**
+  (`docs/rules/21-observability.md`, «Первое событие серии счётчика»). Серия `counter` появляется
+  после первого события сразу с 1, и `increase(x[5m]) > 0` этот инкремент не видел: единичное
+  сообщение в DLQ или единичный отказ публикации после старта ноды проходили молча. Засеять эти
+  серии нулём нельзя — у всех шести счётчиков есть открытая метка (`topic`, `dlq_topic`, `cache`).
+  Условия `OutboxFailedDelivery`, `MqPublishErrors` (и варианта Kafka), `MqDecodeDrops`,
+  `MqSubscriberDlq`, `CacheUnavailable`, `CacheStoreErrors` получили правую ветку — серию, у которой
+  не было точек окно назад: `last_over_time(x[5m] offset 5m)`, фильтр повторён в каждом `x`.
+  Мгновенный `x offset 5m` не годится: единичный пропуск скрейпа оставляет staleness marker, и через
+  окно алерт поднялся бы по каждой ненулевой серии цели. Цена — ложное срабатывание после разрыва
+  скрейпа дольше окна. Решение и отвергнутые варианты — `docs/adr/0029-counter-first-event.md`.
+
+  Правка правил алертов у себя: было — `sum by (topic, dlq_topic)
+  (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0` → стало — то же
+  `or sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total unless
+  last_over_time(my_app_prom_ex_mq_subscriber_dlq_total[5m] offset 5m)) > 0`; для остальных пяти —
+  строки таблицы.
+  Код и конфигурацию `Core.*.PromEx` менять не нужно.
+
 - **Отказ сбора gauge'ей: `…_collect_errors_total{collector}` и алерт `PromExCollectFailing`**
   (`docs/rules/21-observability.md`, «Рекомендованные алерты»). Сбор polling-метрик под
   `Core.PromEx.Safe` при недоступной БД или провайдере писал `warning` и ничего не эмитил: gauge
@@ -36,8 +55,8 @@
   `result` (`:reserved` / `:taken` / `:unresolved`), а event-группа `Core.Es.PromEx` считает его
   счётчиком `my_app_prom_ex_es_key_reservation_total`. Повтор внутри резерва второго события не
   даёт, `:release` и `:keep` событий не дают; значения ключа и `aggregate_id` в метках нет — ПДн и
-  растущая кардинальность. Условие алерта — с правой веткой `x unless x offset 5m`: отказ единичный,
-  а серии нулём засеять некому — у резервов нет процесса-владельца.
+  растущая кардинальность. Условие алерта — с правой веткой `x unless last_over_time(x[5m] offset
+  5m)`: отказ единичный, а серии нулём засеять некому — у резервов нет процесса-владельца.
 
   Что завести у себя: алерт `EsKeyReservationUnresolved` из таблицы. Код и конфигурацию
   `Core.Es.PromEx` менять не нужно — метрика строится всегда.
