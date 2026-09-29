@@ -21,6 +21,19 @@ defmodule Core.Workers.PromEx do
   @memory_event [:prom_ex, :plugin, :workers, :memory]
 
   @doc false
+  @spec event_metrics(keyword()) :: [Event.t()]
+
+  @impl true
+  def event_metrics(opts) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :workers))
+
+    [
+      Event.build(:workers_collect_event_metrics, [Safe.error_metric(metric_prefix, :workers)])
+    ]
+  end
+
+  @doc false
   @impl true
   def polling_metrics(opts) do
     otp_app = Keyword.fetch!(opts, :otp_app)
@@ -68,7 +81,7 @@ defmodule Core.Workers.PromEx do
   @spec execute_worker_metrics({module(), atom(), [term()]}) :: :ok
 
   def execute_worker_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
-    Safe.execute("workers", fn ->
+    Safe.execute(:workers, :workers, "workers", fn ->
       groups =
         mod
         |> apply(fun, args)

@@ -20,7 +20,8 @@ defmodule Core.Es.PromExTest do
     [:prom_ex, :plugin, :es, :projection, :rebuilding],
     [:prom_ex, :plugin, :es, :projection, :outdated],
     [:prom_ex, :plugin, :es, :checkpoint, :orphan],
-    [:prom_ex, :plugin, :es, :aggregate, :processes]
+    [:prom_ex, :plugin, :es, :aggregate, :processes],
+    [:prom_ex, :plugin, :es, :collect, :error]
   ]
 
   defmodule AccountOnly do
@@ -94,6 +95,7 @@ defmodule Core.Es.PromExTest do
             aggregate.process.execute.retries.total
             aggregate.process.start.total
             aggregate.process.stop.total
+            collect.errors.total
           ) do
         assert ("core.prom_ex.es." <> name) in names
       end
@@ -228,7 +230,7 @@ defmodule Core.Es.PromExTest do
       assert_receive {:orphan, %{name: "prom_ex_account_only"}, %{value: 0}}
     end
 
-    test "недоступная БД — цикл пропущен с warning, gauges не эмитятся" do
+    test "недоступная БД — цикл пропущен с warning, gauges не эмитятся, отказ сбора projections" do
       configured = Application.fetch_env!(:core, :dao)
       on_exit(fn -> Application.put_env(:core, :dao, configured) end)
       Application.put_env(:core, :dao, DownDao)
@@ -237,6 +239,7 @@ defmodule Core.Es.PromExTest do
         capture_log(fn -> assert :ok = PromEx.execute_projection_metrics(@projections, @now) end)
 
       assert log =~ "сбор метрик пропущен (es projections)"
+      assert_received {:error, %{collector: :projections}, %{count: 1}}
       refute_received {_gauge, _metadata, _measurements}
     end
   end

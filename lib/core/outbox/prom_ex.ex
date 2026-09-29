@@ -107,7 +107,8 @@ defmodule Core.Outbox.PromEx do
             description: "Число удалённых published-записей outbox",
             tags: [:result],
             tag_values: &result_tag_values/1
-          )
+          ),
+          Safe.error_metric(metric_prefix, :outbox)
         ]
       )
     ]
@@ -155,7 +156,7 @@ defmodule Core.Outbox.PromEx do
   @spec execute_queue_metrics() :: :ok
 
   def execute_queue_metrics do
-    Safe.execute("outbox queue", &emit_queue_metrics/0)
+    Safe.execute(:outbox, :queue, "outbox queue", &emit_queue_metrics/0)
   end
 
   # ---

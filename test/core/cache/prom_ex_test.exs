@@ -18,6 +18,7 @@ defmodule Core.Cache.PromExTest do
     names = Enum.map(metrics, &Enum.join(&1.name, "."))
 
     assert Enum.any?(names, &String.contains?(&1, "cache.requests"))
+    assert "core.prom_ex.cache.collect.errors.total" in names
   end
 
   test "polling_metrics содержит cache.size" do

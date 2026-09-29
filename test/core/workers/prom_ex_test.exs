@@ -20,6 +20,8 @@ defmodule Core.Workers.PromExTest do
     def many(items), do: items
 
     def from(agent), do: Agent.get(agent, & &1)
+
+    def down, do: exit(:noproc)
   end
 
   setup do
@@ -41,6 +43,30 @@ defmodule Core.Workers.PromExTest do
     assert Enum.any?(names, &String.contains?(&1, "workers.up"))
     assert Enum.any?(names, &String.contains?(&1, "workers.message_queue_len"))
     assert Enum.any?(names, &String.contains?(&1, "workers.memory"))
+  end
+
+  test "event_metrics содержит workers.collect.errors.total" do
+    assert [%{metrics: metrics}] = PromEx.event_metrics(otp_app: :core)
+    assert Enum.map(metrics, &Enum.join(&1.name, ".")) == ["core.prom_ex.workers.collect.errors.total"]
+  end
+
+  test "отказ провайдера watch: — отказ сбора workers" do
+    handler_id = "workers-promex-collect-#{inspect(self())}"
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:prom_ex, :plugin, :workers, :collect, :error],
+        fn _event, measurements, metadata, test_pid -> send(test_pid, {:collect_error, measurements, metadata}) end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    log = capture_log(fn -> assert :ok = PromEx.execute_worker_metrics({StubWatch, :down, []}) end)
+
+    assert log =~ "сбор метрик пропущен (workers)"
+    assert_received {:collect_error, %{count: 1}, %{collector: :workers}}
   end
 
   test "polling_metrics требует watch:" do

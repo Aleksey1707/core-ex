@@ -33,7 +33,8 @@ defmodule Core.Cache.PromEx do
             description: "Число обращений к кешу по исходу",
             tags: [:cache, :result],
             tag_values: &request_tag_values/1
-          )
+          ),
+          Safe.error_metric(metric_prefix, :cache)
         ]
       )
     ]
@@ -71,7 +72,7 @@ defmodule Core.Cache.PromEx do
   @spec execute_size_metrics({module(), atom(), [term()]}) :: :ok
 
   def execute_size_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
-    Safe.execute("cache sizes", fn ->
+    Safe.execute(:cache, :sizes, "cache sizes", fn ->
       mod
       |> apply(fun, args)
       |> Enum.each(&emit_size/1)

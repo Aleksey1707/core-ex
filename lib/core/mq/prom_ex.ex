@@ -106,7 +106,8 @@ defmodule Core.Mq.PromEx do
             description: "Число сообщений, отправленных подписчиком в DLQ",
             tags: [:topic, :dlq_topic],
             tag_values: &dlq_tag_values/1
-          )
+          ),
+          Safe.error_metric(metric_prefix, :mq)
         ]
       )
     ]
@@ -126,14 +127,14 @@ defmodule Core.Mq.PromEx do
     end
   end
 
-  # Два уровня `Safe` делают разное: внешний `execute/2` ловит сбой самого провайдера
-  # (список reader'ов не собрался — цикл пропускается целиком), внутренний `collect/2` —
+  # Два уровня `Safe` делают разное: внешний `execute/4` ловит сбой самого провайдера
+  # (список reader'ов не собрался — цикл пропускается целиком), внутренний `collect/4` —
   # недоступность одного reader'а, чтобы она не уносила метрики остальных.
   @doc false
   @spec execute_reader_metrics({module(), atom(), [term()]}) :: :ok
 
   def execute_reader_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
-    Safe.execute("mq readers", fn ->
+    Safe.execute(:mq, :readers, "mq readers", fn ->
       groups =
         mod
         |> apply(fun, args)
@@ -195,7 +196,7 @@ defmodule Core.Mq.PromEx do
   end
 
   defp reader_sample(%{component: component, name: name}) do
-    Safe.collect("mq reader #{component}", fn ->
+    Safe.collect(:mq, :readers, "mq reader #{component}", fn ->
       case Process.whereis(name) do
         pid when is_pid(pid) -> [sample(component, name, Reader.info(pid))]
         nil -> []

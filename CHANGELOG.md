@@ -2,7 +2,31 @@
 
 ## Не выпущено
 
+### Ломающие изменения контракта
+
+- **`Core.PromEx.Safe.execute/4` и `collect/4` вместо `/2`.** Обёртка сбора теперь эмитит
+  событие отказа, и ей нужны имя плагина для события и закрытое имя polling-группы для тега
+  `collector` (пункт «Отказ сбора gauge'ей» ниже). Свой плагин потребителя, зовущий `Safe`: было —
+  `Safe.execute("my label", fun)` → стало — `Safe.execute(:my_plugin, :my_group, "my label", fun)`
+  и `Safe.error_metric(metric_prefix, :my_plugin)` в event-метриках плагина.
+
 ### Новое
+
+- **Отказ сбора gauge'ей: `…_collect_errors_total{collector}` и алерт `PromExCollectFailing`**
+  (`docs/rules/21-observability.md`, «Рекомендованные алерты»). Сбор polling-метрик под
+  `Core.PromEx.Safe` при недоступной БД или провайдере писал `warning` и ничего не эмитил: gauge
+  держал последнее значение, и `EsProjectionLagging`, `OutboxOldestNewHigh` и соседи молчали ровно
+  тогда, когда что-то сломано. Теперь каждый пропущенный цикл, кроме `warning`, считает счётчик
+  `my_app_prom_ex_<плагин>_collect_errors_total{collector}` — он объявлен во всех пяти плагинах
+  (`Core.Es.PromEx`, `Core.Mq.PromEx`, `Core.Outbox.PromEx`, `Core.Cache.PromEx`,
+  `Core.Workers.PromEx`), `collector` — имя polling-группы: `projections`, `processes`, `readers`,
+  `queue`, `sizes`, `workers`; отказ одного reader'а засчитывается группе `readers`. Счётчик, а не
+  gauge времени последнего успешного сбора: у gauge нет серии, если сбор не удался ни разу с
+  запуска ноды, — решение в moduledoc `Core.PromEx.Safe`. Норма `docs/rules/app/21-observability.md`
+  о сбое провайдера уточнена: сбой виден `PromExCollectFailing`.
+
+  Что завести у себя: алерт `PromExCollectFailing` из таблицы со своим `for:`. Конфигурацию
+  плагинов менять не нужно.
 
 - **Метрики сигнала чекпоинта и алерт `EsProjectionSignalLost`** (`docs/rules/22-projections.md`,
   «Эксплуатация»). Потеря соединения слушателя `Core.Es.Projection.Listener` и `LISTEN` за pgbouncer

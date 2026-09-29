@@ -27,6 +27,7 @@ defmodule Core.Outbox.PromExTest do
     assert Enum.any?(names, &String.contains?(&1, "outbox.poller.failed"))
     assert Enum.any?(names, &String.contains?(&1, "outbox.delivery"))
     assert Enum.any?(names, &String.contains?(&1, "outbox.cleaner"))
+    assert "core.prom_ex.outbox.collect.errors.total" in names
 
     assert [%{metrics: poll_metrics, poll_rate: 5_000}] =
              List.wrap(PromEx.polling_metrics(opts))
@@ -34,13 +35,13 @@ defmodule Core.Outbox.PromExTest do
     assert length(poll_metrics) == 3
   end
 
-  test "недоступный источник не роняет провайдер, метрика не эмитится" do
+  test "недоступный источник не роняет провайдер, метрика не эмитится, отказ сбора queue" do
     handler_id = "outbox-promex-down-#{inspect(self())}"
 
     :ok =
-      :telemetry.attach(
+      :telemetry.attach_many(
         handler_id,
-        [:prom_ex, :plugin, :outbox, :queue, :count],
+        [[:prom_ex, :plugin, :outbox, :queue, :count], [:prom_ex, :plugin, :outbox, :collect, :error]],
         fn event, measurements, metadata, test_pid ->
           send(test_pid, {:telemetry, event, measurements, metadata})
         end,
@@ -59,6 +60,7 @@ defmodule Core.Outbox.PromExTest do
     log = capture_log(fn -> assert :ok = PromEx.execute_queue_metrics() end)
 
     assert log =~ "сбор метрик пропущен"
+    assert_received {:telemetry, [:prom_ex, :plugin, :outbox, :collect, :error], %{count: 1}, %{collector: :queue}}
     refute_received {:telemetry, [:prom_ex, :plugin, :outbox, :queue, :count], _, _}
   end
 

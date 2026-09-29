@@ -32,7 +32,8 @@ defmodule Core.Es.PromEx do
   ## Polling
 
   Запросы идут на `Core.Config.dao/0`; сбор — под `Core.PromEx.Safe`: недоступная БД или провайдер
-  пропускают цикл, gauge остаётся с прошлым значением.
+  пропускают цикл, gauge остаётся с прошлым значением, а отказ считает
+  `collect.errors.total{collector}` (`projections` / `processes`).
 
   - `projection.lag.seconds{projection}` — отставание проекции: возраст самого раннего из первых
     событий типов проекции после чекпоинта (`LIMIT 1` на тип), без условия видимости пачки;
@@ -77,7 +78,8 @@ defmodule Core.Es.PromEx do
     [
       aggregate_event_group(prefix, unit),
       projection_event_group(prefix, unit),
-      process_event_group(prefix, unit)
+      process_event_group(prefix, unit),
+      Event.build(:es_collect_event_metrics, [Safe.error_metric(prefix, :es)])
     ]
   end
 
@@ -370,7 +372,7 @@ defmodule Core.Es.PromEx do
 
   def execute_projection_metrics({mod, fun, args}, now \\ DateTime.utc_now())
       when is_atom(mod) and is_atom(fun) and is_list(args) do
-    Safe.execute("es projections", fn ->
+    Safe.execute(:es, :projections, "es projections", fn ->
       mod
       |> apply(fun, args)
       |> Keyword.fetch!(:projections)
@@ -428,7 +430,7 @@ defmodule Core.Es.PromEx do
 
   def execute_process_metrics({mod, fun, args})
       when is_atom(mod) and is_atom(fun) and is_list(args) do
-    Safe.execute("es processes", fn ->
+    Safe.execute(:es, :processes, "es processes", fn ->
       mod
       |> apply(fun, args)
       |> Enum.each(&emit_processes/1)

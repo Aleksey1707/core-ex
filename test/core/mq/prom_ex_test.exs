@@ -35,6 +35,7 @@ defmodule Core.Mq.PromExTest do
     assert Enum.any?(names, &String.contains?(&1, "mq.deliver.entries"))
     assert Enum.any?(names, &String.contains?(&1, "mq.decode_drop"))
     assert Enum.any?(names, &String.contains?(&1, "mq.subscriber.cycles"))
+    assert "core.prom_ex.mq.collect.errors.total" in names
 
     assert [%{metrics: poll_metrics, poll_rate: 5_000}] =
              List.wrap(PromEx.polling_metrics(opts))
@@ -111,6 +112,38 @@ defmodule Core.Mq.PromExTest do
     assert_receive {:telemetry, [:prom_ex, :plugin, :mq, :reader, :buffer_len], %{value: 4}, ^meta}
     assert log =~ "source=mq_readers"
     assert capture_log(fn -> PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end) == ""
+  end
+
+  test "отказ одного reader'а — отказ сбора группы readers, а не component; остальные собраны" do
+    info = %{
+      buffer_len: 1,
+      chunk_remaining: 0,
+      dropped_offset: nil,
+      pending?: false,
+      subscribed?: true,
+      topic: "orders"
+    }
+
+    start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
+    down = spawn(fn -> receive do: (_call -> exit(:down)) end)
+    Process.register(down, :mq_promex_second)
+    handler_id = "mq-promex-collect-#{inspect(self())}"
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        [[:prom_ex, :plugin, :mq, :collect, :error], [:prom_ex, :plugin, :mq, :reader, :buffer_len]],
+        fn event, measurements, metadata, test_pid -> send(test_pid, {:telemetry, event, measurements, metadata}) end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    log = capture_log(fn -> assert :ok = PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end)
+
+    assert log =~ "сбор метрик пропущен (mq reader orders)"
+    assert_receive {:telemetry, [:prom_ex, :plugin, :mq, :collect, :error], %{count: 1}, %{collector: :readers}}
+    assert_receive {:telemetry, [:prom_ex, :plugin, :mq, :reader, :buffer_len], %{value: 1}, %{component: "orders"}}
   end
 
   test "одна component с разными topic — не повтор" do

@@ -187,6 +187,7 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 | `WorkerMailboxHigh` | `my_app_prom_ex_workers_message_queue_len > <порог>`, `for: <порог>` | mailbox процесса растёт быстрее, чем он обрабатывает сообщения (`17-otp-concurrency.md`, «Mailbox и backpressure») |
 | `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
 | `CacheStoreErrors` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="store_error"}[5m])) > 0` | отказывает store за кешем, а не кеш: сброс кеша не поможет |
+| `PromExCollectFailing` | `sum by (instance, collector) (increase({__name__=~"my_app_prom_ex_.+_collect_errors_total"}[5m])) > 0`, `for: <порог>` | сбор polling-группы `collector` отказывает (`Core.PromEx.Safe`): её gauge'и застыли на последнем значении, и алерты на них недостоверны |
 
 - Условие MUST брать имя метрики с префиксом PromEx: серии без префикса не существует, и алерт
   на неё молчит всегда, не выдавая ошибки.
@@ -195,6 +196,10 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
   умножила бы значение на число нод.
 - `WorkerDown` верен, только пока в `watch:` нет элементов выключенного поддерева
   (`17-otp-concurrency.md`, «Дерево процессов»).
+- `PromExCollectFailing` SHOULD нести `for:`: единичный отказ опроса (таймаут пула на пике)
+  gauge'и не портит — следующий цикл их обновит; недостоверны они, только пока сбор отказывает
+  подряд. Первый инкремент новой серии, которого `increase` не видит, алерт не глушит: отказ
+  повторяется на каждом опросе (`poll_rate:`), и его поднимает рост со второго отказа.
 
 ```yaml
 # плохо — имя без префикса PromEx: такой серии нет, алерт не сработает никогда
