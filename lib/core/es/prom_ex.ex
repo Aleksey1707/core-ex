@@ -10,8 +10,13 @@ defmodule Core.Es.PromEx do
 
   Event-метрики строятся всегда — по telemetry `[:es, :aggregate, :load]`,
   `[:es, :aggregate, :fold]`, `[:es, :snapshot, :write]`, `[:es, :projection, :cycle]`,
-  `[:es, :projection, :await]` и `[:es, :aggregate, :process, :execute | :start | :stop]`
-  (`Core.Telemetry.event/1`).
+  `[:es, :projection, :await]`, `[:es, :projection, :signal, :sent | :received]` и
+  `[:es, :aggregate, :process, :execute | :start | :stop]` (`Core.Telemetry.event/1`).
+
+  Сигнал чекпоинта — `projection.signal.sent.total{repo}` и `projection.signal.received.total{repo}`:
+  `sum` по `count`, а не `counter` — слушатель засевает обе серии нулём, `counter` прибавил бы 1 на
+  событие засева; в Prometheus экспортируется с типом `counter`. Отправлено пачками читателей ноды
+  против получено её слушателем — `Core.Es.Projection.Listener`, «Telemetry»; `repo` — имя модуля.
 
   ## Opts
 
@@ -192,6 +197,22 @@ defmodule Core.Es.PromEx do
         tags: result_tags,
         tag_values: tag_values(result_tags),
         unit: {:native, unit}
+      ),
+      sum(
+        prefix ++ [:projection, :signal, :sent, :total],
+        event_name: Telemetry.event([:es, :projection, :signal, :sent]),
+        measurement: :count,
+        description: "Число сигналов чекпоинта, отправленных пачками читателей ноды",
+        tags: [:repo],
+        tag_values: &repo_tag/1
+      ),
+      sum(
+        prefix ++ [:projection, :signal, :received, :total],
+        event_name: Telemetry.event([:es, :projection, :signal, :received]),
+        measurement: :count,
+        description: "Число сигналов чекпоинта, полученных слушателем ноды",
+        tags: [:repo],
+        tag_values: &repo_tag/1
       )
     ])
   end
@@ -256,6 +277,8 @@ defmodule Core.Es.PromEx do
 
   defp tag_values(keys),
     do: fn metadata -> Map.new(keys, &{&1, to_string(Map.fetch!(metadata, &1))}) end
+
+  defp repo_tag(%{repo: repo}), do: %{repo: inspect(repo)}
 
   # ===== метрики опроса =====
 

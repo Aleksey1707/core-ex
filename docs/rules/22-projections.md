@@ -150,9 +150,11 @@ commit, вне `Transact.run` (`20-agreements.md`, CQS); тест — `19-testin
 невозможная clause по результату `await/3` (`make consumer-check`).
 
 Сломанный быстрый путь ожидания — `LISTEN` через пулер, `notifications: false` на одной из
-нескольких нод — ошибкой не виден: ожидание доходит шагами страховки (ADR-0013). Медленное
-ожидание SHOULD разбирать по `duration` `[:es, :projection, :await]`: держится на уровне шагов
-`await_min_ms:` … `await_max_ms:`, а не пачки, — сигнал чекпоинта не доходит.
+нескольких нод — ошибкой не виден: ожидание доходит шагами страховки (ADR-0013). Слушатель ноды,
+который не получает сигнал, пока кластер его шлёт, ловит алерт `EsProjectionSignalLost`
+(«Эксплуатация», ADR-0028). Медленное ожидание SHOULD разбирать по `duration`
+`[:es, :projection, :await]`: держится на уровне шагов `await_min_ms:` … `await_max_ms:`, а не
+пачки, — сигнал чекпоинта не доходит.
 
 ```text
 # плохо — медиана ожидания кратна шагам страховки, а пачки короче: сигнала нет, ответ даёт шаг
@@ -294,12 +296,15 @@ def down, do: raise(Ecto.MigrationError, "удаление проекции acco
 | `EsProjectionLagging` | `max by (projection) (my_app_prom_ex_es_projection_lag_seconds) > <порог> and on (projection) max by (projection) (my_app_prom_ex_es_projection_rebuilding) == 0` | проекция не успевает за записью: read-модель отстаёт, `await` уходит в `:projection_timeout` |
 | `EsProjectionRebuildLong` | `max by (projection) (my_app_prom_ex_es_projection_rebuilding) == 1`, `for: <порог>` | пересборка идёт дольше ожидаемого; прогресс — убывание `my_app_prom_ex_es_projection_lag_seconds` |
 | `EsProjectionOutdated` | `max by (projection) (my_app_prom_ex_es_projection_outdated) == 1`, `for: <порог>` | код проекции на ноде старше строки чекпоинта дольше выкладки: выкладка застряла или `version:` понижена |
+| `EsProjectionSignalLost` | `increase(my_app_prom_ex_es_projection_signal_received_total[10m]) == 0 and on (repo) sum by (repo) (increase(my_app_prom_ex_es_projection_signal_sent_total[10m])) > 0`, `for: <порог>` | кластер шлёт сигнал чекпоинта, а нода его не получает: соединение слушателя потеряно или стоит за pgbouncer в transaction mode, `await` на ноде идёт шагами |
 
 - `EsProjectionLagging` MUST идти с условием `rebuilding == 0`: при пересборке отставание равно
   возрасту непройденной истории, и алерт горел бы на каждой пересборке — её ведёт
   `EsProjectionRebuildLong`.
 - Отставание одинаково на всех нодах: агрегировать его SHOULD через `max by (projection)`, а не
   `sum` — сумма умножила бы значение на число нод.
+- `EsProjectionSignalLost` MUST держать серию ноды слева от `and` и условие `== 0`, а не долю
+  потерь (ADR-0028). Нода с `notifications: false` серий не отдаёт, и алерт на ней не горит.
 - Алерт SHOULD NOT заводиться на падение читателей и процессов агрегата — его ведёт
   `WorkerDown` (`21-observability.md`, «Рекомендованные алерты»); на `checkpoint_orphan` —
   сирота штатна между выкладками 2 и 3 новой проекции; на отказ записи снапшота,
@@ -316,6 +321,29 @@ def down, do: raise(Ecto.MigrationError, "удаление проекции acco
     max by (projection) (my_app_prom_ex_es_projection_lag_seconds) > 300
     and on (projection) max by (projection) (my_app_prom_ex_es_projection_rebuilding) == 0
   for: 5m
+```
+
+Тест `EsProjectionSignalLost` на `promtool test rules` (правило в `alerts.yml` — с `for: 5m`): нода
+`b` не получает, пока кластер шлёт, — алерт; нода `a` получает — тишина.
+
+```yaml
+rule_files: [alerts.yml]
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'my_app_prom_ex_es_projection_signal_sent_total{instance="a", repo="MyApp.DAO"}'
+        values: '0+5x30'
+      - series: 'my_app_prom_ex_es_projection_signal_received_total{instance="a", repo="MyApp.DAO"}'
+        values: '0+5x30'
+      - series: 'my_app_prom_ex_es_projection_signal_sent_total{instance="b", repo="MyApp.DAO"}'
+        values: '0x30'
+      - series: 'my_app_prom_ex_es_projection_signal_received_total{instance="b", repo="MyApp.DAO"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: EsProjectionSignalLost
+        exp_alerts:
+          - exp_labels: {instance: b, repo: MyApp.DAO}
 ```
 
 ## Связанные правила

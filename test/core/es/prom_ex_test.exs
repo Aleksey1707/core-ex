@@ -86,6 +86,8 @@ defmodule Core.Es.PromExTest do
             projection.retry.total
             projection.await.total
             projection.await.duration.milliseconds
+            projection.signal.sent.total
+            projection.signal.received.total
             aggregate.process.execute.total
             aggregate.process.execute.duration.milliseconds
             aggregate.process.execute.queue.milliseconds
@@ -121,6 +123,18 @@ defmodule Core.Es.PromExTest do
       refute metric.keep.(%{projection: "account_list", result: :idle})
       assert metric.keep.(%{projection: "account_list", result: :retry, error: "fake/failed"})
       assert metric.tags == [:projection, :error]
+    end
+
+    test "signal.sent.total и signal.received.total — sum по count с меткой repo" do
+      groups = PromEx.event_metrics(otp_app: :core)
+
+      for {name, event} <- [{"projection.signal.sent.total", :sent}, {"projection.signal.received.total", :received}] do
+        metric = metric!(groups, name)
+
+        assert %Telemetry.Metrics.Sum{measurement: :count, tags: [:repo]} = metric
+        assert metric.event_name == Core.Telemetry.event([:es, :projection, :signal, event])
+        assert metric.tag_values.(%{repo: Core.TestRepo}) == %{repo: "Core.TestRepo"}
+      end
     end
   end
 

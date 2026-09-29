@@ -426,6 +426,7 @@ Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_
 | `es_projection_events_total` | `projection` | события, прочитанные пачками |
 | `es_projection_retry_total` | `projection`, `error` | отказы пачки с повтором; `error` — `ns/code` ошибки или модуль исключения |
 | `es_projection_await_total`, `es_projection_await_duration_milliseconds` | `projection`, `result` | ожидание проекции; `result`: `ok` / `timeout` / `rebuilding` |
+| `es_projection_signal_sent_total`, `es_projection_signal_received_total` | `repo` | сигналы чекпоинта: отправленные пачками читателей ноды и полученные её слушателем; обе серии засеваются нулём при старте слушателя, при `notifications: false` серий нет |
 | `es_aggregate_process_execute_total`, `es_aggregate_process_execute_duration_milliseconds` | `type`, `mode`, `result` | команды процесса агрегата, длительность — с очередью; `result`: `ok` / `version_mismatch` / `error` / `exit` |
 | `es_aggregate_process_execute_queue_milliseconds` | `type` | ожидание в очереди процесса на id (`mode="process"`) |
 | `es_aggregate_process_execute_retries_total` | `type` | повторы команды после отказа записи |

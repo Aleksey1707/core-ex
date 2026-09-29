@@ -50,6 +50,9 @@ defmodule Core.Es.Projection.Reader do
   - метаданные: `projection` — имя, `result`, при `:retry` — `error`: модуль исключения, в том
     числе исключения колбэка (`:projection_raised`), `"<ns>/<code>"` прочих `%Core.Error{}`,
     `"exit"` или `"throw"`.
+
+  `[:es, :projection, :signal, :sent]` после commit пачки с исходом `:processed` —
+  `Core.Es.Projection.Listener`, «Telemetry».
   """
 
   use GenServer
@@ -57,6 +60,7 @@ defmodule Core.Es.Projection.Reader do
   alias Core.Error
   alias Core.Es.Projection
   alias Core.Es.Projection.Batch
+  alias Core.Es.Projection.Listener
   alias Core.Telemetry
 
   require Logger
@@ -190,9 +194,12 @@ defmodule Core.Es.Projection.Reader do
     schedule(%{state | backoff: backoff, result: result}, delay)
   end
 
-  # Транзакция пачки закоммичена: ожидающие своей проекции перечитывают чекпоинт.
-  defp signal_checkpoint(:processed, declaration),
-    do: Projection.Registry.signal_checkpoint(declaration.name)
+  # Транзакция пачки закоммичена: ожидающие своей проекции перечитывают чекпоинт, а её `NOTIFY`
+  # засчитывается отправленным.
+  defp signal_checkpoint(:processed, declaration) do
+    :ok = Projection.Registry.signal_checkpoint(declaration.name)
+    Listener.count_sent(declaration)
+  end
 
   defp signal_checkpoint(_result, _declaration), do: :ok
 
