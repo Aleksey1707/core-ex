@@ -43,12 +43,12 @@
 | `MyAppWeb.<Api>.<Version>.<Group>.<Resource>.*` | ресурс группы без своего ресурса (`/security/roles`): `<Group>` — только namespace, его `Schemas` и `Params` — по той же лестнице |
 | `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
 | `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
-| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка |
+| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка, ответ записи `Written` / `Created` |
 | `MyAppWeb.Params.*` | разбор входа, общий для поверхностей; общий для версий или ресурсов — `<Api>.Params.*`, `<Api>.<Version>.Params.*` |
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
 | `MyAppWeb.ErrorJSON` | ответ Phoenix на исключение (`render_errors:` у `Endpoint`) |
-| `MyAppWeb.Accepted` | ответ 202 после ожидания проекции, один на приложение («Ожидание проекции») |
+| `MyAppWeb.Accepted` | ответ команды после ожидания проекции — 202 и ответ создания, один на приложение («Ожидание проекции») |
 | `MyAppWeb.Response`, `MyAppWeb.Response.Code` | конверт ответа `use Core.Web.Response, codes: MyAppWeb.Response.Code` (`deps/core/docs/rules/10-architecture.md`) |
 | `MyAppWeb.Endpoint`, `MyAppWeb.Router`, `MyAppWeb.Telemetry` | обвязка Phoenix |
 
@@ -76,25 +76,32 @@ lib/my_app_web/{endpoint,router,telemetry}.ex
 - Схема, которую делят два ресурса, две версии или две поверхности, поднимается в `Schemas`
   ближайшего общего уровня (таблица выше), а не импортируется из соседнего ресурса. Разбор входа
   (`Params`), презентеры и плаги поднимаются по той же лестнице.
+- Ответ записи — `MyAppWeb.Schemas.Written` (`id` и целое `version`, оба обязательны; 200 создания
+  и 202 любой команды) и `MyAppWeb.Schemas.Created` (`id`, обязателен; создание state-stored) —
+  MUST лежать в корне при любом числе поверхностей: форма ответа записи одна на приложение, и вторая
+  поверхность берёт ту же схему, а не заводит копию.
 - Модуль одной поверхности лежит в её namespace, общий для поверхностей — в корне под ролью из
   таблицы. `Helper` и другие имена без роли — MUST NOT: новая роль корня — новая строка таблицы.
 - `ErrorJSON` MUST лежать в `lib/my_app_web/error_json.ex`, а не в `controllers/`, куда его кладёт
   генератор Phoenix: путь — по имени модуля, `render_errors:` ссылается на модуль, а не на файл.
 
 ```elixir
-# плохо — схема, общая для поверхностей, лежит в одной из них; вложенный ресурс — сосед родителя
+# плохо — схема, общая для поверхностей, лежит в одной из них; вложенный ресурс — сосед родителя;
+# ответ записи у единственной поверхности — в её namespace
 defmodule MyAppWeb.Public.V1.Schemas.Envelope do
 defmodule MyAppWeb.Public.V1.OrderItem.Controller do
+defmodule MyAppWeb.Public.V1.Schemas.Written do
 
-# хорошо
+# хорошо — ответ записи в корне при любом числе поверхностей
 defmodule MyAppWeb.Schemas.Envelope do
 defmodule MyAppWeb.Public.V1.Order.Item.Controller do
+defmodule MyAppWeb.Schemas.Written do
 
 # плохо — модули без роли в корне web
 defmodule MyAppWeb.Parse.OrderFilter do
 defmodule MyAppWeb.Helper.Projection do
 
-# хорошо — разбор входа у своего ресурса, ответ 202 — роль корня
+# хорошо — разбор входа у своего ресурса, ответ после ожидания проекции — роль корня
 defmodule MyAppWeb.Public.V1.Order.Params.Filter do
 defmodule MyAppWeb.Accepted do
 ```
@@ -156,8 +163,12 @@ defmodule MyAppWeb.Accepted do
 - Каждый экшен описывается `operation/2`; `@spec` у экшенов не требуется — контракт задаёт
   `operation/2` (`20-agreements.md`).
 - Ответы: `Response.success/1` + `json/2`; ошибки — через `action_fallback`.
+- Создание state-stored агрегата MUST отвечать `{id}` схемой `MyAppWeb.Schemas.Created`: usecase
+  отдаёт только идентификатор (`10-architecture.md`, «Usecases»), проекции у агрегата нет. Создание
+  event-sourced агрегата — «Ожидание проекции».
 
 ```elixir
+# создание state-stored агрегата — `{id}`, в `operation/2` ответ `MyAppWeb.Schemas.Created`
 def create(conn, _params) do
   body = OpenApiSpex.body_params(conn)
 
@@ -196,11 +207,17 @@ with {:ok, version} <- Params.optional_version(params),
 После успешного usecase экшен MUST дождаться её — **вне** транзакции, по потоку агрегата
 (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
 
+Создание ждёт проекцию так же, но MUST отвечать не представлением, а `{id, version}` записи —
+одной схемой `MyAppWeb.Schemas.Written` на 200 и на 202: 200 значит, что `GET` по `id` уже видит
+запись, 202 — что ещё нет. Почему не представление — ADR-0027
+(`deps/core/docs/adr/0027-create-responds-id-and-version.md`).
+
 - Usecase команды отдаёт версию после записи, у заведения — пару `{id, version}`
   (`10-architecture.md`, «Usecases»). Ждать проекцию и читать представление — дело экшена.
 - `:projection_timeout` и `:projection_rebuilding` — ответ 202 с `{id, version}`, а не ошибка:
   запись применена, повтор команды по ним запрещает свод библиотеки.
-- Операция такой команды MUST объявлять ответ `accepted:` со своей схемой.
+- Операция такой команды MUST объявлять ответ `accepted:` со схемой `MyAppWeb.Schemas.Written`,
+  операция создания — её же и в `ok:`.
 - Ответ 202 по `:projection_timeout` / `:projection_rebuilding` собирает один хелпер
   приложения — `MyAppWeb.Accepted` («Раскладка»). Проекцию ждёт литеральный вызов
   `Projection.await(Agg, id, timeout)` в экшене или в его `defp`, хелпер принимает результат.
@@ -209,6 +226,9 @@ with {:ok, version} <- Params.optional_version(params),
   `events:`. Хелпер, который зовёт
   `projection.await(agg, id, timeout)` сам, MUST NOT: через модуль-переменную сборка не
   проверяет ни агрегат, ни ID.
+- Ответ создания MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/4` (`conn`, результат
+  ожидания, `id`, `version`) через `respond/4` с `render`, который отдаёт тело `{id, version}`:
+  ветка 202 у хелпера одна, и её тест покрывает и создание.
 - Ветку 202 MUST проверять один тест на приложение, через
   `Core.Es.Projection.Test.with_rebuilding/2` (`19-testing.md`, «Event sourcing»).
 
@@ -231,6 +251,14 @@ with {:ok, version} <- Usecases.Agg.take(id, expected, context),
 
 defp respond_taken(conn, %Agg.ID{} = id, version) do
   MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+end
+
+# хорошо — создание: {id, version} и на 200, и на 202
+with {:ok, {id, version}} <- Usecases.Agg.open(name, context),
+     do: respond_created(conn, id, version)
+
+defp respond_created(conn, %Agg.ID{} = id, version) do
+  MyAppWeb.Accepted.written(conn, Projection.await(Agg, id, 5_000), id, version)
 end
 ```
 

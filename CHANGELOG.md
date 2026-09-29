@@ -1,5 +1,32 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Создание отвечает `{id, version}` / `{id}` общими схемами корня web**
+  (`docs/rules/app/15-web-api.md`, «Раскладка», «Controller», «Ожидание проекции»). Ярус описывал
+  ответ команды event-sourced агрегата представлением, а создание не выделял: версию после создания
+  клиент не угадает (создание пишет несколько событий), без неё не пошлёт следующий `If-Match`, а
+  202 с `{id, version}` отдавал её только тогда, когда представление не готово. Теперь создание
+  event-sourced агрегата ждёт проекцию, как любая команда, и отвечает `{id, version}` одной схемой
+  `MyAppWeb.Schemas.Written` на 200 и на 202 — статус несёт готовность представления. Ответ собирает
+  `MyAppWeb.Accepted.written/4` (`conn`, результат ожидания, `id`, `version`) рядом с `respond/4`;
+  операция команды объявляет `Written` в `accepted:`, операция создания — ещё и в `ok:`. Создание
+  state-stored агрегата отвечает `{id}` схемой `MyAppWeb.Schemas.Created`. `Written` и `Created`
+  MUST лежать в корне `MyAppWeb.Schemas` при любом числе поверхностей — исключение из лестницы схем.
+  Решение и отвергнутые варианты — `docs/adr/0027-create-responds-id-and-version.md`.
+
+  Правка экшена создания event-sourced агрегата: было — `json(conn, Response.success(%{id: …}))`
+  или представление после ожидания → стало — `{:ok, {id, version}}` из usecase и
+  `MyAppWeb.Accepted.written(conn, Projection.await(Agg, id, timeout), id, version)` в `defp` с
+  суженным ID.
+
+  Правка операций: схема 202 любой команды event-sourced агрегата, своя у ресурса или версии →
+  `MyAppWeb.Schemas.Written` в `accepted:`; схема `{id}` state-stored создания в namespace
+  поверхности → `MyAppWeb.Schemas.Created`. Строка `DEBT.md` приложения об ответе создания
+  `{id, version}` вместо представления снимается.
+
 ## 0.6.0
 
 ### Ломающие изменения контракта
