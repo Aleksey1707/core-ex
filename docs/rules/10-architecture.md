@@ -149,6 +149,7 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 | Модуль | Роль |
 |---|---|
 | `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `If-Match` → `Version`: `explicit_version/2` (только явная), `expected_version/2` (`*` → `:current`), `optional_version/2` (нет заголовка → `:current`) |
+| `Core.Web.Prefer` | заголовок `Prefer` (RFC 7240) → предпочтения `respond-async` / `wait`, режим ответа при серверном пределе (`mode/2`) и значение `Preference-Applied` по итоговому статусу (`applied/3`) |
 | `Core.Web.Response` + `Core.Web.Response.Code` | конверт `%{code, messages[, data]}` и его числовые коды; `use Core.Web.Response, codes:` — конверт на своём словаре |
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, код конверта, текст, уровень лога}` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |

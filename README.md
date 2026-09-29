@@ -19,7 +19,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | `Core.Es.*` | доменные события и их wire-конверт, event-sourced агрегат и его write-репозиторий, event store, маппинг в outbox |
 | `Core.Outbox.*` | transactional outbox: запись, поллер, доставка, чистильщик |
 | `Core.Mq.*`, `Core.PubSub.*` | адаптеры RabbitMQ Stream / Kafka и контракты pub/sub (клиенты — опциональные зависимости, см. ниже) |
-| `Core.Web.*` | граница HTTP: конверт ответа, разбор параметров, `%Error{}` → HTTP-статус, сервер метрик |
+| `Core.Web.*` | граница HTTP: конверт ответа, разбор параметров и заголовка `Prefer`, `%Error{}` → HTTP-статус, сервер метрик |
 | `Core.Otel`, `Core.Otel.Messaging`, `Core.Otel.LogFilter` | пропагация OpenTelemetry через outbox и брокер, `trace_id` в metadata логов |
 | `Core.Helper.*` | транзакции, savepoint, advisory-локи, after-commit хуки |
 | `Core.*.PromEx` | плагины метрик для outbox, MQ, event sourcing, кешей, воркеров, cgroup |

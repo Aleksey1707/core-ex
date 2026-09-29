@@ -43,12 +43,12 @@
 | `MyAppWeb.<Api>.<Version>.<Group>.<Resource>.*` | ресурс группы без своего ресурса (`/security/roles`): `<Group>` — только namespace, его `Schemas` и `Params` — по той же лестнице |
 | `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
 | `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
-| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка, ответ записи `Written` / `Created` |
+| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка, ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
 | `MyAppWeb.Params.*` | разбор входа, общий для поверхностей; общий для версий или ресурсов — `<Api>.Params.*`, `<Api>.<Version>.Params.*` |
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
 | `MyAppWeb.ErrorJSON` | ответ Phoenix на исключение (`render_errors:` у `Endpoint`) |
-| `MyAppWeb.Accepted` | ответ команды после ожидания проекции — 202 и ответ создания, один на приложение («Ожидание проекции») |
+| `MyAppWeb.Accepted` | ответ команды после ожидания проекции — решение по `Prefer`, 202 и ответ создания, один на приложение («Ожидание проекции») |
 | `MyAppWeb.Response`, `MyAppWeb.Response.Code` | конверт ответа `use Core.Web.Response, codes: MyAppWeb.Response.Code` (`deps/core/docs/rules/10-architecture.md`) |
 | `MyAppWeb.Endpoint`, `MyAppWeb.Router`, `MyAppWeb.Telemetry` | обвязка Phoenix |
 
@@ -79,7 +79,9 @@ lib/my_app_web/{endpoint,router,telemetry}.ex
 - Ответ записи — `MyAppWeb.Schemas.Written` (`id` и целое `version`, оба обязательны; 200 создания
   и 202 любой команды) и `MyAppWeb.Schemas.Created` (`id`, обязателен; создание state-stored) —
   MUST лежать в корне при любом числе поверхностей: форма ответа записи одна на приложение, и вторая
-  поверхность берёт ту же схему, а не заводит копию.
+  поверхность берёт ту же схему, а не заводит копию. Туда же и по той же причине — определения
+  заголовков ожидания `MyAppWeb.Schemas.Prefer`: параметр запроса `Prefer` и заголовок ответа
+  `Preference-Applied` («Ожидание проекции»).
 - Модуль одной поверхности лежит в её namespace, общий для поверхностей — в корне под ролью из
   таблицы. `Helper` и другие имена без роли — MUST NOT: новая роль корня — новая строка таблицы.
 - `ErrorJSON` MUST лежать в `lib/my_app_web/error_json.ex`, а не в `controllers/`, куда его кладёт
@@ -204,29 +206,50 @@ with {:ok, version} <- Params.optional_version(params),
 ## Ожидание проекции
 
 Команда event-sourced агрегата отвечает представлением из read-модели, но его пишет проекция.
-После успешного usecase экшен MUST дождаться её — **вне** транзакции, по потоку агрегата
-(`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
+После успешного usecase экшен ждёт её — **вне** транзакции, по потоку агрегата
+(`deps/core/docs/rules/22-projections.md`, «Read-after-write»), — если клиент не отказался от
+ожидания заголовком `Prefer` (RFC 7240).
 
 Создание ждёт проекцию так же, но MUST отвечать не представлением, а `{id, version}` записи —
 одной схемой `MyAppWeb.Schemas.Written` на 200 и на 202: 200 значит, что `GET` по `id` уже видит
 запись, 202 — что ещё нет. Почему не представление — ADR-0027
 (`deps/core/docs/adr/0027-create-responds-id-and-version.md`).
 
+Готовность ждать задаёт клиент, а не операция: `Prefer` MUST понимать каждая команда
+event-sourced агрегата, одинаково. Без ожидания ответ — всегда 202: 200 сохраняет смысл «`GET` уже
+видит запись». Почему клиент и почему не 200 — ADR-0030
+(`deps/core/docs/adr/0030-prefer-controls-projection-await.md`).
+
+| `Prefer` | Ответ | `Preference-Applied` |
+|---|---|---|
+| нет, неизвестное или неразборчивое предпочтение | ждать с пределом хелпера (`await_timeout_ms:`): дождался — 200, нет — 202 | нет |
+| `respond-async`, `wait=0` | `await` не звать, 202 с `{id, version}` | `respond-async` / `wait=0` |
+| `wait=N` | ждать `min(N с, предел)`: дождался — 200, нет — 202 | `wait=<применённое>` |
+| `respond-async, wait=N` | как `wait=N` | `wait=<применённое>`; на 202 — и `respond-async` |
+
+Разбор заголовка и значение `Preference-Applied` по итоговому статусу — `Core.Web.Prefer`
+(`parse/1`, `mode/2`, `applied/3`). Команда state-stored агрегата и чтение `Prefer` не разбирают и
+`Preference-Applied` не ставят: ждать им нечего.
+
 - Usecase команды отдаёт версию после записи, у заведения — пару `{id, version}`
   (`10-architecture.md`, «Usecases»). Ждать проекцию и читать представление — дело экшена.
 - `:projection_timeout` и `:projection_rebuilding` — ответ 202 с `{id, version}`, а не ошибка:
   запись применена, повтор команды по ним запрещает свод библиотеки.
 - Операция такой команды MUST объявлять ответ `accepted:` со схемой `MyAppWeb.Schemas.Written`,
-  операция создания — её же и в `ok:`.
-- Ответ 202 по `:projection_timeout` / `:projection_rebuilding` собирает один хелпер
-  приложения — `MyAppWeb.Accepted` («Раскладка»). Проекцию ждёт литеральный вызов
-  `Projection.await(Agg, id, timeout)` в экшене или в его `defp`, хелпер принимает результат.
+  операция создания — её же и в `ok:`. Параметр-заголовок `Prefer` и заголовок ответа
+  `Preference-Applied` на 200 и 202 операция MUST объявлять общими определениями
+  `MyAppWeb.Schemas.Prefer` («Раскладка»): без них клиент об отказе от ожидания не узнает.
+- Ответ собирает один хелпер приложения — `MyAppWeb.Accepted` («Раскладка»): он разбирает
+  `Prefer` через `Core.Web.Prefer`, решает, ждать ли и сколько, ставит `Preference-Applied` и
+  отвечает 200 или 202. Свой разбор `Prefer` в хелпере или экшене MUST NOT: разборы разойдутся.
+- Проекцию ждёт литеральный вызов в колбэке-захвате `&Projection.await(Agg, id, &1)`, записанном
+  в экшене или в его `defp`: хелпер зовёт колбэк с таймаутом из `Core.Web.Prefer.mode/2` либо не
+  зовёт вовсе. Сборка сверяет агрегат и ID там, где записан вызов, и внутри захвата.
   ID на месте вызова MUST быть сужен до `%Agg.ID{}` — паттерном в голове функции с вызовом или
   в `with`: ID из параметра без сужения сборка не сверяет, и ловится только агрегат не из
-  `events:`. Хелпер, который зовёт
-  `projection.await(agg, id, timeout)` сам, MUST NOT: через модуль-переменную сборка не
-  проверяет ни агрегат, ни ID.
-- Ответ создания MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/4` (`conn`, результат
+  `events:`. Хелпер, который зовёт `projection.await(agg, id, timeout)` сам, MUST NOT: через
+  модуль-переменную сборка не проверяет ни агрегат, ни ID.
+- Ответ создания MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/4` (`conn`, колбэк
   ожидания, `id`, `version`) через `respond/4` с `render`, который отдаёт тело `{id, version}`:
   ветка 202 у хелпера одна, и её тест покрывает и создание.
 - Ветку 202 MUST проверять один тест на приложение, через
@@ -237,20 +260,23 @@ with {:ok, version} <- Params.optional_version(params),
 with {:ok, _version} <- Usecases.Agg.take(id, version, context),
      do: reload(conn, id)
 
+# плохо — ожидание до хелпера: `Prefer` не работает, таймаут клиента не применяется
+MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+
 # плохо — модуль проекции параметром хелпера: ID другого агрегата сборка не видит
 MyAppWeb.Accepted.await(conn, Projection, Agg, id, written, &reload(&1, id))
 
 # плохо — ID параметром defp без сужения: ID другого агрегата сборка не видит
 defp respond_taken(conn, id, version) do
-  MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+  MyAppWeb.Accepted.respond(conn, &Projection.await(Agg, id, &1), {id, version}, &reload(&1, id))
 end
 
-# хорошо — литерал в defp экшена, ID сужен в голове, ответ 202 получает {id, version}
+# хорошо — литерал в захвате defp экшена, ID сужен в голове, хелпер решает по `Prefer`
 with {:ok, version} <- Usecases.Agg.take(id, expected, context),
      do: respond_taken(conn, id, version)
 
 defp respond_taken(conn, %Agg.ID{} = id, version) do
-  MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), {id, version}, &reload(&1, id))
+  MyAppWeb.Accepted.respond(conn, &Projection.await(Agg, id, &1), {id, version}, &reload(&1, id))
 end
 
 # хорошо — создание: {id, version} и на 200, и на 202
@@ -258,7 +284,19 @@ with {:ok, {id, version}} <- Usecases.Agg.open(name, context),
      do: respond_created(conn, id, version)
 
 defp respond_created(conn, %Agg.ID{} = id, version) do
-  MyAppWeb.Accepted.written(conn, Projection.await(Agg, id, 5_000), id, version)
+  MyAppWeb.Accepted.written(conn, &Projection.await(Agg, id, &1), id, version)
+end
+
+# хорошо — ядро хелпера (`alias Core.Web.Prefer`): колбэк не зван при отказе от ожидания,
+# `Preference-Applied` — по итоговому статусу: `Prefer.applied(prefer, max_ms, 200 | 202)`
+def respond(conn, await, {id, version}, render) when is_function(await, 1) do
+  prefer = conn |> get_req_header("prefer") |> Prefer.parse()
+  max_ms = await_timeout_ms()
+
+  case Prefer.mode(prefer, max_ms) do
+    :respond_async -> accepted(conn, {prefer, max_ms}, {id, version})
+    {:wait, timeout} -> respond_awaited(conn, {prefer, max_ms}, await.(timeout), {id, version}, render)
+  end
 end
 ```
 

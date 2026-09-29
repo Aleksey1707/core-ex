@@ -10,6 +10,34 @@
   `Safe.execute("my label", fun)` → стало — `Safe.execute(:my_plugin, :my_group, "my label", fun)`
   и `Safe.error_metric(metric_prefix, :my_plugin)` в event-метриках плагина.
 
+- **Ожидание проекции после команды управляется заголовком `Prefer` клиента**
+  (`docs/rules/app/15-web-api.md`, «Ожидание проекции»). Ярус обязывал каждую команду event-sourced
+  агрегата ждать проекцию до ответа, даже когда клиенту read-модель после команды не нужна, — он
+  платил за это временем ответа до таймаута хелпера. Теперь без заголовка поведение прежнее
+  (дождался — 200, нет — 202), а клиент отказывается от ожидания или ограничивает его по RFC 7240:
+  `Prefer: respond-async` (и `wait=0`) — сразу 202 с `{id, version}` без `await`, `wait=N` — ждать не
+  дольше `min(N с, предел хелпера)`; применённое сервер сообщает в `Preference-Applied` по итоговому
+  статусу (`respond-async` — только на 202). Без ожидания ответ всегда 202 — 200 по-прежнему значит
+  «`GET` уже видит запись». `Prefer` MUST понимать каждая команда event-sourced агрегата; usecase
+  проекцию не ждёт ни на одной границе
+  (`docs/rules/app/10-architecture.md`, «Usecases»; `docs/rules/22-projections.md`,
+  «Read-after-write»). Решение и отвергнутые варианты — `docs/adr/0030-prefer-controls-projection-await.md`.
+
+  Правка хелпера `MyAppWeb.Accepted`: было — `respond(conn, awaited, {id, version}, render)` и
+  `written(conn, awaited, id, version)` с результатом ожидания → стало — колбэк ожидания вместо
+  результата; хелпер разбирает `Prefer` через `Core.Web.Prefer`, ставит `Preference-Applied` и зовёт
+  колбэк с таймаутом из `Core.Web.Prefer.mode/2` либо не зовёт вовсе. Пока хелпер не переведён —
+  строка `DEBT.md` приложения.
+
+  Правка экшенов: было — `MyAppWeb.Accepted.respond(conn, Projection.await(Agg, id, 5_000), …)` →
+  стало — `MyAppWeb.Accepted.respond(conn, &Projection.await(Agg, id, &1), …)`; то же у `written/4`.
+  Сборка сверяет агрегат и ID и внутри захвата; ID по-прежнему сужен до `%Agg.ID{}`.
+
+  Правка операций: параметр-заголовок `Prefer` и заголовок ответа `Preference-Applied` на 200 и 202
+  каждой команды event-sourced агрегата — общими определениями `MyAppWeb.Schemas.Prefer` в корне web.
+  Тест хелпера как чистой функции проходит три ветки `Prefer` (`docs/rules/app/19-testing.md`,
+  «Event sourcing»).
+
 ### Новое
 
 - **`name:` в `watch:` у `Core.Workers.PromEx` принимает `GenServer.name()`**
@@ -85,6 +113,12 @@
   Что завести у себя: алерт `EsProjectionSignalLost` из таблицы «Эксплуатация» со своим `for:` и
   тест `promtool test rules` по примеру оттуда. Код и конфигурацию `Core.Es.PromEx` менять не
   нужно — метрики строятся всегда.
+
+- **`Core.Web.Prefer` — разбор заголовка `Prefer` (RFC 7240) для ожидания проекции.** `parse/1`
+  разбирает значения заголовков (`respond-async`, `wait=N`; регистр, кавычки и параметры после `;`
+  учтены, неизвестное и неразборчивое игнорируется, из повторов учитывается только первое),
+  `mode/2` при серверном пределе отдаёт `:respond_async | {:wait, ms}`, `applied/3` — значение
+  `Preference-Applied` по итоговому статусу 200 / 202 либо `nil`.
 
 ## 0.7.0
 

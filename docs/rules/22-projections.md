@@ -146,6 +146,11 @@ commit, вне `Transact.run` (`20-agreements.md`, CQS); тест — `19-testin
 Реализацию `Core.Es.Projection.Await.run/5` (`@doc false`) звать MUST NOT: модуль проекции и тип
 агрегата в ней — параметры, и сборка не сверяет ни агрегат, ни ID.
 
+Ожидание — решение вызывающего, а не обязанность команды: usecase проекцию MUST NOT ждать. Граница,
+чей клиент читает read-модель сразу после записи, ждёт; HTTP-граница ждёт по умолчанию, и клиент
+отказывается заголовком `Prefer` — `deps/core/docs/rules/app/15-web-api.md`, «Ожидание проекции»;
+ADR-0030. Воркер, подписчик и mix-таска, которые read-модель после записи не читают, не ждут.
+
 Проверяется: предупреждение при сборке вызывающего — агрегат не из `events:`, ID другого агрегата,
 невозможная clause по результату `await/3` (`make consumer-check`).
 
@@ -174,6 +179,13 @@ with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, c
 
 # плохо — реализация ожидания мимо await/3: ID другого агрегата сборка не видит
 Core.Es.Projection.Await.run(projection, projection.__es_projection__(), "account", order_id, 5_000)
+
+# плохо — usecase ждёт проекцию сам: клиент, которому read-модель не нужна, платит ожиданием
+def open(id, params, context) do
+  with {:ok, version} <- write(id, params, context),
+       :ok <- AccountList.Projection.await(Account, id, 5_000),
+       do: {:ok, version}
+end
 
 # хорошо — usecase записал и закоммитил, вызывающий ждёт проекцию и читает read-модель
 with {:ok, _version} <- Accounts.Open.call(id, params, context),
