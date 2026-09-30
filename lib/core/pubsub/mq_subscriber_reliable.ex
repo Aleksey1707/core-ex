@@ -7,13 +7,18 @@ defmodule Core.PubSub.MqSubscriberReliable do
   `on_message`/`from_message` перехватывается и превращается в `{:error, %Error{}}`
   (без commit, redelivery) — не роняет подписчик в crash-loop на «ядовитом» сообщении.
 
+  Фильтр `filter` решает по сырому `Mq.Message` (заголовки, ключ, топик) до `from_message`:
+  отвергнутое сообщение коммитится без декодирования тела, span'а не открывает и даёт исход
+  цикла `:filtered` — отдельный от `{:skip, _}` обработчика. Исключение или не-boolean из
+  фильтра — ошибка обработки: без commit, с тем же счётом попыток и выходом в DLQ.
+
   Повторы одного и того же сообщения считаются: интервал растёт от `poll_interval_ms`
   до `retry_max_ms`, а после `max_attempts` неудач сообщение уходит в DLQ-топик
   (`dlq_topic`, по умолчанию `"<topic>.dlq"`) и коммитится — иначе оно блокировало бы
   топик навсегда. Без настроенного `dlq_writer` выброса не происходит: подписчик
   продолжает повторы на `retry_max_ms` и пишет `error` в лог.
 
-  После `:processed` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
+  После `:processed` / `:filtered` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
   После `:idle` — `poll_interval_ms`, после `:error` — текущий backoff.
 
   Обработка сообщения идёт в span'е `"process <topic>"` (`kind: :consumer`),
@@ -46,8 +51,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @label "PubSub.MqSubscriberReliable"
 
   @keys ~w(
-    reader_module reader from_message on_message context_factory poll_interval_ms retry_max_ms max_attempts
-    dlq_writer dlq_handle dlq_topic topic subscribe subscribe_data name shutdown
+    reader_module reader filter from_message on_message context_factory poll_interval_ms retry_max_ms
+    max_attempts dlq_writer dlq_handle dlq_topic topic subscribe subscribe_data name shutdown
   )a
 
   @shutdown_ms 30_000
@@ -59,6 +64,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   defstruct [
     :reader_module,
     :reader,
+    :filter,
     :from_message,
     :on_message,
     :context_factory,
@@ -80,6 +86,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @type domain_message :: term()
   @type subscriber_data :: term()
 
+  @type filter :: (Message.t() -> boolean())
+
   @type from_message :: (Message.t() -> Result.t(domain_message()))
 
   @type on_message ::
@@ -88,7 +96,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @type t :: GenServer.server()
 
   @typedoc "Исход одного цикла чтения."
-  @type cycle_result :: :processed | :dlq | :idle | :error | :not_subscribed
+  @type cycle_result :: :processed | :filtered | :dlq | :idle | :error | :not_subscribed
 
   @doc """
   Спецификация ребёнка супервизора.
@@ -111,7 +119,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   Запустить reliable subscriber.
 
   Opts: `:reader_module`, `:reader`, `:from_message`, `:on_message`,
-  опционально `:context_factory` (вызывается на каждое сообщение), `:poll_interval_ms`,
+  опционально `:filter` (предикат по сырому сообщению до `from_message`, по умолчанию
+  пропускает всё), `:context_factory` (вызывается на каждое сообщение), `:poll_interval_ms`,
   `:topic` (string для метрик и имени DLQ), `:name`.
 
   DLQ: `:dlq_writer` (модуль `Mq.Writer`), `:dlq_handle` (его handle — обязателен при
@@ -169,6 +178,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
     state = %__MODULE__{
       reader_module: StartOpts.module!(@label, opts, :reader_module),
       reader: StartOpts.term!(@label, opts, :reader),
+      filter: StartOpts.fun!(@label, opts, :filter, 1, &accept_all/1),
       from_message: StartOpts.fun!(@label, opts, :from_message, 1),
       on_message: StartOpts.fun!(@label, opts, :on_message, 3),
       context_factory: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0),
@@ -242,7 +252,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
         {:idle, state}
 
       {:ok, raw} ->
-        handle_raw(count_attempt(state, raw), raw)
+        filter_raw(count_attempt(state, raw), raw)
 
       {:error, %Error{} = error} ->
         Logger.warning("pubsub reliable get: #{error.message}")
@@ -276,6 +286,33 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   defp count_attempt(state, raw) do
     %{state | pending_raw: raw, attempts: 1, retry_ms: state.poll_interval_ms}
+  end
+
+  # Фильтр стоит до span'а: у внешнего топика без `traceparent` каждое отвергнутое сообщение
+  # открывало бы свой корневой трейс.
+  defp filter_raw(state, raw) do
+    case safe_filter(state, raw) do
+      true ->
+        handle_raw(state, raw)
+
+      false ->
+        commit(state)
+        {:filtered, clear_pending(state)}
+
+      {:error, %Error{} = error} ->
+        Logger.warning("pubsub reliable filter: #{error.message}")
+        fail_attempt(state, raw, error)
+
+      other ->
+        Logger.warning("pubsub reliable filter: неожиданный результат #{inspect(other)}")
+        fail_attempt(state, raw, unexpected_result_error(:filter, other))
+    end
+  end
+
+  defp safe_filter(state, raw) do
+    state.filter.(raw)
+  rescue
+    exception -> {:error, handler_crash_error(:filter, exception, __STACKTRACE__)}
   end
 
   # Span покрывает и декод, и обработчик: родитель берётся из заголовков сообщения
@@ -345,7 +382,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
       other ->
         Logger.warning("pubsub reliable on_message: неожиданный результат #{inspect(other)}")
-        error = unexpected_result_error(other)
+        error = unexpected_result_error(:on_message, other)
         Otel.record_error(error)
         fail_attempt(state, raw, error)
     end
@@ -448,11 +485,11 @@ defmodule Core.PubSub.MqSubscriberReliable do
     )
   end
 
-  defp unexpected_result_error(other) do
+  defp unexpected_result_error(handler, other) do
     Error.app(
       code: :unexpected_handler_result,
       ns: :pubsub,
-      message: "on_message вернул неожиданный результат",
+      message: "#{handler} вернул неожиданный результат",
       detail: other
     )
   end
@@ -477,7 +514,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
     schedule(%{state | data: data, subscribed?: true}, state.poll_interval_ms)
   end
 
-  defp reschedule(state, result) when result in ~w(processed dlq)a do
+  defp reschedule(state, result) when result in ~w(processed filtered dlq)a do
     schedule(state, 0)
   end
 
@@ -517,6 +554,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
       %{topic: state.topic, dlq_topic: state.dlq_topic}
     )
   end
+
+  defp accept_all(%Message{}), do: true
 
   defp retry_max_ms(opts, poll_interval_ms) do
     max(StartOpts.pos_integer!(@label, opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)

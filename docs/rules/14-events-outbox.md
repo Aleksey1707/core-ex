@@ -372,6 +372,13 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
   `{:skip, reason}` коммитят offset; `{:error, _}`, ошибка `from_message` и исключение в
   обработчике — нет, сообщение приходит снова с растущим интервалом. Исключение не роняет
   подписчик: оно становится `{:error, _}` (`:handler_crashed`).
+- Фильтр `filter:` (`Mq.Message.t() -> boolean()`) решает по сырому сообщению до
+  `from_message`: `false` коммитит offset без декодирования тела и без span'а, исход цикла —
+  `:filtered` (метка `result="filtered"` у `mq_subscriber_cycles_total`), отдельно от
+  `{:skip, _}` обработчика, который считается `:processed`. Исключение в фильтре
+  (`:handler_crashed`) и не-boolean (`:unexpected_handler_result`) — ошибка обработки: без commit,
+  с общим счётом попыток и выходом в DLQ. Проверяется:
+  `test/core/pubsub/mq_subscriber_reliable_test.exs`, describe «фильтр до разбора тела».
 - «Ядовитое» сообщение (обработчик стабильно возвращает ошибку) MUST иметь выход:
   `MqSubscriberReliable` считает попытки, растит интервал до `retry_max_ms` и после
   `max_attempts` публикует сырое сообщение в DLQ-топик (`<topic>.dlq`, заголовки

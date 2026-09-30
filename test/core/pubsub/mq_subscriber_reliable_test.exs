@@ -171,6 +171,94 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     assert :idle = MqSubscriberReliable.run_once(sub)
   end
 
+  describe "фильтр до разбора тела" do
+    test "отвергнутое сообщение коммитится без from_message", %{topic: topic, context: context} do
+      reader = MqFake.QueueReader.new([message(topic, "b1", %{"name" => "other"}), message(topic, "b2")])
+      parent = self()
+      attach_cycle_telemetry(parent)
+
+      on = fn message, _d, _c ->
+        send(parent, {:handled, message})
+        :ok
+      end
+
+      from_message = fn %Message{body: body} ->
+        send(parent, {:decoded, body})
+        {:ok, body}
+      end
+
+      sub =
+        start_sub(reader, topic, "sub-filter", on,
+          from_message: from_message,
+          filter: fn %Message{headers: headers} -> headers["name"] == "product_created" end
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      assert :filtered = MqSubscriberReliable.run_once(sub)
+      assert_receive {:cycle, :filtered}
+      refute_received {:decoded, _}
+      refute_received {:handled, _}
+
+      assert :processed = MqSubscriberReliable.run_once(sub)
+      assert_received {:decoded, "b2"}
+      assert_received {:handled, "b2"}
+      assert :idle = MqSubscriberReliable.run_once(sub)
+    end
+
+    test "исключение в фильтре — без commit, subscriber не падает", %{
+      reader: reader,
+      topic: topic,
+      context: context
+    } do
+      {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+      filter = fn _m ->
+        if Agent.get_and_update(calls, &{&1, &1 + 1}) == 0, do: raise("filter boom"), else: true
+      end
+
+      sub = start_sub(reader, topic, "sub-filter-crash", fn _m, _d, _c -> :ok end, filter: filter)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      log = capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+      assert log =~ "pubsub reliable filter: filter завершился исключением"
+      assert Process.alive?(sub)
+      assert :processed = MqSubscriberReliable.run_once(sub)
+    end
+
+    test "не-boolean из фильтра — ошибка без commit", %{reader: reader, topic: topic, context: context} do
+      sub = start_sub(reader, topic, "sub-filter-result", fn _m, _d, _c -> :ok end, filter: fn _m -> :yes end)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      log = capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+      assert log =~ "pubsub reliable filter: неожиданный результат :yes"
+      capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+    end
+
+    test "ошибка фильтра после max_attempts уходит в DLQ", %{reader: reader, topic: topic, context: context} do
+      writer = MqFake.Writer.new()
+
+      sub =
+        start_sub(reader, topic, "sub-filter-dlq", fn _m, _d, _c -> :ok end,
+          filter: fn _m -> raise "filter boom" end,
+          max_attempts: 1,
+          dlq_writer: MqFake.Writer,
+          dlq_handle: writer
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      capture_log(fn -> assert :dlq = MqSubscriberReliable.run_once(sub) end)
+      assert :idle = MqSubscriberReliable.run_once(sub)
+
+      assert [dead] = MqFake.Writer.published(writer)
+      assert dead.body == "body"
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-error")) =~ "filter завершился исключением"
+    end
+  end
+
   test "drain: один :tick обрабатывает пачку без ожидания poll_interval", %{context: context} do
     topic = Mq.Topic.new!("drain_topic")
     reader = MqFake.QueueReader.new(Enum.map(1..5, &message(topic, "b#{&1}")))
@@ -471,6 +559,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
             {:from_message, fn _m, _d -> :ok end, "функция арности 1"},
             {:on_message, fn _m -> :ok end, "функция арности 3"},
             {:context_factory, fn _ -> Context.new() end, "функция арности 0"},
+            {:filter, fn _m, _d -> true end, "функция арности 1"},
             {:poll_interval_ms, 0, "положительное целое"},
             {:retry_max_ms, -1, "положительное целое"},
             {:max_attempts, 0, "положительное целое"},
@@ -573,6 +662,14 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
       process = OtelFixture.drain() |> OtelFixture.find("process products")
 
       assert process.attributes["core.pubsub.dlq_topic"] == "products.dlq"
+    end
+
+    test "отфильтрованное сообщение span'а не открывает", %{reader: reader, topic: topic, context: context} do
+      sub = start_sub(reader, topic, "sub-trace-filter", fn _m, _d, _c -> :ok end, filter: fn _m -> false end)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+      assert :filtered = MqSubscriberReliable.run_once(sub)
+
+      assert OtelFixture.drain() == []
     end
   end
 

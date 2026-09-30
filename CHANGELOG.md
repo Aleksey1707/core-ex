@@ -78,6 +78,18 @@
   `DefaultPartitioner` Kafka (`partition/2`, `murmur2/1`). Клиента не требует и компилируется
   всегда.
 
+- **Фильтр `filter:` у `Core.PubSub.MqSubscriberReliable`** — предикат `Mq.Message.t() -> boolean()`
+  по заголовкам, ключу и топику до `from_message`. Раньше решение «пропустить» принимал только
+  `on_message`, то есть после декодирования тела, которое фильтр по заголовкам и должен сэкономить.
+  `false` коммитит offset без `from_message` и без span'а `"process <topic>"`; исход `run_once/1` и
+  метка `result` у `mq_subscriber_cycles_total` — `filtered`, отдельно от `{:skip, _}` обработчика
+  (`processed`). Исключение в фильтре и не-boolean — ошибка обработки без commit, с повторами и
+  выходом в DLQ. Без опции подписчик пропускает всё, как раньше; опция проходит и через
+  `MqSubscriberReliable.Supervisor`. Правка подписчика, которому хватает заголовков: было —
+  `on_message` возвращает `{:skip, :irrelevant_event}` по `message.headers` после разбора тела →
+  стало — `filter: &(&1.headers["type"] in @types)`, `from_message` видит только нужное
+  (`docs/rules/app/14-events-outbox.md`, «Подписчики»).
+
 ## 0.9.0
 
 ### Ломающие изменения контракта
