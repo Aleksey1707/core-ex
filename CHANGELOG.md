@@ -111,6 +111,25 @@
   `{:reject, error}` при настроенном `dlq_writer` (`docs/rules/app/14-events-outbox.md`,
   «Подписчики»).
 
+- **DLQ подписчиков в Postgres — `Core.Mq.Dlq`.** Топики внешнего источника принадлежат не
+  потребителю: завести рядом `<topic>.dlq` он не может, а Stream-DLQ не принимает tombstone и
+  байтовый ключ. `Core.Mq.Dlq.Writer` — `Mq.Writer` в таблицу `mq_dlq` БД приложения, подключается
+  `dlq_writer:` подписчика: строка `dead` с топиком источника, ключом, заголовками, телом, позицией
+  источника (`NULL`, если адаптер её не отдал), причиной (`x-dlq-reason`), ошибкой и временем.
+  Оператор возвращает записи в обработку — `mix mq.dlq.requeue --all` / `--topic <топик>` /
+  `--id <id>` или `Core.Mq.Dlq.Release.requeue/2` в задаче релиза; `Core.Mq.Dlq.Reader` —
+  `Mq.ReaderReliable` из таблицы, под подписчиком с тем же обработчиком, что у исходного топика;
+  `commit` помечает запись `processed`, не удаляя. Tombstone, байтовый ключ, `key: nil` и значения
+  заголовков не в UTF-8 переживают выброс и перечитывание без искажения. Подписчик теперь
+  передаёт в DLQ-сообщение позицию источника; writer'ы брокеров её по-прежнему не читают.
+
+  Подключение: миграция со своим timestamp, делегирующая `Core.Mq.Dlq.Migration` (README,
+  «Миграции»); было — `dlq_writer: {Core.Mq.Stream.Writer, …}` у подписчика на Kafka → стало —
+  `dlq_writer: {Core.Mq.Dlq.Writer, repo: MyApp.DAO, subscriber_name: …, name: …}` и отдельное
+  дерево перечитывания (`docs/rules/app/14-events-outbox.md`, «DLQ в Postgres»). Метрика —
+  опция `dlq_repo:` плагина `Core.Mq.PromEx`: gauge `mq_dlq_count{subscriber, topic, status}`;
+  алерт `MqDlqRequeuedStuck` — `docs/rules/21-observability.md`, «Рекомендованные алерты».
+
 ## 0.9.0
 
 ### Ломающие изменения контракта

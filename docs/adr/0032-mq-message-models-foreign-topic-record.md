@@ -52,8 +52,8 @@
   тело стало бы tombstone. `Kafka.Reader` отдаёт пустое значение как `nil`;
 - `Message.position :: Mq.Position.t() | nil`, `%Mq.Position{partition: non_neg_integer() | nil,
   offset: non_neg_integer()}`. Заполняет читатель: `Kafka.Reader` — партицию и смещение,
-  `Stream.Reader` — смещение при `partition: nil`. На пути записи `nil`, writer'ы поле
-  игнорируют;
+  `Stream.Reader` — смещение при `partition: nil`. На пути записи `nil`, writer'ы брокеров поле
+  игнорируют; DLQ в Postgres (`Mq.Dlq.Writer`) сохраняет позицию выброшенного сообщения;
 - `Stream.Codec` (JSON-конверт, ADR-0004) на ключе или значении заголовка не в UTF-8 и на `nil`-теле
   возвращает `{:error, _}`: выброс такого сообщения в Stream-DLQ не удаётся громко, а не
   искажает его. Путь DLQ для внешнего источника — таблица Postgres.

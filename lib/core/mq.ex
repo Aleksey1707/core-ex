@@ -76,7 +76,8 @@ defmodule Core.Mq do
     Позиция прочитанного сообщения в источнике.
 
     Заполняет читатель: `Mq.Kafka.Reader` — партицию и смещение, `Mq.Stream.Reader` — смещение
-    при `partition: nil`. На пути записи позиции нет, writer'ы её не читают (ADR-0032).
+    при `partition: nil`. Writer'ы брокеров её не читают (ADR-0032); `Mq.Dlq.Writer` сохраняет
+    позицию выброшенного сообщения, и `Mq.Dlq.Reader` отдаёт её при перечитывании.
     """
 
     @enforce_keys ~w(partition offset)a

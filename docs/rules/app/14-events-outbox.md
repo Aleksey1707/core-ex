@@ -132,7 +132,65 @@ consumer group, со смещениями и арендой топика в БД
 - Читателю одного топика с другим `subscriber_name` MUST быть свой клиент `:brod`: консьюмер
   партиции принимает одного подписчика.
 - `dlq_writer` на RabbitMQ Stream у подписчика на Kafka SHOULD NOT: конверт стрима не выражает
-  tombstone и байтовый ключ, выброс такого сообщения отказывает, и оно остаётся без commit.
+  tombstone и байтовый ключ, выброс такого сообщения отказывает, и оно остаётся без commit. DLQ
+  такого подписчика — Postgres («DLQ в Postgres»).
+
+### DLQ в Postgres
+
+Подписчик на топик, которым приложение не владеет, выбрасывает отклонённое в таблицу `mq_dlq`
+своей БД: `Core.Mq.Dlq.Writer` в `dlq_writer:` дерева, перечитывание — `Core.Mq.Dlq.Reader` под
+подписчиком с тем же обработчиком (`deps/core/docs/rules/14-events-outbox.md`, «Идемпотентность
+потребителей»).
+
+- Миграция таблицы MUST делегировать `Core.Mq.Dlq.Migration` (README библиотеки, «Миграции»).
+- `subscriber_name:` DLQ-writer'а MUST быть свой у каждого компонента, как имя подписчика: по нему
+  читатель перечитывания отличает записи компонента от чужих записей того же топика.
+- Перечитывание — отдельное дерево `Core.PubSub.MqSubscriberReliable.Supervisor` компонента:
+  топик в дереве не повторяется, а читатель перечитывания стоит на том же топике, что исходный.
+  У дерева свой `Core.Mq.Dlq.Writer` с тем же `repo:` и `subscriber_name:`, но своим `name:` —
+  повторный отказ перечитанного вернётся в ту же таблицу. `poll_interval_ms:` подписчика
+  перечитывания SHOULD быть в секундах: пустой `get` — запрос в базу, а по умолчанию подписчик
+  опрашивает читатель раз в 100 мс.
+- Задача релиза для оператора MUST звать `Core.Mq.Dlq.Release.requeue/2` после
+  `Application.load(:my_app)`, а не собственный `UPDATE`: статус и захват записи — контракт
+  библиотеки.
+- Строки `dead` вручную MUST NOT удаляться: строка — единственный след сообщения. Строки
+  `processed` библиотека не удаляет; их MAY удалять оператор.
+
+```elixir
+{Core.PubSub.MqSubscriberReliable.Supervisor,
+ enabled: true,
+ component: "orders_dlq",
+ name: MyApp.<BC>.Orders.DlqSubscribers,
+ dlq_writer:
+   {Core.Mq.Dlq.Writer,
+    repo: MyApp.DAO,
+    subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
+    name: MyApp.<BC>.Orders.DlqRewriter},
+ topics: [
+   [
+     reader:
+       {Core.Mq.Dlq.Reader,
+        repo: MyApp.DAO,
+        topic: Core.Mq.Topic.new!("orders"),
+        subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
+        name: MyApp.<BC>.Orders.DlqReader},
+     subscriber: [
+       name: MyApp.<BC>.Orders.DlqSubscriber,
+       topic: "orders",
+       poll_interval_ms: 5_000,
+       from_message: …,
+       on_message: …
+     ]
+   ]
+ ]}
+```
+
+Разбор: алерт `MqSubscriberDlq` → запрос к `mq_dlq` (`reason`, `error`, позиция источника) →
+починка обработчика или данных → `mix mq.dlq.requeue --all` / `--topic <топик>` / `--id <id>`, в
+релизе — `bin/my_app eval 'MyApp.Release.dlq_requeue(:all)'`. Возвращённое, которое не
+перечитывается, поднимает `MqDlqRequeuedStuck` (`deps/core/docs/rules/21-observability.md`,
+«Рекомендованные алерты»).
 
 ## Идемпотентность потребителей
 

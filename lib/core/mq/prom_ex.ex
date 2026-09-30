@@ -16,10 +16,16 @@ defmodule Core.Mq.PromEx do
   `pending` — максимум, `buffer_len` и `chunk_remaining` — сумма; повтор — `error` в лог
   (`Core.PromEx.Labels`). Топик reader'а известен только живому процессу, поэтому сводятся только
   живые: упавший reader этими метриками не виден — его видит `up` плагина `Core.Workers.PromEx`.
+
+  Опция `dlq_repo:` — Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`: gauge `dlq_count` —
+  число записей DLQ в Postgres по `subscriber`, `topic` и `status` (`dead` / `requeued` /
+  `processed`, `Core.Mq.Dlq.counts/1`). Без опции группа не строится. Каждая нода считает одну
+  таблицу: агрегировать — `max`, а не `sum`.
   """
 
   use PromEx.Plugin
 
+  alias Core.Mq.Dlq
   alias Core.Mq.Stream.Reader
   alias Core.PromEx.Labels
   alias Core.PromEx.Safe
@@ -29,6 +35,7 @@ defmodule Core.Mq.PromEx do
   @chunk_remaining_event [:prom_ex, :plugin, :mq, :reader, :chunk_remaining]
   @pending_event [:prom_ex, :plugin, :mq, :reader, :pending]
   @subscribed_event [:prom_ex, :plugin, :mq, :reader, :subscribed]
+  @dlq_count_event [:prom_ex, :plugin, :mq, :dlq, :count]
 
   @duration_buckets [1, 10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
 
@@ -118,15 +125,7 @@ defmodule Core.Mq.PromEx do
   @doc false
   @impl true
   def polling_metrics(opts) do
-    case Keyword.get(opts, :readers) do
-      nil ->
-        []
-
-      {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
-        [
-          reader_poll_group(opts, {mod, fun, args})
-        ]
-    end
+    reader_groups(opts, Keyword.get(opts, :readers)) ++ dlq_groups(opts, Keyword.get(opts, :dlq_repo))
   end
 
   # Два уровня `Safe` делают разное: внешний `execute/4` ловит сбой самого провайдера
@@ -148,7 +147,23 @@ defmodule Core.Mq.PromEx do
     end)
   end
 
+  @doc false
+  @spec execute_dlq_metrics(module()) :: :ok
+
+  def execute_dlq_metrics(repo) when is_atom(repo) do
+    Safe.execute(:mq, :dlq, "mq dlq", fn ->
+      Enum.each(Dlq.counts(repo), fn %{count: count} = row ->
+        :telemetry.execute(@dlq_count_event, %{value: count}, Map.delete(row, :count))
+      end)
+    end)
+  end
+
   # ---
+
+  defp reader_groups(_opts, nil), do: []
+
+  defp reader_groups(opts, {mod, fun, args}) when is_atom(mod) and is_atom(fun) and is_list(args),
+    do: [reader_poll_group(opts, {mod, fun, args})]
 
   defp reader_poll_group(opts, readers) do
     otp_app = Keyword.fetch!(opts, :otp_app)
@@ -231,6 +246,32 @@ defmodule Core.Mq.PromEx do
   end
 
   defp values(samples, key), do: Enum.map(samples, &Map.fetch!(&1, key))
+
+  defp dlq_groups(_opts, nil), do: []
+
+  defp dlq_groups(opts, repo) when is_atom(repo) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :mq))
+    poll_rate = Keyword.get(opts, :poll_rate, 5_000)
+
+    [
+      Polling.build(
+        :mq_dlq_poll_metrics,
+        poll_rate,
+        {__MODULE__, :execute_dlq_metrics, [repo]},
+        [
+          last_value(
+            metric_prefix ++ [:dlq, :count],
+            event_name: @dlq_count_event,
+            description: "Число записей DLQ в Postgres по подписчику, топику и статусу",
+            measurement: :value,
+            tags: [:subscriber, :topic, :status]
+          )
+        ],
+        detach_on_error: false
+      )
+    ]
+  end
 
   defp publish_tag_values(%{result: result, topic: topic}) do
     %{result: to_string(result), topic: topic}

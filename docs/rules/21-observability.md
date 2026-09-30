@@ -183,6 +183,7 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 | `MqPublishErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_publish_total{result!="ok"}[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_publish_total{result!="ok"} unless last_over_time(my_app_prom_ex_mq_publish_total{result!="ok"}[5m] offset 5m)) > 0` | публикация в RabbitMQ Stream отказала или не подтверждена брокером; у Kafka — то же условие по `my_app_prom_ex_mq_kafka_publish_total{result="error"}` |
 | `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_decode_drop_total unless last_over_time(my_app_prom_ex_mq_decode_drop_total[5m] offset 5m)) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching |
 | `MqSubscriberDlq` | `sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0 or sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total unless last_over_time(my_app_prom_ex_mq_subscriber_dlq_total[5m] offset 5m)) > 0` | подписчик отправил «ядовитое» сообщение в DLQ; метка `reason`: `rejected` — отказ обработчика, `exhausted` — исчерпание попыток (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
+| `MqDlqRequeuedStuck` | `max by (subscriber, topic) (my_app_prom_ex_mq_dlq_count{status="requeued"}) > 0`, `for: <порог>` | записи DLQ в Postgres возвращены оператором, но не перечитываются: подписчика над `Core.Mq.Dlq.Reader` этого топика нет на ноде или обработчик раз за разом отвечает `{:error, _}` (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
 | `WorkerDown` | `my_app_prom_ex_workers_up == 0`, `for: <порог>` | процесса из `watch:` нет на ноде; имя `{:global, _}` / `{:via, _, _}`, разрешённое в pid другой ноды, даёт `up` 1 — такой процесс алерт ловит, только когда его нет в кластере |
 | `WorkerMailboxHigh` | `my_app_prom_ex_workers_message_queue_len > <порог>`, `for: <порог>` | mailbox процесса растёт быстрее, чем он обрабатывает сообщения (`17-otp-concurrency.md`, «Mailbox и backpressure») |
 | `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0 or sum by (cache) (my_app_prom_ex_cache_requests_total{result="cache_error"} unless last_over_time(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m] offset 5m)) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
@@ -193,8 +194,8 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - Условие MUST брать имя метрики с префиксом PromEx: серии без префикса не существует, и алерт
   на неё молчит всегда, не выдавая ошибки.
 - Gauge очереди outbox (`queue_count`, `queue_oldest_age_seconds`, `queue_expired_locks_count`)
-  каждая нода считает по одной таблице: агрегировать SHOULD через `max`, а не `sum` — сумма
-  умножила бы значение на число нод.
+  и DLQ в Postgres (`mq_dlq_count`) каждая нода считает по одной таблице: агрегировать SHOULD
+  через `max`, а не `sum` — сумма умножила бы значение на число нод.
 - `WorkerDown` верен, только пока в `watch:` нет элементов выключенного поддерева
   (`17-otp-concurrency.md`, «Дерево процессов»).
 - `PromExCollectFailing` SHOULD нести `for:`: единичный отказ опроса (таймаут пула на пике)

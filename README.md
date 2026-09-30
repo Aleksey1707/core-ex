@@ -79,7 +79,7 @@ Core.Mq.Kafka.Writer.put_many(MyApp.Kafka, messages)
 Всё, что не зависит от конкретного клиента, компилируется всегда: `Core.Mq.Writer` /
 `Core.Mq.ReaderReliable` (behaviour), `Core.Mq.Stream.Writer` (получает connection-модуль
 в `opts`), `Core.Mq.Stream.Credentials`, `Core.Mq.Stream.Codec`, `Core.Mq.Kafka.Partitioner`,
-`Core.Mq.Kafka.Migration`, `Core.Mq.Kafka.Reader.Store`, `Core.Outbox.Delivery.Mq`,
+`Core.Mq.Kafka.Migration`, `Core.Mq.Kafka.Reader.Store`, `Core.Mq.Dlq.*`, `Core.Outbox.Delivery.Mq`,
 `Core.PubSub.*`, `Core.Mq.PromEx`. Свой адаптер под другой брокер подключается реализацией
 behaviour — менять библиотеку для этого не нужно.
 
@@ -296,6 +296,22 @@ end
 
    Строки `mq_kafka_offsets` вручную не удаляются: без строки партиция читается со стартовой
    позиции читателя — по умолчанию с начала топика.
+
+   DLQ подписчиков в Postgres (`Core.Mq.Dlq`) — таблица `mq_dlq`, DDL живёт в
+   `Core.Mq.Dlq.Migration`:
+
+   ```elixir
+   defmodule MyApp.DAO.Migrations.CreateMqDlq do
+     use Ecto.Migration
+
+     defdelegate up, to: Core.Mq.Dlq.Migration
+     defdelegate down, to: Core.Mq.Dlq.Migration
+   end
+   ```
+
+   Вместе с ней приезжает `mix mq.dlq.requeue --all` / `--topic <топик>` / `--id <id>` — возврат
+   записей в обработку; в релизе — `Core.Mq.Dlq.Release.requeue/2` (runbook в
+   `deps/core/docs/rules/app/14-events-outbox.md`, «DLQ в Postgres»).
 
 4. **DI репозиториев** — по конвенции, а не по конфигурации. Call site резолвит реализацию
    через `Core.Config.repo!/1`:

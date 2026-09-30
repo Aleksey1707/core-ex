@@ -16,7 +16,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   до `retry_max_ms`, а после `max_attempts` неудач сообщение уходит в DLQ-топик
   (`dlq_topic`, по умолчанию `"<topic>.dlq"`) и коммитится — иначе оно блокировало бы
   топик навсегда. Без настроенного `dlq_writer` выброса не происходит: подписчик
-  продолжает повторы на `retry_max_ms` и пишет `error` в лог.
+  продолжает повторы на `retry_max_ms` и пишет `error` в лог. В DLQ уходит сырое сообщение с
+  его ключом, телом и позицией источника (`Message.position`); DLQ в Postgres — `Core.Mq.Dlq`.
 
   Отказ без повторов — `{:reject, %Error{}}` из `on_message` или `from_message`
   (`Core.PubSub`): сообщение, которое не обработать никогда, уходит в DLQ сразу, без
@@ -473,7 +474,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   # а не как `{:error, _}` — без этой ветки сбой DLQ ронял бы подписчика.
   defp publish_to_dlq(%__MODULE__{} = state, %Message{} = raw, error, reason) do
     with {:ok, topic} <- Mq.Topic.new(state.dlq_topic),
-         {:ok, message} <- Message.new(topic, dlq_headers(state, raw, error, reason), raw.body, raw.key) do
+         {:ok, message} <-
+           Message.new(topic, dlq_headers(state, raw, error, reason), raw.body, raw.key, raw.position) do
       state.dlq_writer.put(state.dlq_handle, message)
     end
   rescue

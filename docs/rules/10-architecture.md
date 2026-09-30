@@ -93,8 +93,8 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 ## Адаптеры и абстракции
 
 Адаптеры брокеров (`Mq.Writer` / `Mq.ReaderReliable`: `Mq.Stream.*`, `Mq.Kafka.Writer`,
-`Mq.Kafka.Reader`) живут в библиотеке — конкретный клиент/коннекшн приходит им аргументом или
-через `opts`.
+`Mq.Kafka.Reader`) и DLQ в Postgres (`Mq.Dlq.Writer` / `Mq.Dlq.Reader`) живут в библиотеке —
+конкретный клиент/коннекшн или репозиторий приходит им аргументом или через `opts`.
 
 Клиентские библиотеки объявлены `optional: true`, а модули, которым нужен клиент
 на этапе компиляции (`use RabbitMQStream.Connection`, структура `%OsirisChunk{}`) или которые
@@ -132,7 +132,8 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 ключе).
 
 - представление MAY различаться между адаптерами (`Mq.Stream.Codec` — JSON с base64-телом,
-  `Mq.Kafka.Writer` / `Mq.Kafka.Reader` — нативно);
+  `Mq.Kafka.Writer` / `Mq.Kafka.Reader` — нативно, `Mq.Dlq.*` — колонками `bytea` таблицы
+  `mq_dlq`);
 - адаптер MUST документировать своё представление в `@moduledoc` и держать кодек в
   собственном пространстве имён (`Mq.Stream.Codec`, а не `Mq.Codec`): общее имя врёт о том,
   что формат один на всех;
