@@ -107,7 +107,7 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   (`Mq.Stream.Writer` работает с любым connection-модулем и компилируется всегда; DDL и запросы
   смещений `Mq.Kafka.Reader` — `Mq.Kafka.Migration` и `Mq.Kafka.Reader.Store`: миграция
   потребителя накатывается независимо от состава его `deps`);
-- ссылки на условные модули из безусловных (`Mq.PromEx` → `Mq.Stream.Reader`)
+- ссылки на условные модули из безусловных (`Mq.PromEx` → `Mq.Stream.Reader`, `Mq.Kafka.Reader`)
   MUST попадать в `elixirc_options: [no_warn_undefined: [...]]` в `mix.exs`;
 - новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.ReaderReliable` —
   как в библиотеке, так и на стороне потребителя;

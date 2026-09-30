@@ -81,6 +81,21 @@
   `docs/adr/0033-kafka-reader-without-consumer-group.md`. `Core.Mq.Kafka.ensure_available!/0`
   проверяет и читателя.
 
+  Метрики чтения — в `Core.Mq.PromEx`: смещения читателя не видны мониторингу групп брокера, и
+  отставание видно только по ним. Счётчики `mq_kafka_offset_reset_total{topic}`,
+  `mq_kafka_decode_drop_total{topic}`, `mq_kafka_read_errors_total{topic, reason}` и
+  `mq_kafka_commit_errors_total{topic, reason}` — по событиям читателя `offset_reset`,
+  `decode_drop`, `read_error`, `commit_error`; серии засеваются нулём при старте читателя. Опция
+  `kafka_readers:` плагина (провайдер — `Core.PubSub.MqSubscriberReliable.Supervisor.kafka_readers/1`)
+  строит gauge'и `mq_kafka_reader_lease{component, topic}` и по партиции
+  `mq_kafka_reader_lag_messages` / `mq_kafka_reader_lag_seconds`; отставание снимает владелец
+  аренды, нода без неё отдаёт нули. Алерты `MqKafkaReaderLagging`, `MqKafkaReaderBacklog`,
+  `MqKafkaReaderNoLease`, `MqKafkaOffsetReset`, `MqKafkaReadErrors`, `MqKafkaCommitErrors` и
+  Kafka-вариант `MqDecodeDrops` — `docs/rules/21-observability.md`, «Отставание чтения Kafka».
+  Подключение: было — `{Core.Mq.PromEx, readers: …}` → стало — плюс
+  `kafka_readers: {MyApp.PromEx.Mq, :kafka_readers, []}`, провайдер склеивает `kafka_readers/1`
+  деревьев подписчиков (`docs/rules/app/17-otp-concurrency.md`, «Наблюдение за процессами»).
+
 - **`Core.Mq.Kafka.Partitioner`** — раскладка ключа по партициям, совместимая с
   `DefaultPartitioner` Kafka (`partition/2`, `murmur2/1`). Клиента не требует и компилируется
   всегда.

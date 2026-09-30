@@ -244,6 +244,22 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
     end
   end
 
+  describe "kafka_readers/1" do
+    test "только читатели Kafka, метка — как у mq_reader в watch_list/1" do
+      opts = kafka_orders_opts()
+      reader = %{component: "mq_reader:catalog:orders", name: @orders_reader}
+
+      assert MqSubscriberReliable.Supervisor.kafka_readers(opts) == [reader]
+      assert MqSubscriberReliable.Supervisor.readers(opts) == []
+      assert reader in MqSubscriberReliable.Supervisor.watch_list(opts)
+    end
+
+    test "дерево не стартует — пусто" do
+      assert MqSubscriberReliable.Supervisor.kafka_readers(Keyword.put(kafka_orders_opts(), :enabled, false)) == []
+      assert MqSubscriberReliable.Supervisor.kafka_readers(Keyword.put(kafka_orders_opts(), :topics, [])) == []
+    end
+  end
+
   # ---
 
   defp tree_opts(overrides \\ []) do
@@ -274,6 +290,12 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
   defp stream_orders_opts do
     Keyword.update!(tree_opts(), :topics, fn [products, orders] ->
       [products, Keyword.put(orders, :reader, {Core.Mq.Stream.Reader, name: @orders_reader})]
+    end)
+  end
+
+  defp kafka_orders_opts do
+    Keyword.update!(tree_opts(), :topics, fn [products, orders] ->
+      [products, Keyword.put(orders, :reader, {Core.Mq.Kafka.Reader, name: @orders_reader})]
     end)
   end
 

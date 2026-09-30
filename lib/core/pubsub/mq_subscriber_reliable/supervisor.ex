@@ -74,6 +74,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @owned_keys ~w(reader_module reader dlq_writer dlq_handle subscribe)a
   @process_expected "{модуль, опции с name: атомом}"
   @stream_reader Core.Mq.Stream.Reader
+  @kafka_reader Core.Mq.Kafka.Reader
 
   @typedoc "Процесс брокера: модуль, его опции и имя — оно же handle."
   @type process :: %{module: module(), opts: keyword(), name: atom()}
@@ -90,7 +91,10 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
           name: GenServer.name() | nil
         }
 
-  @typedoc "Элемент `watch:` плагина `Core.Workers.PromEx` и `readers:` плагина `Core.Mq.PromEx`."
+  @typedoc """
+  Элемент `watch:` плагина `Core.Workers.PromEx` и `readers:` / `kafka_readers:` плагина
+  `Core.Mq.PromEx`.
+  """
   @type watch_item :: %{component: String.t(), name: atom()}
 
   # ===== старт =====
@@ -211,12 +215,27 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   Элементы `readers:` плагина `Core.Mq.PromEx` — stream-читатели дерева с той же меткой, что у
   `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
 
-  Метрики опроса есть только у `Core.Mq.Stream.Reader`: читатель другого модуля в список не
-  попадает. Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет.
+  Читатель другого модуля в список не попадает: у `Core.Mq.Kafka.Reader` своя группа метрик опроса
+  (`kafka_readers/1`), у прочих её нет. Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет.
   """
   @spec readers(keyword()) :: [watch_item()]
 
-  def readers(opts) when is_list(opts) do
+  def readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader)
+
+  @doc """
+  Элементы `kafka_readers:` плагина `Core.Mq.PromEx` — читатели Kafka дерева с той же меткой, что
+  у `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
+
+  Читатель другого модуля в список не попадает. Когда дерево не стартует (`enabled: false`,
+  `topics: []`), элементов нет.
+  """
+  @spec kafka_readers(keyword()) :: [watch_item()]
+
+  def kafka_readers(opts) when is_list(opts), do: reader_items(opts, @kafka_reader)
+
+  # ---
+
+  defp reader_items(opts, module) do
     case options!(opts) do
       %{enabled: false} ->
         []
@@ -225,7 +244,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
         []
 
       %{component: component, topics: topics} ->
-        for %{reader: %{module: @stream_reader}} = topic <- topics,
+        for %{reader: %{module: ^module}} = topic <- topics,
             do: reader_item(topic, component)
     end
   end

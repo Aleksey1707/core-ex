@@ -368,10 +368,11 @@ top-level boundary, и ссылка из одной в другую — цикл
   наблюдение тем же элементом, имя отдаёт реестр (`Oban.Registry.via/1`).
 - Читателей проекций перечисляет само дерево (`Core.Es.Projection.Supervisor.watch_list/1`), а не
   третий список в реестре приложения: иначе он разойдётся с деревом молча.
-- Stream-читателей для `readers:` плагина `Core.Mq.PromEx` MUST перечислять деревья подписчиков
-  (`Core.PubSub.MqSubscriberReliable.Supervisor.readers/1` с опциями старта), а реестр приложения —
-  склеивать их, как `watch_list/0`: своя метка у читателя дала бы одному процессу две разные
-  `component` в `workers_up` и `mq_reader_*`.
+- Stream-читателей для `readers:` и читателей Kafka для `kafka_readers:` плагина `Core.Mq.PromEx`
+  MUST перечислять деревья подписчиков (`Core.PubSub.MqSubscriberReliable.Supervisor.readers/1` и
+  `kafka_readers/1` с опциями старта), а реестр приложения — склеивать их, как `watch_list/0`:
+  своя метка у читателя дала бы одному процессу две разные `component` в `workers_up` и
+  `mq_reader_*` / `mq_kafka_reader_*`.
 - Метка `component` — стабильная строка, а не имя модуля: перенос компонента между слоями меняет
   модуль, и метка из `inspect(name)` порвала бы ряды метрик и заглушки Alertmanager по
   `component`. У дерева подписчиков её задаёт опция `component:`.

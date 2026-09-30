@@ -134,6 +134,9 @@ consumer group, со смещениями и арендой топика в БД
 - `dlq_writer` на RabbitMQ Stream у подписчика на Kafka SHOULD NOT: конверт стрима не выражает
   tombstone и байтовый ключ, выброс такого сообщения отказывает, и оно остаётся без commit. DLQ
   такого подписчика — Postgres («DLQ в Postgres»).
+- Приложение с читателем Kafka SHOULD подключать `kafka_readers:` плагина `Core.Mq.PromEx` и
+  алерты `MqKafka*` (`deps/core/docs/rules/21-observability.md`, «Отставание чтения Kafka»):
+  смещения в своей таблице не видны мониторингу групп брокера, и отставание видно только по ним.
 
 ### DLQ в Postgres
 

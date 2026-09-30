@@ -66,8 +66,20 @@ if Code.ensure_loaded?(:brod) do
     принимает (имя заголовка пустое или не в UTF-8), — `error` в лог, событие
     `[:core, :mq, :kafka, :decode_drop]` и запись её смещения: повтор дал бы тот же отказ.
 
+    ## Метрики
+
+    События `[:core, :mq, :kafka, _]` с `%{count: 1}` и `topic` в metadata — счётчики
+    `Core.Mq.PromEx`: `offset_reset` (с `partition`), `decode_drop`, `read_error` с `reason`
+    (`subscribe` — подписка на партиции, раз на попытку backoff; `consumer_down` — падение
+    консьюмера партиции; `lease` — аренда не продлена) и `commit_error` с `reason` (`lease_lost`,
+    `failed` — смещение не записано). При старте читатель засевает каждую серию `%{count: 0}`
+    (`21-observability.md`, «Первое событие серии счётчика»).
+
     `info/1` отдаёт по партиции `high_wm_offset` последней пачки, зафиксированное смещение и
-    `ts` последнего закоммиченного сообщения — для метрик отставания.
+    `ts` последнего закоммиченного сообщения — для метрик отставания. Зафиксированное смещение
+    известно с подписки, `ts` — с первого `commit` на ноде; подписка со стартовой позиции
+    сбрасывает значения партиции, потеря аренды — всех партиций. Партиции с сохранённым смещением
+    известны со старта — и без аренды.
     """
 
     @behaviour Core.Mq.ReaderReliable
@@ -103,6 +115,8 @@ if Code.ensure_loaded?(:brod) do
     @retry_min_ms 1_000
     @retry_max_ms 30_000
     @initial_offsets ~w(earliest latest)a
+    @read_error_reasons ~w(subscribe consumer_down lease)a
+    @commit_error_reasons ~w(lease_lost failed)a
 
     defstruct [
       :client,
@@ -200,9 +214,10 @@ if Code.ensure_loaded?(:brod) do
     @doc false
     @impl true
     def handle_continue(:lease, state) do
+      seed_metrics(state)
       Process.send_after(self(), :partitions, state.partitions_interval_ms)
 
-      {:noreply, lease_tick(state)}
+      {:noreply, lease_tick(known_partitions(state))}
     end
 
     @doc false
@@ -309,6 +324,24 @@ if Code.ensure_loaded?(:brod) do
       }
     end
 
+    # Серии счётчиков существуют до первого события (`21-observability.md`, «Первое событие серии
+    # счётчика»): `Core.Mq.PromEx` считает их `sum` по `count`, и засев `count: 0` серию не растит.
+    defp seed_metrics(state) do
+      emit_count(state, :offset_reset, 0)
+      emit_count(state, :decode_drop, 0)
+      Enum.each(@read_error_reasons, &emit_count(state, :read_error, 0, %{reason: &1}))
+      Enum.each(@commit_error_reasons, &emit_count(state, :commit_error, 0, %{reason: &1}))
+    end
+
+    # Партиции с сохранённым смещением известны и перезапущенному читателю без аренды: его нули
+    # сменяют отставание, которое нода отдавала до рестарта.
+    defp known_partitions(state) do
+      case offsets(state) do
+        {:ok, offsets} -> %{state | stats: Map.new(offsets, fn {partition, _offset} -> {partition, %{}} end)}
+        {:error, _reason} -> state
+      end
+    end
+
     defp reply_get({:ok, message, state}), do: {:reply, {:ok, message}, state}
     defp reply_get({:empty, state}), do: {:reply, :empty, state}
     defp reply_get({:error, %Error{} = error, state}), do: {:reply, {:error, error}, state}
@@ -381,7 +414,7 @@ if Code.ensure_loaded?(:brod) do
           state
 
         {:error, reason} ->
-          log_lease_failure(state, reason)
+          lease_failed(state, reason)
           state
       end
     end
@@ -396,7 +429,7 @@ if Code.ensure_loaded?(:brod) do
           lose_lease(state)
 
         {:error, reason} ->
-          log_lease_failure(state, reason)
+          lease_failed(state, reason)
           if leased?(state), do: state, else: lose_lease(state)
       end
     end
@@ -419,17 +452,22 @@ if Code.ensure_loaded?(:brod) do
       :exit, _reason -> :ok
     end
 
-    defp log_lease_failure(state, reason) do
+    defp lease_failed(state, reason) do
       Logger.warning(
         "kafka reader: аренда не продлена topic=#{state.topic_name} subscriber=#{state.subscriber} " <>
           "reason=#{inspect(reason)}"
       )
+
+      emit_count(state, :read_error, 1, %{reason: :lease})
     end
 
+    # Партиции остаются в `stats` без значений: метрики отставания ноды без аренды — нули по ним,
+    # а не значения, снятые при потере аренды.
     defp lose_lease(state) do
       state = unsubscribe_all(state)
+      stats = Map.new(state.stats, fn {partition, _stats} -> {partition, %{}} end)
 
-      %{state | lease: nil, lease_deadline: nil, pending: nil}
+      %{state | lease: nil, lease_deadline: nil, pending: nil, stats: stats}
     end
 
     # Подписываются партиции, у которых подписки нет: `:resubscribe` после сбоя части из них
@@ -460,12 +498,21 @@ if Code.ensure_loaded?(:brod) do
            end) do
         {:ok, pid} ->
           entry = %{consumer: pid, ref: Process.monitor(pid), buffer: :queue.new()}
-          {%{state | partitions: Map.put(state.partitions, partition, entry)}, failures}
+          partitions = Map.put(state.partitions, partition, entry)
+          {%{state | partitions: partitions, stats: subscribed_stats(state.stats, partition, begin_offset)}, failures}
 
         {:error, reason} ->
           {state, [{partition, reason} | failures]}
       end
     end
+
+    # Зафиксированное смещение известно с подписки, а не с первого `commit`: отставание в сообщениях
+    # видно и у сообщения, которое подписчик повторяет. Подписка со стартовой позиции (смещения нет
+    # или оно вне лога) прежние значения партиции не наследует.
+    defp subscribed_stats(stats, partition, offset) when is_integer(offset),
+      do: Map.update(stats, partition, %{committed_offset: offset}, &Map.put(&1, :committed_offset, offset))
+
+    defp subscribed_stats(stats, partition, _initial_offset), do: Map.put(stats, partition, %{})
 
     defp consumer_opts(state, begin_offset) do
       [
@@ -506,10 +553,14 @@ if Code.ensure_loaded?(:brod) do
           "reason=#{inspect(reason)} retry_in=#{state.retry_ms}ms"
       )
 
+      emit_count(state, :read_error, 1, %{reason: read_error_reason(reason)})
       timer = Process.send_after(self(), :resubscribe, state.retry_ms)
 
       %{state | resubscribe_timer: timer, retry_ms: min(state.retry_ms * 2, state.retry_max_ms)}
     end
+
+    defp read_error_reason({:consumer_down, _partition, _reason}), do: :consumer_down
+    defp read_error_reason(_reason), do: :subscribe
 
     defp log_level(:unknown_topic_or_partition), do: :error
     defp log_level(_reason), do: :warning
@@ -561,11 +612,7 @@ if Code.ensure_loaded?(:brod) do
           "subscriber=#{state.subscriber} partition=#{partition}"
       )
 
-      :telemetry.execute(
-        Telemetry.event([:mq, :kafka, :offset_reset]),
-        %{count: 1},
-        %{topic: state.topic_name, partition: partition}
-      )
+      emit_count(state, :offset_reset, 1, %{partition: partition})
 
       state = drop_partition(state, partition)
       {state, failures} = subscribe_partition({state, []}, partition, :earliest)
@@ -655,7 +702,7 @@ if Code.ensure_loaded?(:brod) do
           {:ok, message, %{popped | pending: pending}}
 
         {:error, %Error{} = error} ->
-          drop(state, popped, partition, offset, error)
+          drop(state, popped, %{partition: partition, offset: offset, ts: ts(ts)}, error)
       end
     end
 
@@ -676,7 +723,7 @@ if Code.ensure_loaded?(:brod) do
 
     # Отказ повторился бы на каждом чтении: смещение записи фиксируется, и чтение идёт дальше.
     # Не записалось — запись остаётся в голове буфера, отказ уходит вызывающему.
-    defp drop(state, popped, partition, offset, error) do
+    defp drop(state, popped, %{partition: partition, offset: offset} = dropped, error) do
       case commit_offset(popped, partition, offset) do
         {:ok, popped} ->
           Logger.error(
@@ -684,8 +731,8 @@ if Code.ensure_loaded?(:brod) do
               "partition=#{partition} offset=#{offset} ошибка=#{Error.format_chain(error)}"
           )
 
-          :telemetry.execute(Telemetry.event([:mq, :kafka, :decode_drop]), %{count: 1}, %{topic: state.topic_name})
-          take(popped)
+          emit_count(state, :decode_drop, 1)
+          take(committed(popped, dropped))
 
         {:error, %Error{} = commit_error, %__MODULE__{lease: nil} = lost} ->
           {:error, commit_error, lost}
@@ -707,9 +754,11 @@ if Code.ensure_loaded?(:brod) do
               "subscriber=#{state.subscriber} partition=#{partition} offset=#{offset}"
           )
 
+          emit_count(state, :commit_error, 1, %{reason: :lease_lost})
           {:error, error, lose_lease(state)}
 
         {:error, %Error{} = error} ->
+          emit_count(state, :commit_error, 1, %{reason: :failed})
           {:error, error, state}
       end
     end
@@ -724,6 +773,14 @@ if Code.ensure_loaded?(:brod) do
 
     defp commit_failed(detail) do
       Error.app(code: :commit_failed, ns: :mq, message: "Не удалось сохранить смещение Kafka", detail: detail)
+    end
+
+    defp emit_count(state, event, count, metadata \\ %{}) do
+      :telemetry.execute(
+        Telemetry.event([:mq, :kafka, event]),
+        %{count: count},
+        Map.put(metadata, :topic, state.topic_name)
+      )
     end
 
     # Непойманное исключение или exit клиента `:brod` (клиент не запущен, консьюмер умер между

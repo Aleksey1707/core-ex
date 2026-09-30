@@ -174,4 +174,113 @@ defmodule Core.Mq.PromExTest do
 
     assert capture_log(fn -> PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end) == ""
   end
+
+  describe "чтение Kafka" do
+    @kafka_readers {__MODULE__, :kafka_readers, []}
+    @lease [:prom_ex, :plugin, :mq, :kafka_reader, :lease]
+    @lag_messages [:prom_ex, :plugin, :mq, :kafka_reader, :lag_messages]
+    @lag_seconds [:prom_ex, :plugin, :mq, :kafka_reader, :lag_seconds]
+
+    test "счётчики — sum по count: засев нулём не прибавляет единицу" do
+      assert [%{metrics: metrics}] = PromEx.event_metrics(otp_app: :core)
+      by_name = Map.new(metrics, &{&1.name, &1})
+
+      for {name, tags} <- [
+            {[:offset_reset, :total], [:topic]},
+            {[:decode_drop, :total], [:topic]},
+            {[:read_errors, :total], [:topic, :reason]},
+            {[:commit_errors, :total], [:topic, :reason]}
+          ] do
+        assert %Telemetry.Metrics.Sum{measurement: :count, tags: ^tags} =
+                 Map.fetch!(by_name, [:core, :prom_ex, :mq, :kafka | name])
+      end
+
+      read_errors = Map.fetch!(by_name, [:core, :prom_ex, :mq, :kafka, :read_errors, :total])
+      assert read_errors.tag_values.(%{topic: "t", reason: :lease}) == %{topic: "t", reason: "lease"}
+    end
+
+    test "polling-группа строится только с kafka_readers:" do
+      assert [] = PromEx.polling_metrics(otp_app: :core)
+
+      assert [%{group_name: :mq_kafka_reader_poll_metrics, metrics: metrics}] =
+               PromEx.polling_metrics(otp_app: :core, kafka_readers: @kafka_readers)
+
+      assert Enum.map(metrics, & &1.name) == [
+               [:core, :prom_ex, :mq, :kafka_reader, :lease],
+               [:core, :prom_ex, :mq, :kafka_reader, :lag_messages],
+               [:core, :prom_ex, :mq, :kafka_reader, :lag_seconds]
+             ]
+    end
+
+    test "владелец аренды: отставание по партициям, неизвестное — без значения" do
+      now = System.os_time(:millisecond)
+
+      start_kafka_reader!(%{
+        lease?: true,
+        pending?: false,
+        topic: "orders",
+        partitions: %{
+          0 => %{high_wm_offset: 10, committed_offset: 4, committed_ts: now - 5_000, buffered: 0},
+          1 => %{high_wm_offset: nil, committed_offset: 3, committed_ts: nil, buffered: 0}
+        }
+      })
+
+      attach([@lease, @lag_messages, @lag_seconds])
+      assert :ok = PromEx.execute_kafka_reader_metrics(@kafka_readers)
+
+      assert_receive {:telemetry, @lease, %{value: 1}, %{component: "orders", topic: "orders"}}
+      assert_receive {:telemetry, @lag_messages, %{value: 6}, %{component: "orders", topic: "orders", partition: 0}}
+      assert_receive {:telemetry, @lag_seconds, %{value: seconds}, %{partition: 0}}
+      assert seconds >= 5 and seconds < 6
+      refute_received {:telemetry, _event, _measurements, %{partition: 1}}
+    end
+
+    test "нода без аренды — нули по известным партициям" do
+      start_kafka_reader!(%{
+        lease?: false,
+        pending?: false,
+        topic: "orders",
+        partitions: %{0 => %{high_wm_offset: nil, committed_offset: nil, committed_ts: nil, buffered: 0}}
+      })
+
+      attach([@lease, @lag_messages, @lag_seconds])
+      assert :ok = PromEx.execute_kafka_reader_metrics(@kafka_readers)
+
+      assert_receive {:telemetry, @lease, %{value: 0}, %{component: "orders", topic: "orders"}}
+      assert_receive {:telemetry, @lag_messages, %{value: 0}, %{partition: 0}}
+      assert_receive {:telemetry, @lag_seconds, %{value: 0}, %{partition: 0}}
+    end
+
+    test "метка partition — строка" do
+      assert [%{metrics: metrics}] = PromEx.polling_metrics(otp_app: :core, kafka_readers: @kafka_readers)
+      lag = Enum.find(metrics, &(&1.name == [:core, :prom_ex, :mq, :kafka_reader, :lag_messages]))
+
+      assert lag.tag_values.(%{component: "c", topic: "t", partition: 3}) == %{
+               component: "c",
+               topic: "t",
+               partition: "3"
+             }
+    end
+  end
+
+  @doc false
+  def kafka_readers, do: [%{component: "orders", name: :mq_promex_kafka}]
+
+  defp start_kafka_reader!(info) do
+    start_supervised!(%{id: :kafka, start: {StubReader, :start_link, [[name: :mq_promex_kafka, info: info]]}})
+  end
+
+  defp attach(events) do
+    handler_id = "mq-promex-kafka-#{inspect(self())}"
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        events,
+        fn event, measurements, metadata, test_pid -> send(test_pid, {:telemetry, event, measurements, metadata}) end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
 end

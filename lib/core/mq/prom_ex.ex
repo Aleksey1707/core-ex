@@ -17,6 +17,20 @@ defmodule Core.Mq.PromEx do
   (`Core.PromEx.Labels`). Топик reader'а известен только живому процессу, поэтому сводятся только
   живые: упавший reader этими метриками не виден — его видит `up` плагина `Core.Workers.PromEx`.
 
+  Чтение Kafka (`Core.Mq.Kafka.Reader`): event-счётчики `kafka_offset_reset_total{topic}`,
+  `kafka_decode_drop_total{topic}`, `kafka_read_errors_total{topic, reason}` и
+  `kafka_commit_errors_total{topic, reason}` — `sum` по `count`, серии засевает читатель при
+  старте. Опция `kafka_readers:` — MFA-провайдер читателей Kafka в той же форме, что `readers:`
+  (`Core.PubSub.MqSubscriberReliable.Supervisor.kafka_readers/1`); без неё группа не строится.
+  Gauge'и группы: `kafka_reader_lease{component, topic}` (0|1) и по партиции
+  `kafka_reader_lag_messages` — `high_wm_offset` последней пачки минус зафиксированное смещение —
+  и `kafka_reader_lag_seconds` — сейчас минус `ts` последнего закоммиченного сообщения. Отставание
+  снимает только владелец аренды; нода без неё отдаёт нули по партициям, которые читала:
+  агрегировать — `max`. Неизвестное значение (до первой пачки, до первого `commit` на ноде) точки
+  не даёт. Упавший читатель, как и stream reader, этими метриками не виден — его видит `up`
+  плагина `Core.Workers.PromEx`. На пустом топике `lag_seconds` растёт без отставания — смотреть вместе с
+  `lag_messages` (`21-observability.md`, «Отставание чтения Kafka»).
+
   Опция `dlq_repo:` — Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`: gauge `dlq_count` —
   число записей DLQ в Postgres по `subscriber`, `topic` и `status` (`dead` / `requeued` /
   `processed`, `Core.Mq.Dlq.counts/1`). Без опции группа не строится. Каждая нода считает одну
@@ -26,6 +40,7 @@ defmodule Core.Mq.PromEx do
   use PromEx.Plugin
 
   alias Core.Mq.Dlq
+  alias Core.Mq.Kafka
   alias Core.Mq.Stream.Reader
   alias Core.PromEx.Labels
   alias Core.PromEx.Safe
@@ -36,6 +51,9 @@ defmodule Core.Mq.PromEx do
   @pending_event [:prom_ex, :plugin, :mq, :reader, :pending]
   @subscribed_event [:prom_ex, :plugin, :mq, :reader, :subscribed]
   @dlq_count_event [:prom_ex, :plugin, :mq, :dlq, :count]
+  @kafka_lease_event [:prom_ex, :plugin, :mq, :kafka_reader, :lease]
+  @kafka_lag_messages_event [:prom_ex, :plugin, :mq, :kafka_reader, :lag_messages]
+  @kafka_lag_seconds_event [:prom_ex, :plugin, :mq, :kafka_reader, :lag_seconds]
 
   @duration_buckets [1, 10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000]
 
@@ -116,6 +134,39 @@ defmodule Core.Mq.PromEx do
             tags: [:topic, :dlq_topic, :reason],
             tag_values: &dlq_tag_values/1
           ),
+          sum(
+            metric_prefix ++ [:kafka, :offset_reset, :total],
+            event_name: kafka_event(:offset_reset),
+            measurement: :count,
+            description: "Число сбросов смещения читателя Kafka на earliest: смещение вне лога",
+            tags: [:topic]
+          ),
+          sum(
+            metric_prefix ++ [:kafka, :decode_drop, :total],
+            event_name: kafka_event(:decode_drop),
+            measurement: :count,
+            description: "Число записей Kafka, пропущенных читателем: их не принимает Mq.Message",
+            tags: [:topic]
+          ),
+          sum(
+            metric_prefix ++ [:kafka, :read_errors, :total],
+            event_name: kafka_event(:read_error),
+            measurement: :count,
+            description:
+              "Число отказов чтения Kafka: subscribe — подписка на партиции, consumer_down — падение " <>
+                "консьюмера партиции, lease — продление аренды",
+            tags: [:topic, :reason],
+            tag_values: &reason_tag_values/1
+          ),
+          sum(
+            metric_prefix ++ [:kafka, :commit_errors, :total],
+            event_name: kafka_event(:commit_error),
+            measurement: :count,
+            description:
+              "Число отказов commit читателя Kafka: lease_lost — аренда потеряна, failed — смещение не записано",
+            tags: [:topic, :reason],
+            tag_values: &reason_tag_values/1
+          ),
           Safe.error_metric(metric_prefix, :mq)
         ]
       )
@@ -125,7 +176,9 @@ defmodule Core.Mq.PromEx do
   @doc false
   @impl true
   def polling_metrics(opts) do
-    reader_groups(opts, Keyword.get(opts, :readers)) ++ dlq_groups(opts, Keyword.get(opts, :dlq_repo))
+    reader_groups(opts, Keyword.get(opts, :readers)) ++
+      kafka_reader_groups(opts, Keyword.get(opts, :kafka_readers)) ++
+      dlq_groups(opts, Keyword.get(opts, :dlq_repo))
   end
 
   # Два уровня `Safe` делают разное: внешний `execute/4` ловит сбой самого провайдера
@@ -144,6 +197,24 @@ defmodule Core.Mq.PromEx do
 
       Labels.report("mq_readers mfa=#{inspect({mod, fun, args})}", groups)
       Enum.each(groups, &emit_reader_group/1)
+    end)
+  end
+
+  @doc false
+  @spec execute_kafka_reader_metrics({module(), atom(), [term()]}) :: :ok
+
+  def execute_kafka_reader_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
+    Safe.execute(:mq, :kafka_readers, "mq kafka readers", fn ->
+      now = System.os_time(:millisecond)
+
+      groups =
+        mod
+        |> apply(fun, args)
+        |> Enum.flat_map(&kafka_reader_sample(&1, now))
+        |> Labels.group(&{&1.component, &1.topic})
+
+      Labels.report("mq_kafka_readers mfa=#{inspect({mod, fun, args})}", groups)
+      Enum.each(groups, &emit_kafka_reader_group/1)
     end)
   end
 
@@ -247,6 +318,113 @@ defmodule Core.Mq.PromEx do
 
   defp values(samples, key), do: Enum.map(samples, &Map.fetch!(&1, key))
 
+  defp kafka_reader_groups(_opts, nil), do: []
+
+  defp kafka_reader_groups(opts, {mod, fun, args}) when is_atom(mod) and is_atom(fun) and is_list(args) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :mq))
+    poll_rate = Keyword.get(opts, :poll_rate, 5_000)
+
+    [
+      Polling.build(
+        :mq_kafka_reader_poll_metrics,
+        poll_rate,
+        {__MODULE__, :execute_kafka_reader_metrics, [{mod, fun, args}]},
+        [
+          last_value(
+            metric_prefix ++ [:kafka_reader, :lease],
+            event_name: @kafka_lease_event,
+            description: "Держит ли нода аренду топика читателя Kafka (0|1)",
+            measurement: :value,
+            tags: [:component, :topic],
+            tag_values: &reader_tag_values/1
+          ),
+          last_value(
+            metric_prefix ++ [:kafka_reader, :lag_messages],
+            event_name: @kafka_lag_messages_event,
+            description:
+              "Отставание чтения Kafka в сообщениях: high_wm_offset последней пачки минус зафиксированное " <>
+                "смещение; у ноды без аренды — 0",
+            measurement: :value,
+            tags: [:component, :topic, :partition],
+            tag_values: &partition_tag_values/1
+          ),
+          last_value(
+            metric_prefix ++ [:kafka_reader, :lag_seconds],
+            event_name: @kafka_lag_seconds_event,
+            description:
+              "Отставание чтения Kafka по времени: сейчас минус timestamp последнего закоммиченного " <>
+                "сообщения; у ноды без аренды — 0",
+            measurement: :value,
+            tags: [:component, :topic, :partition],
+            tag_values: &partition_tag_values/1
+          )
+        ],
+        detach_on_error: false
+      )
+    ]
+  end
+
+  defp kafka_reader_sample(%{component: component, name: name}, now) do
+    Safe.collect(:mq, :kafka_readers, "mq kafka reader #{component}", fn ->
+      case Process.whereis(name) do
+        pid when is_pid(pid) -> [kafka_sample(component, name, Kafka.Reader.info(pid), now)]
+        nil -> []
+      end
+    end)
+  end
+
+  # Отставание снимает только владелец аренды (ADR-0033). Нода без неё отдаёт нули по известным
+  # партициям: `last_value` держал бы значение, снятое при потере аренды, и `max` по нодам видел бы
+  # отставание, которое уже разгребает новый владелец.
+  defp kafka_sample(component, name, %{lease?: lease?, topic: topic, partitions: partitions}, now) do
+    %{
+      component: component,
+      name: name,
+      topic: topic,
+      lease: flag(lease?),
+      lags: Map.new(partitions, fn {partition, info} -> {partition, lags(lease?, info, now)} end)
+    }
+  end
+
+  defp lags(false, _info, _now), do: %{messages: 0, seconds: 0}
+
+  defp lags(true, info, now), do: %{messages: lag_messages(info), seconds: lag_seconds(info, now)}
+
+  defp lag_messages(%{high_wm_offset: high_wm, committed_offset: committed})
+       when is_integer(high_wm) and is_integer(committed),
+       do: high_wm - committed
+
+  defp lag_messages(_info), do: nil
+
+  defp lag_seconds(%{committed_ts: ts}, now) when is_integer(ts), do: (now - ts) / 1_000
+
+  defp lag_seconds(_info, _now), do: nil
+
+  defp emit_kafka_reader_group({{component, topic}, samples}) do
+    meta = %{component: component, topic: topic}
+
+    :telemetry.execute(@kafka_lease_event, %{value: Enum.max(values(samples, :lease))}, meta)
+
+    samples
+    |> Enum.flat_map(&Map.to_list(&1.lags))
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.each(fn {partition, lags} ->
+      meta = Map.put(meta, :partition, partition)
+      emit_lag(@kafka_lag_messages_event, Enum.map(lags, & &1.messages), meta)
+      emit_lag(@kafka_lag_seconds_event, Enum.map(lags, & &1.seconds), meta)
+    end)
+  end
+
+  # Значение неизвестно — точки нет: до первой пачки нет `high_wm_offset`, до первого `commit` —
+  # `ts`, а без сохранённого смещения — и зафиксированного смещения.
+  defp emit_lag(event, lags, meta) do
+    case Enum.reject(lags, &is_nil/1) do
+      [] -> :ok
+      known -> :telemetry.execute(event, %{value: Enum.max(known)}, meta)
+    end
+  end
+
   defp dlq_groups(_opts, nil), do: []
 
   defp dlq_groups(opts, repo) when is_atom(repo) do
@@ -293,6 +471,14 @@ defmodule Core.Mq.PromEx do
     %{component: component, topic: topic}
   end
 
+  defp partition_tag_values(%{component: component, topic: topic, partition: partition}) do
+    %{component: component, topic: topic, partition: Integer.to_string(partition)}
+  end
+
+  defp reason_tag_values(%{topic: topic, reason: reason}) do
+    %{topic: topic, reason: to_string(reason)}
+  end
+
   # Имена событий резолвятся в рантайме: префикс задаёт потребитель
   # (`Core.Config.telemetry_prefix/0`), а библиотека компилируется один раз на все приложения.
 
@@ -307,4 +493,6 @@ defmodule Core.Mq.PromEx do
   defp subscriber_cycle_event, do: Telemetry.event([:mq, :subscriber, :cycle])
 
   defp subscriber_dlq_event, do: Telemetry.event([:mq, :subscriber, :dlq])
+
+  defp kafka_event(name), do: Telemetry.event([:mq, :kafka, name])
 end

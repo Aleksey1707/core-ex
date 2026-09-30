@@ -167,7 +167,7 @@ defmodule Core.Mq.Kafka.ReaderTest do
     :ok = Store.commit(TestRepo, @sub, @topic, lease, 0, 100)
     :ok = Store.release(TestRepo, @sub, @topic, lease)
 
-    attach_telemetry([:core, :mq, :kafka, :offset_reset])
+    attach_telemetry([[:core, :mq, :kafka, :offset_reset]])
 
     start_reader!(client)
     await_subscribed(client, 0)
@@ -181,7 +181,7 @@ defmodule Core.Mq.Kafka.ReaderTest do
 
     assert log =~ "offset_out_of_range" or log =~ "вне лога"
     assert %{begin_offset: :earliest} = KafkaFake.subscription(client, @topic, 0)
-    assert_receive {:telemetry, %{count: 1}, %{topic: @topic, partition: 0}}
+    assert_receive {:telemetry, _event, %{count: 1}, %{topic: @topic, partition: 0}}
   end
 
   test "перезапуск консьюмера — переподписка с зафиксированного смещения", %{client: client} do
@@ -237,6 +237,132 @@ defmodule Core.Mq.Kafka.ReaderTest do
 
     assert %{lease?: true, pending?: false, topic: @topic, partitions: %{0 => partition}} = Reader.info(reader)
     assert partition == %{high_wm_offset: 17, committed_offset: 4, committed_ts: 3, buffered: 0}
+  end
+
+  test "info: зафиксированное смещение из базы до первого commit, потеря аренды сбрасывает партиции",
+       %{client: client} do
+    lease = Store.new_lease()
+    :ok = Store.acquire(TestRepo, @sub, @topic, lease, 30_000)
+    :ok = Store.commit(TestRepo, @sub, @topic, lease, 0, 4)
+    :ok = Store.release(TestRepo, @sub, @topic, lease)
+
+    reader = start_reader!(client)
+    await_subscribed(client, 0)
+    :ok = KafkaFake.deliver(client, @topic, 0, [{4, "k", "a", []}], 9)
+    assert {:ok, _} = Reader.get(reader, 100)
+
+    assert %{partitions: %{0 => %{high_wm_offset: 9, committed_offset: 4, committed_ts: nil}}} = Reader.info(reader)
+
+    take_over!()
+    capture_log(fn -> assert {:error, %Error{code: :kafka_lease_lost}} = Reader.commit(reader) end)
+
+    assert %{lease?: false, partitions: %{0 => partition}} = Reader.info(reader)
+    assert partition == %{high_wm_offset: nil, committed_offset: nil, committed_ts: nil, buffered: 0}
+  end
+
+  test "info: пропущенная запись зафиксирована — отставания по ней нет", %{client: client} do
+    reader = start_reader!(client)
+    await_subscribed(client, 0)
+
+    :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", [{"", "x"}]}], 1)
+    capture_log(fn -> assert :empty = Reader.get(reader, 50) end)
+
+    assert Store.offsets(TestRepo, @sub, @topic) == %{0 => 1}
+    assert %{partitions: %{0 => %{high_wm_offset: 1, committed_offset: 1}}} = Reader.info(reader)
+  end
+
+  test "info: перезапущенный читатель без аренды знает партиции с сохранённым смещением", %{client: client} do
+    lease = Store.new_lease()
+    :ok = Store.acquire(TestRepo, @sub, @topic, lease, 30_000)
+    :ok = Store.commit(TestRepo, @sub, @topic, lease, 1, 4)
+
+    reader = start_reader!(client)
+
+    assert %{lease?: false, partitions: %{1 => partition} = partitions} = Reader.info(reader)
+    assert map_size(partitions) == 1
+    assert partition == %{high_wm_offset: nil, committed_offset: nil, committed_ts: nil, buffered: 0}
+  end
+
+  describe "события метрик" do
+    @events [
+      [:core, :mq, :kafka, :offset_reset],
+      [:core, :mq, :kafka, :decode_drop],
+      [:core, :mq, :kafka, :read_error],
+      [:core, :mq, :kafka, :commit_error]
+    ]
+
+    test "счётчики засеяны нулём при старте по каждой причине", %{client: client} do
+      attach_telemetry(@events)
+      start_reader!(client)
+
+      assert_receive {:telemetry, [_, _, _, :offset_reset], %{count: 0}, %{topic: @topic}}
+      assert_receive {:telemetry, [_, _, _, :decode_drop], %{count: 0}, %{topic: @topic}}
+
+      for reason <- ~w(subscribe consumer_down lease)a,
+          do: assert_receive({:telemetry, [_, _, _, :read_error], %{count: 0}, %{topic: @topic, reason: ^reason}})
+
+      for reason <- ~w(lease_lost failed)a,
+          do: assert_receive({:telemetry, [_, _, _, :commit_error], %{count: 0}, %{topic: @topic, reason: ^reason}})
+    end
+
+    test "commit устаревшей ноды — commit_error lease_lost", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+      :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", []}], 1)
+      assert {:ok, _} = Reader.get(reader, 100)
+      attach_telemetry(@events)
+
+      take_over!()
+      capture_log(fn -> assert {:error, %Error{code: :kafka_lease_lost}} = Reader.commit(reader) end)
+
+      assert_receive {:telemetry, [_, _, _, :commit_error], %{count: 1}, %{topic: @topic, reason: :lease_lost}}
+    end
+
+    test "смещение не записано — commit_error failed", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+      :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", []}], 1)
+      assert {:ok, _} = Reader.get(reader, 100)
+      attach_telemetry(@events)
+
+      TestRepo.query!("ALTER TABLE mq_kafka_offsets RENAME TO mq_kafka_offsets_gone")
+
+      assert {:error, %Error{code: :commit_failed}} = Reader.commit(reader)
+      assert_receive {:telemetry, [_, _, _, :commit_error], %{count: 1}, %{topic: @topic, reason: :failed}}
+    end
+
+    test "неизвестный топик — read_error subscribe", %{client: client} do
+      attach_telemetry(@events)
+
+      capture_log(fn ->
+        start_reader!(client, topic: Mq.Topic.new!("missing"))
+        assert_receive {:telemetry, [_, _, _, :read_error], %{count: 1}, %{topic: "missing", reason: :subscribe}}
+      end)
+    end
+
+    test "перезапуск консьюмера — read_error consumer_down", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+      attach_telemetry(@events)
+
+      capture_log(fn ->
+        :ok = KafkaFake.restart_consumer(client, @topic, 0)
+        await(fn -> KafkaFake.subscription(client, @topic, 0).subscriber == reader end)
+      end)
+
+      assert_receive {:telemetry, [_, _, _, :read_error], %{count: 1}, %{topic: @topic, reason: :consumer_down}}
+    end
+
+    test "аренда не продлена — read_error lease", %{client: client} do
+      start_reader!(client, lease_ttl_ms: 300)
+      await_subscribed(client, 0)
+      attach_telemetry(@events)
+
+      capture_log(fn ->
+        TestRepo.query!("ALTER TABLE mq_kafka_leases RENAME TO mq_kafka_leases_gone")
+        assert_receive {:telemetry, [_, _, _, :read_error], %{count: 1}, %{topic: @topic, reason: :lease}}, 1_000
+      end)
+    end
   end
 
   test "мусор в опциях — ArgumentError на старте", %{client: client} do
@@ -299,15 +425,15 @@ defmodule Core.Mq.Kafka.ReaderTest do
     end
   end
 
-  defp attach_telemetry(event) do
+  defp attach_telemetry(events) do
     test = self()
-    handler = "#{inspect(test)}-#{inspect(event)}"
+    handler = "#{inspect(test)}-#{inspect(events)}"
 
     :ok =
-      :telemetry.attach(
+      :telemetry.attach_many(
         handler,
-        event,
-        fn _event, measurements, metadata, pid -> send(pid, {:telemetry, measurements, metadata}) end,
+        events,
+        fn event, measurements, metadata, pid -> send(pid, {:telemetry, event, measurements, metadata}) end,
         test
       )
 

@@ -181,9 +181,15 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 | `OutboxOldestNewHigh` | `max(my_app_prom_ex_outbox_queue_oldest_age_seconds) > <порог>`, `for: <порог>` | очередь не разгребается: поллер не запущен, брокер недоступен или голова очереди раз за разом уходит в backoff |
 | `OutboxExpiredLocks` | `max(my_app_prom_ex_outbox_queue_expired_locks_count) > 0`, `for: <порог>` | аренда `:in_work` истекла: поллер остановлен посреди пачки или цикл дольше `lock_duration` |
 | `MqPublishErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_publish_total{result!="ok"}[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_publish_total{result!="ok"} unless last_over_time(my_app_prom_ex_mq_publish_total{result!="ok"}[5m] offset 5m)) > 0` | публикация в RabbitMQ Stream отказала или не подтверждена брокером; у Kafka — то же условие по `my_app_prom_ex_mq_kafka_publish_total{result="error"}` |
-| `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_decode_drop_total unless last_over_time(my_app_prom_ex_mq_decode_drop_total[5m] offset 5m)) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching |
+| `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_decode_drop_total unless last_over_time(my_app_prom_ex_mq_decode_drop_total[5m] offset 5m)) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching; у Kafka — то же условие по `my_app_prom_ex_mq_kafka_decode_drop_total`: запись не принимает `Mq.Message` |
 | `MqSubscriberDlq` | `sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0 or sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total unless last_over_time(my_app_prom_ex_mq_subscriber_dlq_total[5m] offset 5m)) > 0` | подписчик отправил «ядовитое» сообщение в DLQ; метка `reason`: `rejected` — отказ обработчика, `exhausted` — исчерпание попыток (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
 | `MqDlqRequeuedStuck` | `max by (subscriber, topic) (my_app_prom_ex_mq_dlq_count{status="requeued"}) > 0`, `for: <порог>` | записи DLQ в Postgres возвращены оператором, но не перечитываются: подписчика над `Core.Mq.Dlq.Reader` этого топика нет на ноде или обработчик раз за разом отвечает `{:error, _}` (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
+| `MqKafkaReaderLagging` | `max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_seconds) > <порог> and on (component, topic, partition) max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_messages) > 0`, `for: <порог>` | чтение Kafka отстаёт от записи: подписчик не успевает или повторяет сообщение, которое держит весь топик (head-of-line) |
+| `MqKafkaReaderBacklog` | `max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_messages) > <порог>`, `for: <порог>` | непрочитанных сообщений в партиции больше порога |
+| `MqKafkaReaderNoLease` | `max by (component, topic) (my_app_prom_ex_mq_kafka_reader_lease) == 0`, `for: <порог>` | топик не читает ни одна нода с читателем: аренда не берётся, а нули `lag_*` у нод без аренды отставания не покажут |
+| `MqKafkaOffsetReset` | `sum by (topic) (increase(my_app_prom_ex_mq_kafka_offset_reset_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_kafka_offset_reset_total unless last_over_time(my_app_prom_ex_mq_kafka_offset_reset_total[5m] offset 5m)) > 0` | смещение вне лога, партиция перечитана с начала: подписчик увидит повторы, а записи между зафиксированным смещением и началом лога потеряны (retention, пересоздание топика) |
+| `MqKafkaReadErrors` | `sum by (topic, reason) (increase(my_app_prom_ex_mq_kafka_read_errors_total[5m])) > 0`, `for: <порог>` | чтение Kafka отказывает: `subscribe` — подписка на партиции (неизвестный топик, клиент, метаданные), `consumer_down` — падает консьюмер партиции, `lease` — аренда не продлевается |
+| `MqKafkaCommitErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_kafka_commit_errors_total{reason="failed"}[5m])) > 0`, `for: <порог>` | смещение не записывается, подписчик повторяет сообщение; `reason="lease_lost"` — переход аренды, алерта на него нет |
 | `WorkerDown` | `my_app_prom_ex_workers_up == 0`, `for: <порог>` | процесса из `watch:` нет на ноде; имя `{:global, _}` / `{:via, _, _}`, разрешённое в pid другой ноды, даёт `up` 1 — такой процесс алерт ловит, только когда его нет в кластере |
 | `WorkerMailboxHigh` | `my_app_prom_ex_workers_message_queue_len > <порог>`, `for: <порог>` | mailbox процесса растёт быстрее, чем он обрабатывает сообщения (`17-otp-concurrency.md`, «Mailbox и backpressure») |
 | `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0 or sum by (cache) (my_app_prom_ex_cache_requests_total{result="cache_error"} unless last_over_time(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m] offset 5m)) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
@@ -213,6 +219,74 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - alert: OutboxQueueFailedGrowing
   expr: max(my_app_prom_ex_outbox_queue_count{status="failed"}) > 0
   for: 10m
+```
+
+### Отставание чтения Kafka
+
+Gauge'и `mq_kafka_reader_*` (`Core.Mq.PromEx`, опция `kafka_readers:`) снимает только владелец
+аренды топика (ADR-0033); нода без аренды отдаёт нули по партициям, которые читала, — иначе
+`last_value` держал бы отставание, снятое при потере аренды.
+
+- Агрегировать SHOULD через `max` по `(component, topic, partition)`: отставание партиции есть
+  только у одной ноды.
+- Алерт на `lag_seconds` MUST нести условие `lag_messages > 0`: на пустом топике время с последнего
+  сообщения растёт без отставания.
+- `lag_seconds` известен с первого `commit` на ноде: сообщение, застрявшее первым после перехода
+  аренды, `MqKafkaReaderLagging` не видит — его ловит `MqKafkaReaderBacklog`.
+- `for:` у `MqKafkaReaderNoLease` MUST быть длиннее `lease_ttl_ms` читателя: аренду упавшей ноды
+  никто не возьмёт до её истечения.
+- `for:` у `MqKafkaReadErrors` и `MqKafkaCommitErrors` SHOULD быть длиннее окна `increase`:
+  единичный отказ держит `increase > 0` одно окно, а длящийся повторяется — переподписка раз на
+  backoff до `retry_max_ms`, аренда раз в треть `lease_ttl_ms`, commit на каждом повторе
+  сообщения.
+- `MqKafkaOffsetReset` и Kafka-вариант `MqDecodeDrops` MUST нести правую ветку, хотя читатель
+  засевает серии при старте: сброс и пропуск приходят с первой пачкой после подписки — раньше
+  первого скрейпа ноды.
+
+```yaml
+# плохо — пустой топик: время с последнего сообщения растёт, алерт горит без отставания
+- alert: MqKafkaReaderLagging
+  expr: max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_seconds) > 300
+
+# хорошо
+- alert: MqKafkaReaderLagging
+  expr: >
+    max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_seconds) > 300
+    and on (component, topic, partition)
+      max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_messages) > 0
+  for: 5m
+```
+
+Тест `MqKafkaReaderLagging` на `promtool test rules` (правило «хорошо» в `alerts.yml`): партиция
+`orders/0` отстаёт на ноде `a`, нода `b` без аренды отдаёт нули — алерт; `orders/1` пуста — тишина;
+`users/0` разобрала отставание — тишина.
+
+```yaml
+rule_files: [alerts.yml]
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_seconds{instance="a", component="c", topic="orders", partition="0"}'
+        values: '0+60x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_messages{instance="a", component="c", topic="orders", partition="0"}'
+        values: '5x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_seconds{instance="b", component="c", topic="orders", partition="0"}'
+        values: '0x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_messages{instance="b", component="c", topic="orders", partition="0"}'
+        values: '0x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_seconds{instance="a", component="c", topic="orders", partition="1"}'
+        values: '0+60x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_messages{instance="a", component="c", topic="orders", partition="1"}'
+        values: '0x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_seconds{instance="a", component="c", topic="users", partition="0"}'
+        values: '0+60x20'
+      - series: 'my_app_prom_ex_mq_kafka_reader_lag_messages{instance="a", component="c", topic="users", partition="0"}'
+        values: '5x7 0x13'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MqKafkaReaderLagging
+        exp_alerts:
+          - exp_labels: {component: c, topic: orders, partition: "0"}
 ```
 
 ### Первое событие серии счётчика
@@ -258,7 +332,8 @@ sum by (<метки>) (increase(x{<фильтр>}[w])) > 0
 Новый счётчик под алерт на единичное событие с закрытым множеством меток SHOULD объявляться `sum`
 по measurement `count` и засеваться `count: 0` по каждому значению меток при старте
 процесса-владельца: серия существует до первого события, и условию в таблице хватает
-`increase(x[w]) > 0`. Засевает владелец, а не плагин PromEx: метрики плагина подключаются к
+`increase(x[w]) > 0`, если событие не приходит раньше первого скрейпа ноды (иначе — правая ветка,
+«Отставание чтения Kafka»). Засевает владелец, а не плагин PromEx: метрики плагина подключаются к
 telemetry после его сборки. `counter` прибавил бы 1 на событие засева; `sum` экспортируется в
 Prometheus с типом `counter`, имя серии не меняется. Так засеяны
 `es_projection_signal_{sent,received}_total` (`Core.Es.Projection.Listener`, ADR-0028).

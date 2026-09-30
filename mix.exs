@@ -15,7 +15,7 @@ defmodule Core.MixProject do
       dialyzer: [plt_add_apps: [:mix], ignore_warnings: "dialyzer.ignore.exs"],
       # Адаптеры брокеров компилируются условно (см. deps): без клиента модуля нет,
       # и ссылка на него из Mq.PromEx — не ошибка, а осознанный no-op.
-      elixirc_options: [no_warn_undefined: [Core.Mq.Stream.Reader, Core.Mq.Kafka.Writer]],
+      elixirc_options: [no_warn_undefined: [Core.Mq.Stream.Reader, Core.Mq.Kafka.Writer, Core.Mq.Kafka.Reader]],
       description: "Shared-фундамент приложений: Prim, Codec, Repo, Es, Outbox, MQ, PubSub",
       docs: docs()
     ]
