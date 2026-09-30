@@ -92,8 +92,9 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 ## Адаптеры и абстракции
 
-Адаптеры брокеров (`Mq.Writer` / `Mq.ReaderReliable`: `Mq.Stream.*`, `Mq.Kafka.Writer`)
-живут в библиотеке — конкретный клиент/коннекшн приходит им аргументом или через `opts`.
+Адаптеры брокеров (`Mq.Writer` / `Mq.ReaderReliable`: `Mq.Stream.*`, `Mq.Kafka.Writer`,
+`Mq.Kafka.Reader`) живут в библиотеке — конкретный клиент/коннекшн приходит им аргументом или
+через `opts`.
 
 Клиентские библиотеки объявлены `optional: true`, а модули, которым нужен клиент
 на этапе компиляции (`use RabbitMQStream.Connection`, структура `%OsirisChunk{}`) или которые
@@ -103,7 +104,9 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 за тот брокер, который использует. Правила при добавлении нового адаптера:
 
 - всё, что не требует клиента на этапе компиляции, MUST оставаться вне условия
-  (`Mq.Stream.Writer` работает с любым connection-модулем и компилируется всегда);
+  (`Mq.Stream.Writer` работает с любым connection-модулем и компилируется всегда; DDL и запросы
+  смещений `Mq.Kafka.Reader` — `Mq.Kafka.Migration` и `Mq.Kafka.Reader.Store`: миграция
+  потребителя накатывается независимо от состава его `deps`);
 - ссылки на условные модули из безусловных (`Mq.PromEx` → `Mq.Stream.Reader`)
   MUST попадать в `elixirc_options: [no_warn_undefined: [...]]` в `mix.exs`;
 - новый брокер подключается реализацией behaviour `Mq.Writer` / `Mq.ReaderReliable` —
@@ -123,10 +126,13 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 
 `Mq.Message` — внутренняя модель, а не контракт провода: `Mq.Writer` / `Mq.ReaderReliable`
 задают порядок публикации и обработку ошибок, но не то, во что сообщение превращается
-на проводе.
+на проводе. Модель рассчитана на запись чужого топика — байтовый ключ, заголовки с любыми
+именами, `nil`-тело у tombstone, позиция источника (ADR-0032), — и адаптер, чей провод выразить
+её целиком не может, отказывает громко, а не искажает (`Mq.Stream.Codec` на tombstone и байтовом
+ключе).
 
 - представление MAY различаться между адаптерами (`Mq.Stream.Codec` — JSON с base64-телом,
-  `Mq.Kafka.Writer` — нативно);
+  `Mq.Kafka.Writer` / `Mq.Kafka.Reader` — нативно);
 - адаптер MUST документировать своё представление в `@moduledoc` и держать кодек в
   собственном пространстве имён (`Mq.Stream.Codec`, а не `Mq.Codec`): общее имя врёт о том,
   что формат один на всех;
@@ -140,8 +146,8 @@ config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 Почему формат не унифицирован и чем платим — ADR-0004.
 
 Сконфигурированные клиенты брокеров (например, клиент Kafka `:brod` под id приложения —
-handle `Mq.Kafka.Writer`), их supervision, runtime-тумблеры и реестры доменных процессов
-остаются в app-слое потребителя.
+handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, runtime-тумблеры и
+реестры доменных процессов остаются в app-слое потребителя.
 
 ## Граница HTTP
 

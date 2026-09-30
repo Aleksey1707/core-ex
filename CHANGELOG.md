@@ -34,7 +34,45 @@
   (`:message_too_large`), а не числом; клиент не запущен — `:client_down`. Разбор `detail` на
   call site правится по этим формам.
 
+- **`Mq.Message` моделирует запись чужого топика: `nil`-тело, байтовый ключ, любые имена
+  заголовков, позиция источника.** Библиотека читает топики, которыми не владеет: ключ с Schema
+  Registry — Avro-байты, имена заголовков задаёт владелец топика, удаление в компактном топике —
+  запись без значения. Решение и отвергнутые варианты —
+  `docs/adr/0032-mq-message-models-foreign-topic-record.md`.
+
+  - `Message.body :: binary() | nil`: `nil` — tombstone. `Kafka.Writer` публикует его как
+    удаление, `Kafka.Reader` отдаёт пустое значение как `nil`. `from_message` подписчика: было —
+    тело всегда `binary()` → стало — клоза на `%Mq.Message{body: nil}`.
+  - `Mq.Key` — непустые байты без предела длины и без UTF-8; модуль и API (`new/1`, `value/1`)
+    прежние. Код, выводящий `Mq.Key.value/1` в лог или JSON, проверяет `String.valid?/1`.
+  - `Mq.HeaderKey` — любая непустая строка UTF-8 в lowercase (было — `^[a-zA-Z0-9._-]+$` до 100
+    символов). `Message.new/4,5` принимает заголовки и списком пар: при повторе имени — последнее
+    значение, `nil`-значение — `""`.
+  - `Message.position :: Mq.Position.t() | nil` (`%Mq.Position{partition:, offset:}`) и
+    `Message.new/5` с позицией пятым аргументом. `Stream.Reader` заполняет смещение при
+    `partition: nil`, у публикуемого сообщения — `nil`. Код, матчащий `%Mq.Message{}` целиком
+    литералом, дополняется полем.
+  - `Stream.Codec.encode/1` на tombstone, ключе или значении заголовка не в UTF-8 —
+    `{:error, _}` (`:invalid_body`, `:invalid_key`, `:invalid_headers`): было — исключение или
+    `:encode_failed`. Выброс такого сообщения в Stream-DLQ отказывает, и оно остаётся без commit.
+
+- **Таблицы читателя Kafka — миграция потребителя.** `Core.Mq.Kafka.Reader` хранит смещения и
+  аренду топика в БД приложения (`mq_kafka_offsets`, `mq_kafka_leases`). Приложение, которое
+  поднимает читатель, заводит миграцию со своим timestamp и делегирует DDL
+  `Core.Mq.Kafka.Migration` (`defdelegate up/down`, README, «Миграции»); без читателя миграция
+  не нужна.
+
 ### Новое
+
+- **`Core.Mq.Kafka.Reader`** — `Mq.ReaderReliable` для Kafka: `Core.PubSub.MqSubscriberReliable`,
+  `{:skip, _}` с commit и путь DLQ работают поверх Kafka. Подписка на `brod_consumer` каждой
+  партиции без consumer group — работает на любой Kafka ≥ 0.11, в том числе без KIP-848; одна
+  активная нода на топик по аренде с fencing-токеном, смещения — в таблице БД приложения, без
+  смещения — чтение с начала топика (`initial_offset:`). Сообщение несёт ключ, заголовки, тело
+  как есть и позицию (партиция, смещение). Смещение вне лога — `error` и переподписка с начала,
+  событие `[:core, :mq, :kafka, :offset_reset]`. Решение и цена —
+  `docs/adr/0033-kafka-reader-without-consumer-group.md`. `Core.Mq.Kafka.ensure_available!/0`
+  проверяет и читателя.
 
 - **`Core.Mq.Kafka.Partitioner`** — раскладка ключа по партициям, совместимая с
   `DefaultPartitioner` Kafka (`partition/2`, `murmur2/1`). Клиента не требует и компилируется

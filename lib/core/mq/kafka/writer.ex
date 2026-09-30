@@ -14,8 +14,9 @@ if Code.ensure_loaded?(:brod) do
     заголовки записи. Партиция ключа — `Core.Mq.Kafka.Partitioner` (murmur2, как у
     `DefaultPartitioner` Kafka), без ключа — случайная.
 
-    `body: ""` — отказ до отправки: `:brod` пишет пустое значение как null, и сообщение стало бы
-    tombstone, молча удаляющим ключ компактного топика (ADR-0034).
+    `body: nil` публикуется как tombstone. `body: ""` — отказ до отправки: `:brod` пишет пустое
+    значение как null, и сообщение стало бы tombstone, молча удаляющим ключ компактного топика
+    (ADR-0034).
 
     Идемпотентного продюсера у `:brod` нет: повтор отправки внутри клиента может задвоить
     запись, подписчик обязан быть идемпотентным.
@@ -94,12 +95,12 @@ if Code.ensure_loaded?(:brod) do
 
     # Число партиций — `get_partitions_count_safe/2`: партиционер-функция в `produce_sync/5`
     # спрашивает метаданные с автосозданием, и опечатка в топике на кластере с
-    # `auto.create.topics.enable` создала бы топик вместо ошибки. Пустой ключ `:brod` пишет как
-    # null — сообщение без ключа. Непойманное исключение клиента унесло бы вызывающего
+    # `auto.create.topics.enable` создала бы топик вместо ошибки. Пустые ключ и значение `:brod`
+    # пишет как null — сообщение без ключа и tombstone. Непойманное исключение клиента унесло бы вызывающего
     # (`Outbox.Poller`), поэтому ловится любое исключение.
     defp produce(client, topic, %Message{} = message) do
       key = key(message.key)
-      value = %{value: message.body, headers: Map.to_list(message.headers)}
+      value = %{value: message.body || "", headers: Map.to_list(message.headers)}
 
       with {:ok, count} <- :brod.get_partitions_count_safe(client, topic),
            :ok <- :brod.produce_sync(client, topic, Partitioner.partition(key, count), key || "", value) do

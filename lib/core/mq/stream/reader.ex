@@ -447,7 +447,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     defp yield_or_skip(state, offset, data) do
       case decode_entry(state, data) do
         {:ok, message} ->
-          hold_if_reliable(state, offset, message)
+          hold_if_reliable(state, offset, %{message | position: %Mq.Position{partition: nil, offset: offset}})
 
         {:drop, state} ->
           state

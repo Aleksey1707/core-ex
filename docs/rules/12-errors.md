@@ -329,6 +329,7 @@ json(conn, Response.error(code, messages))
 | `Core.Mq.Stream.Reader` | `:mq` | `:app` | `:not_reliable`, `:nothing_to_commit`, `:commit_failed` |
 | `Core.Mq.Stream.Writer` | `:mq` | `:app` | `:publish_unconfirmed`, `:producer_setup_failed` |
 | `Core.Mq.Kafka.Writer` | `:mq` | `:app` | `:kafka_publish_failed` |
+| `Core.Mq.Kafka.Reader` | `:mq` | `:app` | `:nothing_to_commit`, `:commit_failed`, `:kafka_lease_lost` |
 | `Core.PubSub.MqSubscriberReliable` | `:pubsub` | `:app` | `:already_subscribed`, `:reader_unavailable`, `:dlq_publish_failed`, `:handler_crashed`, `:unexpected_handler_result` |
 | `Core.Outbox.Poller`, `Core.Outbox.Cleaner` | `:outbox` | `:app` | `:cycle_failed`, `:cycle_exit` |
 | `Core.Outbox.Delivery.Mq` | `:outbox` | `:app` | `:encode_payload_failed` |

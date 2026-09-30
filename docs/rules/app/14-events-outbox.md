@@ -110,6 +110,24 @@
 - Правило, читающее read-модель event-sourced агрегата, MUST дождаться проекции по потоку
   **того агрегата, чью read-модель читает** (`deps/core/docs/rules/22-projections.md`).
 
+### Чтение топика Kafka
+
+Топик Kafka читается `Core.Mq.Kafka.Reader` под `Core.PubSub.MqSubscriberReliable` — без
+consumer group, со смещениями и арендой топика в БД приложения
+(`deps/core/docs/adr/0033-kafka-reader-without-consumer-group.md`).
+
+- Миграция таблиц читателя MUST делегировать `Core.Mq.Kafka.Migration` (README библиотеки,
+  «Миграции»). Строки `mq_kafka_offsets` вручную MUST NOT удаляться: без строки партиция
+  читается со стартовой позиции — по умолчанию с начала топика.
+- `from_message` MUST разбирать tombstone: `body: nil` — удаление ключа в компактном топике, а
+  не ошибка разбора.
+- Ключ чужого топика — байты: `Core.Mq.Key.value/1` MUST NOT уходить в лог или JSON как строка без
+  проверки UTF-8.
+- Читателю одного топика с другим `subscriber_name` MUST быть свой клиент `:brod`: консьюмер
+  партиции принимает одного подписчика.
+- `dlq_writer` на RabbitMQ Stream у подписчика на Kafka SHOULD NOT: конверт стрима не выражает
+  tombstone и байтовый ключ, выброс такого сообщения отказывает, и оно остаётся без commit.
+
 ## Идемпотентность потребителей
 
 Доставка — **at-least-once** на каждом звене: очередь переотправляет пачку после сбоя, брокер

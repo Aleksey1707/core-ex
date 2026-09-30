@@ -126,11 +126,15 @@ defmodule Core.Mq.Stream.ReaderTest do
     good = encoded(topic, "ok")
     deliver(reader, 0, [good, "not-json", good])
 
-    assert {:ok, %Mq.Message{body: "ok"}} = Stream.Reader.get(reader, 0)
+    assert {:ok, %Mq.Message{body: "ok", position: %Mq.Position{partition: nil, offset: 0}}} =
+             Stream.Reader.get(reader, 0)
+
     assert :ok = Stream.Reader.commit(reader)
     assert FakeConn.credits() == []
 
-    assert {:ok, %Mq.Message{body: "ok"}} = Stream.Reader.get(reader, 0)
+    assert {:ok, %Mq.Message{body: "ok", position: %Mq.Position{partition: nil, offset: 2}}} =
+             Stream.Reader.get(reader, 0)
+
     assert :ok = Stream.Reader.commit(reader)
     assert FakeConn.credits() == [{1, 1}]
     assert_received {:drop, 1}

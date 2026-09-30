@@ -31,6 +31,14 @@ defmodule Core.Mq.Stream.CodecTest do
     assert decoded.headers == %{}
   end
 
+  test "encode отклоняет то, что конверт исказил бы: tombstone, ключ и значение заголовка не в UTF-8" do
+    topic = Mq.Topic.new!("products")
+
+    assert {:error, %{code: :invalid_body}} = Stream.Codec.encode(message!(topic, %{}, nil, nil))
+    assert {:error, %{code: :invalid_key}} = Stream.Codec.encode(message!(topic, %{}, "b", Mq.Key.new!(<<0xFF>>)))
+    assert {:error, %{code: :invalid_headers}} = Stream.Codec.encode(message!(topic, %{"h" => <<0xFF>>}, "b", nil))
+  end
+
   test "decode отклоняет чужой payload" do
     assert {:error, %{code: :invalid_payload}} = Stream.Codec.decode("не json")
     assert {:error, %{code: :invalid_payload}} = Stream.Codec.decode(~s(["не объект"]))
@@ -66,5 +74,11 @@ defmodule Core.Mq.Stream.CodecTest do
 
     assert {:error, %{code: :invalid_headers, detail: :redacted}} =
              Stream.Codec.decode(~s({"topic": "products", "body": "#{secret}", "headers": {"k": 1}}))
+  end
+
+  defp message!(topic, headers, body, key) do
+    {:ok, message} = Message.new(topic, headers, body, key)
+
+    message
   end
 end

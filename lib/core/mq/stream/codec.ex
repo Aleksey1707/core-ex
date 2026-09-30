@@ -18,31 +18,94 @@ defmodule Core.Mq.Stream.Codec do
 
   require Error
 
-  @doc "Message → JSON binary."
+  # ===== encode =====
+
+  @doc """
+  Message → JSON binary.
+
+  Tombstone (`body: nil`), ключ и значение заголовка не в UTF-8 — `{:error, _}`: конверту их
+  не выразить без искажения (ADR-0032), и выброс такого сообщения в стрим отказывает громко.
+  """
   @spec encode(Message.t()) :: {:ok, binary()} | {:error, Error.t()}
 
   def encode(%Message{} = message) do
-    payload = %{
+    with :ok <- encodable_body(message.body),
+         :ok <- encodable_key(message.key),
+         :ok <- encodable_headers(message.headers) do
+      message
+      |> payload()
+      |> Jason.encode()
+      |> encoded()
+    end
+  end
+
+  # ---
+
+  defp encodable_body(body) when is_binary(body), do: :ok
+
+  defp encodable_body(nil) do
+    {:error,
+     Error.app(
+       code: :invalid_body,
+       ns: :mq,
+       message: "Tombstone не выражается конвертом MQ"
+     )}
+  end
+
+  defp encodable_key(nil), do: :ok
+
+  defp encodable_key(%Mq.Key{} = key) do
+    value = Mq.Key.value(key)
+
+    if String.valid?(value) do
+      :ok
+    else
+      {:error,
+       Error.app(
+         code: :invalid_key,
+         ns: :mq,
+         message: "Ключ не в UTF-8 не выражается конвертом MQ",
+         detail: redact(value)
+       )}
+    end
+  end
+
+  defp encodable_headers(headers) do
+    if Enum.all?(headers, fn {_k, v} -> String.valid?(v) end) do
+      :ok
+    else
+      {:error,
+       Error.app(
+         code: :invalid_headers,
+         ns: :mq,
+         message: "Значение заголовка не в UTF-8 не выражается конвертом MQ",
+         detail: redact(headers)
+       )}
+    end
+  end
+
+  defp payload(%Message{} = message) do
+    %{
       "headers" => message.headers,
       "body" => Base.encode64(message.body),
       "key" => Option.map(message.key, &Mq.Key.value/1),
       "topic" => Mq.Topic.value(message.topic)
     }
-
-    case Jason.encode(payload) do
-      {:ok, binary} ->
-        {:ok, binary}
-
-      {:error, reason} ->
-        {:error,
-         Error.app(
-           code: :encode_failed,
-           ns: :mq,
-           message: "Не удалось закодировать MQ message",
-           detail: reason
-         )}
-    end
   end
+
+  defp encoded({:ok, binary}), do: {:ok, binary}
+
+  defp encoded({:error, reason}) do
+    {:error,
+     Error.app(
+       code: :encode_failed,
+       ns: :mq,
+       message: "Не удалось закодировать MQ message",
+       detail: reason
+     )}
+  end
+
+  # ===== decode =====
 
   @doc "JSON binary → Message."
   @spec decode(binary()) :: {:ok, Message.t()} | {:error, Error.t()}
@@ -158,6 +221,8 @@ defmodule Core.Mq.Stream.Codec do
        detail: redact(other)
      )}
   end
+
+  # ===== общее =====
 
   # Разбираемая запись — чужие данные: объём не ограничен, содержимое библиотеке
   # неизвестно, а `detail` уходит в лог потребителя целиком. Наружу — форма и размер

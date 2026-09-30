@@ -290,9 +290,14 @@ defmodule Core.PubSub.MqSubscriberReliable do
     end)
   end
 
+  # Ключ чужого топика — байты (ADR-0032): не-UTF-8 атрибутом span'а экспортёр не отдаст.
   defp message_id(%Message{key: nil}), do: nil
 
-  defp message_id(%Message{key: key}), do: Mq.Key.value(key)
+  defp message_id(%Message{key: key}) do
+    value = Mq.Key.value(key)
+
+    if String.valid?(value), do: value
+  end
 
   defp consume_raw(state, raw) do
     case safe_from_message(state, raw) do

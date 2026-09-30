@@ -42,7 +42,7 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 | Нужен адаптер | Объявите у себя | Появятся модули |
 |---|---|---|
 | RabbitMQ Stream | `{:rabbitmq_stream, "~> 0.4.2"}` | `Core.Mq.Stream.Connection`, `Core.Mq.Stream.Reader` |
-| Kafka | `{:brod, "~> 4.7"}` | `Core.Mq.Kafka.Writer` (только публикация) |
+| Kafka | `{:brod, "~> 4.7"}` | `Core.Mq.Kafka.Writer`, `Core.Mq.Kafka.Reader` |
 | ни одного | — | остальное работает как обычно |
 
 Handle `Core.Mq.Kafka.Writer` — id клиента `:brod` (атом). Клиента стартует дерево приложения,
@@ -60,19 +60,33 @@ children = [
 Core.Mq.Kafka.Writer.put_many(MyApp.Kafka, messages)
 ```
 
+`Core.Mq.Kafka.Reader` — `Mq.ReaderReliable` поверх того же клиента без consumer group: смещения
+и аренда топика (его читает одна нода) — в таблицах БД приложения, миграция — «Что предоставляет
+потребитель», пункт «Миграции». Работает на любой Kafka ≥ 0.11, в том числе без KIP-848.
+Консьюмер партиции у `:brod` принимает одного подписчика: читателям одного топика с разными
+`subscriber_name` нужны разные клиенты. Решение и цена —
+`docs/adr/0033-kafka-reader-without-consumer-group.md`.
+
+```elixir
+{Core.Mq.Kafka.Reader,
+ client: MyApp.Kafka,
+ topic: Core.Mq.Topic.new!("orders"),
+ subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
+ repo: MyApp.DAO,
+ name: MyApp.Orders.Reader}
+```
+
 Всё, что не зависит от конкретного клиента, компилируется всегда: `Core.Mq.Writer` /
 `Core.Mq.ReaderReliable` (behaviour), `Core.Mq.Stream.Writer` (получает connection-модуль
 в `opts`), `Core.Mq.Stream.Credentials`, `Core.Mq.Stream.Codec`, `Core.Mq.Kafka.Partitioner`,
-`Core.Outbox.Delivery.Mq`, `Core.PubSub.*`, `Core.Mq.PromEx`. Свой адаптер под другой брокер
-подключается реализацией behaviour — менять библиотеку для этого не нужно.
+`Core.Mq.Kafka.Migration`, `Core.Mq.Kafka.Reader.Store`, `Core.Outbox.Delivery.Mq`,
+`Core.PubSub.*`, `Core.Mq.PromEx`. Свой адаптер под другой брокер подключается реализацией
+behaviour — менять библиотеку для этого не нужно.
 
 Контракты задают порядок и обработку ошибок, но **не** представление на проводе: оно —
 свойство адаптера (`Core.Mq.Stream.Codec` заворачивает сообщение в JSON с base64-телом,
 `Core.Mq.Kafka.Writer` пишет нативно). Потребители одного топика обязаны читать тем же
 адаптером, каким он написан; подробности — `docs/rules/10-architecture.md`.
-
-Читателя для Kafka в библиотеке нет: `Core.PubSub.MqSubscriberReliable` и путь DLQ
-работают только поверх RabbitMQ Stream (`docs/rules/DEBT.md`).
 
 Модули адаптеров объявлены под `if Code.ensure_loaded?/1`: без клиента их просто нет,
 и обращение к ним даёт `UndefinedFunctionError`, а не ошибку компиляции библиотеки.
@@ -267,6 +281,21 @@ end
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
    `:failed` в очередь (runbook в `deps/core/docs/rules/app/14-events-outbox.md`). Задача поднимает
    приложение потребителя и берёт репозиторий из `Core.Config.outbox_repo/0`.
+
+   Смещения и аренда `Core.Mq.Kafka.Reader` — таблицы `mq_kafka_offsets` и `mq_kafka_leases`,
+   DDL живёт в `Core.Mq.Kafka.Migration` и собирается без клиента `:brod`:
+
+   ```elixir
+   defmodule MyApp.DAO.Migrations.CreateMqKafkaReader do
+     use Ecto.Migration
+
+     defdelegate up, to: Core.Mq.Kafka.Migration
+     defdelegate down, to: Core.Mq.Kafka.Migration
+   end
+   ```
+
+   Строки `mq_kafka_offsets` вручную не удаляются: без строки партиция читается со стартовой
+   позиции читателя — по умолчанию с начала топика.
 
 4. **DI репозиториев** — по конвенции, а не по конфигурации. Call site резолвит реализацию
    через `Core.Config.repo!/1`:

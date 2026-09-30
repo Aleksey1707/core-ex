@@ -79,6 +79,11 @@ defmodule Core.Mq.Kafka.WriterTest do
     assert Enum.map(KafkaFake.published(client), & &1.value) == ["a"]
   end
 
+  test "nil-тело — tombstone: пустое значение на проводе", %{client: client} do
+    assert :ok = Writer.put(client, message!(%{}, nil))
+    assert [%{key: "owner-1", value: ""}] = KafkaFake.published(client)
+  end
+
   test "любое исключение клиента становится ошибкой, а не падением вызывающего", %{client: client} do
     # Строка кеша метаданных, которую `:brod` не разбирает, — исключение в процессе вызывающего.
     :ets.insert(client, {{:topics, "topic_a"}, :broken, :broken})
