@@ -35,20 +35,36 @@ PostgreSQL, event store, transactional outbox, адаптеры брокеров
 
 Клиентские библиотеки брокеров объявлены `optional: true` и **не приходят потребителю
 транзитивно**. Приложению, которому нужен только RabbitMQ Stream, не придётся собирать
-`klife` с его нативными зависимостями (`crc32cer`, `snappyer` — NIF, требуют C-toolchain
-в образе сборки), и наоборот.
+`brod` с его нативной зависимостью (`crc32cer` — NIF, требует C-toolchain в образе сборки),
+и наоборот. Кодеки сжатия Kafka (`snappyer`, `lz4b`, `ezstd` — тоже NIF) `brod` не тянет:
+потребитель объявляет нужный сам, если продюсер или топик их использует.
 
 | Нужен адаптер | Объявите у себя | Появятся модули |
 |---|---|---|
 | RabbitMQ Stream | `{:rabbitmq_stream, "~> 0.4.2"}` | `Core.Mq.Stream.Connection`, `Core.Mq.Stream.Reader` |
-| Kafka | `{:klife, "~> 1.2"}` | `Core.Mq.Kafka.Writer` (только публикация) |
+| Kafka | `{:brod, "~> 4.7"}` | `Core.Mq.Kafka.Writer` (только публикация) |
 | ни одного | — | остальное работает как обычно |
+
+Handle `Core.Mq.Kafka.Writer` — id клиента `:brod` (атом). Клиента стартует дерево приложения,
+продюсеры — по первому запросу (`auto_start_producers: true`); подключение, SASL и TLS —
+опции клиента:
+
+```elixir
+children = [
+  %{
+    id: MyApp.Kafka,
+    start: {:brod, :start_link_client, [[{"kafka", 9092}], MyApp.Kafka, [auto_start_producers: true]]}
+  }
+]
+
+Core.Mq.Kafka.Writer.put_many(MyApp.Kafka, messages)
+```
 
 Всё, что не зависит от конкретного клиента, компилируется всегда: `Core.Mq.Writer` /
 `Core.Mq.ReaderReliable` (behaviour), `Core.Mq.Stream.Writer` (получает connection-модуль
-в `opts`), `Core.Mq.Stream.Credentials`, `Core.Mq.Stream.Codec`, `Core.Outbox.Delivery.Mq`,
-`Core.PubSub.*`, `Core.Mq.PromEx`. Свой адаптер под другой брокер подключается реализацией
-behaviour — менять библиотеку для этого не нужно.
+в `opts`), `Core.Mq.Stream.Credentials`, `Core.Mq.Stream.Codec`, `Core.Mq.Kafka.Partitioner`,
+`Core.Outbox.Delivery.Mq`, `Core.PubSub.*`, `Core.Mq.PromEx`. Свой адаптер под другой брокер
+подключается реализацией behaviour — менять библиотеку для этого не нужно.
 
 Контракты задают порядок и обработку ошибок, но **не** представление на проводе: оно —
 свойство адаптера (`Core.Mq.Stream.Codec` заворачивает сообщение в JSON с base64-телом,
@@ -508,9 +524,10 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 ## Разработка
 
 ```bash
-make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
-mix test                 # тесты; :rabbit_stream исключены по умолчанию
+make infra-up            # Postgres + RabbitMQ + Kafka (podman compose, deploy/infra)
+mix test                 # тесты; :rabbit_stream и :kafka исключены по умолчанию
 make test-stream         # включая тесты живого RabbitMQ Stream
+make test-kafka          # включая тесты живого Kafka; образ брокера — KAFKA_IMAGE
 make                     # rules-check → format-check → compile → compile-no-optional → deps-clean → xref → dialyzer → test → credo → audit
 make compile-no-optional # сборка без optional-клиентов брокеров — так библиотеку видит потребитель без них
 make infra-down

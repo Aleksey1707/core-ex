@@ -52,7 +52,7 @@ format-check:
 compile:
 	mix compile --warnings-as-errors
 
-# Сборка без optional-клиентов брокеров (rabbitmq_stream, klife) — так библиотека
+# Сборка без optional-клиентов брокеров (rabbitmq_stream, brod) — так библиотека
 # собирается у потребителя, которому они не нужны. Ловит ссылку на клиента из
 # безусловного модуля раньше, чем её увидит потребитель. Флаг форсирует полную
 # пересборку, следующий обычный `mix compile` возвращает полную сборку сам.
@@ -78,6 +78,12 @@ test: infra-up
 .PHONY: test-stream
 test-stream: infra-up
 	mix test --include rabbit_stream
+
+# Тесты, которым нужен живой Kafka (по умолчанию исключены тегом). Образ брокера —
+# `KAFKA_IMAGE` (`deploy/infra/compose.yml`).
+.PHONY: test-kafka
+test-kafka: infra-up
+	mix test --include kafka
 
 .PHONY: deps-clean
 deps-clean:

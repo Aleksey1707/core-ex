@@ -2,53 +2,94 @@ defmodule Core.Mq.Kafka.WriterTest do
   use ExUnit.Case, async: true
 
   alias Core.Error
+  alias Core.KafkaFake
   alias Core.Mq
   alias Core.Mq.Kafka.Writer
 
-  defmodule OkClient do
-    @moduledoc false
+  setup do
+    client = :"kafka_fake_#{System.unique_integer([:positive])}"
+    start_supervised!({KafkaFake, client: client, topics: %{"topic_a" => 7}})
 
-    def produce(record) do
-      send(self(), {:produced, record})
-      {:ok, record}
+    {:ok, client: client}
+  end
+
+  test "put: topic/key/value/headers → запись брокера", %{client: client} do
+    assert :ok = Writer.put(client, message!(%{"owner_id" => "o-1"}, "body"))
+
+    assert [%{topic: "topic_a", key: "owner-1", value: "body", headers: [{"owner_id", "o-1"}]}] =
+             KafkaFake.published(client)
+  end
+
+  test "put: сообщение без заголовков", %{client: client} do
+    assert :ok = Writer.put(client, message!(%{}, "body"))
+    assert [%{headers: []}] = KafkaFake.published(client)
+  end
+
+  test "ключ → партиция murmur2, как у DefaultPartitioner Kafka", %{client: client} do
+    messages = for key <- ~w(foobar 21 abc), do: message!(%{}, key, Mq.Key.new!(key))
+
+    assert :ok = Writer.put_many(client, messages)
+    assert Enum.map(KafkaFake.published(client), &{&1.key, &1.partition}) == [{"foobar", 0}, {"21", 3}, {"abc", 4}]
+  end
+
+  test "без ключа — пустой ключ на проводе и партиция из числа партиций топика", %{client: client} do
+    assert :ok = Writer.put(client, message!(%{}, "body", nil))
+    assert [%{key: "", partition: partition}] = KafkaFake.published(client)
+    assert partition in 0..6
+  end
+
+  test "put_many: успех по порядку", %{client: client} do
+    messages = for name <- ~w(a b c), do: message!(%{"name" => name}, name)
+
+    assert :ok = Writer.put_many(client, messages)
+    assert Enum.map(KafkaFake.published(client), & &1.value) == ~w(a b c)
+  end
+
+  for exit <- ~w(not_retriable reached_max_retries)a do
+    test "put_many: стоп на первой ошибке брокера (#{exit})" do
+      client = :"kafka_fake_#{System.unique_integer([:positive])}"
+
+      start_supervised!({KafkaFake, client: client, topics: %{"topic_a" => 1}, fail_at: 1, exit: unquote(exit)})
+
+      messages = for body <- ~w(ok-body fail tail), do: message!(%{}, body)
+
+      assert {:error, 1, %Error{code: :kafka_publish_failed, detail: {:error_code, :message_too_large}}} =
+               Writer.put_many(client, messages)
+
+      assert Enum.map(KafkaFake.published(client), & &1.value) == ["ok-body"]
     end
   end
 
-  defmodule FailClient do
-    @moduledoc false
+  test "неизвестный топик — ошибка без автосоздания, а не падение", %{client: client} do
+    {:ok, message} = Mq.Message.new(Mq.Topic.new!("missing"), %{}, "body", nil)
 
-    def produce(record), do: {:error, %{record | error_code: 1}}
+    assert {:error, %Error{code: :kafka_publish_failed, detail: :unknown_topic_or_partition}} =
+             Writer.put(client, message)
   end
 
-  defmodule UnknownTopicClient do
-    @moduledoc false
-
-    def produce(_record) do
-      raise "Error on add partition: {:error, :unkown_metadata_for_topic}"
-    end
+  test "клиент не запущен — :client_down" do
+    assert {:error, %Error{code: :kafka_publish_failed, detail: :client_down}} =
+             Writer.put(:kafka_fake_not_started, message!(%{}, "body"))
   end
 
-  defmodule FailSecondClient do
-    @moduledoc false
+  test "пустое тело — отказ до отправки: на проводе оно стало бы tombstone", %{client: client} do
+    assert {:error, 1, %Error{code: :kafka_publish_failed, detail: :empty_body}} =
+             Writer.put_many(client, [message!(%{}, "a"), message!(%{}, ""), message!(%{}, "c")])
 
-    def produce(%Klife.Record{value: "fail"} = record), do: {:error, %{record | error_code: 7}}
-    def produce(record), do: {:ok, record}
+    assert Enum.map(KafkaFake.published(client), & &1.value) == ["a"]
   end
 
-  defmodule RaisingClient do
-    @moduledoc false
+  test "любое исключение клиента становится ошибкой, а не падением вызывающего", %{client: client} do
+    # Строка кеша метаданных, которую `:brod` не разбирает, — исключение в процессе вызывающего.
+    :ets.insert(client, {{:topics, "topic_a"}, :broken, :broken})
 
-    def produce(_record), do: raise(ArgumentError, "клиент сломался")
-  end
-
-  test "любое исключение клиента становится ошибкой, а не падением вызывающего" do
     assert {:error, %Error{code: :kafka_publish_failed, detail: detail}} =
-             Writer.put(RaisingClient, message!(%{}, "body"))
+             Writer.put(client, message!(%{}, "body"))
 
-    assert detail =~ "клиент сломался"
+    assert is_binary(detail)
   end
 
-  test "publish эмитит телеметрию с результатом и топиком" do
+  test "publish эмитит телеметрию с результатом и топиком", %{client: client} do
     handler_id = "kafka-writer-#{inspect(self())}"
 
     :ok =
@@ -63,64 +104,20 @@ defmodule Core.Mq.Kafka.WriterTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    assert :ok = Writer.put(OkClient, message!(%{"name" => "a"}, "a"))
+    assert :ok = Writer.put(client, message!(%{"name" => "a"}, "a"))
     assert_received {:publish, %{count: 1, duration: duration}, %{result: :ok, topic: "topic_a"}}
     assert is_integer(duration)
 
-    assert {:error, _} = Writer.put(FailClient, message!(%{"name" => "a"}, "a"))
-    assert_received {:publish, %{count: 1}, %{result: :error, topic: "topic_a"}}
+    {:ok, missing} = Mq.Message.new(Mq.Topic.new!("missing"), %{}, "a", nil)
+    assert {:error, _} = Writer.put(client, missing)
+    assert_received {:publish, %{count: 1}, %{result: :error, topic: "missing"}}
+
+    assert {:error, _} = Writer.put(client, message!(%{}, ""))
+    refute_received {:publish, _, _}
   end
 
-  test "put_many: успех по порядку" do
-    messages = for name <- ~w(a b), do: message!(%{"name" => name}, name)
-
-    assert :ok = Writer.put_many(OkClient, messages)
-    assert_received {:produced, %Klife.Record{value: "a"}}
-    assert_received {:produced, %Klife.Record{value: "b"}}
-  end
-
-  test "put: topic/key/value/headers → Klife.Record" do
-    assert :ok = Writer.put(OkClient, message!(%{"owner_id" => "o-1"}, "body"))
-
-    assert_received {:produced, record}
-
-    assert %Klife.Record{
-             topic: "topic_a",
-             key: "owner-1",
-             value: "body",
-             headers: [%{key: "owner_id", value: "o-1"}]
-           } = record
-  end
-
-  test "put: сообщение без заголовков" do
-    assert :ok = Writer.put(OkClient, message!(%{}, "body"))
-    assert_received {:produced, %Klife.Record{headers: []}}
-  end
-
-  test "put_many: стоп на первой ошибке" do
-    messages = [
-      message!(%{}, "ok-body"),
-      message!(%{}, "fail"),
-      message!(%{}, "tail")
-    ]
-
-    assert {:error, 1, %Error{code: :kafka_publish_failed}} =
-             Writer.put_many(FailSecondClient, messages)
-  end
-
-  test "put: ошибка клиента" do
-    assert {:error, %Error{code: :kafka_publish_failed, detail: {:error_code, 1}}} =
-             Writer.put(FailClient, message!(%{}, "body"))
-  end
-
-  test "produce: unkown_metadata_for_topic → unknown_metadata_for_topic" do
-    assert {:error, %Error{code: :kafka_publish_failed, detail: :unknown_metadata_for_topic}} =
-             Writer.put(UnknownTopicClient, message!(%{}, "body"))
-  end
-
-  defp message!(headers, body) do
-    {:ok, message} =
-      Mq.Message.new(Mq.Topic.new!("topic_a"), headers, body, Mq.Key.new!("owner-1"))
+  defp message!(headers, body, key \\ Mq.Key.new!("owner-1")) do
+    {:ok, message} = Mq.Message.new(Mq.Topic.new!("topic_a"), headers, body, key)
 
     message
   end

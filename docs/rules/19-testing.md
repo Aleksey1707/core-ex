@@ -537,7 +537,8 @@ use MyApp.DataCase, async: false
 
 - Тесты, которым нужен живой брокер или хранилище, — под тегом, исключённым по умолчанию
   в `test/test_helper.exs`, и гоняются явно. В библиотеке это `:rabbit_stream`
-  (`make test-stream`), инфраструктура поднимается `make infra-up`.
+  (`make test-stream`) и `:kafka` (`make test-kafka`), инфраструктура поднимается
+  `make infra-up`.
 - Конфигурационный контракт (`Core.Config`) проверяется отдельно, `test/core/config_test.exs`:
   такие тесты правят app env целиком, поэтому `async: false` с восстановлением в `on_exit`.
 

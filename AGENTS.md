@@ -120,10 +120,11 @@ make compile-no-optional # сборка без optional-клиентов бро�
 make consumer-check      # фикстура-потребитель: раскладка под boundary_lint --consumer и храповик вывода типов
 make release-check       # версия сведена в mix.exs, README.md и CHANGELOG.md (и с тегом на коммите)
 make release VERSION=X.Y.Z # свести версию в трёх местах: «Не выпущено» → ## X.Y.Z
-make infra-up            # Postgres + RabbitMQ (podman compose, deploy/infra)
+make infra-up            # Postgres + RabbitMQ + Kafka (podman compose, deploy/infra)
 make infra-down
-mix test                 # :rabbit_stream исключены по умолчанию
+mix test                 # :rabbit_stream и :kafka исключены по умолчанию
 make test-stream         # включая тесты живого RabbitMQ Stream
+make test-kafka          # включая тесты живого Kafka; образ брокера — KAFKA_IMAGE
 mix test path/to/file_test.exs:42
 mix credo --strict
 mix dialyzer

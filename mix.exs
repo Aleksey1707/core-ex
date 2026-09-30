@@ -51,7 +51,7 @@ defmodule Core.MixProject do
       # Брокеры: клиенты опциональны — адаптер компилируется только у тех
       # потребителей, кто объявил соответствующий клиент у себя (см. README).
       {:rabbitmq_stream, "~> 0.4.2", optional: true},
-      {:klife, "~> 1.2", optional: true},
+      {:brod, "~> 4.7", optional: true},
       # Криптография
       {:argon2_elixir, "~> 4.1"},
       {:fernetex, "~> 0.5"},

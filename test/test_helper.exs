@@ -17,4 +17,4 @@ stream_opts =
 
 {:ok, _pid} = Core.Mq.Stream.Connection.start_link(stream_opts)
 
-ExUnit.start(exclude: [:rabbit_stream])
+ExUnit.start(exclude: [:rabbit_stream, :kafka])

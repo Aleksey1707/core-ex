@@ -1,19 +1,29 @@
 # Kafka-клиент объявлен в библиотеке `optional: true`: адаптер компилируется только
 # у тех потребителей, которые добавили клиента себе в `deps`. Без него модуля
 # просто нет — вместо ошибки компиляции библиотеки вызов даст UndefinedFunctionError.
-if Code.ensure_loaded?(Klife.Record) do
+if Code.ensure_loaded?(:brod) do
   defmodule Core.Mq.Kafka.Writer do
     @moduledoc """
-    `Mq.Writer` для Kafka через klife-клиент.
+    `Mq.Writer` для Kafka через клиент `:brod`.
 
-    Handle writer'а — модуль клиента (`use Klife.Client`) из app-слоя;
-    собственного состояния нет.
-    Публикация строго по порядку, стоп на первой ошибке.
+    Handle writer'а — id клиента `:brod` (атом): клиента стартует app-слой в своём дереве с
+    `auto_start_producers: true`; собственного состояния нет.
+    Публикация строго по порядку (`:brod.produce_sync/5`), стоп на первой ошибке.
 
-    `detail` ошибки `:kafka_publish_failed` — атом распознанной причины
-    (`:unknown_metadata_for_topic`), `{:error_code, code}` брокера либо текст: klife отдаёт
-    сбои чем придётся, и нормализация сводит их к этим трём формам, чтобы на call site
-    было что разбирать.
+    Сообщение пишется нативно: тело — значение записи, `Mq.Key` — байты ключа, заголовки —
+    заголовки записи. Партиция ключа — `Core.Mq.Kafka.Partitioner` (murmur2, как у
+    `DefaultPartitioner` Kafka), без ключа — случайная.
+
+    `body: ""` — отказ до отправки: `:brod` пишет пустое значение как null, и сообщение стало бы
+    tombstone, молча удаляющим ключ компактного топика (ADR-0034).
+
+    Идемпотентного продюсера у `:brod` нет: повтор отправки внутри клиента может задвоить
+    запись, подписчик обязан быть идемпотентным.
+
+    `detail` ошибки `:kafka_publish_failed` — атом причины (`:empty_body`,
+    `:unknown_topic_or_partition`, `:client_down`, код брокера из метаданных топика),
+    `{:error_code, code}` отказа брокера на запись либо текст: `:brod` отдаёт сбои чем придётся,
+    и нормализация сводит их к этим трём формам, чтобы на call site было что разбирать.
     """
 
     @behaviour Core.Mq.Writer
@@ -21,13 +31,14 @@ if Code.ensure_loaded?(Klife.Record) do
     alias Core.Error
     alias Core.Helper.Transact
     alias Core.Mq
+    alias Core.Mq.Kafka.Partitioner
     alias Core.Mq.Message
     alias Core.Telemetry
 
     require Error
 
     @doc "Опубликовать сообщение."
-    @spec put(module(), Message.t()) :: :ok | {:error, Error.t()}
+    @spec put(atom(), Message.t()) :: :ok | {:error, Error.t()}
 
     @impl true
     def put(client, %Message{} = message) when is_atom(client) do
@@ -38,7 +49,7 @@ if Code.ensure_loaded?(Klife.Record) do
     end
 
     @doc "Опубликовать сообщения по порядку; стоп на первой ошибке."
-    @spec put_many(module(), [Message.t()]) :: :ok | {:error, non_neg_integer(), Error.t()}
+    @spec put_many(atom(), [Message.t()]) :: :ok | {:error, non_neg_integer(), Error.t()}
 
     @impl true
     def put_many(client, messages) when is_atom(client) and is_list(messages) do
@@ -56,12 +67,14 @@ if Code.ensure_loaded?(Klife.Record) do
 
     # ---
 
+    defp put_one(_client, %Message{body: ""}), do: kafka_error(:empty_body)
+
     defp put_one(client, %Message{} = message) do
       topic = Mq.Topic.value(message.topic)
       start = System.monotonic_time()
 
-      case produce(client, to_klife(message)) do
-        {:ok, _} ->
+      case produce(client, topic, message) do
+        :ok ->
           emit_publish(start, :ok, topic)
           :ok
 
@@ -79,53 +92,37 @@ if Code.ensure_loaded?(Klife.Record) do
       )
     end
 
-    # Клиент падает исключением там, где контракт ждёт `{:error, _}`: `unkown_metadata_for_topic`
-    # прилетает `RuntimeError`, остальные сбои — чем придётся. Непойманное исключение унесло бы
-    # вызывающего (`Outbox.Poller`), поэтому ловится любое.
-    defp produce(client, record) do
-      case client.produce(record) do
-        {:ok, _} = ok -> ok
-        {:error, reason} -> {:error, normalize_klife_reason(reason)}
+    # Число партиций — `get_partitions_count_safe/2`: партиционер-функция в `produce_sync/5`
+    # спрашивает метаданные с автосозданием, и опечатка в топике на кластере с
+    # `auto.create.topics.enable` создала бы топик вместо ошибки. Пустой ключ `:brod` пишет как
+    # null — сообщение без ключа. Непойманное исключение клиента унесло бы вызывающего
+    # (`Outbox.Poller`), поэтому ловится любое исключение.
+    defp produce(client, topic, %Message{} = message) do
+      key = key(message.key)
+      value = %{value: message.body, headers: Map.to_list(message.headers)}
+
+      with {:ok, count} <- :brod.get_partitions_count_safe(client, topic),
+           :ok <- :brod.produce_sync(client, topic, Partitioner.partition(key, count), key || "", value) do
+        :ok
+      else
+        {:error, reason} -> {:error, normalize_brod_reason(reason)}
       end
     rescue
-      exception -> {:error, normalize_klife_reason(exception)}
-    end
-
-    defp to_klife(%Message{} = message) do
-      %Klife.Record{
-        topic: Mq.Topic.value(message.topic),
-        key: key(message.key),
-        value: message.body,
-        headers: Enum.map(message.headers, fn {key, value} -> %{key: key, value: value} end)
-      }
+      exception -> {:error, Exception.message(exception)}
     end
 
     defp key(nil), do: nil
     defp key(%Mq.Key{} = key), do: Mq.Key.value(key)
 
-    # Опечатка в самом klife (~> 1.2): причина приходит как `:unkown_metadata_for_topic`
-    # и в атоме, и внутри текста RuntimeError. Клозы остаются безвредными после её
-    # исправления в апстриме — общая клоза ниже вернёт причину как есть.
-    defp normalize_klife_reason(:unkown_metadata_for_topic), do: :unknown_metadata_for_topic
+    # Отказ брокера на запись роняет продюсера партиции: `:not_retriable` — сразу,
+    # `:reached_max_retries` — после исчерпания повторов.
+    defp normalize_brod_reason({:producer_down, {exit, {:produce_response_error, _, _, _, code}}})
+         when exit in [:not_retriable, :reached_max_retries],
+         do: {:error_code, code}
 
-    defp normalize_klife_reason({:error, :unkown_metadata_for_topic}),
-      do: :unknown_metadata_for_topic
+    defp normalize_brod_reason(reason) when is_atom(reason) or is_binary(reason), do: reason
 
-    defp normalize_klife_reason(%RuntimeError{message: message}) do
-      if String.contains?(message, "unkown_metadata_for_topic") or
-           String.contains?(message, "unknown_metadata_for_topic"),
-         do: :unknown_metadata_for_topic,
-         else: String.replace(message, "unkown", "unknown")
-    end
-
-    defp normalize_klife_reason(%Klife.Record{error_code: code}), do: {:error_code, code}
-
-    defp normalize_klife_reason(exception) when is_exception(exception),
-      do: Exception.message(exception)
-
-    defp normalize_klife_reason(reason) when is_atom(reason) or is_binary(reason), do: reason
-
-    defp normalize_klife_reason(reason), do: inspect(reason)
+    defp normalize_brod_reason(reason), do: inspect(reason)
 
     defp kafka_error(reason) do
       {:error,

@@ -19,7 +19,7 @@ defmodule Core.Helper.StartOptsTest do
   end
 
   test "atom!: nil модулем не считается" do
-    assert StartOpts.atom!(@label, [dep: :klife], :dep) == :klife
+    assert StartOpts.atom!(@label, [dep: :brod], :dep) == :brod
 
     assert_raise ArgumentError, ~r/:dep — ожидается атом/, fn ->
       StartOpts.atom!(@label, [dep: nil], :dep)

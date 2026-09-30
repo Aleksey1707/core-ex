@@ -1,5 +1,45 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Адаптер Kafka — на клиенте `:brod` вместо `:klife`.** Читать с кластера без KIP-848 `:klife`
+  может только через свои внутренние модули; `:brod` читает партицию без consumer group публичным
+  API, а два клиента к одному кластеру — две конфигурации подключения и два набора нативных
+  зависимостей. Решение и отвергнутые варианты — `docs/adr/0034-kafka-adapter-on-brod.md`.
+  `put` / `put_many` по-прежнему публикуют строго по порядку со стопом на первой ошибке, ключ
+  попадает в ту же партицию, что и раньше, и что у Java-клиентов (murmur2 `DefaultPartitioner`).
+
+  Правка `deps`: было — `{:klife, "~> 1.2"}` → стало — `{:brod, "~> 4.7"}`. Обязательная нативная
+  зависимость — `crc32cer`; `snappyer` больше не обязателен, кодеки сжатия (`snappyer`, `lz4b`,
+  `ezstd`) объявляются по выбору. `Core.Mq.Kafka.ensure_available!/0` проверяет `:brod`.
+
+  Правка клиента и handle: было — модуль `use Klife.Client, otp_app: :my_app` с конфигурацией
+  в `config :my_app, MyApp.Kafka` и handle `Kafka.Writer.put_many(MyApp.Kafka, messages)` → стало —
+  клиент `:brod` в дереве приложения, handle — его id:
+  `{:brod, :start_link_client, [endpoints, MyApp.Kafka, [auto_start_producers: true]]}` и
+  `Kafka.Writer.put_many(MyApp.Kafka, messages)`. Подключение, SASL и TLS переписываются в опции
+  клиента `:brod` (README, «Опциональные зависимости»).
+
+  Идемпотентного продюсера у `:brod` нет: повтор отправки внутри клиента может задвоить запись.
+  Outbox и без того at-least-once — подписчик обязан быть идемпотентным.
+
+  `body: ""` — `{:error, %Error{code: :kafka_publish_failed, detail: :empty_body}}` до отправки:
+  `:brod` пишет пустое значение как null, и сообщение стало бы tombstone, молча удаляющим ключ
+  компактного топика. Было — пустое тело публиковалось.
+
+  `detail` ошибки `:kafka_publish_failed` — причины `:brod`: было — `:unknown_metadata_for_topic`
+  → стало — `:unknown_topic_or_partition`; `{:error_code, code}` — код брокера атомом
+  (`:message_too_large`), а не числом; клиент не запущен — `:client_down`. Разбор `detail` на
+  call site правится по этим формам.
+
+### Новое
+
+- **`Core.Mq.Kafka.Partitioner`** — раскладка ключа по партициям, совместимая с
+  `DefaultPartitioner` Kafka (`partition/2`, `murmur2/1`). Клиента не требует и компилируется
+  всегда.
+
 ## 0.9.0
 
 ### Ломающие изменения контракта
