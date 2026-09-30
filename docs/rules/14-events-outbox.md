@@ -386,6 +386,14 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
   `[:mq, :subscriber, :dlq]` (алерт `MqSubscriberDlq` — `21-observability.md`, «Рекомендованные
   алерты»). Без настроенного `dlq_writer` сообщение не выбрасывается — повторы продолжаются, в
   лог идёт `error`.
+- Отказ без повторов — `{:reject, %Error{}}` из `on_message` (`PubSub.handler_result()`) или
+  `from_message` (`PubSub.decode_result/1`): сообщение уходит в DLQ на первой же попытке и
+  коммитится, исход цикла — `:dlq`. Выброс по отказу отличим от исчерпания попыток: заголовок
+  `x-dlq-reason` (`rejected` / `exhausted`), `reason` в metadata `[:mq, :subscriber, :dlq]` и
+  метка `reason` у `mq_subscriber_dlq_total`, атрибут span'а `core.pubsub.dlq_reason`. Без
+  `dlq_writer` отказ ведёт себя как исчерпание попыток без DLQ: `error` в лог, без commit.
+  `{:reject, _}` не с `%Error{}` и иная форма из `from_message` — `:unexpected_handler_result`.
+  Проверяется: `test/core/pubsub/mq_subscriber_reliable_test.exs`, describe «отказ без повторов».
 - DLQ-writer подписчику передаётся опциями `dlq_writer` (модуль `Mq.Writer`) и `dlq_handle` (его
   handle) — только парой, одна без другой роняет старт `ArgumentError`; чей это writer и где он
   стоит в дереве — `deps/core/docs/rules/app/14-events-outbox.md`, «Подписчики». Проверяется:
@@ -405,8 +413,10 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
 ### Runbook: сообщения в DLQ
 
 1. Алерт `MqSubscriberDlq` → топик и `dlq_topic` в метках.
-2. Причина — в логе подписчика (`сообщение отправлено в DLQ после N попыток`) и в заголовке
-   `x-dlq-error` самого сообщения.
+2. Причина — в логе подписчика (`сообщение отправлено в DLQ после N попыток` или `сообщение
+   отклонено и отправлено в DLQ`) и в заголовках `x-dlq-reason` / `x-dlq-error`
+   самого сообщения. `rejected` — обработчик счёл сообщение необрабатываемым: чинятся данные или
+   правило обработчика, а не транзиентный сбой.
 3. Починить обработчик, затем переиграть содержимое DLQ-стрима в исходный топик
    (порядок относительно уже обработанных сообщений не восстанавливается).
 

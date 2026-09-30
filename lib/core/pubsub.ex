@@ -2,14 +2,19 @@ defmodule Core.PubSub do
   @moduledoc """
   Контракты доменного pub/sub.
 
-  Skip — через `{:skip, reason}`, не через исключения.
+  Skip — через `{:skip, reason}`, не через исключения. Отказ без повторов — `{:reject, error}`:
+  сообщение не обработать никогда (тело не разбирается, запись нарушает инвариант), и повтор
+  не поможет.
   """
 
   alias Core.Context
   alias Core.Error
 
   @type skip_reason :: term()
-  @type handler_result :: :ok | {:skip, skip_reason()} | {:error, Error.t()}
+  @type handler_result :: :ok | {:skip, skip_reason()} | {:reject, Error.t()} | {:error, Error.t()}
+
+  @typedoc "Исход разбора сообщения: `{:reject, _}` — ошибка разбора, которую повтор не исправит."
+  @type decode_result(message) :: {:ok, message} | {:reject, Error.t()} | {:error, Error.t()}
 
   defmodule Publisher do
     @moduledoc """

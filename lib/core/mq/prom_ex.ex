@@ -103,8 +103,10 @@ defmodule Core.Mq.PromEx do
           counter(
             metric_prefix ++ [:subscriber, :dlq, :total],
             event_name: subscriber_dlq_event(),
-            description: "Число сообщений, отправленных подписчиком в DLQ",
-            tags: [:topic, :dlq_topic],
+            description:
+              "Число сообщений, отправленных подписчиком в DLQ: rejected — отказ обработчика, " <>
+                "exhausted — исчерпание попыток",
+            tags: [:topic, :dlq_topic, :reason],
             tag_values: &dlq_tag_values/1
           ),
           Safe.error_metric(metric_prefix, :mq)
@@ -242,8 +244,8 @@ defmodule Core.Mq.PromEx do
     %{result: to_string(result), topic: topic}
   end
 
-  defp dlq_tag_values(%{topic: topic, dlq_topic: dlq_topic}) do
-    %{topic: topic, dlq_topic: dlq_topic}
+  defp dlq_tag_values(%{topic: topic, dlq_topic: dlq_topic, reason: reason}) do
+    %{topic: topic, dlq_topic: dlq_topic, reason: to_string(reason)}
   end
 
   defp reader_tag_values(%{component: component, topic: topic}) do

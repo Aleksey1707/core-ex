@@ -18,6 +18,13 @@ defmodule Core.PubSub.MqSubscriberReliable do
   топик навсегда. Без настроенного `dlq_writer` выброса не происходит: подписчик
   продолжает повторы на `retry_max_ms` и пишет `error` в лог.
 
+  Отказ без повторов — `{:reject, %Error{}}` из `on_message` или `from_message`
+  (`Core.PubSub`): сообщение, которое не обработать никогда, уходит в DLQ сразу, без
+  `max_attempts` попыток, и коммитится. Причина выброса — заголовок `x-dlq-reason`
+  (`rejected` / `exhausted`), метка `reason` события `[:mq, :subscriber, :dlq]` и атрибут
+  `core.pubsub.dlq_reason` span'а. Без `dlq_writer` отказ ведёт себя как исчерпание попыток
+  без DLQ: `error` в лог, без commit, повторы с растущим интервалом.
+
   После `:processed` / `:filtered` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
   После `:idle` — `poll_interval_ms`, после `:error` — текущий backoff.
 
@@ -39,7 +46,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
   alias Core.Otel
   alias Core.PubSub
   alias Core.Repo
-  alias Core.Result
   alias Core.Telemetry
 
   require Logger
@@ -47,6 +53,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   @attr_attempt "core.pubsub.attempt"
   @attr_dlq_topic "core.pubsub.dlq_topic"
+  @attr_dlq_reason "core.pubsub.dlq_reason"
 
   @label "PubSub.MqSubscriberReliable"
 
@@ -88,7 +95,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   @type filter :: (Message.t() -> boolean())
 
-  @type from_message :: (Message.t() -> Result.t(domain_message()))
+  @type from_message :: (Message.t() -> PubSub.decode_result(domain_message()))
 
   @type on_message ::
           (domain_message(), subscriber_data(), Context.t() -> PubSub.handler_result())
@@ -345,6 +352,16 @@ defmodule Core.PubSub.MqSubscriberReliable do
         Logger.warning("pubsub reliable from_message: #{error.message}")
         Otel.record_error(error)
         fail_attempt(state, raw, error)
+
+      {:reject, %Error{} = error} ->
+        Otel.record_error(error)
+        reject(state, raw, error)
+
+      other ->
+        Logger.warning("pubsub reliable from_message: неожиданный результат #{inspect(other)}")
+        error = unexpected_result_error(:from_message, other)
+        Otel.record_error(error)
+        fail_attempt(state, raw, error)
     end
   end
 
@@ -379,6 +396,10 @@ defmodule Core.PubSub.MqSubscriberReliable do
         Logger.warning("pubsub reliable on_message: #{error.message}")
         Otel.record_error(error)
         fail_attempt(state, raw, error)
+
+      {:reject, %Error{} = error} ->
+        Otel.record_error(error)
+        reject(state, raw, error)
 
       other ->
         Logger.warning("pubsub reliable on_message: неожиданный результат #{inspect(other)}")
@@ -415,13 +436,26 @@ defmodule Core.PubSub.MqSubscriberReliable do
     {:error, state}
   end
 
-  defp exhausted(%__MODULE__{} = state, raw, error) do
-    case publish_to_dlq(state, raw, error) do
+  defp exhausted(%__MODULE__{} = state, raw, error), do: to_dlq(state, raw, error, :exhausted)
+
+  defp reject(%__MODULE__{dlq_writer: nil} = state, _raw, error) do
+    Logger.error(
+      "pubsub reliable: сообщение отклонено, DLQ не настроен, повторы продолжаются: " <>
+        "topic=#{state.topic} ошибка=#{Error.format_chain(error)}"
+    )
+
+    {:error, state}
+  end
+
+  defp reject(%__MODULE__{} = state, raw, error), do: to_dlq(state, raw, error, :rejected)
+
+  defp to_dlq(%__MODULE__{} = state, raw, error, reason) do
+    case publish_to_dlq(state, raw, error, reason) do
       :ok ->
         commit(state)
-        log_dlq(state, error)
-        emit_dlq(state)
-        Otel.set_attributes(%{@attr_dlq_topic => state.dlq_topic})
+        log_dlq(state, error, reason)
+        emit_dlq(state, reason)
+        Otel.set_attributes(%{@attr_dlq_topic => state.dlq_topic, @attr_dlq_reason => Atom.to_string(reason)})
         {:dlq, clear_pending(state)}
 
       {:error, %Error{} = dlq_error} ->
@@ -437,9 +471,9 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   # За writer'ом стоит `GenServer.call`: недоступный процесс приходит как exit,
   # а не как `{:error, _}` — без этой ветки сбой DLQ ронял бы подписчика.
-  defp publish_to_dlq(%__MODULE__{} = state, %Message{} = raw, error) do
+  defp publish_to_dlq(%__MODULE__{} = state, %Message{} = raw, error, reason) do
     with {:ok, topic} <- Mq.Topic.new(state.dlq_topic),
-         {:ok, message} <- Message.new(topic, dlq_headers(state, raw, error), raw.body, raw.key) do
+         {:ok, message} <- Message.new(topic, dlq_headers(state, raw, error, reason), raw.body, raw.key) do
       state.dlq_writer.put(state.dlq_handle, message)
     end
   rescue
@@ -457,15 +491,23 @@ defmodule Core.PubSub.MqSubscriberReliable do
     )
   end
 
-  defp dlq_headers(%__MODULE__{} = state, %Message{headers: headers}, error) do
+  defp dlq_headers(%__MODULE__{} = state, %Message{headers: headers}, error, reason) do
     Map.merge(headers, %{
       "x-dlq-source-topic" => state.topic,
       "x-dlq-attempts" => Integer.to_string(state.attempts),
+      "x-dlq-reason" => Atom.to_string(reason),
       "x-dlq-error" => String.slice(Error.format_chain(error), 0, 1000)
     })
   end
 
-  defp log_dlq(%__MODULE__{} = state, error) do
+  defp log_dlq(%__MODULE__{} = state, error, :rejected) do
+    Logger.error(
+      "pubsub reliable: сообщение отклонено и отправлено в DLQ: " <>
+        "topic=#{state.topic} dlq=#{state.dlq_topic} ошибка=#{Error.format_chain(error)}"
+    )
+  end
+
+  defp log_dlq(%__MODULE__{} = state, error, :exhausted) do
     Logger.error(
       "pubsub reliable: сообщение отправлено в DLQ после #{state.attempts} попыток: " <>
         "topic=#{state.topic} dlq=#{state.dlq_topic} ошибка=#{Error.format_chain(error)}"
@@ -547,11 +589,11 @@ defmodule Core.PubSub.MqSubscriberReliable do
     )
   end
 
-  defp emit_dlq(state) do
+  defp emit_dlq(state, reason) do
     :telemetry.execute(
       Telemetry.event([:mq, :subscriber, :dlq]),
       %{count: 1},
-      %{topic: state.topic, dlq_topic: state.dlq_topic}
+      %{topic: state.topic, dlq_topic: state.dlq_topic, reason: reason}
     )
   end
 

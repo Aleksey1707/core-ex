@@ -37,6 +37,15 @@ defmodule Core.Mq.PromExTest do
     assert Enum.any?(names, &String.contains?(&1, "mq.subscriber.cycles"))
     assert "core.prom_ex.mq.collect.errors.total" in names
 
+    dlq = Enum.find(event_metrics, &(&1.name == [:core, :prom_ex, :mq, :subscriber, :dlq, :total]))
+    assert dlq.tags == [:topic, :dlq_topic, :reason]
+
+    assert dlq.tag_values.(%{topic: "t", dlq_topic: "t.dlq", reason: :rejected}) == %{
+             topic: "t",
+             dlq_topic: "t.dlq",
+             reason: "rejected"
+           }
+
     assert [%{metrics: poll_metrics, poll_rate: 5_000}] =
              List.wrap(PromEx.polling_metrics(opts))
 

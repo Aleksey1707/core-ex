@@ -62,6 +62,13 @@
   `Core.Mq.Kafka.Migration` (`defdelegate up/down`, README, «Миграции»); без читателя миграция
   не нужна.
 
+- **Метка `reason` у `mq_subscriber_dlq_total`** (`rejected` — отказ обработчика `{:reject, _}`,
+  `exhausted` — исчерпание `max_attempts`): выброс по отказу и после повторов требуют разного
+  разбора, а ряд без метки их не различает. Метка делит ряд надвое. Запрос без агрегации по меткам
+  правится: было — `my_app_prom_ex_mq_subscriber_dlq_total{topic="orders"}` → стало —
+  `sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total{topic="orders"})`; алерт
+  `MqSubscriberDlq` из `docs/rules/21-observability.md` уже агрегирует и не меняется.
+
 ### Новое
 
 - **`Core.Mq.Kafka.Reader`** — `Mq.ReaderReliable` для Kafka: `Core.PubSub.MqSubscriberReliable`,
@@ -89,6 +96,20 @@
   `on_message` возвращает `{:skip, :irrelevant_event}` по `message.headers` после разбора тела →
   стало — `filter: &(&1.headers["type"] in @types)`, `from_message` видит только нужное
   (`docs/rules/app/14-events-outbox.md`, «Подписчики»).
+
+- **Отказ без повторов `{:reject, %Error{}}` у `Core.PubSub.MqSubscriberReliable`** — исход
+  `on_message` (`PubSub.handler_result()`) и `from_message` (новый тип
+  `PubSub.decode_result(message)`) для сообщения, которое не обработать никогда: тело не
+  разбирается, запись нарушает инвариант. Раньше такое сообщение проходило `max_attempts`
+  повторов с backoff до `retry_max_ms`, и всё это время партиция стояла. Отказ публикует сырое
+  сообщение в DLQ сразу и коммитит offset; исход `run_once/1` — `:dlq`. Отказ отличим от
+  исчерпания попыток: заголовок DLQ-сообщения `x-dlq-reason` (`rejected` / `exhausted`), ключ
+  `reason` в metadata `[:mq, :subscriber, :dlq]`, метка `reason` у `mq_subscriber_dlq_total`,
+  атрибут `core.pubsub.dlq_reason` span'а `"process <topic>"`. Без `dlq_writer` отказ — как
+  исчерпание попыток без DLQ: `error` в лог, без commit, повторы. Правка подписчика: было — неразбираемое тело даёт
+  `{:error, _}` (повторы) или `{:skip, :unprocessable}` (сообщение теряется) → стало —
+  `{:reject, error}` при настроенном `dlq_writer` (`docs/rules/app/14-events-outbox.md`,
+  «Подписчики»).
 
 ## 0.9.0
 

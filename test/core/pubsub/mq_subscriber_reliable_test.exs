@@ -350,7 +350,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
         end)
 
       assert log =~ "сообщение отправлено в DLQ после 3 попыток"
-      assert_receive {:dlq, %{topic: "products", dlq_topic: "products.dlq"}}
+      assert_receive {:dlq, %{topic: "products", dlq_topic: "products.dlq", reason: :exhausted}}
 
       # сообщение закоммичено — топик разблокирован
       assert :idle = MqSubscriberReliable.run_once(sub)
@@ -361,6 +361,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
       assert Mq.Topic.value(dead.topic) == "products.dlq"
       assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-source-topic")) == "products"
       assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-attempts")) == "3"
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-reason")) == "exhausted"
       assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-error")) =~ "яд"
     end
 
@@ -445,6 +446,109 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
       assert :processed = MqSubscriberReliable.run_once(sub)
       assert :processed = MqSubscriberReliable.run_once(sub)
       assert MqFake.Writer.published(dlq) == []
+    end
+  end
+
+  describe "отказ без повторов" do
+    test "{:reject, _} из on_message — сразу в DLQ и commit", %{reader: reader, topic: topic, context: context} do
+      dlq = MqFake.Writer.new()
+      parent = self()
+      attach_dlq_telemetry(parent)
+      on = fn _m, _d, _c -> {:reject, Error.app(__MODULE__, code: :invariant, ns: :pubsub, message: "инвариант")} end
+
+      sub = start_sub(reader, topic, "sub-reject", on, dlq_writer: MqFake.Writer, dlq_handle: dlq, max_attempts: 5)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      log = capture_log(fn -> assert :dlq = MqSubscriberReliable.run_once(sub) end)
+
+      assert log =~ "сообщение отклонено и отправлено в DLQ"
+      assert_receive {:dlq, %{topic: "products", dlq_topic: "products.dlq", reason: :rejected}}
+      assert :idle = MqSubscriberReliable.run_once(sub)
+      assert MqFake.QueueReader.pending(reader) == 0
+
+      assert [dead] = MqFake.Writer.published(dlq)
+      assert dead.body == "body"
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-reason")) == "rejected"
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-attempts")) == "1"
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-error")) =~ "инвариант"
+    end
+
+    test "{:reject, _} из from_message — в DLQ без on_message", %{reader: reader, topic: topic, context: context} do
+      dlq = MqFake.Writer.new()
+      parent = self()
+
+      on = fn message, _d, _c ->
+        send(parent, {:handled, message})
+        :ok
+      end
+
+      from_message = fn _m -> {:reject, Error.app(__MODULE__, code: :undecodable, ns: :pubsub, message: "не Avro")} end
+
+      sub =
+        start_sub(reader, topic, "sub-reject-decode", on,
+          from_message: from_message,
+          dlq_writer: MqFake.Writer,
+          dlq_handle: dlq
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      capture_log(fn -> assert :dlq = MqSubscriberReliable.run_once(sub) end)
+
+      refute_received {:handled, _}
+      assert :idle = MqSubscriberReliable.run_once(sub)
+      assert [dead] = MqFake.Writer.published(dlq)
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-reason")) == "rejected"
+      assert Mq.Message.find_header(dead, Mq.HeaderKey.new!("x-dlq-error")) =~ "не Avro"
+    end
+
+    test "без dlq_writer — error в лог, без commit", %{reader: reader, topic: topic, context: context} do
+      on = fn _m, _d, _c -> {:reject, Error.app(__MODULE__, code: :invariant, ns: :pubsub, message: "инвариант")} end
+
+      sub = start_sub(reader, topic, "sub-reject-no-dlq", on)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      log = capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+      assert log =~ "[error]"
+      assert log =~ "сообщение отклонено, DLQ не настроен"
+      assert MqFake.QueueReader.pending(reader) == 1
+    end
+
+    test "{:reject, _} не с %Error{} — неожиданный результат", %{reader: reader, topic: topic, context: context} do
+      dlq = MqFake.Writer.new()
+
+      sub =
+        start_sub(reader, topic, "sub-reject-shape", fn _m, _d, _c -> {:reject, :bad} end,
+          dlq_writer: MqFake.Writer,
+          dlq_handle: dlq
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      log = capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+      assert log =~ "неожиданный результат {:reject, :bad}"
+      assert MqFake.Writer.published(dlq) == []
+    end
+
+    test "{:reject, _} не с %Error{} из from_message — ошибка без commit", %{
+      reader: reader,
+      topic: topic,
+      context: context
+    } do
+      sub =
+        start_sub(reader, topic, "sub-reject-decode-shape", fn _m, _d, _c -> :ok end,
+          from_message: fn _m -> {:reject, :bad} end
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      log = capture_log(fn -> assert :error = MqSubscriberReliable.run_once(sub) end)
+
+      assert log =~ "pubsub reliable from_message: неожиданный результат {:reject, :bad}"
+      assert Process.alive?(sub)
+      assert MqFake.QueueReader.pending(reader) == 1
     end
   end
 
@@ -662,6 +766,22 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
       process = OtelFixture.drain() |> OtelFixture.find("process products")
 
       assert process.attributes["core.pubsub.dlq_topic"] == "products.dlq"
+      assert process.attributes["core.pubsub.dlq_reason"] == "exhausted"
+    end
+
+    test "отказ отмечается на span'е причиной rejected", %{reader: reader, topic: topic, context: context} do
+      writer = MqFake.Writer.new()
+      on = fn _m, _d, _c -> {:reject, Error.app(__MODULE__, code: :invariant, ns: :pubsub, message: "инвариант")} end
+
+      sub = start_sub(reader, topic, "sub-trace-reject", on, dlq_writer: MqFake.Writer, dlq_handle: writer)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      capture_log(fn -> assert :dlq = MqSubscriberReliable.run_once(sub) end)
+
+      process = OtelFixture.drain() |> OtelFixture.find("process products")
+
+      assert process.attributes["core.pubsub.dlq_reason"] == "rejected"
+      assert process.attributes["error.type"] == "pubsub/invariant"
     end
 
     test "отфильтрованное сообщение span'а не открывает", %{reader: reader, topic: topic, context: context} do
