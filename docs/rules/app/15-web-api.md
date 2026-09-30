@@ -227,6 +227,10 @@ event-sourced агрегата, одинаково. Без ожидания от
 | `wait=N` | ждать `min(N с, предел)`: дождался — 200, нет — 202 | `wait=<применённое>` |
 | `respond-async, wait=N` | как `wait=N` | `wait=<применённое>`; на 202 — и `respond-async` |
 
+`N` — секунды, MAY с дробной частью (`wait=0.2`): это шире RFC 7240. Точность и форму применённого
+задаёт `Core.Web.Prefer`.
+Почему дробь — ADR-0031 (`deps/core/docs/adr/0031-prefer-wait-accepts-decimal.md`).
+
 Разбор заголовка и значение `Preference-Applied` по итоговому статусу — `Core.Web.Prefer`
 (`parse/1`, `mode/2`, `applied/3`). Команда state-stored агрегата и чтение `Prefer` не разбирают и
 `Preference-Applied` не ставят: ждать им нечего.
