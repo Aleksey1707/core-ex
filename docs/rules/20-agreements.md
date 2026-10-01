@@ -250,7 +250,10 @@ end
   - Prim / struct: `is/2`, `is_opt/2` (`defguard`); обязательный Prim в head по умолчанию —
     `%Mod{}`.
   - Enum: `is_enum/2`, `in_enum/3` (макросы; subset сразу в `when`, без `@attr`; enum-модуль
-    подтягивается через `ensure_compiled`).
+    подтягивается через `ensure_compiled`). Enum собственного агрегата отдельным файлом MAY
+    стоять в guard самого агрегата; имя enum MUST — через `alias` или полное: короткое имя без
+    `alias` — несуществующий корневой модуль, и сборка падает `CompileError` (в проекте обычно
+    `:unavailable`, а не `:nofile`).
   - Пример: `when is(id, User.ID) and is_opt(at, CreatedAt) and is_enum(status, Status)`.
 - Доменные guards типа вне Guard — у источника типа (например `Version.is_version/1` для
   `t() | :current`).

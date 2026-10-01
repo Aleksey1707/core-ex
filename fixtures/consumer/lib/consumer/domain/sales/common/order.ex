@@ -1,7 +1,10 @@
 defmodule Consumer.Domain.Sales.Common.Order do
+  import Core.Guard, only: [is_enum: 2]
+
   alias Consumer.Domain.Sales.Common.Order.Cmd
   alias Consumer.Domain.Sales.Common.Order.Errors
   alias Consumer.Domain.Sales.Common.Order.Event
+  alias Consumer.Domain.Sales.Common.Order.Status
 
   use Core.Es.Aggregate,
     event_codec: Consumer.Domain.Sales.Common.Order.Event.Codec
@@ -37,4 +40,10 @@ defmodule Consumer.Domain.Sales.Common.Order do
     do: %{state | amount: payload.amount}
 
   def evolve(state, %Event.Cancelled{}), do: %{state | cancelled?: true}
+
+  def status(%__MODULE__{cancelled?: true}), do: :cancelled
+  def status(%__MODULE__{}), do: :placed
+
+  def status?(%__MODULE__{} = state, status) when is_enum(status, Status),
+    do: status(state) == status
 end

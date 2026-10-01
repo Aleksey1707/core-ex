@@ -84,7 +84,7 @@ defmodule Core.Guard do
       raise CompileError,
         file: env.file,
         line: env.line,
-        description: "не удалось скомпилировать #{inspect(mod)}: #{inspect(reason)}"
+        description: "не удалось скомпилировать #{inspect(mod)}: #{inspect(reason)}" <> unaliased_hint(mod, env)
     end
 
     unless function_exported?(mod, :values, 0) do
@@ -104,6 +104,20 @@ defmodule Core.Guard do
     end
 
     values
+  end
+
+  # Короткое имя без alias раскрывается в корневой модуль, которого нет. Внутри агрегата его ждут
+  # остальные файлы, и параллельный компилятор отпускает `ensure_compiled/1` с `:unavailable`,
+  # а не `:nofile`: ошибка выглядит циклом компиляции, хотя виновато имя.
+  defp unaliased_hint(mod, env) do
+    if Atom.to_string(mod) =~ ~r/^Elixir\.[^.]+$/ do
+      nested = "#{inspect(env.module)}.#{inspect(mod)}"
+
+      ".\n#{inspect(mod)}: короткое имя без alias раскрывается в корневой модуль; если имелся в виду " <>
+        "#{nested} — нужен alias или полное имя"
+    else
+      ""
+    end
   end
 
   defp literal_atom_list!(ast, env) do

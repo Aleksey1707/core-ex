@@ -150,6 +150,16 @@ defmodule Core.GuardTest do
     end
   end
 
+  test "is_enum CompileError на короткое имя без alias называет причину" do
+    assert_raise CompileError, ~r/Status: короткое имя без alias/, fn ->
+      compile(
+        quote do
+          def f(x) when is_enum(x, Status), do: x
+        end
+      )
+    end
+  end
+
   test "is_prim/1" do
     assert Matchers.prim?(%SamplePrim{value: "значение"})
     refute Matchers.prim?(%{value: 1})

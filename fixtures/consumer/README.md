@@ -27,7 +27,8 @@
   ```
 
   Контекст `Consumer.Domain.Sales`, его `Common`: агрегаты `Account` (кодек с `upcasts:`, модуль ключа
-  `Account.NameKey` с `key_reservations:` у репозитория счёта, процесс), `Order`, `Ping` (кодек
+  `Account.NameKey` с `key_reservations:` у репозитория счёта, процесс), `Order` (enum `Order.Status`
+  отдельным файлом в guard `is_enum/2` самого агрегата), `Ping` (кодек
   только из событий без нагрузки), `Grants` (два события делят модуль нагрузки), `NeverFails` и
   `AlwaysFails` (`decide` никогда не ошибается / только ошибается), события `Parcel` без агрегата
   (кодек, чей `load_payload/3` никогда не ошибается), идентификаторы из ключа (`DeliveryID`,
