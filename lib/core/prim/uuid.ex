@@ -1,9 +1,9 @@
 defmodule Core.Prim.UUID do
   @moduledoc """
-  Билдер uuid-Prim: генерация (`new/0`) или идентификатор из ключа (`from_key/1`) и валидация
-  UUID-строки.
+  Билдер uuid-Prim: генерация (`new/0`), идентификатор из ключа (`from_key/1`) или внешний UUID
+  источника и валидация UUID-строки.
 
-  Опции: `name:` (обязательна), `kind:`, `version:` (1 / 4 / 5 / 7; default 4),
+  Опции: `name:` (обязательна), `kind:`, `version:` (1 / 4 / 5 / 7 / `:external`; default 4),
   `check_version:` (default `true`), `namespace:` / `scope:` (только и обязательно при
   `version: 5`), `mutate:` / `validate:`, `sensitive:`. Wire-форму (`:full` / `:hex` / `:urn`)
   задаёт профиль кодека, не Prim.
@@ -18,6 +18,10 @@ defmodule Core.Prim.UUID do
   ключа, непустая строка) → части ключа по одной; строка — ключ из одной части.
   `check_version: false` при `version: 5` снимает проверку версии на разборе — для агрегата,
   который переходит на идентификатор из ключа и разбирает прежние случайные id.
+
+  `version: :external` — внешний идентификатор (ADR-0036): UUID источника как есть. Ни `new/0`,
+  ни `from_key/1` нет — id не выпускается в обход источника; разбор принимает UUID любой версии.
+  `check_version:`, `namespace:` и `scope:` при нём — `CompileError`.
   """
 
   alias Core.Prim
@@ -44,7 +48,7 @@ defmodule Core.Prim.UUID do
       check_version = Keyword.get(opts, :check_version, true)
 
       validate_opts =
-        if check_version do
+        if check_version and version != :external do
           type_opts
         else
           Keyword.put(type_opts, :version, nil)
@@ -61,24 +65,29 @@ defmodule Core.Prim.UUID do
         sensitive: Keyword.get(opts, :sensitive, false),
         value_type: String.t()
 
-      if version == 5 do
-        @uuid_namespace Keyword.fetch!(opts, :namespace)
-        @uuid_scope Keyword.fetch!(opts, :scope)
+      case version do
+        5 ->
+          @uuid_namespace Keyword.fetch!(opts, :namespace)
+          @uuid_scope Keyword.fetch!(opts, :scope)
 
-        @spec from_key(String.t() | [String.t(), ...]) :: t()
+          @spec from_key(String.t() | [String.t(), ...]) :: t()
 
-        # Одна clause: потребитель зовёт одну из форм, и clause другой дала бы ему «never used»,
-        # а рекурсия строки в список теряет сужение результата `new!/1`.
-        defp from_key(key) when is_binary(key) or (is_list(key) and key != []) do
-          new!(Core.Prim.UUID.from_key(@uuid_namespace, @uuid_scope, key))
-        end
-      else
-        @uuid_version version
+          # Одна clause: потребитель зовёт одну из форм, и clause другой дала бы ему «never used»,
+          # а рекурсия строки в список теряет сужение результата `new!/1`.
+          defp from_key(key) when is_binary(key) or (is_list(key) and key != []) do
+            new!(Core.Prim.UUID.from_key(@uuid_namespace, @uuid_scope, key))
+          end
 
-        @doc "Сгенерировать новый UUID."
-        @spec new() :: t()
+        :external ->
+          :ok
 
-        def new, do: new!(Core.Prim.UUID.generate(@uuid_version))
+        _generated ->
+          @uuid_version version
+
+          @doc "Сгенерировать новый UUID."
+          @spec new() :: t()
+
+          def new, do: new!(Core.Prim.UUID.generate(@uuid_version))
       end
 
       @doc "Отформатировать UUID (`:full` / `:hex` / `:urn`)."
@@ -99,14 +108,29 @@ defmodule Core.Prim.UUID do
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
-    Prim.Opts.allowed!(opts, :version, [nil | @versions], label())
+    Prim.Opts.allowed!(opts, :version, [nil, :external | @versions], label())
     Prim.Opts.boolean!(opts, ~w(check_version sensitive)a, label())
-    key_opts!(opts, Keyword.get(opts, :version, 4))
+    version = Keyword.get(opts, :version, 4)
+    check_version_opt!(opts, version)
+    key_opts!(opts, version)
     Prim.Opts.uuid!(opts, :namespace, label())
     Prim.Opts.non_empty_string!(opts, ~w(scope)a, label())
   end
 
   # ---
+
+  defp check_version_opt!(opts, :external) do
+    if Keyword.has_key?(opts, :check_version) do
+      raise CompileError,
+        description:
+          "#{label()}: check_version: допустима только при version: 1 / 4 / 5 / 7 — разбор внешнего " <>
+            "UUID версию не проверяет"
+    end
+
+    :ok
+  end
+
+  defp check_version_opt!(_opts, _version), do: :ok
 
   defp key_opts!(opts, 5) do
     case Enum.find(@key_opts, &is_nil(Keyword.get(opts, &1))) do
@@ -121,16 +145,19 @@ defmodule Core.Prim.UUID do
     end
   end
 
-  defp key_opts!(opts, _version) do
+  defp key_opts!(opts, version) do
     case Enum.find(@key_opts, &Keyword.has_key?(opts, &1)) do
       nil ->
         :ok
 
       key ->
         raise CompileError,
-          description: "#{label()}: #{key}: допустима только при version: 5 — генерируемый UUID ключа не знает"
+          description: "#{label()}: #{key}: допустима только при version: 5 — #{keyless_reason(version)}"
     end
   end
+
+  defp keyless_reason(:external), do: "внешний UUID приходит от источника, а не считается от ключа"
+  defp keyless_reason(_version), do: "генерируемый UUID ключа не знает"
 
   # ===== значение =====
 

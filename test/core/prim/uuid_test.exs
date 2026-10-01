@@ -1,6 +1,8 @@
 defmodule Core.Prim.UUIDTest do
   use ExUnit.Case, async: true
 
+  alias Core.CodecFixture.Prim.External
+
   defmodule Id do
     use Core.Prim.UUID, name: "Идентификатор", version: 4
   end
@@ -73,6 +75,12 @@ defmodule Core.Prim.UUIDTest do
       scope: "delivery"
 
     def from_number(number), do: from_key(number)
+  end
+
+  defmodule SourceID do
+    use Core.Prim.UUID,
+      name: "Источник",
+      version: :external
   end
 
   @uuid4 "550e8400-e29b-41d4-a716-446655440000"
@@ -302,6 +310,58 @@ defmodule Core.Prim.UUIDTest do
 
       assert_raise CompileError, ~r/scope: допустима только при version: 5/, fn ->
         compile_uuid(scope: "delivery")
+      end
+    end
+  end
+
+  describe "внешний идентификатор (version: :external)" do
+    test "new/0 и from_key/1 не генерируются" do
+      Code.ensure_loaded!(SourceID)
+
+      refute function_exported?(SourceID, :new, 0)
+      refute function_exported?(SourceID, :from_key, 1)
+    end
+
+    test "new/1 принимает UUID любой версии и отвергает не-UUID" do
+      for uuid <- [@uuid1, @uuid4, "48729eb6-0c8a-5383-a0c4-e8b281bbda54", "0190a0c0-0000-7000-8000-000000000001"] do
+        assert {:ok, %SourceID{value: ^uuid}} = SourceID.new(uuid)
+      end
+
+      assert {:error, %Core.Error{kind: :domain}} = SourceID.new("not-a-uuid")
+    end
+
+    test "вызов new/0 — предупреждение сборки" do
+      {_result, diagnostics} =
+        Code.with_diagnostics(fn ->
+          Code.compile_quoted(
+            quote do
+              defmodule Core.Prim.UUIDTest.SourceCaller do
+                def id, do: Core.Prim.UUIDTest.SourceID.new()
+              end
+            end
+          )
+        end)
+
+      assert Enum.any?(diagnostics, &(&1.severity == :warning and &1.message =~ "new/0 is undefined"))
+    end
+
+    test "round-trip через профиль кодека" do
+      id = SourceID.new!(@uuid1)
+
+      assert {:ok, ^id} = External.load(SourceID, External.dump(id))
+    end
+
+    test "CompileError: check_version:, namespace: и scope: при version: :external" do
+      assert_raise CompileError, ~r/check_version: допустима только при version: 1 \/ 4 \/ 5 \/ 7/, fn ->
+        compile_uuid(version: :external, check_version: false)
+      end
+
+      assert_raise CompileError, ~r/namespace: допустима только при version: 5/, fn ->
+        compile_uuid(version: :external, namespace: StreamID.namespace())
+      end
+
+      assert_raise CompileError, ~r/scope: допустима только при version: 5/, fn ->
+        compile_uuid(version: :external, scope: "source")
       end
     end
   end

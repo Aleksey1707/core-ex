@@ -287,9 +287,9 @@ commit.
 
 У event-sourced агрегата уникального индекса по состоянию нет: строки пишет проекция, а её
 `clear/0` очищает таблицу при пересборке. Поэтому неизменяемый естественный ключ агрегата MUST
-задавать **id его потока** — идентификатор из ключа: Prim `use Core.Prim.UUID, version: 5`
-(`deps/core/docs/rules/11-domain.md`, «Типизированные обёртки»; схема id —
-`deps/core/docs/adr/0017-stream-id-from-key.md`).
+задавать **id его потока** — идентификатор из ключа (исключение — внешний идентификатор, ниже):
+Prim `use Core.Prim.UUID, version: 5` (`deps/core/docs/rules/11-domain.md`, «Типизированные
+обёртки»; схема id — `deps/core/docs/adr/0017-stream-id-from-key.md`).
 
 - Namespace UUIDv5 — один на приложение и неизменяемый: другая константа переименовала бы потоки
   всех таких агрегатов. `namespace:` MUST браться из одной публичной функции модуля приложения
@@ -327,6 +327,25 @@ use Core.Prim.UUID,
 
 def from_member(%Agg.ID{} = agg_id, %Actor.ID{} = actor_id),
   do: from_key([Agg.ID.value(agg_id), Actor.ID.value(actor_id)])
+```
+
+Ключ, который сам UUID внешнего источника, уникальный на все виды агрегатов, грузящиеся из этого
+источника, MAY задавать id потока как есть — внешний идентификатор: Prim
+`use Core.Prim.UUID, version: :external`, `new/0` у него нет. UUID, уникальный лишь в пределах
+вида, склеит потоки двух видов — ему нужен идентификатор из ключа. Решение —
+`deps/core/docs/adr/0036-stream-id-external-uuid.md`.
+
+```elixir
+# плохо — UUID источника под генерирующей версией: new/0 выпустит id в обход источника
+use Core.Prim.UUID,
+  name: first_line(@moduledoc),
+  version: 1,
+  check_version: false
+
+# хорошо — внешний идентификатор: new/0 нет, разбор принимает UUID любой версии
+use Core.Prim.UUID,
+  name: first_line(@moduledoc),
+  version: :external
 ```
 
 Изменяемый ключ (логин, название роли) id потока не задаёт: id постоянен, а ключ меняется событием.

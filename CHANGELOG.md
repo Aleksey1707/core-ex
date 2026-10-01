@@ -1,5 +1,37 @@
 # Changelog
 
+## Не выпущено
+
+### Изменения контракта макросов
+
+- **`use Core.Prim.UUID, version: :external` — внешний идентификатор.** Id потока event-sourced
+  агрегата, чей неизменяемый естественный ключ — сам UUID внешнего источника, уникальный на все виды
+  агрегатов из этого источника, MAY быть этим UUID как есть (`docs/rules/app/13-repos.md`,
+  «Уникальность без индекса состояния»; решение — `docs/adr/0036-stream-id-external-uuid.md`).
+  UUIDv5 от такого ключа дал бы второй идентификатор того же объекта, а Prim с генерирующей
+  версией и `check_version: false` генерирует `new/0`, которым id выпускается в обход источника, и
+  компилятор этого не видит. У `version: :external` нет ни `new/0`, ни `from_key/1` — вызов
+  `new/0` ловится на сборке; разбор принимает UUID любой версии; `check_version:`, `namespace:` и
+  `scope:` рядом с ним — `CompileError`. Прочие значения `version:` не меняются.
+
+  Как править код потребителя, у которого Prim над UUID источника:
+
+  ```elixir
+  # было
+  use Core.Prim.UUID,
+    name: first_line(@moduledoc),
+    version: 1,
+    check_version: false
+
+  # стало
+  use Core.Prim.UUID,
+    name: first_line(@moduledoc),
+    version: :external
+  ```
+
+  Вызовы `Agg.ID.new()` такого Prim после правки — предупреждение компилятора: id берётся из
+  источника через `Agg.ID.new/1`.
+
 ## 0.10.0
 
 ### Ломающие изменения контракта
