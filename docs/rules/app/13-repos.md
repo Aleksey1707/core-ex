@@ -97,6 +97,20 @@ read-модели затрагивает одно место, а её перес
   `use Core.Repo.Pg` она не объявляет, реализация `ReadRepo` — обычный модуль над
   write-репозиториями. Отдаётся она `<ReadModel>.View` из примитивных значений, лежит там же, где
   read-модель с таблицей; кеш — по `16-caching.md`.
+
+  Если её не отдаёт граница (например, её читает только механизм проверки прав), она MAY
+  возвращать вместо View неизменяемое доменное значение — struct на Prim и `Core.Enum`, не
+  агрегат: значения write-репозиториев уже валидны, и View из примитивов была бы второй формой без
+  читателя. Презентер по-прежнему получает только View (`15-web-api.md`, «Presenters»).
+
+  ```elixir
+  # плохо — доменное значение уходит на границу: презентер получил не View
+  with {:ok, access} <- @access_read_repo.get(user_id, context), do: render(conn, access)
+
+  # хорошо — значение читает только механизм проверки прав, наружу уходит решение
+  with {:ok, access} <- @access_read_repo.get(user_id, context),
+       do: Access.allows?(access, action)
+  ```
 - Чтение state-stored агрегата из его собственной таблицы (read-схема над таблицей write-пути,
   без проекции) MUST лежать в каталоге агрегата: таблица принадлежит агрегату.
 - View лежит в каталоге read-модели, а не под ReadRepo: его видят behaviour, usecase, презентер и
@@ -209,6 +223,8 @@ def insert(%<Aggregate>{} = agg, %Context{} = context, opts \\ []),
   множество агрегатов и метод служит **источником для mutate**, либо его зовёт `ReadRepo`
   read-модели без таблицы («Read-модель»). Загрузка пачки и её сохранение
   живут в теле одной функции (`deps/core/docs/rules/20-agreements.md`, «Load/save агрегата»).
+- Кандидатов изменяющего фонового прогона MAY выбирать `ReadRepo` —
+  `deps/core/docs/rules/13-repos.md`, «Read (`<Aggregate>.ReadRepo`)».
 - Кастомный `get_by_*`, объявление read-репозитория, его собственная схема и
   `shadow_copy?: false` — `deps/core/docs/rules/13-repos.md`, «Read/Write репозитории».
 

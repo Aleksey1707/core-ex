@@ -75,6 +75,31 @@ ReadRepo.
 - Читающие usecases (`get`/`list`/`page`, HTTP GET) вызывают **ReadRepo**.
 - Изменяющие usecases вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть
   изменяющего usecase, а не чтение через ReadRepo).
+- Изменяющий фоновый прогон (уборка, пересчёт по расписанию) MAY выбирать кандидатов через ReadRepo,
+  если в мутацию уходят только id и версия, а каждый кандидат читается и сохраняется отдельным
+  load/save в одной функции (`20-agreements.md`, «Load/save агрегата»). Пачка через Repo осела бы
+  эталоном в `Repo.Sc` на всё задание, а чтение по версии отсекает кандидата, изменённого после
+  выборки. Сам View в мутацию не уходит — «View (read-модель)».
+
+  ```elixir
+  # плохо — агрегат собран из View: запись по копии, прочитанной до начала прогона
+  for view <- @read_repo.list_expired(at, context), do: @repo.save(to_aggregate(view), context)
+
+  # хорошо — в мутацию уходят id и версия, кандидата читает и сохраняет одна функция
+  for %View{id: id, version: version} <- @read_repo.list_expired(at, context),
+      do: archive(id, version, at, context)
+
+  defp archive(id, version, at, context) do
+    Transact.run(DAO, fn ->
+      with {:ok, id} <- Agg.ID.new(id),
+           {:ok, version} <- Version.new(version),
+           {:ok, agg} <- @repo.get(id, version, context),
+           {:ok, agg} <- Agg.archive(agg, at),
+           {:ok, _saved} <- @repo.save(agg, context),
+           do: :ok
+    end)
+  end
+  ```
 
 Кеш — только на ReadRepo; см. `deps/core/docs/rules/app/16-caching.md`.
 

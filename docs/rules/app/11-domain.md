@@ -79,8 +79,8 @@
 
 - Автор и момент изменения лежат в `by` / `at` событий: поля аудита в состоянии не нужны, а
   soft-delete к агрегату не применяется — удаление является доменным событием.
-- Конверсия момента события в Prim состояния внутри `evolve/2` — bang
-  (`deps/core/docs/rules/20-agreements.md`, «Safe vs bang»).
+- Bang внутри `evolve/2` — `deps/core/docs/rules/20-agreements.md`, «Safe vs bang»: колбэку
+  некуда вернуть ошибку.
 
 ### Команда
 
