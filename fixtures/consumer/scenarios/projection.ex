@@ -1,7 +1,7 @@
 defmodule Consumer.S.BadProjection do
   @moduledoc "Проекция без clause `project/1` для `Closed` и с опечаткой в суженной нагрузке."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
 
   # G1 — нет clause `project/1` для `Closed`: проверка полноты на строке `use`
   # expect: incompatible types given to project/1
@@ -27,7 +27,7 @@ end
 defmodule Consumer.S.BadProjectionPayload do
   @moduledoc "Проекция с опечаткой в поле нагрузки, не суженной паттерном."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
 
   # G3a — опечатка в поле нагрузки без паттерна `%Payload{}`: при определении молчит, опора G3c
   # expect: incompatible types given to project/1
@@ -47,10 +47,10 @@ end
 defmodule Consumer.S.Projection do
   @moduledoc "Прямые вызовы `project/1`."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
   alias Consumer.S.BadProjection
   alias Consumer.S.BadProjectionPayload
-  alias Consumer.Domain.Sales.Common.UserID
+  alias Consumer.Domain.Sales.Values.UserID
   alias Core.Es
   alias Core.Version
 

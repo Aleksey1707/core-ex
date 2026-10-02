@@ -1,4 +1,10 @@
 defmodule Consumer.Codec do
+  @moduledoc "Кодек: Prim-профиль, фасад и реестр плагинов всех контекстов — граница без проверки исходящих."
+
+  use Boundary,
+    check: [out: false],
+    exports: [Internal]
+
   defmodule Prim.Internal do
     use Core.Codec,
       uuid: :full,
@@ -10,11 +16,11 @@ defmodule Consumer.Codec do
 
   @plugins [
     Core.Outbox.Codec,
-    Consumer.Domain.Sales.Common.Account.Event.Codec,
-    Consumer.Domain.Sales.Common.Order.Event.Codec,
-    Consumer.Domain.Sales.Common.Ping.Event.Codec,
-    Consumer.Domain.Sales.Common.Grants.Event.Codec,
-    Consumer.Domain.Sales.Common.Account.Card.Codec
+    Consumer.Domain.Sales.Account.Event.Codec,
+    Consumer.Domain.Sales.Order.Event.Codec,
+    Consumer.Domain.Sales.Ping.Event.Codec,
+    Consumer.Domain.Sales.Grants.Event.Codec,
+    Consumer.Domain.Sales.Account.Card.Codec
   ]
 
   def plugins, do: @plugins

@@ -8,34 +8,48 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Spec:** [Контекст — граница Boundary, раскладка — вертикаль по агрегату](../spec.md) — «Границы», «Раскладка»,
 «`boundary_lint --consumer`», «Фикстура»
 
-- [ ] `fixtures/consumer`: зависимость `boundary` в lock, общем с библиотекой; `Consumer.Domain.Sales` — `use Boundary`
+- [x] `fixtures/consumer`: зависимость `boundary` в lock, общем с библиотекой; `Consumer.Domain.Sales` — `use Boundary`
       с `deps` и `exports` (модули usecases, View, ID, события, плагины кодека); `Consumer.Codec` —
       `check: [out: false]`; `DAO` и `StreamID` — граница `Consumer.Infra`; сценарии — граница без проверок; модулей
       вне границ нет
-- [ ] модули переезжают из `common/` и `client/` в каталоги агрегатов: usecases актора —
+- [x] модули переезжают из `common/` и `client/` в каталоги агрегатов: usecases актора —
       `<aggregate>/client/usecases.ex` → `Sales.<Aggregate>.Client.Usecases`; ID агрегата — в его каталоге, значение
       без владельца — в `values/`; read-модель не по агрегату — каталог по назначению
-- [ ] маркеры `# expect:` в `scenarios/` и `check.exs` правятся вместе с именами модулей
-- [ ] `check.exs` сверяет предупреждения Boundary с маркерами наравне с предупреждениями компилятора
-- [ ] сценарий: модуль другой границы ссылается на неэкспортированный модуль `Sales` — предупреждение Boundary с
+- [x] маркеры `# expect:` в `scenarios/` и `check.exs` правятся вместе с именами модулей
+- [x] `check.exs` сверяет предупреждения Boundary с маркерами наравне с предупреждениями компилятора
+- [x] сценарий: модуль другой границы ссылается на неэкспортированный модуль `Sales` — предупреждение Boundary с
       маркером `# expect:` (сначала красный)
-- [ ] `boundary_lint --consumer`: правила `common-slice`, `foreign-slice`, `sibling-slice`, `subsystem-slice` и их тесты
+- [x] `boundary_lint --consumer`: правила `common-slice`, `foreign-slice`, `sibling-slice`, `subsystem-slice` и их тесты
       удалены; `bc-root`, `projection-layout`, `module-path` переписаны под вертикаль, у каждого — тест на нарушение
       и на чистый случай; `bc-index` проверяет корень контекста как корень границы
-- [ ] `app/10`: «Состав контекста», «Раскладка», «Направления зависимостей», «Boundary» — по Q23, Q24; строки
+- [x] `app/10`: «Состав контекста», «Раскладка», «Направления зависимостей», «Boundary» — по Q23, Q24; строки
       контекста и кодека в таблице namespaces (корень и сток — тикет 03)
-- [ ] ADR вместо ADR-0023: вертикаль по агрегату, граница на контекст, цикл — `dirty_xrefs` и строка `DEBT.md`;
+- [x] ADR вместо ADR-0023: вертикаль по агрегату, граница на контекст, цикл — `dirty_xrefs` и строка `DEBT.md`;
       в ADR-0023 — пометка о замене, в ADR-0025 — о замене пунктов про циклы, тип модели в `Common` и «корня
       контекста нет»
-- [ ] `CONTEXT.md`: переписаны «Bounded context», «Common», «Actor», «Модуль-оглавление»; новые «Граница контекста»,
+- [x] `CONTEXT.md`: переписаны «Bounded context», «Common», «Actor», «Модуль-оглавление»; новые «Граница контекста»,
       «Каталог агрегата», «Модуль usecases актора»
-- [ ] `app/00`, таблица устаревших форм: `Common` и срезы → каталог агрегата и подкаталог актора
-- [ ] CHANGELOG, «Ломающие изменения контракта»: раскладка и граница на контекст, «было → стало»
-- [ ] `make` зелёный
+- [x] `app/00`, таблица устаревших форм: `Common` и срезы → каталог агрегата и подкаталог актора
+- [x] CHANGELOG, «Ломающие изменения контракта»: раскладка и граница на контекст, «было → стало»
+- [x] `make` зелёный
 
 До тикета 02 деревья `app/13` и примеры свода ещё показывают `Common`: выпуск — не раньше тикетов 02–06.
+
+## Comments
+
+- Раздел «Boundary» в `app/10` описывает образец фикстуры: контекст, `MyApp.Codec`
+  (`check: [out: false]`), сток `MyApp.Infra`, `MyAppWeb`, подсистема; строки `MyApp.Application` и
+  `MyApp.PromEx` — без `top_level?`. Корень `MyAppApp`, `MyAppTest` и переименование плейсхолдеров в
+  таблице namespaces — тикет 03. «Usecases» (`<Actor>.Usecases.<Usecase>`, ссылка на
+  `foreign-slice`) до тикета 02 противоречит «Составу контекста».
+- `boundary` без `check: [aliases: true]` не видит модуль, переданный значением: в фикстуре
+  `Transact.run(DAO, …)` без `Consumer.Infra` в `deps` предупреждения не даёт, его даёт только вызов
+  `StreamID.namespace()`. Для тикета 03: замена архитектурного теста «web не ссылается на `DAO`»
+  сборкой этот случай не покрывает.
+- `bc-root` узнаёт срез только по usecases по сценарию (`<BC>.<X>.Usecases.<Y>` без модуля
+  `<BC>.<X>.Usecases`); остаток среза без них от каталога агрегата не отличим.

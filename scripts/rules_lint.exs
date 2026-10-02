@@ -49,7 +49,7 @@ defmodule RulesLint do
     Ecto ExUnit Credo Logger Oban Cachex Phoenix PromEx OpenApiSpex
     Consistency Design Readability Refactor Warning
     Application Enum Keyword Map Mix Process String
-    Actor Agg Caches Codec Config Context DAO Error Errors Es Event Helper InCodec OutCodec
+    Actor Agg Caches Cart Codec Config Context DAO Error Errors Es Event Helper InCodec Order OutCodec
     Outbox Params Prim Projection Projections Repo ReadRepo Response Result Schema Sc
     Specs Status Step Steps Store Transact Usecases Version View Workers
   )

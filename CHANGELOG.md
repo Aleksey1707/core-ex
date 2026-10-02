@@ -2,6 +2,51 @@
 
 ## Не выпущено
 
+### Ломающие изменения контракта
+
+- **Раскладка контекста — вертикаль по агрегату, контекст — граница Boundary**
+  (`docs/rules/app/10-architecture.md`, «Состав контекста», «Модуль-оглавление», «Направления
+  зависимостей», «Boundary»; решение — `docs/adr/0037-vertical-layout-context-boundary.md`, заменяет
+  ADR-0023 и пункты ADR-0025 о циклах, типе модели в `Common` и корне контекста). `Common` и срезы
+  инициаторов разносили агрегат, его чтение и его usecases по разным деревьям: чтение копировалось в
+  срезах, а направления между контекстами держали правила линтера и ревью. Теперь всё об агрегате —
+  в его каталоге, usecases — модулем на актора в подкаталоге актора, а то, что не принадлежит одному
+  агрегату, — в каталогах уровня контекста по виду (`values/`, `errors.ex`, read-модель по
+  назначению, `reactions/`). Каждый контекст — граница Boundary верхнего уровня: ссылку мимо его
+  `exports` и цикл между контекстами ловит сборка; цикл, который пока не развязать, — `dirty_xrefs`
+  и строка `DEBT.md`.
+
+  `boundary_lint --consumer`: правила `common-slice`, `foreign-slice`, `sibling-slice` и
+  `subsystem-slice` удалены — направления держит Boundary. `bc-root` ловит `<BC>.Common` и срез на
+  уровне контекста — одно нарушение на часть; `projection-layout` ждёт
+  `<BC>.<ReadModel>.Projection`; `module-path` проверяет события и команды семейства на глубине
+  каталога агрегата; `bc-index` требует `use Boundary` в оглавлении. Режима старой раскладки нет.
+
+  Как править приложение (было → стало):
+  - `MyApp.Domain.<BC>.Common.<Aggregate>…` в `<bc>/common/<aggregate>/` →
+    `MyApp.Domain.<BC>.<Aggregate>…` в `<bc>/<aggregate>/`;
+  - usecases среза `MyApp.Domain.<BC>.<Actor>.Usecases.<Aggregate>` →
+    `MyApp.Domain.<BC>.<Aggregate>.<Actor>.Usecases` в `<bc>/<aggregate>/<actor>/usecases.ex`;
+    actor-ReadRepo и View среза — в тот же подкаталог актора;
+  - значение без владельца `<BC>.Common.<Value>` → `<BC>.Values.<Value>`; read-модель `Common` не
+    по агрегату → каталог по назначению `<BC>.<ReadModel>`; тип модели контекста — в каталог
+    агрегата-владельца или в `values/`;
+  - оглавление `MyApp.Domain.<BC>` без кода → корень границы: `use Boundary` с `deps` (контексты,
+    от которых зависит, `MyApp.Codec`, модули приложения, которые он зовёт) и `exports` (модули
+    usecases, View, типы ID, события, плагины кодека);
+  - граница `MyApp` на весь домен → её нет; `MyApp.Codec` — граница с `check: [out: false]`;
+    `MyApp.DAO` и `MyApp.StreamID` → `MyApp.Infra.DAO` и `MyApp.Infra.StreamID` границы-стока
+    `MyApp.Infra` (`config :core, dao:` и `config :my_app, MyApp.Infra.DAO` — вместе с ним); каждый
+    модуль `lib/` принадлежит границе;
+  - `MyAppWeb` с `deps: [MyApp]` → `deps` — контексты и `MyApp.Codec`, без `MyApp.Infra`;
+  - `MyApp.Application` и `MyApp.PromEx` с `top_level?: true` и `deps: [MyApp, …]` → без
+    `top_level?`, `deps` — контексты; mix-таски `classify_to: MyApp` →
+    `classify_to: MyApp.Application`;
+  - взаимные ссылки контекстов (`SHOULD NOT`) → цикл — ошибка сборки, отступление — `dirty_xrefs`
+    на одной стороне и строка `DEBT.md`;
+  - маркеры `boundary-lint: allow` правил `common-slice`, `foreign-slice`, `sibling-slice`,
+    `subsystem-slice` и их строки `DEBT.md` удаляются.
+
 ### Новое
 
 - **Нормы совместимости действуют с первого релиза приложения** (`docs/rules/app/00-index.md`,

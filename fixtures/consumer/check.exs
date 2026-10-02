@@ -1,14 +1,15 @@
-# Храповик вывода типов: предупреждения компилятора фикстуры против маркеров в её исходниках.
+# Храповик вывода типов и границ: предупреждения компилятора и Boundary фикстуры против маркеров в её
+# исходниках.
 #
 # Запуск из каталога фикстуры (так зовёт `make consumer-check`):
 #
 #     mix run --no-start --no-compile check.exs          # сверка
 #     mix run --no-start --no-compile check.exs --dump   # предупреждения: file:line: заголовок [функция]
 #
-# Предупреждения — диагностики компиляции через Mix API, а не разбор текста вывода. Ожидание — маркер
-# отдельной строкой над ошибочной строкой:
+# Предупреждения — диагностики компиляции через Mix API (компилятор Elixir и Boundary), а не разбор текста
+# вывода. Ожидание — маркер отдельной строкой над ошибочной строкой:
 #
-#     # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+#     # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
 #     def a3(%Order{} = state, %Account.Cmd.Open{} = command), do: Account.execute(state, command)
 #
 # Маркер относится к ближайшей следующей строке кода; несколько маркеров подряд — к одной строке.
@@ -63,7 +64,7 @@ defmodule ConsumerCheck do
     |> Enum.filter(&(&1.severity == :warning))
     |> Enum.map(fn diagnostic ->
       %{
-        file: Path.relative_to(diagnostic.file, root),
+        file: relative(diagnostic.file, root),
         line: line(diagnostic.position),
         title: diagnostic.message |> String.split("\n", parts: 2) |> hd() |> String.trim(),
         mfa: mfa(diagnostic.stacktrace)
@@ -72,16 +73,19 @@ defmodule ConsumerCheck do
     |> Enum.sort()
   end
 
-  # Компилятор печатает каждое из десятков ожидаемых предупреждений в stderr; вывод шага — только
-  # итог сверки. Ошибки компиляции печатает `halt_on_errors/2`.
+  # Компилятор печатает каждое из десятков ожидаемых предупреждений в stderr, Boundary — в shell Mix;
+  # вывод шага — только итог сверки. Ошибки компиляции печатает `halt_on_errors/2`.
   defp quietly(fun) do
     {:ok, device} = StringIO.open("")
     original = Process.whereis(:standard_error)
+    shell = Mix.shell()
     register_standard_error(device)
+    Mix.shell(Mix.Shell.Quiet)
 
     try do
       fun.()
     after
+      Mix.shell(shell)
       register_standard_error(original)
       StringIO.close(device)
     end
@@ -96,13 +100,17 @@ defmodule ConsumerCheck do
     diagnostics
     |> Enum.filter(&(&1.severity == :error))
     |> Enum.each(fn diagnostic ->
-      location = "#{Path.relative_to(diagnostic.file, root)}:#{line(diagnostic.position)}"
+      location = "#{relative(diagnostic.file, root)}:#{line(diagnostic.position)}"
       IO.puts(:stderr, "#{location}: #{diagnostic.message}")
     end)
 
     IO.puts(:stderr, "\nconsumer-check: фикстура не собирается")
     System.halt(1)
   end
+
+  # Диагностика Boundary о цикле границ файла не называет.
+  defp relative(nil, _root), do: "-"
+  defp relative(file, root), do: Path.relative_to(file, root)
 
   defp line(line) when is_integer(line), do: line
   defp line({line, _column}), do: line

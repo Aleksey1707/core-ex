@@ -1,19 +1,19 @@
 defmodule Consumer.S.Await do
   @moduledoc "`Projection.await/3`: агрегат, ID, результат."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Order
-  alias Consumer.Domain.Sales.Common.Ping
-  alias Consumer.Domain.Sales.Common.Activity.Projection
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Order
+  alias Consumer.Domain.Sales.Ping
+  alias Consumer.Domain.Sales.Activity.Projection
 
   # G4 — ID другого агрегата
   def g4_foreign_id(%Order.ID{} = id),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Activity.Projection.await/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Activity.Projection.await/3
     do: Projection.await(Account, id, 100)
 
   # G4b — агрегат, чьих событий нет в `events:`
   def g4b_foreign_aggregate(%Ping.ID{} = id),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Activity.Projection.await/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Activity.Projection.await/3
     do: Projection.await(Ping, id, 100)
 
   # G4o — прежняя форма: реализация ожидания в библиотеке вместо `await/3` модуля проекции

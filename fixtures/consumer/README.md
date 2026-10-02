@@ -1,13 +1,15 @@
 # Фикстура-потребитель
 
 Приложение на `Core`, которое видит библиотеку зависимостью (`{:core, path: "../.."}`), — так же, как
-её видит настоящий потребитель. Проверяет две вещи, обе — шагом `make consumer-check`:
+её видит настоящий потребитель. Проверяет три вещи, все — шагом `make consumer-check`:
 
 - **раскладку**: `lib/` — живой образец bounded context по своду потребителя
   (`docs/rules/app/10-architecture.md`, «Раскладка»), и `boundary_lint --consumer` проходит на нём
   без нарушений; линтер печатает все нарушения, и шаг на них падает, не доходя до сверки;
-- **вывод типов** (ADR-0014): предупреждения компилятора фикстуры сверяются с маркерами в её
-  исходниках; шаг падает, если ожидаемое предупреждение пропало или появилось лишнее.
+- **границы**: контекст, кодек и сток — границы Boundary (`docs/rules/app/10-architecture.md`,
+  «Boundary»); ссылка чужой границы на неэкспортированный модуль контекста — предупреждение сборки;
+- **вывод типов** (ADR-0014): предупреждения компилятора и Boundary фикстуры сверяются с маркерами в
+  её исходниках; шаг падает, если ожидаемое предупреждение пропало или появилось лишнее.
 
 Зачем отдельный проект: внутри самой библиотеки её модули для компилятора — «тот же проект», и
 сигнатуры `Core.*` в выводе не участвуют. Картину потребителя даёт только зависимость.
@@ -17,23 +19,25 @@
 - `lib/` — корректный потребитель, разложенный по правилу «путь файла = имя модуля»:
 
   ```text
-  lib/consumer/dao.ex, stream_id.ex                  # DAO и namespace UUIDv5
-  lib/consumer/codec.ex, codec/internal.ex           # реестр плагинов с Prim-профилем, фасад
-  lib/consumer/domain/sales.ex                       # модуль-оглавление контекста
-  lib/consumer/domain/sales/common/<aggregate>{.ex,/**}  # агрегаты: cmd/, event/, репозитории, кодеки
-  lib/consumer/domain/sales/common/<value>.ex        # значения без владельца: UserID, DeliveryID, …
-  lib/consumer/domain/sales/common/activity/         # read-модель со своей проекцией
-  lib/consumer/domain/sales/client/usecases/*.ex     # срез Client: usecases по сценарию
+  lib/consumer/infra.ex, infra/{dao,stream_id}.ex    # граница-сток: DAO и namespace UUIDv5
+  lib/consumer/codec.ex, codec/internal.ex           # граница кодека: реестр плагинов с Prim-профилем, фасад
+  lib/consumer/domain/sales.ex                       # оглавление — корень границы контекста
+  lib/consumer/domain/sales/<aggregate>{.ex,/**}     # каталог агрегата: cmd/, event/, репозитории, кодеки
+  lib/consumer/domain/sales/<aggregate>/client/usecases.ex  # usecases актора Client
+  lib/consumer/domain/sales/values/<value>.ex        # значения без владельца: UserID, DeliveryID, …
+  lib/consumer/domain/sales/activity/                # read-модель по назначению со своей проекцией
   ```
 
-  Контекст `Consumer.Domain.Sales`, его `Common`: агрегаты `Account` (кодек с `upcasts:`, модуль ключа
-  `Account.NameKey` с `key_reservations:` у репозитория счёта, процесс), `Order` (enum `Order.Status`
-  отдельным файлом в guard `is_enum/2` самого агрегата), `Ping` (кодек
-  только из событий без нагрузки), `Grants` (два события делят модуль нагрузки), `NeverFails` и
-  `AlwaysFails` (`decide` никогда не ошибается / только ошибается), события `Parcel` без агрегата
-  (кодек, чей `load_payload/3` никогда не ошибается), идентификаторы из ключа (`DeliveryID`,
-  составной ключ — `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов и
-  dump-only плагин фасада `Account.Card.Codec`. Срез `Client` — usecases с типовыми вызовами.
+  Контекст `Consumer.Domain.Sales` — граница верхнего уровня: `deps` — кодек и сток, `exports` —
+  модули usecases, типы ID, семейства событий и плагин кодека. Агрегаты `Account` (кодек с `upcasts:`,
+  модуль ключа `Account.NameKey` с `key_reservations:` у репозитория счёта, процесс), `Order` (enum
+  `Order.Status` отдельным файлом в guard `is_enum/2` самого агрегата), `Ping` (кодек только из
+  событий без нагрузки), `Grants` (два события делят модуль нагрузки), `NeverFails` и `AlwaysFails`
+  (`decide` никогда не ошибается / только ошибается), события `Parcel` без агрегата (кодек, чей
+  `load_payload/3` никогда не ошибается), идентификаторы из ключа (`DeliveryID`, составной ключ —
+  `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов и dump-only плагин
+  фасада `Account.Card.Codec`. Актор `Client` — usecases с типовыми вызовами в каталоге каждого
+  агрегата и read-модели.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие
   линтеры библиотеки фикстуру не проверяют.
@@ -41,7 +45,9 @@
   состояние без `%Context{}`, `Core.Helper.Transact` вокруг команды event-sourced агрегата), read-модель
   `Activity` — одна проекция без таблиц, View и ReadRepo, `NeverFails` и `AlwaysFails` живут на
   командах и событиях `Order`. Тело usecase и состав read-модели берутся из свода, а не отсюда.
-- `scenarios/` — сценарии: функция или модуль на одну ошибку, над ошибочной строкой маркер.
+- `scenarios/` — сценарии: функция или модуль на одну ошибку, над ошибочной строкой маркер. Сценарии
+  `Consumer.S.*` — граница без проверок (`scenarios/s.ex`): их ошибки — вывод типов, а не границы;
+  сценарий границы — своя граница верхнего уровня (`Consumer.Foreign`).
   Коды сценариев (A3, E4b, …) — из `.scratch/es-type-safety/research/02-core-es-blind-spots.md`;
   буква после номера — вариант сценария карты (`B1p` — B1 с нагрузкой другого агрегата литералом).
   Каталог лежит вне `lib/` (`elixirc_paths` в `mix.exs`): сценарии — намеренно ошибочный код и
@@ -49,7 +55,8 @@
 - `check.exs` — сверка, `selftest.sh` — её самопроверка.
 
 Версии зависимостей берутся из `mix.lock` библиотеки (`lockfile:`), сборка — в своём `_build`
-(окружение `dev`): `_build` и lock библиотеки шаг не трогает.
+(окружение `dev`): `_build` и lock библиотеки шаг не трогает. `boundary` — зависимость только фикстуры,
+но её версия — строка того же lock.
 
 ## Запуск
 
@@ -66,8 +73,9 @@ bash selftest.sh                                      # самопроверка
 
 Сверка пересобирает изменённый core сама. Dialyzer на фикстуре не запускается.
 
-Новый модуль корректной части ложится в `lib/` по своду потребителя: по пути своего имени, агрегат и
-всё без привязки к инициатору — в `Common`, вызов — в usecase среза; оглавление `sales.ex` дополняется.
+Новый модуль корректной части ложится в `lib/` по своду потребителя: по пути своего имени, всё об
+агрегате — в его каталоге, вызов — в модуле usecases актора; оглавление `sales.ex` дополняется картой, а
+модуль, нужный чужой границе, — его `exports`. Модуль вне границ Boundary репортит предупреждением.
 
 `selftest.sh` проверяет четыре исхода и откатывает свои правки: исходное состояние — `ok`; маркер над
 строкой без предупреждения — провал; предупреждение без маркера — провал; сдвиг строк на семь — `ok`.
@@ -77,7 +85,7 @@ bash selftest.sh                                      # самопроверка
 ```elixir
 # A3 — состояние другого агрегата
 def a3_foreign_state(%Order{} = state, %Account.Cmd.Open{} = command),
-  # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+  # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
   do: Account.execute(state, command)
 ```
 

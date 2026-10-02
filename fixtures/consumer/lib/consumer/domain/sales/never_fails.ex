@@ -1,0 +1,19 @@
+defmodule Consumer.Domain.Sales.NeverFails do
+  @moduledoc "Агрегат, чей `decide/2` никогда не возвращает ошибку: clause ошибки в `execute/2` недостижима."
+
+  alias Consumer.Domain.Sales.Order.Cmd
+  alias Consumer.Domain.Sales.Order.Event
+
+  use Core.Es.Aggregate,
+    event_codec: Consumer.Domain.Sales.Order.Event.Codec
+
+  defstruct id: nil, version: nil, cancelled?: false
+
+  @impl true
+  def decide(%Cmd.Cancel{}, %__MODULE__{cancelled?: true}), do: {:ok, []}
+  def decide(%Cmd.Cancel{}, %__MODULE__{}), do: {:ok, [Event.Cancelled.draft()]}
+
+  @impl true
+  def evolve(state, %Event.Placed{}), do: state
+  def evolve(state, %Event.Cancelled{}), do: %{state | cancelled?: true}
+end

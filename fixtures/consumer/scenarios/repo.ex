@@ -1,38 +1,38 @@
 defmodule Consumer.S.Repo do
   @moduledoc "Репозиторий event-sourced агрегата через `Core.Config.repo!/1`, как в usecase."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Order
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Order
   alias Core.Context
   alias Core.Pagination
 
   require Core.Config
 
-  @repo Core.Config.repo!(Consumer.Domain.Sales.Common.Account.Repo)
+  @repo Core.Config.repo!(Consumer.Domain.Sales.Account.Repo)
 
   # E1 — ID другого агрегата из паттерна
   def e1_foreign_id(%Order.ID{} = id, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get/3
     do: @repo.get(id, :current, context)
 
   # E1b — ID другого агрегата из `Order.ID.new()`
   def e1b_foreign_id_new(%Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get/3
     do: @repo.get(Order.ID.new(), :current, context)
 
   # E2 — целое вместо `%Version{}` / `:current`
   def e2_integer_version(%Account.ID{} = id, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get/3
     do: @repo.get(id, 1, context)
 
   # E2b — строка вместо `:current`
   def e2b_string_version(%Account.ID{} = id, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get/3
     do: @repo.get(id, "*", context)
 
   # E3c — событие без списка в `append`
   def e3c_append_not_list(%Account.Event.Closed{} = event, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.append/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.append/2
     do: @repo.append(event, context)
 
   # E4 — `:ok` по результату `get`
@@ -71,7 +71,7 @@ defmodule Consumer.S.Repo do
 
   # E7 — `refresh` состояния другого агрегата
   def e7_refresh_foreign_state(%Order{} = state, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.refresh/3
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.refresh/3
     do: @repo.refresh(state, :current, context)
 
   # X3 — ID другого агрегата в `page_stream`
@@ -81,7 +81,7 @@ defmodule Consumer.S.Repo do
         %Pagination.Offset{} = offset,
         %Context{} = context
       ),
-      # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.page_stream/4
+      # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.page_stream/4
       do: @repo.page_stream(id, limit, offset, context)
 
   # X3o — прежняя форма: реализация хранилища вместо репозитория агрегата
@@ -123,17 +123,17 @@ defmodule Consumer.S.Repo do
 
   # E9 — ID другого агрегата в `get_decision`
   def e9_decision_foreign_id(%Order.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get_decision/4
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get_decision/4
     do: @repo.get_decision(id, :current, context, &Account.execute(&1, command))
 
   # E9b — целое вместо версии в `get_decision`
   def e9b_decision_integer_version(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get_decision/4
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get_decision/4
     do: @repo.get_decision(id, 1, context, &Account.execute(&1, command))
 
   # E9c — колбэк арности 2 в `get_decision`
   def e9c_decision_callback_arity(%Account.ID{} = id, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get_decision/4
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get_decision/4
     do: @repo.get_decision(id, :current, context, fn state, _extra -> {:ok, state} end)
 
   # E9d — `:ok` по результату `get_decision`

@@ -1,11 +1,11 @@
 defmodule Consumer.S.CommandTypo do
   @moduledoc "Опечатка в поле команды, суженной `%Cmd.X{}` в голове `decide/2`."
 
-  alias Consumer.Domain.Sales.Common.Account.Cmd
-  alias Consumer.Domain.Sales.Common.Account.Event
+  alias Consumer.Domain.Sales.Account.Cmd
+  alias Consumer.Domain.Sales.Account.Event
 
   use Core.Es.Aggregate,
-    event_codec: Consumer.Domain.Sales.Common.Account.Event.Codec
+    event_codec: Consumer.Domain.Sales.Account.Event.Codec
 
   defstruct id: nil, version: nil, name: nil, status: nil
 

@@ -1,13 +1,13 @@
 defmodule Consumer.S.CallPath do
   @moduledoc "Чужой ID по пути вызова внутри модуля: `defp`, замыкание, обёртка без паттерна."
 
-  alias Consumer.Domain.Sales.Common.Order
+  alias Consumer.Domain.Sales.Order
   alias Core.Context
   alias Core.Helper.Transact
 
   require Core.Config
 
-  @repo Core.Config.repo!(Consumer.Domain.Sales.Common.Account.Repo)
+  @repo Core.Config.repo!(Consumer.Domain.Sales.Account.Repo)
 
   # X6 — через `defp`
   # expect: incompatible types given to load/2
@@ -15,8 +15,8 @@ defmodule Consumer.S.CallPath do
 
   # X7 — внутри замыкания `Transact.run`
   def x7_in_closure(%Order.ID{} = id, %Context{} = context),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.get/3
-    do: Transact.run(Consumer.DAO, fn -> @repo.get(id, :current, context) end)
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.get/3
+    do: Transact.run(Consumer.Infra.DAO, fn -> @repo.get(id, :current, context) end)
 
   # X8 — через публичную обёртку без паттерна в том же модуле
   def x8_wrapper(id, context), do: @repo.get(id, :current, context)
@@ -32,12 +32,12 @@ end
 defmodule Consumer.S.Usecase do
   @moduledoc "Usecase с паттерном в голове."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
   alias Core.Context
 
   require Core.Config
 
-  @repo Core.Config.repo!(Consumer.Domain.Sales.Common.Account.Repo)
+  @repo Core.Config.repo!(Consumer.Domain.Sales.Account.Repo)
 
   def get(%Account.ID{} = id, %Context{} = context), do: @repo.get(id, :current, context)
 end
@@ -45,7 +45,7 @@ end
 defmodule Consumer.S.Controller do
   @moduledoc "Вызов usecase другого модуля."
 
-  alias Consumer.Domain.Sales.Common.Order
+  alias Consumer.Domain.Sales.Order
   alias Consumer.S.Usecase
   alias Core.Context
 

@@ -51,7 +51,7 @@ Event-sourced агрегат добавляет к этому свои моду�
 - Кодек событий и `Outbox` лежат в `common/<aggregate>/`: их видят оба среза.
 - Репозиторий записи и read-модель лежат в `Common`; в срез (`<bc>/<actor>/…`) они переезжают
   вместе со своим ACL-фильтром («Actor-репозиторий») или своей формой данных, а не заранее
-  (`10-architecture.md`, «Actor / role slices»).
+  (`10-architecture.md`, «Состав контекста»).
 - В actor-срезе каталог `<aggregate>/` — namespace actor-domain (`<Actor>.<Aggregate>.…`,
   `10-architecture.md`): actor-репозиторий, read-модель среза с именем агрегата и
   роль-специфичные операции среза лежат в нём рядом.

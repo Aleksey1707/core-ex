@@ -10,37 +10,37 @@ end
 defmodule Consumer.S.Execute do
   @moduledoc "`Agg.execute/2` и прямой `decide/2`: ошибки вызова и разбора результата."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.AlwaysFails
-  alias Consumer.Domain.Sales.Common.NeverFails
-  alias Consumer.Domain.Sales.Common.Order
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.AlwaysFails
+  alias Consumer.Domain.Sales.NeverFails
+  alias Consumer.Domain.Sales.Order
   alias Consumer.S.Orphan
-  alias Consumer.Domain.Sales.Common.UserID
+  alias Consumer.Domain.Sales.Values.UserID
   alias Core.Context
   alias Core.Es
 
   require Core.Config
 
-  @repo Core.Config.repo!(Consumer.Domain.Sales.Common.Account.Repo)
+  @repo Core.Config.repo!(Consumer.Domain.Sales.Account.Repo)
 
   # A1 — команда другого агрегата
   def a1_foreign_command(%Account{} = state, %Order.Cmd.Place{} = command),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
     do: Account.execute(state, command)
 
   # A1 у агрегата, чей `decide/2` всегда возвращает ошибку
   def a1_always_fails_foreign_command(%AlwaysFails{} = state, %Order.Cmd.Cancel{} = command),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.AlwaysFails.execute/2
+    # expect: incompatible types given to Consumer.Domain.Sales.AlwaysFails.execute/2
     do: AlwaysFails.execute(state, command)
 
   # A2 — команда без clause в `decide/2`
   def a2_no_decide_clause(%Account{} = state, %UserID{} = by, %Es.Event.At{} = at),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
     do: Account.execute(state, %Orphan{by: by, at: at})
 
   # A3 — состояние другого агрегата
   def a3_foreign_state(%Order{} = state, %Account.Cmd.Open{} = command),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
     do: Account.execute(state, command)
 
   # A4a — `{:ok, events}` вместо `{:ok, {events, state}}`
@@ -55,7 +55,7 @@ defmodule Consumer.S.Execute do
   # A4b — кортеж результата передан в `append` как список событий
   def a4b_with_append(%Account{} = state, %Account.Cmd.Open{} = command, %Context{} = context) do
     with {:ok, events} <- Account.execute(state, command) do
-      # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.Repo.Pg.append/2
+      # expect: incompatible types given to Consumer.Domain.Sales.Account.Repo.Pg.append/2
       @repo.append(events, context)
     end
   end
@@ -93,27 +93,27 @@ defmodule Consumer.S.Execute do
 
   # A6 — struct без `by` / `at` вместо команды
   def a6_not_a_command(%Account{} = state, %Account.Name{} = name),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
     do: Account.execute(state, name)
 
   # A7 — map вместо struct команды
   def a7_map_command(%Account{} = state, %UserID{} = by, %Es.Event.At{} = at),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
     do: Account.execute(state, %{by: by, at: at})
 
   # A-d1 — прямой `decide/2`: команда другого агрегата
   def d1_foreign_command(%Account{} = state, %Order.Cmd.Place{} = command),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.decide/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.decide/2
     do: Account.decide(command, state)
 
   # A-d2 — прямой `decide/2`: команда без clause
   def d2_no_decide_clause(%Account{} = state, %UserID{} = by, %Es.Event.At{} = at),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.decide/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.decide/2
     do: Account.decide(%Orphan{by: by, at: at}, state)
 
   # A-d3 — прямой `decide/2`: состояние другого агрегата
   def d3_foreign_state(%Order{} = state, %Account.Cmd.Open{} = command),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.decide/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.decide/2
     do: Account.decide(command, state)
 
   # A-d4 — прямой `decide/2`: `{:ok, {events, state}}` вместо `{:ok, results}`

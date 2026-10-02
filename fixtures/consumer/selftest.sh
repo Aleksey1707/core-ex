@@ -32,7 +32,7 @@ check "исходное состояние" 0 "consumer-check: ok"
 
 cat > "$probe" <<'PROBE'
 defmodule Consumer.S.SelftestMissing do
-  # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.execute/2
+  # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
   def fine, do: :ok
 end
 PROBE
@@ -41,7 +41,7 @@ rm -f "$probe"
 
 cat > "$probe" <<'PROBE'
 defmodule Consumer.S.SelftestExtra do
-  def typo(%Consumer.Domain.Sales.Common.Account{} = state), do: state.nmae
+  def typo(%Consumer.Domain.Sales.Account{} = state), do: state.nmae
 end
 PROBE
 check "предупреждение без ожидания" 1 "лишнее: $probe:2: unknown key .nmae"

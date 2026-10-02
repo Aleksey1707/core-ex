@@ -1,8 +1,8 @@
 defmodule Consumer.S.BadKey do
   @moduledoc "Модуль ключа без clause `reservation/1` для `Closed`."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Account.Event
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Account.Event
 
   use Core.Es.KeyReservation,
     scope: "scenario.bad_key",
@@ -22,12 +22,12 @@ end
 defmodule Consumer.S.BadKey.Repo.Pg do
   @moduledoc "Репозиторий с модулем ключа без clause `reservation/1` для `Closed`."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
 
   # нет clause `reservation/1` для `Closed`: проверка полноты на строке `use`
   # expect: incompatible types given to Consumer.S.BadKey.reservation/1
   use Core.Es.Aggregate.Repo.Pg,
-    behaviour: Consumer.Domain.Sales.Common.Account.Repo,
+    behaviour: Consumer.Domain.Sales.Account.Repo,
     aggregate: Account,
     id: Account.ID,
     errors: Account.Errors,
@@ -38,8 +38,8 @@ end
 defmodule Consumer.S.BadKeyPayload do
   @moduledoc "Модуль ключа с опечаткой в поле нагрузки, не суженной паттерном."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Account.Event
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Account.Event
 
   use Core.Es.KeyReservation,
     scope: "scenario.bad_key_payload",
@@ -60,12 +60,12 @@ end
 defmodule Consumer.S.BadKeyPayload.Repo.Pg do
   @moduledoc "Репозиторий с модулем ключа с опечаткой в поле нагрузки."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
 
   # опечатка в поле нагрузки без паттерна `%Payload{}`: при определении молчит
   # expect: incompatible types given to Consumer.S.BadKeyPayload.reservation/1
   use Core.Es.Aggregate.Repo.Pg,
-    behaviour: Consumer.Domain.Sales.Common.Account.Repo,
+    behaviour: Consumer.Domain.Sales.Account.Repo,
     aggregate: Account,
     id: Account.ID,
     errors: Account.Errors,
@@ -76,8 +76,8 @@ end
 defmodule Consumer.S.KeyFind do
   @moduledoc "Вызовы генерируемого `find/2` модуля ключа."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Order
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Order
   alias Core.Context
 
   # `{:ok, _}` по результату `find`
@@ -100,6 +100,6 @@ defmodule Consumer.S.KeyFind do
 
   # не `%Context{}` вторым аргументом
   def find_not_context(%Account.Name{} = name),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.NameKey.find/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.NameKey.find/2
     do: Account.NameKey.find(name, %{})
 end

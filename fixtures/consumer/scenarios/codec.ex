@@ -1,7 +1,7 @@
 defmodule Consumer.S.BadCodec do
   @moduledoc "Кодек без clause `dump_payload/2` и `load_payload/3` для `Lost`; в фасад не входит."
 
-  alias Consumer.Domain.Sales.Common.Parcel.Event
+  alias Consumer.Domain.Sales.Parcel.Event
 
   # H1 — нет clause `dump_payload/2` и `load_payload/3` для `Lost`: проверки полноты на строке `use`
   # expect: incompatible types given to dump_payload/2
@@ -23,8 +23,8 @@ end
 defmodule Consumer.S.BadCodecPayload do
   @moduledoc "Кодек, чей `load_payload/3` отдаёт литерал нагрузки другого события; в фасад не входит."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Parcel.Event
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Parcel.Event
 
   # H2 — `load_payload/3` для `Sent` отдаёт литерал нагрузки `Account.Event.Renamed`
   # expect: the following clause will never match
@@ -45,8 +45,8 @@ end
 defmodule Consumer.S.BadCodecPayloadNew do
   @moduledoc "Кодек, чей `load_payload/3` собирает нагрузку другого события конструктором; в фасад не входит."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.Parcel.Event
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Parcel.Event
 
   # H2n — `load_payload/3` для `Sent` отдаёт нагрузку `Account.Event.Renamed` через `Payload.new/1`
   # expect: the following clause will never match
@@ -70,9 +70,9 @@ end
 defmodule Consumer.S.BadCodecSharedPayload do
   @moduledoc "Кодек, чей `load_payload/3` отдаёт чужую нагрузку обоим событиям с общим модулем нагрузки; в фасад не входит."
 
-  alias Consumer.Domain.Sales.Common.Grants
-  alias Consumer.Domain.Sales.Common.Grants.Event
-  alias Consumer.Domain.Sales.Common.Order
+  alias Consumer.Domain.Sales.Grants
+  alias Consumer.Domain.Sales.Grants.Event
+  alias Consumer.Domain.Sales.Order
 
   # H2g — H2 у обоих событий с общим модулем нагрузки: предупреждение на каждое
   # expect: the following clause will never match
@@ -94,9 +94,9 @@ end
 defmodule Consumer.S.Codec do
   @moduledoc "Кодек событий напрямую и фасад Codec."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
   alias Consumer.Codec.Internal, as: InCodec
-  alias Consumer.Domain.Sales.Common.Parcel
+  alias Consumer.Domain.Sales.Parcel
   alias Consumer.S.BadCodec
 
   # H1d — прямой `dump_payload/2` события без clause

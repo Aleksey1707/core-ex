@@ -102,6 +102,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | `MyApp.QuickStart`, `MyApp.SeedDemo` — задачи оператора верхнего уровня | `MyApp.Release.<Name>` (`10-architecture.md`, «Направления зависимостей») |
 | строка `DEBT.md` на каждую несовместимую правку до выката («строк с этим тегом не существует») | строка «Первый релиз» в локальном индексе, правка до релиза без учёта («Первый релиз») |
 | clause `:unknown_event_type` в каталоге `<Aggregate>.Errors` | ошибку строит `Core.Es.Event.Codec` (`ns: :es`), clause в каталоге MUST NOT (`deps/core/docs/rules/14-events-outbox.md`, «Domain events») |
+| `<BC>.Common` и срезы инициаторов на уровне контекста (`<BC>.<Actor>.Usecases.<Usecase>`); граница `MyApp` на весь домен, направления — правила `boundary_lint` `common-slice`, `foreign-slice`, `sibling-slice`, `subsystem-slice` | каталог агрегата `<BC>.<Aggregate>` с подкаталогом актора (`<Aggregate>.<Actor>.Usecases`), `<BC>.Values`, read-модель по назначению; контекст — граница `boundary` верхнего уровня, направления держит сборка (`10-architecture.md`, «Состав контекста», «Boundary») |
 
 Встреченная в приложении устаревшая форма — не повод для точечной правки посреди чужой задачи:
 это либо отдельная задача, либо строка в `DEBT.md` с условием снятия.
@@ -207,7 +208,7 @@ MUST NOT — копия расходится с оригиналом на пер
 
 | Номер | Тема | Свод библиотеки |
 |---|---|---|
-| `10-architecture.md` | namespaces, boundary, срезы, usecases, DI, `Transact.run` | есть |
+| `10-architecture.md` | namespaces, раскладка, boundary, акторы, usecases, DI, `Transact.run` | есть |
 | `11-domain.md` | профили Codec, реестр плагинов, Prim и Enum, `ContextFactory` | есть |
 | `12-errors.md` | словарь `ns`, каталоги ошибок, границы | есть |
 | `13-repos.md` | раскладка репозиториев, read vs write, View, Specs | есть |

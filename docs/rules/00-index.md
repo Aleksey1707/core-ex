@@ -111,12 +111,13 @@
 | `MyApp` | `my_app` | корневой namespace приложения-потребителя |
 | `:my_app` | — | его OTP app atom |
 | `<BC>` | `<bc>` | bounded context |
-| `<Actor>` | `<actor>` | actor / role-срез |
+| `<Actor>` | `<actor>` | актор — инициатор операций, подкаталог в каталоге агрегата |
 | `<Aggregate>` | `<aggregate>` | агрегат |
 | `<ReadModel>` | `<read_model>` | read-модель: View, ReadRepo и проекция одного каталога |
 | `<Usecase>` | — | имя модуля usecases; по умолчанию имя агрегата |
 | `<Subsystem>` | `<subsystem>` | подсистема приложения вне `Domain`, без агрегатов |
 | `<Component>` | `<component>` | компонент: процессы одного назначения (и одного тумблера, кроме подчинённого, если он есть) под корнем `<Component>.Supervisor` |
+| `<Operation>` | `<operation>` | операция над равноправными агрегатами — каталог уровня контекста |
 | `<Value>` | `<value>` | значение (Prim) |
 | `<Api>`, `<Version>`, `<Resource>` | `<api>`, `<version>`, `<resource>` | web: поверхность, версия API, ресурс |
 | `<Nested>`, `<Group>` | `<nested>`, `<group>` | web: вложенный ресурс; группа ресурсов без своего ресурса |

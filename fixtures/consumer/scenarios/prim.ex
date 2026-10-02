@@ -1,8 +1,8 @@
 defmodule Consumer.S.Prim do
   @moduledoc "Результат bang-конструкторов Prim, `from_<key>` идентификатора из ключа и `Core.Version.new/0`."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.DeliveryID
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Values.DeliveryID
   alias Core.Es
   alias Core.Version
 
@@ -29,7 +29,7 @@ defmodule Consumer.S.Prim.KeyID do
   use Core.Prim.UUID,
     name: "Идентификатор из ключа",
     version: 5,
-    namespace: Consumer.StreamID.namespace(),
+    namespace: Consumer.Infra.StreamID.namespace(),
     scope: "scenario"
 
   # ключ не строка

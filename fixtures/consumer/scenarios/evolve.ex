@@ -1,11 +1,11 @@
 defmodule Consumer.S.BadEvolve do
   @moduledoc "Агрегат без clause `evolve/2` для `Frozen` и `Closed` и с опечаткой в суженной нагрузке."
 
-  alias Consumer.Domain.Sales.Common.Account.Cmd
-  alias Consumer.Domain.Sales.Common.Account.Event
+  alias Consumer.Domain.Sales.Account.Cmd
+  alias Consumer.Domain.Sales.Account.Event
 
   use Core.Es.Aggregate,
-    event_codec: Consumer.Domain.Sales.Common.Account.Event.Codec
+    event_codec: Consumer.Domain.Sales.Account.Event.Codec
 
   defstruct id: nil, version: nil, name: nil, status: nil
 
@@ -30,17 +30,17 @@ defmodule Consumer.S.BadEvolve.Repo do
   # expect: incompatible types given to Consumer.S.BadEvolve.evolve/2
   use Core.Es.Aggregate.Repo,
     aggregate: Consumer.S.BadEvolve,
-    id: Consumer.Domain.Sales.Common.Account.ID
+    id: Consumer.Domain.Sales.Account.ID
 end
 
 defmodule Consumer.S.BadEvolvePayload do
   @moduledoc "Агрегат с опечаткой в поле нагрузки, не суженной паттерном."
 
-  alias Consumer.Domain.Sales.Common.Account.Cmd
-  alias Consumer.Domain.Sales.Common.Account.Event
+  alias Consumer.Domain.Sales.Account.Cmd
+  alias Consumer.Domain.Sales.Account.Event
 
   use Core.Es.Aggregate,
-    event_codec: Consumer.Domain.Sales.Common.Account.Event.Codec
+    event_codec: Consumer.Domain.Sales.Account.Event.Codec
 
   defstruct id: nil, version: nil, name: nil, status: nil
 
@@ -61,17 +61,17 @@ defmodule Consumer.S.BadEvolvePayload.Repo do
   # expect: incompatible types given to Consumer.S.BadEvolvePayload.evolve/2
   use Core.Es.Aggregate.Repo,
     aggregate: Consumer.S.BadEvolvePayload,
-    id: Consumer.Domain.Sales.Common.Account.ID
+    id: Consumer.Domain.Sales.Account.ID
 end
 
 defmodule Consumer.S.BadEvolveState do
   @moduledoc "Агрегат с опечаткой в ключе обновления состояния."
 
-  alias Consumer.Domain.Sales.Common.Account.Cmd
-  alias Consumer.Domain.Sales.Common.Account.Event
+  alias Consumer.Domain.Sales.Account.Cmd
+  alias Consumer.Domain.Sales.Account.Event
 
   use Core.Es.Aggregate,
-    event_codec: Consumer.Domain.Sales.Common.Account.Event.Codec
+    event_codec: Consumer.Domain.Sales.Account.Event.Codec
 
   defstruct id: nil, version: nil, name: nil, status: nil
 
@@ -94,14 +94,14 @@ defmodule Consumer.S.BadEvolveState.Repo do
   # expect: incompatible types given to Consumer.S.BadEvolveState.evolve/2
   use Core.Es.Aggregate.Repo,
     aggregate: Consumer.S.BadEvolveState,
-    id: Consumer.Domain.Sales.Common.Account.ID
+    id: Consumer.Domain.Sales.Account.ID
 end
 
 defmodule Consumer.S.LongName.Event do
   @moduledoc "События, у одного из которых имя модуля длиннее, чем помещается в атом имени функции-проверки."
 
-  alias Consumer.Domain.Sales.Common.Account
-  alias Consumer.Domain.Sales.Common.UserID
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Values.UserID
 
   defmodule AlphaBravoCharlieDeltaEchoFoxtrotGolfHotelIndia.JulietKiloLimaMikeNovemberOscarPapaQuebecRomeo.SierraTangoUniformVictorWhiskeyXrayYankeeZulu.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotelX.IndiaJulietKiloLimaMikeNovemberX do
     use Core.Es.Event,
@@ -133,7 +133,7 @@ end
 defmodule Consumer.S.LongName do
   @moduledoc "Агрегат без clause `evolve/2` для события с длинным именем модуля."
 
-  alias Consumer.Domain.Sales.Common.Account.Cmd
+  alias Consumer.Domain.Sales.Account.Cmd
   alias Consumer.S.LongName.Event
 
   use Core.Es.Aggregate,
@@ -155,13 +155,13 @@ defmodule Consumer.S.LongName.Repo do
   # expect: incompatible types given to Consumer.S.LongName.evolve/2
   use Core.Es.Aggregate.Repo,
     aggregate: Consumer.S.LongName,
-    id: Consumer.Domain.Sales.Common.Account.ID
+    id: Consumer.Domain.Sales.Account.ID
 end
 
 defmodule Consumer.S.Evolve do
   @moduledoc "Прямые вызовы `evolve/2`."
 
-  alias Consumer.Domain.Sales.Common.Account
+  alias Consumer.Domain.Sales.Account
   alias Consumer.S.BadEvolve
   alias Consumer.S.BadEvolveState
 
@@ -172,7 +172,7 @@ defmodule Consumer.S.Evolve do
 
   # C3d — прямой `evolve/2` с не-событием
   def c3_direct_not_event(%Account{} = state),
-    # expect: incompatible types given to Consumer.Domain.Sales.Common.Account.evolve/2
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.evolve/2
     do: Account.evolve(state, "bad")
 
   # C4, прямой вызов — `evolve/2` с опечаткой в ключе обновления состояния

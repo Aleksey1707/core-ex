@@ -7,12 +7,13 @@
 # Режим библиотеки проверяет главный инвариант «Core не знает потребителя»
 # (`docs/rules/10-architecture.md`), режим потребителя — что DI репозиториев (`Repo` и
 # `ReadRepo`) идёт через `Core.Config.repo!/1` (`docs/rules/13-repos.md`, «DI»), а в `lib/` —
-# что путь файла равен имени модуля, у контекста есть модуль-оглавление и нет модулей в корне, а
-# `Common`, чужой контекст и подсистема не ссылаются на срезы (`docs/rules/app/10-architecture.md`,
+# что путь файла равен имени модуля, корень границы контекста — его модуль-оглавление с
+# `use Boundary`, а `Common` и срезов на уровне контекста нет (`docs/rules/app/10-architecture.md`,
 # «Раскладка»), проекция лежит в каталоге read-модели (`docs/rules/app/13-repos.md`), а корень web
-# состоит из поверхностей и модулей своей таблицы (`docs/rules/app/15-web-api.md`). Норму ввела
-# библиотека, поэтому инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`,
-# и путь правил в его сообщениях — от корня потребителя.
+# состоит из поверхностей и модулей своей таблицы (`docs/rules/app/15-web-api.md`). Направления
+# между контекстами держит Boundary при сборке, а не линтер. Норму ввела библиотека, поэтому
+# инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`, и путь правил в его
+# сообщениях — от корня потребителя.
 
 defmodule BoundaryLint do
   @moduledoc false
@@ -24,10 +25,6 @@ defmodule BoundaryLint do
   @repos "deps/core/docs/rules/13-repos.md"
   @layout "deps/core/docs/rules/app/10-architecture.md"
   @module_path "module-path"
-  @common_slice "common-slice"
-  @foreign_slice "foreign-slice"
-  @subsystem_slice "subsystem-slice"
-  @sibling_slice "sibling-slice"
   @bc_index "bc-index"
   @bc_root "bc-root"
   @projection_layout "projection-layout"
@@ -39,8 +36,6 @@ defmodule BoundaryLint do
   @compile_env_funs ~w(compile_env compile_env!)a
   @own_apps ~w(core argon2_elixir)a
   @repo_keys ~w(Repo ReadRepo)a
-  @wiring_modules ~w(Application Projections)a
-  @wiring_namespaces ~w(Codec PromEx Release)a
   @web_parts ~w(Endpoint Router Telemetry ErrorJSON FallbackController ErrorMapper Accepted Response
                 Schemas Presenters Plugs Params)
 
@@ -122,19 +117,18 @@ defmodule BoundaryLint do
 
     (errors ++
        module_path_violations(ast, path, root) ++
-       bc_root_violations(ast, path, root, known) ++
-       direction_violations(ast, path, root, known.bc_roots) ++
+       bc_root_violations(path, known) ++
        web_root_violations(ast, path, known) ++ projection_violations(ast, path, root))
     |> Enum.reject(&allowed?(&1, markers))
     |> Enum.uniq_by(&{&1.line, &1.text})
     |> Enum.sort_by(& &1.line)
   end
 
-  # Сведения, которым нужны все файлы: модули в корне контекста (кроме среза, объявленного модулем),
-  # поверхности web, `ApiSpec` на уровне поверхности, корни приложения и имена всех модулей.
+  # Сведения, которым нужны все файлы: части контекста до вертикали, поверхности web, `ApiSpec` на
+  # уровне поверхности, корни приложения и имена всех модулей.
   defp known(_files, nil),
     do: %{
-      bc_roots: MapSet.new(),
+      bc_anchors: %{},
       surfaces: MapSet.new(),
       deep_specs: %{},
       roots: MapSet.new(),
@@ -145,10 +139,14 @@ defmodule BoundaryLint do
   defp known(files, _root) do
     all = for %{ast: ast, markers: markers} <- files, module <- modules(ast), do: {module, markers}
     names = for {%{name: name}, _markers} <- all, into: MapSet.new(), do: name
-    placed = for %{path: path, ast: ast} <- files, module <- modules(ast), do: Map.put(module, :path, path)
+
+    placed =
+      for %{path: path, ast: ast, markers: markers} <- files,
+          module <- modules(ast),
+          do: Map.merge(module, %{path: path, markers: markers})
 
     known = %{
-      bc_roots: bc_roots(all, names),
+      bc_anchors: bc_anchors(placed, names),
       surfaces:
         for(
           {%{name: name}, _} <- all,
@@ -304,12 +302,12 @@ defmodule BoundaryLint do
   # Событие и команда — свой файл, даже вложенные в семейство `<Aggregate>.Event` / `<Aggregate>.Cmd`
   # (`13-repos.md`, «Событие и команда»): вложенный модуль следует за родителем, но у члена семейства
   # родитель — семейство, а не он сам.
-  # Член семейства — `<Root>.Domain.<BC>.<Part>.<Aggregate>.{Event,Cmd}.<Name>`: вложенный Prim агрегата с
-  # именем `Event` (`…Common.Event.ID`), модуль вне `Domain` и кодек семейства правилом не считаются.
+  # Член семейства — `<Root>.Domain.<BC>.<Aggregate>.{Event,Cmd}.<Name>`: вложенный Prim агрегата с именем
+  # `Event` (`<BC>.Event.ID`), модуль вне `Domain` и кодек семейства правилом не считаются.
   defp nested_member_violations(ast, top_names, path, root) do
     for %{name: name, line: line} <- modules(ast),
         not MapSet.member?(top_names, name),
-        [_root, "Domain", _bc, _part, _aggregate, family, member] <- [String.split(name, ".")],
+        [_root, "Domain", _bc, _aggregate, family, member] <- [String.split(name, ".")],
         family in ["Event", "Cmd"] and member != "Codec",
         do:
           layout_err(
@@ -344,319 +342,135 @@ defmodule BoundaryLint do
 
   defp layout_err(path, line, message), do: violation(path, line, message, @module_path, @layout)
 
-  # ===== потребитель: направления зависимостей контекста =====
+  # ===== потребитель: модуль-оглавление — корень границы контекста =====
 
-  # Контекст — `<Root>.Domain.<BC>`, его части — `Common` и срезы; корень берётся из модуля, на который
-  # ссылаются. `Common` не видит срезов своего контекста, чужой контекст виден только через его
-  # `Common`. Подсистема — любой модуль вне `Domain` и сборки приложения: `<Root>.<X>` вне `@wiring` и
-  # модуль с другим корнем, кроме `<Root>Web` и `Mix.Tasks`. Срез — namespace, а не модуль: часть,
-  # объявленная модулем `<Root>.Domain.<BC>.<X>`, — модуль в корне контекста. Его ловит `bc-root` на
-  # объявлении, а ссылки на него правила срезов не считают — правка одна, перенос модуля.
-  defp direction_violations(_ast, _path, nil, _bc_roots), do: []
-
-  defp direction_violations(ast, path, _root, bc_roots) do
-    {_env, refs} = walk(ast, %{module: nil, aliases: %{}})
-
-    refs
-    |> Enum.reject(fn {from, to, _line} -> root_ref?(bc_roots, from, to) end)
-    |> Enum.flat_map(fn {from, to, line} -> direction(from, to, line, path) end)
-  end
-
-  # Ссылка на модуль в корне контекста — и ссылка такого модуля на свой контекст — правилами срезов не
-  # считается: его ловит `bc-root`, правка одна — перенос.
-  defp root_ref?(bc_roots, from, to) do
-    MapSet.member?(bc_roots, bc_part(to)) or
-      (MapSet.member?(bc_roots, bc_part(from)) and same_context?(bc_part(from), bc_part(to)))
-  end
-
-  defp same_context?({root, bc, _from_part}, {root, bc, _part}), do: true
-  defp same_context?(_from, _to), do: false
-
-  defp direction(from, to, line, path) do
-    case {bc_part(from), bc_part(to)} do
-      {{root, bc, :Common}, {root, bc, part}} when part not in [:Common, nil] ->
-        [
-          violation(
-            path,
-            line,
-            "`Common` контекста `#{bc}` ссылается на `#{module_name(to)}` — срез своего контекста, а не `Common`: " <>
-              "нужное обоим — в `Common`, компонент или проекция read-модели среза — в срез",
-            @common_slice,
-            @layout
-          )
-        ]
-
-      {{root, bc, from_part}, {root, bc, part}}
-      when from_part not in [:Common, nil] and part not in [:Common, nil, from_part] ->
-        [
-          violation(
-            path,
-            line,
-            "срез `#{from_part}` контекста `#{bc}` ссылается на `#{module_name(to)}` — соседний срез: " <>
-              "общее — в `#{bc}.Common`",
-            @sibling_slice,
-            @layout
-          )
-        ]
-
-      {{root, bc, _part}, {root, other, part}} when other != bc and part not in [:Common, nil] ->
-        [
-          violation(
-            path,
-            line,
-            "ссылка на `#{module_name(to)}` — срез чужого контекста: контекст `#{other}` виден через `#{other}.Common`",
-            @foreign_slice,
-            @layout
-          )
-        ]
-
-      {nil, {root, _bc, part}} when part not in [:Common, nil] ->
-        subsystem_violations(from, to, root, line, path)
-
-      {{from_root, _bc, _part}, {root, _other, part}} when from_root != root and part not in [:Common, nil] ->
-        subsystem_violations(from, to, root, line, path)
-
-      _other ->
-        []
-    end
-  end
-
-  # ---
-
-  defp subsystem_violations(nil, _to, _root, _line, _path), do: []
-  defp subsystem_violations([root, top], _to, root, _line, _path) when top in @wiring_modules, do: []
-
-  defp subsystem_violations([root, top | _rest] = from, to, root, line, path) when top in @wiring_modules,
-    do: [
-      subsystem_err(module_name(from), to, line, path, " (к сборке относится только `#{root}.#{top}`, без вложенных)")
-    ]
-
-  defp subsystem_violations([root, top | _rest], _to, root, _line, _path) when top in @wiring_namespaces, do: []
-  defp subsystem_violations([root], to, root, line, path), do: [subsystem_err("#{root}", to, line, path)]
-
-  defp subsystem_violations([root, top | _rest], to, root, line, path),
-    do: [subsystem_err("#{root}.#{top}", to, line, path)]
-
-  defp subsystem_violations([:Mix, :Tasks | _rest], _to, _root, _line, _path), do: []
-
-  defp subsystem_violations([from_root | _rest], to, root, line, path) do
-    if from_root == :"#{root}Web",
-      do: [],
-      else: [subsystem_err("#{from_root}", to, line, path)]
-  end
-
-  defp subsystem_err(subsystem, [root | _rest] = to, line, path, note \\ "") do
-    hint =
-      if :Usecases in to,
-        do:
-          "; задача оператора — в `#{root}.Release.<Name>`, компонент, который ссылается на срез, — в срез инициатора",
-        else: ""
-
-    violation(
-      path,
-      line,
-      "подсистема `#{subsystem}`#{note} ссылается на `#{module_name(to)}` — срез контекста: " <>
-        "контекст виден через `Common`" <>
-        hint,
-      @subsystem_slice,
-      @layout
-    )
-  end
-
-  defp bc_part([root, :Domain, bc, part | _rest]), do: {root, bc, part}
-  defp bc_part([root, :Domain, bc]), do: {root, bc, nil}
-  defp bc_part(_module), do: nil
-
-  defp module_name(module), do: Enum.map_join(module, ".", &Atom.to_string/1)
-
-  # Обход с лексическими алиасами: блок передаёт алиас следующим выражениям, прочий узел — только
-  # своим детям. Строка `alias` ссылкой не считается: нарушение отмечается там, где модуль зовут.
-  defp walk({:__block__, _meta, exprs}, env) do
-    {_env, refs} =
-      Enum.reduce(exprs, {env, []}, fn expr, {env, refs} ->
-        {env, more} = walk(expr, env)
-        {env, refs ++ more}
-      end)
-
-    {env, refs}
-  end
-
-  defp walk({:defmodule, _meta, [{:__aliases__, _, parts}, body]}, env) do
-    {module, env} = define_module(parts, env)
-    {_env, refs} = walk(body, %{env | module: module})
-    {env, refs}
-  end
-
-  defp walk({:alias, _meta, [target | opts]}, env), do: {define_aliases(target, List.flatten(opts), env), []}
-
-  # Верхнеуровневый `defimpl … for: T` принадлежит модулю `T`: его ссылки — ссылки `T`.
-  defp walk({:defimpl, _meta, [protocol | rest]}, %{module: nil} = env) do
-    case Keyword.get(List.flatten(rest), :for) do
-      {:__aliases__, _, parts} -> {env, children([protocol | rest], %{env | module: expand(parts, env)})}
-      _other -> {env, children([protocol | rest], env)}
-    end
-  end
-
-  defp walk({:require, _meta, [target, opts]}, env) when is_list(opts) do
-    {_env, refs} = walk(target, env)
-    {if(opts[:as], do: define_aliases(target, opts, env), else: env), refs}
-  end
-
-  defp walk({{:., _, [base, :{}]}, meta, children}, env) do
-    {env, for(module <- multi_targets(base, children, env), do: {env.module, module, meta[:line]})}
-  end
-
-  defp walk({:__aliases__, meta, parts}, env) do
-    case expand(parts, env) do
-      nil -> {env, []}
-      module -> {env, [{env.module, module, meta[:line]}]}
-    end
-  end
-
-  defp walk({form, _meta, args}, env) when is_list(args), do: {env, children([form | args], env)}
-  defp walk({left, right}, env), do: {env, children([left, right], env)}
-  defp walk(list, env) when is_list(list), do: {env, children(list, env)}
-  defp walk(_node, env), do: {env, []}
-
-  # ---
-
-  defp children(nodes, env), do: Enum.flat_map(nodes, &(&1 |> walk(env) |> elem(1)))
-
-  # Вложенный `defmodule Line` внутри `A` — это `A.Line` даже при алиасе `Line`, и `Line` становится
-  # алиасом в `A`; `defmodule Elixir.Line` вложенностью не считается.
-  defp define_module([first | _rest] = parts, %{module: parent} = env)
-       when is_list(parent) and is_atom(first) and first != :"Elixir" do
-    {parent ++ parts, put_in(env.aliases[first], parent ++ [first])}
-  end
-
-  defp define_module(parts, env), do: {expand(parts, env), env}
-
-  defp define_aliases({{:., _, [base, :{}]}, _, children}, _opts, env) do
-    base
-    |> multi_targets(children, env)
-    |> Enum.reduce(env, &define_alias(&1, nil, &2))
-  end
-
-  defp define_aliases({:__aliases__, _, parts}, opts, env), do: define_alias(expand(parts, env), opts[:as], env)
-  defp define_aliases({:__MODULE__, _, _}, opts, env), do: define_alias(env.module, opts[:as], env)
-  defp define_aliases(_target, _opts, env), do: env
-
-  defp define_alias(nil, _as, env), do: env
-  defp define_alias(module, {:__aliases__, _, [as]}, env), do: put_in(env.aliases[as], module)
-  defp define_alias(module, _as, env), do: put_in(env.aliases[List.last(module)], module)
-
-  # `A.{B, C.D}` и `__MODULE__.{B}` — модули `A.B`, `A.C.D` и `<модуль>.B`.
-  defp multi_targets(base, children, env) do
-    base_parts =
-      case base do
-        {:__aliases__, _, parts} -> parts
-        {:__MODULE__, _, _} -> [base]
-        _other -> nil
-      end
-
-    if base_parts,
-      do: for({:__aliases__, _, parts} <- children, module = expand(base_parts ++ parts, env), do: module),
-      else: []
-  end
-
-  defp expand(parts, env) do
-    module = resolve(parts, env)
-    if is_list(module) and Enum.all?(module, &is_atom/1), do: module
-  end
-
-  defp resolve([{:__MODULE__, _, _} | rest], %{module: module}) when is_list(module), do: module ++ rest
-  defp resolve([:"Elixir" | rest], _env), do: rest
-  defp resolve([first | rest], env) when is_atom(first), do: Map.get(env.aliases, first, [first]) ++ rest
-  defp resolve(_parts, _env), do: nil
-
-  # ===== потребитель: модуль-оглавление контекста =====
-
-  # Каталог `domain/<bc>/` требует модуль `<Root>.Domain.<BC>`: его ищут среди верхнеуровневых модулей
-  # `lib/` по `Macro.underscore`, как и путь файла, — так аббревиатура в имени контекста не даёт ложного
-  # нарушения. Содержание не проверяется. Нарушение принадлежит каталогу, а не модулю, поэтому его гасит
-  # маркер над любым `defmodule` в файлах контекста.
+  # Каталог `domain/<bc>/` требует модуль `<Root>.Domain.<BC>` с `use Boundary`: контекст — граница
+  # верхнего уровня, и её корень — оглавление. Модуль ищут среди верхнеуровневых модулей `lib/` по
+  # `Macro.underscore`, как и путь файла, — так аббревиатура в имени контекста не даёт ложного нарушения;
+  # `use` разрешается через `alias`, опции границы и `@moduledoc` не проверяются. Нарушение принадлежит
+  # каталогу, а не модулю, поэтому его гасит маркер над любым `defmodule` в файлах контекста и в оглавлении.
   defp index_violations(_files, nil), do: []
 
   defp index_violations(files, root) do
-    defined =
-      for %{ast: ast} <- files, {name, _line} <- top_modules(ast), into: MapSet.new(), do: Macro.underscore(name)
+    indexes =
+      for %{path: path, ast: ast} <- files,
+          {name, _line} <- top_modules(ast),
+          %{name: ^name} = module <- modules(ast),
+          into: %{},
+          do: {Macro.underscore(name), Map.put(module, :path, path)}
 
     root
     |> Path.join("*/domain/*")
     |> Path.wildcard()
     |> Enum.filter(&File.dir?/1)
     |> Enum.sort()
-    |> Enum.reject(&MapSet.member?(defined, Path.relative_to(Path.expand(&1), Path.expand(root))))
     |> Enum.reject(&index_allowed?(&1, files))
-    |> Enum.map(fn dir ->
-      violation(
-        dir <> "/",
-        0,
-        "контекст без модуля-оглавления: его `@moduledoc` — карта контекста, файл — #{dir}.ex; " <>
-          "контекст без агрегатов — не контекст, а подсистема",
-        @bc_index,
-        @layout
-      )
-    end)
+    |> Enum.flat_map(&index_violation(&1, indexes[Path.relative_to(Path.expand(&1), Path.expand(root))]))
   end
 
   # ---
 
   defp index_allowed?(dir, files) do
     prefix = Path.expand(dir) <> "/"
+    index = Path.expand(dir) <> ".ex"
 
     Enum.any?(files, fn %{path: path, markers: markers} ->
-      String.starts_with?(Path.expand(path), prefix) and Enum.any?(markers, &match?({@bc_index, _first, _last}, &1))
+      (String.starts_with?(Path.expand(path), prefix) or Path.expand(path) == index) and
+        Enum.any?(markers, &match?({@bc_index, _first, _last}, &1))
     end)
   end
 
-  # ===== потребитель: модуль в корне контекста =====
-
-  # Срез — namespace, модулем он не объявляется; модуль `<Root>.Domain.<BC>.<X>` при `X` не `Common` —
-  # модуль в корне контекста, вложенный или верхнеуровневый. Ссылки на него и на модули под ним правила
-  # срезов не считают, в том числе под маркером `bc-root`: правка одна — перенос. Исключение — срез,
-  # объявленный модулем (под ним есть `.Usecases.`): его направления проверяются как у среза.
-  defp bc_roots(all, names) do
-    for {%{parts: [_root, :Domain, _bc, part], name: name} = module, _markers} <- all,
-        part != :Common,
-        not slice_module?(name, names),
-        into: MapSet.new(),
-        do: bc_part(module.parts)
+  defp index_violation(dir, nil) do
+    [
+      violation(
+        dir <> "/",
+        0,
+        "контекст без модуля-оглавления: оглавление — корень границы контекста (`use Boundary` с `deps` и " <>
+          "`exports`), его `@moduledoc` — карта контекста, файл — #{dir}.ex; контекст без агрегатов — не " <>
+          "контекст, а подсистема",
+        @bc_index,
+        @layout
+      )
+    ]
   end
 
-  # Срез, объявленный модулем: под ним лежат usecases (`10-architecture.md`, «Usecases»).
-  defp slice_module?(name, names), do: Enum.any?(names, &String.starts_with?(&1, name <> ".Usecases."))
+  defp index_violation(_dir, %{uses: uses} = index) do
+    if [:Boundary] in uses,
+      do: [],
+      else: [
+        violation(
+          index.path,
+          index.line,
+          "`#{index.name}` — оглавление без `use Boundary`: контекст — граница верхнего уровня, её корень — " <>
+            "оглавление с `deps` и `exports`",
+          @bc_index,
+          @layout
+        )
+      ]
+  end
 
-  defp bc_root_violations(_ast, _path, nil, _known), do: []
+  # ===== потребитель: `Common` и срезы на уровне контекста =====
 
-  defp bc_root_violations(ast, path, _root, known) do
-    for %{parts: [root, :Domain, bc, part], name: name, line: line, uses: uses} <- modules(ast),
-        part != :Common,
-        [:Core, :Es, :Projection] not in uses,
-        do: violation(path, line, bc_root_message(name, root, bc, known.names), @bc_root, @layout)
+  # Раскладка — вертикаль по агрегату: модули контекста лежат в каталогах агрегатов и в каталогах уровня
+  # контекста по виду (`Values`, `Errors`, read-модель и операция по назначению, `Reactions`). Раскладку до
+  # неё выдают две части: `<BC>.Common` целиком и срез — namespace `<BC>.<X>.Usecases` с usecases по
+  # сценарию, который сам модулем не объявлен (общий модуль чтения `<BC>.<Aggregate>.Usecases` — модуль, и
+  # под ним MAY лежать свои). Нарушение — одно на часть: правка у неё одна, перенос. Оно ставится на первый
+  # модуль части по пути и строке, там же — число прочих; маркер над любым модулем части его гасит.
+  defp bc_anchors(placed, names) do
+    placed
+    |> Enum.flat_map(fn module -> for part <- [bc_part(module.parts, names)], part, do: {part, module} end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.reject(fn {_part, modules} -> Enum.any?(modules, &part_allowed?/1) end)
+    |> Map.new(fn {part, modules} ->
+      anchor = Enum.min_by(modules, &{&1.path, &1.line})
+      {part, %{path: anchor.path, line: anchor.line, others: length(modules) - 1}}
+    end)
+  end
+
+  defp bc_root_violations(path, known) do
+    for {{root, bc, part}, %{path: ^path, line: line, others: others}} <- known.bc_anchors,
+        do: violation(path, line, bc_root_message(root, bc, part) <> others(others), @bc_root, @layout)
   end
 
   # ---
 
-  defp bc_root_message(name, root, bc, names) do
-    place =
-      "`#{name}` — модуль в корне контекста `#{bc}`: его место — `#{root}.Domain.#{bc}.Common`, " <>
-        "срез инициатора или подсистема `#{root}.<Subsystem>` (механизм без агрегатов; контекст без агрегатов " <>
-        "целиком — подсистема)"
+  defp bc_part([root, :Domain, bc, :Common | _rest], _names), do: {root, bc, :Common}
 
-    if slice_module?(name, names),
-      do:
-        "`#{name}` — срез, объявленный модулем: срез — namespace, модуль убрать, " <>
-          "карту — в оглавление `#{root}.Domain.#{bc}`",
-      else: place
+  defp bc_part([root, :Domain, bc, slice, :Usecases, _usecase | _rest], names) do
+    if MapSet.member?(names, module_name([root, :Domain, bc, slice, :Usecases])),
+      do: nil,
+      else: {root, bc, slice}
+  end
+
+  defp bc_part(_parts, _names), do: nil
+
+  defp part_allowed?(module), do: allowed?(%{rule: @bc_root, line: module.line}, module.markers)
+
+  defp bc_root_message(root, bc, :Common) do
+    context = "#{root}.Domain.#{bc}"
+
+    "`#{context}.Common` — общая часть контекста: раскладка до вертикали, `Common` нет. Всё об агрегате — " <>
+      "в его каталоге `#{context}.<Aggregate>`, значение без владельца — в `#{context}.Values`, read-модель " <>
+      "не по агрегату — в каталоге по назначению"
+  end
+
+  defp bc_root_message(root, bc, slice) do
+    context = "#{root}.Domain.#{bc}"
+
+    "`#{context}.#{slice}` — срез на уровне контекста: раскладка до вертикали, срезов нет. Usecases актора — " <>
+      "модуль `#{context}.<Aggregate>.#{slice}.Usecases` в каталоге агрегата, операция над равноправными " <>
+      "агрегатами — `#{context}.<Operation>.#{slice}.Usecases`"
   end
 
   # ===== потребитель: проекция в каталоге read-модели =====
 
-  # Проекция — ровно `<Root>.Domain.<BC>.<Part>.<ReadModel>.Projection` (или `ProjectionV<N>` на время
-  # перехода): модуль с `use Core.Es.Projection` в другом месте — проекция контекста или модуль под
-  # read-моделью. `use` разрешается через `alias`, код в `quote` макроса-обёртки не проверяется. Отдельный
-  # модуль записи — `*.Projector` под `ReadRepo`: слово `Projector` вне `ReadRepo` бывает доменным.
+  # Проекция — ровно `<Root>.Domain.<BC>.<ReadModel>.Projection` (или `ProjectionV<N>` на время перехода):
+  # read-модель агрегата лежит в его каталоге, не по агрегату — в каталоге по назначению, а у актора своей
+  # проекции нет — таблица и проекция общие. Модуль с `use Core.Es.Projection` в другом месте — проекция
+  # контекста или модуль под read-моделью. `use` разрешается через `alias`, код в `quote` макроса-обёртки
+  # не проверяется. Отдельный модуль записи — `*.Projector` под `ReadRepo`: слово `Projector` вне `ReadRepo`
+  # бывает доменным.
   defp projection_violations(_ast, _path, nil), do: []
 
   defp projection_violations(ast, path, _root) do
@@ -673,14 +487,17 @@ defmodule BoundaryLint do
         ["`#{name}` — отдельный модуль записи проекции: таблицы пишет сама `<ReadModel>.Projection`"]
 
       uses? and not read_model_projection?(parts) ->
-        ["`#{name}` — проекция вне каталога read-модели: ожидается `<BC>.<Part>.<ReadModel>.Projection`"]
+        [
+          "`#{name}` — проекция вне каталога read-модели: ожидается `<BC>.<ReadModel>.Projection` — в каталоге " <>
+            "агрегата или read-модели по назначению"
+        ]
 
       true ->
         []
     end
   end
 
-  defp read_model_projection?([_root, "Domain", _bc, _part, _read_model, projection]),
+  defp read_model_projection?([_root, "Domain", _bc, _read_model, projection]),
     do: Regex.match?(~r/^Projection(V\d+)?$/, projection)
 
   defp read_model_projection?(_parts), do: false
@@ -696,11 +513,6 @@ defmodule BoundaryLint do
         do:
           violation(path, line, web_root_message(web, part, known.deep_specs) <> others(others), @web_root, @web_layout)
   end
-
-  # ---
-
-  defp others(0), do: ""
-  defp others(count), do: "; прочих модулей namespace с тем же нарушением: #{count}, правка одна"
 
   # ---
 
@@ -787,6 +599,53 @@ defmodule BoundaryLint do
 
   defp used(nodes, env), do: Enum.flat_map(nodes, &(&1 |> use_targets(env) |> elem(1)))
 
+  # Вложенный `defmodule Line` внутри `A` — это `A.Line` даже при алиасе `Line`, и `Line` становится
+  # алиасом в `A`; `defmodule Elixir.Line` вложенностью не считается.
+  defp define_module([first | _rest] = parts, %{module: parent} = env)
+       when is_list(parent) and is_atom(first) and first != :"Elixir" do
+    {parent ++ parts, put_in(env.aliases[first], parent ++ [first])}
+  end
+
+  defp define_module(parts, env), do: {expand(parts, env), env}
+
+  defp define_aliases({{:., _, [base, :{}]}, _, children}, _opts, env) do
+    base
+    |> multi_targets(children, env)
+    |> Enum.reduce(env, &define_alias(&1, nil, &2))
+  end
+
+  defp define_aliases({:__aliases__, _, parts}, opts, env), do: define_alias(expand(parts, env), opts[:as], env)
+  defp define_aliases({:__MODULE__, _, _}, opts, env), do: define_alias(env.module, opts[:as], env)
+  defp define_aliases(_target, _opts, env), do: env
+
+  defp define_alias(nil, _as, env), do: env
+  defp define_alias(module, {:__aliases__, _, [as]}, env), do: put_in(env.aliases[as], module)
+  defp define_alias(module, _as, env), do: put_in(env.aliases[List.last(module)], module)
+
+  # `A.{B, C.D}` и `__MODULE__.{B}` — модули `A.B`, `A.C.D` и `<модуль>.B`.
+  defp multi_targets(base, children, env) do
+    base_parts =
+      case base do
+        {:__aliases__, _, parts} -> parts
+        {:__MODULE__, _, _} -> [base]
+        _other -> nil
+      end
+
+    if base_parts,
+      do: for({:__aliases__, _, parts} <- children, module = expand(base_parts ++ parts, env), do: module),
+      else: []
+  end
+
+  defp expand(parts, env) do
+    module = resolve(parts, env)
+    if is_list(module) and Enum.all?(module, &is_atom/1), do: module
+  end
+
+  defp resolve([{:__MODULE__, _, _} | rest], %{module: module}) when is_list(module), do: module ++ rest
+  defp resolve([:"Elixir" | rest], _env), do: rest
+  defp resolve([first | rest], env) when is_atom(first), do: Map.get(env.aliases, first, [first]) ++ rest
+  defp resolve(_parts, _env), do: nil
+
   # ===== исключение: маркер у `defmodule` =====
 
   # Маркер — строка комментария в блоке прямо над `defmodule`:
@@ -849,6 +708,11 @@ defmodule BoundaryLint do
   end
 
   # ===== общее =====
+
+  defp module_name(module), do: Enum.map_join(module, ".", &Atom.to_string/1)
+
+  defp others(0), do: ""
+  defp others(count), do: "; прочих модулей namespace с тем же нарушением: #{count}, правка одна"
 
   defp top_modules({kind, meta, [{:__aliases__, _, parts}, _body]}) when kind in [:defmodule, :defprotocol] do
     if Enum.all?(parts, &is_atom/1),
