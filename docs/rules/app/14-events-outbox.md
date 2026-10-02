@@ -92,6 +92,10 @@
 
 ## Подписчики
 
+- Место подписчика: топика своего приложения — реакция в реагирующем контексте, топика внешней
+  системы вместе с разбором её формата и DLQ — граница входа `MyAppIngest`
+  (`17-otp-concurrency.md`, «Место компонента»); `repo:` его деревьев — `10-architecture.md`,
+  «Boundary».
 - Исход обработки сообщения MUST быть явным: `:ok`, `{:skip, reason}`, `{:reject, error}` или
   `{:error, _}`.
 - Событие, на которое у подписчика нет правила, — `{:skip, :irrelevant_event}` **без** лога:
@@ -163,22 +167,22 @@ consumer group, со смещениями и арендой топика в БД
 {Core.PubSub.MqSubscriberReliable.Supervisor,
  enabled: true,
  component: "orders_dlq",
- name: MyApp.<BC>.Orders.DlqSubscribers,
+ name: MyAppIngest.<Source>.DlqSubscribers,
  dlq_writer:
    {Core.Mq.Dlq.Writer,
-    repo: MyApp.Infra.DAO,
+    repo: Keyword.fetch!(opts, :repo),
     subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
-    name: MyApp.<BC>.Orders.DlqRewriter},
+    name: MyAppIngest.<Source>.DlqRewriter},
  topics: [
    [
      reader:
        {Core.Mq.Dlq.Reader,
-        repo: MyApp.Infra.DAO,
+        repo: Keyword.fetch!(opts, :repo),
         topic: Core.Mq.Topic.new!("orders"),
         subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
-        name: MyApp.<BC>.Orders.DlqReader},
+        name: MyAppIngest.<Source>.DlqReader},
      subscriber: [
-       name: MyApp.<BC>.Orders.DlqSubscriber,
+       name: MyAppIngest.<Source>.DlqSubscriber,
        topic: "orders",
        poll_interval_ms: 5_000,
        from_message: …,

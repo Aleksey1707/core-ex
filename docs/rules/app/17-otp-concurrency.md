@@ -53,10 +53,10 @@ MUST NOT: тумблер, опции и наблюдение компонент�
 4. соединение с брокером — раньше подписчиков и очереди;
 5. планировщик фоновых задач — разделяемая инфраструктура: раньше компонентов, которые ставят
    задачи;
-6. очередь, дерево проекций, процессы агрегатов, затем компоненты подсистем и дети контекстов —
-   граница после тех, от кого она зависит: дети контекстов в порядке `MyAppApp.contexts/0`, а
-   внутри `children/0` контекста кеш read-модели с его инвалидатором — раньше прочих
-   компонентов контекста;
+6. очередь, дерево проекций, процессы агрегатов, затем компоненты подсистем, дети контекстов и
+   компоненты границы входа `MyAppIngest` — граница после тех, от кого она зависит: дети
+   контекстов в порядке `MyAppApp.contexts/0`, а внутри `children/0` контекста кеш read-модели с
+   его инвалидатором — раньше прочих компонентов контекста;
 7. HTTP-эндпоинт — последним: он поднимается, когда зависимости готовы.
 
 Кеш контекста поднимается после планировщика: задача, взятая в первые мгновения старта, может не
@@ -98,7 +98,7 @@ def start(_type, _args) do
       Enum.map(processes(), &{&1, process_opts(&1)}) ++
       [MyApp.<Subsystem>.Supervisor] ++
       Enum.flat_map(MyAppApp.contexts(), & &1.children()) ++
-      [MyAppWeb.Endpoint]
+      [MyAppIngest.<Source>.Supervisor, MyAppWeb.Endpoint]
 
   Supervisor.start_link(children, strategy: :one_for_one, name: MyAppApp.Supervisor)
 end
@@ -117,7 +117,7 @@ DLQ-writer (`14-events-outbox.md`, «Подписчики»), затем на к
 
 ```elixir
 # плохо — свой супервизор: порядок детей и связки опций в каждом компоненте свои
-children = [dlq_writer, reader, subscriber, {MyApp.Domain.<BC>.System.Subscribe, subscribers: [subscriber]}]
+children = [dlq_writer, reader, subscriber, {<Component>.Subscribe, subscribers: [subscriber]}]
 Supervisor.init(children, strategy: :rest_for_one)
 
 # хорошо — дерево библиотеки внутри корня компонента: тумблер у корня, дереву — enabled: true
@@ -237,18 +237,40 @@ end
 ### Место компонента
 
 Компонент — единица раскладки: каталог компонента с корнем `supervisor.ex` и процессами компонента
-рядом. Каталог MUST лежать там, куда компонент относится по назначению:
+рядом. Каталог MUST лежать у исполнителя: реакция на доменное событие — рядом с usecases, которые
+она зовёт, а не у производителя события; вход внешней системы — в границе входа, как web;
+компонент без вызовов usecases — по назначению:
 
 | Компонент | Где лежит |
 |---|---|
-| ссылается на срез (зовёт его usecases, ставит его воркер): подписчик брокера, импорт | срез своего инициатора, `lib/my_app/domain/<bc>/<actor>/<component>/` |
-| на срезы не ссылается: клиент внешнего сервиса, реестр, техническое состояние без версии и событий (сессии, журнал прогонов) | подсистема `MyApp.<Subsystem>` (`10-architecture.md`, «Состав контекста») |
+| реакция на доменное событие — подписчик топика своего приложения, зовёт usecases одного агрегата | реагирующий контекст, каталог агрегата, чей usecase зовёт: `lib/my_app/domain/<bc>/<aggregate>/<component>/` |
+| реакция, которая зовёт usecases нескольких агрегатов | реагирующий контекст, `lib/my_app/domain/<bc>/reactions/<component>/` |
 | кеш read-модели и его инвалидатор | каталог read-модели, `<read_model>/read_repo/supervisor.ex` (`16-caching.md`) |
+| вход внешней системы: подписчик её брокера, разбор её формата, DLQ отклонённого | граница входа `MyAppIngest`, `lib/my_app_ingest/<source>/` (`10-architecture.md`, «Boundary») |
+| usecases не зовёт: клиент внешнего сервиса, реестр, техническое состояние без версии и событий (сессии, журнал прогонов) | подсистема `MyApp.<Subsystem>` — своя граница (`10-architecture.md`, «Состав контекста») |
 | очередь outbox | корень, `MyAppApp.Outbox` (`10-architecture.md`, «Корень и сток») |
 
-Компонент в `Common` вне каталога read-модели — MUST NOT: зовущий usecases нарушил бы
-направление `Common` → срез (`10-architecture.md`, «Направления зависимостей»), а без доменной
-логики контексту он не принадлежит.
+- Компонент контекста MUST NOT звать изменяющие usecases другого контекста: его место — у того
+  контекста, реакцией или воркером (`10-architecture.md`, «Usecases»). События производителя
+  реакция видит через его `exports`, а производитель о ней не знает.
+- Разбор формата внешней системы и DLQ отклонённого MUST лежать в границе входа, а не в
+  контексте: контекст получает уже доменные значения вызовом своего экспортированного usecase.
+  Вход, который пишет несколько контекстов, зовёт usecases каждого.
+- Воркер фоновой задачи — не компонент: его место — «Фоновые задания».
+
+Почему у исполнителя, а не у инициатора, и почему вход — своя граница —
+`deps/core/docs/adr/0040-component-at-executor.md`.
+
+```text
+# плохо — реакция контекста Billing на событие заказа лежит у производителя и зовёт usecases Billing
+lib/my_app/domain/orders/order/invoicing/supervisor.ex
+# плохо — разбор топика внешней системы и его DLQ в контексте, чьи usecases он зовёт
+lib/my_app/domain/billing/invoice/<source>_feed/supervisor.ex
+
+# хорошо — реакция у реагирующего, рядом с usecases, которые зовёт; вход — своя граница
+lib/my_app/domain/billing/invoice/order_events/supervisor.ex
+lib/my_app_ingest/<source>/supervisor.ex
+```
 
 ## Объявления контекста
 
@@ -296,7 +318,7 @@ end
 # lib/my_app_app.ex — корень: контексты в порядке зависимостей
 defmodule MyAppApp do
   use Boundary,
-    deps: [MyApp.Domain.Billing, MyApp.Domain.Orders, MyApp.Infra, MyAppWeb]
+    deps: [MyApp.Domain.Billing, MyApp.Domain.Orders, MyApp.Infra, MyAppWeb, MyAppIngest]
 
   def contexts, do: [MyApp.Domain.Billing.Supervision, MyApp.Domain.Orders.Supervision]
 end
@@ -460,6 +482,7 @@ def watch_list do
     MyAppApp.Outbox.Supervisor.watch_list() ++
     MyApp.<Subsystem>.Supervisor.watch_list() ++
     Enum.flat_map(MyAppApp.contexts(), & &1.watch_list()) ++
+    MyAppIngest.<Source>.Supervisor.watch_list() ++
     Core.Es.Projection.Supervisor.watch_list(projection_opts()) ++
     Enum.flat_map(processes(), &(&1.watch_list(process_opts(&1))))
 end
@@ -487,9 +510,34 @@ end
 - Периодические и отложенные работы с данными — планировщик задач, а не самописный цикл с
   `Process.send_after/3`. Свой цикл («Периодические циклы») — только для локального состояния
   процесса (чистка кеша в памяти): ему не нужны ни персистентность задачи, ни её повтор.
-- Модуль воркера `Oban.Worker` — не компонент и не процесс: он лежит в срезе того usecase, который
-  ставит задачу, — это отложенная часть операции того же инициатора. Задача по расписанию лежит в
-  срезе `System`.
+- Модуль воркера `Oban.Worker` — не компонент и не процесс. Он MUST лежать у исполнителя — в
+  каталоге агрегата, чей usecase исполняет (`<Aggregate>.<Name>` в `<bc>/<aggregate>/<name>.ex`,
+  у операции над равноправными агрегатами — в каталоге операции), а не у того, кто ставит задачу
+  (`deps/core/docs/adr/0040-component-at-executor.md`).
+- Постановка — функция модуля воркера (`enqueue/N`): вызывающий зовёт её внутри своей
+  транзакции, и задача появится только при commit (`10-architecture.md`, «Что можно внутри
+  `Transact.run`»). Воркер, которого ставит другой контекст, исполнитель экспортирует
+  (`10-architecture.md`, «Boundary»); собирать задачу чужого воркера (`new/1`, `Oban.insert/2`)
+  MUST NOT.
+- Задача по расписанию лежит так же — в каталоге агрегата, чей usecase исполняет; `crontab`
+  планировщика называет модуль её воркера.
+
+```elixir
+# плохо — воркер контекста Billing лежит у постановщика, и Orders собирает чужую задачу
+defmodule MyApp.Domain.Orders.Order.Client.IssueInvoice do
+  use Oban.Worker, queue: :billing
+end
+
+# хорошо — воркер у исполнителя, постановка — его функцией в транзакции вызывающего
+defmodule MyApp.Domain.Billing.Invoice.Issue do
+  use Oban.Worker, queue: :billing, unique: [period: :infinity, keys: [:order_id]]
+
+  def enqueue(order_id), do: ...
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"order_id" => order_id}}), do: ...
+end
+```
 - Задача MUST быть идемпотентна по своему ключу (`14-events-outbox.md`) и собирать контекст
   сама (`11-domain.md`).
 - Расписание задаётся в `config/runtime.exs` и выключается тумблером.
