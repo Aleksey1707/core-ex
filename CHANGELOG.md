@@ -139,6 +139,47 @@
   - компилятор `boundary` не во всех окружениях → `compilers: [:boundary] ++ Mix.compilers()` в
     `project/0`.
 
+- **Проекцию ждёт usecase по `wait:`, web выбирает только статус**
+  (`docs/rules/22-projections.md`, «Read-after-write»; `docs/rules/20-agreements.md`, «Разделение
+  изменения и чтения (CQS)»; `docs/rules/app/10-architecture.md`, «Usecases», «Слои и зависимости»;
+  `docs/rules/app/15-web-api.md`, «Ожидание проекции»; `docs/rules/app/19-testing.md`, «Event
+  sourcing»; `docs/rules/19-testing.md`, «Ветка неготовой read-модели»; решение —
+  `docs/adr/0039-usecase-awaits-projection-by-wait.md`, заменяет ADR-0030 в
+  пунктах «usecase проекцию не ждёт» и «хелпер получает колбэк ожидания»). Ожидание проекции было
+  делом экшена: литеральный захват `&Projection.await(Agg, id, &1)` повторялся в каждом контроллере,
+  воркер и подписчик ждали своим кодом, а с границей Boundary на контекст проекция и ReadRepo в его
+  `exports` не входят — экшен ждать и читать read-модель больше не может. Теперь изменяющий usecase
+  event-sourced агрегата принимает `wait: :none | pos_integer()` и после commit, вне транзакции, сам
+  ждёт проекцию литеральным `Projection.await/3` с ID, суженным до `%Agg.ID{}`, — сборка сверяет
+  агрегат и ID, как прежде в экшене. Дождавшись, команда отдаёт представление, создание —
+  `{id, version}`; не дождавшись — `{id, version}` с тегом `:accepted`. Ответы API, схемы `Written` и
+  `Prefer`, таблица `Prefer` и `Preference-Applied` не меняются.
+
+  Как править приложение (было → стало):
+  - команда event-sourced агрегата `take(id, version, context) :: {:ok, Version.t()}` →
+    `take(id, version, context, opts \\ [])` с `wait: :none | pos_integer()`, по умолчанию `:none`,
+    `:: {:ok, {:projected, View.t()}} | {:ok, {:accepted, ID.t(), Version.t()}}`; после записи —
+    хелпер ожидания `awaited/2` в модуле usecases (`docs/rules/22-projections.md`,
+    «Read-after-write»), `:projected` — чтение представления ReadRepo;
+  - создание `{:ok, {ID.t(), Version.t()}}` → `{:ok, {:projected | :accepted, ID.t(), Version.t()}}`;
+  - вызывающие, которые read-модель после записи не читают (воркер, подписчик, mix-таска), —
+    `{:ok, version}` → `{:ok, {:accepted, _id, version}}`, `wait:` не передают; своё ожидание
+    проекции у них → `wait:` usecase;
+  - `MyAppWeb.Accepted.respond(conn, &Projection.await(Agg, id, &1), {id, version}, render)` →
+    `MyAppWeb.Accepted.respond(conn, result, render)`, где `result` — результат usecase, вызванного
+    с `wait: MyAppWeb.Accepted.wait(conn)`, а `render` — `(conn, view -> conn)` вместо перечитывания
+    read-модели; `written(conn, &Projection.await(Agg, id, &1), id, version)` →
+    `written(conn, result)`; новая `wait/1` переводит `Core.Web.Prefer.mode/2` в `wait:`
+    (`:respond_async` → `:none`, `{:wait, ms}` → `ms`);
+  - `defp` экшена с захватом `&Projection.await(Agg, id, &1)` и сужением ID → удаляется: ожидание и
+    сужение — в хелпере ожидания usecase;
+  - тест ветки 202 в `MyAppTest.ConnCase` через `Core.Es.Projection.Test.with_rebuilding/2` → тест
+    ветки `:accepted` usecase в `MyAppTest.DataCase, async: false`, один на модуль usecases с
+    ожиданием; тест хелпера — `wait/1` в трёх ветках `Prefer`, `respond/3` и `written/2` — 200 на
+    `:projected` и 202 на `:accepted`;
+  - тесты, которые сопоставляли `{:ok, version}` и `{:ok, {id, version}}` команд event-sourced
+    агрегата, → `{:ok, {:accepted, ^id, version}}` и `{:ok, {:accepted, id, version}}`.
+
 ### Новое
 
 - **Нормы совместимости действуют с первого релиза приложения** (`docs/rules/app/00-index.md`,

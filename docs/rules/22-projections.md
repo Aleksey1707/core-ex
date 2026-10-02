@@ -135,24 +135,34 @@ notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST"), port: 5432]
 
 ## Read-after-write
 
-Когда клиент сразу после команды читает read-модель, вызывающий после успеха usecase ждёт проекцию
-— `Projection.await(Agg, %Agg.ID{} = aggregate_id, timeout)` у модуля своей проекции. Цель —
-последнее событие потока агрегата на момент вызова; `Agg` — модуль, в котором лежит кодек событий
-`<Aggregate>.Event.Codec`, то есть сам агрегат. `await/3` генерирует `use Core.Es.Projection` —
-clause на каждый агрегат, чьи события есть в `events:`: агрегат не из `events:`, ID другого
-агрегата и невозможная clause по результату — предупреждение при сборке. Исходы, опрос и режим
-`:inline` тестового дерева — moduledoc `Core.Es.Projection`, «Ожидание»; место вызова — после
-commit, вне `Transact.run` (`20-agreements.md`, CQS); тест — `19-testing.md`, «Проекции».
-Реализацию `Core.Es.Projection.Await.run/5` (`@doc false`) звать MUST NOT: модуль проекции и тип
-агрегата в ней — параметры, и сборка не сверяет ни агрегат, ни ID.
+Когда вызывающий сразу после команды читает read-модель, изменяющий usecase после commit ждёт
+проекцию — `Projection.await(Agg, %Agg.ID{} = aggregate_id, timeout)` у модуля своей проекции.
+Цель — последнее событие потока агрегата на момент вызова; `Agg` — модуль, в котором лежит кодек
+событий `<Aggregate>.Event.Codec`, то есть сам агрегат. `await/3` генерирует
+`use Core.Es.Projection` — clause на каждый агрегат, чьи события есть в `events:`: агрегат не из
+`events:`, ID другого агрегата и невозможная clause по результату — предупреждение при сборке.
+Исходы, опрос и режим `:inline` тестового дерева — moduledoc `Core.Es.Projection`, «Ожидание»;
+место вызова — после commit, вне `Transact.run` (`20-agreements.md`, CQS); тест —
+`19-testing.md`, «Проекции». Реализацию `Core.Es.Projection.Await.run/5` (`@doc false`) звать
+MUST NOT: модуль проекции и тип агрегата в ней — параметры, и сборка не сверяет ни агрегат, ни ID.
 
-Ожидание — решение вызывающего, а не обязанность команды: usecase проекцию MUST NOT ждать. Граница,
-чей клиент читает read-модель сразу после записи, ждёт; HTTP-граница ждёт по умолчанию, и клиент
-отказывается заголовком `Prefer` — `deps/core/docs/rules/app/15-web-api.md`, «Ожидание проекции»;
-ADR-0030. Воркер, подписчик и mix-таска, которые read-модель после записи не читают, не ждут.
+Готовность ждать задаёт вызывающий, а ждёт usecase: проекция — внутреннее устройство контекста и
+в его `exports` не входит, так что web и другой контекст её не видят. Изменяющий usecase
+event-sourced агрегата принимает `wait: :none | pos_integer()` — не ждать или ждать не дольше
+стольких мс, по умолчанию `:none` — и после commit, вне транзакции, зовёт `await/3` литерально.
+Возвраты по `wait:` — `deps/core/docs/rules/app/10-architecture.md`, «Usecases»; HTTP-граница
+выводит `wait:` из `Prefer` клиента — `deps/core/docs/rules/app/15-web-api.md`, «Ожидание
+проекции»; почему ждёт usecase — ADR-0039. Воркер, подписчик и mix-таска, которые read-модель
+после записи не читают, `wait:` не передают.
+
+- ID на месте вызова MUST быть сужен до `%Agg.ID{}` — паттерном в голове функции с вызовом или в
+  `with`: ID из параметра без сужения сборка не сверяет, и ловится только агрегат не из `events:`.
+- Хелпер, который зовёт `projection.await(agg, id, timeout)` через модуль-переменную, MUST NOT:
+  сборка не проверяет ни агрегат, ни ID.
 
 Проверяется: предупреждение при сборке вызывающего — агрегат не из `events:`, ID другого агрегата,
-невозможная clause по результату `await/3` (`make consumer-check`).
+невозможная clause по результату `await/3`, в том числе в хелпере ожидания usecase
+(`make consumer-check`).
 
 Сломанный быстрый путь ожидания — `LISTEN` через пулер, `notifications: false` на одной из
 нескольких нод — ошибкой не виден: ожидание доходит шагами страховки (ADR-0013). Слушатель ноды,
@@ -169,8 +179,8 @@ histogram_quantile(0.5, sum by (le, projection)
 ```
 
 `:projection_timeout` и `:projection_rebuilding` — не отказ команды: запись уже закоммичена.
-Повтор команды по ним MUST NOT — команда исполнится второй раз; вызывающий отвечает успехом
-записи без свежей read-модели либо ошибкой ожидания.
+Повтор команды по ним MUST NOT — команда исполнится второй раз; usecase с `wait:` MUST отдавать по
+ним успех записи без представления — `{:accepted, id, version}`, а не ошибку.
 
 ```elixir
 # плохо — повтор команды по таймауту ожидания: запись уже закоммичена
@@ -180,17 +190,29 @@ with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, c
 # плохо — реализация ожидания мимо await/3: ID другого агрегата сборка не видит
 Core.Es.Projection.Await.run(projection, projection.__es_projection__(), "account", order_id, 5_000)
 
-# плохо — usecase ждёт проекцию сам: клиент, которому read-модель не нужна, платит ожиданием
-def open(id, params, context) do
-  with {:ok, version} <- write(id, params, context),
-       :ok <- AccountList.Projection.await(Account, id, 5_000),
-       do: {:ok, version}
+# плохо — ожидание без `wait:`: вызывающий, которому read-модель не нужна, платит ожиданием
+with {:ok, version} <- write(id, expected, context),
+     :ok <- Account.Projection.await(Account, id, 5_000),
+     do: {:ok, version}
+
+# плохо — ID параметром defp без сужения: ID другого агрегата сборка не видит
+defp awaited(id, timeout), do: Account.Projection.await(Account, id, timeout)
+
+# хорошо — после commit ждёт по `wait:`, ID сужен в голове хелпера, исход ожидания — не ошибка
+with {:ok, version} <- write(id, expected, context) do
+  case awaited(id, Keyword.get(opts, :wait, :none)) do
+    :projected -> with {:ok, view} <- @read_repo.get(id, :current, context), do: {:ok, {:projected, view}}
+    :accepted -> {:ok, {:accepted, id, version}}
+  end
 end
 
-# хорошо — usecase записал и закоммитил, вызывающий ждёт проекцию и читает read-модель
-with {:ok, _version} <- Accounts.Open.call(id, params, context),
-     :ok <- AccountList.Projection.await(Account, id, 5_000) do
-  AccountList.ReadRepo.get(id, :current, context)
+defp awaited(%Account.ID{}, :none), do: :accepted
+
+defp awaited(%Account.ID{} = id, timeout) when is_integer(timeout) do
+  case Account.Projection.await(Account, id, timeout) do
+    :ok -> :projected
+    {:error, %Error{code: code}} when code in ~w(projection_timeout projection_rebuilding)a -> :accepted
+  end
 end
 ```
 

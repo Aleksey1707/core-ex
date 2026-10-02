@@ -1,5 +1,11 @@
 # Создание отвечает `{id, version}` / `{id}` общими схемами корня
 
+Форма ожидания пересмотрена: ADR-0030 (`0030-prefer-controls-projection-await.md`) передал хелперу
+колбэк ожидания, ADR-0039 (`0039-usecase-awaits-projection-by-wait.md`) перенёс ожидание в usecase —
+он отдаёт `{:projected | :accepted, id, version}`, а ответ собирает `MyAppWeb.Accepted.written/2`.
+Ответ создания `{id, version}` одной схемой `Written` на 200 и 202 и `{id}` схемой `Created` — в
+силе. Ниже — решение в редакции 2026-09-29.
+
 Создание event-sourced агрегата ждёт проекцию, как любая команда, и отвечает `{id, version}` записи
 одной схемой `MyAppWeb.Schemas.Written` на 200 и на 202: статус несёт готовность представления,
 тело — одно. Создание state-stored агрегата отвечает `{id}` схемой `MyAppWeb.Schemas.Created`.

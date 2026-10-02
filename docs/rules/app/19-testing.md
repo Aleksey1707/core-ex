@@ -87,31 +87,34 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 `enabled: false, await: :inline` — `deps/core/docs/rules/19-testing.md`, «Event-sourced
 агрегат», «Совместимость событий» и «Проекции».
 
-Ветку ответа на неготовую read-модель (202 по `:projection_timeout` / `:projection_rebuilding`,
-`15-web-api.md`, «Ожидание проекции») приложение MUST проверять **одним** тестом на приложение —
-`Core.Es.Projection.Test.with_rebuilding/2` в `MyAppTest.ConnCase, async: false`. Путь
-`await` → хелпер ответа → 202 у всех контроллеров один, и остальные ресурсы покрывает тест
-самого хелпера как чистой функции. Механика и запрет доводить тест до `:projection_timeout` —
-`deps/core/docs/rules/19-testing.md`, «Ветка неготовой read-модели».
+Ветку `:accepted` usecase с ожиданием (`:projection_timeout` / `:projection_rebuilding` →
+`{:accepted, id, version}`, `10-architecture.md`, «Usecases») приложение MUST проверять тестом
+usecase через `Core.Es.Projection.Test.with_rebuilding/2` в `MyAppTest.DataCase, async: false` —
+**одним** на модуль usecases, который ждёт проекцию: ветка живёт в его хелпере ожидания, и у
+каждого модуля она своя. Ответ 202 на `:accepted` у всех контроллеров один, и его покрывает тест
+хелпера `MyAppWeb.Accepted` как чистой функции: `ConnCase` ради ветки не нужен. Механика и запрет
+доводить тест до `:projection_timeout` — `deps/core/docs/rules/19-testing.md`, «Ветка неготовой
+read-модели».
 
 Тест хелпера MUST проходить три ветки `Prefer` (`15-web-api.md`, «Ожидание проекции»): без
-заголовка колбэк ожидания получает предел хелпера, на `respond-async` он не вызван и ответ — 202,
-на `wait=N` — получает урезанный таймаут; `Preference-Applied` сверяется в каждой ветке. Разбор
-самого заголовка проверяют тесты `Core.Web.Prefer` в библиотеке.
+заголовка `wait/1` отдаёт предел хелпера, на `respond-async` — `:none`, на `wait=N` — урезанный
+таймаут; `respond/3` и `written/2` отвечают 200 на `:projected` и 202 на `:accepted`, и
+`Preference-Applied` сверяется в каждой ветке. Разбор самого заголовка проверяют тесты
+`Core.Web.Prefer` в библиотеке.
 
 Тесту, который read-модель не читает, прогон не нужен: версию для следующей команды он берёт
 из возврата usecase, а не из ReadRepo.
 
 ```elixir
 # плохо — прогон и чтение ради версии: её уже вернул usecase
-{:ok, {id, _version}} = <Aggregate>.<Actor>.Usecases.open(context)
+{:ok, {:accepted, id, _version}} = <Aggregate>.<Actor>.Usecases.open(context)
 :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.<ReadModel>.Projection)
 {:ok, view} = <Aggregate>.<Actor>.Usecases.get(id, :current, context)
-{:ok, _version} = <Aggregate>.<Actor>.Usecases.close(id, Version.new!(view.version), context)
+{:ok, _closed} = <Aggregate>.<Actor>.Usecases.close(id, Version.new!(view.version), context)
 
 # хорошо
-{:ok, {id, version}} = <Aggregate>.<Actor>.Usecases.open(context)
-{:ok, _version} = <Aggregate>.<Actor>.Usecases.close(id, version, context)
+{:ok, {:accepted, id, version}} = <Aggregate>.<Actor>.Usecases.open(context)
+{:ok, {:accepted, ^id, _version}} = <Aggregate>.<Actor>.Usecases.close(id, version, context)
 ```
 
 ## Ратчеты

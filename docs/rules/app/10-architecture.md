@@ -422,11 +422,14 @@ Read-модель по назначению держит свои модули �
   внутри `Transact.run`»), или реакция второго контекста на событие первого
   (`17-otp-concurrency.md`, «Место компонента»). Нужна атомарная запись двух контекстов — это одна
   модель, и контексты склеиваются (`deps/core/docs/adr/0038-one-context-per-transaction.md`).
-- Команда над несколькими event-sourced агрегатами возвращает версию того агрегата, чью проекцию
-  ждёт граница (`15-web-api.md`, «Ожидание проекции»), и называет его в `@doc`.
-- Ждать проекцию usecase MUST NOT — это решение вызывающего:
-  `deps/core/docs/rules/22-projections.md`, «Read-after-write»; у HTTP — `15-web-api.md`,
-  «Ожидание проекции».
+- Команда event-sourced агрегата MUST принимать `wait: :none | pos_integer()` последней опцией
+  (`opts \\ []`, по умолчанию `:none`) и по ней после commit, вне транзакции, ждать проекцию
+  литеральным `Projection.await/3` — `deps/core/docs/rules/22-projections.md`, «Read-after-write»:
+  `Prefer` понимает каждая команда event-sourced агрегата (`15-web-api.md`, «Ожидание
+  проекции»), а воркер и подписчик ждут тем же вызовом. Команда агрегата без read-модели `wait:`
+  не принимает: ждать нечего, и её исход — всегда `:accepted`.
+- Команда над несколькими event-sourced агрегатами ждёт проекцию того агрегата, чьё представление
+  отдаёт, и называет его в `@doc`; в `{:accepted, id, version}` — его ID и версия.
 
 ```elixir
 # плохо — оформление меняет корзину и заказ, а лежит в модуле корзины
@@ -474,13 +477,23 @@ Authz и резолв актора MUST идти до открытия тран�
 |---|---|
 | Команда | `:ok \| {:error, Error.t()}` |
 | Команда-создание | MAY `{:ok, <Aggregate>.ID.t()}` — идентификатор генерирует домен |
-| Команда event-sourced агрегата | `{:ok, Version.t()}`; создание — `{:ok, {<Aggregate>.ID.t(), Version.t()}}` |
+| Команда event-sourced агрегата | `{:ok, {:projected, <ReadModel>.View.t()}} \| {:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
+| Создание event-sourced агрегата | `{:ok, {:projected \| :accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Запрос | `{:ok, <ReadModel>.View.t()} \| {:error, Error.t()}` — read-путь отдаёт представление |
 
 Идентификатор созданного агрегата и версия после записи — результат собственного выполнения
 команды, а не отступление от CQS (`deps/core/docs/rules/20-agreements.md`, «Разделение изменения и
-чтения (CQS)»): без id вызывающий искал бы созданный агрегат отдельным запросом, по версии граница
-ждёт проекцию (`15-web-api.md`). Прочие данные агрегата команда не возвращает.
+чтения (CQS)»): без id вызывающий искал бы созданный агрегат отдельным запросом, а версию клиент
+шлёт следующим `If-Match`. Прочие данные агрегата команда не возвращает.
+
+Исход ожидания у команды event-sourced агрегата — тег результата:
+
+- `:projected` — проекция дождалась: команда отдаёт представление, прочитанное после commit, —
+  это исключение из CQS (`deps/core/docs/rules/20-agreements.md`, там же); создание отдаёт
+  `{id, version}` и в этом исходе — почему не представление, ADR-0027;
+- `:accepted` — `wait: :none`, `:projection_timeout` или `:projection_rebuilding`: запись применена,
+  read-модель её ещё не видит, и это успех, а не ошибка; повтор команды по нему MUST NOT
+  (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
 
 Резолв репозитория — `deps/core/docs/rules/13-repos.md`, «DI».
 
@@ -498,8 +511,8 @@ usecase (`13-repos.md`, «Event-sourced агрегат»):
   версии, сверка ожидаемой версии (`source: :expected`) — нет; повтор даёт `Core.Es.Transact` или
   процесс агрегата (`13-repos.md`, «Повтор после отказа записи»);
 - команду собирает usecase (`<Aggregate>.Cmd.<Name>` с `by` и `at` — `11-domain.md`);
-- ответ клиенту, которому нужна свежая read-модель, ждёт проекцию — **после** commit, вне
-  транзакции (`15-web-api.md`).
+- проекцию по `wait:` ждёт сам usecase — **после** commit, вне транзакции
+  (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
 
 ```elixir
 def command(%Agg.ID{} = id, %Version{} = version, %Context{} = context) do
@@ -513,6 +526,18 @@ def command(%Agg.ID{} = id, %Version{} = version, %Context{} = context) do
       end
     end)
   end
+end
+```
+
+```elixir
+# event-sourced создание — {id, version} в обоих исходах ожидания; запись — `get_decision` и
+# `append` под `Es.Transact.run` в `write_open/3`, хелпер `awaited/2` —
+# `deps/core/docs/rules/22-projections.md`, «Read-after-write»
+def open(%Agg.Name{} = name, %Context{} = context, opts \\ []) do
+  with :ok <- check_user(~w(create)a, context),
+       {:ok, by} <- CurrentUser.get(context),
+       {:ok, {id, version}} <- write_open(name, by, context),
+       do: {:ok, {awaited(id, Keyword.get(opts, :wait, :none)), id, version}}
 end
 ```
 
@@ -558,7 +583,8 @@ flowchart TB
 ```
 
 - Web вызывает usecases: мутации domain и вызовы repo / DAO из web — MUST NOT; разбор параметров
-  в Prim и ожидание проекции — MAY (`15-web-api.md`).
+  в Prim и режима ожидания `wait:` из `Prefer` — MAY (`15-web-api.md`). Проекцию web не ждёт: её
+  нет в `exports` контекста, и ждёт usecase.
 - Воркеры, подписчики и mix-таски — такие же вызывающие, как web: оркестрация прогона, но не
   доменные мутации.
 - Usecases оркестрируют domain и репозитории; authz живёт здесь.

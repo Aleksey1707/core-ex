@@ -294,7 +294,7 @@ sandbox-транзакции, и пачка соседнего теста пол
 
 ```elixir
 # плохо — чтение ReadRepo без прогона проекции: таблица пуста
-{:ok, {id, _version}} = Account.Client.Usecases.open(params, context)
+{:ok, {:accepted, id, _version}} = Account.Client.Usecases.open(params, context)
 {:ok, view} = Account.ReadRepo.get(id, :current, context)
 
 # плохо — прогон в async: true: пачку проекции держит sandbox-транзакция соседнего теста
@@ -305,7 +305,7 @@ assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Account.Pr
 # хорошо — test/my_app/domain/<bc>/account/client/usecases_test.exs
 use MyAppTest.DataCase, async: false
 
-{:ok, {id, _version}} = Account.Client.Usecases.open(params, context)
+{:ok, {:accepted, id, _version}} = Account.Client.Usecases.open(params, context)
 assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Account.Projection)
 assert {:ok, %Account.View{status: :open}} = Account.ReadRepo.get(id, :current, context)
 ```
@@ -345,13 +345,14 @@ assert %{name: MyApp.Domain.<BC>.Account.Projection} in MyAppApp.Application.wat
 
 ### Ветка неготовой read-модели
 
-Ответ на `:projection_rebuilding` / `:projection_timeout` (у HTTP-API — 202,
-`deps/core/docs/rules/app/15-web-api.md`) тест MUST проверять через
-`Core.Es.Projection.Test.with_rebuilding/2`. На время блока хелпер переводит отметку дерева
-на `await: :poll` и снимает строку чекпоинта, поэтому `await/3` внутри
-отдаёт `:projection_rebuilding` сразу, не читая таймаут вызывающего; в `after` он возвращает и
-отметку, и строку — со своей позицией, так что следующий `run_until_idle/2` досчитывает события,
-а не зовёт `clear/0` и не проигрывает историю заново.
+Ветку `:accepted` usecase с `wait:` — исход `:projection_rebuilding` / `:projection_timeout`
+(`22-projections.md`, «Read-after-write»; у HTTP-API — 202,
+`deps/core/docs/rules/app/15-web-api.md`) — тест MUST проверять через
+`Core.Es.Projection.Test.with_rebuilding/2`. На время блока хелпер переводит отметку дерева на
+`await: :poll` и снимает строку чекпоинта, поэтому `await/3` внутри отдаёт
+`:projection_rebuilding` сразу, не читая таймаут вызывающего; в `after` он возвращает и отметку, и
+строку — со своей позицией, так что следующий `run_until_idle/2` досчитывает события, а не зовёт
+`clear/0` и не проигрывает историю заново.
 
 - Тест MUST быть `async: false` и идти в sandbox-транзакции: отметка глобальна для ноды, а
   снятие строки откатывает sandbox. Case-модуль задаёт ярус потребителя.
@@ -360,25 +361,25 @@ assert %{name: MyApp.Domain.<BC>.Account.Projection} in MyAppApp.Application.wat
 - Отметка общая для ноды: на `await: :poll` внутри блока переходят **все** проекции дерева.
   Ждёт блок несколько проекций — MUST называть все, иначе неназванная уйдёт в опрос до своего
   таймаута.
-- Доводить тест до `:projection_timeout` MUST NOT: ветка ответа та же, а цена — полный таймаут
-  вызывающего и таймаут приложения, настраиваемый только ради теста. Сам таймаут проверяют
+- Доводить тест до `:projection_timeout` MUST NOT: ветка та же, а цена — полный таймаут
+  ожидания реальным временем и `wait:`, подобранный только ради теста. Сам таймаут проверяют
   тесты ожидания в библиотеке.
-- Ветка одна на приложение, и тест её MUST держать один —
-  `deps/core/docs/rules/app/19-testing.md`, «Event sourcing».
+- Сколько таких тестов держит приложение — `deps/core/docs/rules/app/19-testing.md`, «Event
+  sourcing».
 
 ```elixir
-# плохо — свой `:poll` и короткий таймаут из env: тест платит реальным временем
-Application.put_env(:my_app, MyAppWeb.Accepted, await_timeout_ms: 50)
+# плохо — свой `:poll` и короткий `wait:`: тест платит реальным временем
 opts = Keyword.put(MyAppApp.Application.projection_opts(), :await, :poll)
 :ignore = Core.Es.Projection.Supervisor.start_link(opts)
+{:ok, {:accepted, ^id, _version}} = Account.Client.Usecases.freeze(id, version, context, wait: 50)
 
 # хорошо — состояние подставлено на время блока, исход мгновенный
-conn =
+result =
   Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Account.Projection, fn ->
-    patch(authed(ctx), "#{@path}/#{id}", body)
+    Account.Client.Usecases.freeze(id, version, context, wait: 5_000)
   end)
 
-assert %{"data" => %{"version" => 2}} = json_response(conn, 202)
+assert {:ok, {:accepted, ^id, %Version{}}} = result
 ```
 
 ## Enum: описания и внешние коды

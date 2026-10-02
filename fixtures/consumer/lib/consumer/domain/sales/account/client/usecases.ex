@@ -1,8 +1,12 @@
 defmodule Consumer.Domain.Sales.Account.Client.Usecases do
-  @moduledoc "Типовые вызовы генерируемых функций счёта, его репозитория и фасада Codec: предупреждений быть не должно."
+  @moduledoc """
+  Типовые вызовы генерируемых функций счёта, его репозитория и фасада Codec, ожидание проекции в usecase
+  с `wait:`: предупреждений быть не должно.
+  """
 
   alias Consumer.Codec.Internal, as: InCodec
   alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Activity
   alias Consumer.Domain.Sales.Order
   alias Consumer.Infra.DAO
   alias Core.Context
@@ -15,15 +19,6 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
   require Core.Config
 
   @repo Core.Config.repo!(Account.Repo)
-
-  def open(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context) do
-    Transact.run(DAO, fn ->
-      with {:ok, account} <- @repo.get(id, :current, context),
-           {:ok, {events, _account}} <- Account.execute(account, command) do
-        @repo.append(events, context)
-      end
-    end)
-  end
 
   def freeze(%Account.ID{} = id, %Version{} = version, %Account.Cmd.Freeze{} = command, %Context{} = context) do
     Transact.run(DAO, fn ->
@@ -110,4 +105,28 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
 
   def fold_history(%Account{} = state, events) when is_list(events),
     do: Account.fold(state, events).status
+
+  def open(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context, opts \\ []) do
+    written =
+      Transact.run(DAO, fn ->
+        with {:ok, account} <- @repo.get(id, :current, context),
+             {:ok, {events, opened}} <- Account.execute(account, command),
+             :ok <- @repo.append(events, context),
+             do: {:ok, opened.version}
+      end)
+
+    with {:ok, version} <- written,
+         do: {:ok, {awaited(id, Keyword.get(opts, :wait, :none)), id, version}}
+  end
+
+  # ---
+
+  defp awaited(%Account.ID{}, :none), do: :accepted
+
+  defp awaited(%Account.ID{} = id, timeout) when is_integer(timeout) do
+    case Activity.Projection.await(Account, id, timeout) do
+      :ok -> :projected
+      {:error, %Error{code: code}} when code in ~w(projection_timeout projection_rebuilding)a -> :accepted
+    end
+  end
 end
