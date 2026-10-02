@@ -363,6 +363,29 @@
   Вызовы `Agg.ID.new()` такого Prim после правки — предупреждение компилятора: id берётся из
   источника через `Agg.ID.new/1`.
 
+- **`use Core.Es.Outbox` генерирует `topic/0`.** Модуль `<Aggregate>.Outbox` отдаёт топик из опции
+  `topic:` строкой (`docs/rules/14-events-outbox.md`, «Aggregate → Outbox.Record»). Подписчик на
+  топик своего приложения берёт его оттуда, а модуль outbox входит в `exports`
+  контекста-производителя (`docs/rules/app/14-events-outbox.md`, «Топики и запись в очередь»):
+  литерал топика в контексте подписчика не узнаёт о переименовании в `use Es.Outbox`, и подписчик
+  молча остаётся читать старый топик. Строка — та же форма, что у `topic:` подписчика; читателю
+  брокера топик — `Core.Mq.Topic.new!/1` над ней.
+
+  Как править подписчик на топик своего приложения:
+
+  ```elixir
+  # было
+  reader: {Core.Mq.Stream.Reader, topic: Core.Mq.Topic.new!("orders"), …},
+  subscriber: [topic: "orders", …]
+
+  # стало
+  reader: {Core.Mq.Stream.Reader, topic: Core.Mq.Topic.new!(Order.Outbox.topic()), …},
+  subscriber: [topic: Order.Outbox.topic(), …]
+  ```
+
+  и `Order.Outbox` — в `exports` оглавления контекста-производителя `MyApp.Domain.Orders`. Своя
+  функция `topic/0` в модуле outbox сталкивается с генерируемой: её нужно убрать.
+
 ## 0.10.0
 
 ### Ломающие изменения контракта

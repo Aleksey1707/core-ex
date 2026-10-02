@@ -65,6 +65,31 @@
   «Aggregate → Outbox.Record».
 - Накопленные в агрегате события сбрасываются в хранилище и очередь **в той же транзакции**,
   что и состояние; публикация в брокер идёт после commit, из поллера (`13-repos.md`).
+- Подписчик на топик своего приложения MUST брать его у производителя —
+  `<Aggregate>.Outbox.topic/0`, литерал топика у подписчика MUST NOT: топик — часть контракта
+  событий производителя, и переименованный в `use Es.Outbox` топик оставил бы подписчика читать
+  старый. Поэтому модуль outbox входит в `exports` контекста-производителя рядом с семейством
+  событий (`10-architecture.md`, «Boundary»).
+
+```elixir
+# плохо — литерал топика производителя: подписчик не узнает о его переименовании
+topics: [
+  [
+    reader: {Core.Mq.Stream.Reader, topic: Core.Mq.Topic.new!("orders"), …},
+    subscriber: [topic: "orders", …]
+  ]
+]
+
+# хорошо — топик из модуля outbox производителя, экспорт его контекста
+alias MyApp.Domain.Orders.Order
+
+topics: [
+  [
+    reader: {Core.Mq.Stream.Reader, topic: Core.Mq.Topic.new!(Order.Outbox.topic()), …},
+    subscriber: [topic: Order.Outbox.topic(), …]
+  ]
+]
+```
 
 ## Единственность поллера
 

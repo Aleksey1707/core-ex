@@ -77,6 +77,8 @@ API:
 
 - `from_event/1` → `{:ok, Record.t()} | {:error, Error.t()}`
 - `from_events/1` → `{:ok, [Record.t()]} | {:error, Error.t()}`
+- `topic/0` → `String.t()` — топик из `topic:`; его берёт подписчик
+  (`deps/core/docs/rules/app/14-events-outbox.md`, «Топики и запись в очередь»)
 
 Поля Record: topic / key (= aggregate id) / name (= event name) / payload (JSON-объект) / headers
 (MQ-заголовки | `nil`) / lifecycle-поля (`status`, `attempts`, `locked_until`, `lease_id`, …).

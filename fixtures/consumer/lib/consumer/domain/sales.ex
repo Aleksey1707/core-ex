@@ -36,6 +36,8 @@ defmodule Consumer.Domain.Sales do
       {Order.Event, []},
       {Parcel.Event, []},
       {Ping.Event, []},
+      Account.Outbox,
+      Order.Outbox,
       Account.Card.Codec
     ]
 end

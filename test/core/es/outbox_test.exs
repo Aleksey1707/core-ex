@@ -40,6 +40,10 @@ defmodule Core.Es.OutboxTest do
     assert function_exported?(impl, :from_events, 1)
   end
 
+  test "topic/0 отдаёт топик из опции topic: строкой" do
+    assert Fixture.topic() == "fakes"
+  end
+
   test "требует обязательные опции" do
     assert_raise CompileError, ~r/нет обязательных опций: \[:event\]/, fn ->
       Code.eval_quoted(

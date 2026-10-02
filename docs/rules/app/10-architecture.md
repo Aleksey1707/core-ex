@@ -195,6 +195,7 @@ defmodule MyApp.Domain.Orders do
       Order.View,
       Order.ID,
       {Order.Event, []},
+      Order.Outbox,
       Cart.Client.Usecases,
       Cart.ID,
       Supervision
@@ -379,7 +380,8 @@ end
 - `exports` контекста — модули usecases (`<Aggregate>.<Actor>.Usecases`, `<Aggregate>.Usecases`,
   `<ReadModel>.<Actor>.Usecases`, `<Operation>.<Actor>.Usecases`), View, типы ID, значения и
   аксессор текущего пользователя, которые видят другие границы (`11-domain.md`, «Prim и Enum»,
-  «Context»), каталог ошибок контекста (`12-errors.md`), модули событий и их семейства, плагины
+  «Context»), каталог ошибок контекста (`12-errors.md`), модули событий и их семейства, модули
+  outbox с топиком производителя (`14-events-outbox.md`, «Топики и запись в очередь»), плагины
   кодека, модуль объявлений `Supervision` (`17-otp-concurrency.md`, «Объявления контекста»),
   модули воркеров, которых ставят другие контексты (`17-otp-concurrency.md`, «Фоновые задания»);
   агрегат, репозиторий, схемы, проекция и ReadRepo в него не входят. Семейство событий MAY
