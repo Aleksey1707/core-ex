@@ -5,8 +5,8 @@ defmodule Core.Es.PromEx do
 
       {Core.Es.PromEx,
        poll_rate: 5_000,
-       projections: {MyApp.Projections, :opts, []},
-       processes: {MyApp.Processes, :list, []}}
+       projections: {MyAppApp.Application, :projection_opts, []},
+       processes: {MyAppApp.Application, :processes, []}}
 
   Event-метрики строятся всегда — по telemetry `[:es, :aggregate, :load]`,
   `[:es, :aggregate, :fold]`, `[:es, :snapshot, :write]`, `[:es, :key_reservation]`,

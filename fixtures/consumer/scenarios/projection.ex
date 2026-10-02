@@ -1,4 +1,4 @@
-defmodule Consumer.S.BadProjection do
+defmodule ConsumerTest.BadProjection do
   @moduledoc "Проекция без clause `project/1` для `Closed` и с опечаткой в суженной нагрузке."
 
   alias Consumer.Domain.Sales.Account
@@ -24,7 +24,7 @@ defmodule Consumer.S.BadProjection do
   defp name(_name), do: :ok
 end
 
-defmodule Consumer.S.BadProjectionPayload do
+defmodule ConsumerTest.BadProjectionPayload do
   @moduledoc "Проекция с опечаткой в поле нагрузки, не суженной паттерном."
 
   alias Consumer.Domain.Sales.Account
@@ -44,19 +44,19 @@ defmodule Consumer.S.BadProjectionPayload do
   defp name(_name), do: :ok
 end
 
-defmodule Consumer.S.Projection do
+defmodule ConsumerTest.Projection do
   @moduledoc "Прямые вызовы `project/1`."
 
   alias Consumer.Domain.Sales.Account
-  alias Consumer.S.BadProjection
-  alias Consumer.S.BadProjectionPayload
+  alias ConsumerTest.BadProjection
+  alias ConsumerTest.BadProjectionPayload
   alias Consumer.Domain.Sales.Values.UserID
   alias Core.Es
   alias Core.Version
 
   # G1d — прямой `project/1` с событием без clause
   def g1_direct_missing_clause(%Account.Event.Closed{} = event),
-    # expect: incompatible types given to Consumer.S.BadProjection.project/1
+    # expect: incompatible types given to ConsumerTest.BadProjection.project/1
     do: BadProjection.project(event)
 
   # G3c — прямой `project/1` с событием из конструктора при опечатке G3a
@@ -67,7 +67,7 @@ defmodule Consumer.S.Projection do
         %Es.Event.At{} = at
       ) do
     event = Account.Event.Opened.new(payload, id, Version.new(), by, at)
-    # expect: incompatible types given to Consumer.S.BadProjectionPayload.project/1
+    # expect: incompatible types given to ConsumerTest.BadProjectionPayload.project/1
     BadProjectionPayload.project(event)
   end
 end

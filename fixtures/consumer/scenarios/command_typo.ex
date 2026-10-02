@@ -1,4 +1,4 @@
-defmodule Consumer.S.CommandTypo do
+defmodule ConsumerTest.CommandTypo do
   @moduledoc "Опечатка в поле команды, суженной `%Cmd.X{}` в голове `decide/2`."
 
   alias Consumer.Domain.Sales.Account.Cmd

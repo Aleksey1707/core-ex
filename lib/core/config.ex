@@ -10,7 +10,7 @@ defmodule Core.Config do
   ```elixir
   config :core,
     otp_app: :my_app,
-    dao: MyApp.DAO,
+    dao: MyApp.Infra.DAO,
     codec: MyApp.Codec.Internal
   ```
 

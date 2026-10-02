@@ -1,4 +1,4 @@
-defmodule Consumer.S.Repo do
+defmodule ConsumerTest.Repo do
   @moduledoc "Репозиторий event-sourced агрегата через `Core.Config.repo!/1`, как в usecase."
 
   alias Consumer.Domain.Sales.Account

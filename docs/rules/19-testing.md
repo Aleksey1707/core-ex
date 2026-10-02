@@ -10,14 +10,14 @@
 | Case | Когда |
 |---|---|
 | `ExUnit.Case` | чистые модули: Prim, Enum, Codec, хелперы |
-| `MyApp.DataCase` (в самой библиотеке — `Core.DataCase`) | всё, что ходит в Postgres (Ecto Sandbox) |
+| `MyAppTest.DataCase` (в самой библиотеке — `Core.DataCase`) | всё, что ходит в Postgres (Ecto Sandbox) |
 | `Core.Es.EventCompatCase` | golden-фикстуры событий, один тест-модуль на агрегат (см. «Совместимость событий») |
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
 | `Core.Repo.ConstraintErrorsCase` | сверка `constraint_errors` с `changeset/2` и БД, один тест-модуль на приложение (см. «`constraint_errors`») |
 | `Core.Enum.DocsCase` | описание каждого значения `Core.Enum` в `@moduledoc`, один тест-модуль на приложение (см. «Enum: описания и внешние коды») |
 
 Тестовая обвязка библиотеки живёт в `test/support`: `Core.DataCase`, `Core.TestRepo` (роль
-`MyApp.DAO`), `Core.CodecFixture.*` (роль `MyApp.Codec.*`); фикстуры `Core.*Fixture`, дублёр
+`MyApp.Infra.DAO`), `Core.CodecFixture.*` (роль `MyApp.Codec.*`); фикстуры `Core.*Fixture`, дублёр
 `Core.MqFake` и контрактные наборы `Core.*Contract` — по каталогу. Процессы, которые в
 приложении поднимает его supervisor, стартуют в `test/test_helper.exs`.
 
@@ -57,7 +57,7 @@
 
 ```elixir
 # плохо — участники в sandbox теста: соединение и транзакция у них одни, второму нечего ждать
-use MyApp.DataCase, async: true
+use MyAppTest.DataCase, async: true
 
 defp participant(test), do: Task.async(fn -> Transact.run(DAO, fn -> serve(test) end) end)
 
@@ -231,7 +231,7 @@ assert [%Event.Opened{}, %Event.Frozen{}] = Core.Es.Store.Test.events!(Account.E
 - `find/2` по занятому значению — `%Agg.ID{}` того агрегата, по свободному — `nil`.
 
 Значение ключа в тесте с `async: true` MUST быть уникальным (`System.unique_integer/1`) — в том
-числе в общей обвязке (`MyAppWeb.ConnCase`, фикстуры пользователей): литерал делит одну строку
+числе в общей обвязке (`MyAppTest.ConnCase`, фикстуры пользователей): литерал делит одну строку
 резерва на все async-модули, и соседний тест стоит на ней до конца чужой sandbox-транзакции, то
 есть до конца чужого теста. Цена — сериализация async-модулей, а при разном порядке захвата двух
 ключей встречное ожидание — deadlock.
@@ -286,7 +286,7 @@ end
 Проекцию SHOULD проверять записью через репозиторий агрегата → прогоном
 `Core.Es.Projection.Test.run_until_idle/2` → чтением ReadRepo: так тест видит порядок событий
 разных агрегатов, пропуск необъявленных тегов и апкаст. Прогон MUST идти в
-`MyApp.DataCase, async: false`: блокировка пачки и строка чекпоинта держатся до конца
+`MyAppTest.DataCase, async: false`: блокировка пачки и строка чекпоинта держатся до конца
 sandbox-транзакции, и пачка соседнего теста получила бы `{:error, :locked}`.
 
 Прямой вызов `project/1` проекции MAY — в `async: true` на событиях из `Agg.execute/2` или
@@ -298,12 +298,12 @@ sandbox-транзакции, и пачка соседнего теста пол
 {:ok, view} = Account.ReadRepo.get(id, :current, context)
 
 # плохо — прогон в async: true: пачку проекции держит sandbox-транзакция соседнего теста
-use MyApp.DataCase, async: true
+use MyAppTest.DataCase, async: true
 
 assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Account.Projection)
 
 # хорошо — test/my_app/domain/<bc>/account/client/usecases_test.exs
-use MyApp.DataCase, async: false
+use MyAppTest.DataCase, async: false
 
 {:ok, {id, _version}} = Account.Client.Usecases.open(params, context)
 assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Account.Projection)
@@ -314,17 +314,17 @@ Usecase с `Projection.await/3` тест MUST гонять на тестовом
 `await: :inline` из `config/test.exs`: без него читателей нет, чекпоинт стоит и `await` не
 дождётся ничего, а с ним `await` прогоняет проекцию до `:idle` в процессе теста, как
 `run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой тест —
-тоже `MyApp.DataCase, async: false`. Ждать на живом дереве — подняв его своим `start_link`,
+тоже `MyAppTest.DataCase, async: false`. Ждать на живом дереве — подняв его своим `start_link`,
 правкой отметки или env приложения — потребитель MUST NOT: к ветке неготовой read-модели ведёт
 только хелпер библиотеки (ниже). Живое дерево (`await: :poll`) MAY только у тестов самого
 ожидания в библиотеке: они проверяют опрос и сигнал чекпоинта, которых у `:inline` нет.
 
 ```elixir
 # плохо — тестовое дерево без await: :inline: читателей нет, чекпоинт стоит, await не дождётся
-config :my_app, MyApp.Projections, enabled: false
+config :my_app, Core.Es.Projection.Supervisor, enabled: false
 
 # хорошо — config/test.exs
-config :my_app, MyApp.Projections, enabled: false, await: :inline
+config :my_app, Core.Es.Projection.Supervisor, enabled: false, await: :inline
 ```
 
 Запрет — на ожидание, а не на значение опции. Тест, который дерева не поднимает и `await/3` не
@@ -336,11 +336,11 @@ config :my_app, MyApp.Projections, enabled: false, await: :inline
 
 ```elixir
 # хорошо — ратчет watch_list/0: дерево не поднято, await/3 не зван, опции идут чистой функции
-saved = Application.get_env(:my_app, MyApp.Projections)
-on_exit(fn -> Application.put_env(:my_app, MyApp.Projections, saved) end)
-Application.put_env(:my_app, MyApp.Projections, enabled: true, await: :poll)
+saved = Application.get_env(:my_app, Core.Es.Projection.Supervisor)
+on_exit(fn -> Application.put_env(:my_app, Core.Es.Projection.Supervisor, saved) end)
+Application.put_env(:my_app, Core.Es.Projection.Supervisor, enabled: true, await: :poll)
 
-assert %{name: MyApp.Domain.<BC>.Account.Projection} in MyApp.PromEx.Workers.watch_list()
+assert %{name: MyApp.Domain.<BC>.Account.Projection} in MyAppApp.Application.watch_list()
 ```
 
 ### Ветка неготовой read-модели
@@ -369,7 +369,7 @@ assert %{name: MyApp.Domain.<BC>.Account.Projection} in MyApp.PromEx.Workers.wat
 ```elixir
 # плохо — свой `:poll` и короткий таймаут из env: тест платит реальным временем
 Application.put_env(:my_app, MyAppWeb.Accepted, await_timeout_ms: 50)
-opts = Keyword.put(MyApp.Projections.opts(), :await, :poll)
+opts = Keyword.put(MyAppApp.Application.projection_opts(), :await, :poll)
 :ignore = Core.Es.Projection.Supervisor.start_link(opts)
 
 # хорошо — состояние подставлено на время блока, исход мгновенный
@@ -431,7 +431,7 @@ end
 общий набор не переносится.
 
 ```elixir
-defmodule MyApp.ReadRepoContract do
+defmodule MyAppTest.ReadRepoContract do
   defmacro __using__(impl: impl), do: quote(do: @impl_mod unquote(impl))
   # ... общие тесты, работающие через @impl_mod
 end
@@ -493,7 +493,7 @@ end
 - `Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), pid)` для порождённых процессов, pid которых тест
   знает до их первого запроса.
 - Процесс, который стартует внутри вызова (процесс агрегата на id при `{Agg.Process, enabled:
-  true}`), тест MUST вести в shared mode sandbox — `async: false` на `MyApp.DataCase`
+  true}`), тест MUST вести в shared mode sandbox — `async: false` на `MyAppTest.DataCase`
   (`start_owner!(shared: not async)`), без `allow` и `$callers`: pid появляется посреди вызова,
   который уже ждёт его запроса, и поставить `allow` некому.
 - Циклы OTP проверять синхронным `run_once/1` (`Poller` / `Cleaner`), а не `sleep`
@@ -508,10 +508,10 @@ end
 
 ```elixir
 # плохо — процесс агрегата убран из тестового дерева: execute падает RuntimeError «не запущен»
-children = [MyApp.DAO | if(test?, do: [], else: [{Account.Process, enabled: true}])]
+children = [MyApp.Infra.DAO | if(test?, do: [], else: [{Account.Process, enabled: true}])]
 
 # хорошо — дерево одно, config/test.exs выключает процесс: команда идёт в процессе теста
-children = [MyApp.DAO, {Account.Process, Application.fetch_env!(:my_app, Account.Process)}]
+children = [MyApp.Infra.DAO, {Account.Process, Application.fetch_env!(:my_app, Account.Process)}]
 config :my_app, Account.Process, enabled: false
 ```
 
@@ -521,8 +521,8 @@ config :my_app, Account.Process, enabled: false
 {:ok, tree} = start_supervised({Account.Process, enabled: true})
 Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), tree)
 
-# хорошо — async: false: MyApp.DataCase ставит shared mode, соединение теста видят все процессы
-use MyApp.DataCase, async: false
+# хорошо — async: false: MyAppTest.DataCase ставит shared mode, соединение теста видят все процессы
+use MyAppTest.DataCase, async: false
 {:ok, _tree} = start_supervised({Account.Process, enabled: true})
 ```
 

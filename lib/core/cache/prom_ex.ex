@@ -4,7 +4,7 @@ defmodule Core.Cache.PromEx do
 
   Обязательная опция `sizes:` — MFA-провайдер размеров
   (`[%{cache: String.t(), size: non_neg_integer()}]`), например
-  `{MyApp.PromEx.Caches, :sizes, []}`.
+  `{MyAppApp.PromEx.Caches, :sizes, []}`.
 
   Событие обращения эмитят сами кеширующие фасады (`<ReadRepo>.Cached`)
   через `Core.Cache.Telemetry.emit_request/2`.

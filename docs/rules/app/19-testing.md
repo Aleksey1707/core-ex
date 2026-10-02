@@ -14,8 +14,8 @@
 | Case | Когда |
 |---|---|
 | `ExUnit.Case` | чистые модули: Prim, Enum, кодеки, агрегаты, презентеры, хелперы |
-| `MyApp.DataCase` | всё, что ходит в `MyApp.DAO`: репозитории, usecases, воркеры |
-| `MyAppWeb.ConnCase` | контроллеры и плаги |
+| `MyAppTest.DataCase` | всё, что ходит в `MyApp.Infra.DAO`: репозитории, usecases, воркеры |
+| `MyAppTest.ConnCase` | контроллеры и плаги |
 | `Core.Es.EventCompatCase` | golden-фикстуры событий агрегата |
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции |
 
@@ -24,20 +24,20 @@
 - Собственный case-модуль совместимости событий MUST NOT: библиотечный уже держит все инварианты
   (`deps/core/docs/rules/14-events-outbox.md`, «Совместимость событий»), а копия расходится с
   форматом конверта.
-- `MyApp.DataCase` MUST поднимать sandbox через
-  `Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.DAO, shared: not tags[:async])` и останавливать
-  владельца в `on_exit`: на shared mode при `async: false` держатся прогон проекции и процесс,
-  стартующий внутри вызова (`deps/core/docs/rules/19-testing.md`, «Процессы»).
+- `MyAppTest.DataCase` MUST поднимать sandbox через
+  `Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.Infra.DAO, shared: not tags[:async])` и
+  останавливать владельца в `on_exit`: на shared mode при `async: false` держатся прогон проекции
+  и процесс, стартующий внутри вызова (`deps/core/docs/rules/19-testing.md`, «Процессы»).
 
 ```elixir
 # плохо — checkout без shared mode: процесс, стартующий внутри вызова, соединения не получит
 setup tags do
-  :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.DAO)
+  :ok = Ecto.Adapters.SQL.Sandbox.checkout(MyApp.Infra.DAO)
 end
 
 # хорошо — test/support/data_case.ex
 setup tags do
-  pid = Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.DAO, shared: not tags[:async])
+  pid = Ecto.Adapters.SQL.Sandbox.start_owner!(MyApp.Infra.DAO, shared: not tags[:async])
   on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
   :ok
 end
@@ -48,20 +48,19 @@ end
 - Тест модуля SHOULD лежать по пути модуля: `MyApp.Domain.<BC>.<Aggregate>` —
   `test/my_app/domain/<bc>/<aggregate>_test.exs`. Тест находится по имени модуля так же, как
   сам модуль (`10-architecture.md`, «Раскладка»); линтер дерево `test/` не проверяет.
-- Тест, который держит норму на всём дереве, — архитектурный тест
-  (`test/my_app/architecture_test.exs`, `10-architecture.md`, «Boundary») и ратчеты («Ратчеты») —
-  MUST лежать в `test/my_app/`: модуля, по пути которого его положить, у него нет. Исключение —
-  ратчет, чей тест-модуль назван в namespace web (`MyAppWeb.IfMatchSpecTest`, сверка спецификаций
-  поверхностей): он лежит в `test/my_app_web/`, путь следует за именем модуля. Архитектурный тест
-  «web не ссылается на `*Repo` и `DAO`» — `MyApp.ArchitectureTest` в `test/my_app/`.
-- Case-модули (`MyApp.DataCase`, `MyAppWeb.ConnCase`) и прочая обвязка MUST лежать в
-  `test/support/` («Case-модули», «Обвязка `test/support`»): это не тесты, а код, который
-  компилируется в `:test`.
+- Тест, который держит норму на всём дереве, — ратчет («Ратчеты») — MUST лежать в `test/my_app/`:
+  модуля, по пути которого его положить, у него нет. Исключение — ратчет, чей тест-модуль назван в
+  namespace web (`MyAppWeb.IfMatchSpecTest`, сверка спецификаций поверхностей): он лежит в
+  `test/my_app_web/`, путь следует за именем модуля.
+- Архитектурного теста на направления зависимостей нет: «web не ссылается на `*Repo` и `DAO`» и
+  ссылки мимо `exports` контекста ловит сборка (`10-architecture.md`, «Boundary»).
+- Case-модули (`MyAppTest.DataCase`, `MyAppTest.ConnCase`) и прочая обвязка MUST лежать в
+  `test/support/` в границе `MyAppTest` («Case-модули», «Обвязка `test/support`»): это не тесты,
+  а код, который компилируется в `:test`.
 
 ```text
 test/my_app/domain/<bc>/<aggregate>_test.exs          # тест модуля — по его пути
-test/my_app/architecture_test.exs                     # норма на всём дереве
-test/my_app/enum_docs_test.exs                        # ратчет
+test/my_app/enum_docs_test.exs                        # ратчет — норма на всём дереве
 test/support/{data_case,conn_case}.ex                 # обвязка
 ```
 
@@ -90,7 +89,7 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 
 Ветку ответа на неготовую read-модель (202 по `:projection_timeout` / `:projection_rebuilding`,
 `15-web-api.md`, «Ожидание проекции») приложение MUST проверять **одним** тестом на приложение —
-`Core.Es.Projection.Test.with_rebuilding/2` в `MyAppWeb.ConnCase, async: false`. Путь
+`Core.Es.Projection.Test.with_rebuilding/2` в `MyAppTest.ConnCase, async: false`. Путь
 `await` → хелпер ответа → 202 у всех контроллеров один, и остальные ресурсы покрывает тест
 самого хелпера как чистой функции. Механика и запрет доводить тест до `:projection_timeout` —
 `deps/core/docs/rules/19-testing.md`, «Ветка неготовой read-модели».
@@ -126,7 +125,6 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 | wire-теги событий уникальны и квалифицированы типом агрегата | `14-events-outbox.md` |
 | `constraint_errors` сходятся с `changeset/2` и с ограничениями БД | `13-repos.md` |
 | новая миграция создаёт индексы `concurrently` | `18-migrations.md` |
-| web-слой не ссылается на `*Repo` и `DAO` | `10-architecture.md` |
 | `watch_list/0` согласован с конфигурацией | `17-otp-concurrency.md` |
 | состав `plugins/0` PromEx и провайдеры публикуют метрику | `21-observability.md`, «Метрики» |
 | корень очереди зовёт `Core.Outbox.check_singleton!/1` до подъёма своих детей | `14-events-outbox.md`, «Единственность поллера» |

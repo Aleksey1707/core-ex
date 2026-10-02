@@ -45,7 +45,7 @@ defmodule RulesLint do
   # Корень цепочки модулей в ярусе потребителя: либо библиотека, либо плейсхолдер приложения,
   # либо внешняя зависимость, либо конвенционный короткий алиас из примеров свода.
   @app_roots ~w(
-    Core MyApp MyAppWeb
+    Core MyApp MyAppApp MyAppTest MyAppWeb
     Ecto ExUnit Credo Logger Oban Cachex Phoenix PromEx OpenApiSpex
     Consistency Design Readability Refactor Warning
     Application Enum Keyword Map Mix Process String

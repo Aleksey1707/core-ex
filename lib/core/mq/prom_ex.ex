@@ -7,7 +7,7 @@ defmodule Core.Mq.PromEx do
   остаток текущего чанка, pending и наличие подписки у наблюдаемых reader'ов.
 
   Опция `readers:` — MFA-провайдер списка наблюдаемых stream reader'ов
-  (`{MyApp.PromEx.Mq, :readers, []}` → `[%{component: String.t(), name: atom()}]`),
+  (`{MyAppApp.PromEx.Mq, :readers, []}` → `[%{component: String.t(), name: atom()}]`),
   как `watch:` у `Core.Workers.PromEx`: список процессов принадлежит рантайму
   потребителя, а не моменту сборки метрик (`10-architecture.md`). Без опции
   polling-группа не строится.

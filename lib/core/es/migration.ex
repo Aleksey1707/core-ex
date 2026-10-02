@@ -5,7 +5,7 @@ defmodule Core.Es.Migration do
 
   Потребитель заводит миграцию со своим timestamp и делегирует DDL сюда:
 
-      defmodule MyApp.DAO.Migrations.CreateEsEvents do
+      defmodule MyApp.Infra.DAO.Migrations.CreateEsEvents do
         use Ecto.Migration
 
         defdelegate up, to: Core.Es.Migration
@@ -130,7 +130,7 @@ defmodule Core.Es.Migration do
   Удалить строку `es_checkpoints` проекции `name` — в миграции потребителя, которая удаляет таблицы
   убранной из кода проекции.
 
-      defmodule MyApp.DAO.Migrations.DropAccountList do
+      defmodule MyApp.Infra.DAO.Migrations.DropAccountList do
         use Ecto.Migration
 
         def up do

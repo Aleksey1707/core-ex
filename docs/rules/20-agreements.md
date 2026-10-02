@@ -85,8 +85,8 @@ Logger.debug(
 
 `IO.puts` вместо `Logger` — MUST NOT: вывод мимо `Logger` теряет уровень, metadata и
 `trace_id`. Вывод точки входа оператора (mix-таска) — не лог, а ответ оператору:
-`Mix.shell().info/1`. Задача релиза (`MyApp.Release.*`, `bin/my_app eval`) Mix не видит: её ответ
-оператору — `IO.puts`, исключение `Credo` — на её файлы.
+`Mix.shell().info/1`. Задача релиза (`MyAppApp.Release.*`, `bin/my_app eval`) Mix не видит: её
+ответ оператору — `IO.puts`, исключение `Credo` — на её файлы.
 
 Проверяется: `mix credo --strict` (`Credo.Check.Refactor.IoPuts`, исключён `test/`).
 

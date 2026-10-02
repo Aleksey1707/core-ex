@@ -74,12 +74,12 @@ AST `lib/**/*.ex` и проверяет три правила:
 ```elixir
 config :core,
   otp_app: :my_app,          # обязателен: app-env с DI-ключами потребителя; читается на компиляции call site
-  dao: MyApp.DAO,            # обязателен
+  dao: MyApp.Infra.DAO,      # обязателен
   codec: MyApp.Codec.Internal, # обязателен
   tz: "Etc/UTC",             # опционален, дефолт "Etc/UTC"
   telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]; префикс имён telemetry-событий
 
-config :core, Core.Outbox, poller_name: MyApp.Outbox.Poller
+config :core, Core.Outbox, poller_name: MyAppApp.Outbox.Poller
 config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 ```
 

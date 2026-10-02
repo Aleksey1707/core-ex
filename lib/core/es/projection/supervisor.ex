@@ -4,7 +4,7 @@ defmodule Core.Es.Projection.Supervisor do
   обрабатывают новые события.
 
       children = [
-        MyApp.DAO,
+        MyApp.Infra.DAO,
         {Core.Es.Projection.Supervisor,
          projections: [MyApp.Domain.<BC>.AccountList.Projection],
          enabled: true}

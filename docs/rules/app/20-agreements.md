@@ -30,11 +30,11 @@ dialyzer → test → credo → security → audit
 
 | Шаг | Что проверяет |
 |---|---|
-| `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` правила раскладки из таблицы маркеров `10-architecture.md`, «Отступление»: путь файла, оглавление и корень контекста, направления, проекции, корень web |
+| `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` правила раскладки из таблицы маркеров `10-architecture.md`, «Отступление»: путь файла, оглавление и корень контекста, проекции, корень web; направления держит `boundary` на шаге `compile` |
 | `rules-check` | `deps/core/scripts/rules_lint.exs --consumer` — форма локального свода, его карты и ссылки на оба яруса (`00-index.md`) |
 | `layout-check` | `deps/core/scripts/layout_lint.exs` — разделители внутри модуля (`deps/core/docs/rules/20-agreements.md`) |
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
-| `compile` | `--warnings-as-errors`, включая нарушения `boundary` |
+| `compile` | `--warnings-as-errors`: предупреждение `boundary` — отказ сборки (`10-architecture.md`, «Boundary») |
 | `deps-clean` | `mix deps.clean --unused` |
 | `dialyzer` | типы, `dialyzer.ignore.exs` |
 | `test` | инфраструктура + `mix test` |
@@ -50,6 +50,9 @@ dialyzer → test → credo → security → audit
 - Пропустить шаг MUST NOT: пайплайн, разный в двух приложениях, перестаёт быть нормой и
   становится привычкой конкретного репозитория.
 - `xref` в пайплайн не входит — это диагностика, а не гейт.
+- Компилятор `boundary` MUST стоять в `compilers:` проекта (`[:boundary] ++ Mix.compilers()`) во
+  всех окружениях: без него границы не проверяются вовсе, а `--warnings-as-errors` шага `compile`
+  превращает их предупреждения в отказ сборки.
 
 ## Граф зависимостей
 
@@ -87,7 +90,7 @@ dialyzer → test → credo → security → audit
 | `Warning.LeakyEnvironment` | утечка окружения в подпроцессы |
 | `Warning.MixEnv` | runtime-конфиг вместо `Mix.env/0` |
 | `Refactor.PassAsyncInTestCases` | явный `async:` в тестах (`deps/core/docs/rules/19-testing.md`) |
-| `Refactor.IoPuts` | `Logger` вместо `IO.puts` (`deps/core/docs/rules/20-agreements.md`, «Логирование (`Logger`)»); исключены `test/`, `lib/my_app/release.ex` и `lib/my_app/release/` (строки без `*` Credo сравнивает префиксом, фигурные скобки не раскрывает) — в релизе нет `Mix.shell()`, и ответ оператору задачи `MyApp.Release.*` печатает `IO.puts` |
+| `Refactor.IoPuts` | `Logger` вместо `IO.puts` (`deps/core/docs/rules/20-agreements.md`, «Логирование (`Logger`)»); исключены `test/` и пути задач релиза в корне — `lib/my_app_app/release.ex` и `lib/my_app_app/release/` (строки без `*` Credo сравнивает префиксом, фигурные скобки не раскрывает) — в релизе нет `Mix.shell()`, и ответ оператору задачи `MyAppApp.Release.*` печатает `IO.puts` |
 
 Отключены осознанно:
 
@@ -124,8 +127,8 @@ dialyzer → test → credo → security → audit
   `alias MyApp.Domain.<BC>.<Aggregate>` → `<Aggregate>.Repo.Pg.Schema`. Отдельный
   `alias …<Aggregate>.Repo` — MUST NOT: короткое имя `Repo` в том же файле почти всегда
   занято `Core.Repo` (`use Repo.Pg`), и такой алиас молча его перебивает (`13-repos.md`).
-- `MyApp.DAO` — единственный `Ecto.Repo`; обращаться к нему из web-слоя MUST NOT
-  (`10-architecture.md`).
+- `MyApp.Infra.DAO` — единственный `Ecto.Repo`; обращаться к нему из web-слоя MUST NOT — ссылку
+  ловит сборка (`10-architecture.md`, «Boundary»).
 - `Core.Config` требует `require Config` рядом с алиасом: `repo!/1` — макрос.
 - Типовые конфликты приложения и их разрешение MUST быть выписаны таблицей в локальном своде:
   одноимённые агрегаты двух контекстов, общие схемы против ресурсных,

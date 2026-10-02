@@ -1,4 +1,4 @@
-defmodule Consumer.S.BadCodec do
+defmodule ConsumerTest.BadCodec do
   @moduledoc "Кодек без clause `dump_payload/2` и `load_payload/3` для `Lost`; в фасад не входит."
 
   alias Consumer.Domain.Sales.Parcel.Event
@@ -20,7 +20,7 @@ defmodule Consumer.S.BadCodec do
     do: {:ok, %Event.Sent.Payload{note: field(wire, :note)}}
 end
 
-defmodule Consumer.S.BadCodecPayload do
+defmodule ConsumerTest.BadCodecPayload do
   @moduledoc "Кодек, чей `load_payload/3` отдаёт литерал нагрузки другого события; в фасад не входит."
 
   alias Consumer.Domain.Sales.Account
@@ -42,7 +42,7 @@ defmodule Consumer.S.BadCodecPayload do
     do: {:ok, %Account.Event.Renamed.Payload{name: field(wire, :note)}}
 end
 
-defmodule Consumer.S.BadCodecPayloadNew do
+defmodule ConsumerTest.BadCodecPayloadNew do
   @moduledoc "Кодек, чей `load_payload/3` собирает нагрузку другого события конструктором; в фасад не входит."
 
   alias Consumer.Domain.Sales.Account
@@ -67,7 +67,7 @@ defmodule Consumer.S.BadCodecPayloadNew do
   end
 end
 
-defmodule Consumer.S.BadCodecSharedPayload do
+defmodule ConsumerTest.BadCodecSharedPayload do
   @moduledoc "Кодек, чей `load_payload/3` отдаёт чужую нагрузку обоим событиям с общим модулем нагрузки; в фасад не входит."
 
   alias Consumer.Domain.Sales.Grants
@@ -91,22 +91,22 @@ defmodule Consumer.S.BadCodecSharedPayload do
   def load_payload(Event.Revoked, _wire, _codec), do: {:ok, %Order.Amount{value: 1}}
 end
 
-defmodule Consumer.S.Codec do
+defmodule ConsumerTest.Codec do
   @moduledoc "Кодек событий напрямую и фасад Codec."
 
   alias Consumer.Domain.Sales.Account
   alias Consumer.Codec.Internal, as: InCodec
   alias Consumer.Domain.Sales.Parcel
-  alias Consumer.S.BadCodec
+  alias ConsumerTest.BadCodec
 
   # H1d — прямой `dump_payload/2` события без clause
   def h1_direct_dump_payload(%Parcel.Event.Lost{} = event),
-    # expect: incompatible types given to Consumer.S.BadCodec.dump_payload/2
+    # expect: incompatible types given to ConsumerTest.BadCodec.dump_payload/2
     do: BadCodec.dump_payload(event, InCodec)
 
   # H1d — прямой `load_payload/3` события без clause
   def h1_direct_load_payload(wire),
-    # expect: incompatible types given to Consumer.S.BadCodec.load_payload/3
+    # expect: incompatible types given to ConsumerTest.BadCodec.load_payload/3
     do: BadCodec.load_payload(Parcel.Event.Lost, wire, InCodec)
 
   # H3a — опечатка в поле события после `load/2` по семейству

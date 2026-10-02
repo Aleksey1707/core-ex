@@ -8,9 +8,9 @@ defmodule Core.Es.Aggregate.Process do
           repo: MyApp.Domain.<BC>.Account.Repo
       end
 
-      # MyApp.Application — опции из одного модуля приложения (`MyApp.Processes.opts/1`)
+      # MyAppApp.Application — опции из одной функции корня (`process_opts/1`)
       process = MyApp.Domain.<BC>.Account.Process
-      children = [MyApp.DAO, {process, MyApp.Processes.opts(process)}]
+      children = [MyApp.Infra.DAO, {process, process_opts(process)}]
 
       # usecase
       Account.Process.execute(id, :current, command, context, fn events ->

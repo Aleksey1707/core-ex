@@ -1,4 +1,4 @@
-defmodule Consumer.S.EventNew do
+defmodule ConsumerTest.EventNew do
   @moduledoc "Конструктор события: нагрузка, Prim агрегата и автора, момент, версия."
 
   alias Consumer.Domain.Sales.Account

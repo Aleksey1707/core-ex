@@ -3,7 +3,7 @@
 - **Область.** `lib/my_app/domain/<bc>/<aggregate>/{repo,event,cmd}*`,
   `<aggregate>/<name>_key.ex`, каталоги read-моделей
   `<bc>/<read_model>/{view,read_repo,projection}*`, подкаталоги актора
-  `<aggregate>/<actor>/{repo,read_repo,view}*`, `lib/my_app/dao.ex`, DI-ключи репозиториев в
+  `<aggregate>/<actor>/{repo,read_repo,view}*`, `lib/my_app/infra/dao.ex`, DI-ключи репозиториев в
   `config/**`.
 - **Читать перед.** Новым репозиторием, Ecto-схемой, read-моделью, View, проекцией, Specs, модулем
   ключа, событием или командой; правкой `default_filters`, `constraint_errors`,
@@ -300,8 +300,9 @@ Es.Transact.run(fn -> ... end)
 команду одного агрегата вместо тела usecase. Колбэк, `enabled: false` и запрет вызова внутри
 `Transact.run` — `deps/core/docs/rules/13-repos.md`, «Процесс агрегата».
 
-- Элемент `{<Aggregate>.Process, MyApp.Processes.opts(<Aggregate>.Process)}` ставит дерево
-  приложения; список и опции собирает `MyApp.Processes` (`17-otp-concurrency.md`).
+- Элемент `{<Aggregate>.Process, process_opts(<Aggregate>.Process)}` ставит дерево приложения;
+  процесс объявляет `processes/0` модуля `<BC>.Supervision`, список и опции собирает
+  `MyAppApp.Application` (`17-otp-concurrency.md`, «Объявления контекста»).
 - Сопутствующие записи (постановка фоновой задачи, строка соседней таблицы) идут колбэком
   `fun.(events)`; что в нём допустимо — `10-architecture.md`, «Что можно внутри `Transact.run`».
 
@@ -323,7 +324,7 @@ Prim `use Core.Prim.UUID, version: 5` (`deps/core/docs/rules/11-domain.md`, «Т
 
 - Namespace UUIDv5 — один на приложение и неизменяемый: другая константа переименовала бы потоки
   всех таких агрегатов. `namespace:` MUST браться из одной публичной функции модуля приложения
-  (`MyApp.StreamID.namespace()`, имя — на выбор приложения); литерал в Prim MUST NOT.
+  (`MyApp.Infra.StreamID.namespace()`, имя — на выбор приложения); литерал в Prim MUST NOT.
 - `scope:` — область ключа — MUST быть у каждого идентификатора из ключа и неизменяема, как тип
   агрегата. Идентификатор, общий у нескольких агрегатов, — одна область.
 - Конструктор MUST лежать в Prim идентификатора агрегата (`<Aggregate>.ID.from_<key>` любой
@@ -352,7 +353,7 @@ use Core.Prim.UUID,
 use Core.Prim.UUID,
   name: first_line(@moduledoc),
   version: 5,
-  namespace: MyApp.StreamID.namespace(),
+  namespace: MyApp.Infra.StreamID.namespace(),
   scope: "agg_member"
 
 def from_member(%Agg.ID{} = agg_id, %Actor.ID{} = actor_id),

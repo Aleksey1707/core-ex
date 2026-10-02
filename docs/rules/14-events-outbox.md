@@ -218,8 +218,8 @@ end
 Поддерево очереди (`Writer` → `Poller` → `Cleaner`) собирает супервизор приложения; своего
 супервизора у библиотеки нет.
 
-Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyApp.Outbox`). Библиотека читает из
-него только цели пробуждения после commit `append` (`Outbox.Repo.Pg`):
+Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyAppApp.Outbox`). Библиотека читает
+из него только цели пробуждения после commit `append` (`Outbox.Repo.Pg`):
 
 - `poller_name` — atom имени GenServer; `nil` — wake no-op;
 - `pollers` — `[[name:, topics:], …]`: будится каждый поллер, чей фильтр топиков совпал с пачкой.

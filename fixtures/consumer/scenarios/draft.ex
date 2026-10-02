@@ -1,4 +1,4 @@
-defmodule Consumer.S.Draft do
+defmodule ConsumerTest.Draft do
   @moduledoc """
   Черновик события `Event.Mod.draft/0,1`: неверная нагрузка или арность.
 

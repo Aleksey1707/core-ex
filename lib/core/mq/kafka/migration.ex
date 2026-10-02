@@ -4,7 +4,7 @@ defmodule Core.Mq.Kafka.Migration do
 
   Потребитель заводит миграцию со своим timestamp и делегирует DDL сюда:
 
-      defmodule MyApp.DAO.Migrations.CreateMqKafkaReader do
+      defmodule MyApp.Infra.DAO.Migrations.CreateMqKafkaReader do
         use Ecto.Migration
 
         defdelegate up, to: Core.Mq.Kafka.Migration

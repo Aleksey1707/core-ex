@@ -31,7 +31,7 @@ check() {
 check "исходное состояние" 0 "consumer-check: ok"
 
 cat > "$probe" <<'PROBE'
-defmodule Consumer.S.SelftestMissing do
+defmodule ConsumerTest.SelftestMissing do
   # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
   def fine, do: :ok
 end
@@ -40,7 +40,7 @@ check "ожидание без предупреждения" 1 "нет пред�
 rm -f "$probe"
 
 cat > "$probe" <<'PROBE'
-defmodule Consumer.S.SelftestExtra do
+defmodule ConsumerTest.SelftestExtra do
   def typo(%Consumer.Domain.Sales.Account{} = state), do: state.nmae
 end
 PROBE

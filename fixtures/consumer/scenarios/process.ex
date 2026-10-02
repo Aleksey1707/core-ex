@@ -1,4 +1,4 @@
-defmodule Consumer.S.Process do
+defmodule ConsumerTest.Process do
   @moduledoc "`Agg.Process.execute`: адрес, версия, колбэк, опции."
 
   alias Consumer.Domain.Sales.Account

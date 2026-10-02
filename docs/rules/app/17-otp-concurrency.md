@@ -1,9 +1,10 @@
 # OTP и конкурентность приложения
 
-- **Область.** `lib/my_app/application.ex`, корни компонентов `<Component>.Supervisor`,
+- **Область.** `lib/my_app_app/application.ex`, объявления контекстов
+  `lib/my_app/domain/<bc>/supervision.ex`, корни компонентов `<Component>.Supervisor`,
   периодические процессы, реестры наблюдаемых процессов.
 - **Читать перед.** Добавлением процесса в дерево, правкой порядка старта, заведением компонента,
-  правкой его тумблера и списка наблюдаемых процессов.
+  проекции или процесса агрегата, правкой тумблера и списка наблюдаемых процессов.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
 Общие нормы BEAM — `init/1` против `handle_continue/2`, таймауты `GenServer.call`, mailbox и
@@ -12,7 +13,7 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 
 ## Дерево процессов
 
-`MyApp.Application` — композиционный корень, `strategy: :one_for_one`. В нём MUST быть только:
+`MyAppApp.Application` — композиционный корень, `strategy: :one_for_one`. В нём MUST быть только:
 
 1. `Core.Config.validate!()` и проверки разделяемой инфраструктуры (`10-architecture.md`,
    «Обязательства перед библиотекой») — **до** подъёма детей: неверная конфигурация роняет старт,
@@ -26,9 +27,10 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 4. шаги инициализации, которым нужен процесс дерева («Состояние без процессов»), — сразу после
    этого процесса;
 5. корни компонентов («Компонент») и готовые деревья Core с тумблером, которым свой корень не
-   нужен («Готовое дерево без корня»), — плоско, списком детей;
-6. web и метрики вне дерева компонентов: `MyAppWeb.Telemetry`, сервер метрик `MyApp.MetricsServer`
-   (`21-observability.md`), `MyAppWeb.Endpoint` — последним.
+   нужен («Готовое дерево без корня»), — плоско, списком детей; корни компонентов контекста —
+   из `children/0` его объявлений («Объявления контекста»);
+6. web и метрики вне дерева компонентов: `MyAppWeb.Telemetry`, сервер метрик
+   `MyAppApp.MetricsServer` (`21-observability.md`), `MyAppWeb.Endpoint` — последним.
 
 `strategy: :one_for_one` — и при значимом порядке детей: порядок здесь — только порядок старта.
 `rest_for_one` из общего правила (`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево
@@ -49,9 +51,17 @@ MUST NOT: тумблер, опции и наблюдение компонент�
 2. пул БД — раньше всех, кто в неё ходит;
 3. кластеризация и внутренняя шина;
 4. соединение с брокером — раньше подписчиков и очереди;
-5. компоненты кешей — кеш вместе с его инвалидатором;
-6. планировщик фоновых задач (разделяемая инфраструктура), очередь, проекции и остальные компоненты;
+5. планировщик фоновых задач — разделяемая инфраструктура: раньше компонентов, которые ставят
+   задачи;
+6. очередь, дерево проекций, процессы агрегатов, затем компоненты подсистем и дети контекстов —
+   граница после тех, от кого она зависит: дети контекстов в порядке `MyAppApp.contexts/0`, а
+   внутри `children/0` контекста кеш read-модели с его инвалидатором — раньше прочих
+   компонентов контекста;
 7. HTTP-эндпоинт — последним: он поднимается, когда зависимости готовы.
+
+Кеш контекста поднимается после планировщика: задача, взятая в первые мгновения старта, может не
+застать кеш и уйдёт в повтор планировщика. Порядок по контекстам держит `contexts/0`, а не
+склейка: компонент контекста стартует после детей контекстов, от которых тот зависит.
 
 ```elixir
 # плохо — кеш рядом с супервизором своего инвалидатора, проверка компонента в start/2
@@ -60,34 +70,37 @@ def start(_type, _args) do
   Core.Outbox.check_singleton!(outbox_opts)
 
   children = [
-    MyApp.PromEx,
-    MyApp.DAO,
+    MyAppApp.PromEx,
+    MyApp.Infra.DAO,
     {Cachex, name: MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Cache},
     MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Supervisor,
     MyAppWeb.Endpoint
   ]
 
-  Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
+  Supervisor.start_link(children, strategy: :one_for_one, name: MyAppApp.Supervisor)
 end
 
-# хорошо — разделяемая инфраструктура и корни компонентов плоско
+# хорошо — разделяемая инфраструктура и корни компонентов плоско, дети контекстов — из объявлений
 def start(_type, _args) do
   Core.Config.validate!()
   Core.Mq.Stream.ensure_available!()
 
-  children = [
-    MyApp.PromEx,
-    MyApp.DAO,
-    {Phoenix.PubSub, name: MyApp.PubSub},
-    MyApp.Mq.Connection,
-    MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Supervisor,
-    MyApp.Outbox.Supervisor,
-    {Core.Es.Projection.Supervisor, MyApp.Projections.opts()},
-    MyApp.<Subsystem>.Supervisor,
-    MyAppWeb.Endpoint
-  ]
+  children =
+    [
+      MyAppApp.PromEx,
+      MyApp.Infra.DAO,
+      {Phoenix.PubSub, name: MyApp.PubSub},
+      MyApp.Mq.Connection,
+      {Oban, Application.fetch_env!(:my_app, Oban)},
+      MyAppApp.Outbox.Supervisor,
+      {Core.Es.Projection.Supervisor, projection_opts()}
+    ] ++
+      Enum.map(processes(), &{&1, process_opts(&1)}) ++
+      [MyApp.<Subsystem>.Supervisor] ++
+      Enum.flat_map(MyAppApp.contexts(), & &1.children()) ++
+      [MyAppWeb.Endpoint]
 
-  Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
+  Supervisor.start_link(children, strategy: :one_for_one, name: MyAppApp.Supervisor)
 end
 ```
 
@@ -135,7 +148,7 @@ def start(_type, _args) do
 end
 
 # нужен процесс дерева — шаг после него, без процесса
-children = [MyApp.DAO, %{id: MyApp.<Subsystem>.Catalog, start: {MyApp.<Subsystem>.Catalog, :load, []}}, ...]
+children = [MyApp.Infra.DAO, %{id: MyApp.<Subsystem>.Catalog, start: {MyApp.<Subsystem>.Catalog, :load, []}}, ...]
 ```
 
 ## Компонент
@@ -202,7 +215,7 @@ end
 `watch_list/1`, MAY стоять в `Application` без своего корня: корень повторил бы тумблер и
 `watch_list`, которые у дерева уже есть. Таковы `Core.Es.Projection.Supervisor` и
 `<Aggregate>.Process`. Опции и тумблер MUST собирать одна функция приложения из
-`config/runtime.exs` — `MyApp.Projections.opts/0`, `MyApp.Processes.opts/1` («Проекции и процессы
+`config/runtime.exs` — `projection_opts/0`, `process_opts/1` корня («Проекции и процессы
 агрегата»), — а `watch_list/1` дерева MUST входить в склейку («Наблюдение за процессами»).
 
 Дерево сторонней библиотеки без этих контрактов (`Oban`) — разделяемая инфраструктура: оно
@@ -231,11 +244,63 @@ end
 | ссылается на срез (зовёт его usecases, ставит его воркер): подписчик брокера, импорт | срез своего инициатора, `lib/my_app/domain/<bc>/<actor>/<component>/` |
 | на срезы не ссылается: клиент внешнего сервиса, реестр, техническое состояние без версии и событий (сессии, журнал прогонов) | подсистема `MyApp.<Subsystem>` (`10-architecture.md`, «Состав контекста») |
 | кеш read-модели и его инвалидатор | каталог read-модели, `<read_model>/read_repo/supervisor.ex` (`16-caching.md`) |
-| очередь outbox | `MyApp.Outbox` (`10-architecture.md`, «Top-level namespaces») |
+| очередь outbox | корень, `MyAppApp.Outbox` (`10-architecture.md`, «Корень и сток») |
 
 Компонент в `Common` вне каталога read-модели — MUST NOT: зовущий usecases нарушил бы
 направление `Common` → срез (`10-architecture.md`, «Направления зависимостей»), а без доменной
 логики контексту он не принадлежит.
+
+## Объявления контекста
+
+Контекст сам объявляет то, что поднимает и наблюдает корень: модуль объявлений
+`MyApp.Domain.<BC>.Supervision` (`lib/my_app/domain/<bc>/supervision.ex`) отдаёт списки его части,
+а `MyAppApp.Application` склеивает их по списку `MyAppApp.contexts/0`. Новая проекция, процесс
+или компонент правят свой контекст, а не центральный список. Модуль объявлений — не супервизор:
+процессов он не поднимает.
+
+| Функция `<BC>.Supervision` | Что отдаёт | Кто склеивает |
+|---|---|---|
+| `projections/0` | модули проекций | `projection_opts/0` корня («Проекции и процессы агрегата») |
+| `processes/0` | модули процессов агрегатов | `processes/0` корня |
+| `children/0` | корни компонентов контекста в порядке старта | `start/2` («Дерево процессов») |
+| `watch_list/0` | `watch_list/0` тех же корней | `watch_list/0` корня («Наблюдение за процессами») |
+| `readers/0`, `kafka_readers/0` | читатели деревьев подписчиков контекста | провайдеры `readers:` и `kafka_readers:` плагина `Core.Mq.PromEx` |
+| `caches/0` | кеши контекста под наблюдением | провайдер `sizes:` плагина `Core.Cache.PromEx` |
+
+- Контекст MUST объявлять четыре первые функции, а `readers/0`, `kafka_readers/0` и `caches/0` —
+  если приложение подключает плагин с этим провайдером; пустая часть — пустой список: корень
+  зовёт функции у каждого контекста, не разбирая, что в нём есть.
+- Объявления MUST лежать в `<BC>.Supervision`, а не в оглавлении: фасад кодека зависит от
+  оглавления на компиляции (`codec_plugins/0`, `11-domain.md`, «Фасады и реестр плагинов»), а
+  объявления ссылаются на проекции и корни компонентов, которые зовут фасад, — правка любого
+  модуля контекста пересобирала бы фасад. Контекст экспортирует `Supervision` (`10-architecture.md`,
+  «Boundary»): корень видит контекст только через его `exports`, а корни компонентов в них не
+  входят.
+- Детей контекст MUST отдавать списком, а не своим супервизором («Дерево процессов»).
+- `children/0` и `watch_list/0` MUST перечислять одни и те же корни: компонент без строки в
+  `watch_list/0` падает молча («Наблюдение за процессами»).
+- `MyAppApp.contexts/0` MUST перечислять модули объявлений контекстов в порядке зависимостей —
+  контекст после тех, от кого он зависит: этот порядок задаёт старт детей контекстов.
+
+```elixir
+# lib/my_app/domain/orders/supervision.ex — объявления контекста для корня
+defmodule MyApp.Domain.Orders.Supervision do
+  alias MyApp.Domain.Orders.Order
+
+  def projections, do: [Order.Projection, <ReadModel>.Projection]
+  def processes, do: [Order.Process]
+  def children, do: [<ReadModel>.ReadRepo.Supervisor]
+  def watch_list, do: <ReadModel>.ReadRepo.Supervisor.watch_list()
+end
+
+# lib/my_app_app.ex — корень: контексты в порядке зависимостей
+defmodule MyAppApp do
+  use Boundary,
+    deps: [MyApp.Domain.Billing, MyApp.Domain.Orders, MyApp.Infra, MyAppWeb]
+
+  def contexts, do: [MyApp.Domain.Billing.Supervision, MyApp.Domain.Orders.Supervision]
+end
+```
 
 ## Тумблер компонента
 
@@ -275,9 +340,12 @@ end
 отказы старта, семантика `notifications:` — `deps/core/docs/rules/22-projections.md`, «Дерево».
 Config и env библиотека не читает.
 
-- Список проекций и опции MUST собирать одна функция приложения (`MyApp.Projections.opts/0`):
-  её же принимают `Core.Es.Projection.Supervisor.watch_list/1` и PromEx-плагин
+- Список проекций и опции MUST собирать одна функция приложения —
+  `MyAppApp.Application.projection_opts/0` из `projections/0` объявлений контекстов («Объявления
+  контекста»): её же принимают `Core.Es.Projection.Supervisor.watch_list/1` и PromEx-плагин
   (`21-observability.md`). Вторая сборка разошлась бы со списком, который видят `await` и метрики.
+- Опции дерева MUST лежать под ключом `config :my_app, Core.Es.Projection.Supervisor`, как опции
+  процесса агрегата — под ключом его модуля: ключ называет то, что настраивается.
 - Опции приходят из env `ES_PROJECTIONS_*` в `config/runtime.exs`, длительности — через
   `Core.DurationParser`.
 - Приложение на одной ноде SHOULD ставить `notifications: false`: сигнала внутри ноды хватает;
@@ -292,18 +360,16 @@ Config и env библиотека не читает.
 {Core.Es.Projection.Supervisor,
  projections: [MyApp.Domain.<BC>.<ReadModel>.Projection], enabled: true}
 
-# хорошо — одна функция; её же читают watch_list/1 и Core.Es.PromEx
-defmodule MyApp.Projections do
-  def opts do
-    [projections: [MyApp.Domain.<BC>.<ReadModel>.Projection]] ++
-      Application.fetch_env!(:my_app, __MODULE__)
-  end
+# хорошо — одна функция корня; её же читают watch_list/1 и Core.Es.PromEx
+def projection_opts do
+  [projections: Enum.flat_map(MyAppApp.contexts(), & &1.projections())] ++
+    Application.fetch_env!(:my_app, Core.Es.Projection.Supervisor)
 end
 
-children = [{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}]
+children = [{Core.Es.Projection.Supervisor, projection_opts()}]
 
 # config/runtime.exs
-config :my_app, MyApp.Projections,
+config :my_app, Core.Es.Projection.Supervisor,
   enabled: System.get_env("ES_PROJECTIONS_ENABLED", "true") == "true",
   poll_interval_ms:
     Core.DurationParser.to_timeout!(System.get_env("ES_PROJECTIONS_POLL_INTERVAL", "1s")),
@@ -314,7 +380,7 @@ config :my_app, MyApp.Projections,
   notifications: System.get_env("ES_PROJECTIONS_NOTIFICATIONS", "true") == "true"
 
 # хорошо — одна нода: сигнала внутри ноды хватает, NOTIFY пачек не нужен
-config :my_app, MyApp.Projections, notifications: false
+config :my_app, Core.Es.Projection.Supervisor, notifications: false
 ```
 
 ```text
@@ -326,20 +392,18 @@ max_connections >= ноды × (pool_size + различных repo: проек�
 ```
 
 Процесс агрегата ставится в дерево элементом
-`{<Aggregate>.Process, MyApp.Processes.opts(<Aggregate>.Process)}` (`13-repos.md`, «Процесс
-агрегата») — готовое дерево без корня. Список процессов и их опции MUST собирать один модуль
-`MyApp.Processes`: `list/0` — модули процессов, `opts/1` — опции процесса из
-`config/runtime.exs`. Его же читают `<Aggregate>.Process.watch_list/1` в склейке («Наблюдение за
-процессами») и `processes:` плагина `Core.Es.PromEx` (`21-observability.md`): вторая сборка
-разошлась бы с деревом.
+`{<Aggregate>.Process, process_opts(<Aggregate>.Process)}` (`13-repos.md`, «Процесс агрегата») —
+готовое дерево без корня. Список процессов и их опции MUST собирать `MyAppApp.Application`:
+`processes/0` — модули процессов из `processes/0` объявлений контекстов, `process_opts/1` —
+опции процесса из `config/runtime.exs`. Их же читают `<Aggregate>.Process.watch_list/1` в склейке
+(«Наблюдение за процессами») и `processes:` плагина `Core.Es.PromEx` (`21-observability.md`):
+вторая сборка разошлась бы с деревом.
 
 ```elixir
-defmodule MyApp.Processes do
-  def list, do: [MyApp.Domain.<BC>.<Aggregate>.Process]
-  def opts(process), do: Application.fetch_env!(:my_app, process)
-end
+def processes, do: Enum.flat_map(MyAppApp.contexts(), & &1.processes())
+def process_opts(process), do: Application.fetch_env!(:my_app, process)
 
-children = [MyApp.DAO | Enum.map(MyApp.Processes.list(), &{&1, MyApp.Processes.opts(&1)})]
+children = [MyApp.Infra.DAO | Enum.map(processes(), &{&1, process_opts(&1)})]
 ```
  При `enabled: false`
 команда идёт тем же путём, но без процесса на id: выключенное дерево не ломает команды, а
@@ -348,12 +412,13 @@ children = [MyApp.DAO | Enum.map(MyApp.Processes.list(), &{&1, MyApp.Processes.o
 ## Наблюдение за процессами
 
 Каждый критичный именованный процесс MUST быть в `watch_list/0` своего компонента — по нему
-работает алерт на падение (`21-observability.md`). `watch_list/0` приложения
-(провайдер `MyApp.PromEx.Workers.watch_list/0`) MUST быть конкатенацией списков компонентов и
-готовых деревьев и своих элементов только для разделяемой инфраструктуры — детей, которых
-`Application` перечисляет сам (соединение с брокером, `Oban`), под тумблерами их владельцев.
-Функция в `MyApp.Application` для этого MUST NOT: `MyApp.PromEx` и `MyApp.Application` — соседние
-top-level boundary, и ссылка из одной в другую — цикл (`10-architecture.md`, «Boundary»).
+работает алерт на падение (`21-observability.md`). `watch_list/0` приложения —
+`MyAppApp.Application.watch_list/0`, провайдер плагина `Core.Workers.PromEx` — MUST быть
+конкатенацией `watch_list/0` объявлений контекстов, списков остальных компонентов и готовых
+деревьев и своих элементов только для разделяемой инфраструктуры — детей, которых `Application`
+перечисляет сам (соединение с брокером, `Oban`), под тумблерами их владельцев. Список живёт рядом
+с детьми, которых наблюдает: `Application` и `PromEx` — модули одной границы корня
+(`10-architecture.md`, «Boundary»).
 
 - Новый именованный процесс, чьё падение меняет поведение системы, MUST попадать в
   `watch_list/0` компонента **той же правкой**, что и в дерево: процесс без наблюдения падает
@@ -392,11 +457,11 @@ end
 def watch_list do
   [%{component: "mq_connection", name: MyApp.Mq.Connection}] ++
     [%{component: "oban", name: Oban.Registry.via(Oban)}] ++
-    MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Supervisor.watch_list() ++
-    MyApp.Outbox.Supervisor.watch_list() ++
+    MyAppApp.Outbox.Supervisor.watch_list() ++
     MyApp.<Subsystem>.Supervisor.watch_list() ++
-    Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts()) ++
-    Enum.flat_map(MyApp.Processes.list(), &(&1.watch_list(MyApp.Processes.opts(&1))))
+    Enum.flat_map(MyAppApp.contexts(), & &1.watch_list()) ++
+    Core.Es.Projection.Supervisor.watch_list(projection_opts()) ++
+    Enum.flat_map(processes(), &(&1.watch_list(process_opts(&1))))
 end
 ```
 

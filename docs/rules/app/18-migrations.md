@@ -30,7 +30,7 @@ priv/dao/migrations/20260915120000_drop_<entity>_<children>.exs
 таблице индекс MUST создаваться `concurrently`:
 
 ```elixir
-defmodule MyApp.DAO.Migrations.Add<Entities>StatusIndex do
+defmodule MyApp.Infra.DAO.Migrations.Add<Entities>StatusIndex do
   use Ecto.Migration
 
   # concurrently нельзя выполнять внутри транзакции
@@ -112,7 +112,7 @@ DDL очереди (`outbox`) и event sourcing (`es_events`, `es_snapshots`, `e
 `Core.Es.KeyReservation.Migration`; миграция приложения только делегирует:
 
 ```elixir
-defmodule MyApp.DAO.Migrations.CreateOutbox do
+defmodule MyApp.Infra.DAO.Migrations.CreateOutbox do
   use Ecto.Migration
 
   defdelegate up, to: Core.Outbox.Migration

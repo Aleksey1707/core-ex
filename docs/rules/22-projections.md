@@ -343,19 +343,19 @@ rule_files: [alerts.yml]
 tests:
   - interval: 1m
     input_series:
-      - series: 'my_app_prom_ex_es_projection_signal_sent_total{instance="a", repo="MyApp.DAO"}'
+      - series: 'my_app_prom_ex_es_projection_signal_sent_total{instance="a", repo="MyApp.Infra.DAO"}'
         values: '0+5x30'
-      - series: 'my_app_prom_ex_es_projection_signal_received_total{instance="a", repo="MyApp.DAO"}'
+      - series: 'my_app_prom_ex_es_projection_signal_received_total{instance="a", repo="MyApp.Infra.DAO"}'
         values: '0+5x30'
-      - series: 'my_app_prom_ex_es_projection_signal_sent_total{instance="b", repo="MyApp.DAO"}'
+      - series: 'my_app_prom_ex_es_projection_signal_sent_total{instance="b", repo="MyApp.Infra.DAO"}'
         values: '0x30'
-      - series: 'my_app_prom_ex_es_projection_signal_received_total{instance="b", repo="MyApp.DAO"}'
+      - series: 'my_app_prom_ex_es_projection_signal_received_total{instance="b", repo="MyApp.Infra.DAO"}'
         values: '0x30'
     alert_rule_test:
       - eval_time: 20m
         alertname: EsProjectionSignalLost
         exp_alerts:
-          - exp_labels: {instance: b, repo: MyApp.DAO}
+          - exp_labels: {instance: b, repo: MyApp.Infra.DAO}
 ```
 
 ## Связанные правила

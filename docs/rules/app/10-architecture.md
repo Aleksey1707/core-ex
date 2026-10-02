@@ -18,23 +18,40 @@
 | Namespace | Path | Назначение |
 |---|---|---|
 | `Core` | зависимость `:core` | shared-фундамент: `Prim`, `Enum`, `Codec`, `View`, `Context`, `Error`, `Es`, `Repo`, `Outbox`, `Mq`, `PubSub`, `Web`, `Helper` |
-| `MyApp.Application` | `lib/my_app/application.ex` | композиционный корень: проверки конфигурации на старте и дерево процессов, включая процессы Core |
+| `MyAppApp` | `lib/my_app_app.ex`, `lib/my_app_app/` | композиционный корень — одна граница: список контекстов, дерево процессов, очередь, метрики, задачи релиза и mix-таски (см. «Корень и сток») |
 | `MyApp.Codec` | `lib/my_app/codec.ex`, `lib/my_app/codec/` | граница кодека: Prim-профили `Prim.{Internal,External}`, entity-фасады `{Internal,External}`, реестр плагинов (см. «Boundary») |
 | `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>.ex`, `lib/my_app/domain/<bc>/` | bounded context — граница верхнего уровня: оглавление — корень границы, каталоги агрегатов и уровня контекста (см. «Раскладка», «Boundary») |
-| `MyApp.Outbox` | `lib/my_app/outbox/` | OTP-дерево очереди: writer + поллер + cleaner |
-| `MyApp.Projections` | `lib/my_app/projections.ex` | список проекций и опции их дерева (`17-otp-concurrency.md`, «Проекции и процессы агрегата») |
-| `MyApp.Processes` | `lib/my_app/processes.ex` | список процессов агрегатов и их опции (`17-otp-concurrency.md`, «Проекции и процессы агрегата») |
-| `MyApp.PromEx` | `lib/my_app/prom_ex*` | плагины метрик и MFA-провайдеры списков |
+| `MyApp.Infra` | `lib/my_app/infra.ex`, `lib/my_app/infra/` | граница-сток без зависимостей на домен: `DAO`, `StreamID` (см. «Корень и сток») |
 | `MyApp.ContextFactory` | `lib/my_app/context_factory.ex` | сборка `%Context{}` вне web |
-| `MyApp.DAO` | `lib/my_app/dao.ex` | единственный `Ecto.Repo` |
-| `MyApp.StreamID` | `lib/my_app/stream_id.ex` | namespace UUIDv5 идентификаторов из ключа (`13-repos.md`) |
-| `MyApp.MetricsServer` | `lib/my_app/metrics_server.ex` | сервер метрик вне `Endpoint` (`21-observability.md`) |
-| `MyApp.Release` | `lib/my_app/release.ex`, `lib/my_app/release/` | задачи релиза без Mix: миграции через `bin/my_app eval`; задачи оператора, общие для mix-таски и `bin/` |
-| `Mix.Tasks.*` | `lib/mix/tasks/` | mix-таски приложения (см. «Boundary» и «Раскладка») |
 | `MyAppWeb` | `lib/my_app_web/` | HTTP-поверхности, плаги, презентеры |
+| `MyAppTest` | `test/support/` | обвязка тестов: case-модули `MyAppTest.DataCase`, `MyAppTest.ConnCase`, дублёры (`19-testing.md`) |
 
 Модуль верхнего уровня, не попавший в таблицу, — либо подсистема приложения (см. «Раскладка»),
 либо признак того, что слой выбран неверно.
+
+### Корень и сток
+
+Корень `MyAppApp` держит то, что собирает приложение целиком и не принадлежит ни одному
+контексту. Граница у него одна: дерево процессов, метрики и очередь ссылаются друг на друга, а
+единственная граница, которой видны и контексты, и web, — корень.
+
+| Модуль | Путь | Назначение |
+|---|---|---|
+| `MyAppApp` | `lib/my_app_app.ex` | корень границы: `use Boundary`, список объявлений контекстов `contexts/0` (`17-otp-concurrency.md`, «Объявления контекста») |
+| `MyAppApp.Application` | `lib/my_app_app/application.ex` | проверки конфигурации на старте, дерево процессов, включая процессы Core, и сборка объявлений контекстов |
+| `MyAppApp.Outbox` | `lib/my_app_app/outbox/` | OTP-дерево очереди: writer + поллер + cleaner |
+| `MyAppApp.PromEx` | `lib/my_app_app/prom_ex.ex`, `lib/my_app_app/prom_ex/` | плагины метрик и MFA-провайдеры списков |
+| `MyAppApp.MetricsServer` | `lib/my_app_app/metrics_server.ex` | сервер метрик вне `Endpoint` (`21-observability.md`) |
+| `MyAppApp.Release` | `lib/my_app_app/release.ex`, `lib/my_app_app/release/` | задачи релиза без Mix: миграции через `bin/my_app eval`; задачи оператора, общие для mix-таски и `bin/` |
+| `Mix.Tasks.*` | `lib/mix/tasks/` | mix-таски приложения (см. «Boundary» и «Раскладка») |
+
+Сток `MyApp.Infra` держит инфраструктуру, которой домен не нужен: от него зависят контексты,
+подсистемы и корень, а сам он не зависит ни от кого.
+
+| Модуль | Путь | Назначение |
+|---|---|---|
+| `MyApp.Infra.DAO` | `lib/my_app/infra/dao.ex` | единственный `Ecto.Repo` |
+| `MyApp.Infra.StreamID` | `lib/my_app/infra/stream_id.ex` | namespace UUIDv5 идентификаторов из ключа (`13-repos.md`) |
 
 ## Раскладка
 
@@ -82,6 +99,7 @@ lib/my_app/domain/<bc>/
   <read_model>/                            # read-модель не по агрегату — каталог по назначению
   <operation>/<actor>/usecases.ex          # операция над равноправными агрегатами
   reactions/<name>.ex                      # реакция, которая зовёт usecases нескольких агрегатов
+  supervision.ex                           # объявления для корня: проекции, процессы, дети
 ```
 
 - Актор — инициатор операций: роль пользователя или системный процесс (фоновые задачи, импорт,
@@ -137,8 +155,10 @@ usecases по сценарию (actor-репозиторий `<BC>.<Actor>.<Aggr
 
 У каждого контекста MUST быть модуль-оглавление `MyApp.Domain.<BC>` в `lib/my_app/domain/<bc>.ex` —
 корень его границы: `use Boundary` с `deps` и `exports` (см. «Boundary») и объявления контекста —
-плагины кодека (`11-domain.md`, «Фасады и реестр плагинов»). Без него контекст не граница, а его
-состав читается только по дереву каталогов. Оглавление лежит на уровне `domain/`,
+плагины кодека (`11-domain.md`, «Фасады и реестр плагинов»). Проекции, процессы агрегатов и детей
+для корня приложения объявляет не оглавление, а `<BC>.Supervision` (`17-otp-concurrency.md`,
+«Объявления контекста»). Без оглавления контекст не граница, а его состав читается только по
+дереву каталогов. Оглавление лежит на уровне `domain/`,
 рядом с каталогом контекста, а не внутри него.
 
 `@moduledoc` оглавления SHOULD давать карту контекста: назначение, агрегаты, акторы, read-модели,
@@ -166,7 +186,8 @@ defmodule MyApp.Domain.Orders do
       Order.ID,
       {Order.Event, []},
       Cart.Client.Usecases,
-      Cart.ID
+      Cart.ID,
+      Supervision
     ]
 
   alias MyApp.Domain.Orders.Order
@@ -196,10 +217,13 @@ end
   граница. Место операции над несколькими агрегатами — «Usecases».
 - Контекст MAY звать подсистему `MyApp.<Subsystem>`, объявив её в `deps`: связь остаётся
   односторонней.
-- Точки входа — `MyAppWeb` и `Mix.Tasks.*` — зовут модули usecases контекстов.
+- Сборка приложения и точки входа — закрытый состав границ: корень `MyAppApp` (дерево процессов,
+  метрики, mix-таски, задачи релиза), `MyApp.Codec` (реестр плагинов) и `MyAppWeb`. Точки входа —
+  `MyAppWeb` и корень — зовут модули usecases контекстов; прочая граница вне контекстов видит
+  контекст, как подсистема.
 - Задача оператора, общая для mix-таски и `bin/` (стартовая инициализация, наполнение стенда),
-  MUST лежать в `MyApp.Release.<Name>`, а не модулем верхнего уровня: модуль вне таблицы
-  namespaces — подсистема, а не точка входа.
+  MUST лежать в `MyAppApp.Release.<Name>`, а не модулем верхнего уровня: модуль вне корня —
+  подсистема, а не точка входа.
 
 ```elixir
 # плохо — чужой контекст читает репозиторий контекста мимо его exports
@@ -254,7 +278,7 @@ defmodule MyApp.Domain.<BC>.<Aggregate>.Repo do
 Всё, что библиотека знает о приложении, лежит под её собственным ключом `config :core`. Ключи,
 их обязательность и дефолты — `deps/core/docs/rules/10-architecture.md`, «Контракт конфигурации».
 
-- `MyApp.DAO` MUST объявляться через `use Core.DAO`, а не `use Ecto.Repo`: иначе after-commit
+- `MyApp.Infra.DAO` MUST объявляться через `use Core.DAO`, а не `use Ecto.Repo`: иначе after-commit
   хуки (wake поллера outbox, эталон `Repo.Sc`) молча не выполняются, и ошибка проявится
   отложенной доставкой и перезаписью дочерних строк, а не падением.
 - Состав реестра плагинов фасада, включая `Core.Outbox.Codec`, — `11-domain.md`, «Фасады и
@@ -307,11 +331,11 @@ Core.Security.Secret.ensure_configured!()
 
 ```elixir
 # плохо — config/prod.exs: значение машины сборки, секрет в артефакте
-config :my_app, MyApp.DAO, password: System.fetch_env!("DB_PASSWORD")
+config :my_app, MyApp.Infra.DAO, password: System.fetch_env!("DB_PASSWORD")
 
 # хорошо — config/runtime.exs
 if config_env() == :prod do
-  config :my_app, MyApp.DAO, password: System.fetch_env!("DB_PASSWORD")
+  config :my_app, MyApp.Infra.DAO, password: System.fetch_env!("DB_PASSWORD")
 end
 ```
 
@@ -326,9 +350,9 @@ end
 | `MyApp.Codec` | — (`check: [out: false]`) | Prim-профили, entity-фасады, реестр плагинов |
 | `MyApp.Infra` | `[]` | сток без зависимостей на домен: `DAO`, `StreamID` |
 | `MyApp.<Subsystem>` | контексты, которые она читает, `MyApp.Infra` | подсистема приложения |
-| `MyAppWeb` | контексты, `MyApp.Codec` | web-слой |
-| `MyApp.Application` | контексты, `MyAppWeb`, `MyApp.Infra` | композиционный корень |
-| `MyApp.PromEx` | контексты, `MyAppWeb` | обвязка наблюдаемости |
+| `MyAppWeb` | контексты, `MyApp.Codec`; `check: [aliases: true]` | web-слой |
+| `MyAppApp` | контексты, подсистемы, `MyApp.Infra`, `MyAppWeb` | композиционный корень: `Application`, список контекстов, `Outbox`, `PromEx`, `MetricsServer`, `Release`, mix-таски |
+| `MyAppTest` | — (`check: [in: false, out: false]`) | обвязка тестов `test/support/` |
 
 - Bounded context MUST быть границей верхнего уровня, а `MyApp` границей не является
   (`deps/core/docs/adr/0037-vertical-layout-context-boundary.md`).
@@ -336,25 +360,36 @@ end
   `<ReadModel>.<Actor>.Usecases`, `<Operation>.<Actor>.Usecases`), View, типы ID, значения и
   аксессор текущего пользователя, которые видят другие границы (`11-domain.md`, «Prim и Enum»,
   «Context»), каталог ошибок контекста (`12-errors.md`), модули событий и их семейства, плагины
-  кодека; агрегат, репозиторий, схемы, проекция и ReadRepo в него не входят. Семейство событий MAY
+  кодека, модуль объявлений `Supervision` (`17-otp-concurrency.md`, «Объявления контекста»);
+  агрегат, репозиторий, схемы, проекция и ReadRepo в него не входят. Семейство событий MAY
   экспортироваться целиком — `{<Aggregate>.Event, []}`: члены, нагрузки и кодек семейства.
 - `MyApp.Codec` MUST нести `check: [out: false]`: фасад знает плагины всех контекстов, контексты
   зовут фасад, и без него это цикл границ. Контексты объявляют `deps: [MyApp.Codec]`, кодек —
   ни одного.
-- `MyApp.Infra` — сток: от него зависят контексты, а `MyAppWeb` держать его в `deps` MUST NOT.
+- `MyApp.Infra` — сток: от него зависят контексты, подсистемы и корень, а `MyAppWeb` держать его
+  в `deps` MUST NOT.
+- `MyAppWeb` MUST нести `check: [aliases: true]`: без этой опции `boundary` видит вызов
+  `DAO.all/1`, но не модуль, переданный значением (`Transact.run(DAO, …)`), и web дотягивается
+  до `DAO` мимо сборки.
 - `Core.*` в `deps:` MUST NOT перечисляться: `boundary` размечает модули этого приложения, а
   чужое OTP-приложение его проверками не покрыто.
-- `Application` и `PromEx` — отдельные границы: только они сводят контексты и web вместе (старт
-  `Endpoint`, PromEx-плагин Phoenix с `endpoint:` / `router:`). Контекстам и стоку ссылаться на
-  `MyAppWeb` MUST NOT.
-- Mix-таски лежат вне дерева `MyApp.*` — им нужен явный
-  `use Boundary, classify_to: MyApp.Application`.
+- Корень `MyAppApp` — единственная граница, которая сводит контексты и web вместе (старт
+  `Endpoint`, PromEx-плагин Phoenix с `endpoint:` / `router:`). Зависеть от корня MUST NOT ни
+  одной границе, контекстам и стоку ссылаться на `MyAppWeb` — тоже.
+- Mix-таски лежат вне дерева `MyAppApp.*` — им нужен явный `use Boundary, classify_to: MyAppApp`.
+- Обвязка `test/support/` без своей границы по имени MUST лежать в границе `MyAppTest` с
+  `check: [in: false, out: false]`: `boundary` относит модуль к границе по префиксу имени, и
+  case-модуль под `MyApp` или `MyAppWeb` оказался бы вне границ или в границе web со всеми её
+  запретами.
 - Цикл между контекстами и его оформление `dirty_xrefs` — «Направления зависимостей».
 
-Проверяемая часть инварианта MUST выноситься в архитектурный тест: web-слой не ссылается на
-`*Repo` и `DAO`. Исключение — `Core.Repo.Sc`: это shadow copy контекста, а не репозиторий.
+Ссылку web на `*Repo` и `DAO` ловит сборка: репозитории не входят в `exports` контекстов,
+`MyApp.Infra` нет в `deps` web, а `check: [aliases: true]` видит и модуль, переданный значением.
+Архитектурный тест на это не нужен — он был бы вторым механизмом на одно нарушение.
+`Core.Repo.Sc` — shadow copy контекста, а не репозиторий, и библиотеку `boundary` не проверяет.
 
-Проверяется: `mix compile --warnings-as-errors`, архитектурный тест (`19-testing.md`).
+Проверяется: `mix compile --warnings-as-errors` — предупреждения `boundary` (`20-agreements.md`,
+«Пайплайн проверок»).
 
 ## Usecases
 

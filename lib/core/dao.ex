@@ -2,7 +2,7 @@ defmodule Core.DAO do
   @moduledoc """
   Билдер `Ecto.Repo` потребителя.
 
-      defmodule MyApp.DAO do
+      defmodule MyApp.Infra.DAO do
         use Core.DAO,
           otp_app: :my_app,
           adapter: Ecto.Adapters.Postgres

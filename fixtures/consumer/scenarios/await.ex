@@ -1,4 +1,4 @@
-defmodule Consumer.S.Await do
+defmodule ConsumerTest.Await do
   @moduledoc "`Projection.await/3`: агрегат, ID, результат."
 
   alias Consumer.Domain.Sales.Account

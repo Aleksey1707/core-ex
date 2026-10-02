@@ -4,16 +4,16 @@ defmodule Core.Mq.Dlq.Release do
 
   Приложение зовёт её из своей задачи релиза, загрузив конфигурацию:
 
-      defmodule MyApp.Release do
+      defmodule MyAppApp.Release do
         def dlq_requeue(target) do
           Application.load(:my_app)
-          Core.Mq.Dlq.Release.requeue(MyApp.DAO, target)
+          Core.Mq.Dlq.Release.requeue(MyApp.Infra.DAO, target)
         end
       end
 
-      bin/my_app eval 'MyApp.Release.dlq_requeue(:all)'
-      bin/my_app eval 'MyApp.Release.dlq_requeue({:topic, Core.Mq.Topic.new!("orders")})'
-      bin/my_app eval 'MyApp.Release.dlq_requeue([42, 43])'
+      bin/my_app eval 'MyAppApp.Release.dlq_requeue(:all)'
+      bin/my_app eval 'MyAppApp.Release.dlq_requeue({:topic, Core.Mq.Topic.new!("orders")})'
+      bin/my_app eval 'MyAppApp.Release.dlq_requeue([42, 43])'
 
   Ответ оператору — `IO.puts`: Mix в релизе нет (`20-agreements.md`, «Логирование»). То же из
   корня приложения — `mix mq.dlq.requeue`.

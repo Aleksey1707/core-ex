@@ -1,6 +1,6 @@
 # События и outbox приложения
 
-- **Область.** `lib/my_app/domain/**/{event,outbox}*`, `lib/my_app/outbox/**`, подписчики
+- **Область.** `lib/my_app/domain/**/{event,outbox}*`, `lib/my_app_app/outbox/**`, подписчики
   брокера и фоновые задачи, ключи `OUTBOX_*` в `config/runtime.exs`.
 - **Читать перед.** Новым событием или правкой его wire-формата, правкой outbox и подписчиков,
   разбором записей `:failed` и сообщений в DLQ.
@@ -74,7 +74,7 @@
 
 - `OUTBOX_ENABLED=true` MUST стоять ровно на одном инстансе.
 - Включённый outbox вместе с заданной кластеризацией (`DNS_CLUSTER_QUERY`) MUST ронять старт
-  `ArgumentError` с инструкцией: корень очереди `MyApp.Outbox.Supervisor` MUST звать
+  `ArgumentError` с инструкцией: корень очереди `MyAppApp.Outbox.Supervisor` MUST звать
   `Core.Outbox.check_singleton!/1` в `start_link/1` до подъёма своих детей — это проверка старта
   компонента (`17-otp-concurrency.md`, «Компонент»;
   `deps/core/docs/rules/14-events-outbox.md`, «Единственность поллера»).
@@ -166,14 +166,14 @@ consumer group, со смещениями и арендой топика в БД
  name: MyApp.<BC>.Orders.DlqSubscribers,
  dlq_writer:
    {Core.Mq.Dlq.Writer,
-    repo: MyApp.DAO,
+    repo: MyApp.Infra.DAO,
     subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
     name: MyApp.<BC>.Orders.DlqRewriter},
  topics: [
    [
      reader:
        {Core.Mq.Dlq.Reader,
-        repo: MyApp.DAO,
+        repo: MyApp.Infra.DAO,
         topic: Core.Mq.Topic.new!("orders"),
         subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
         name: MyApp.<BC>.Orders.DlqReader},
@@ -190,7 +190,7 @@ consumer group, со смещениями и арендой топика в БД
 
 Разбор: алерт `MqSubscriberDlq` → запрос к `mq_dlq` (`reason`, `error`, позиция источника) →
 починка обработчика или данных → `mix mq.dlq.requeue --all` / `--topic <топик>` / `--id <id>`, в
-релизе — `bin/my_app eval 'MyApp.Release.dlq_requeue(:all)'`. Возвращённое, которое не
+релизе — `bin/my_app eval 'MyAppApp.Release.dlq_requeue(:all)'`. Возвращённое, которое не
 перечитывается, поднимает `MqDlqRequeuedStuck` (`deps/core/docs/rules/21-observability.md`,
 «Рекомендованные алерты»).
 

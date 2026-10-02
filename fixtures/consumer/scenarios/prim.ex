@@ -1,4 +1,4 @@
-defmodule Consumer.S.Prim do
+defmodule ConsumerTest.Prim do
   @moduledoc "Результат bang-конструкторов Prim, `from_<key>` идентификатора из ключа и `Core.Version.new/0`."
 
   alias Consumer.Domain.Sales.Account
@@ -23,7 +23,7 @@ defmodule Consumer.S.Prim do
   def from_key_typo(number), do: DeliveryID.from_number(number).valeu
 end
 
-defmodule Consumer.S.Prim.KeyID do
+defmodule ConsumerTest.Prim.KeyID do
   @moduledoc "Аргумент приватного `from_key/1` идентификатора из ключа."
 
   use Core.Prim.UUID,

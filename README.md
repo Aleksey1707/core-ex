@@ -72,7 +72,7 @@ Core.Mq.Kafka.Writer.put_many(MyApp.Kafka, messages)
  client: MyApp.Kafka,
  topic: Core.Mq.Topic.new!("orders"),
  subscriber_name: Core.Mq.SubscriberName.new!("my_app.orders"),
- repo: MyApp.DAO,
+ repo: MyApp.Infra.DAO,
  name: MyApp.Orders.Reader}
 ```
 
@@ -111,7 +111,7 @@ behaviour — менять библиотеку для этого не нужн�
 ```elixir
 config :core,
   otp_app: :my_app,
-  dao: MyApp.DAO,
+  dao: MyApp.Infra.DAO,
   codec: MyApp.Codec.Internal
 ```
 
@@ -133,12 +133,12 @@ config :core,
 ```elixir
 # Читается Core только ради `Poller.wake/1` после записи в очередь.
 # Либо один поллер:
-config :core, Core.Outbox, poller_name: MyApp.Outbox.Poller
+config :core, Core.Outbox, poller_name: MyAppApp.Outbox.Poller
 # либо несколько, с разбиением по топикам:
 config :core, Core.Outbox,
   pollers: [
-    [name: MyApp.Outbox.Poller.Orders, topics: ["orders"]],
-    [name: MyApp.Outbox.Poller.Rest, topics: :all]
+    [name: MyAppApp.Outbox.Poller.Orders, topics: ["orders"]],
+    [name: MyAppApp.Outbox.Poller.Rest, topics: :all]
   ]
 
 # Ключ шифрования секретов (Fernet, 32 байта в base64). Обязателен, если используется
@@ -172,7 +172,7 @@ end
 ```
 
 Проверки старта компонента стоят в его корне, а не в `start/2`
-(`docs/rules/app/17-otp-concurrency.md`, «Компонент»). Корень очереди `MyApp.Outbox.Supervisor`,
+(`docs/rules/app/17-otp-concurrency.md`, «Компонент»). Корень очереди `MyAppApp.Outbox.Supervisor`,
 если приложение ставит outbox в дерево:
 
 ```elixir
@@ -218,7 +218,7 @@ end
    выполняются:
 
    ```elixir
-   defmodule MyApp.DAO do
+   defmodule MyApp.Infra.DAO do
      use Core.DAO,
        otp_app: :my_app,
        adapter: Ecto.Adapters.Postgres
@@ -237,7 +237,7 @@ end
    миграцию со своим timestamp и делегирует туда:
 
    ```elixir
-   defmodule MyApp.DAO.Migrations.CreateOutbox do
+   defmodule MyApp.Infra.DAO.Migrations.CreateOutbox do
      use Ecto.Migration
 
      defdelegate up, to: Core.Outbox.Migration
@@ -254,7 +254,7 @@ end
    `es_checkpoints` — так же, DDL всех трёх таблиц живёт в `Core.Es.Migration`:
 
    ```elixir
-   defmodule MyApp.DAO.Migrations.CreateEsEvents do
+   defmodule MyApp.Infra.DAO.Migrations.CreateEsEvents do
      use Ecto.Migration
 
      defdelegate up, to: Core.Es.Migration
@@ -270,7 +270,7 @@ end
    `Core.Es.KeyReservation.Migration`:
 
    ```elixir
-   defmodule MyApp.DAO.Migrations.CreateEsKeyReservations do
+   defmodule MyApp.Infra.DAO.Migrations.CreateEsKeyReservations do
      use Ecto.Migration
 
      defdelegate up, to: Core.Es.KeyReservation.Migration
@@ -286,7 +286,7 @@ end
    DDL живёт в `Core.Mq.Kafka.Migration` и собирается без клиента `:brod`:
 
    ```elixir
-   defmodule MyApp.DAO.Migrations.CreateMqKafkaReader do
+   defmodule MyApp.Infra.DAO.Migrations.CreateMqKafkaReader do
      use Ecto.Migration
 
      defdelegate up, to: Core.Mq.Kafka.Migration
@@ -301,7 +301,7 @@ end
    `Core.Mq.Dlq.Migration`:
 
    ```elixir
-   defmodule MyApp.DAO.Migrations.CreateMqDlq do
+   defmodule MyApp.Infra.DAO.Migrations.CreateMqDlq do
      use Ecto.Migration
 
      defdelegate up, to: Core.Mq.Dlq.Migration
@@ -349,7 +349,7 @@ end
    {Core.Outbox.Poller,
     repo: Core.Outbox.Repo.Pg,
     delivery_module: Core.Outbox.Delivery.Mq,
-    delivery: Core.Outbox.Delivery.Mq.new(Core.Mq.Stream.Writer, MyApp.Outbox.Writer),
+    delivery: Core.Outbox.Delivery.Mq.new(Core.Mq.Stream.Writer, MyAppApp.Outbox.Writer),
     poll_interval_ms: 1_000,
     idle_min_ms: 50,
     batch_size: Core.Outbox.BatchSize.new!(100),
@@ -362,14 +362,15 @@ end
    «Read-модель»). Проекции гоняет одно дерево `Core.Es.Projection.Supervisor` со всем списком
    проекций приложения на каждой ноде; опции и дефолты — в его moduledoc. Config и env
    библиотека не читает: рекомендуемые env — `ES_PROJECTIONS_*` в `config/runtime.exs`,
-   длительности — через `Core.DurationParser`. Список и опции удобно собрать одной функцией —
-   её же принимает `watch_list/1`:
+   длительности — через `Core.DurationParser`. Список и опции удобно собрать одной функцией корня
+   из объявлений контекстов — её же принимает `watch_list/1`
+   (`docs/rules/app/17-otp-concurrency.md`, «Объявления контекста»):
 
    ```elixir
    # config/runtime.exs
    duration = &Core.DurationParser.to_timeout!(System.get_env(&1, &2))
 
-   config :my_app, MyApp.Projections,
+   config :my_app, Core.Es.Projection.Supervisor,
      enabled: System.get_env("ES_PROJECTIONS_ENABLED", "true") == "true",
      batch_size: String.to_integer(System.get_env("ES_PROJECTIONS_BATCH_SIZE", "100")),
      idle_min_ms: duration.("ES_PROJECTIONS_IDLE_MIN", "50ms"),
@@ -381,16 +382,13 @@ end
      await_max_ms: duration.("ES_PROJECTIONS_AWAIT_MAX", "100ms"),
      notifications: System.get_env("ES_PROJECTIONS_NOTIFICATIONS", "true") == "true"
 
-   # lib/my_app/projections.ex
-   defmodule MyApp.Projections do
-     def opts do
-       [projections: [MyApp.Domain.Accounts.AccountList.Projection]] ++
-         Application.fetch_env!(:my_app, __MODULE__)
-     end
+   # lib/my_app_app/application.ex — проекции объявляет контекст: <BC>.Supervision.projections/0
+   def projection_opts do
+     [projections: Enum.flat_map(MyAppApp.contexts(), & &1.projections())] ++
+       Application.fetch_env!(:my_app, Core.Es.Projection.Supervisor)
    end
 
-   # MyApp.Application
-   children = [MyApp.DAO, {Core.Es.Projection.Supervisor, MyApp.Projections.opts()}]
+   children = [MyApp.Infra.DAO, {Core.Es.Projection.Supervisor, projection_opts()}]
    ```
 
    `enabled: false` — дерево не стартует (`:ignore`); так ставится в `config/test.exs` вместе с
@@ -412,12 +410,11 @@ end
    ставится в тестах.
 
    ```elixir
-   defmodule MyApp.Processes do
-     def list, do: [MyApp.Domain.Accounts.Account.Process]
-     def opts(process), do: Application.fetch_env!(:my_app, process)
-   end
+   # lib/my_app_app/application.ex — процессы объявляет контекст: <BC>.Supervision.processes/0
+   def processes, do: Enum.flat_map(MyAppApp.contexts(), & &1.processes())
+   def process_opts(process), do: Application.fetch_env!(:my_app, process)
 
-   children = [MyApp.DAO | Enum.map(MyApp.Processes.list(), &{&1, MyApp.Processes.opts(&1)})]
+   children = [MyApp.Infra.DAO | Enum.map(processes(), &{&1, process_opts(&1)})]
    ```
 
 6. **Регистрация PromEx-плагинов** в модуле `use PromEx`:
@@ -428,27 +425,28 @@ end
        {Core.Outbox.PromEx, poll_rate: 5_000},
        {Core.Mq.PromEx,
         poll_rate: 5_000,
-        readers: {MyApp.PromEx.Mq, :readers, []},
-        kafka_readers: {MyApp.PromEx.Mq, :kafka_readers, []}},
-       {Core.Workers.PromEx, poll_rate: 5_000, watch: {MyApp.PromEx.Workers, :watch_list, []}},
-       {Core.Cache.PromEx, poll_rate: 5_000, sizes: {MyApp.PromEx.Caches, :sizes, []}},
+        readers: {MyAppApp.PromEx.Mq, :readers, []},
+        kafka_readers: {MyAppApp.PromEx.Mq, :kafka_readers, []}},
+       {Core.Workers.PromEx, poll_rate: 5_000, watch: {MyAppApp.Application, :watch_list, []}},
+       {Core.Cache.PromEx, poll_rate: 5_000, sizes: {MyAppApp.PromEx.Caches, :sizes, []}},
        {Core.Cgroup.PromEx, poll_rate: 5_000},
        {Core.Es.PromEx,
         poll_rate: 5_000,
-        projections: {MyApp.Projections, :opts, []},
-        processes: {MyApp.Processes, :list, []}}
+        projections: {MyAppApp.Application, :projection_opts, []},
+        processes: {MyAppApp.Application, :processes, []}}
      ]
    end
    ```
 
-   Читатели проекций в `watch:` — `Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts())`:
-   при `enabled: false` элементов нет, и нода без дерева не показывает `up=0`.
+   Читатели проекций в `watch:` — `Core.Es.Projection.Supervisor.watch_list(projection_opts())`
+   в `MyAppApp.Application.watch_list/0`: при `enabled: false` элементов нет, и нода без дерева не
+   показывает `up=0`.
 
    `Core.Es.PromEx` без `projections:` и `processes:` строит только event-метрики. `projections:` —
-   тот же провайдер опций дерева, что у `{Core.Es.Projection.Supervisor, MyApp.Projections.opts()}`:
+   тот же провайдер опций дерева, что у `{Core.Es.Projection.Supervisor, projection_opts()}`:
    из него плагин берёт список проекций ноды для отставания, пересборки, `outdated` и сирот
-   чекпоинтов. `processes:` — список модулей процесса агрегата, тот же `MyApp.Processes.list/0`, что
-   у дерева.
+   чекпоинтов. `processes:` — список модулей процесса агрегата, тот же
+   `MyAppApp.Application.processes/0`, что у дерева.
 
 ## Имена метрик
 
@@ -545,9 +543,9 @@ OTel живёт в process dictionary и сам туда не попадает. 
 ```
 
 ```elixir
-# MyApp.Application.start/2 — до старта supervision tree
+# MyAppApp.Application.start/2 — до старта supervision tree
 OpentelemetryPhoenix.setup(adapter: :bandit)
-OpentelemetryEcto.setup([:my_app, :dao], db_statement: :enabled)
+OpentelemetryEcto.setup([:my_app, :infra, :dao], db_statement: :enabled)
 OpentelemetryOban.setup()
 
 # корреляция логов

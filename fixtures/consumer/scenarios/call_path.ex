@@ -1,4 +1,4 @@
-defmodule Consumer.S.CallPath do
+defmodule ConsumerTest.CallPath do
   @moduledoc "Чужой ID по пути вызова внутри модуля: `defp`, замыкание, обёртка без паттерна."
 
   alias Consumer.Domain.Sales.Order
@@ -29,7 +29,7 @@ defmodule Consumer.S.CallPath do
   defp load(id, context), do: @repo.get(id, :current, context)
 end
 
-defmodule Consumer.S.Usecase do
+defmodule ConsumerTest.Usecase do
   @moduledoc "Usecase с паттерном в голове."
 
   alias Consumer.Domain.Sales.Account
@@ -42,15 +42,15 @@ defmodule Consumer.S.Usecase do
   def get(%Account.ID{} = id, %Context{} = context), do: @repo.get(id, :current, context)
 end
 
-defmodule Consumer.S.Controller do
+defmodule ConsumerTest.Controller do
   @moduledoc "Вызов usecase другого модуля."
 
   alias Consumer.Domain.Sales.Order
-  alias Consumer.S.Usecase
+  alias ConsumerTest.Usecase
   alias Core.Context
 
   # X9 (`get_typed` в карте 02) — чужой ID в usecase с паттерном в голове
   def x9_typed_usecase(%Order.ID{} = id, %Context{} = context),
-    # expect: incompatible types given to Consumer.S.Usecase.get/2
+    # expect: incompatible types given to ConsumerTest.Usecase.get/2
     do: Usecase.get(id, context)
 end

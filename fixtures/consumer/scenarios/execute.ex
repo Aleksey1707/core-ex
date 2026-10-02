@@ -1,4 +1,4 @@
-defmodule Consumer.S.Orphan do
+defmodule ConsumerTest.Orphan do
   @moduledoc "Команда, которую `decide/2` счёта не разбирает."
 
   use Core.Es.Cmd
@@ -7,14 +7,14 @@ defmodule Consumer.S.Orphan do
   defstruct @enforce_keys
 end
 
-defmodule Consumer.S.Execute do
+defmodule ConsumerTest.Execute do
   @moduledoc "`Agg.execute/2` и прямой `decide/2`: ошибки вызова и разбора результата."
 
   alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.AlwaysFails
   alias Consumer.Domain.Sales.NeverFails
   alias Consumer.Domain.Sales.Order
-  alias Consumer.S.Orphan
+  alias ConsumerTest.Orphan
   alias Consumer.Domain.Sales.Values.UserID
   alias Core.Context
   alias Core.Es

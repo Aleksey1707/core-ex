@@ -59,16 +59,85 @@
     usecases, View, типы ID, события, плагины кодека);
   - граница `MyApp` на весь домен → её нет; `MyApp.Codec` — граница с `check: [out: false]`;
     `MyApp.DAO` и `MyApp.StreamID` → `MyApp.Infra.DAO` и `MyApp.Infra.StreamID` границы-стока
-    `MyApp.Infra` (`config :core, dao:` и `config :my_app, MyApp.Infra.DAO` — вместе с ним); каждый
-    модуль `lib/` принадлежит границе;
+    `MyApp.Infra` (`config :core, dao:`, `config :my_app, MyApp.Infra.DAO` и `ecto_repos:` — вместе
+    с ним); каждый модуль `lib/` принадлежит границе. Префикс telemetry репозитория Ecto выводится
+    из имени модуля и становится `[:my_app, :infra, :dao]`: прежние имена событий сохраняет
+    `telemetry_prefix: [:my_app, :dao]` в конфигурации репозитория, иначе правятся обработчики и
+    `OpentelemetryEcto.setup/2`; метка `repo` метрик (`…_es_projection_signal_*`) становится
+    `MyApp.Infra.DAO` — дашборды и алерты по ней правятся. Существующие миграции
+    `MyApp.DAO.Migrations.*` не переименовываются: каталог `priv/dao/migrations` прежний;
   - `MyAppWeb` с `deps: [MyApp]` → `deps` — контексты и `MyApp.Codec`, без `MyApp.Infra`;
-  - `MyApp.Application` и `MyApp.PromEx` с `top_level?: true` и `deps: [MyApp, …]` → без
-    `top_level?`, `deps` — контексты; mix-таски `classify_to: MyApp` →
-    `classify_to: MyApp.Application`;
+  - `MyApp.Application` и `MyApp.PromEx` с `top_level?: true` и `deps: [MyApp, …]`, mix-таски
+    `classify_to: MyApp` → граница корня `MyAppApp` (пункт «Корень приложения — граница
+    `MyAppApp`…» ниже);
   - взаимные ссылки контекстов (`SHOULD NOT`) → цикл — ошибка сборки, отступление — `dirty_xrefs`
     на одной стороне и строка `DEBT.md`;
   - маркеры `boundary-lint: allow` правил `common-slice`, `foreign-slice`, `sibling-slice`,
     `subsystem-slice` и их строки `DEBT.md` удаляются.
+
+- **Корень приложения — граница `MyAppApp`, контекст объявляет проекции, процессы и детей**
+  (`docs/rules/app/10-architecture.md`, «Top-level namespaces», «Корень и сток», «Направления
+  зависимостей», «Boundary»; `docs/rules/app/17-otp-concurrency.md`, «Дерево процессов»,
+  «Объявления контекста», «Проекции и процессы агрегата», «Наблюдение за процессами»;
+  `docs/rules/app/19-testing.md`; `docs/rules/app/20-agreements.md`; пометка в
+  `docs/adr/0024-component-owns-its-subtree.md`). Модули, которые собирают приложение целиком, —
+  `Application`, `PromEx`, дерево очереди, сервер метрик, задачи релиза — были модулями верхнего
+  уровня `MyApp.*`, а `Application` и `PromEx` — соседними границами, которые не могли ссылаться
+  друг на друга; без границы `MyApp` остальные оказались бы вне границ. Списки проекций, процессов и
+  наблюдаемых процессов были центральными: новая проекция правила `MyApp.Projections`, новый
+  компонент — `Application` и провайдер `watch_list`. Теперь корень — одна граница `MyAppApp`, и
+  `watch_list/0` приложения живёт в `Application` рядом с детьми, которых наблюдает. Контекст сам
+  объявляет свои проекции, процессы агрегатов, корни компонентов и их списки для метрик модулем
+  `<BC>.Supervision`, а корень склеивает их по списку контекстов. Объявления лежат не в
+  оглавлении: от оглавления фасад кодека зависит на компиляции, и ссылки на проекции и компоненты,
+  которые зовут фасад, замкнули бы цикл — правка любого модуля контекста пересобирала бы фасад.
+  Архитектурный тест «web не ссылается на `*Repo` и `DAO`» заменён сборкой: `check: [aliases: true]`
+  у `MyAppWeb` видит и модуль, переданный значением (`Transact.run(DAO, …)`). Обвязка тестов —
+  граница `MyAppTest`: `boundary` относит модуль к границе по префиксу имени, и `MyApp.DataCase`
+  без границы `MyApp` оказался бы вне границ.
+
+  Как править приложение (было → стало):
+  - `MyApp.Application`, `MyApp.PromEx`, `MyApp.Outbox`, `MyApp.MetricsServer`, `MyApp.Release` в
+    `lib/my_app/` → `MyAppApp.Application`, `MyAppApp.PromEx`, `MyAppApp.Outbox`,
+    `MyAppApp.MetricsServer`, `MyAppApp.Release` в `lib/my_app_app/`; корень границы — модуль
+    `MyAppApp` в `lib/my_app_app.ex`: `use Boundary` с `deps` (контексты, подсистемы,
+    `MyApp.Infra`, `MyAppWeb`) и `contexts/0`;
+  - границы `MyApp.Application` и `MyApp.PromEx` с `top_level?: true`, mix-таски
+    `classify_to: MyApp` → одна граница `MyAppApp`, `use Boundary, classify_to: MyAppApp`;
+  - `mod: {MyApp.Application, []}` в `mix.exs` → `mod: {MyAppApp.Application, []}`; команды
+    `bin/my_app eval 'MyApp.Release.<fun>(…)'` в скриптах выката, образе и runbook →
+    `bin/my_app eval 'MyAppApp.Release.<fun>(…)'`; имена `MyApp.Outbox.Poller*` в
+    `config :core, Core.Outbox` → `MyAppApp.Outbox.Poller*`; имя `MyApp.Supervisor` корня дерева
+    → `MyAppApp.Supervisor`;
+  - новый модуль контекста `MyApp.Domain.<BC>.Supervision` в
+    `lib/my_app/domain/<bc>/supervision.ex` с `projections/0`, `processes/0`, `children/0`,
+    `watch_list/0`, а при плагинах `Core.Mq.PromEx` и `Core.Cache.PromEx` — `readers/0`,
+    `kafka_readers/0`, `caches/0`; пустая часть — `[]`; контекст экспортирует `Supervision`,
+    `MyAppApp.contexts/0` перечисляет такие модули в порядке зависимостей контекстов;
+  - `MyApp.Projections.opts/0` со списком проекций → `MyAppApp.Application.projection_opts/0`
+    склеивает `projections/0` объявлений; ключ `config :my_app, MyApp.Projections` в
+    `config/runtime.exs` и `config/test.exs` → `config :my_app, Core.Es.Projection.Supervisor`;
+    `projections:` плагина `Core.Es.PromEx` → `{MyAppApp.Application, :projection_opts, []}`;
+  - `MyApp.Processes.list/0` и `opts/1` → `MyAppApp.Application.processes/0` склеивает
+    `processes/0` объявлений, опции — `process_opts/1`; `processes:` плагина `Core.Es.PromEx` →
+    `{MyAppApp.Application, :processes, []}`;
+  - корни компонентов контекста детьми `Application` → `children/0` объявлений; `start/2` ставит их
+    после разделяемой инфраструктуры, включая планировщик задач, в порядке `contexts/0`;
+  - провайдер `MyApp.PromEx.Workers.watch_list/0` → `MyAppApp.Application.watch_list/0`, в нём —
+    `watch_list/0` объявлений вместо корней компонентов контекстов; `watch:` плагина
+    `Core.Workers.PromEx` → `{MyAppApp.Application, :watch_list, []}`; провайдеры читателей и
+    размеров кешей `MyApp.PromEx.*` → `MyAppApp.PromEx.*`, части контекстов — из `readers/0`,
+    `kafka_readers/0` и `caches/0` объявлений;
+  - архитектурный тест `MyApp.ArchitectureTest` и строка ратчета «web-слой не ссылается на `*Repo`
+    и `DAO`» → удаляются; граница `MyAppWeb` → `check: [aliases: true]`;
+  - `MyApp.DataCase`, `MyAppWeb.ConnCase` и прочая обвязка `test/support/` под `MyApp.*`
+    (контрактные наборы, дублёры) → `MyAppTest.DataCase`, `MyAppTest.ConnCase`, `MyAppTest.*`;
+    корень границы — модуль `MyAppTest` в `test/support/` с
+    `use Boundary, check: [in: false, out: false]`;
+  - исключение Credo `Refactor.IoPuts` для `lib/my_app/release.ex` и `lib/my_app/release/` →
+    `lib/my_app_app/release.ex` и `lib/my_app_app/release/`;
+  - компилятор `boundary` не во всех окружениях → `compilers: [:boundary] ++ Mix.compilers()` в
+    `project/0`.
 
 ### Новое
 

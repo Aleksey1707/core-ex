@@ -1,4 +1,4 @@
-defmodule Consumer.S.BadKey do
+defmodule ConsumerTest.BadKey do
   @moduledoc "Модуль ключа без clause `reservation/1` для `Closed`."
 
   alias Consumer.Domain.Sales.Account
@@ -19,23 +19,23 @@ defmodule Consumer.S.BadKey do
   def to_key(%Account.Name{} = name), do: Account.Name.value(name)
 end
 
-defmodule Consumer.S.BadKey.Repo.Pg do
+defmodule ConsumerTest.BadKey.Repo.Pg do
   @moduledoc "Репозиторий с модулем ключа без clause `reservation/1` для `Closed`."
 
   alias Consumer.Domain.Sales.Account
 
   # нет clause `reservation/1` для `Closed`: проверка полноты на строке `use`
-  # expect: incompatible types given to Consumer.S.BadKey.reservation/1
+  # expect: incompatible types given to ConsumerTest.BadKey.reservation/1
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Consumer.Domain.Sales.Account.Repo,
     aggregate: Account,
     id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
-    key_reservations: [Consumer.S.BadKey]
+    key_reservations: [ConsumerTest.BadKey]
 end
 
-defmodule Consumer.S.BadKeyPayload do
+defmodule ConsumerTest.BadKeyPayload do
   @moduledoc "Модуль ключа с опечаткой в поле нагрузки, не суженной паттерном."
 
   alias Consumer.Domain.Sales.Account
@@ -57,23 +57,23 @@ defmodule Consumer.S.BadKeyPayload do
   def to_key(%Account.Name{} = name), do: Account.Name.value(name)
 end
 
-defmodule Consumer.S.BadKeyPayload.Repo.Pg do
+defmodule ConsumerTest.BadKeyPayload.Repo.Pg do
   @moduledoc "Репозиторий с модулем ключа с опечаткой в поле нагрузки."
 
   alias Consumer.Domain.Sales.Account
 
   # опечатка в поле нагрузки без паттерна `%Payload{}`: при определении молчит
-  # expect: incompatible types given to Consumer.S.BadKeyPayload.reservation/1
+  # expect: incompatible types given to ConsumerTest.BadKeyPayload.reservation/1
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Consumer.Domain.Sales.Account.Repo,
     aggregate: Account,
     id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
-    key_reservations: [Consumer.S.BadKeyPayload]
+    key_reservations: [ConsumerTest.BadKeyPayload]
 end
 
-defmodule Consumer.S.KeyFind do
+defmodule ConsumerTest.KeyFind do
   @moduledoc "Вызовы генерируемого `find/2` модуля ключа."
 
   alias Consumer.Domain.Sales.Account

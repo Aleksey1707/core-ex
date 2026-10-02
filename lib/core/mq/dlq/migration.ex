@@ -5,7 +5,7 @@ defmodule Core.Mq.Dlq.Migration do
 
   Потребитель заводит миграцию со своим timestamp и делегирует DDL сюда:
 
-      defmodule MyApp.DAO.Migrations.CreateMqDlq do
+      defmodule MyApp.Infra.DAO.Migrations.CreateMqDlq do
         use Ecto.Migration
 
         defdelegate up, to: Core.Mq.Dlq.Migration
