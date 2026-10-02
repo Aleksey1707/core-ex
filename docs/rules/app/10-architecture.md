@@ -22,6 +22,7 @@
 | `MyApp.Codec` | `lib/my_app/codec.ex`, `lib/my_app/codec/` | граница кодека: Prim-профили `Prim.{Internal,External}`, entity-фасады `{Internal,External}`, реестр плагинов (см. «Boundary») |
 | `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>.ex`, `lib/my_app/domain/<bc>/` | bounded context — граница верхнего уровня: оглавление — корень границы, каталоги агрегатов и уровня контекста (см. «Раскладка», «Boundary») |
 | `MyApp.Infra` | `lib/my_app/infra.ex`, `lib/my_app/infra/` | граница-сток без зависимостей на домен: `DAO`, `StreamID` (см. «Корень и сток») |
+| `MyApp.Authz` | `lib/my_app/authz.ex`, `lib/my_app/authz/` | порт проверки доступа: behaviour, макрос декларации, каталог ошибок отказа, заглушка (см. «Проверка доступа») |
 | `MyApp.ContextFactory` | `lib/my_app/context_factory.ex` | сборка `%Context{}` вне web |
 | `MyAppWeb` | `lib/my_app_web/` | HTTP-поверхности, плаги, презентеры |
 | `MyAppIngest` | `lib/my_app_ingest.ex`, `lib/my_app_ingest/` | граница входа внешней системы (MAY): подписчики её брокера, разбор её формата, DLQ; зовёт usecases контекстов (см. «Boundary») |
@@ -99,6 +100,7 @@ lib/my_app/domain/<bc>/
     <actor>/view.ex                        # своя форма данных актора
   values/<value>.ex                        # значение без агрегата-владельца
   errors.ex                                # ошибки нескольких агрегатов
+  authz.ex                                 # реализация порта проверки доступа — у контекста прав
   <read_model>/                            # read-модель не по агрегату — каталог по назначению
   <operation>/<actor>/usecases.ex          # операция над равноправными агрегатами
   reactions/<component>/                   # реакция, которая зовёт usecases нескольких агрегатов
@@ -121,33 +123,36 @@ lib/my_app/domain/<bc>/
   назначению рядом с агрегатами, реакция, которая зовёт usecases нескольких агрегатов, — в
   `reactions/`. Реакция и воркер одного агрегата лежат в его каталоге (`17-otp-concurrency.md`,
   «Место компонента», «Фоновые задания»).
-- Часть приложения без агрегатов (хранилище файлов, интеграция с внешним сервисом, реестр прав)
-  MUST быть подсистемой `MyApp.<Subsystem>` вне `Domain` — своей границей (см. «Boundary»), а не
+- Часть приложения без агрегатов (хранилище файлов, интеграция с внешним сервисом) MUST быть
+  подсистемой `MyApp.<Subsystem>` вне `Domain` — своей границей (см. «Boundary»), а не
   контекстом: контекст без агрегатов — граница без модели. Агрегат в подсистеме MUST NOT: появился
-  агрегат — это bounded context.
+  агрегат — это bounded context. Порт подсистемой не является: контекстов он не видит, а работу
+  делает его реализация (см. «Проверка доступа»).
 - Техническое состояние без версии и событий (сессии, журнал прогонов, слот взаимоисключения) —
   не агрегат: оно лежит в подсистеме, его хранилище, кеш и чистка — один компонент
   (`17-otp-concurrency.md`, «Место компонента»), репозиторий —
   `MyApp.<Subsystem>.<Name>.Repo{,.Pg}` с резолвом через `Core.Config.repo!/1`.
 - Тип, который вводит модель контекста и который его агрегат хранит в состоянии (пространство
   имён у разрешений), MUST лежать в каталоге этого агрегата, а общий нескольким агрегатам — в
-  `values/`: это часть модели, и вынос в подсистему разрезал бы её ссылками в обе стороны.
-  Механизм над моделью (макрос DSL, проверка, реестр механизма) SHOULD быть подсистемой: он читает
-  модель, а модель его не знает. Правило режет по модулю: DSL, общий для usecases всех контекстов,
-  делится на типы модели в контексте и механизм в подсистеме. Билдер, который модель сама
-  подключает (`use` в агрегатах контекста), — часть модели и лежит в контексте; реестр адаптеров
-  одного контекста (каналы доставки уведомлений) MAY остаться в нём.
+  `values/`: это часть модели, и вынос в подсистему разрезал бы её ссылками в обе стороны. Билдер,
+  который модель сама подключает (`use` в агрегатах контекста), — часть модели и лежит в контексте;
+  реестр адаптеров одного контекста (каналы доставки уведомлений) MAY остаться в нём.
+- Механизм над моделью, который зовут usecases контекстов (проверка доступа), MUST быть портом с
+  реализацией в контексте модели, а не подсистемой: контекст модели сам зовёт механизм, и
+  подсистема, которая читает модель, замкнула бы с ним цикл границ, а тест usecase через неё
+  готовил бы данные чужой модели (см. «Проверка доступа»).
 - Собственный тип подсистемы (ключ объекта хранилища файлов) остаётся в подсистеме, даже если его
   хранит агрегат: ссылка контекста на подсистему разрешена, и связь односторонняя. Значение,
   общее нескольким контекстам, лежит в контексте, который его вводит; остальные видят его через
   `exports` этого контекста (`11-domain.md`, «Prim и Enum»).
-- Ключ механизма, который агрегат не читает ни в состоянии, ни в решениях (`decide` / `evolve`), а
-  читают только механизм и его декларации в usecases, MUST лежать у механизма, а не в агрегате
-  (`<Aggregate>.ns/0` — в реестре механизма): иначе каждый контекст ссылается на типы механизма, и
-  контексты замыкаются в цикл. Декларация называет ключ реестра атомом, механизм проверяет его при
-  компиляции.
-- Линтер признаки типа модели, механизма и ключа не проверяет: отступление — строка `DEBT.md`
-  (`deps/core/docs/adr/0025-model-types-in-common.md`).
+- Ключ, который агрегат не читает ни в состоянии, ни в решениях (`decide` / `evolve`), а называют
+  только декларации механизма в usecases (пространство разрешений), MUST объявлять контекст в своём
+  оглавлении — не агрегат (`<Aggregate>.ns/0`) и не реестр механизма: новый агрегат не правит
+  центральный реестр, а порт не знает контекстов. Декларация называет ключ атомом, макрос порта
+  сверяет его при компиляции (см. «Проверка доступа»).
+- Линтер признак типа модели не проверяет: отступление — строка `DEBT.md`
+  (`deps/core/docs/adr/0025-model-types-in-common.md`). Ссылку контекста на реализацию порта и
+  необъявленный ключ ловит сборка (см. «Проверка доступа»).
 
 Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `bc-root`: часть
 `<BC>.Common` и срез — namespace `<BC>.<X>.Usecases` с usecases по сценарию, который сам модулем не
@@ -158,9 +163,10 @@ usecases по сценарию (actor-репозиторий `<BC>.<Actor>.<Aggr
 ### Модуль-оглавление
 
 У каждого контекста MUST быть модуль-оглавление `MyApp.Domain.<BC>` в `lib/my_app/domain/<bc>.ex` —
-корень его границы: `use Boundary` с `deps` и `exports` (см. «Boundary») и объявления контекста —
-плагины кодека (`11-domain.md`, «Фасады и реестр плагинов»). Проекции, процессы агрегатов и детей
-для корня приложения объявляет не оглавление, а `<BC>.Supervision` (`17-otp-concurrency.md`,
+корень его границы: `use Boundary` с `deps` и `exports` (см. «Boundary») и объявления контекста,
+которые читают на компиляции, — плагины кодека (`11-domain.md`, «Фасады и реестр плагинов») и
+ключи пространств разрешений (см. «Проверка доступа»). Проекции, процессы агрегатов и детей для
+корня приложения объявляет не оглавление, а `<BC>.Supervision` (`17-otp-concurrency.md`,
 «Объявления контекста»). Без оглавления контекст не граница, а его состав читается только по
 дереву каталогов. Оглавление лежит на уровне `domain/`,
 рядом с каталогом контекста, а не внутри него.
@@ -182,7 +188,7 @@ defmodule MyApp.Domain.Orders do
   """
 
   use Boundary,
-    deps: [MyApp.Codec, MyApp.Infra, MyApp.Domain.Billing],
+    deps: [MyApp.Authz, MyApp.Codec, MyApp.Infra, MyApp.Domain.Billing],
     exports: [
       Order.Client.Usecases,
       Order.Admin.Usecases,
@@ -200,6 +206,11 @@ defmodule MyApp.Domain.Orders do
   @spec codec_plugins() :: [module()]
 
   def codec_plugins, do: [Order.Event.Codec, Order.View.Codec]
+
+  @doc "Ключи пространств разрешений и их описание; склеивает их `MyAppApp.authz_namespaces/0`."
+  @spec authz_namespaces() :: [{atom(), String.t()}]
+
+  def authz_namespaces, do: [orders: "Заказы и корзины клиентов"]
 end
 ```
 
@@ -221,6 +232,8 @@ end
   граница. Место операции над несколькими агрегатами — «Usecases».
 - Контекст MAY звать подсистему `MyApp.<Subsystem>`, объявив её в `deps`: связь остаётся
   односторонней.
+- Проверку доступа контекст MUST звать через порт `MyApp.Authz`, а не через контекст, который её
+  реализует: в `deps` — порт, а не контекст прав (см. «Проверка доступа»).
 - Сборка приложения и точки входа — закрытый состав границ: корень `MyAppApp` (дерево процессов,
   метрики, mix-таски, задачи релиза), `MyApp.Codec` (реестр плагинов), `MyAppWeb` и граница входа
   внешней системы `MyAppIngest` (MAY, см. «Boundary»). Точки входа — `MyAppWeb`, `MyAppIngest` и
@@ -298,8 +311,8 @@ defmodule MyApp.Domain.<BC>.<Aggregate>.Repo do
   `optional: true`, и без записи в `deps` адаптеров `Core.Mq.*` просто нет. После добавления или
   удаления клиента — `mix deps.compile core --force`, иначе адаптер останется в том состоянии, в
   каком его собрали.
-- Ключи под `:my_app` — только подмена конвенции `<Behaviour>.Pg` (`13-repos.md`) и настройки
-  подсистем самого приложения.
+- Ключи под `:my_app` — только подмена конвенции `<Behaviour>.Pg` (`13-repos.md`), выбор
+  реализации порта (см. «Проверка доступа») и настройки подсистем самого приложения.
 
 Старт MUST проверять конфигурацию до подъёма дерева — неверная конфигурация роняет старт, а не
 всплывает на первом запросе (`17-otp-concurrency.md`):
@@ -323,9 +336,9 @@ Core.Security.Secret.ensure_configured!()
 
 | Файл | Что в нём |
 |---|---|
-| `config.exs` | `compile_env` и DI-подмены: `config :core` (`otp_app`, `telemetry_prefix`), подмена `<Behaviour>.Pg` (`13-repos.md`, «DI»), `.Cached` и TTL кеша (`16-caching.md`, «Конфигурация») |
+| `config.exs` | `compile_env` и DI-подмены: `config :core` (`otp_app`, `telemetry_prefix`), подмена `<Behaviour>.Pg` (`13-repos.md`, «DI»), `.Cached` и TTL кеша (`16-caching.md`, «Конфигурация»), реализация и реестр порта `MyApp.Authz` (см. «Проверка доступа») |
 | `runtime.exs` | env и тумблеры: `OUTBOX_*` (`14-events-outbox.md`, «Конфигурация»), тумблеры поддеревьев и опции процессов, `ES_PROJECTIONS_*` (`17-otp-concurrency.md`), тумблер инвалидатора кеша (`16-caching.md`) |
-| `test.exs` | тестовый overlay: очередь выключена (`14-events-outbox.md`), кеш на `.Pg` (`16-caching.md`), тестовый plug HTTP-клиентов (`19-testing.md`, «Внешние зависимости»), сервер метрик и PromEx выключены (`21-observability.md`, «Сервер метрик») |
+| `test.exs` | тестовый overlay: очередь выключена (`14-events-outbox.md`), кеш на `.Pg` (`16-caching.md`), тестовый plug HTTP-клиентов (`19-testing.md`, «Внешние зависимости»), мок порта `MyApp.Authz` (`19-testing.md`, «Проверка доступа»), сервер метрик и PromEx выключены (`21-observability.md`, «Сервер метрик») |
 | `dev.exs`, `prod.exs` | настройки окружения без секретов и env: уровень логов, `debug_errors`, `force_ssl` |
 
 Секреты площадок и чтение env в `dev.exs` / `prod.exs` MUST NOT, их место — `runtime.exs`:
@@ -351,13 +364,14 @@ end
 
 | Boundary | `deps:` | Что внутри |
 |---|---|---|
-| `MyApp.Domain.<BC>` | контексты, от которых зависит, `MyApp.Codec`, `MyApp.Infra`, подсистемы | bounded context: корень — оглавление, состав `exports` — ниже |
+| `MyApp.Domain.<BC>` | контексты, от которых зависит, `MyApp.Codec`, `MyApp.Infra`, `MyApp.Authz`, подсистемы | bounded context: корень — оглавление, состав `exports` — ниже |
 | `MyApp.Codec` | — (`check: [out: false]`) | Prim-профили, entity-фасады, реестр плагинов |
 | `MyApp.Infra` | `[]` | сток без зависимостей на домен: `DAO`, `StreamID` |
+| `MyApp.Authz` | `[]`; `exports: [Errors]` | порт проверки доступа: behaviour, макрос декларации, каталог ошибок отказа, заглушка |
 | `MyApp.<Subsystem>` | контексты, которые она читает, `MyApp.Infra` | подсистема приложения |
 | `MyAppWeb` | контексты, `MyApp.Codec`; `check: [aliases: true]` | web-слой |
 | `MyAppIngest` | контексты, подсистемы; `check: [aliases: true]` | граница входа внешней системы: подписчики её брокера, разбор её формата, DLQ |
-| `MyAppApp` | контексты, подсистемы, `MyApp.Infra`, `MyAppWeb`, `MyAppIngest` | композиционный корень: `Application`, список контекстов, `Outbox`, `PromEx`, `MetricsServer`, `Release`, mix-таски |
+| `MyAppApp` | контексты, подсистемы, `MyApp.Infra`, `MyApp.Authz`, `MyAppWeb`, `MyAppIngest` | композиционный корень: `Application`, список контекстов, `Outbox`, `PromEx`, `MetricsServer`, `Release`, mix-таски |
 | `MyAppTest` | — (`check: [in: false, out: false]`) | обвязка тестов `test/support/` |
 
 - Bounded context MUST быть границей верхнего уровня, а `MyApp` границей не является
@@ -375,6 +389,9 @@ end
   ни одного.
 - `MyApp.Infra` — сток: от него зависят контексты, подсистемы и корень, а `MyAppWeb` и
   `MyAppIngest` держать его в `deps` MUST NOT.
+- `MyApp.Authz` — порт: от него зависят контексты и корень, а сам он MUST NOT держать в `deps` ни
+  одного контекста — реализацию называет конфигурация, а не ссылка (см. «Проверка доступа»).
+  Экспорт порта — каталог отказа `Errors`: ошибку строит реализация в контексте прав.
 - `MyAppWeb` и `MyAppIngest` MUST нести `check: [aliases: true]`: без этой опции `boundary` видит
   вызов `DAO.all/1`, но не модуль, переданный значением (`Transact.run(DAO, …)`), и точка входа
   дотягивается до `DAO` мимо сборки.
@@ -405,6 +422,108 @@ end
 
 Проверяется: `mix compile --warnings-as-errors` — предупреждения `boundary` (`20-agreements.md`,
 «Пайплайн проверок»).
+
+## Проверка доступа
+
+Проверка доступа — порт `MyApp.Authz`: behaviour проверки и макрос декларации, граница без `deps`
+на контексты. Реализует порт контекст, который владеет моделью прав (роли, выданные разрешения), а
+у приложения без такой модели — заглушка порта; реализацию выбирает композиционный корень. Ключи
+пространств разрешений объявляет каждый контекст, корень склеивает их в реестр для реализации
+(`deps/core/docs/adr/0042-authz-port.md`).
+
+- Порт MUST держать behaviour `check/4` (тип учётной записи, ключ пространства, операции,
+  `%Context{}`), макрос декларации и каталог ошибок отказа `MyApp.Authz.Errors`. У приложения без
+  модели прав реализация — заглушка порта `MyApp.Authz.Stub`: контекст без агрегатов MUST NOT
+  («Состав контекста»), а проверка, которой нужна модель, — уже реализация в контексте.
+- Реализация в контексте прав — `MyApp.Domain.<BC>.Authz` в `lib/my_app/domain/<bc>/authz.ex` с
+  `@behaviour MyApp.Authz`: модель она читает своими ReadRepo (`13-repos.md`, «Read-модель»). В
+  `exports` реализация не входит — её называет только конфигурация.
+- Декларация MUST стоять на модуле usecases актора — `use MyApp.Authz` с типом учётной записи
+  `account:` и ключом пространства `namespace:`: они общие для всех usecases актора над агрегатом.
+  Макрос даёт `check_user/2`, и usecase называет им операцию первым шагом, до транзакции
+  («Usecases»).
+- Ключи пространств своих агрегатов и их описание MUST объявляться в оглавлении контекста функцией
+  `authz_namespaces/0` (см. «Модуль-оглавление»). Декларация называет ключ своего контекста, и
+  макрос сверяет его с `authz_namespaces/0` оглавления: ключ, которого контекст не объявил, —
+  `CompileError`. Сверка MUST идти в теле модуля актора, а не в теле макроса: только тогда правка
+  оглавления пересобирает модули деклараций (ADR-0042).
+- Реестр MUST склеивать одна функция корня `MyAppApp.authz_namespaces/0` из оглавлений
+  контекстов; ключ, объявленный двумя контекстами, — `CompileError` склейки. Реализация получает
+  реестр функцией порта `MyApp.Authz.namespaces/0`, которая зовёт MFA корня из конфигурации: от
+  корня не зависит ни одна граница («Boundary»).
+- Реализацию и реестр MUST называть ключ `config :my_app, MyApp.Authz` в `config.exs` — `impl:` и
+  `namespaces:`, мок порта — `config/test.exs` (`19-testing.md`, «Проверка доступа»). Порт MUST
+  читать ключ в рантайме, а не `compile_env`: литерал реализации в порте — ссылка на контекст
+  прав, которую репортит `boundary` (ADR-0042).
+- `MyAppApp.Application.start/2` MUST звать `MyApp.Authz.validate!/0` до подъёма дерева: ключ
+  читается в рантайме, и опечатку в `impl:` иначе нашёл бы первый запрос (`17-otp-concurrency.md`,
+  «Дерево процессов»).
+- Отказ MUST быть `%Error{kind: :domain, code: :access_denied}` из `MyApp.Authz.Errors`: его
+  возвращают все реализации, включая мок, и `ErrorMapper` отвечает 403 без своей клозы
+  (`12-errors.md`, «Границы»).
+
+```elixir
+# плохо — контекст зовёт реализацию: Orders зависит от модели прав, тест usecase готовит её данные
+use Boundary, deps: [MyApp.Codec, MyApp.Infra, MyApp.Domain.Rights]
+
+with :ok <- MyApp.Domain.Rights.Authz.check(:client, :orders, ~w(update)a, context), do: ...
+
+# хорошо — lib/my_app/domain/orders/order/client/usecases.ex: тип учётной записи и пространство —
+# у актора, операция — у usecase; ключ :orders объявлен в authz_namespaces/0 оглавления
+use MyApp.Authz,
+  account: :client,
+  namespace: :orders
+
+def cancel(%Order.ID{} = id, %Version{} = version, %Context{} = context, opts \\ []) do
+  with :ok <- check_user(~w(update)a, context), ...
+end
+```
+
+```elixir
+# lib/my_app/authz.ex — сверка ключа в теле модуля актора, реализация из конфигурации в рантайме
+@required ~w(account namespace)a
+
+defmacro __using__(opts) do
+  :ok = Opts.validate!(opts, @required, [], "MyApp.Authz")
+  [account, namespace] = Enum.map(@required, &Opts.atom!(opts, &1, "MyApp.Authz"))
+  # оглавление MyApp.Domain.<BC> — по имени модуля актора (путь = имя модуля, «Раскладка»)
+  index = index_of(__CALLER__.module)
+
+  quote do
+    MyApp.Authz.declared!(unquote(index).authz_namespaces(), unquote(namespace), __MODULE__)
+
+    defp check_user(ops, context),
+      do: MyApp.Authz.check(unquote(account), unquote(namespace), ops, context)
+  end
+end
+
+@doc "Проверить доступ реализацией, которую называет конфигурация."
+@spec check(atom(), atom(), [atom()], Context.t()) :: :ok | {:error, Error.t()}
+
+def check(account, namespace, ops, %Context{} = context),
+  do: impl().check(account, namespace, ops, context)
+
+# ---
+
+defp impl, do: :my_app |> Application.fetch_env!(__MODULE__) |> Keyword.fetch!(:impl)
+
+# config/config.exs — реализацию выбирает корень
+config :my_app, MyApp.Authz,
+  impl: MyApp.Domain.Rights.Authz,
+  namespaces: {MyAppApp, :authz_namespaces, []}
+
+# lib/my_app_app.ex — реестр из оглавлений; дубль ключа — CompileError склейки
+@authz_namespaces MyApp.Authz.registry!(
+                    MyApp.Domain.Billing.authz_namespaces() ++
+                      MyApp.Domain.Orders.authz_namespaces()
+                  )
+
+def authz_namespaces, do: @authz_namespaces
+```
+
+Проверяется: `mix compile --warnings-as-errors` — ссылка контекста на реализацию и литерал
+реализации в порте — предупреждения `boundary`; необъявленный и дублированный ключ — `CompileError`
+макроса порта.
 
 ## Usecases
 
@@ -477,16 +596,17 @@ end)
 
 Конвенция тела:
 
-1. Authz — до открытия транзакции.
+1. Проверка доступа — `check_user/2` декларации актора, до открытия транзакции.
 2. Актор: `CurrentUser.get(context)` → `by` — там же, до транзакции.
 3. Load → мутация домена → persist — внутри `Transact.run`.
 4. `%Context{}` — последний из данных (`deps/core/docs/rules/20-agreements.md`, «Context — последний
    из данных»).
 
-Authz и резолв актора MUST идти до открытия транзакции: проверка прав ходит в read-путь, а тот
-в dev и prod MAY быть закеширован, и внепроцессный сайд-эффект внутри транзакции запрещён.
-Транзакционности с самой командой проверка доступа не требует — отказ по правам это отказ до
-начала работы.
+Проверка доступа и резолв актора MUST идти до открытия транзакции: проверка ходит в read-путь
+модели прав, а тот в dev и prod MAY быть закеширован, и внепроцессный сайд-эффект внутри транзакции
+запрещён. Транзакционности с самой командой проверка доступа не требует — отказ по правам это отказ
+до начала работы. Доступ usecase MUST проверять через порт (см. «Проверка доступа»), а не чтением
+модели прав.
 
 Возвраты по CQS (`deps/core/docs/rules/20-agreements.md`):
 
@@ -604,7 +724,7 @@ flowchart TB
   нет в `exports` контекста, и ждёт usecase.
 - Воркеры, подписчики и mix-таски — такие же вызывающие, как web: оркестрация прогона, но не
   доменные мутации.
-- Usecases оркестрируют domain и репозитории; authz живёт здесь.
+- Usecases оркестрируют domain и репозитории; доступ проверяют здесь, через порт `MyApp.Authz`.
 - Domain не пишет в БД и не знает про Ecto.
 - Repo пишет состояние и — при наличии — события с outbox в одной транзакции.
 - Command-путь работает с агрегатом на доменных Prim, query-путь — с `<ReadModel>.View`

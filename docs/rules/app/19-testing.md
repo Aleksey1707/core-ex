@@ -72,6 +72,7 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 | `*_seed.ex` | наполнение БД связанными агрегатами под тест |
 | `*_contract.ex` | общие наборы тестов behaviour (`deps/core/docs/rules/19-testing.md`, «Контрактные тесты behaviour») |
 | дублёры внешних систем | канал, брокер, каталог пользователей без сети |
+| `mocks.ex` | мок порта проверки доступа `MyAppTest.Authz` («Проверка доступа») |
 | `test/support/fixtures/events/**` | снимки wire-формата событий |
 
 - Сборка фикстур доменными конструкторами и событиями, а не строками в БД, —
@@ -80,6 +81,49 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 - Дублёр внешней системы MUST держать контракт адаптера буквально, включая поведение при
   ошибке. Дублёр, который «всегда `:ok`», прячет ровно тот класс ошибок, ради которого пишется
   тест.
+
+## Проверка доступа
+
+Порт `MyApp.Authz` (`10-architecture.md`, «Проверка доступа») в тестах закрывает мок Mox:
+`Mox.defmock(MyAppTest.Authz, for: MyApp.Authz)` в `test/support/mocks.ex`, `config/test.exs`
+называет его реализацией порта, `{:mox, "~> 1.2", only: :test}` — в `deps` приложения. Ожидания
+Mox принадлежат процессу теста, и тест с моком остаётся `async: true`.
+
+- Тест usecase MUST идти с моком порта, а не с реализацией контекста прав: `Mox.stub/3`
+  пропускает проверку, `Mox.expect/4` — сверяет тип учётной записи, ключ и операции. Данные готовит
+  только свой контекст: роли, учётные записи и проекции контекста прав тесту предметной логики не
+  нужны.
+- Если порт реализует контекст прав, каждая операция — usecase с `check_user/2` — MUST иметь
+  интеграционный тест с боевой реализацией: `Mox.stub_with(MyAppTest.Authz,
+  MyApp.Domain.<BC>.Authz)`, отказ `{:error, %Error{code: :access_denied}}` без выданного права и
+  успех с ним; права выдают usecases контекста прав. Только он видит, что декларация актора и
+  операция usecase сходятся с выданными правами. `async:` у него — по модели прав: ожидание её
+  проекции — `async: false` (`deps/core/docs/rules/19-testing.md`, «Case-модули»).
+- Контрактный набор behaviour на мок не распространяется — его место занимает интеграционный тест
+  операции (`deps/core/docs/rules/19-testing.md`, «Контрактные тесты behaviour»).
+- Приложение, у которого порт закрывает заглушка `MyApp.Authz.Stub`, MAY не заводить мок: тест
+  usecase идёт с заглушкой из `config/test.exs`, интеграционных тестов доступа нет — модели прав
+  нет.
+
+```elixir
+# плохо — тест логики отмены поднимает модель прав: выдачу роли и прогон её проекции
+setup %{user_id: user_id} do
+  :ok = MyAppTest.RightsSeed.grant(user_id, :orders, ~w(update)a)
+  :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.Rights.Access.Projection)
+end
+
+# хорошо — test/my_app/domain/orders/order/client/usecases_test.exs: логика — с моком
+setup do
+  Mox.stub(MyAppTest.Authz, :check, fn _account, _namespace, _ops, _context -> :ok end)
+  :ok
+end
+
+# хорошо — там же, describe «доступ»: операция — с боевой реализацией
+setup do
+  Mox.stub_with(MyAppTest.Authz, MyApp.Domain.Rights.Authz)
+  :ok
+end
+```
 
 ## Event sourcing
 

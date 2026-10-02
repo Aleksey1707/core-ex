@@ -15,9 +15,10 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 
 `MyAppApp.Application` — композиционный корень, `strategy: :one_for_one`. В нём MUST быть только:
 
-1. `Core.Config.validate!()` и проверки разделяемой инфраструктуры (`10-architecture.md`,
-   «Обязательства перед библиотекой») — **до** подъёма детей: неверная конфигурация роняет старт,
-   а не всплывает на первом запросе;
+1. `Core.Config.validate!()`, проверки разделяемой инфраструктуры (`10-architecture.md`,
+   «Обязательства перед библиотекой») и порта `MyApp.Authz.validate!/0` (там же, «Проверка
+   доступа») — **до** подъёма детей: неверная конфигурация роняет старт, а не всплывает на первом
+   запросе;
 2. инициализация общего состояния без процессов («Состояние без процессов») — там же, до детей;
 3. сама разделяемая инфраструктура: PromEx, `DAO`, кластер, PubSub, соединения с брокером,
    планировщик задач `Oban`. Соединение, у которого один пользователь, — не разделяемое: оно
@@ -318,7 +319,14 @@ end
 # lib/my_app_app.ex — корень: контексты в порядке зависимостей
 defmodule MyAppApp do
   use Boundary,
-    deps: [MyApp.Domain.Billing, MyApp.Domain.Orders, MyApp.Infra, MyAppWeb, MyAppIngest]
+    deps: [
+      MyApp.Domain.Billing,
+      MyApp.Domain.Orders,
+      MyApp.Infra,
+      MyApp.Authz,
+      MyAppWeb,
+      MyAppIngest
+    ]
 
   def contexts, do: [MyApp.Domain.Billing.Supervision, MyApp.Domain.Orders.Supervision]
 end
