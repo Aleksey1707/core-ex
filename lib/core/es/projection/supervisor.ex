@@ -6,7 +6,7 @@ defmodule Core.Es.Projection.Supervisor do
       children = [
         MyApp.DAO,
         {Core.Es.Projection.Supervisor,
-         projections: [MyApp.Domain.<BC>.<Actor>.AccountList.Projection],
+         projections: [MyApp.Domain.<BC>.AccountList.Projection],
          enabled: true}
       ]
 

@@ -3,7 +3,7 @@ defmodule Core.Context do
   Сквозной контекст вызова: `%Context{data: map}`.
 
   Носитель того, что не является аргументом предметной операции: текущий пользователь
-  (`MyApp.Domain.<BC>.Common.CurrentUser`), shadow copy (`Repo.Sc`) и подобное. Типизированный
+  (`MyApp.Domain.<BC>.<Aggregate>.CurrentUser`), shadow copy (`Repo.Sc`) и подобное. Типизированный
   доступ к ключу — через `Context.Accessor`.
 
   Ключ — атом: словарь ключей закрыт кодом (`Context.Accessor`, `Repo.Sc`), а не приходит

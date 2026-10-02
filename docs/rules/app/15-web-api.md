@@ -177,7 +177,7 @@ def create(conn, _params) do
   body = OpenApiSpex.body_params(conn)
 
   with {:ok, name} <- body |> Params.get(:name) |> Result.and_then(&Agg.Name.new/1),
-       {:ok, id} <- Usecases.Agg.create(name, conn.assigns.context) do
+       {:ok, id} <- Agg.Client.Usecases.create(name, conn.assigns.context) do
     json(conn, Response.success(%{id: OutCodec.dump(id)}))
   end
 end
@@ -186,22 +186,22 @@ end
 ```elixir
 # плохо — забытый If-Match на команде становится :current и затирает конкурентную запись
 with {:ok, version} <- Params.optional_version(params),
-     {:ok, written} <- Usecases.Agg.take(id, version, context),
+     {:ok, written} <- Agg.Client.Usecases.take(id, version, context),
      do: respond_taken(conn, id, written)
 
 # хорошо — команда требует явную версию
 with {:ok, version} <- Params.explicit_version(params),
-     {:ok, written} <- Usecases.Agg.take(id, version, context),
+     {:ok, written} <- Agg.Client.Usecases.take(id, version, context),
      do: respond_taken(conn, id, written)
 
 # хорошо — чтение по версии: нет заголовка → 400, `*` → :current
 with {:ok, version} <- Params.expected_version(params),
-     {:ok, view} <- Usecases.Agg.get(id, version, context),
+     {:ok, view} <- Agg.Client.Usecases.get(id, version, context),
      do: json(conn, Response.success(OutCodec.dump(view)))
 
 # допустимо, если проект выбрал необязательный заголовок: нет заголовка → :current
 with {:ok, version} <- Params.optional_version(params),
-     {:ok, view} <- Usecases.Agg.get(id, version, context),
+     {:ok, view} <- Agg.Client.Usecases.get(id, version, context),
      do: json(conn, Response.success(OutCodec.dump(view)))
 ```
 
@@ -263,7 +263,7 @@ event-sourced агрегата, одинаково. Без ожидания от
 
 ```elixir
 # плохо — чтение сразу после команды: проекция ещё не обработала запись
-with {:ok, _version} <- Usecases.Agg.take(id, version, context),
+with {:ok, _version} <- Agg.Client.Usecases.take(id, version, context),
      do: reload(conn, id)
 
 # плохо — ожидание до хелпера: `Prefer` не работает, таймаут клиента не применяется
@@ -278,7 +278,7 @@ defp respond_taken(conn, id, version) do
 end
 
 # хорошо — литерал в захвате defp экшена, ID сужен в голове, хелпер решает по `Prefer`
-with {:ok, version} <- Usecases.Agg.take(id, expected, context),
+with {:ok, version} <- Agg.Client.Usecases.take(id, expected, context),
      do: respond_taken(conn, id, version)
 
 defp respond_taken(conn, %Agg.ID{} = id, version) do
@@ -286,7 +286,7 @@ defp respond_taken(conn, %Agg.ID{} = id, version) do
 end
 
 # хорошо — создание: {id, version} и на 200, и на 202
-with {:ok, {id, version}} <- Usecases.Agg.open(name, context),
+with {:ok, {id, version}} <- Agg.Client.Usecases.open(name, context),
      do: respond_created(conn, id, version)
 
 defp respond_created(conn, %Agg.ID{} = id, version) do

@@ -4,7 +4,7 @@ defmodule Core.Es.Outbox do
 
       use Core.Es.Outbox,
         topic: "roles",
-        event: MyApp.Domain.<BC>.Common.Role.Event
+        event: MyApp.Domain.<BC>.Role.Event
 
   Генерирует `from_events/1`, `from_event/1` и интроспекцию `__es_event__/0` (сверка в
   `Core.Repo.Pg.StateStored`). Wire-payload — конверт события целиком

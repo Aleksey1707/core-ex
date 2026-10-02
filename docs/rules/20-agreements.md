@@ -605,7 +605,7 @@ id владельца в `find/2` модуля ключа (`use Core.Es.KeyReser
 Schema-мапперы (dual API `to_entity` / `to_entity!`) — какой вызов на каком call site:
 `13-repos.md`, раздел «Schema»; события страницы потока грузятся safe — там же, «Страница потока».
 
-Конверсия datetime-Prim в domain flow (мутации агрегатов / actor-domain), кроме `evolve/2`:
+Конверсия datetime-Prim в domain flow (мутации агрегатов), кроме `evolve/2`:
 только `from` + `with` (`CreatedAt.from`, `UpdatedAt.from`, `Es.Event.At.from`, …), не `from!` и
 без обёрток вроде `event_at/1` — на call site сразу `Es.Event.At.from(at)`.
 

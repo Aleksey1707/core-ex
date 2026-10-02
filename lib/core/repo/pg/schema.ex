@@ -7,8 +7,8 @@ defmodule Core.Repo.Pg.Schema do
       end
 
       use Core.Repo.Pg.Schema,
-        entity: MyApp.Domain.<BC>.Common.Role,
-        id: MyApp.Domain.<BC>.Common.Role.ID
+        entity: MyApp.Domain.<BC>.Role,
+        id: MyApp.Domain.<BC>.Role.ID
 
   Ставится **после** блока `schema/2` (нужен `defstruct`); safe-мапперы схема пишет сама —
   они и есть источник истины (см. `13-repos.md`).

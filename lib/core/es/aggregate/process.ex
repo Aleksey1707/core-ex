@@ -3,13 +3,13 @@ defmodule Core.Es.Aggregate.Process do
   Билдер процесса агрегата (`use`): кэш состояния и очередь команд одного event-sourced агрегата
   на ноде; команда — с повтором после отказа записи.
 
-      defmodule MyApp.Domain.<BC>.Common.Account.Process do
+      defmodule MyApp.Domain.<BC>.Account.Process do
         use Core.Es.Aggregate.Process,
-          repo: MyApp.Domain.<BC>.Common.Account.Repo
+          repo: MyApp.Domain.<BC>.Account.Repo
       end
 
       # MyApp.Application — опции из одного модуля приложения (`MyApp.Processes.opts/1`)
-      process = MyApp.Domain.<BC>.Common.Account.Process
+      process = MyApp.Domain.<BC>.Account.Process
       children = [MyApp.DAO, {process, MyApp.Processes.opts(process)}]
 
       # usecase

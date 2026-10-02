@@ -3,8 +3,8 @@ defmodule Core.Es.Projection do
   Builder проекции (`use`), её behaviour, прогон одной пачки `run_once/2` и генерируемое ожидание
   проекции после записи `await/3`.
 
-      defmodule MyApp.Domain.<BC>.<Actor>.AccountList.Projection do
-        alias MyApp.Domain.<BC>.Common.Account
+      defmodule MyApp.Domain.<BC>.AccountList.Projection do
+        alias MyApp.Domain.<BC>.Account
 
         use Core.Es.Projection,
           name: "account_list",

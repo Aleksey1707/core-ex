@@ -121,14 +121,14 @@ dialyzer → test → credo → security → audit
 
   `InCodec` / `OutCodec` — entity-фасады (Prim + плагины); `PrimInCodec` — явный Prim-only.
 - Репозиторий агрегата (`<Aggregate>.Repo`) MUST адресоваться через алиас **агрегата**:
-  `alias MyApp.Domain.<BC>.Common.<Aggregate>` → `<Aggregate>.Repo.Pg.Schema`. Отдельный
-  `alias …Common.<Aggregate>.Repo` — MUST NOT: короткое имя `Repo` в том же файле почти всегда
+  `alias MyApp.Domain.<BC>.<Aggregate>` → `<Aggregate>.Repo.Pg.Schema`. Отдельный
+  `alias …<Aggregate>.Repo` — MUST NOT: короткое имя `Repo` в том же файле почти всегда
   занято `Core.Repo` (`use Repo.Pg`), и такой алиас молча его перебивает (`13-repos.md`).
 - `MyApp.DAO` — единственный `Ecto.Repo`; обращаться к нему из web-слоя MUST NOT
   (`10-architecture.md`).
 - `Core.Config` требует `require Config` рядом с алиасом: `repo!/1` — макрос.
 - Типовые конфликты приложения и их разрешение MUST быть выписаны таблицей в локальном своде:
-  `Common.<Aggregate>` против одноимённого модуля среза, общие схемы против ресурсных,
+  одноимённые агрегаты двух контекстов, общие схемы против ресурсных,
   `Errors` агрегата, одноимённые модули библиотеки и домена.
 
 ## Термины

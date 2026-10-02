@@ -114,14 +114,13 @@
 | `<Actor>` | `<actor>` | актор — инициатор операций, подкаталог в каталоге агрегата |
 | `<Aggregate>` | `<aggregate>` | агрегат |
 | `<ReadModel>` | `<read_model>` | read-модель: View, ReadRepo и проекция одного каталога |
-| `<Usecase>` | — | имя модуля usecases; по умолчанию имя агрегата |
+| `<Usecase>` | — | имя usecase в устаревшей форме модуля `<BC>.<Actor>.Usecases.<Usecase>` |
 | `<Subsystem>` | `<subsystem>` | подсистема приложения вне `Domain`, без агрегатов |
 | `<Component>` | `<component>` | компонент: процессы одного назначения (и одного тумблера, кроме подчинённого, если он есть) под корнем `<Component>.Supervisor` |
 | `<Operation>` | `<operation>` | операция над равноправными агрегатами — каталог уровня контекста |
 | `<Value>` | `<value>` | значение (Prim) |
 | `<Api>`, `<Version>`, `<Resource>` | `<api>`, `<version>`, `<resource>` | web: поверхность, версия API, ресурс |
 | `<Nested>`, `<Group>` | `<nested>`, `<group>` | web: вложенный ресурс; группа ресурсов без своего ресурса |
-| `<Part>` | `<scope>` | часть контекста: `Common` или срез `<Actor>` (в путях — `common` или `<actor>`) |
 | `<Owner>` | — | модуль-владелец каталога ошибок, который возвращает не агрегат |
 | `<Behaviour>` | — | behaviour, реализацию которого резолвит конвенция `<Behaviour>.Pg` |
 | `<Name>` | `<name>` | имя модуля, не покрытое другими плейсхолдерами (событие, команда, задача оператора) |
@@ -130,7 +129,7 @@
 | `<Other>` | — | другая read-модель или агрегат (схема join `ReadRepo.Pg.Schema.<Other>`) |
 | `<N>` | — | номер версии API (`V<N>`) или проекции (`ProjectionV<N>`) |
 
-В путях и именах файлов понятие пишется snake_case: `lib/my_app/domain/<bc>/<actor>/`.
+В путях и именах файлов понятие пишется snake_case: `lib/my_app/domain/<bc>/<aggregate>/<actor>/`.
 
 ## Модальность
 

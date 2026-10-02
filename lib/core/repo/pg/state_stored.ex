@@ -3,7 +3,7 @@ defmodule Core.Repo.Pg.StateStored do
   Билдер write-репозитория state-stored агрегата: строка, дочерние строки, события и outbox.
 
       use Core.Repo.Pg.StateStored,
-        behaviour: MyApp.Domain.<BC>.Common.Role.Repo,
+        behaviour: MyApp.Domain.<BC>.Role.Repo,
         schema: Schema,
         to_entity: &Schema.to_entity!/1,
         to_model: &Schema.to_model!/1,

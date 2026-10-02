@@ -2,9 +2,9 @@ defmodule Core.Es.Aggregate do
   @moduledoc """
   Builder event-sourced агрегата (`use`) и его behaviour.
 
-      defmodule MyApp.Domain.<BC>.Common.Account do
+      defmodule MyApp.Domain.<BC>.Account do
         use Core.Es.Aggregate,
-          event_codec: MyApp.Domain.<BC>.Common.Account.Event.Codec
+          event_codec: MyApp.Domain.<BC>.Account.Event.Codec
 
         defstruct id: nil, version: nil, name: nil, status: nil
 

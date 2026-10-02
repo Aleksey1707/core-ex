@@ -2,7 +2,7 @@ defmodule Core.Es.Cmd do
   @moduledoc """
   Builder команды event-sourced агрегата (`<Aggregate>.Cmd.<Name>`).
 
-      defmodule MyApp.Domain.<BC>.Common.Account.Cmd.Rename do
+      defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
         use Core.Es.Cmd
 
         @enforce_keys ~w(name by at)a

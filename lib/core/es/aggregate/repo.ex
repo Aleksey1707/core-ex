@@ -2,10 +2,10 @@ defmodule Core.Es.Aggregate.Repo do
   @moduledoc """
   Билдер behaviour write-репозитория event-sourced агрегата (`use`).
 
-      defmodule MyApp.Domain.<BC>.Common.Account.Repo do
+      defmodule MyApp.Domain.<BC>.Account.Repo do
         use Core.Es.Aggregate.Repo,
-          aggregate: MyApp.Domain.<BC>.Common.Account,
-          id: MyApp.Domain.<BC>.Common.Account.ID
+          aggregate: MyApp.Domain.<BC>.Account,
+          id: MyApp.Domain.<BC>.Account.ID
       end
 
   Генерирует `@callback`:

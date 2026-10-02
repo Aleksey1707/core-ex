@@ -5,7 +5,7 @@ defmodule Core.Es.Event.Codec do
       @tag_by_mod %{Event.Registered => "delivery.registered", Event.Updated => "delivery.updated"}
 
       use Core.Es.Event.Codec,
-        event: MyApp.Domain.<BC>.Common.Delivery.Event,
+        event: MyApp.Domain.<BC>.Delivery.Event,
         type: "delivery",
         tags: @tag_by_mod
 

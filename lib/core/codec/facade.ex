@@ -5,7 +5,7 @@ defmodule Core.Codec.Facade do
   ```elixir
   use Core.Codec.Facade,
     prim: MyApp.Codec.Prim.Internal,
-    plugins: [MyApp.Domain.<BC>.Common.<Aggregate>.Codec]
+    plugins: [MyApp.Domain.<BC>.<Aggregate>.Codec]
   ```
 
   Наружу фасад отдаёт три функции — `dump/1`, `load/2`, `load!/2`

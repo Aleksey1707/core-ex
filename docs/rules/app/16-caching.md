@@ -1,8 +1,9 @@
 # Кеширование
 
 - **Область.** Кеш read-модели
-  `lib/my_app/domain/<bc>/<scope>/<read_model>/read_repo/{cached,invalidator,supervisor}.ex`, ключи
-  кеша и TTL в `config/**`, провайдер размеров в PromEx приложения.
+  `lib/my_app/domain/<bc>/<read_model>/read_repo/{cached,invalidator,supervisor}.ex` и
+  `<aggregate>/<actor>/read_repo/…` у ReadRepo актора, ключи кеша и TTL в `config/**`, провайдер
+  размеров в PromEx приложения.
 - **Читать перед.** Включением кеша на read-репозитории; правкой `.Cached`, `.Invalidator` и
   их конфигурации.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
@@ -127,16 +128,17 @@ Usecases (query) → ReadRepo (behaviour)
 
 ```elixir
 # config/config.exs — подмена реализации и TTL (compile-time)
-config :my_app, MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo,
-       MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Cached
+config :my_app, MyApp.Domain.<BC>.<ReadModel>.ReadRepo,
+       MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Cached
 
-config :my_app, MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Cached,
-  store: MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Pg,
+config :my_app, MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Cached,
+  store: MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Pg,
   ttl_ms: :timer.minutes(10)
 ```
 
-Read-модель среза (`13-repos.md`, «Read-модель») даёт те же ключи со своим именем
-`MyApp.Domain.<BC>.<Actor>.<ReadModel>.ReadRepo`.
+ReadRepo актора (`13-repos.md`, «Репозитории актора») даёт те же ключи со своим именем
+`MyApp.Domain.<BC>.<Aggregate>.<Actor>.ReadRepo`, а его кеш лежит в подкаталоге актора, под его
+ReadRepo.
 
 `config/test.exs` возвращает репозиторий на `.Pg` и выключает инвалидатор: кеш проверяется
 адресно, а не участвует в каждом тесте.

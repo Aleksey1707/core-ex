@@ -45,8 +45,8 @@ end
 
 ## Раскладка `test/`
 
-- Тест модуля SHOULD лежать по пути модуля: `MyApp.Domain.<BC>.Common.<Aggregate>` —
-  `test/my_app/domain/<bc>/common/<aggregate>_test.exs`. Тест находится по имени модуля так же, как
+- Тест модуля SHOULD лежать по пути модуля: `MyApp.Domain.<BC>.<Aggregate>` —
+  `test/my_app/domain/<bc>/<aggregate>_test.exs`. Тест находится по имени модуля так же, как
   сам модуль (`10-architecture.md`, «Раскладка»); линтер дерево `test/` не проверяет.
 - Тест, который держит норму на всём дереве, — архитектурный тест
   (`test/my_app/architecture_test.exs`, `10-architecture.md`, «Boundary») и ратчеты («Ратчеты») —
@@ -59,7 +59,7 @@ end
   компилируется в `:test`.
 
 ```text
-test/my_app/domain/<bc>/common/<aggregate>_test.exs   # тест модуля — по его пути
+test/my_app/domain/<bc>/<aggregate>_test.exs          # тест модуля — по его пути
 test/my_app/architecture_test.exs                     # норма на всём дереве
 test/my_app/enum_docs_test.exs                        # ратчет
 test/support/{data_case,conn_case}.ex                 # обвязка
@@ -105,14 +105,14 @@ test/support/{data_case,conn_case}.ex                 # обвязка
 
 ```elixir
 # плохо — прогон и чтение ради версии: её уже вернул usecase
-{:ok, {id, _version}} = Usecases.<Aggregate>.open(context)
-:ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.<ReadModel>.Projection)
-{:ok, view} = Usecases.<Aggregate>.get(id, :current, context)
-{:ok, _version} = Usecases.<Aggregate>.close(id, Version.new!(view.version), context)
+{:ok, {id, _version}} = <Aggregate>.<Actor>.Usecases.open(context)
+:ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.<ReadModel>.Projection)
+{:ok, view} = <Aggregate>.<Actor>.Usecases.get(id, :current, context)
+{:ok, _version} = <Aggregate>.<Actor>.Usecases.close(id, Version.new!(view.version), context)
 
 # хорошо
-{:ok, {id, version}} = Usecases.<Aggregate>.open(context)
-{:ok, _version} = Usecases.<Aggregate>.close(id, version, context)
+{:ok, {id, version}} = <Aggregate>.<Actor>.Usecases.open(context)
+{:ok, _version} = <Aggregate>.<Actor>.Usecases.close(id, version, context)
 ```
 
 ## Ратчеты

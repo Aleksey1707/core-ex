@@ -157,7 +157,7 @@ Prim вложен в агрегат-владелец **по имени** (`<Aggr
 без владельца — `deps/core/docs/rules/app/11-domain.md`, «Prim и Enum». В файле агрегата:
 
 ```elixir
-defmodule MyApp.Domain.<BC>.Common.<Aggregate> do
+defmodule MyApp.Domain.<BC>.<Aggregate> do
   import Core.Helper.String, only: [first_line: 1]
 
   defmodule Name do
@@ -349,7 +349,7 @@ Entity-фасад (`alias Codec.Internal, as: InCodec`):
 ```elixir
 use Core.Codec.Facade,
   prim: MyApp.Codec.Prim.Internal,
-  plugins: [MyApp.Domain.<BC>.Common.<Aggregate>.Codec]
+  plugins: [MyApp.Domain.<BC>.<Aggregate>.Codec]
 ```
 
 **Весь интерфейс фасада — `dump/1`, `load/2`, `load!/2`.** Единственная ось диспетчеризации —
@@ -528,7 +528,7 @@ def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 Проверяется: `CompileError` в `use Core.Es.Cmd` — `by` или `at` не в `@enforce_keys`.
 
 ```elixir
-defmodule MyApp.Domain.<BC>.Common.Account.Cmd.Rename do
+defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
   use Core.Es.Cmd
 
   @enforce_keys ~w(name by at)a
@@ -542,7 +542,7 @@ end
 ним (read-модель без таблицы сворачивает агрегаты внутри своего `ReadRepo` и наружу их не отдаёт;
 если её не отдаёт граница, она MAY вернуть неизменяемое доменное значение —
 `deps/core/docs/rules/app/13-repos.md`, «Read-модель»), а с **представлением**
-(`<BC>.Common.<ReadModel>.View`, в срез — вместе со своей формой) — структурой из примитивных
+(`<BC>.<ReadModel>.View`, в подкаталог актора — вместе со своей формой) — структурой из примитивных
 значений (`String.t()`, `DateTime.t()`, `Decimal.t()`, `pos_integer()`, атомы `Core.Enum`).
 
 - View — не домен: инвариантов не держит, мутаций не имеет, Prim в нём **MUST NOT**.
@@ -563,7 +563,7 @@ end
 уходит в crash-репорты OTP-процессов, а его значения чувствительны (`12-errors.md`).
 
 `Context.Accessor` — типизированный доступ к ключу (пример:
-`MyApp.Domain.<BC>.Common.CurrentUser` с `use Core.Context.Accessor` → `:current_user_id`):
+`MyApp.Domain.<BC>.<Aggregate>.CurrentUser` с `use Core.Context.Accessor` → `:current_user_id`):
 
 - `key:` (обязательна) — атом ключа;
 - `type:` — модуль значения; спеки сужаются до `<Mod>.t()`, а `put/2` принимает только

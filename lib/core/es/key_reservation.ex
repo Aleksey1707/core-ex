@@ -3,9 +3,9 @@ defmodule Core.Es.KeyReservation do
   Билдер модуля ключа `<Aggregate>.<Name>Key` — изменяемого уникального ключа event-sourced
   агрегата — и резерв ключа в `es_key_reservations` (`Core.Es.KeyReservation.Migration`).
 
-      defmodule MyApp.Domain.<BC>.Common.User.LoginKey do
-        alias MyApp.Domain.<BC>.Common.User
-        alias MyApp.Domain.<BC>.Common.User.Event
+      defmodule MyApp.Domain.<BC>.User.LoginKey do
+        alias MyApp.Domain.<BC>.User
+        alias MyApp.Domain.<BC>.User.Event
 
         use Core.Es.KeyReservation,
           scope: "user.login",

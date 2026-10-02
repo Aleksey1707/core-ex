@@ -128,17 +128,17 @@ use MyApp.EventCompatCase,
   event: Delivery.Event,
   aggregate_id: Delivery.ID
 
-# хорошо — test/my_app/domain/<bc>/common/delivery/event_compat_test.exs
-defmodule MyApp.Domain.<BC>.Common.Delivery.EventCompatTest do
+# хорошо — test/my_app/domain/<bc>/delivery/event_compat_test.exs
+defmodule MyApp.Domain.<BC>.Delivery.EventCompatTest do
   use Core.Es.EventCompatCase,
-    event_codec: MyApp.Domain.<BC>.Common.Delivery.Event.Codec,
+    event_codec: MyApp.Domain.<BC>.Delivery.Event.Codec,
     async: true
 end
 
-# хорошо — test/my_app/domain/<bc>/common/account/event_compat_test.exs
-defmodule MyApp.Domain.<BC>.Common.Account.EventCompatTest do
+# хорошо — test/my_app/domain/<bc>/account/event_compat_test.exs
+defmodule MyApp.Domain.<BC>.Account.EventCompatTest do
   use Core.Es.EventCompatCase,
-    aggregate: MyApp.Domain.<BC>.Common.Account,
+    aggregate: MyApp.Domain.<BC>.Account,
     async: true
 end
 ```
@@ -248,9 +248,9 @@ assert User.LoginKey.find(User.Login.new!(login), Context.new()) == id
 
 ```elixir
 # плохо — своего теста у модуля ключа нет: usecase сверяет to_key/1 сам с собой
-assert {:error, %Error{code: :name_taken}} = Usecases.Role.create(%{name: name}, context)
+assert {:error, %Error{code: :name_taken}} = Role.Admin.Usecases.create(%{name: name}, context)
 
-# хорошо — test/my_app/domain/<bc>/common/role/name_key_test.exs
+# хорошо — test/my_app/domain/<bc>/role/name_key_test.exs
 :ok = @repo.append(created(taken, name), context)
 
 assert {:error, %Error{code: :name_taken}} =
@@ -275,10 +275,10 @@ test "clear/0 очищает read-модель" do
   assert DAO.aggregate(Account.ReadRepo.Pg.Schema, :count) == 0
 end
 
-# хорошо — test/my_app/domain/<bc>/common/account/projection_case_test.exs
-defmodule MyApp.Domain.<BC>.Common.Account.ProjectionCaseTest do
+# хорошо — test/my_app/domain/<bc>/account/projection_case_test.exs
+defmodule MyApp.Domain.<BC>.Account.ProjectionCaseTest do
   use Core.Es.ProjectionCase,
-    projection: MyApp.Domain.<BC>.Common.Account.Projection,
+    projection: MyApp.Domain.<BC>.Account.Projection,
     async: false
 end
 ```
@@ -294,19 +294,19 @@ sandbox-транзакции, и пачка соседнего теста пол
 
 ```elixir
 # плохо — чтение ReadRepo без прогона проекции: таблица пуста
-{:ok, {id, _version}} = Usecases.Account.open(params, context)
+{:ok, {id, _version}} = Account.Client.Usecases.open(params, context)
 {:ok, view} = Account.ReadRepo.get(id, :current, context)
 
 # плохо — прогон в async: true: пачку проекции держит sandbox-транзакция соседнего теста
 use MyApp.DataCase, async: true
 
-assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Account.Projection)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Account.Projection)
 
-# хорошо — test/my_app/domain/<bc>/<actor>/usecases/account_test.exs
+# хорошо — test/my_app/domain/<bc>/account/client/usecases_test.exs
 use MyApp.DataCase, async: false
 
-{:ok, {id, _version}} = Usecases.Account.open(params, context)
-assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Common.Account.Projection)
+{:ok, {id, _version}} = Account.Client.Usecases.open(params, context)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.Account.Projection)
 assert {:ok, %Account.View{status: :open}} = Account.ReadRepo.get(id, :current, context)
 ```
 
@@ -340,7 +340,7 @@ saved = Application.get_env(:my_app, MyApp.Projections)
 on_exit(fn -> Application.put_env(:my_app, MyApp.Projections, saved) end)
 Application.put_env(:my_app, MyApp.Projections, enabled: true, await: :poll)
 
-assert %{name: MyApp.Domain.<BC>.Common.Account.Projection} in MyApp.PromEx.Workers.watch_list()
+assert %{name: MyApp.Domain.<BC>.Account.Projection} in MyApp.PromEx.Workers.watch_list()
 ```
 
 ### Ветка неготовой read-модели
@@ -374,7 +374,7 @@ opts = Keyword.put(MyApp.Projections.opts(), :await, :poll)
 
 # хорошо — состояние подставлено на время блока, исход мгновенный
 conn =
-  Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Common.Account.Projection, fn ->
+  Core.Es.Projection.Test.with_rebuilding(MyApp.Domain.<BC>.Account.Projection, fn ->
     patch(authed(ctx), "#{@path}/#{id}", body)
   end)
 

@@ -2,11 +2,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @moduledoc """
   Билдер write-репозитория event-sourced агрегата на хранилище событий (`Core.Es.Store`).
 
-      defmodule MyApp.Domain.<BC>.Common.Account.Repo.Pg do
-        alias MyApp.Domain.<BC>.Common.Account
+      defmodule MyApp.Domain.<BC>.Account.Repo.Pg do
+        alias MyApp.Domain.<BC>.Account
 
         use Core.Es.Aggregate.Repo.Pg,
-          behaviour: MyApp.Domain.<BC>.Common.Account.Repo,
+          behaviour: MyApp.Domain.<BC>.Account.Repo,
           aggregate: Account,
           id: Account.ID,
           errors: Account.Errors,

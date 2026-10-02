@@ -2,9 +2,9 @@ defmodule Core.Es.ProjectionCase do
   @moduledoc """
   Case-модуль проекции: очистка `clear/0` на golden-фикстурах событий.
 
-      defmodule MyApp.Domain.<BC>.<Actor>.AccountList.ProjectionCaseTest do
+      defmodule MyApp.Domain.<BC>.AccountList.ProjectionCaseTest do
         use Core.Es.ProjectionCase,
-          projection: MyApp.Domain.<BC>.<Actor>.AccountList.Projection,
+          projection: MyApp.Domain.<BC>.AccountList.Projection,
           async: false
       end
 

@@ -68,13 +68,13 @@ defmodule Core.Config do
   @doc """
   Реализация репозитория для доменного behaviour: из app-env потребителя, иначе `<Behaviour>.Pg`.
 
-      @repo Config.repo!(MyApp.Domain.Users.Common.User.Repo)
+      @repo Config.repo!(MyApp.Domain.Users.User.Repo)
 
   Разворачивается в `Application.compile_env/3` по ключу `behaviour` в приложении `otp_app/0`:
   значение запекается на компиляции call site, а правка ключа заставляет его перекомпилировать.
   Ключ нужен только нестандартной реализации:
 
-      config :my_app, MyApp.Domain.Users.Common.User.Repo, MyApp.Domain....User.Repo.Memory
+      config :my_app, MyApp.Domain.Users.User.Repo, MyApp.Domain....User.Repo.Memory
 
   Модуль-реализация проверяется на компиляции — и выведенный по конвенции, и заданный ключом.
   """

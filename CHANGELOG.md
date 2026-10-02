@@ -6,15 +6,20 @@
 
 - **Раскладка контекста — вертикаль по агрегату, контекст — граница Boundary**
   (`docs/rules/app/10-architecture.md`, «Состав контекста», «Модуль-оглавление», «Направления
-  зависимостей», «Boundary»; решение — `docs/adr/0037-vertical-layout-context-boundary.md`, заменяет
-  ADR-0023 и пункты ADR-0025 о циклах, типе модели в `Common` и корне контекста). `Common` и срезы
+  зависимостей», «Boundary», «Usecases»; `docs/rules/app/11-domain.md`, «Фасады и реестр плагинов»,
+  «Prim и Enum»; `docs/rules/app/12-errors.md`; `docs/rules/app/13-repos.md`, «Read-модель»,
+  «Репозитории актора»; решение — `docs/adr/0037-vertical-layout-context-boundary.md`, заменяет
+  ADR-0023 и пункты ADR-0025 о циклах, типе модели в `Common` и корне контекста; запись и чтение
+  между контекстами — `docs/adr/0038-one-context-per-transaction.md`). `Common` и срезы
   инициаторов разносили агрегат, его чтение и его usecases по разным деревьям: чтение копировалось в
   срезах, а направления между контекстами держали правила линтера и ревью. Теперь всё об агрегате —
   в его каталоге, usecases — модулем на актора в подкаталоге актора, а то, что не принадлежит одному
   агрегату, — в каталогах уровня контекста по виду (`values/`, `errors.ex`, read-модель по
   назначению, `reactions/`). Каждый контекст — граница Boundary верхнего уровня: ссылку мимо его
   `exports` и цикл между контекстами ловит сборка; цикл, который пока не развязать, — `dirty_xrefs`
-  и строка `DEBT.md`.
+  и строка `DEBT.md`. Одна транзакция пишет один контекст, а таблицы read-модели другого контекста
+  не читаются join: такие связи сборка не видит, и граница держалась бы ревью. Плагины кодека
+  объявляет контекст, и новый кодек не правит центральный список.
 
   `boundary_lint --consumer`: правила `common-slice`, `foreign-slice`, `sibling-slice` и
   `subsystem-slice` удалены — направления держит Boundary. `bc-root` ловит `<BC>.Common` и срез на
@@ -27,10 +32,28 @@
     `MyApp.Domain.<BC>.<Aggregate>…` в `<bc>/<aggregate>/`;
   - usecases среза `MyApp.Domain.<BC>.<Actor>.Usecases.<Aggregate>` →
     `MyApp.Domain.<BC>.<Aggregate>.<Actor>.Usecases` в `<bc>/<aggregate>/<actor>/usecases.ex`;
-    actor-ReadRepo и View среза — в тот же подкаталог актора;
+    чтение, общее нескольким акторам, — `<Aggregate>.Usecases`, у read-модели по назначению —
+    `<ReadModel>.<Actor>.Usecases` и `<ReadModel>.Usecases`; операция над равноправными
+    агрегатами `<Actor>.Usecases.<Usecase>` → `<BC>.<Operation>.<Actor>.Usecases` в
+    `<bc>/<operation>/<actor>/usecases.ex`; хелпер `<Actor>.Usecases.<Aggregate>.Query` →
+    `<Aggregate>.Query` в каталоге агрегата;
+  - actor-репозитории среза `<BC>.<Actor>.<Aggregate>.{Repo,ReadRepo}` и View среза →
+    `<Aggregate>.<Actor>.{Repo,ReadRepo,View}` в подкаталоге актора; ACL-фильтр — `default/1` в
+    `Specs` актора; ключи кеша `.Cached` — под новым именем ReadRepo;
   - значение без владельца `<BC>.Common.<Value>` → `<BC>.Values.<Value>`; read-модель `Common` не
     по агрегату → каталог по назначению `<BC>.<ReadModel>`; тип модели контекста — в каталог
-    агрегата-владельца или в `values/`;
+    агрегата-владельца или в `values/`; каталог ошибок нескольких владельцев `<BC>.Common.Errors` →
+    `<BC>.Errors` в `<bc>/errors.ex`; аксессор `<BC>.Common.CurrentUser` →
+    `<BC>.<Aggregate>.CurrentUser` в каталоге агрегата учётной записи; значения, аксессор и каталог
+    ошибок, на которые ссылаются другие границы, — в `exports` контекста;
+  - список `MyApp.Codec.plugins/0` с плагинами всех контекстов → оглавление контекста объявляет
+    `codec_plugins/0`, `MyApp.Codec.plugins/0` склеивает их и добавляет `Core.Outbox.Codec`;
+  - usecase, который пишет второй контекст через его `Common` (репозиторий, агрегат), → вторая
+    запись — задача второго контекста, поставленная в той же транзакции его экспортированной
+    функцией, или его реакция на событие; нужна атомарная запись двух контекстов — контексты
+    склеиваются;
+  - join ReadRepo на таблицы read-модели `Common` чужого контекста → нужные поля копирует своя
+    проекция из экспортированных событий другого контекста; join — только внутри своего контекста;
   - оглавление `MyApp.Domain.<BC>` без кода → корень границы: `use Boundary` с `deps` (контексты,
     от которых зависит, `MyApp.Codec`, модули приложения, которые он зовёт) и `exports` (модули
     usecases, View, типы ID, события, плагины кодека);

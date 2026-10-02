@@ -75,7 +75,8 @@ lib/my_app/domain/<bc>/
     projection.ex, read_repo.ex, view.ex   # read-модель агрегата
     usecases.ex                            # общее чтение нескольких акторов
     <actor>/usecases.ex                    # usecases актора
-    <actor>/read_repo.ex, <actor>/view.ex  # свой ACL-фильтр или своя форма данных актора
+    <actor>/repo.ex, <actor>/read_repo.ex  # свой ACL-фильтр актора
+    <actor>/view.ex                        # своя форма данных актора
   values/<value>.ex                        # значение без агрегата-владельца
   errors.ex                                # ошибки нескольких агрегатов
   <read_model>/                            # read-модель не по агрегату — каталог по назначению
@@ -88,9 +89,10 @@ lib/my_app/domain/<bc>/
   подкаталоге актора; чтение, общее нескольким акторам, — `<Aggregate>.Usecases`. Имя актора
   свободно: `Admin`, `Client`, `System`. Актор MAY не совпадать с типом учётной записи: это роль
   в контексте.
-- Свой ReadRepo и View актора MAY лежать в его подкаталоге, только когда у актора свой ACL-фильтр
-  или своя форма данных: таблица, проекция и схема остаются общими (`13-repos.md`, «Read-модель»).
-  В остальных случаях акторы читают и пишут общие модули каталога агрегата.
+- Свои репозитории и View актора MAY лежать в его подкаталоге, только когда у актора свой
+  ACL-фильтр или своя форма данных: таблица, проекция, схема и запись остаются общими
+  (`13-repos.md`, «Репозитории актора»). В остальных случаях акторы читают и пишут общие модули
+  каталога агрегата.
 - Usecases актора, которые зовут не из web, а из воркеров, подписчиков и mix-тасок, MUST получать
   актора от `ContextFactory` (`11-domain.md`), а не собирать контекст на месте.
 - Значение без агрегата-владельца MUST лежать в `values/` — `MyApp.Domain.<BC>.Values.<Value>`,
@@ -134,8 +136,9 @@ usecases по сценарию (actor-репозиторий `<BC>.<Actor>.<Aggr
 ### Модуль-оглавление
 
 У каждого контекста MUST быть модуль-оглавление `MyApp.Domain.<BC>` в `lib/my_app/domain/<bc>.ex` —
-корень его границы: `use Boundary` с `deps` и `exports` (см. «Boundary»). Без него контекст не
-граница, а его состав читается только по дереву каталогов. Оглавление лежит на уровне `domain/`,
+корень его границы: `use Boundary` с `deps` и `exports` (см. «Boundary») и объявления контекста —
+плагины кодека (`11-domain.md`, «Фасады и реестр плагинов»). Без него контекст не граница, а его
+состав читается только по дереву каталогов. Оглавление лежит на уровне `domain/`,
 рядом с каталогом контекста, а не внутри него.
 
 `@moduledoc` оглавления SHOULD давать карту контекста: назначение, агрегаты, акторы, read-модели,
@@ -165,6 +168,13 @@ defmodule MyApp.Domain.Orders do
       Cart.Client.Usecases,
       Cart.ID
     ]
+
+  alias MyApp.Domain.Orders.Order
+
+  @doc "Плагины кодека контекста; склеивает их `MyApp.Codec.plugins/0`."
+  @spec codec_plugins() :: [module()]
+
+  def codec_plugins, do: [Order.Event.Codec, Order.View.Codec]
 end
 ```
 
@@ -174,10 +184,9 @@ end
 
 ### Направления зависимостей
 
-- Контекст, подсистема и точки входа MUST ссылаться на контекст только через его `exports` —
-  модули usecases, View, типы ID и события (см. «Boundary»): агрегат, репозиторий и read-модель
-  контекста — его внутреннее устройство. Ссылка на модуль вне `exports` — предупреждение
-  `boundary`, в пайплайне — ошибка сборки.
+- Контекст, подсистема и точки входа MUST ссылаться на контекст только через его `exports` (см.
+  «Boundary»): агрегат, репозиторий и read-модель контекста — его внутреннее устройство. Ссылка на
+  модуль вне `exports` — предупреждение `boundary`, в пайплайне — ошибка сборки.
 - Цикл между контекстами MUST NOT: взаимные ссылки — признак одной модели, и `boundary` ловит цикл
   сборкой. Цикл, который сейчас не развязать, MAY оформляться `dirty_xrefs` на одной стороне и
   строкой `DEBT.md` с причиной и условием снятия: склеить контексты или развернуть зависимость —
@@ -313,7 +322,7 @@ end
 
 | Boundary | `deps:` | Что внутри |
 |---|---|---|
-| `MyApp.Domain.<BC>` | контексты, от которых зависит, `MyApp.Codec`, `MyApp.Infra`, подсистемы | bounded context: корень — оглавление, `exports` — модули usecases, View, типы ID, события, плагины кодека |
+| `MyApp.Domain.<BC>` | контексты, от которых зависит, `MyApp.Codec`, `MyApp.Infra`, подсистемы | bounded context: корень — оглавление, состав `exports` — ниже |
 | `MyApp.Codec` | — (`check: [out: false]`) | Prim-профили, entity-фасады, реестр плагинов |
 | `MyApp.Infra` | `[]` | сток без зависимостей на домен: `DAO`, `StreamID` |
 | `MyApp.<Subsystem>` | контексты, которые она читает, `MyApp.Infra` | подсистема приложения |
@@ -323,10 +332,12 @@ end
 
 - Bounded context MUST быть границей верхнего уровня, а `MyApp` границей не является
   (`deps/core/docs/adr/0037-vertical-layout-context-boundary.md`).
-- `exports` контекста — модули usecases (`<Aggregate>.<Actor>.Usecases`, `<Aggregate>.Usecases`),
-  View, типы ID, модули событий и их семейства, плагины кодека; агрегат, репозиторий, схемы,
-  проекция и ReadRepo в него не входят. Семейство событий MAY экспортироваться целиком —
-  `{<Aggregate>.Event, []}`: члены, нагрузки и кодек семейства.
+- `exports` контекста — модули usecases (`<Aggregate>.<Actor>.Usecases`, `<Aggregate>.Usecases`,
+  `<ReadModel>.<Actor>.Usecases`, `<Operation>.<Actor>.Usecases`), View, типы ID, значения и
+  аксессор текущего пользователя, которые видят другие границы (`11-domain.md`, «Prim и Enum»,
+  «Context»), каталог ошибок контекста (`12-errors.md`), модули событий и их семейства, плагины
+  кодека; агрегат, репозиторий, схемы, проекция и ReadRepo в него не входят. Семейство событий MAY
+  экспортироваться целиком — `{<Aggregate>.Event, []}`: члены, нагрузки и кодек семейства.
 - `MyApp.Codec` MUST нести `check: [out: false]`: фасад знает плагины всех контекстов, контексты
   зовут фасад, и без него это цикл границ. Контексты объявляют `deps: [MyApp.Codec]`, кодек —
   ни одного.
@@ -347,24 +358,35 @@ end
 
 ## Usecases
 
-Модуль usecases MUST называться `MyApp.Domain.<BC>.<Actor>.Usecases.<Usecase>`: `<Usecase>` —
-имя usecase, по умолчанию имя агрегата, над которым он работает (`Usecases.Order`). Операция над
-несколькими агрегатами SHOULD быть своим usecase со своим модулем, а не ложиться в модуль одного из
-них: второй агрегат из имени не виден, и usecase ищут не там, где он лежит.
+Модуль usecases MUST называться `MyApp.Domain.<BC>.<Aggregate>.<Actor>.Usecases` и лежать в
+подкаталоге актора `<bc>/<aggregate>/<actor>/usecases.ex`: usecases одного актора над одним
+агрегатом — функции этого модуля. Чтение, общее нескольким акторам, — модуль
+`<Aggregate>.Usecases` в `<bc>/<aggregate>/usecases.ex`: модули акторов его функции не копируют.
+Read-модель по назначению держит свои модули так же — `<ReadModel>.<Actor>.Usecases` и
+`<ReadModel>.Usecases` в её каталоге.
 
-- Операция над несколькими агрегатами — запись (`append` / `insert` / `update` / `save` / `delete`)
-  в два агрегата и больше, ни один из которых не подчинён другому. Чтение соседа — не запись.
-  Подчинённость определяется происхождением id: id подчинённого выводится из id главного, главный
-  хранит id подчинённого, или подчинённый хранит id главного и без него не существует (черновик
-  операции над агрегатом). Запись в главный и подчинённый — одна операция: она лежит в
-  `Usecases.<Aggregate>` того агрегата, чей id пришёл командой, — отметка в главном о действии над
-  подчинённым — часть операции над подчинённым.
-- Хелпер чтения, общий для usecases одного среза (найти позицию, собрать контекст проверки), MAY
-  лежать в `<Actor>.Usecases.<Aggregate>.Query`: он только читает, а load и save остаются в самом
-  usecase (`deps/core/docs/rules/20-agreements.md`, «Load/save агрегата — в одной функции»).
-- Usecase, который пишет агрегаты двух контекстов, лежит в срезе контекста, который уже зависит от
-  второго, и пишет второй через его `Common` (репозиторий, агрегат): ссылка на срез второго —
-  `foreign-slice`.
+Операция над равноправными агрегатами SHOULD лежать в каталоге уровня контекста по имени операции —
+`MyApp.Domain.<BC>.<Operation>.<Actor>.Usecases` в `<bc>/<operation>/<actor>/usecases.ex`, а не в
+модуле одного из агрегатов: второй агрегат из имени не виден, и операцию ищут не там, где она
+лежит.
+
+- Операция над равноправными агрегатами — запись (`append` / `insert` / `update` / `save` /
+  `delete`) в два агрегата и больше, ни один из которых не подчинён другому. Чтение соседа — не
+  запись. Подчинённость определяется происхождением id: id подчинённого выводится из id главного,
+  главный хранит id подчинённого, или подчинённый хранит id главного и без него не существует
+  (черновик операции над агрегатом). Запись в главный и подчинённый — одна операция: она лежит в
+  модуле usecases актора в каталоге того агрегата, чей id пришёл командой, — отметка в главном о
+  действии над подчинённым — часть операции над подчинённым.
+- Хелпер чтения, общий для usecases агрегата (найти позицию, собрать контекст проверки), MAY
+  лежать в `<Aggregate>.Query` в каталоге агрегата: он только читает, а load и save остаются в
+  самом usecase (`deps/core/docs/rules/20-agreements.md`, «Load/save агрегата — в одной функции»).
+- Одна транзакция MUST писать один контекст, а usecase с записью агрегатов двух контекстов —
+  MUST NOT: агрегат и репозиторий другого контекста не входят в его `exports`, а его usecase внутри
+  своей транзакции связывает инварианты двух моделей одним откатом. Вторая запись — задача второго
+  контекста, поставленная в той же транзакции его экспортированной функцией постановки («Что можно
+  внутри `Transact.run`»), или реакция второго контекста на событие первого
+  (`17-otp-concurrency.md`, «Место компонента»). Нужна атомарная запись двух контекстов — это одна
+  модель, и контексты склеиваются (`deps/core/docs/adr/0038-one-context-per-transaction.md`).
 - Команда над несколькими event-sourced агрегатами возвращает версию того агрегата, чью проекцию
   ждёт граница (`15-web-api.md`, «Ожидание проекции»), и называет его в `@doc`.
 - Ждать проекцию usecase MUST NOT — это решение вызывающего:
@@ -373,14 +395,29 @@ end
 
 ```elixir
 # плохо — оформление меняет корзину и заказ, а лежит в модуле корзины
-defmodule MyApp.Domain.Orders.Client.Usecases.Cart do
+defmodule MyApp.Domain.Orders.Cart.Client.Usecases do
   def checkout(cart_id, context), do: ...
 end
 
-# хорошо
-defmodule MyApp.Domain.Orders.Client.Usecases.Checkout do
-  def run(cart_id, context), do: ...
+# хорошо — операция над равноправными агрегатами — каталог по её имени
+defmodule MyApp.Domain.Orders.Checkout.Client.Usecases do
+  def checkout(cart_id, context), do: ...
 end
+```
+
+```elixir
+# плохо — транзакция заказа пишет и счёт контекста Billing
+Transact.run(DAO, fn ->
+  with {:ok, _saved} <- @repo.save(order, context),
+       do: MyApp.Domain.Billing.Invoice.System.Usecases.issue(order.id, context)
+end)
+
+# хорошо — счёт пишет задача контекста Billing: её ставит его экспортированная функция, и
+# задача появится только при commit заказа
+Transact.run(DAO, fn ->
+  with {:ok, _saved} <- @repo.save(order, context),
+       do: MyApp.Domain.Billing.Invoice.Issue.enqueue(order.id)
+end)
 ```
 
 Конвенция тела:
@@ -435,7 +472,7 @@ def command(%Agg.ID{} = id, %Version{} = version, %Context{} = context) do
        {:ok, by} <- CurrentUser.get(context) do
     Transact.run(DAO, fn ->
       with {:ok, agg} <- @repo.get(id, version, context),
-           {:ok, agg} <- Actor.Agg.mutate(agg, by),
+           {:ok, agg} <- Agg.mutate(agg, by),
            {:ok, _saved} <- @repo.save(agg, context) do
         :ok
       end
@@ -471,7 +508,7 @@ flowchart TB
   Web["Web: Controller / Presenter"]
   Worker["Воркеры, подписчики, mix-таски"]
   UC["Usecases"]
-  Domain["Domain: Aggregate / Actor-domain"]
+  Domain["Domain: Aggregate"]
   Repo["Repo / ReadRepo"]
   Store["Event store / Outbox"]
   DAO["DAO"]

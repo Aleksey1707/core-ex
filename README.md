@@ -321,15 +321,15 @@ end
 
    require Config
 
-   @repo Config.repo!(MyApp.Domain.<BC>.Common.<Aggregate>.Repo)
+   @repo Config.repo!(MyApp.Domain.<BC>.<Aggregate>.Repo)
    ```
 
-   Без ключа берётся `MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Pg`. Ключ под своим `otp_app`
+   Без ключа берётся `MyApp.Domain.<BC>.<Aggregate>.Repo.Pg`. Ключ под своим `otp_app`
    нужен только при подмене:
 
    ```elixir
-   config :my_app, MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
-     MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Memory
+   config :my_app, MyApp.Domain.<BC>.<Aggregate>.Repo,
+     MyApp.Domain.<BC>.<Aggregate>.Repo.Memory
    ```
 
    Прямой `Application.compile_env!/2` на доменный behaviour — нарушение
@@ -384,7 +384,7 @@ end
    # lib/my_app/projections.ex
    defmodule MyApp.Projections do
      def opts do
-       [projections: [MyApp.Domain.Accounts.Common.AccountList.Projection]] ++
+       [projections: [MyApp.Domain.Accounts.AccountList.Projection]] ++
          Application.fetch_env!(:my_app, __MODULE__)
      end
    end
@@ -413,7 +413,7 @@ end
 
    ```elixir
    defmodule MyApp.Processes do
-     def list, do: [MyApp.Domain.Accounts.Common.Account.Process]
+     def list, do: [MyApp.Domain.Accounts.Account.Process]
      def opts(process), do: Application.fetch_env!(:my_app, process)
    end
 

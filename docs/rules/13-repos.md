@@ -11,8 +11,8 @@
 
 | Слой | Пример модуля | Роль |
 |---|---|---|
-| Behaviour | `<BC>.Common.<Aggregate>.Repo` | `@callback` API; без SQL |
-| Pg impl | `<BC>.Common.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
+| Behaviour | `<BC>.<Aggregate>.Repo` | `@callback` API; без SQL |
+| Pg impl | `<BC>.<Aggregate>.Repo.Pg` | PostgreSQL-реализация |
 | Schema | `*.Repo.Pg.Schema` (+ nested `Schema.<Child>`, …) | Ecto schema; write — `to_entity`/`to_model` (+ bang), read — `to_view` |
 | View | `<ReadModel>.View` (+ вложенный `.Codec`) | read-модель: примитивные значения + dump-only кодек |
 | Specs | `*.Repo.Pg.Specs` | `dynamic` / `from` query fragments |
@@ -22,8 +22,6 @@
 Раскладка этих модулей у потребителя — где лежат репозиторий, схема, Specs, View, `Outbox`,
 процесс агрегата и проекция, — `deps/core/docs/rules/app/13-repos.md`, «Раскладка»; алиас
 репозитория агрегата — `deps/core/docs/rules/app/20-agreements.md`, «Алиасы приложения».
-Репозиторий записи и read-модель (View, ReadRepo, проекция) лежат в `<BC>.Common`; в срез
-`<BC>.<Actor>` они переезжают вместе со своим ACL-фильтром или своей формой данных.
 
 ## Read/Write репозитории
 
@@ -112,12 +110,12 @@ View объявляется билдером `Core.View`: одна деклар�
 dump-only кодек.
 
 ```elixir
-defmodule MyApp.Domain.<BC>.Common.<Aggregate>.View do
+defmodule MyApp.Domain.<BC>.<Aggregate>.View do
   @moduledoc """
   Представление <Aggregate> для read-пути
   """
 
-  alias MyApp.Domain.<BC>.Common.<Aggregate>
+  alias MyApp.Domain.<BC>.<Aggregate>
 
   use Core.View,
     fields: [
@@ -250,7 +248,7 @@ Version-аргумент: `%Version{} | :current`.
 
 ```elixir
 use Repo.Pg,
-  behaviour: MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
+  behaviour: MyApp.Domain.<BC>.<Aggregate>.Repo,
   schema: Schema,
   to_entity: &Schema.to_entity!/1,
   to_model: &Schema.to_model!/1,
@@ -296,7 +294,7 @@ Read-репозиторий — тот же макрос, другой деко�
 
 ```elixir
 use Repo.Pg,
-  behaviour: MyApp.Domain.<BC>.Common.<Aggregate>.ReadRepo,
+  behaviour: MyApp.Domain.<BC>.<Aggregate>.ReadRepo,
   schema: Schema,
   to_view: &Schema.to_view/1,
   to_id: &Schema.dump_id/1,
@@ -321,7 +319,7 @@ Read-репозиторий над таблицей (исключение — re
 `deps/core/docs/rules/app/13-repos.md`, «Read-модель») MUST иметь **собственную** Ecto-схему
 `<Aggregate>.ReadRepo.Pg.Schema` на той же
 таблице: только нужные колонки, без `changeset/2` и без аудит-`belongs_to`. Схема write-репо не
-переиспользуется — иначе read-срез становится зависим от формы записи, а запись оказывается
+переиспользуется — иначе read-путь становится зависим от формы записи, а запись оказывается
 в одном шаге от read-пути. Цена — продублированный список полей; расхождение с миграцией
 всплывает на тесте `to_view/1`.
 
@@ -468,7 +466,7 @@ State-stored агрегат с событиями и outbox (с дочерним
 
 ```elixir
 use Repo.Pg.StateStored,
-  behaviour: MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
+  behaviour: MyApp.Domain.<BC>.<Aggregate>.Repo,
   schema: Schema,
   to_entity: &Schema.to_entity!/1,
   to_model: &Schema.to_model!/1,
@@ -573,17 +571,17 @@ Event-sourced агрегат (`11-domain.md`, «Event-sourced») хранитс�
 реализация — `use Core.Es.Aggregate.Repo.Pg`; `insert` / `update` / `save` у агрегата нет.
 
 ```elixir
-defmodule MyApp.Domain.<BC>.Common.Account.Repo do
+defmodule MyApp.Domain.<BC>.Account.Repo do
   use Core.Es.Aggregate.Repo,
-    aggregate: MyApp.Domain.<BC>.Common.Account,
-    id: MyApp.Domain.<BC>.Common.Account.ID
+    aggregate: MyApp.Domain.<BC>.Account,
+    id: MyApp.Domain.<BC>.Account.ID
 end
 
-defmodule MyApp.Domain.<BC>.Common.Account.Repo.Pg do
-  alias MyApp.Domain.<BC>.Common.Account
+defmodule MyApp.Domain.<BC>.Account.Repo.Pg do
+  alias MyApp.Domain.<BC>.Account
 
   use Core.Es.Aggregate.Repo.Pg,
-    behaviour: MyApp.Domain.<BC>.Common.Account.Repo,
+    behaviour: MyApp.Domain.<BC>.Account.Repo,
     aggregate: Account,
     id: Account.ID,
     errors: Account.Errors,
@@ -647,22 +645,24 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
   (`defoverridable`) MUST сохранять закрытую голову и сужение (`20-agreements.md`, «Генерируемые
   функции»).
 
-Репозиторий event-sourced агрегата MUST быть один — в common-слое (`common/<aggregate>/repo*`),
-без `default_filters`, role-обёрток и `Repo.Sc`; доступ решают usecase (роли из `Context`) и
-`decide` (владение по состоянию и `by` команды). Удаление агрегата — доменное событие, `delete`
-нет.
+Репозиторий event-sourced агрегата MUST быть один — в каталоге агрегата (`<aggregate>/repo*`),
+без `default_filters`, репозиториев записи актора и `Repo.Sc`; доступ решают usecase (роли из
+`Context`) и `decide` (владение по состоянию и `by` команды). Удаление агрегата — доменное
+событие, `delete` нет.
 
 ```elixir
-# плохо — role-обёртка фильтрует восстановленное состояние: доступ ушёл из usecase и decide
-defmodule MyApp.Domain.<BC>.<Actor>.Account.Repo.Pg do
+# плохо — репозиторий актора фильтрует восстановленное состояние: доступ ушёл из usecase и decide
+defmodule MyApp.Domain.<BC>.Account.<Actor>.Repo.Pg do
+  alias MyApp.Domain.<BC>.Account
+
   def get(id, version, context, opts \\ []) do
-    with {:ok, account} <- Common.Account.Repo.Pg.get(id, version, context, opts),
+    with {:ok, account} <- Account.Repo.Pg.get(id, version, context, opts),
          :ok <- only_own(account, context),
          do: {:ok, account}
   end
 end
 
-# хорошо — один common-репозиторий; роль проверяет usecase, владение — decide по by команды
+# хорошо — один репозиторий агрегата; роль проверяет usecase, владение — decide по by команды
 Es.Transact.run(fn ->
   with {:ok, {events, _account}} <-
          @repo.get_decision(id, version, context, &Account.execute(&1, command)),
@@ -702,7 +702,7 @@ end)
 
 ```elixir
 use Core.Es.Aggregate.Repo.Pg,
-  behaviour: MyApp.Domain.<BC>.Common.Account.Repo,
+  behaviour: MyApp.Domain.<BC>.Account.Repo,
   aggregate: Account,
   id: Account.ID,
   errors: Account.Errors,
@@ -746,9 +746,9 @@ snapshot: [every: 100, version: 2]
 состояния»; решение — ADR-0018.
 
 ```elixir
-defmodule MyApp.Domain.<BC>.Common.User.LoginKey do
-  alias MyApp.Domain.<BC>.Common.User
-  alias MyApp.Domain.<BC>.Common.User.Event
+defmodule MyApp.Domain.<BC>.User.LoginKey do
+  alias MyApp.Domain.<BC>.User
+  alias MyApp.Domain.<BC>.User.Event
 
   use Core.Es.KeyReservation,
     scope: "user.login",
@@ -767,7 +767,7 @@ defmodule MyApp.Domain.<BC>.Common.User.LoginKey do
 end
 
 use Core.Es.Aggregate.Repo.Pg,
-  behaviour: MyApp.Domain.<BC>.Common.User.Repo,
+  behaviour: MyApp.Domain.<BC>.User.Repo,
   aggregate: User,
   id: User.ID,
   errors: User.Errors,
@@ -865,15 +865,15 @@ end)
 
 Команду одного event-sourced агрегата MAY исполнять `Agg.Process.execute` вместо тела usecase
 `get_decision` → `Agg.execute/2` → `append`. Модуль `use Core.Es.Aggregate.Process, repo: Agg.Repo`
-лежит рядом с репозиторием (`common/<aggregate>/process.ex`), реализация `repo:` резолвится по
+лежит рядом с репозиторием (`<aggregate>/process.ex`), реализация `repo:` резолвится по
 конвенции («DI»), элемент `{Agg.Process, opts}` с `enabled:` ставит дерево потребителя (список и
 опции — `deps/core/docs/rules/app/17-otp-concurrency.md`, «Проекции и процессы агрегата»). Опции,
 исходы и наблюдаемость — moduledoc `Core.Es.Aggregate.Process`.
 
 ```elixir
-defmodule MyApp.Domain.<BC>.Common.Account.Process do
+defmodule MyApp.Domain.<BC>.Account.Process do
   use Core.Es.Aggregate.Process,
-    repo: MyApp.Domain.<BC>.Common.Account.Repo
+    repo: MyApp.Domain.<BC>.Account.Repo
 end
 
 # usecase — транзакцию открывает execute
@@ -1025,7 +1025,7 @@ end
 Core.Es.Store.read_stream(Agg.Event.Codec, other_id, limit, offset, context)
 
 # хорошо — репозиторий агрегата: на ID другого агрегата сборка даёт
-# warning: incompatible types given to MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Pg.page_stream/4
+# warning: incompatible types given to MyApp.Domain.<BC>.<Aggregate>.Repo.Pg.page_stream/4
 @repo.page_stream(id, limit, offset, context)
 ```
 
@@ -1055,7 +1055,7 @@ alias Core.Config
 
 require Config
 
-@repo Config.repo!(MyApp.Domain.<BC>.Common.<Aggregate>.Repo)
+@repo Config.repo!(MyApp.Domain.<BC>.<Aggregate>.Repo)
 ```
 
 Реализация репозитория MUST лежать в `<Behaviour>.Pg` — та же раскладка, что задаёт
@@ -1065,8 +1065,8 @@ app-env **потребителя**, под именем приложения и�
 
 ```elixir
 # config/config.exs потребителя — только при подмене
-config :my_app, MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
-  MyApp.Domain.<BC>.Common.<Aggregate>.Repo.Memory
+config :my_app, MyApp.Domain.<BC>.<Aggregate>.Repo,
+  MyApp.Domain.<BC>.<Aggregate>.Repo.Memory
 ```
 
 Модуль-реализация проверяется на компиляции call site — и выведенный по конвенции, и
@@ -1081,8 +1081,8 @@ config :my_app, MyApp.Domain.<BC>.Common.<Aggregate>.Repo,
 for behaviour <- [Order.Repo, Invoice.Repo], do: Config.repo!(behaviour)
 
 # хорошо
-@order_repo Config.repo!(MyApp.Domain.Orders.Common.Order.Repo)
-@invoice_repo Config.repo!(MyApp.Domain.Orders.Common.Invoice.Repo)
+@order_repo Config.repo!(MyApp.Domain.Orders.Order.Repo)
+@invoice_repo Config.repo!(MyApp.Domain.Orders.Invoice.Repo)
 ```
 
 Инфраструктурный репозиторий самой библиотеки живёт по той же конвенции:

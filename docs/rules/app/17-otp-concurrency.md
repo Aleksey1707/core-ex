@@ -62,8 +62,8 @@ def start(_type, _args) do
   children = [
     MyApp.PromEx,
     MyApp.DAO,
-    {Cachex, name: MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Cache},
-    MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Supervisor,
+    {Cachex, name: MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Cache},
+    MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Supervisor,
     MyAppWeb.Endpoint
   ]
 
@@ -80,7 +80,7 @@ def start(_type, _args) do
     MyApp.DAO,
     {Phoenix.PubSub, name: MyApp.PubSub},
     MyApp.Mq.Connection,
-    MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Supervisor,
+    MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Supervisor,
     MyApp.Outbox.Supervisor,
     {Core.Es.Projection.Supervisor, MyApp.Projections.opts()},
     MyApp.<Subsystem>.Supervisor,
@@ -290,12 +290,12 @@ Config и env библиотека не читает.
 ```elixir
 # плохо — список и опции собраны на месте старта: await и метрики видят другой список
 {Core.Es.Projection.Supervisor,
- projections: [MyApp.Domain.<BC>.Common.<ReadModel>.Projection], enabled: true}
+ projections: [MyApp.Domain.<BC>.<ReadModel>.Projection], enabled: true}
 
 # хорошо — одна функция; её же читают watch_list/1 и Core.Es.PromEx
 defmodule MyApp.Projections do
   def opts do
-    [projections: [MyApp.Domain.<BC>.Common.<ReadModel>.Projection]] ++
+    [projections: [MyApp.Domain.<BC>.<ReadModel>.Projection]] ++
       Application.fetch_env!(:my_app, __MODULE__)
   end
 end
@@ -335,7 +335,7 @@ max_connections >= ноды × (pool_size + различных repo: проек�
 
 ```elixir
 defmodule MyApp.Processes do
-  def list, do: [MyApp.Domain.<BC>.Common.<Aggregate>.Process]
+  def list, do: [MyApp.Domain.<BC>.<Aggregate>.Process]
   def opts(process), do: Application.fetch_env!(:my_app, process)
 end
 
@@ -392,7 +392,7 @@ end
 def watch_list do
   [%{component: "mq_connection", name: MyApp.Mq.Connection}] ++
     [%{component: "oban", name: Oban.Registry.via(Oban)}] ++
-    MyApp.Domain.<BC>.Common.<ReadModel>.ReadRepo.Supervisor.watch_list() ++
+    MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Supervisor.watch_list() ++
     MyApp.Outbox.Supervisor.watch_list() ++
     MyApp.<Subsystem>.Supervisor.watch_list() ++
     Core.Es.Projection.Supervisor.watch_list(MyApp.Projections.opts()) ++

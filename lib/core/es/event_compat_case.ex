@@ -2,15 +2,15 @@ defmodule Core.Es.EventCompatCase do
   @moduledoc """
   Case-модуль совместимости событий: golden-фикстуры агрегата против текущего кода его кодека.
 
-      defmodule MyApp.Domain.<BC>.Common.Account.EventCompatTest do
+      defmodule MyApp.Domain.<BC>.Account.EventCompatTest do
         use Core.Es.EventCompatCase,
-          aggregate: MyApp.Domain.<BC>.Common.Account,
+          aggregate: MyApp.Domain.<BC>.Account,
           async: true
       end
 
-      defmodule MyApp.Domain.<BC>.Common.Delivery.EventCompatTest do
+      defmodule MyApp.Domain.<BC>.Delivery.EventCompatTest do
         use Core.Es.EventCompatCase,
-          event_codec: MyApp.Domain.<BC>.Common.Delivery.Event.Codec,
+          event_codec: MyApp.Domain.<BC>.Delivery.Event.Codec,
           async: true
       end
 
