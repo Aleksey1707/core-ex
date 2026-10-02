@@ -49,9 +49,9 @@ defmodule RulesLint do
     Ecto ExUnit Credo Logger Oban Cachex Phoenix PromEx OpenApiSpex
     Consistency Design Readability Refactor Warning
     Application Enum Keyword Map Mix Process String
-    Actor Agg Caches Cart Codec Config Context DAO Error Errors Es Event Helper InCodec Order OutCodec
-    Outbox Params Prim Projection Projections Repo ReadRepo Response Result Schema Sc
-    Specs Status Step Steps Store Transact Usecases Version View Workers
+    Actor Agg Caches Cart Codec Config Context DAO Error Errors Es Event Helper InCodec Invoice Order
+    OutCodec Outbox Params Prim Projection Projections Repo ReadRepo Response Result Schema Sc
+    Specs Status Step Steps Store Transact Usecases User Version View Workers
   )
   @module_ref ~r/(?<![\w.])([A-Z][A-Za-z0-9]*)\.[A-Z][A-Za-z0-9]*/
 

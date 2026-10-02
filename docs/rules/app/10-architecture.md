@@ -435,8 +435,10 @@ Read-модель по назначению держит свои модули �
   своей транзакции связывает инварианты двух моделей одним откатом. Вторая запись — задача второго
   контекста, поставленная в той же транзакции его экспортированной функцией постановки («Что можно
   внутри `Transact.run`»), или реакция второго контекста на событие первого
-  (`17-otp-concurrency.md`, «Место компонента»). Нужна атомарная запись двух контекстов — это одна
-  модель, и контексты склеиваются (`deps/core/docs/adr/0038-one-context-per-transaction.md`).
+  (`17-otp-concurrency.md`, «Место компонента»). Задача — когда первый контекст уже зависит от
+  второго, реакция — когда второму нужны данные первого (`17-otp-concurrency.md`, «Фоновые
+  задания»). Нужна атомарная запись двух контекстов — это одна модель, и контексты склеиваются
+  (`deps/core/docs/adr/0038-one-context-per-transaction.md`).
 - Команда event-sourced агрегата MUST принимать `wait: :none | pos_integer()` последней опцией
   (`opts \\ []`, по умолчанию `:none`) и по ней после commit, вне транзакции, ждать проекцию
   литеральным `Projection.await/3` — `deps/core/docs/rules/22-projections.md`, «Read-after-write»:
@@ -459,17 +461,17 @@ end
 ```
 
 ```elixir
-# плохо — транзакция заказа пишет и счёт контекста Billing
+# плохо — транзакция отмены заказа аннулирует и счёт контекста Billing
 Transact.run(DAO, fn ->
   with {:ok, _saved} <- @repo.save(order, context),
-       do: MyApp.Domain.Billing.Invoice.System.Usecases.issue(order.id, context)
+       do: MyApp.Domain.Billing.Invoice.System.Usecases.void(order.invoice_id, by, context)
 end)
 
-# хорошо — счёт пишет задача контекста Billing: её ставит его экспортированная функция, и
+# хорошо — счёт аннулирует задача контекста Billing: её ставит его экспортированная функция, и
 # задача появится только при commit заказа
 Transact.run(DAO, fn ->
   with {:ok, _saved} <- @repo.save(order, context),
-       do: MyApp.Domain.Billing.Invoice.Issue.enqueue(order.id)
+       do: MyApp.Domain.Billing.Invoice.Void.enqueue(order.invoice_id, by)
 end)
 ```
 

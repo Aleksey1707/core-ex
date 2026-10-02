@@ -519,30 +519,58 @@ end
   `Transact.run`»). Воркер, которого ставит другой контекст, исполнитель экспортирует
   (`10-architecture.md`, «Boundary»); собирать задачу чужого воркера (`new/1`, `Oban.insert/2`)
   MUST NOT.
+- Аргументы функции постановки MUST быть типами исполнителя или типами, которые он уже видит
+  через `exports` (ID учётной записи): постановщик зависит от исполнителя, и его тип в сигнатуре
+  замкнул бы цикл границ. Исполнителю нужны данные постановщика — это реакция на его событие
+  («Место компонента»).
+- Задача-следствие — продолжение решения, закоммиченного вызывающим, — MUST исполняться от
+  системной учётной записи (`ContextFactory.system/0`), а не от пользователя, который её
+  поставил: его права проверены при постановке, а их перепроверка при исполнении отказала бы в
+  том, что commit уже обещал.
+- Автор решения, если он нужен аудиту, — явный аргумент функции постановки и операции
+  исполнителя и поле нагрузки события исполнителя; `by` события — системная учётная запись.
+  Функция постановки задачи-следствия MUST NOT принимать `%Context{}`: `args` хранятся в
+  `oban_jobs`, и сохраняемое должно быть видно из сигнатуры.
+- Отложенная команда пользователя (отправка от его имени по времени, выгрузка его данных) — его
+  собственная операция: задача хранит ID пользователя и MUST исполняться от его имени
+  (`ContextFactory.as_user/1`) с проверкой прав при исполнении. Её функция постановки MAY брать
+  пользователя из `%Context{}`.
 - Задача по расписанию лежит так же — в каталоге агрегата, чей usecase исполняет; `crontab`
   планировщика называет модуль её воркера.
-
-```elixir
-# плохо — воркер контекста Billing лежит у постановщика, и Orders собирает чужую задачу
-defmodule MyApp.Domain.Orders.Order.Client.IssueInvoice do
-  use Oban.Worker, queue: :billing
-end
-
-# хорошо — воркер у исполнителя, постановка — его функцией в транзакции вызывающего
-defmodule MyApp.Domain.Billing.Invoice.Issue do
-  use Oban.Worker, queue: :billing, unique: [period: :infinity, keys: [:order_id]]
-
-  def enqueue(order_id), do: ...
-
-  @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"order_id" => order_id}}), do: ...
-end
-```
 - Задача MUST быть идемпотентна по своему ключу (`14-events-outbox.md`) и собирать контекст
   сама (`11-domain.md`).
 - Расписание задаётся в `config/runtime.exs` и выключается тумблером.
 - Размер пачки — параметр, а не константа в коде: один прогон не должен держать транзакцию на
   произвольном объёме.
+
+Почему задача-следствие исполняется от системы, а автор решения — аргумент, а не контекст, —
+`deps/core/docs/adr/0041-consequence-job-runs-as-system.md`.
+
+```elixir
+# плохо — воркер контекста Billing лежит у постановщика, и Orders собирает чужую задачу
+defmodule MyApp.Domain.Orders.Order.Client.VoidInvoice do
+  use Oban.Worker, queue: :billing
+end
+
+# плохо — тип постановщика и контекст в функции постановки, исполнение от имени поставившего
+def enqueue(%MyApp.Domain.Orders.Order.ID{} = order_id, %Context{} = context), do: ...
+def perform(%Oban.Job{args: %{"user_id" => id}} = job), do: void(job, ContextFactory.as_user(id))
+
+# хорошо — воркер у исполнителя, аргументы — его типы, автор решения — аргумент, исполняет система
+defmodule MyApp.Domain.Billing.Invoice.Void do
+  use Oban.Worker, queue: :billing, unique: [period: :infinity, keys: [:invoice_id]]
+
+  def enqueue(%Invoice.ID{} = id, %User.ID{} = requested_by), do: ...
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"invoice_id" => raw_id, "requested_by" => raw_by}}) do
+    with {:ok, id} <- InCodec.load(Invoice.ID, raw_id),
+         {:ok, requested_by} <- InCodec.load(User.ID, raw_by),
+         {:ok, _} <- Invoice.System.Usecases.void(id, requested_by, ContextFactory.system()),
+         do: :ok
+  end
+end
+```
 
 ## Связанные правила
 
