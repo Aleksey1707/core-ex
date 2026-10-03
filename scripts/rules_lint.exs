@@ -485,20 +485,9 @@ defmodule RulesLint do
   end
 
   defp release_lines(content) do
-    content
-    |> String.split("\n")
-    |> Enum.with_index(1)
-    |> Enum.reduce({false, []}, &release_line/2)
-    |> elem(1)
-    |> Enum.reverse()
-  end
-
-  defp release_line({line, n}, {fenced, found}) do
-    cond do
-      Regex.match?(@fence, line) -> {not fenced, found}
-      not fenced and Regex.match?(@first_release, line) -> {fenced, [{line, n} | found]}
-      true -> {fenced, found}
-    end
+    for {no, line, false, _open} <- content |> String.split("\n") |> mark_fences(),
+        Regex.match?(@first_release, line),
+        do: {line, no}
   end
 
   defp first_release_errors(path, []),

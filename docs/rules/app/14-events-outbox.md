@@ -76,10 +76,14 @@
   которую держит правило выше.
 
   ```elixir
-  # хорошо — топик в голове функции подписчика: атрибут от производителя, а не литерал
+  # хорошо — топик в голове функции подписчика: атрибут от производителя, а не литерал;
+  # topic сообщения — Prim `Core.Mq.Topic`, сравнивается его строка
   @topic MyApp.Domain.Orders.Order.Outbox.topic()
 
-  defp rule(%Core.Mq.Message{topic: @topic} = message), do: ...
+  def on_message(%Core.Mq.Message{topic: topic} = message, context),
+    do: rule(Core.Mq.Topic.value(topic), message, context)
+
+  defp rule(@topic, message, context), do: ...
   ```
 
 ```elixir
@@ -315,7 +319,7 @@ DLQ — `deps/core/docs/rules/14-events-outbox.md`, «Идемпотентнос
   ```
 
   Проверяется: старт дерева — включённое дерево без `cluster_query:` отказывает `ArgumentError`
-  (`test/core/outbox/supervisor_test.exs` библиотеки).
+  (`deps/core/test/core/outbox/supervisor_test.exs`).
 - В `:test` runtime-блок очереди пропускается, overlay в `config/test.exs` —
   `config :my_app, Core.Outbox.Supervisor, enabled: false`: выключенному дереву прочие опции не
   нужны, оно отвечает `:ignore`, и wake после вставки никого не будит.

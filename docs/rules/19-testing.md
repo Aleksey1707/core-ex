@@ -445,9 +445,9 @@ end
 # плохо — общий набор на моке: проверяет то, что тест сам задал
 use MyAppTest.StorageContract, impl: MyAppTest.StorageMock
 
-# хорошо — набор на боевой реализации и на дублёре
-use MyAppTest.StorageContract, impl: MyApp.Storage.S3
-use MyAppTest.StorageContract, impl: MyAppTest.Storage.InMemory
+# хорошо — набор на боевой реализации и на дублёре, по модулю теста на каждую
+defmodule MyApp.Storage.S3Test, do: use(MyAppTest.StorageContract, impl: MyApp.Storage.S3)
+defmodule MyAppTest.Storage.InMemoryTest, do: use(MyAppTest.StorageContract, impl: MyAppTest.Storage.InMemory)
 ```
 
 ```elixir

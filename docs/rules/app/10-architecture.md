@@ -174,10 +174,10 @@ lib/my_app/domain/<bc>/
   необъявленный ключ ловит сборка (см. «Проверка доступа»).
 
 Проверяется: `deps/core/scripts/boundary_lint.exs --consumer` — правило `bc-root`: часть
-`<BC>.Common` и срез — namespace `<BC>.<X>.Usecases` с usecases по операции, который сам модулем не
-объявлен. Нарушение одно на часть и ставится на её первый модуль по пути. Остаток среза без
-usecases по операции (actor-репозиторий `<BC>.<Actor>.<Aggregate>.ReadRepo`, воркер среза) от
-каталога агрегата по имени не отличить, и правило его не видит.
+`<BC>.Common` и срез — namespace `<BC>.<X>.Usecases` с модулями usecases внутри, который сам модулем
+не объявлен. Нарушение одно на часть и ставится на её первый модуль по пути. Остаток среза без
+модулей usecases (actor-репозиторий `<BC>.<Actor>.<Aggregate>.ReadRepo`, воркер среза) от каталога
+агрегата по имени не отличить, и правило его не видит.
 
 ### Модуль-оглавление
 
@@ -434,10 +434,10 @@ end
 
   ```elixir
   # плохо — вход строит ошибку каталогом агрегата: агрегат эту запись не видел
-  {:reject, MyApp.Domain.Orders.Order.Errors.domain(:invalid_record, record)}
+  {:reject, MyApp.Domain.Orders.Order.Errors.domain(__MODULE__, :invalid_record, %{offset: offset})}
 
   # хорошо — каталог входа; ошибку контекста вход получает результатом его usecase
-  {:reject, MyAppIngest.Errors.domain(:invalid_record, record)}
+  {:reject, MyAppIngest.Errors.domain(__MODULE__, :invalid_record, %{offset: offset})}
   ```
 - `Core.*` в `deps:` MUST NOT перечисляться: `boundary` размечает модули этого приложения, а
   чужое OTP-приложение его проверками не покрыто.
