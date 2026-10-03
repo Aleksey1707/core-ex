@@ -18,6 +18,25 @@ defmodule Core.Helper.StartOptsTest do
     end
   end
 
+  test "process!: {модуль, опции} с name: атомом, иначе ошибка с именем опции" do
+    assert StartOpts.process!(@label, :writer, {MyWriter, name: MyWriter.Name, prefix: "p"}) ==
+             %{module: MyWriter, opts: [name: MyWriter.Name, prefix: "p"], name: MyWriter.Name}
+
+    for spec <- [{MyWriter, []}, {MyWriter, name: "w"}, {nil, name: :w}, {MyWriter, :w}, MyWriter] do
+      assert_raise ArgumentError, ~r/:writer — ожидается \{модуль, опции с name: атомом\}/, fn ->
+        StartOpts.process!(@label, :writer, spec)
+      end
+    end
+  end
+
+  test "unique!: повторы — ошибка с их списком" do
+    assert StartOpts.unique!(@label, :pollers, "имена без повторов", [:a, :b]) == :ok
+
+    assert_raise ArgumentError, ~r/:pollers — ожидается имена без повторов, получено \[:a\]/, fn ->
+      StartOpts.unique!(@label, :pollers, "имена без повторов", [:a, :b, :a, :a])
+    end
+  end
+
   test "atom!: nil модулем не считается" do
     assert StartOpts.atom!(@label, [dep: :brod], :dep) == :brod
 

@@ -83,9 +83,10 @@ defmodule Core.Outbox.Supervisor do
 
   До подъёма детей, в том числе при `:ignore`, старт ставит отметку в `:persistent_term`: имена и
   фильтры топиков поллеров дерева, при `:ignore` — пусто. Включённое дерево ставит её в `init/1`,
-  после регистрации имени: второе дерево на ноде отметку работающего не перезапишет. `Core.Outbox.Repo.Pg` после вставки будит
-  по ней поллеры, чей фильтр совпал с топиками записей; нода без дерева или с выключенным деревом не
-  будит никого — записи её вставок поллеры находят опросом. `Core.Outbox.Poller` без своего имени в
+  после регистрации имени: второе дерево на ноде отметку работающего не перезапишет.
+  `Core.Outbox.Repo.Pg` после вставки будит по ней поллеры, чей фильтр совпал с топиками записей;
+  нода без дерева или с выключенным деревом не будит никого — записи её вставок поллеры находят
+  опросом. `Core.Outbox.Poller` без своего имени в
   отметке не стартует: поднимать его — дело дерева.
   """
 
@@ -107,13 +108,12 @@ defmodule Core.Outbox.Supervisor do
     batch_size lock_duration_seconds max_attempts published_ttl_seconds cleaner_interval_ms
   )a
   @poller_keys ~w(name label topics writer via)a
-  @process_expected "{модуль, опции с name: атомом}"
 
   @typedoc "DNS-запрос кластеризации: `nil`, `:ignore` и `\"\"` — кластеризации нет."
   @type cluster_query :: String.t() | :ignore | nil
 
   @typedoc "Процесс, который поднимает дерево: модуль, его опции и имя."
-  @type process :: %{module: module(), opts: keyword(), name: atom()}
+  @type process :: StartOpts.process()
 
   @typedoc "Поллер: writer-процесс дерева (`nil` при `via:`) и handle, через который он пишет."
   @type poller :: %{
@@ -325,8 +325,20 @@ defmodule Core.Outbox.Supervisor do
     pollers = Enum.map(StartOpts.list!(@label, opts, :pollers), &poller!/1)
     connection = connection!(Keyword.get(opts, :connection))
     ensure_pollers!(enabled, pollers)
-    unique!(:pollers, "имена процессов без повторов: имя — id ребёнка", process_names(connection, pollers))
-    unique!(:pollers, "label: без повторов: по метке строится компонент", Enum.map(pollers, & &1.label))
+
+    StartOpts.unique!(
+      @label,
+      :pollers,
+      "имена процессов без повторов: имя — id ребёнка",
+      process_names(connection, pollers)
+    )
+
+    StartOpts.unique!(
+      @label,
+      :pollers,
+      "label: без повторов: по метке строится компонент",
+      Enum.map(pollers, & &1.label)
+    )
 
     %{
       enabled: enabled,
@@ -388,7 +400,7 @@ defmodule Core.Outbox.Supervisor do
   defp transport!(poller) do
     case {Keyword.fetch(poller, :writer), Keyword.fetch(poller, :via)} do
       {{:ok, spec}, :error} ->
-        %{module: module, name: name} = writer = process!(:writer, spec)
+        %{module: module, name: name} = writer = StartOpts.process!(@label, :writer, spec)
         {writer, {module, name}}
 
       {:error, {:ok, via}} ->
@@ -405,26 +417,10 @@ defmodule Core.Outbox.Supervisor do
 
   defp connection!(nil), do: nil
 
-  defp connection!(spec), do: process!(:connection, spec)
-
-  defp process!(key, {module, opts} = spec) when is_atom(module) and not is_nil(module) and is_list(opts) do
-    case Keyword.get(opts, :name) do
-      name when is_atom(name) and not is_nil(name) -> %{module: module, opts: opts, name: name}
-      _other -> StartOpts.raise_invalid!(@label, key, @process_expected, spec)
-    end
-  end
-
-  defp process!(key, spec), do: StartOpts.raise_invalid!(@label, key, @process_expected, spec)
+  defp connection!(spec), do: StartOpts.process!(@label, :connection, spec)
 
   defp process_names(connection, pollers) do
     processes = [connection | Enum.map(pollers, & &1.writer)]
     [Cleaner | for(%{name: name} <- processes, do: name)] ++ Enum.map(pollers, & &1.name)
-  end
-
-  defp unique!(key, expected, values) do
-    case Enum.uniq(values -- Enum.uniq(values)) do
-      [] -> :ok
-      repeated -> StartOpts.raise_invalid!(@label, key, expected, repeated)
-    end
   end
 end

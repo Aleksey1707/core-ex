@@ -13,7 +13,15 @@ defmodule Core.Helper.StartOpts do
 
   `keys!/3` ловит опечатку в имени необязательной опции: без него такая опция молча берёт
   значение по умолчанию.
+
+  `process!/3` и `unique!/4` — для готовых деревьев: они проверяют значение, а не достают его из
+  `opts`, потому что процессы дерева приходят вложенными в элементы его списков.
   """
+
+  @typedoc "Процесс, который поднимает дерево: модуль, его опции и имя — оно же `id` ребёнка и handle."
+  @type process :: %{module: module(), opts: keyword(), name: atom()}
+
+  @process_expected "{модуль, опции с name: атомом}"
 
   @doc "Опции — только из `allowed`; неизвестная — ошибка с её именем."
   @spec keys!(String.t(), keyword(), [atom()]) :: :ok
@@ -227,6 +235,28 @@ defmodule Core.Helper.StartOpts do
       value when is_integer(value) and value >= 0 -> value
       value when value in ~w(infinity brutal_kill)a -> value
       other -> raise_invalid!(label, key, "неотрицательное целое, :infinity или :brutal_kill", other)
+    end
+  end
+
+  @doc "Процесс дерева `{модуль, опции}` с `name:` — атомом в опциях; `key` — опция для текста ошибки."
+  @spec process!(String.t(), atom(), term()) :: process()
+
+  def process!(label, key, {module, opts} = spec) when is_atom(module) and not is_nil(module) and is_list(opts) do
+    case Keyword.get(opts, :name) do
+      name when is_atom(name) and not is_nil(name) -> %{module: module, opts: opts, name: name}
+      _other -> raise_invalid!(label, key, @process_expected, spec)
+    end
+  end
+
+  def process!(label, key, spec), do: raise_invalid!(label, key, @process_expected, spec)
+
+  @doc "Значения без повторов; повторы — ошибка с их списком, `expected` — правило для текста."
+  @spec unique!(String.t(), atom(), String.t(), list()) :: :ok
+
+  def unique!(label, key, expected, values) when is_list(values) do
+    case Enum.uniq(values -- Enum.uniq(values)) do
+      [] -> :ok
+      repeated -> raise_invalid!(label, key, expected, repeated)
     end
   end
 

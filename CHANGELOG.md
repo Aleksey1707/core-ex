@@ -340,6 +340,11 @@
 
 ### Новое
 
+- **`Core.Helper.StartOpts.process!/3` и `unique!/4`** — проверки готового дерева: процесс
+  `{модуль, опции}` с `name:` атомом (`%{module:, opts:, name:}`, тип `StartOpts.process()`) и
+  значения без повторов. Их держали копиями `Core.Outbox.Supervisor` и
+  `Core.PubSub.MqSubscriberReliable.Supervisor`; своё дерево приложения берёт их вместо копии.
+
 - **Нормы совместимости действуют с первого релиза приложения** (`docs/rules/app/00-index.md`,
   «Первый релиз»; решение — `docs/adr/0035-compatibility-after-first-release.md`). Первый релиз —
   один момент на приложение: первое из «появилась база, которую нельзя пересоздать» и «у любого

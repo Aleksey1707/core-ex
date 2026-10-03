@@ -72,12 +72,11 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @keys ~w(enabled component topics dlq_writer name)a
   @topic_keys ~w(reader subscriber)a
   @owned_keys ~w(reader_module reader dlq_writer dlq_handle subscribe)a
-  @process_expected "{модуль, опции с name: атомом}"
   @stream_reader Core.Mq.Stream.Reader
   @kafka_reader Core.Mq.Kafka.Reader
 
   @typedoc "Процесс брокера: модуль, его опции и имя — оно же handle."
-  @type process :: %{module: module(), opts: keyword(), name: atom()}
+  @type process :: StartOpts.process()
 
   @typedoc "Топик: читатель и подписчик — его опции, имя и топик."
   @type topic :: %{reader: process(), subscriber: %{opts: keyword(), name: atom(), topic: String.t()}}
@@ -267,7 +266,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
       name: StartOpts.name!(@label, opts, :name)
     }
 
-    unique!(:topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
+    StartOpts.unique!(@label, :topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
     options
   end
 
@@ -284,20 +283,20 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
     dlq ++ Enum.flat_map(topics, &[&1.reader.name, &1.subscriber.name])
   end
 
-  defp unique!(key, expected, values) do
-    case Enum.uniq(values -- Enum.uniq(values)) do
-      [] -> :ok
-      repeated -> StartOpts.raise_invalid!(@label, key, expected, repeated)
-    end
-  end
-
   defp dlq_writer!(nil), do: nil
 
-  defp dlq_writer!(spec), do: process!(:dlq_writer, spec)
+  defp dlq_writer!(spec), do: StartOpts.process!(@label, :dlq_writer, spec)
 
   defp topics!(topics) do
     parsed = Enum.map(topics, &topic!/1)
-    unique!(:topics, "топики без повторов: по топику строится метка", Enum.map(parsed, & &1.subscriber.topic))
+
+    StartOpts.unique!(
+      @label,
+      :topics,
+      "топики без повторов: по топику строится метка",
+      Enum.map(parsed, & &1.subscriber.topic)
+    )
+
     parsed
   end
 
@@ -308,19 +307,10 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
     StartOpts.keys!(@label, topic, @topic_keys)
 
     %{
-      reader: process!(:reader, StartOpts.term!(@label, topic, :reader)),
+      reader: StartOpts.process!(@label, :reader, StartOpts.term!(@label, topic, :reader)),
       subscriber: subscriber!(StartOpts.list!(@label, topic, :subscriber))
     }
   end
-
-  defp process!(key, {module, opts} = spec) when is_atom(module) and not is_nil(module) and is_list(opts) do
-    case Keyword.get(opts, :name) do
-      name when is_atom(name) and not is_nil(name) -> %{module: module, opts: opts, name: name}
-      _other -> StartOpts.raise_invalid!(@label, key, @process_expected, spec)
-    end
-  end
-
-  defp process!(key, spec), do: StartOpts.raise_invalid!(@label, key, @process_expected, spec)
 
   defp subscriber!(opts) do
     case Enum.find(@owned_keys, &Keyword.has_key?(opts, &1)) do
