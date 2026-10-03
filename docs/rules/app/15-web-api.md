@@ -125,7 +125,9 @@ defmodule MyAppWeb.Accepted do
 
 - Плаг контекста MUST стоять первым: он кладёт `%Context{}` с shadow copy в `conn.assigns` и
   снимает ETS в `before_send` (`11-domain.md`). Плаг аутентификации только докладывает в него
-  текущего пользователя.
+  текущего пользователя — функцией фабрики `MyApp.ContextFactory.with_user/2`, а не записью
+  аксессора: контекст собирает фабрика (`11-domain.md`, «Context»), и ключи его владельцев web
+  не пишет.
 - Отказ формируется на границе: плаг отвечает 401 сам и дальше `conn` не пускает.
 - Текст 401 — константа независимо от причины (нет заголовка, битый токен, истёкшая сессия):
   `deps/core/docs/rules/10-architecture.md`, «Граница HTTP»; причина уходит в `Logger.debug`
@@ -243,6 +245,10 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
   `{:projected | :accepted, id, version}` (`10-architecture.md`, «Usecases»): `:projected` —
   ответ 200, `:accepted` — 202 с `{id, version}`. `:projection_timeout` и `:projection_rebuilding`
   usecase уже перевёл в `:accepted`: запись применена, и до экшена ошибкой они не доходят.
+  Пакетная команда с пустым пакетом отдаёт `:unchanged` — ответ 204 без тела и без
+  `Preference-Applied`: записи не было, и ни 200 («`GET` уже видит запись»), ни 202 («ещё не
+  видит») не верны (`deps/core/docs/adr/0051-batch-command-unchanged.md`). Операция такой команды
+  MUST объявлять и ответ 204.
 - Операция такой команды MUST объявлять ответ `accepted:` со схемой `MyAppWeb.Schemas.Written`,
   операция создания — её же и в `ok:`. Параметр-заголовок `Prefer` и заголовок ответа
   `Preference-Applied` на 200 и 202 операция MUST объявлять общими определениями
@@ -250,7 +256,8 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
 - Ответ собирает один хелпер приложения — `MyAppWeb.Accepted` («Раскладка»): `wait/1` разбирает
   `Prefer` через `Core.Web.Prefer` и отдаёт режим `:none | pos_integer()` для `wait:` usecase,
   `respond/3` и `written/2` по результату usecase ставят `Preference-Applied` и отвечают 200 или
-  202. Свой разбор `Prefer` в хелпере или экшене MUST NOT: разборы разойдутся.
+  202, `respond/3` на `:unchanged` — 204. Свой разбор `Prefer` в хелпере или экшене MUST NOT:
+  разборы разойдутся.
 - Экшен команды MUST передавать usecase `wait: MyAppWeb.Accepted.wait(conn)`: без опции usecase не
   ждёт, и команда отвечает 202 при любом `Prefer`.
 - Ответ создания MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/2` (`conn`, результат

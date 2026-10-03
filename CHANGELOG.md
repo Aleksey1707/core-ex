@@ -46,7 +46,11 @@
     по агрегату → каталог по назначению `<BC>.<ReadModel>`; тип модели контекста — в каталог
     агрегата-владельца или в `values/`; модель нескольких агрегатов, которая не значение и не
     read-модель (шаги, шаблоны, их реестр, кодеки и ошибки), → каталог понятия `<BC>.<Concept>`,
-    имя понятия — не `Process`; каталог ошибок нескольких владельцев `<BC>.Common.Errors` →
+    имя понятия — не `Process`; тип в каталоге агрегата, чьё имя совпало с актором
+    (`Users.User.System` рядом с `Users.User.System.Usecases`), → переименовать тип
+    (`User.Superuser`); адаптер канала, которому нужны данные другого контекста, → остаётся в
+    контексте и берёт их через `exports` владельца, его сетевой транспорт — подсистема без чтения
+    контекстов; каталог ошибок нескольких владельцев `<BC>.Common.Errors` →
     `<BC>.Errors` в `<bc>/errors.ex`; аксессор `<BC>.Common.CurrentUser` →
     `<BC>.<Aggregate>.CurrentUser` в каталоге агрегата учётной записи; значения, аксессор и каталог
     ошибок, на которые ссылаются другие границы, — в `exports` контекста;
@@ -121,11 +125,11 @@
     `bin/my_app eval 'MyApp.Release.<fun>(…)'` в скриптах выката, образе и runbook →
     `bin/my_app eval 'MyAppApp.Release.<fun>(…)'`; имя `MyApp.Supervisor` корня дерева →
     `MyAppApp.Supervisor`;
-  - новый модуль контекста `MyApp.Domain.<BC>.Supervision` в
-    `lib/my_app/domain/<bc>/supervision.ex` с `projections/0`, `processes/0`, `children/0`,
-    `watch_list/0`, а при плагинах `Core.Mq.PromEx` и `Core.Cache.PromEx` — `readers/0`,
-    `kafka_readers/0`, `caches/0`; пустая часть — `[]`; контекст экспортирует `Supervision`,
-    `MyAppApp.contexts/0` перечисляет такие модули в порядке зависимостей контекстов;
+  - новый модуль контекста `MyApp.Domain.<BC>.Supervision` в `lib/my_app/domain/<bc>/supervision.ex`
+    с `projections/0`, `processes/0`, `children/0`, `watch_list/0`, а при плагинах `Core.Mq.PromEx`
+    и `Core.Cache.PromEx` — `readers/0`, `kafka_readers/0`, `caches/0` (имена Cachex, `[atom()]`);
+    пустая часть — `[]`; контекст экспортирует `Supervision`, `MyAppApp.contexts/0` перечисляет
+    такие модули в порядке зависимостей контекстов;
   - `MyApp.Projections.opts/0` со списком проекций → `MyAppApp.Application.projection_opts/0`
     склеивает `projections/0` объявлений; ключ `config :my_app, MyApp.Projections` в
     `config/runtime.exs` и `config/test.exs` → `config :my_app, Core.Es.Projection.Supervisor`;
@@ -150,7 +154,16 @@
   - `MyApp.DataCase`, `MyAppWeb.ConnCase` и прочая обвязка `test/support/` под `MyApp.*`
     (контрактные наборы, дублёры) → `MyAppTest.DataCase`, `MyAppTest.ConnCase`, `MyAppTest.*`;
     корень границы — модуль `MyAppTest` в `test/support/` с
-    `use Boundary, check: [in: false, out: false]`;
+    `use Boundary, check: [in: false, out: false]`; заготовка `test/my_app_test.exs` от `mix new` →
+    удалить: имя занято границей;
+  - модули верхнего уровня вне таблицы границ → Ecto-типы схем — `MyApp.Infra.Types.<Type>` в
+    стоке, настройка трассировки и сэмплер — `MyAppApp.Otel.*` в корне, прочее — подсистема
+    `MyApp.<Subsystem>` со своей границей; модули telemetry компонентов, на которые ссылаются
+    плагины PromEx корня, — в `exports` их контекста;
+  - сервер метрик `MyAppApp.MetricsServer` в начале `children` → в конце, перед
+    `MyAppWeb.Endpoint`: поднятый раньше компонентов, он отдавал `up=0` до их старта;
+  - плаг аутентификации web, который кладёт пользователя аксессором в собранный контекст, →
+    `MyApp.ContextFactory.with_user/2`;
   - исключение Credo `Refactor.IoPuts` для `lib/my_app/release.ex` и `lib/my_app/release/` →
     `lib/my_app_app/release.ex` и `lib/my_app_app/release/`;
   - компилятор `boundary` не во всех окружениях → `compilers: [:boundary] ++ Mix.compilers()` в
@@ -163,17 +176,18 @@
   sourcing»; `docs/rules/19-testing.md`, «Ветка неготовой read-модели»; решение —
   `docs/adr/0039-usecase-awaits-projection-by-wait.md`, заменяет ADR-0030 в пунктах «usecase
   проекцию не ждёт» и «хелпер получает колбэк ожидания»; запрос с `wait:`, чтение без отставания и
-  исходы без представления — `docs/adr/0047-query-awaits-projection.md`). Ожидание проекции было
-  делом экшена: литеральный захват `&Projection.await(Agg, id, &1)` повторялся в каждом контроллере,
-  воркер и подписчик ждали своим кодом, а с границей Boundary на контекст проекция и ReadRepo в его
-  `exports` не входят — экшен ждать и читать read-модель больше не может. Теперь изменяющий usecase
-  event-sourced агрегата принимает `wait: :none | pos_integer()` и после commit, вне транзакции, сам
-  ждёт проекцию литеральным `Projection.await/3` с ID, суженным до `%Agg.ID{}`, — сборка сверяет
-  агрегат и ID, как прежде в экшене. Дождавшись, команда отдаёт представление, прочитанное запросом
-  актора, создание, удаление и upsert — `{id, version}`; не дождавшись или не прочитав —
-  `{id, version}` с тегом `:accepted`. Экспортированный запрос MAY принимать тот же `wait:` и ждать до
-  чтения: так реакция другого контекста исполняет «дождаться проекции читаемой read-модели». Ответы
-  API, схемы `Written` и `Prefer`, таблица `Prefer` и `Preference-Applied` не меняются.
+  исходы без представления — `docs/adr/0047-query-awaits-projection.md`; пустой пакет —
+  `docs/adr/0051-batch-command-unchanged.md`). Ожидание проекции было делом экшена: литеральный
+  захват `&Projection.await(Agg, id, &1)` повторялся в каждом контроллере, воркер и подписчик ждали
+  своим кодом, а с границей Boundary на контекст проекция и ReadRepo в его `exports` не входят —
+  экшен ждать и читать read-модель больше не может. Теперь изменяющий usecase event-sourced агрегата
+  принимает `wait: :none | pos_integer()` и после commit, вне транзакции, сам ждёт проекцию
+  литеральным `Projection.await/3` с ID, суженным до `%Agg.ID{}`, — сборка сверяет агрегат и ID, как
+  прежде в экшене. Дождавшись, команда отдаёт представление, прочитанное запросом актора, создание,
+  удаление и upsert — `{id, version}`; не дождавшись или не прочитав — `{id, version}` с тегом
+  `:accepted`. Экспортированный запрос MAY принимать тот же `wait:` и ждать до чтения: так реакция
+  другого контекста исполняет «дождаться проекции читаемой read-модели». Ответы API, схемы `Written`
+  и `Prefer`, таблица `Prefer` и `Preference-Applied` не меняются.
 
   Как править приложение (было → стало):
   - команда event-sourced агрегата `take(id, version, context) :: {:ok, Version.t()}` →
@@ -184,7 +198,9 @@
     `:accepted`;
   - создание, удаление и upsert `{:ok, {ID.t(), Version.t()}}` / `{:ok, Version.t()}` →
     `{:ok, {:projected | :accepted, ID.t(), Version.t()}}`; команда агрегата без read-модели —
-    `{:ok, {:accepted, ID.t(), Version.t()}}`, `wait:` она не принимает;
+    `{:ok, {:accepted, ID.t(), Version.t()}}`, `wait:` она не принимает; пакетная команда с пустым
+    пакетом (`{:ok, nil}`) → `{:ok, :unchanged}`, `MyAppWeb.Accepted.respond/3` отвечает на него 204
+    без `Preference-Applied`, операция объявляет ответ 204;
   - правило реакции, которое ждёт проекцию другого контекста и читает его ReadRepo, → его
     экспортированный запрос с `wait:`, ошибка ожидания — `{:error, _}` и повтор; чтение учётной
     записи свёрткой потока через репозиторий другого контекста → его read-модель без таблицы и её
@@ -256,10 +272,11 @@
   - подписчики топиков внешней системы, разбор её формата и дерево DLQ в контексте → граница
     `MyAppIngest`: корень `MyAppIngest` в `lib/my_app_ingest.ex` с
     `use Boundary, deps: [<контексты>, <подсистемы>], check: [aliases: true]`, корень компонента —
-    `MyAppIngest.<Source>.Supervisor` в `lib/my_app_ingest/<source>/`; `repo:` литералом
-    репозитория у `Core.Mq.Dlq.Writer`, `Core.Mq.Dlq.Reader` и `Core.Mq.Kafka.Reader` → опция
-    компонента в `config/runtime.exs`; `MyAppIngest` — в `deps` корня `MyAppApp`, корни её
-    компонентов — детьми `Application` после детей контекстов и в
+    `MyAppIngest.<Source>.Supervisor` в `lib/my_app_ingest/<source>/`; `repo:` литералом репозитория
+    у `Core.Mq.Dlq.Writer`, `Core.Mq.Dlq.Reader` и `Core.Mq.Kafka.Reader` → опция компонента в
+    `config/runtime.exs`; ошибки разбора её формата, которые строились каталогами агрегатов
+    контекста, → каталог входа `MyAppIngest.Errors`; `MyAppIngest` — в `deps` корня `MyAppApp`,
+    корни её компонентов — детьми `Application` после детей контекстов и в
     `MyAppApp.Application.watch_list/0`, её читатели — в провайдерах `readers:` и `kafka_readers:`;
   - при переносе реакции или входа строки `subscriber_name:` и `component:` не меняются: по ним
     живут смещения читателей Stream и Kafka, записи `mq_dlq` и ряды метрик; меняются только имена
@@ -285,17 +302,20 @@
   реестр. Декларация стоит и на модуле общего чтения `<Aggregate>.Usecases` — со списком типов
   учётной записи, а второе пространство своего контекста usecase проверяет `check_user/3`. Отказ —
   `:access_denied` (403) или `:unauthorized` (401). Тест usecase идёт с моком порта, авторизацию
-  операции держит интеграционный тест с боевой реализацией; общий контрактный набор — MUST только на
-  боевые реализации одного behaviour.
+  модуля декларации держит интеграционный тест с боевой реализацией, операции — табличный тест в
+  нём; общий контрактный набор — MUST на боевых реализациях и дублёрах одного behaviour, на моке —
+  нет.
 
   Как править приложение (было → стало):
   - подсистема механизма прав (макрос декларации, проверка, реестр и каталог пространств) → порт
     `MyApp.Authz` в `lib/my_app/authz.ex`: `use Boundary, deps: [], exports: [Errors]`, behaviour
     `check/4` (первый аргумент — список типов учётной записи), макрос `use MyApp.Authz` с
     `account:` (атом или список), `namespace:` и `namespaces:`, дающий `check_user/2` и
-    `check_user/3`, `namespaces/0`, `registry!/1`, `validate!/0`; проверка второго пространства своего
-    контекста в usecase → ключ в `namespaces:` декларации и `check_user(:<ns>, ops, context)`; чтение нескольких акторов в `<Aggregate>.Usecases` →
-    декларация на нём с `account: [<типы акторов>]`; проверка над моделью прав → реализация
+    `check_user/3`, `namespaces/0`, `registry!/1`, `validate!/0`; проверка второго пространства
+    своего контекста в usecase → ключ в `namespaces:` декларации и
+    `check_user(:<ns>, ops, context)`; чтение нескольких акторов в `<Aggregate>.Usecases` →
+    декларация на нём с `account: [<типы акторов>]`; декларация в тестовом модуле → убрать: usecase
+    тестируется через свой модуль с моком порта; проверка над моделью прав → реализация
     `MyApp.Domain.<BC>.Authz` контекста прав с `@behaviour MyApp.Authz`; у приложения без модели
     прав — заглушка `MyApp.Authz.Stub`;
   - каталог ошибок отказа механизма → `MyApp.Authz.Errors`, отказ —
@@ -314,27 +334,29 @@
   - тест usecase с ролями и прогоном проекций контекста прав → мок
     `Mox.defmock(MyAppTest.Authz, for: MyApp.Authz)` в `test/support/mocks.ex`,
     `config :my_app, MyApp.Authz, impl: MyAppTest.Authz` в `config/test.exs`,
-    `{:mox, "~> 1.2", only: :test}` в `deps`; на каждую операцию с `check_user/2` —
-    интеграционный тест с `Mox.stub_with(MyAppTest.Authz, MyApp.Domain.<BC>.Authz)`: отказ без
-    права и успех с ним; у приложения с заглушкой мок и интеграционные тесты доступа не нужны;
-  - общий контрактный набор, который гонялся и на тестовой реализации, → только на боевых.
+    `{:mox, "~> 1.2", only: :test}` в `deps`; на каждый модуль декларации — интеграционный тест с
+    `Mox.stub_with(MyAppTest.Authz, MyApp.Domain.<BC>.Authz)`: отказ без права и успех с ним, а
+    операции модуля — таблицей в том же тесте; у приложения с заглушкой мок и интеграционные тесты
+    доступа не нужны;
+  - общий контрактный набор, который гонялся и на моке, → на боевых реализациях и дублёрах (своя
+    реализация с поведением), на моке Mox — нет.
 
 - **Очередь outbox — готовое дерево `Core.Outbox.Supervisor`, wake — по его отметке**
   (`docs/rules/14-events-outbox.md`, «Outbox lifecycle», «Единственность поллера»;
   `docs/rules/app/14-events-outbox.md`, «Единственность поллера», «Конфигурация»;
   `docs/rules/app/17-otp-concurrency.md`, «Готовое дерево без корня», «Очередь outbox»; решение —
   `docs/adr/0045-outbox-ready-tree.md`; один репозиторий и выключенное дерево без опций —
-  `docs/adr/0050-outbox-tree-one-repo-disabled-bare.md`). Корень очереди писал каждый потребитель: порядок детей и
-  две проверки старта держали ревью и ратчет, проверка единственности у большинства была своей
-  копией с разной трактовкой пустого `DNS_CLUSTER_QUERY`. Wake после вставки читал имена поллеров
-  из `config :core, Core.Outbox`, корень — из своего ключа, и их расхождение было видно только
-  задержкой доставки до `poll_interval_ms`. Теперь очередь поднимает только дерево библиотеки:
-  соединение → на каждый поллер его writer и сам поллер → cleaner под `rest_for_one`, проверки
-  единственности на кластере и непересечения фильтров при старте, тумблер `enabled:` и
+  `docs/adr/0050-outbox-tree-one-repo-disabled-bare.md`). Корень очереди писал каждый потребитель:
+  порядок детей и две проверки старта держали ревью и ратчет, проверка единственности у большинства
+  была своей копией с разной трактовкой пустого `DNS_CLUSTER_QUERY`. Wake после вставки читал имена
+  поллеров из `config :core, Core.Outbox`, корень — из своего ключа, и их расхождение было видно
+  только задержкой доставки до `poll_interval_ms`. Теперь очередь поднимает только дерево
+  библиотеки: соединение → на каждый поллер его writer и сам поллер → cleaner под `rest_for_one`,
+  проверки единственности на кластере и непересечения фильтров при старте, тумблер `enabled:` и
   `watch_list/1`. До подъёма детей дерево пишет в `:persistent_term` отметку с именами и фильтрами
   поллеров, и wake читает только её; `config :core, Core.Outbox` библиотека не читает нигде.
-  `Core.Outbox.Poller` вне дерева не стартует — `ArgumentError`, поэтому приложение со старым
-  корнем после обновления падает на старте, а не теряет wake молча.
+  `Core.Outbox.Poller` вне дерева не стартует — `ArgumentError`, поэтому приложение со старым корнем
+  после обновления падает на старте, а не теряет wake молча.
 
   Как править приложение (было → стало):
   - рукописный корень очереди (`MyAppApp.Outbox.Supervisor` или `MyApp.Outbox.Supervisor`:
@@ -344,13 +366,13 @@
     пользователей нет, → опция `connection: {Core.Mq.Stream.Connection, opts}` дерева;
   - `config :core, Core.Outbox` в `config/runtime.exs` → `config :my_app, Core.Outbox.Supervisor`:
     `enabled:`, `cluster_query:` (обязательна; прежнее значение `DNS_CLUSTER_QUERY`, `nil` — нет
-    кластера; база `nil` в общей части блока, `DNS_CLUSTER_QUERY` — в prod-блоке),
-    `allow_cluster:` (было `allow_cluster?:` у проверки), `poll_interval_ms:`, `idle_min_ms:`, `batch_size:`, `lock_duration_seconds:`, `max_attempts:`,
-    `published_ttl_seconds:`, `cleaner_interval_ms:` — голыми положительными целыми, без `new!` в
-    Prim; дефолтов у tunables нет, обязательны они только при `enabled: true`; `repo:` дерево не
-    принимает — репозиторий поллеров и cleaner тот же, которым пишут записи,
-    `Core.Config.outbox_repo/0` (`config :core, Core.Outbox.Repo`, по умолчанию
-    `Core.Outbox.Repo.Pg`);
+    кластера; база `nil` в общей части блока, `DNS_CLUSTER_QUERY` — в prod-блоке), `allow_cluster:`
+    (было `allow_cluster?:` у проверки), `poll_interval_ms:`, `idle_min_ms:`, `batch_size:`,
+    `lock_duration_seconds:`, `max_attempts:`, `published_ttl_seconds:`, `cleaner_interval_ms:` —
+    голыми положительными целыми, без `new!` в Prim; дефолтов у tunables нет, обязательны они только
+    при `enabled: true`; `repo:` дерево не принимает — репозиторий поллеров и cleaner тот же,
+    которым пишут записи, `Core.Config.outbox_repo/0` (`config :core, Core.Outbox.Repo`, по
+    умолчанию `Core.Outbox.Repo.Pg`);
   - `poller_name:` / `pollers: [[name:, topics:]]` → `pollers:` дерева, элемент —
     `[name:, label:, topics:]` и ровно один из `writer: {Core.Mq.Stream.Writer, opts с name:}`
     (writer, который поднимало приложение, — теперь его поднимает дерево перед поллером) или
@@ -467,7 +489,9 @@
   ```
 
   Вызовы `Agg.ID.new()` такого Prim после правки — предупреждение компилятора: id берётся из
-  источника через `Agg.ID.new/1`.
+  источника через `Agg.ID.new/1`, в фикстурах — `Ecto.UUID.generate() |> Agg.ID.new!()`. `:external`
+  описывает происхождение значения, а не роль: им объявляется и ссылка агрегата на объект источника,
+  которая id потока не является (`docs/rules/11-domain.md`, «Prim (value object)»).
 
 - **`use Core.Es.Outbox` генерирует `topic/0`.** Модуль `<Aggregate>.Outbox` отдаёт топик из опции
   `topic:` строкой (`docs/rules/14-events-outbox.md`, «Aggregate → Outbox.Record»). Подписчик на
@@ -490,7 +514,9 @@
   ```
 
   и `Order.Outbox` — в `exports` оглавления контекста-производителя `MyApp.Domain.Orders`. Своя
-  функция `topic/0` в модуле outbox сталкивается с генерируемой: её нужно убрать.
+  функция `topic/0` в модуле outbox сталкивается с генерируемой: её нужно убрать. Топик в паттерне
+  головы подписчика или в опции его макроса — атрибутом `@topic Order.Outbox.topic()`, а не
+  литералом: сборка пересобирает подписчика при смене топика производителя.
 
 ## 0.10.0
 

@@ -47,7 +47,7 @@ MUST NOT: тумблер, опции и наблюдение компонент�
 
 Порядок детей значим — зависимости идут раньше потребителей:
 
-1. сбор метрик и сервер метрик — раньше всех: PromEx ловит init-события детей
+1. сбор метрик (`MyAppApp.PromEx`) — раньше всех: PromEx ловит init-события детей
    (`[:ecto, :repo, :init]` у `PromEx.Plugins.Ecto`), а опрос БД плагинами `Core.*.PromEx`
    до старта пула пропускает цикл (`Core.PromEx.Safe`), а не роняет процесс;
 2. пул БД — раньше всех, кто в неё ходит;
@@ -59,7 +59,9 @@ MUST NOT: тумблер, опции и наблюдение компонент�
    компоненты границы входа `MyAppIngest` — граница после тех, от кого она зависит: дети
    контекстов в порядке `MyAppApp.contexts/0`, а внутри `children/0` контекста кеш read-модели с
    его инвалидатором — раньше прочих компонентов контекста;
-7. HTTP-эндпоинт — последним: он поднимается, когда зависимости готовы.
+7. сервер метрик `MyAppApp.MetricsServer` и HTTP-эндпоинт — последними: они поднимаются, когда
+   зависимости готовы, а сервер метрик, поднятый раньше компонентов, отдавал бы `up=0` до их
+   старта.
 
 Кеш контекста поднимается после планировщика: задача, взятая в первые мгновения старта, может не
 застать кеш и уйдёт в повтор планировщика. Порядок по контекстам держит `contexts/0`, а не
@@ -100,7 +102,7 @@ def start(_type, _args) do
       Enum.map(processes(), &{&1, process_opts(&1)}) ++
       [MyApp.<Subsystem>.Supervisor] ++
       Enum.flat_map(MyAppApp.contexts(), & &1.children()) ++
-      [MyAppIngest.<Source>.Supervisor, MyAppWeb.Endpoint]
+      [MyAppIngest.<Source>.Supervisor, MyAppApp.MetricsServer, MyAppWeb.Endpoint]
 
   Supervisor.start_link(children, strategy: :one_for_one, name: MyAppApp.Supervisor)
 end
@@ -291,7 +293,7 @@ lib/my_app_ingest/<source>/supervisor.ex
 | `children/0` | корни компонентов контекста в порядке старта | `start/2` («Дерево процессов») |
 | `watch_list/0` | `watch_list/0` тех же корней | `watch_list/0` корня («Наблюдение за процессами») |
 | `readers/0`, `kafka_readers/0` | читатели деревьев подписчиков контекста | провайдеры `readers:` и `kafka_readers:` плагина `Core.Mq.PromEx` |
-| `caches/0` | кеши контекста под наблюдением | провайдер `sizes:` плагина `Core.Cache.PromEx` |
+| `caches/0` | имена Cachex кешей контекста под наблюдением (`[atom()]`) | провайдер `sizes:` плагина `Core.Cache.PromEx`: `Cachex.size/1` на каждое имя, метка `cache` — имя |
 
 - Контекст MUST объявлять четыре первые функции, а `readers/0`, `kafka_readers/0` и `caches/0` —
   если приложение подключает плагин с этим провайдером; пустая часть — пустой список: корень
