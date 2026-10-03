@@ -81,7 +81,6 @@ defmodule Core.Outbox.PollerTest do
       {Core.Outbox.Supervisor,
        enabled: true,
        cluster_query: nil,
-       repo: @repo,
        pollers: [[name: name, label: "test", via: {module, handle}]],
        poll_interval_ms: Keyword.get(opts, :poll_interval_ms, 60_000),
        idle_min_ms: Keyword.get(opts, :idle_min_ms, 50),

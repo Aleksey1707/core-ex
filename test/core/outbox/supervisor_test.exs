@@ -110,12 +110,21 @@ defmodule Core.Outbox.SupervisorTest do
 
     test "нет обязательной опции — ArgumentError" do
       for key <- ~w(
-            enabled cluster_query repo pollers poll_interval_ms idle_min_ms batch_size lock_duration_seconds
+            enabled cluster_query pollers poll_interval_ms idle_min_ms batch_size lock_duration_seconds
             max_attempts published_ttl_seconds cleaner_interval_ms
           )a do
         assert start_error(Keyword.delete(tree_opts(), key)) =~
                  "Outbox.Supervisor: нет обязательной опции #{inspect(key)}"
       end
+    end
+
+    test "repo: — неизвестная опция: репозиторий очереди один, Core.Config.outbox_repo/0" do
+      assert start_error(tree_opts(repo: @repo)) =~ "Outbox.Supervisor: неизвестные опции [:repo]"
+    end
+
+    test "enabled: false — обязательна только enabled:, прочие опции не нужны" do
+      assert :ignore = Core.Outbox.Supervisor.start_link(enabled: false)
+      assert Core.Outbox.Supervisor.watch_list(enabled: false) == []
     end
 
     test "значение не той формы — ArgumentError с именем опции" do
@@ -280,7 +289,6 @@ defmodule Core.Outbox.SupervisorTest do
       [
         enabled: true,
         cluster_query: nil,
-        repo: @repo,
         connection: {MqFake.Writer, name: @connection},
         pollers: pollers(),
         poll_interval_ms: 60_000,

@@ -16,7 +16,6 @@ defmodule ConsumerTest.Outbox do
     [
       enabled: true,
       cluster_query: nil,
-      repo: Core.Outbox.Repo.Pg,
       pollers: [
         [
           name: ConsumerTest.Outbox.Poller,

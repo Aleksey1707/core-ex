@@ -290,9 +290,15 @@ DLQ — `deps/core/docs/rules/14-events-outbox.md`, «Идемпотентнос
   усекаются молча.
 - Окно до `:failed` задаёт тройка `OUTBOX_IDLE_MIN` / `OUTBOX_POLL_INTERVAL` /
   `OUTBOX_MAX_ATTEMPTS` (`deps/core/docs/rules/14-events-outbox.md`, «Poller scheduling»).
-- В `:test` runtime-блок очереди пропускается, значения задаёт overlay в `config/test.exs`:
-  `enabled: false` с остальными обязательными опциями дерева (опции проверяются и у выключенного
-  дерева) — оно отвечает `:ignore`, и wake после вставки никого не будит.
+- `cluster_query:` MUST задаваться явно и там, где кластеризации нет: база `cluster_query: nil` в
+  общей части блока очереди `config/runtime.exs`, значение `DNS_CLUSTER_QUERY` — в prod-блоке. Без
+  дефолта забытый ключ роняет старт включённой очереди, а не снимает проверку единственности молча.
+- В `:test` runtime-блок очереди пропускается, overlay в `config/test.exs` —
+  `config :my_app, Core.Outbox.Supervisor, enabled: false`: выключенному дереву прочие опции не
+  нужны, оно отвечает `:ignore`, и wake после вставки никого не будит.
+- Репозиторий очереди дерево берёт из `Core.Config.outbox_repo/0` — того же ключа, которым пишут
+  записи; опции `repo:` у дерева нет
+  (`deps/core/docs/adr/0050-outbox-tree-one-repo-disabled-bare.md`).
 
 ## Runbook: записи в `:failed`
 

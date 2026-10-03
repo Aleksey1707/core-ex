@@ -323,7 +323,8 @@
   (`docs/rules/14-events-outbox.md`, «Outbox lifecycle», «Единственность поллера»;
   `docs/rules/app/14-events-outbox.md`, «Единственность поллера», «Конфигурация»;
   `docs/rules/app/17-otp-concurrency.md`, «Готовое дерево без корня», «Очередь outbox»; решение —
-  `docs/adr/0045-outbox-ready-tree.md`). Корень очереди писал каждый потребитель: порядок детей и
+  `docs/adr/0045-outbox-ready-tree.md`; один репозиторий и выключенное дерево без опций —
+  `docs/adr/0050-outbox-tree-one-repo-disabled-bare.md`). Корень очереди писал каждый потребитель: порядок детей и
   две проверки старта держали ревью и ратчет, проверка единственности у большинства была своей
   копией с разной трактовкой пустого `DNS_CLUSTER_QUERY`. Wake после вставки читал имена поллеров
   из `config :core, Core.Outbox`, корень — из своего ключа, и их расхождение было видно только
@@ -343,10 +344,13 @@
     пользователей нет, → опция `connection: {Core.Mq.Stream.Connection, opts}` дерева;
   - `config :core, Core.Outbox` в `config/runtime.exs` → `config :my_app, Core.Outbox.Supervisor`:
     `enabled:`, `cluster_query:` (обязательна; прежнее значение `DNS_CLUSTER_QUERY`, `nil` — нет
-    кластера), `allow_cluster:` (было `allow_cluster?:` у проверки), `repo: Core.Outbox.Repo.Pg`,
-    `poll_interval_ms:`, `idle_min_ms:`, `batch_size:`, `lock_duration_seconds:`, `max_attempts:`,
+    кластера; база `nil` в общей части блока, `DNS_CLUSTER_QUERY` — в prod-блоке),
+    `allow_cluster:` (было `allow_cluster?:` у проверки), `poll_interval_ms:`, `idle_min_ms:`, `batch_size:`, `lock_duration_seconds:`, `max_attempts:`,
     `published_ttl_seconds:`, `cleaner_interval_ms:` — голыми положительными целыми, без `new!` в
-    Prim; дефолтов у tunables нет;
+    Prim; дефолтов у tunables нет, обязательны они только при `enabled: true`; `repo:` дерево не
+    принимает — репозиторий поллеров и cleaner тот же, которым пишут записи,
+    `Core.Config.outbox_repo/0` (`config :core, Core.Outbox.Repo`, по умолчанию
+    `Core.Outbox.Repo.Pg`);
   - `poller_name:` / `pollers: [[name:, topics:]]` → `pollers:` дерева, элемент —
     `[name:, label:, topics:]` и ровно один из `writer: {Core.Mq.Stream.Writer, opts с name:}`
     (writer, который поднимало приложение, — теперь его поднимает дерево перед поллером) или
@@ -362,7 +366,8 @@
     функций нет, обе проверки делает дерево; строку ратчета «корень очереди зовёт
     `check_singleton!/1`» и его тест — удалить;
   - тестовый overlay `config :core, Core.Outbox, enabled: false, poller_name: nil` →
-    `config :my_app, Core.Outbox.Supervisor, enabled: false` с остальными обязательными опциями;
+    `config :my_app, Core.Outbox.Supervisor, enabled: false` — прочие опции выключенному дереву не
+    нужны;
   - `watch_list/0` корня очереди → `Core.Outbox.Supervisor.watch_list(outbox_opts())` в склейке
     `MyAppApp.Application.watch_list/0`; метки компонентов — `outbox_connection`,
     `outbox_writer:<label>`, `outbox_poller:<label>`, `outbox_cleaner`: дашборды и алерты на

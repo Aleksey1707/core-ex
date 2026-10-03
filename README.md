@@ -317,7 +317,6 @@ end
    {Core.Outbox.Supervisor,
     enabled: true,
     cluster_query: System.get_env("DNS_CLUSTER_QUERY"),
-    repo: Core.Outbox.Repo.Pg,
     pollers: [
       [
         name: MyAppApp.Outbox.Poller,

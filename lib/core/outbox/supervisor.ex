@@ -8,7 +8,6 @@ defmodule Core.Outbox.Supervisor do
         {Core.Outbox.Supervisor,
          enabled: true,
          cluster_query: nil,
-         repo: Core.Outbox.Repo.Pg,
          connection: {Core.Mq.Stream.Connection, name: MyAppApp.Outbox.Connection},
          pollers: [
            [
@@ -36,11 +35,10 @@ defmodule Core.Outbox.Supervisor do
 
   ## Opts
 
-  - `enabled:` — обязательна; `false` — дерево не стартует
+  - `enabled:` — обязательна; `false` — дерево не стартует, и прочие опции не нужны
   - `cluster_query:` — обязательна, без дефолта: запрос кластеризации; `nil`, `:ignore` и `""` —
     кластеризации нет
   - `allow_cluster:` — разрешить старт включённой очереди в кластере, по умолчанию `false`
-  - `repo:` — обязательна; модуль `Core.Outbox.Repo` для поллеров и cleaner
   - `pollers:` — обязательна; список поллеров, элемент — keyword:
     - `name:` — обязательна; атом, имя процесса поллера
     - `label:` — обязательна; непустая строка, метка компонента в `watch_list/1`
@@ -58,6 +56,9 @@ defmodule Core.Outbox.Supervisor do
   - `published_ttl_seconds:`, `cleaner_interval_ms:` — обязательны; TTL опубликованных записей и
     интервал cleaner
 
+  «Обязательна» — при `enabled: true`. Репозиторий очереди у поллеров и cleaner — тот же, которым
+  пишут записи, `Core.Config.outbox_repo/0`: второй источник разошёлся бы с ним молча.
+
   Числа — положительные целые; в Prim (`Core.Outbox.BatchSize`, `LockDuration`, `Attempts`,
   `PublishedTTL`) их оборачивает дерево. Имена процессов дерева и метки поллеров MUST различаться.
   Доставку поллера дерево собирает само — `Core.Outbox.Delivery.Mq` над writer'ом элемента. Config
@@ -66,9 +67,10 @@ defmodule Core.Outbox.Supervisor do
 
   ## Старт
 
-  `start_link/1` проверяет опции при любом `enabled:`: неизвестная, отсутствующая или недопустимая
-  опция, оба или ни одного из `writer:` / `via:`, повтор имени или метки, `enabled: true` при
-  `pollers: []` — `ArgumentError`. Затем две проверки старта:
+  `start_link/1` проверяет опции: неизвестная опция — `ArgumentError` при любом `enabled:`;
+  отсутствующая или недопустимая опция, оба или ни одного из `writer:` / `via:`, повтор имени или
+  метки, `enabled: true` при `pollers: []` — `ArgumentError` включённого дерева. Выключенное
+  проверяет только переданные `pollers:`: их имена уходят в лог. Затем две проверки старта:
 
   - единственность на кластере: включённая очередь вместе с кластеризацией — `ArgumentError`,
     каждая нода подняла бы свои поллеры; `allow_cluster: true` — старт с `warning`;
@@ -92,6 +94,7 @@ defmodule Core.Outbox.Supervisor do
 
   use Supervisor
 
+  alias Core.Config
   alias Core.Context
   alias Core.Helper.StartOpts
   alias Core.Outbox
@@ -104,7 +107,7 @@ defmodule Core.Outbox.Supervisor do
 
   @label "Outbox.Supervisor"
   @keys ~w(
-    enabled cluster_query allow_cluster repo pollers connection context_factory poll_interval_ms idle_min_ms
+    enabled cluster_query allow_cluster pollers connection context_factory poll_interval_ms idle_min_ms
     batch_size lock_duration_seconds max_attempts published_ttl_seconds cleaner_interval_ms
   )a
   @poller_keys ~w(name label topics writer via)a
@@ -124,12 +127,14 @@ defmodule Core.Outbox.Supervisor do
           via: {module(), term()}
         }
 
-  @typedoc "Проверенные опции дерева."
-  @type options :: %{
-          enabled: boolean(),
+  @typedoc "Проверенные опции дерева: выключенному нужны только поллеры для лога."
+  @type options :: %{enabled: false, pollers: [poller()]} | enabled_options()
+
+  @typedoc "Проверенные опции включённого дерева."
+  @type enabled_options :: %{
+          enabled: true,
           cluster_query: cluster_query(),
           allow_cluster: boolean(),
-          repo: module(),
           pollers: [poller()],
           connection: process() | nil,
           context_factory: (-> Context.t()),
@@ -230,7 +235,7 @@ defmodule Core.Outbox.Supervisor do
   # ===== дети =====
 
   @doc false
-  @spec init(options()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
+  @spec init(enabled_options()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
 
   @impl true
   def init(%{connection: connection, pollers: pollers} = options) do
@@ -257,7 +262,7 @@ defmodule Core.Outbox.Supervisor do
     [
       name: name,
       topics: topics,
-      repo: options.repo,
+      repo: Config.outbox_repo(),
       delivery_module: Delivery.Mq,
       delivery: Delivery.Mq.new(module, handle),
       poll_interval_ms: options.poll_interval_ms,
@@ -272,7 +277,7 @@ defmodule Core.Outbox.Supervisor do
   defp cleaner_child(options) do
     {Cleaner,
      name: Cleaner,
-     repo: options.repo,
+     repo: Config.outbox_repo(),
      published_ttl: options.published_ttl,
      interval_ms: options.cleaner_interval_ms,
      context_factory: options.context_factory}
@@ -321,10 +326,15 @@ defmodule Core.Outbox.Supervisor do
 
   defp options!(opts) do
     StartOpts.keys!(@label, opts, @keys)
-    enabled = StartOpts.boolean!(@label, opts, :enabled)
+    options!(StartOpts.boolean!(@label, opts, :enabled), opts)
+  end
+
+  defp options!(false, opts), do: %{enabled: false, pollers: Enum.map(Keyword.get(opts, :pollers, []), &poller!/1)}
+
+  defp options!(true, opts) do
     pollers = Enum.map(StartOpts.list!(@label, opts, :pollers), &poller!/1)
     connection = connection!(Keyword.get(opts, :connection))
-    ensure_pollers!(enabled, pollers)
+    ensure_pollers!(pollers)
 
     StartOpts.unique!(
       @label,
@@ -341,10 +351,9 @@ defmodule Core.Outbox.Supervisor do
     )
 
     %{
-      enabled: enabled,
+      enabled: true,
       cluster_query: cluster_query!(opts),
       allow_cluster: StartOpts.boolean!(@label, opts, :allow_cluster, false),
-      repo: StartOpts.module!(@label, opts, :repo),
       pollers: pollers,
       connection: connection,
       context_factory: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0),
@@ -375,11 +384,11 @@ defmodule Core.Outbox.Supervisor do
     end
   end
 
-  defp ensure_pollers!(true, []) do
+  defp ensure_pollers!([]) do
     raise ArgumentError, "#{@label}: enabled: true при pollers: [] — очереди нечем доставлять записи"
   end
 
-  defp ensure_pollers!(_enabled, _pollers), do: :ok
+  defp ensure_pollers!(_pollers), do: :ok
 
   defp poller!(poller) do
     unless Keyword.keyword?(poller),
