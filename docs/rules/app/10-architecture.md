@@ -23,7 +23,7 @@
 | `MyApp.Domain.<BC>` | `lib/my_app/domain/<bc>.ex`, `lib/my_app/domain/<bc>/` | bounded context — граница верхнего уровня: оглавление — корень границы, каталоги агрегатов и уровня контекста (см. «Раскладка», «Boundary») |
 | `MyApp.Infra` | `lib/my_app/infra.ex`, `lib/my_app/infra/` | граница-сток без зависимостей на домен: `DAO`, `StreamID` (см. «Корень и сток») |
 | `MyApp.Authz` | `lib/my_app/authz.ex`, `lib/my_app/authz/` | порт проверки доступа: behaviour, макрос декларации, каталог ошибок отказа, заглушка (см. «Проверка доступа») |
-| `MyApp.ContextFactory` | `lib/my_app/context_factory.ex` | сборка `%Context{}` вне web |
+| `MyApp.ContextFactory` | `lib/my_app/context_factory.ex` | фабрика контекста: сборка `%Context{}` единицы работы, включая плаг контекста web (`11-domain.md`, «Context») |
 | `MyAppWeb` | `lib/my_app_web/` | HTTP-поверхности, плаги, презентеры |
 | `MyAppIngest` | `lib/my_app_ingest.ex`, `lib/my_app_ingest/` | граница входа внешней системы (MAY): подписчики её брокера, разбор её формата, DLQ; зовёт usecases контекстов (см. «Boundary») |
 | `MyAppTest` | `test/support/` | обвязка тестов: case-модули `MyAppTest.DataCase`, `MyAppTest.ConnCase`, дублёры (`19-testing.md`) |
@@ -117,7 +117,8 @@ lib/my_app/domain/<bc>/
   (`13-repos.md`, «Репозитории актора»). В остальных случаях акторы читают и пишут общие модули
   каталога агрегата.
 - Usecases актора, которые зовут не из web, а из воркеров, подписчиков и mix-тасок, MUST получать
-  актора от `ContextFactory` (`11-domain.md`), а не собирать контекст на месте.
+  актора от `ContextFactory` (`11-domain.md`), а не собирать контекст на месте. Исключение —
+  граница аксессора текущего пользователя (`11-domain.md`, «Context»).
 - Значение без агрегата-владельца MUST лежать в `values/` — `MyApp.Domain.<BC>.Values.<Value>`,
   ошибки нескольких агрегатов — в `<BC>.Errors`, read-модель не по агрегату — каталогом по
   назначению рядом с агрегатами, реакция, которая зовёт usecases нескольких агрегатов, — в
@@ -188,7 +189,7 @@ defmodule MyApp.Domain.Orders do
   """
 
   use Boundary,
-    deps: [MyApp.Authz, MyApp.Codec, MyApp.Infra, MyApp.Domain.Billing],
+    deps: [MyApp.Authz, MyApp.Codec, MyApp.ContextFactory, MyApp.Infra, MyApp.Domain.Billing],
     exports: [
       Order.Client.Usecases,
       Order.Admin.Usecases,
@@ -369,8 +370,9 @@ end
 | `MyApp.Codec` | — (`check: [out: false]`) | Prim-профили, entity-фасады, реестр плагинов |
 | `MyApp.Infra` | `[]` | сток без зависимостей на домен: `DAO`, `StreamID` |
 | `MyApp.Authz` | `[]`; `exports: [Errors]` | порт проверки доступа: behaviour, макрос декларации, каталог ошибок отказа, заглушка |
+| `MyApp.ContextFactory` | владельцы ключей контекста: граница аксессора текущего пользователя — контекст учётной записи или `MyApp.Auth` | фабрика контекста: сборка `%Context{}` единицы работы |
 | `MyApp.<Subsystem>` | контексты, которые она читает, `MyApp.Infra` | подсистема приложения |
-| `MyAppWeb` | контексты, `MyApp.Codec`; `check: [aliases: true]` | web-слой |
+| `MyAppWeb` | контексты, `MyApp.Codec`, `MyApp.ContextFactory`; `check: [aliases: true]` | web-слой |
 | `MyAppIngest` | контексты, подсистемы; `check: [aliases: true]` | граница входа внешней системы: подписчики её брокера, разбор её формата, DLQ |
 | `MyAppApp` | контексты, подсистемы, `MyApp.Infra`, `MyApp.Authz`, `MyAppWeb`, `MyAppIngest` | композиционный корень: `Application`, список контекстов, `Outbox`, `PromEx`, `MetricsServer`, `Release`, mix-таски |
 | `MyAppTest` | — (`check: [in: false, out: false]`) | обвязка тестов `test/support/` |
@@ -394,14 +396,16 @@ end
 - `MyApp.Authz` — порт: от него зависят контексты и корень, а сам он MUST NOT держать в `deps` ни
   одного контекста — реализацию называет конфигурация, а не ссылка (см. «Проверка доступа»).
   Экспорт порта — каталог отказа `Errors`: ошибку строит реализация в контексте прав.
+- `MyApp.ContextFactory` — подсистема; запрет границе аксессора зависеть от неё —
+  `11-domain.md`, «Context».
 - `MyAppWeb` и `MyAppIngest` MUST нести `check: [aliases: true]`: без этой опции `boundary` видит
   вызов `DAO.all/1`, но не модуль, переданный значением (`Transact.run(DAO, …)`), и точка входа
   дотягивается до `DAO` мимо сборки.
 - Граница входа `MyAppIngest` MAY — она есть у приложения, которое принимает сообщения внешней
   системы: компоненты подписчиков её брокера, разбор её формата и DLQ отклонённого
   (`17-otp-concurrency.md`, «Место компонента»). Её `deps` MUST быть только контексты и
-  подсистемы (владелец соединения с брокером): чужой формат разбирает сам вход, а не профили
-  кодека приложения. Репозиторий деревьев библиотеки (`repo:` у
+  подсистемы (владелец соединения с брокером, фабрика контекста): чужой формат разбирает сам
+  вход, а не профили кодека приложения. Репозиторий деревьев библиотеки (`repo:` у
   `Core.Mq.Dlq.Writer`, `Core.Mq.Dlq.Reader`, `Core.Mq.Kafka.Reader`) приходит опцией компонента
   из `config/runtime.exs`, как `repo:` у `Oban`: литерал `MyApp.Infra.DAO` во входе — ссылка на
   сток.

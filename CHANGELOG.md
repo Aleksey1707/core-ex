@@ -76,11 +76,13 @@
     `subsystem-slice` и их строки `DEBT.md` удаляются.
 
 - **Корень приложения — граница `MyAppApp`, контекст объявляет проекции, процессы и детей**
-  (`docs/rules/app/10-architecture.md`, «Top-level namespaces», «Корень и сток», «Направления
-  зависимостей», «Boundary»; `docs/rules/app/17-otp-concurrency.md`, «Дерево процессов»,
-  «Объявления контекста», «Проекции и процессы агрегата», «Наблюдение за процессами»;
-  `docs/rules/app/19-testing.md`; `docs/rules/app/20-agreements.md`; пометка в
-  `docs/adr/0024-component-owns-its-subtree.md`). Модули, которые собирают приложение целиком, —
+  (`docs/rules/app/10-architecture.md`, «Top-level namespaces», «Корень и сток», «Состав
+  контекста», «Модуль-оглавление», «Направления зависимостей», «Boundary»;
+  `docs/rules/app/11-domain.md`, «Context»; `docs/rules/app/17-otp-concurrency.md`, «Дерево
+  процессов», «Объявления контекста», «Проекции и процессы агрегата», «Фоновые задания»,
+  «Наблюдение за процессами»; `docs/rules/app/19-testing.md`; `docs/rules/app/20-agreements.md`;
+  пометка в `docs/adr/0024-component-owns-its-subtree.md`; фабрика контекста —
+  `docs/adr/0044-context-factory-boundary.md`). Модули, которые собирают приложение целиком, —
   `Application`, `PromEx`, дерево очереди, сервер метрик, задачи релиза — были модулями верхнего
   уровня `MyApp.*`, а `Application` и `PromEx` — соседними границами, которые не могли ссылаться
   друг на друга; без границы `MyApp` остальные оказались бы вне границ. Списки проекций, процессов и
@@ -94,7 +96,11 @@
   Архитектурный тест «web не ссылается на `*Repo` и `DAO`» заменён сборкой: `check: [aliases: true]`
   у `MyAppWeb` видит и модуль, переданный значением (`Transact.run(DAO, …)`). Обвязка тестов —
   граница `MyAppTest`: `boundary` относит модуль к границе по префиксу имени, и `MyApp.DataCase`
-  без границы `MyApp` оказался бы вне границ.
+  без границы `MyApp` оказался бы вне границ. Фабрика контекста `MyApp.ContextFactory` тоже
+  оказалась бы вне границ, а экспортом контекста учётной записи держала бы в нём обвязку всего
+  приложения: теперь она — своя граница над границей аксессора текущего пользователя. Её зовут
+  изнутри контекстов, и лежит она ниже всех вызывающих; граница аксессора от неё не зависит,
+  иначе цикл.
 
   Как править приложение (было → стало):
   - `MyApp.Application`, `MyApp.PromEx`, `MyApp.Outbox`, `MyApp.MetricsServer`, `MyApp.Release` в
@@ -130,6 +136,11 @@
     `kafka_readers/0` и `caches/0` объявлений;
   - архитектурный тест `MyApp.ArchitectureTest` и строка ратчета «web-слой не ссылается на `*Repo`
     и `DAO`» → удаляются; граница `MyAppWeb` → `check: [aliases: true]`;
+  - `MyApp.ContextFactory` без своей границы → `use Boundary, deps: [<граница аксессора>]` в
+    модуле фабрики: контекст учётной записи или `MyApp.Auth`; фабрика — в `deps` контекстов,
+    `MyAppWeb`, `MyAppIngest` и корня; зависимость границы аксессора от фабрики (прямая или через
+    её `deps`) → контекст воркеров и подписчиков этой границы собирается там
+    `Core.Context.new/0`, `Core.Repo.Sc.init/1` и аксессором;
   - `MyApp.DataCase`, `MyAppWeb.ConnCase` и прочая обвязка `test/support/` под `MyApp.*`
     (контрактные наборы, дублёры) → `MyAppTest.DataCase`, `MyAppTest.ConnCase`, `MyAppTest.*`;
     корень границы — модуль `MyAppTest` в `test/support/` с
