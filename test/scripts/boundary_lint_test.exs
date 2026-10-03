@@ -398,6 +398,70 @@ defmodule BoundaryLintTest do
     assert out =~ "нарушений — 2"
   end
 
+  test "entry-query: точка входа не ссылается на `Query`, контекст и тесты — вправе", %{tmp_dir: dir} do
+    write_index(dir, "Users")
+    write_index(dir, "Rights")
+    write(dir, "lib/my_app_web/public/v1/api_spec.ex", "defmodule MyAppWeb.Public.V1.ApiSpec do\nend\n")
+
+    write(dir, "lib/my_app/domain/users/account/query.ex", """
+    defmodule MyApp.Domain.Users.Account.Query do
+    end
+    """)
+
+    write(dir, "lib/my_app/domain/rights/authz.ex", """
+    defmodule MyApp.Domain.Rights.Authz do
+      alias MyApp.Domain.Users.Account
+      def check(id, context), do: Account.Query.get(id, context)
+    end
+    """)
+
+    write(dir, "lib/my_app_web/public/v1/account/controller.ex", """
+    defmodule MyAppWeb.Public.V1.Account.Controller do
+      alias MyApp.Domain.Users.Account
+
+      def show(conn, id), do: {Account.Query.get(id, conn), Account.Query.get(id, conn)}
+
+      defmodule Helper do
+        alias MyApp.Domain.Users.Account.Query
+        def get(id, context), do: Query.get(id, context)
+      end
+    end
+    """)
+
+    write(dir, "lib/my_app_ingest/accounts/handler.ex", """
+    # boundary-lint: allow entry-query — DEBT.md, «Чтение во входе»
+    defmodule MyAppIngest.Accounts.Handler do
+      def handle(id, context), do: MyApp.Domain.Users.Account.Query.get(id, context)
+    end
+    """)
+
+    write(dir, "lib/mix/tasks/my_app.seed.ex", """
+    defmodule Mix.Tasks.MyApp.Seed do
+      @query MyApp.Domain.Users.Account.Query
+      def run(_args), do: @query
+    end
+    """)
+
+    write(dir, "test/my_app_web/account_test.exs", """
+    defmodule MyAppWeb.AccountTest do
+      def get(id, context), do: MyApp.Domain.Users.Account.Query.get(id, context)
+    end
+    """)
+
+    assert {out, 1} = lint(dir)
+
+    assert out =~
+             "account/controller.ex:4: `MyAppWeb.Public.V1.Account.Controller` ссылается на " <>
+               "`MyApp.Domain.Users.Account.Query`"
+
+    assert out =~ "account/controller.ex:8: `MyAppWeb.Public.V1.Account.Controller.Helper` ссылается"
+    assert out =~ "my_app.seed.ex:2: `Mix.Tasks.MyApp.Seed` ссылается"
+    refute out =~ "rights/authz.ex"
+    refute out =~ "handler.ex"
+    refute out =~ "account_test.exs"
+    assert out =~ "нарушений — 3"
+  end
+
   test "DI через `alias … as:`, `defprotocol` по пути", %{tmp_dir: dir} do
     write_index(dir, "Orders")
 

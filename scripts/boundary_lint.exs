@@ -10,7 +10,8 @@
 # что путь файла равен имени модуля, корень границы контекста — его модуль-оглавление с
 # `use Boundary`, а `Common` и срезов на уровне контекста нет (`docs/rules/app/10-architecture.md`,
 # «Раскладка»), проекция лежит в каталоге read-модели (`docs/rules/app/13-repos.md`), а корень web
-# состоит из поверхностей и модулей своей таблицы (`docs/rules/app/15-web-api.md`). Направления
+# состоит из поверхностей и модулей своей таблицы (`docs/rules/app/15-web-api.md`), а точка входа
+# не ссылается на `Query` контекста (`docs/rules/app/10-architecture.md`, «Usecases»). Направления
 # между контекстами держит Boundary при сборке, а не линтер. Норму ввела библиотека, поэтому
 # инструмент живёт здесь: потребитель зовёт скрипт из `deps/core/scripts/`, и путь правил в его
 # сообщениях — от корня потребителя.
@@ -30,12 +31,14 @@ defmodule BoundaryLint do
   @projection_layout "projection-layout"
   @repos_layout "deps/core/docs/rules/app/13-repos.md"
   @web_root "web-root"
+  @entry_query "entry-query"
   @web_layout "deps/core/docs/rules/app/15-web-api.md"
   @marker ~r/^#\s*boundary-lint:\s*allow\s+(\S+)\s.*(?<![\w.])DEBT\.md,\s*«[^»]+»/u
   @env_funs ~w(get_env fetch_env fetch_env! compile_env compile_env!)a
   @compile_env_funs ~w(compile_env compile_env!)a
   @own_apps ~w(core argon2_elixir)a
   @repo_keys ~w(Repo ReadRepo)a
+  @entry_suffixes ~w(Web Ingest App)
   @web_parts ~w(Endpoint Router Telemetry ErrorJSON FallbackController ErrorMapper Accepted Response
                 Schemas Presenters Plugs Params)
 
@@ -118,7 +121,8 @@ defmodule BoundaryLint do
     (errors ++
        module_path_violations(ast, path, root) ++
        bc_root_violations(path, known) ++
-       web_root_violations(ast, path, known) ++ projection_violations(ast, path, root))
+       web_root_violations(ast, path, known) ++
+       entry_query_violations(ast, path, known) ++ projection_violations(ast, path, root))
     |> Enum.reject(&allowed?(&1, markers))
     |> Enum.uniq_by(&{&1.line, &1.text})
     |> Enum.sort_by(& &1.line)
@@ -132,6 +136,7 @@ defmodule BoundaryLint do
       surfaces: MapSet.new(),
       deep_specs: %{},
       roots: MapSet.new(),
+      domain_roots: MapSet.new(),
       names: MapSet.new(),
       web_anchors: %{}
     }
@@ -164,6 +169,7 @@ defmodule BoundaryLint do
           into: MapSet.new(),
           do: first
         ),
+      domain_roots: for({%{parts: [root, :Domain | _rest]}, _} <- all, into: MapSet.new(), do: root),
       names: names
     }
 
@@ -535,6 +541,39 @@ defmodule BoundaryLint do
     end
   end
 
+  # ===== потребитель: точка входа без `Query` =====
+
+  # `Query` контекста читает без проверки доступа: его зовут usecases, которые доступ уже проверили. Точка
+  # входа — `<Root>Web`, `<Root>Ingest`, `<Root>App` и mix-таски при контекстах `<Root>.Domain` — зовёт модули
+  # usecases. Ссылка — литерал модуля, разрешённый через `alias` тела; вложенный модуль проверяется сам, код
+  # в `quote` — нет. Нарушение — одно на модуль `Query` в модуле точки входа, на первой ссылке.
+  defp entry_query_violations(ast, path, known) do
+    for %{name: name, refs: refs} <- modules(ast),
+        entry?(name, known.domain_roots),
+        {query, line} <- Enum.uniq_by(refs, &elem(&1, 0)),
+        domain_query?(query, known.domain_roots),
+        do: violation(path, line, entry_query_message(name, query), @entry_query, @layout)
+  end
+
+  # ---
+
+  defp entry?("Mix.Tasks." <> _task, roots), do: MapSet.size(roots) > 0
+
+  defp entry?(name, roots) do
+    [first | _rest] = String.split(name, ".")
+    Enum.any?(roots, fn root -> first in Enum.map(@entry_suffixes, &(Atom.to_string(root) <> &1)) end)
+  end
+
+  defp domain_query?([root, :Domain, _bc, _owner | _rest] = module, roots),
+    do: List.last(module) == :Query and MapSet.member?(roots, root)
+
+  defp domain_query?(_module, _roots), do: false
+
+  defp entry_query_message(name, query) do
+    "`#{name}` ссылается на `#{module_name(query)}` — чтение без проверки доступа для usecases; точке входа " <>
+      "данные отдаёт модуль usecases с декларацией"
+  end
+
   # ===== модули файла =====
 
   # Все модули файла с полными именами — верхнеуровневые, вложенные и `defprotocol` — вместе с `use`,
@@ -563,7 +602,8 @@ defmodule BoundaryLint do
         inner = %{env | module: module}
         {_env, nested} = collect_modules(body, inner)
         {_env, uses} = use_targets(body, inner)
-        {env, [%{parts: module, name: module_name(module), line: meta[:line], uses: uses} | nested]}
+        {_env, refs} = references(body, inner)
+        {env, [%{parts: module, name: module_name(module), line: meta[:line], uses: uses, refs: refs} | nested]}
     end
   end
 
@@ -598,6 +638,29 @@ defmodule BoundaryLint do
   defp use_targets(_node, env), do: {env, []}
 
   defp used(nodes, env), do: Enum.flat_map(nodes, &(&1 |> use_targets(env) |> elem(1)))
+
+  defp references({:__block__, _meta, exprs}, env) do
+    Enum.reduce(exprs, {env, []}, fn expr, {env, found} ->
+      {env, more} = references(expr, env)
+      {env, found ++ more}
+    end)
+  end
+
+  defp references({:__aliases__, meta, parts}, env) do
+    case expand(parts, env) do
+      nil -> {env, []}
+      module -> {env, [{module, meta[:line]}]}
+    end
+  end
+
+  defp references({:alias, _meta, [target | opts]}, env), do: {define_aliases(target, List.flatten(opts), env), []}
+  defp references({kind, _meta, _args}, env) when kind in [:defmodule, :defprotocol, :quote], do: {env, []}
+  defp references({form, _meta, args}, env) when is_list(args), do: {env, referenced([form | args], env)}
+  defp references({left, right}, env), do: {env, referenced([left, right], env)}
+  defp references(list, env) when is_list(list), do: {env, referenced(list, env)}
+  defp references(_node, env), do: {env, []}
+
+  defp referenced(nodes, env), do: Enum.flat_map(nodes, &(&1 |> references(env) |> elem(1)))
 
   # Вложенный `defmodule Line` внутри `A` — это `A.Line` даже при алиасе `Line`, и `Line` становится
   # алиасом в `A`; `defmodule Elixir.Line` вложенностью не считается.
