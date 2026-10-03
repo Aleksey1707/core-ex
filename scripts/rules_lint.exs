@@ -55,6 +55,10 @@ defmodule RulesLint do
   )
   @module_ref ~r/(?<![\w.])([A-Z][A-Za-z0-9]*)\.[A-Z][A-Za-z0-9]*/
 
+  @first_release "Первый релиз:"
+  @first_release_form ~r/^Первый релиз: (не состоялся|\d{4}-\d{2}-\d{2}, \d+\.\d+\.\d+)$/
+  @first_release_rule "deps/core/docs/rules/app/00-index.md, «Первый релиз»"
+
   def run([]), do: check(:library)
 
   def run(["--consumer"]), do: check(:consumer)
@@ -107,7 +111,7 @@ defmodule RulesLint do
        check_skills(themes, [@dep_dir, @dep_app_dir]) ++
        check_entry(files) ++
        check_entry_themes(themes) ++
-       check_imports([@dep_dir, @dep_app_dir, @dir]) ++ check_alias())
+       check_imports([@dep_dir, @dep_app_dir, @dir]) ++ check_alias() ++ check_first_release())
     |> report(length(files), :consumer)
   end
 
@@ -464,6 +468,38 @@ defmodule RulesLint do
       nil -> false
       tier -> MapSet.member?(tier, file)
     end
+  end
+
+  # ===== первый релиз =====
+
+  # Строка состояния задаёт силу норм совместимости: без неё они действуют, и забытая строка
+  # видна только ревью. Проверяется одна строка в одной из двух форм.
+  defp check_first_release do
+    path = Path.join(@dir, @index)
+
+    case File.read(path) do
+      {:ok, content} -> first_release_errors(path, release_lines(content))
+      {:error, _} -> []
+    end
+  end
+
+  defp release_lines(content) do
+    content
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _n} -> String.starts_with?(line, @first_release) end)
+  end
+
+  defp first_release_errors(path, []),
+    do: [err(path, 1, "нет строки «Первый релиз: …» — нормы совместимости действуют (#{@first_release_rule})")]
+
+  defp first_release_errors(path, [first | rest]) do
+    form_errors =
+      for {line, n} <- [first | rest],
+          not Regex.match?(@first_release_form, line),
+          do: err(path, n, "строка «Первый релиз» не по форме «не состоялся» или «ГГГГ-ММ-ДД, X.Y.Z»")
+
+    form_errors ++ for({_line, n} <- rest, do: err(path, n, "вторая строка «Первый релиз»: состояние одно"))
   end
 
   # ===== общее =====
