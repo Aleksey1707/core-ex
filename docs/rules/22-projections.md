@@ -155,6 +155,18 @@ event-sourced агрегата принимает `wait: :none | pos_integer()` 
 проекции»; почему ждёт usecase — ADR-0039. Воркер, подписчик и mix-таска, которые read-модель
 после записи не читают, `wait:` не передают.
 
+Тот же `wait:` MAY принимать запрос, который зовёт другой контекст: реакция на событие агрегата
+читает его read-модель только через экспортированный запрос, и ждать проекцию до чтения может
+только сам запрос (ADR-0047). Запрос ждёт **до** чтения; не дождался — `{:error, %Error{}}` с
+кодом ожидания: записи у запроса нет, отдавать успехом нечего, а реакция по ошибке повторяет
+сообщение. Ожидание — чтение, и CQS запрос не нарушает.
+
+`:projected` читает представление тем же запросом, что отдаёт его актору (`get` актора или общий
+`<Aggregate>.Usecases.get`), а не ReadRepo напрямую: проверка доступа на чтение и ACL-фильтр
+актора — те же, что у чтения. Отказ чтения после commit — исход `:accepted`: запись применена.
+Удаление и upsert представление не отдают — их исходы, как у создания, `{id, version}`
+(`deps/core/docs/rules/app/10-architecture.md`, «Usecases»).
+
 - ID на месте вызова MUST быть сужен до `%Agg.ID{}` — паттерном в голове функции с вызовом или в
   `with`: ID из параметра без сужения сборка не сверяет, и ловится только агрегат не из `events:`.
 - Хелпер, который зовёт `projection.await(agg, id, timeout)` через модуль-переменную, MUST NOT:
@@ -183,6 +195,19 @@ histogram_quantile(0.5, sum by (le, projection)
 ним успех записи без представления — `{:accepted, id, version}`, а не ошибку.
 
 ```elixir
+# хорошо — запрос, который зовёт реакция другого контекста: ждёт до чтения
+def get(%Account.ID{} = id, %Context{} = context, opts \\ []) do
+  with :ok <- check_user(~w(read)a, context),
+       :ok <- awaited_read(id, Keyword.get(opts, :wait, :none)),
+       do: @read_repo.get(id, :current, context)
+end
+
+defp awaited_read(%Account.ID{}, :none), do: :ok
+defp awaited_read(%Account.ID{} = id, timeout) when is_integer(timeout),
+  do: Account.Projection.await(Account, id, timeout)
+```
+
+```elixir
 # плохо — повтор команды по таймауту ожидания: запись уже закоммичена
 with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, context),
      do: open_and_await(id, params, context)
@@ -201,8 +226,15 @@ defp awaited(id, timeout), do: Account.Projection.await(Account, id, timeout)
 # хорошо — после commit ждёт по `wait:`, ID сужен в голове хелпера, исход ожидания — не ошибка
 with {:ok, version} <- write(id, expected, context) do
   case awaited(id, Keyword.get(opts, :wait, :none)) do
-    :projected -> with {:ok, view} <- @read_repo.get(id, :current, context), do: {:ok, {:projected, view}}
+    :projected -> projected(id, version, context)
     :accepted -> {:ok, {:accepted, id, version}}
+  end
+end
+
+defp projected(%Account.ID{} = id, version, context) do
+  case Account.Usecases.get(id, context) do
+    {:ok, view} -> {:ok, {:projected, view}}
+    {:error, _} -> {:ok, {:accepted, id, version}}
   end
 end
 

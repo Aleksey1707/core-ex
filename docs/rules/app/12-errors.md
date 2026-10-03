@@ -75,8 +75,9 @@
   (`15-web-api.md`, «FallbackController»). Таблица кодов `Core.Web.ErrorMapper`, константный
   текст 401 и расширение своими клозами `map/1` — `deps/core/docs/rules/10-architecture.md`,
   «Граница HTTP».
-- Отказ доступа, который `ErrorMapper` понимает сам, — доменная ошибка с кодом `:access_denied`;
-  иной код отказа — своя клоза `map/1`.
+- Отказ доступа, который `ErrorMapper` понимает сам, — доменная ошибка с кодом `:access_denied`
+  (403) или `:unauthorized` (401, учётной записи нет или она заблокирована); иной код отказа — своя
+  клоза `map/1`.
 - Что клиент и лог получают по категории ошибки — `deps/core/docs/rules/12-errors.md`, «Матрица
   категорий».
 - Незамапленный constraint (`write_failed`, `deps/core/docs/rules/12-errors.md`, «Источники

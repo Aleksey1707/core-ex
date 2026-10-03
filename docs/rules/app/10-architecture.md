@@ -98,6 +98,7 @@ lib/my_app/domain/<bc>/
     <actor>/repo.ex, <actor>/read_repo.ex  # свой ACL-фильтр актора
     <actor>/view.ex                        # своя форма данных актора
   values/<value>.ex                        # значение без агрегата-владельца
+  <concept>/                               # модель нескольких агрегатов: шаги, шаблоны, реестр
   errors.ex                                # ошибки нескольких агрегатов
   authz.ex                                 # реализация порта проверки доступа — у контекста прав
   <read_model>/                            # read-модель не по агрегату — каталог по назначению
@@ -123,6 +124,13 @@ lib/my_app/domain/<bc>/
   назначению рядом с агрегатами, реакция, которая зовёт usecases нескольких агрегатов, — в
   `reactions/`. Реакция и воркер одного агрегата лежат в его каталоге (`17-otp-concurrency.md`,
   «Место компонента», «Фоновые задания»).
+- Модель, общая нескольким агрегатам контекста и не сводимая к одному значению (шаги и шаблоны
+  сценария обработки с их реестром, кодеками и ошибками), MUST лежать каталогом по понятию
+  `<bc>/<concept>/` — `MyApp.Domain.<BC>.<Concept>.*`: в `values/` она не помещается, а под одним
+  из агрегатов читалась бы его частью. Usecases, проекции и репозитория в нём нет — появились, и
+  это агрегат или read-модель по назначению. Имя понятия MUST NOT занимать имя модуля, который
+  нужен рядом: `Process` затеняет модуль Elixir и читается как процесс агрегата
+  `<Aggregate>.Process` (`deps/core/docs/rules/20-agreements.md`, «Алиасы модулей»; ADR-0049).
 - Часть приложения без агрегатов (хранилище файлов, интеграция с внешним сервисом) MUST быть
   подсистемой `MyApp.<Subsystem>` вне `Domain` — своей границей (см. «Boundary»), а не
   контекстом: контекст без агрегатов — граница без модели. Агрегат в подсистеме MUST NOT: появился
@@ -208,10 +216,10 @@ defmodule MyApp.Domain.Orders do
 
   def codec_plugins, do: [Order.Event.Codec, Order.View.Codec]
 
-  @doc "Ключи пространств разрешений и их описание; склеивает их `MyAppApp.authz_namespaces/0`."
-  @spec authz_namespaces() :: [{atom(), String.t()}]
+  @doc "Пространства разрешений: описание и операции; склеивает их `MyAppApp.authz_namespaces/0`."
+  @spec authz_namespaces() :: [{atom(), {String.t(), [atom()]}}]
 
-  def authz_namespaces, do: [orders: "Заказы и корзины клиентов"]
+  def authz_namespaces, do: [orders: {"Заказы и корзины клиентов", ~w(read create update)a}]
 end
 ```
 
@@ -435,26 +443,40 @@ end
 пространств разрешений объявляет каждый контекст, корень склеивает их в реестр для реализации
 (`deps/core/docs/adr/0042-authz-port.md`).
 
-- Порт MUST держать behaviour `check/4` (тип учётной записи, ключ пространства, операции,
+- Порт MUST держать behaviour `check/4` (типы учётной записи, ключ пространства, операции,
   `%Context{}`), макрос декларации и каталог ошибок отказа `MyApp.Authz.Errors`. У приложения без
   модели прав реализация — заглушка порта `MyApp.Authz.Stub`: контекст без агрегатов MUST NOT
   («Состав контекста»), а проверка, которой нужна модель, — уже реализация в контексте.
 - Реализация в контексте прав — `MyApp.Domain.<BC>.Authz` в `lib/my_app/domain/<bc>/authz.ex` с
   `@behaviour MyApp.Authz`: модель она читает своими ReadRepo (`13-repos.md`, «Read-модель»). В
   `exports` реализация не входит — её называет только конфигурация.
-- Декларация MUST стоять на модуле usecases актора — `use MyApp.Authz` с типом учётной записи
-  `account:` и ключом пространства `namespace:`: они общие для всех usecases актора над агрегатом.
-  Макрос даёт `check_user/2`, и usecase называет им операцию первым шагом, до транзакции
-  («Usecases»).
-- Ключи пространств своих агрегатов и их описание MUST объявляться в оглавлении контекста функцией
-  `authz_namespaces/0` (см. «Модуль-оглавление»). Декларация называет ключ своего контекста, и
-  макрос сверяет его с `authz_namespaces/0` оглавления: ключ, которого контекст не объявил, —
-  `CompileError`. Сверка MUST идти в теле модуля актора, а не в теле макроса: только тогда правка
-  оглавления пересобирает модули деклараций (ADR-0042).
+- Декларация MUST стоять на каждом модуле usecases, который проверяет доступ, — модуле актора и
+  модуле общего чтения `<Aggregate>.Usecases` («Usecases»): `use MyApp.Authz` с типом учётной
+  записи `account:` и ключом пространства `namespace:`, общими для всех его usecases. Макрос даёт
+  `check_user/2`, и usecase называет им операцию первым шагом, до транзакции («Usecases»).
+- `account:` модуля общего чтения — список типов учётной записи акторов, чьё чтение он держит:
+  реализация пропускает пользователя любого из них. Модуль актора MAY тоже назвать список, если
+  роль в контексте держат учётные записи нескольких типов. Порт передаёт реализации список всегда.
+- Usecase, которому кроме пространства модуля нужно второе (файлы заказа в пространстве файлов),
+  называет его ключом `check_user/3`: дополнительные ключи MUST перечисляться опцией `namespaces:`
+  декларации, и макрос генерирует по clause на каждый объявленный ключ — необъявленный даёт
+  `FunctionClauseError`, а литерал ключа — предупреждение типов при сборке. Ключ пространства
+  другого контекста в декларации MUST NOT: доступ к его данным проверяет его экспортированный
+  usecase, а сверка ключа идёт по оглавлению своего контекста.
+- Пространства своих агрегатов — описание и операции — MUST объявляться в оглавлении контекста
+  функцией `authz_namespaces/0` (см. «Модуль-оглавление»). Декларация называет ключи своего
+  контекста, и макрос сверяет их с `authz_namespaces/0` оглавления: ключ, которого контекст не
+  объявил, — `CompileError`. Сверка MUST идти в теле модуля декларации, а не в теле макроса: только
+  тогда правка оглавления пересобирает модули деклараций (ADR-0042).
+- Операция в `check_user` MUST быть объявлена в пространстве: порт сверяет операции с реестром до
+  вызова реализации, и необъявленная — `ArgumentError`, ошибка программиста. Сверку проходит и
+  тест usecase с моком: мок подменяет реализацию, а не порт.
 - Реестр MUST склеивать одна функция корня `MyAppApp.authz_namespaces/0` из оглавлений
   контекстов; ключ, объявленный двумя контекстами, — `CompileError` склейки. Реализация получает
   реестр функцией порта `MyApp.Authz.namespaces/0`, которая зовёт MFA корня из конфигурации: от
-  корня не зависит ни одна граница («Boundary»).
+  корня не зависит ни одна граница («Boundary»). Каталог ролей (роль — набор пространств и
+  операций) — модель контекста прав, а не порта: она лежит в его агрегатах и значениях и берёт
+  пространства и операции из `namespaces/0` (ADR-0046).
 - Реализацию и реестр MUST называть ключ `config :my_app, MyApp.Authz` в `config.exs` — `impl:` и
   `namespaces:`, мок порта — `config/test.exs` (`19-testing.md`, «Проверка доступа»). Порт MUST
   читать ключ в рантайме, а не `compile_env`: литерал реализации в порте — ссылка на контекст
@@ -462,9 +484,11 @@ end
 - `MyAppApp.Application.start/2` MUST звать `MyApp.Authz.validate!/0` до подъёма дерева: ключ
   читается в рантайме, и опечатку в `impl:` иначе нашёл бы первый запрос (`17-otp-concurrency.md`,
   «Дерево процессов»).
-- Отказ MUST быть `%Error{kind: :domain, code: :access_denied}` из `MyApp.Authz.Errors`: его
-  возвращают все реализации, включая мок, и `ErrorMapper` отвечает 403 без своей клозы
-  (`12-errors.md`, «Границы»).
+- Отказ MUST быть ошибкой каталога `MyApp.Authz.Errors`, которую `ErrorMapper` понимает без своей
+  клозы (`12-errors.md`, «Границы»): нет права — `%Error{kind: :domain, code: :access_denied}`,
+  403; учётной записи нет или она заблокирована — `%Error{kind: :domain, code: :unauthorized}`,
+  401 по `auth_codes:`. Существование пользователя плаг не проверяет (`15-web-api.md`,
+  «Аутентификация в плагах»), и отличить «кто ты» от «тебе нельзя» может только реализация порта.
 
 ```elixir
 # плохо — контекст зовёт реализацию: Orders зависит от модели прав, тест usecase готовит её данные
@@ -473,39 +497,64 @@ use Boundary, deps: [MyApp.Codec, MyApp.Infra, MyApp.Domain.Rights]
 with :ok <- MyApp.Domain.Rights.Authz.check(:client, :orders, ~w(update)a, context), do: ...
 
 # хорошо — lib/my_app/domain/orders/order/client/usecases.ex: тип учётной записи и пространство —
-# у актора, операция — у usecase; ключ :orders объявлен в authz_namespaces/0 оглавления
+# у актора, операция — у usecase; ключи :orders и :order_files объявлены в authz_namespaces/0
 use MyApp.Authz,
   account: :client,
-  namespace: :orders
+  namespace: :orders,
+  namespaces: [:order_files]
 
 def cancel(%Order.ID{} = id, %Version{} = version, %Context{} = context, opts \\ []) do
   with :ok <- check_user(~w(update)a, context), ...
 end
+
+def attach(%Order.ID{} = id, file, %Context{} = context) do
+  with :ok <- check_user(~w(update)a, context),
+       :ok <- check_user(:order_files, ~w(create)a, context), ...
+end
+
+# хорошо — lib/my_app/domain/orders/order/usecases.ex: общее чтение двух акторов
+use MyApp.Authz,
+  account: [:client, :admin],
+  namespace: :orders
 ```
 
 ```elixir
-# lib/my_app/authz.ex — сверка ключа в теле модуля актора, реализация из конфигурации в рантайме
+# lib/my_app/authz.ex — ключи сверяет модуль декларации, реализацию берёт конфигурация в рантайме
 @required ~w(account namespace)a
+@optional ~w(namespaces)a
 
 defmacro __using__(opts) do
-  :ok = Opts.validate!(opts, @required, [], "MyApp.Authz")
-  [account, namespace] = Enum.map(@required, &Opts.atom!(opts, &1, "MyApp.Authz"))
-  # оглавление MyApp.Domain.<BC> — по имени модуля актора (путь = имя модуля, «Раскладка»)
+  :ok = Opts.validate!(opts, @required, @optional, "MyApp.Authz")
+  accounts = opts |> Keyword.fetch!(:account) |> List.wrap()
+  namespace = Opts.atom!(opts, :namespace, "MyApp.Authz")
+  namespaces = [namespace | Keyword.get(opts, :namespaces, [])]
+  # оглавление MyApp.Domain.<BC> — по имени модуля декларации (путь = имя модуля, «Раскладка»)
   index = index_of(__CALLER__.module)
 
-  quote do
-    MyApp.Authz.declared!(unquote(index).authz_namespaces(), unquote(namespace), __MODULE__)
+  checks =
+    for ns <- namespaces do
+      quote do
+        defp check_user(unquote(ns), ops, context),
+          do: MyApp.Authz.check(unquote(accounts), unquote(ns), ops, context)
+      end
+    end
 
-    defp check_user(ops, context),
-      do: MyApp.Authz.check(unquote(account), unquote(namespace), ops, context)
+  quote do
+    MyApp.Authz.declared!(unquote(index).authz_namespaces(), unquote(namespaces), __MODULE__)
+
+    defp check_user(ops, context), do: check_user(unquote(namespace), ops, context)
+
+    unquote_splicing(checks)
   end
 end
 
-@doc "Проверить доступ реализацией, которую называет конфигурация."
-@spec check(atom(), atom(), [atom()], Context.t()) :: :ok | {:error, Error.t()}
+@doc "Проверить доступ реализацией, которую называет конфигурация; операции — из реестра."
+@spec check([atom()], atom(), [atom()], Context.t()) :: :ok | {:error, Error.t()}
 
-def check(account, namespace, ops, %Context{} = context),
-  do: impl().check(account, namespace, ops, context)
+def check(accounts, namespace, ops, %Context{} = context) do
+  :ok = declared_ops!(namespace, ops)
+  impl().check(accounts, namespace, ops, context)
+end
 
 # ---
 
@@ -516,7 +565,7 @@ config :my_app, MyApp.Authz,
   impl: MyApp.Domain.Rights.Authz,
   namespaces: {MyAppApp, :authz_namespaces, []}
 
-# lib/my_app_app.ex — реестр из оглавлений; дубль ключа — CompileError склейки
+# lib/my_app_app.ex — реестр из оглавлений: ключ → {описание, операции}; дубль ключа — CompileError
 @authz_namespaces MyApp.Authz.registry!(
                     MyApp.Domain.Billing.authz_namespaces() ++
                       MyApp.Domain.Orders.authz_namespaces()
@@ -527,7 +576,8 @@ def authz_namespaces, do: @authz_namespaces
 
 Проверяется: `mix compile --warnings-as-errors` — ссылка контекста на реализацию и литерал
 реализации в порте — предупреждения `boundary`; необъявленный и дублированный ключ — `CompileError`
-макроса порта.
+макроса порта, ключ `check_user/3` вне декларации — предупреждение типов; необъявленная операция —
+`ArgumentError` порта в тесте usecase.
 
 ## Usecases
 
@@ -562,6 +612,11 @@ Read-модель по назначению держит свои модули �
   второго, реакция — когда второму нужны данные первого (`17-otp-concurrency.md`, «Фоновые
   задания»). Нужна атомарная запись двух контекстов — это одна модель, и контексты склеиваются
   (`deps/core/docs/adr/0038-one-context-per-transaction.md`).
+- Задача оператора, которая заводит данные нескольких контекстов (стартовая инициализация
+  `MyAppApp.Release.<Name>`), зовёт usecase каждого контекста его транзакцией, а взаимоисключение
+  параллельного старта реплик держит сессионная блокировка `Core.Helper.Lock.with_advisory!/4`
+  вокруг всех вызовов — не одна транзакция с `advisory_xact!/3`. Прерванный запуск доводит
+  повторный: шаги задачи MUST быть идемпотентны (ADR-0048).
 - Команда event-sourced агрегата MUST принимать `wait: :none | pos_integer()` последней опцией
   (`opts \\ []`, по умолчанию `:none`) и по ней после commit, вне транзакции, ждать проекцию
   литеральным `Projection.await/3` — `deps/core/docs/rules/22-projections.md`, «Read-after-write»:
@@ -570,6 +625,13 @@ Read-модель по назначению держит свои модули �
   не принимает: ждать нечего, и её исход — всегда `:accepted`.
 - Команда над несколькими event-sourced агрегатами ждёт проекцию того агрегата, чьё представление
   отдаёт, и называет его в `@doc`; в `{:accepted, id, version}` — его ID и версия.
+- Экспортированный запрос, который зовёт другой контекст, MAY принимать тот же `wait:` и ждать
+  проекцию **до** чтения: реакция на событие агрегата другого контекста читает его read-модель
+  только этим запросом, а проекция и ReadRepo в `exports` не входят. Не дождался — ошибка ожидания,
+  а не устаревшее представление (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
+- Чтение доменного состояния агрегата без отставания проекции (решение другого контекста по
+  состоянию учётной записи) — read-модель без таблицы над write-репозиторием агрегата и её
+  экспортированный запрос (`13-repos.md`, «Read-модель»), а не экспорт репозитория.
 
 ```elixir
 # плохо — оформление меняет корзину и заказ, а лежит в модуле корзины
@@ -619,7 +681,8 @@ end)
 | Команда | `:ok \| {:error, Error.t()}` |
 | Команда-создание | MAY `{:ok, <Aggregate>.ID.t()}` — идентификатор генерирует домен |
 | Команда event-sourced агрегата | `{:ok, {:projected, <ReadModel>.View.t()}} \| {:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
-| Создание event-sourced агрегата | `{:ok, {:projected \| :accepted, <Aggregate>.ID.t(), Version.t()}}` |
+| Создание, удаление и upsert event-sourced агрегата | `{:ok, {:projected \| :accepted, <Aggregate>.ID.t(), Version.t()}}` |
+| Команда event-sourced агрегата без read-модели | `{:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Запрос | `{:ok, <ReadModel>.View.t()} \| {:error, Error.t()}` — read-путь отдаёт представление |
 
 Идентификатор созданного агрегата и версия после записи — результат собственного выполнения
@@ -629,11 +692,14 @@ end)
 
 Исход ожидания у команды event-sourced агрегата — тег результата:
 
-- `:projected` — проекция дождалась: команда отдаёт представление, прочитанное после commit, —
-  это исключение из CQS (`deps/core/docs/rules/20-agreements.md`, там же); создание отдаёт
-  `{id, version}` и в этом исходе — почему не представление, ADR-0027;
-- `:accepted` — `wait: :none`, `:projection_timeout` или `:projection_rebuilding`: запись применена,
-  read-модель её ещё не видит, и это успех, а не ошибка; повтор команды по нему MUST NOT
+- `:projected` — проекция дождалась: команда отдаёт представление, прочитанное после commit
+  запросом чтения актора, — это исключение из CQS (`deps/core/docs/rules/20-agreements.md`, там
+  же); создание отдаёт `{id, version}` и в этом исходе — почему не представление, ADR-0027;
+  удаление и upsert — тоже `{id, version}`: после удаления читать нечего, а upsert — создание или
+  команда в зависимости от состояния, и форма исхода не должна от него зависеть;
+- `:accepted` — `wait: :none`, `:projection_timeout`, `:projection_rebuilding` или отказ чтения
+  представления после commit: запись применена, read-модель её ещё не видит или вызывающему её не
+  отдаёт, и это успех, а не ошибка; повтор команды по нему MUST NOT
   (`deps/core/docs/rules/22-projections.md`, «Read-after-write»).
 
 Резолв репозитория — `deps/core/docs/rules/13-repos.md`, «DI».

@@ -454,6 +454,9 @@ children = [MyApp.Infra.DAO | Enum.map(processes(), &{&1, process_opts(&1)})]
   Состав опций — moduledoc дерева, env — `14-events-outbox.md`, «Конфигурация».
 - Соединение с брокером, у которого других пользователей нет, — опция `connection:` дерева;
   соединение, которое делят несколько компонентов, — ребёнок `Application` («Дерево процессов»).
+- Контекст поллеров и cleaner'а MUST собирать фабрика приложения — опция дерева
+  `context_factory: &MyApp.ContextFactory.system/0`: доставка и чистка — фоновая работа от системной
+  учётной записи (`11-domain.md`, «Context»), а без опции дерево берёт `&Context.new/0`.
 - Тумблер транспорта поллера — функция владельца разделяемой инфраструктуры
   (`MyApp.Mq.Kafka.enabled?/0`): её учитывает сборка списка `pollers:`, а не опция дерева. Поллер
   на процессе, которым владеет приложение (клиент Kafka), задаётся `via:`, writer-процесс,
@@ -475,7 +478,9 @@ def outbox_opts do
 
   kafka = if MyApp.Mq.Kafka.enabled?(), do: [kafka_poller()], else: []
 
-  Keyword.put(opts, :pollers, [stream_poller(reference_prefix) | kafka])
+  opts
+  |> Keyword.put(:pollers, [stream_poller(reference_prefix) | kafka])
+  |> Keyword.put(:context_factory, &MyApp.ContextFactory.system/0)
 end
 
 defp stream_poller(reference_prefix) do
