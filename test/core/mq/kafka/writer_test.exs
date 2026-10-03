@@ -101,8 +101,12 @@ defmodule Core.Mq.Kafka.WriterTest do
       :telemetry.attach(
         handler_id,
         [:core, :mq, :kafka, :publish],
-        fn _event, measurements, metadata, test_pid ->
-          send(test_pid, {:publish, measurements, metadata})
+        fn
+          _event, measurements, metadata, test_pid when test_pid == self() ->
+            send(test_pid, {:publish, measurements, metadata})
+
+          _event, _measurements, _metadata, _test_pid ->
+            :ok
         end,
         self()
       )
@@ -118,6 +122,9 @@ defmodule Core.Mq.Kafka.WriterTest do
     assert_received {:publish, %{count: 1}, %{result: :error, topic: "missing"}}
 
     assert {:error, _} = Writer.put(client, message!(%{}, ""))
+    refute_received {:publish, _, _}
+
+    assert :ok = Task.await(Task.async(fn -> Writer.put(client, message!(%{}, "b")) end))
     refute_received {:publish, _, _}
   end
 
