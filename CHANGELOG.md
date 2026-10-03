@@ -192,7 +192,9 @@
   - вызывающие, которые read-модель после записи не читают (воркер, подписчик, mix-таска), —
     `{:ok, version}` → `{:ok, {:accepted, _id, version}}`, `wait:` не передают; своё ожидание
     проекции у них → `wait:` usecase;
-  - `MyAppWeb.Accepted.respond(conn, &Projection.await(Agg, id, &1), {id, version}, render)` →
+  - `MyAppWeb.Accepted.respond` / `written` с колбэком ожидания `&Projection.await(Agg, id, &1)`
+    или результатом ожидания (любой арности, например
+    `respond(conn, &Projection.await(Agg, id, &1), {id, version}, render)`) →
     `MyAppWeb.Accepted.respond(conn, result, render)`, где `result` — результат usecase, вызванного
     с `wait: MyAppWeb.Accepted.wait(conn)`, а `render` — `(conn, view -> conn)` вместо перечитывания
     read-модели; `written(conn, &Projection.await(Agg, id, &1), id, version)` →
