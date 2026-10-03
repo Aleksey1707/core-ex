@@ -17,12 +17,13 @@ defmodule Core.Outbox.Repo.Pg do
   alias Core.Outbox.Record
   alias Core.Outbox.Repo.Pg.Schema
   alias Core.Outbox.Repo.Pg.Stats
+  alias Core.Outbox.Supervisor.Mark
 
   require Logger
 
   @persist_chunk_size 500
 
-  @doc "Добавить записи outbox; после commit — wake poller."
+  @doc "Добавить записи outbox; после commit — wake поллеров из отметки `Core.Outbox.Supervisor`."
   @spec append([Record.t()], Context.t(), keyword()) :: :ok
 
   @impl true
@@ -285,23 +286,9 @@ defmodule Core.Outbox.Repo.Pg do
   defp wake_pollers(records) do
     topics = MapSet.new(records, fn record -> Outbox.Topic.value(record.topic) end)
 
-    Enum.each(poller_targets(), fn {name, filter} ->
+    Enum.each(Mark.pollers(), fn {name, filter} ->
       if Outbox.topics_match?(topics, filter), do: Poller.wake(name)
     end)
-  end
-
-  defp poller_targets do
-    cfg = Application.get_env(:core, Outbox, [])
-
-    case Keyword.get(cfg, :pollers) do
-      [_ | _] = list ->
-        Enum.map(list, fn poller ->
-          {Keyword.fetch!(poller, :name), Keyword.fetch!(poller, :topics)}
-        end)
-
-      _ ->
-        [{Keyword.get(cfg, :poller_name), :all}]
-    end
   end
 
   defp reserve_rows(rows, lease) do

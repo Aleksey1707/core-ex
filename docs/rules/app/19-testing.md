@@ -174,7 +174,6 @@ read-модели».
 | новая миграция создаёт индексы `concurrently` | `18-migrations.md` |
 | `watch_list/0` согласован с конфигурацией | `17-otp-concurrency.md` |
 | состав `plugins/0` PromEx и провайдеры публикуют метрику | `21-observability.md`, «Метрики» |
-| корень очереди зовёт `Core.Outbox.check_singleton!/1` до подъёма своих детей | `14-events-outbox.md`, «Единственность поллера» |
 | примеры тел в спецификации проходят валидацию схем | `15-web-api.md` |
 
 - Ратчет описаний enum — `test/my_app/enum_docs_test.exs`, один на приложение:

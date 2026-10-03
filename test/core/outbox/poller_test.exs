@@ -73,28 +73,26 @@ defmodule Core.Outbox.PollerTest do
     {:ok, context: Context.new(), writer: writer}
   end
 
-  defp start_poller(delivery, opts \\ []) do
-    max_attempts = Keyword.get(opts, :max_attempts, 3)
-    batch_size = Keyword.get(opts, :batch_size, 10)
-    poll_interval_ms = Keyword.get(opts, :poll_interval_ms, 60_000)
-    idle_min_ms = Keyword.get(opts, :idle_min_ms, 50)
-    name = Keyword.get(opts, :name)
+  defp start_poller(%Delivery.Mq{writer_module: module, writer: handle}, opts \\ []) do
+    name = Keyword.get_lazy(opts, :name, fn -> :"outbox-poller-#{System.unique_integer([:positive])}" end)
+    on_exit(fn -> :persistent_term.erase(Core.Outbox.Supervisor.Mark) end)
 
-    child_opts =
-      [
-        repo: @repo,
-        delivery_module: Delivery.Mq,
-        delivery: delivery,
-        poll_interval_ms: poll_interval_ms,
-        idle_min_ms: idle_min_ms,
-        batch_size: Outbox.BatchSize.new!(batch_size),
-        lock_duration: Outbox.LockDuration.new!(30),
-        max_attempts: Outbox.Attempts.new!(max_attempts)
-      ]
-      |> then(fn opts -> if name, do: Keyword.put(opts, :name, name), else: opts end)
+    start_supervised!(
+      {Core.Outbox.Supervisor,
+       enabled: true,
+       cluster_query: nil,
+       repo: @repo,
+       pollers: [[name: name, label: "test", via: {module, handle}]],
+       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, 60_000),
+       idle_min_ms: Keyword.get(opts, :idle_min_ms, 50),
+       batch_size: Keyword.get(opts, :batch_size, 10),
+       lock_duration_seconds: 30,
+       max_attempts: Keyword.get(opts, :max_attempts, 3),
+       published_ttl_seconds: 60,
+       cleaner_interval_ms: 86_400_000}
+    )
 
-    {:ok, poller} = start_supervised({Poller, child_opts})
-    poller
+    Process.whereis(name)
   end
 
   test "child_spec: :id равен :name, иначе модуль" do
@@ -114,6 +112,12 @@ defmodule Core.Outbox.PollerTest do
   end
 
   describe "опции старта" do
+    test "вне дерева очереди поллер не стартует — ArgumentError" do
+      assert start_error(Keyword.put(poller_opts(), :name, :outside_tree)) =~
+               "Outbox.Poller: поллер :outside_tree не из отметки дерева очереди — " <>
+                 "поллер стартует только из Core.Outbox.Supervisor"
+    end
+
     test "неизвестная опция — ArgumentError" do
       opts = Keyword.put(poller_opts(), :poll_interval, 1_000)
 
@@ -412,18 +416,7 @@ defmodule Core.Outbox.PollerTest do
 
   test "append внутри TX будит poller только после commit", %{writer: writer, context: context} do
     delivery = Delivery.Mq.new(MqFake.Writer, writer)
-    name = :"outbox-poller-tx-#{System.unique_integer([:positive])}"
-    _poller = start_poller(delivery, poll_interval_ms: 60_000, idle_min_ms: 60_000, name: name)
-
-    previous = Application.get_env(:core, Outbox, [])
-
-    Application.put_env(
-      :core,
-      Outbox,
-      Keyword.put(previous, :poller_name, name)
-    )
-
-    on_exit(fn -> Application.put_env(:core, Outbox, previous) end)
+    _poller = start_poller(delivery, poll_interval_ms: 60_000, idle_min_ms: 60_000)
 
     {:ok, record} =
       Record.new(

@@ -24,7 +24,7 @@
 |---|---|
 | Инфра-синглтоны (`dao`, `codec`, `tz`, ключ шифрования, реализация `Outbox.Repo`) | `Core.Config` — `config :core, ...` |
 | Реализации репозиториев (доменных и `Outbox.Repo`) | конвенция `<Behaviour>.Pg`; ключ конфигурации — только при подмене |
-| OTP-процессы (`Outbox.Poller`, `Outbox.Cleaner`, `Mq.Stream.*`, `PubSub.MqSubscriberReliable`) | `opts` от supervisor'а потребителя |
+| OTP-процессы и деревья (`Outbox.Supervisor`, `Mq.Stream.*`, `PubSub.MqSubscriberReliable`) | `opts` от supervisor'а потребителя |
 | Макросы (`Repo.Pg`, `Repo.Pg.Schema`, `Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`, `Es.Outbox`, `Es.Projection`, `Prim.DateTime`, `Prim.Date`) | `use`-опция (`repo:`, `codec:`, `tz:`), без неё — `Core.Config` в рантайме |
 | PromEx-плагины | списки процессов / размеров — MFA-провайдер в `opts` плагина |
 
@@ -79,7 +79,6 @@ config :core,
   tz: "Etc/UTC",             # опционален, дефолт "Etc/UTC"
   telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]; префикс имён telemetry-событий
 
-config :core, Core.Outbox, poller_name: MyAppApp.Outbox.Poller
 config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 ```
 

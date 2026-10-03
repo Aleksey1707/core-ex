@@ -22,13 +22,6 @@ config :core, Core.TestRepo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
-config :core, Core.Outbox,
-  enabled: false,
-  poll_interval_ms: 60_000,
-  idle_min_ms: 50,
-  poller_name: nil,
-  cleaner_interval_ms: 86_400_000
-
 config :core, Core.Security.Secret, secret_key: "qI1uzVjrHlMCym8sO62o9uoRdqmqGQf_QmEo4o5uzmE="
 
 config :core, Core.Mq.Stream,

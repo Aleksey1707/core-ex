@@ -23,7 +23,9 @@
 писать в лог причину на уровне `info` — «запущен» / «отключён» / «пропущен: нет зависимости».
 Так устроены `Core.Es.Projection.Supervisor` (`enabled: false` — «отключён», `projections: []` —
 «пропущен: нет проекций»), `Core.PubSub.MqSubscriberReliable.Supervisor` (`enabled: false` —
-«отключён», `topics: []` — «пропущен: нет топиков») и `<Aggregate>.Process` (`enabled: false` —
+«отключён», `topics: []` — «пропущен: нет топиков»), `Core.Outbox.Supervisor` (`enabled: false` —
+«отключён»; `pollers: []` при `enabled: true` — `ArgumentError`, а не пропуск: включённая очередь
+без поллеров не доставила бы ни одной записи, ADR-0045) и `<Aggregate>.Process` (`enabled: false` —
 «отключён»).
 
 `Core.Workers.PromEx` поле `required:` не читает: процесс из `watch:`, которого нет на ноде, даёт
@@ -51,7 +53,8 @@ Core.Es.Projection.Supervisor.watch_list(opts)
 - Тяжёлая инициализация → `{:ok, state, {:continue, :setup}}` + `handle_continue/2`.
 - `send(self(), :setup)` в `init/1` — устаревший идиом: сообщение встаёт в общую очередь и
   может обогнаться внешним сообщением; `handle_continue` выполняется до любого другого.
-- В `init/1` допустимы только разбор `opts`, сборка state, регистрация в локальном `Registry` и
+- В `init/1` допустимы только разбор `opts`, сборка state, регистрация в локальном `Registry`,
+  чтение и запись отметки дерева в `:persistent_term` (`Core.Outbox.Supervisor.Mark`) и
   `schedule/2` таймера.
 - Опции процесса MUST проверяться при разборе (`Core.Helper.StartOpts`): опечатка в них — ошибка
   конфигурации, и место ей — `ArgumentError` в `init/1`. Непроверенное значение всплывает позже и
@@ -101,11 +104,13 @@ Core.Es.Projection.Supervisor.watch_list(opts)
 
 ## Имена процессов
 
-- Статический синглтон — `name: __MODULE__` или атом из конфига (`poller_name`).
+- Статический синглтон — `name: __MODULE__` или атом из опций (`name:` поллера у
+  `Core.Outbox.Supervisor`).
 - Динамические процессы — `Registry`, не атомы: `String.to_atom` на внешних данных запрещён
   (`20-agreements.md`).
-- Имя, по которому будят процесс (`Poller.wake/1`), MUST приходить из конфига, а не вычисляться:
-  отсутствующий процесс → `:ok` (best-effort), а не падение.
+- Имя, по которому будят процесс (`Poller.wake/1`), MUST приходить из опций его дерева (у
+  поллеров — отметка `Core.Outbox.Supervisor`), а не вычисляться: отсутствующий процесс → `:ok`
+  (best-effort), а не падение.
 - Исключение — получатели сигналов, которые регистрируются в `Registry` сами: читатели проекций,
   которых порождает дерево по своему списку, и ожидающий `Projection.await/3`, которого
   порождает не дерево, а вызывающий. Получатель MUST регистрироваться в `Registry` с

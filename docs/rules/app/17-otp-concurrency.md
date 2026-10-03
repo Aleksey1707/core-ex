@@ -22,9 +22,10 @@ backpressure, `trap_exit`, backoff у периодических циклов �
 2. инициализация общего состояния без процессов («Состояние без процессов») — там же, до детей;
 3. сама разделяемая инфраструктура: PromEx, `DAO`, кластер, PubSub, соединения с брокером,
    планировщик задач `Oban`. Соединение, у которого один пользователь, — не разделяемое: оно
-   живёт в корне этого компонента под его тумблером. Тумблер разделяемой инфраструктуры — функция
-   её владельца (`MyApp.Mq.Kafka.enabled?/0`): её читают ребёнок `Application`, провайдер
-   `watch_list` и компоненты, которым инфраструктура нужна;
+   живёт в корне этого компонента под его тумблером, у очереди — опцией `connection:` её дерева.
+   Тумблер разделяемой инфраструктуры — функция её владельца (`MyApp.Mq.Kafka.enabled?/0`): её
+   читают ребёнок `Application`, провайдер `watch_list` и компоненты, которым инфраструктура
+   нужна;
 4. шаги инициализации, которым нужен процесс дерева («Состояние без процессов»), — сразу после
    этого процесса;
 5. корни компонентов («Компонент») и готовые деревья Core с тумблером, которым свой корень не
@@ -68,7 +69,7 @@ MUST NOT: тумблер, опции и наблюдение компонент�
 # плохо — кеш рядом с супервизором своего инвалидатора, проверка компонента в start/2
 def start(_type, _args) do
   Core.Config.validate!()
-  Core.Outbox.check_singleton!(outbox_opts)
+  MyApp.<Subsystem>.Client.ensure_available!(<subsystem>_opts)
 
   children = [
     MyAppApp.PromEx,
@@ -93,7 +94,7 @@ def start(_type, _args) do
       {Phoenix.PubSub, name: MyApp.PubSub},
       MyApp.Mq.Connection,
       {Oban, Application.fetch_env!(:my_app, Oban)},
-      MyAppApp.Outbox.Supervisor,
+      {Core.Outbox.Supervisor, outbox_opts()},
       {Core.Es.Projection.Supervisor, projection_opts()}
     ] ++
       Enum.map(processes(), &{&1, process_opts(&1)}) ++
@@ -105,8 +106,9 @@ def start(_type, _args) do
 end
 ```
 
-Поддерево с внутренним порядком запуска (writer → поллер → cleaner) — собственный `Supervisor`
-со `strategy: :rest_for_one` (`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево процессов»).
+Поддерево с внутренним порядком запуска (клиент внешнего сервиса → его воркеры) — собственный
+`Supervisor` со `strategy: :rest_for_one` (`deps/core/docs/rules/17-otp-concurrency.md`, «Дерево
+процессов»).
 
 Поддерево подписчиков брокера MUST строиться деревом библиотеки
 `Core.PubSub.MqSubscriberReliable.Supervisor`, а не своим супервизором: порядок детей — свой
@@ -214,10 +216,11 @@ end
 
 Компонент, который целиком — готовое дерево Core с тумблером (`enabled:` → `:ignore` с `info`) и
 `watch_list/1`, MAY стоять в `Application` без своего корня: корень повторил бы тумблер и
-`watch_list`, которые у дерева уже есть. Таковы `Core.Es.Projection.Supervisor` и
-`<Aggregate>.Process`. Опции и тумблер MUST собирать одна функция приложения из
-`config/runtime.exs` — `projection_opts/0`, `process_opts/1` корня («Проекции и процессы
-агрегата»), — а `watch_list/1` дерева MUST входить в склейку («Наблюдение за процессами»).
+`watch_list`, которые у дерева уже есть. Таковы `Core.Es.Projection.Supervisor`,
+`Core.Outbox.Supervisor` и `<Aggregate>.Process`. Опции и тумблер MUST собирать одна функция
+приложения из `config/runtime.exs` — `projection_opts/0`, `outbox_opts/0`, `process_opts/1` корня
+(«Проекции и процессы агрегата», «Очередь outbox»), — а `watch_list/1` дерева MUST входить в
+склейку («Наблюдение за процессами»).
 
 Дерево сторонней библиотеки без этих контрактов (`Oban`) — разделяемая инфраструктура: оно
 включается своими опциями (`queues:`, `plugins:`, `testing:`), а его супервизор перечисляет
@@ -249,7 +252,7 @@ end
 | кеш read-модели и его инвалидатор | каталог read-модели, `<read_model>/read_repo/supervisor.ex` (`16-caching.md`) |
 | вход внешней системы: подписчик её брокера, разбор её формата, DLQ отклонённого | граница входа `MyAppIngest`, `lib/my_app_ingest/<source>/` (`10-architecture.md`, «Boundary») |
 | usecases не зовёт: клиент внешнего сервиса, реестр, техническое состояние без версии и событий (сессии, журнал прогонов) | подсистема `MyApp.<Subsystem>` — своя граница (`10-architecture.md`, «Состав контекста») |
-| очередь outbox | корень, `MyAppApp.Outbox` (`10-architecture.md`, «Корень и сток») |
+| очередь outbox | своего каталога нет: дерево `Core.Outbox.Supervisor` в `MyAppApp.Application` («Очередь outbox») |
 
 - Компонент контекста MUST NOT звать изменяющие usecases другого контекста: его место — у того
   контекста, реакцией или воркером (`10-architecture.md`, «Usecases»). События производителя
@@ -346,9 +349,8 @@ end
 - Тумблер компонента и его значения из env (tunables очереди, проекций, кеша) живут **только** в
   `config/runtime.exs`; дублировать их в `config.exs` MUST NOT: у значения появились бы два
   источника, и они разойдутся.
-- Тумблер читается из того же ключа, что и остальная конфигурация компонента: тумблеры
-  приложения — под `:my_app`, тумблер очереди — под `:core`. Расхождение даёт дерево, которое
-  считает выключенное включённым.
+- Тумблер читается из того же ключа, что и остальная конфигурация компонента, — под `:my_app`.
+  Расхождение даёт дерево, которое считает выключенное включённым.
 - Каждый отключаемый компонент MUST иметь записанную цену: что именно перестаёт работать.
 
 ## Опции процессов
@@ -439,6 +441,68 @@ children = [MyApp.Infra.DAO | Enum.map(processes(), &{&1, process_opts(&1)})]
 команда идёт тем же путём, но без процесса на id: выключенное дерево не ломает команды, а
 только снимает процесс на id.
 
+## Очередь outbox
+
+Очередь поднимает только дерево библиотеки `Core.Outbox.Supervisor` — соединение, writer'ы,
+поллеры и cleaner под `rest_for_one`, проверки старта, тумблер `enabled:` и `watch_list/1`
+(`14-events-outbox.md`, «Единственность поллера»; `docs/adr/0045-outbox-ready-tree.md`). Свой
+супервизор очереди — MUST NOT: поллер вне дерева не стартует, а wake после вставки будит только
+поллеры из отметки дерева.
+
+- Опции MUST собирать одна функция приложения — `MyAppApp.Application.outbox_opts/0` из
+  `config :my_app, Core.Outbox.Supervisor`: её же принимает `Core.Outbox.Supervisor.watch_list/1`.
+  Состав опций — moduledoc дерева, env — `14-events-outbox.md`, «Конфигурация».
+- Соединение с брокером, у которого других пользователей нет, — опция `connection:` дерева;
+  соединение, которое делят несколько компонентов, — ребёнок `Application` («Дерево процессов»).
+- Тумблер транспорта поллера — функция владельца разделяемой инфраструктуры
+  (`MyApp.Mq.Kafka.enabled?/0`): её учитывает сборка списка `pollers:`, а не опция дерева. Поллер
+  на процессе, которым владеет приложение (клиент Kafka), задаётся `via:`, writer-процесс,
+  который поднимает дерево, — `writer:`.
+- Цена выключения очереди (`OUTBOX_ENABLED=false`) — записи копятся в `pending` и уходят в брокер
+  после включения; выключенного транспорта — то же для топиков его поллера.
+
+```elixir
+# плохо — свой корень очереди: порядок детей, проверки и имена поллеров для wake — у приложения
+defmodule MyAppApp.Outbox.Supervisor do
+  use Supervisor
+  ...
+end
+
+# хорошо — одна функция корня; её же читает watch_list/1
+def outbox_opts do
+  {reference_prefix, opts} =
+    Keyword.pop(Application.fetch_env!(:my_app, Core.Outbox.Supervisor), :reference_prefix)
+
+  kafka = if MyApp.Mq.Kafka.enabled?(), do: [kafka_poller()], else: []
+
+  Keyword.put(opts, :pollers, [stream_poller(reference_prefix) | kafka])
+end
+
+defp stream_poller(reference_prefix) do
+  [
+    name: MyAppApp.Outbox.StreamPoller,
+    label: "stream",
+    topics: {:except, kafka_topics()},
+    writer:
+      {Core.Mq.Stream.Writer,
+       connection: MyApp.Mq.Connection,
+       reference_prefix: reference_prefix,
+       name: MyAppApp.Outbox.StreamWriter}
+  ]
+end
+
+defp kafka_poller do
+  [
+    name: MyAppApp.Outbox.KafkaPoller,
+    label: "kafka",
+    topics: {:only, kafka_topics()},
+    via: {Core.Mq.Kafka.Writer, MyApp.Mq.Kafka.client()}
+  ]
+end
+
+children = [{Core.Outbox.Supervisor, outbox_opts()}]
+```
+
 ## Наблюдение за процессами
 
 Каждый критичный именованный процесс MUST быть в `watch_list/0` своего компонента — по нему
@@ -487,7 +551,7 @@ end
 def watch_list do
   [%{component: "mq_connection", name: MyApp.Mq.Connection}] ++
     [%{component: "oban", name: Oban.Registry.via(Oban)}] ++
-    MyAppApp.Outbox.Supervisor.watch_list() ++
+    Core.Outbox.Supervisor.watch_list(outbox_opts()) ++
     MyApp.<Subsystem>.Supervisor.watch_list() ++
     Enum.flat_map(MyAppApp.contexts(), & &1.watch_list()) ++
     MyAppIngest.<Source>.Supervisor.watch_list() ++

@@ -36,7 +36,6 @@ defmodule Core.Config do
   ## Подсистемы
 
   ```elixir
-  config :core, Core.Outbox, enabled: true, poll_interval_ms: 1_000, ...
   config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
   ```
 

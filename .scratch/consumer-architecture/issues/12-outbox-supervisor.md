@@ -6,16 +6,16 @@ writer'ы, поллеры и cleaner под `rest_for_one`, проверки с�
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Spec:** [Контекст — граница Boundary, раскладка — вертикаль по агрегату](../spec.md) — «`use Core.Component`»;
 ADR-0045, «Решение»
 
-- [ ] дерево, отметка, wake из отметки, отказ `Poller.init/1` вне дерева
-- [ ] проверки единственности и разбиения — приватные детали дерева
-- [ ] нормы `14-events-outbox.md`, `app/14`, `app/17`, `app/19`, прочие упоминания старого контракта
-- [ ] CHANGELOG, «Ломающие изменения контракта»
-- [ ] `make` зелёный
+- [x] дерево, отметка, wake из отметки, отказ `Poller.init/1` вне дерева
+- [x] проверки единственности и разбиения — приватные детали дерева
+- [x] нормы `14-events-outbox.md`, `app/14`, `app/17`, `app/19`, прочие упоминания старого контракта
+- [x] CHANGELOG, «Ломающие изменения контракта»
+- [x] `make` зелёный
 
 ## Comments
 
@@ -103,24 +103,24 @@ wake — по отметке дерева.
 - `Core.Outbox.check_singleton!/1`, `Core.Outbox.validate_partition!/1` — уходят из публичного API
 
 **Acceptance criteria:**
-- [ ] при `enabled: true` дерево поднимает детей в порядке connection → (writer, поллер) по элементам → cleaner;
+- [x] при `enabled: true` дерево поднимает детей в порядке connection → (writer, поллер) по элементам → cleaner;
       падение writer'а перезапускает его поллер и всё ниже (`rest_for_one`)
-- [ ] элемент с `via:` не поднимает ребёнка, его поллер пишет через указанный процесс
-- [ ] `enabled: false` — `:ignore`, детей нет, `watch_list/1` — `[]`, wake после вставки — no-op
-- [ ] каждый отказ старта даёт `ArgumentError`: неизвестная / отсутствующая опция, отсутствие `cluster_query:`,
+- [x] элемент с `via:` не поднимает ребёнка, его поллер пишет через указанный процесс
+- [x] `enabled: false` — `:ignore`, детей нет, `watch_list/1` — `[]`, wake после вставки — no-op
+- [x] каждый отказ старта даёт `ArgumentError`: неизвестная / отсутствующая опция, отсутствие `cluster_query:`,
       оба или ни одного из `writer:` / `via:`, дубль `name:` или `label:`, пересечение фильтров, `enabled: true`
       с `pollers: []`, включённая очередь в кластере без `allow_cluster: true`; проверки опций — и при
       `enabled: false`
-- [ ] `allow_cluster: true` в кластере — старт с `warning`, как у нынешней проверки
-- [ ] вставка записи будит только поллер, чей фильтр совпал с топиком, по отметке дерева; при выставленном
+- [x] `allow_cluster: true` в кластере — старт с `warning`, как у нынешней проверки
+- [x] вставка записи будит только поллер, чей фильтр совпал с топиком, по отметке дерева; при выставленном
       `config :core, Core.Outbox, poller_name: …` без дерева wake ничего не делает
-- [ ] `Core.Outbox.Poller` вне дерева не стартует: `ArgumentError`
-- [ ] `watch_list/1` отдаёт элементы с метками `outbox_connection`, `outbox_writer:<label>`,
+- [x] `Core.Outbox.Poller` вне дерева не стартует: `ArgumentError`
+- [x] `watch_list/1` отдаёт элементы с метками `outbox_connection`, `outbox_writer:<label>`,
       `outbox_poller:<label>`, `outbox_cleaner`, без элементов для `via:`
-- [ ] тесты библиотеки и сценарий очереди фикстуры-потребителя (`make consumer-check`) поднимают поллер через
+- [x] тесты библиотеки и сценарий очереди фикстуры-потребителя (`make consumer-check`) поднимают поллер через
       дерево; тесты нынешних `check_singleton!/1` / `validate_partition!/1` перенесены на дерево
-- [ ] в `lib/` нет чтения `Application.get_env(:core, Core.Outbox …)`
-- [ ] нормы и CHANGELOG — как в «Desired behavior»; `make` зелёный
+- [x] в `lib/` нет чтения `Application.get_env(:core, Core.Outbox …)`
+- [x] нормы и CHANGELOG — как в «Desired behavior»; `make` зелёный
 
 **Out of scope:**
 - лидер-элекция поллеров между нодами

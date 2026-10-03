@@ -41,7 +41,6 @@
 |---|---|---|
 | `MyAppApp` | `lib/my_app_app.ex` | корень границы: `use Boundary`, список объявлений контекстов `contexts/0` (`17-otp-concurrency.md`, «Объявления контекста») |
 | `MyAppApp.Application` | `lib/my_app_app/application.ex` | проверки конфигурации на старте, дерево процессов, включая процессы Core, и сборка объявлений контекстов |
-| `MyAppApp.Outbox` | `lib/my_app_app/outbox/` | OTP-дерево очереди: writer + поллер + cleaner |
 | `MyAppApp.PromEx` | `lib/my_app_app/prom_ex.ex`, `lib/my_app_app/prom_ex/` | плагины метрик и MFA-провайдеры списков |
 | `MyAppApp.MetricsServer` | `lib/my_app_app/metrics_server.ex` | сервер метрик вне `Endpoint` (`21-observability.md`) |
 | `MyAppApp.Release` | `lib/my_app_app/release.ex`, `lib/my_app_app/release/` | задачи релиза без Mix: миграции через `bin/my_app eval`; задачи оператора, общие для mix-таски и `bin/` |
@@ -327,9 +326,8 @@ Core.Security.Secret.ensure_configured!()
 - Проверка адаптера MUST стоять на каждый используемый адаптер брокера и только на него:
   `Core.Mq.Stream.ensure_available!/0`, `Core.Mq.Kafka.ensure_available!/0`.
 - Проверки старта компонента в `start/2` MUST NOT — они живут в его корне
-  (`17-otp-concurrency.md`, «Компонент»): `Core.Outbox.check_singleton!/1` и
-  `Core.Outbox.validate_partition!/1` зовёт корень очереди (`14-events-outbox.md`, «Единственность
-  поллера»).
+  (`17-otp-concurrency.md`, «Компонент»); проверки очереди делает её дерево
+  `Core.Outbox.Supervisor` (`14-events-outbox.md`, «Единственность поллера»).
 
 ## Файлы `config/`
 
@@ -374,7 +372,7 @@ end
 | `MyApp.<Subsystem>` | контексты, которые она читает, `MyApp.Infra` | подсистема приложения |
 | `MyAppWeb` | контексты, `MyApp.Codec`, `MyApp.ContextFactory`; `check: [aliases: true]` | web-слой |
 | `MyAppIngest` | контексты, подсистемы; `check: [aliases: true]` | граница входа внешней системы: подписчики её брокера, разбор её формата, DLQ |
-| `MyAppApp` | контексты, подсистемы, `MyApp.Infra`, `MyApp.Authz`, `MyAppWeb`, `MyAppIngest` | композиционный корень: `Application`, список контекстов, `Outbox`, `PromEx`, `MetricsServer`, `Release`, mix-таски |
+| `MyAppApp` | контексты, подсистемы, `MyApp.Infra`, `MyApp.Authz`, `MyAppWeb`, `MyAppIngest` | композиционный корень: `Application`, список контекстов, `PromEx`, `MetricsServer`, `Release`, mix-таски |
 | `MyAppTest` | — (`check: [in: false, out: false]`) | обвязка тестов `test/support/` |
 
 - Bounded context MUST быть границей верхнего уровня, а `MyApp` границей не является

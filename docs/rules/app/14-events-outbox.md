@@ -98,22 +98,25 @@ topics: [
 `FOR UPDATE SKIP LOCKED` защищает от дублей, но не от перестановки сообщений между нодами.
 
 - `OUTBOX_ENABLED=true` MUST стоять ровно на одном инстансе.
-- Включённый outbox вместе с заданной кластеризацией (`DNS_CLUSTER_QUERY`) MUST ронять старт
-  `ArgumentError` с инструкцией: корень очереди `MyAppApp.Outbox.Supervisor` MUST звать
-  `Core.Outbox.check_singleton!/1` в `start_link/1` до подъёма своих детей — это проверка старта
-  компонента (`17-otp-concurrency.md`, «Компонент»;
-  `deps/core/docs/rules/14-events-outbox.md`, «Единственность поллера»).
+- Обе проверки старта делает дерево `Core.Outbox.Supervisor` до подъёма своих детей: включённая
+  очередь вместе с заданной кластеризацией (`DNS_CLUSTER_QUERY` → `cluster_query:`) и
+  пересекающиеся фильтры топиков поллеров роняют старт `ArgumentError` с инструкцией
+  (`deps/core/docs/rules/14-events-outbox.md`, «Единственность поллера»). Своих копий проверок у
+  приложения нет: свой корень очереди — MUST NOT (`17-otp-concurrency.md`, «Готовое дерево без
+  корня»).
 - Осознанный отказ от гарантии порядка включается **явным** тумблером
-  (`OUTBOX_ALLOW_CLUSTER=true` → `allow_cluster?: true`): старт разрешён, `warning` пишет сама
-  проверка. Ставить тумблер там, где порядок важен, — MUST NOT.
+  (`OUTBOX_ALLOW_CLUSTER=true` → `allow_cluster: true`): старт разрешён, `warning` пишет само
+  дерево. Ставить тумблер там, где порядок важен, — MUST NOT.
 - Concurrency поллера больше единицы — MUST NOT.
-- Несколько поллеров MAY существовать, если они разделены по топикам: разбиение MUST быть
-  полным и непересекающимся и проверяться на старте — `Core.Outbox.validate_partition!/1` рядом с
-  `check_singleton!/1`.
+- Несколько поллеров MAY существовать, если они разделены по топикам: фильтры элементов
+  `pollers:` MUST NOT пересекаться. Полнота разбиения не проверяется: топики вне фильтров ждут в
+  `pending` — так выключается транспорт (поллер выключенного брокера не входит в `pollers:`), а
+  цена видна только метриками `Core.Outbox.PromEx`.
 - Несколько нод без потери порядка требуют лидер-элекции (`:global` / advisory-lock на
   топик-группу); библиотека её не даёт.
 
-Проверяется: ратчет вызова из корня очереди (`19-testing.md`, «Ратчеты»).
+Проверяется: старт дерева (`deps/core/docs/rules/14-events-outbox.md`, «Единственность
+поллера»); ратчета у приложения нет.
 
 ## Подписчики
 
@@ -262,19 +265,19 @@ DLQ — `deps/core/docs/rules/14-events-outbox.md`, «Идемпотентнос
 ## Конфигурация
 
 Тумблер и tunables очереди (`enabled`, `batch_size`, `poll_interval_ms`, `idle_min_ms`, …) живут
-в `config/runtime.exs` под ключом `config :core, Core.Outbox` и читаются из env
-(`17-otp-concurrency.md`, «Тумблер компонента»). Библиотека из этого ключа читает только
-`poller_name` / `pollers`, остальное супервизор очереди передаёт опциями `Poller` / `Cleaner`
-(`deps/core/docs/rules/14-events-outbox.md`, «Outbox lifecycle»).
+в `config/runtime.exs` под ключом `config :my_app, Core.Outbox.Supervisor` и читаются из env
+(`17-otp-concurrency.md`, «Тумблер компонента»). Библиотека из этого ключа не читает ничего: опции
+дерева собирает `MyAppApp.Application.outbox_opts/0` (`17-otp-concurrency.md`, «Готовое дерево без
+корня»); их состав — moduledoc `Core.Outbox.Supervisor`.
 
 | Ключ | Что задаёт |
 |---|---|
-| `OUTBOX_ENABLED` | поднимать ли поддерево очереди (writer + поллер + cleaner) |
+| `OUTBOX_ENABLED` | поднимать ли дерево очереди (`enabled:`) |
 | `OUTBOX_POLL_INTERVAL` | потолок backoff и safety poll: записи других нод поллер видит только опросом |
 | `OUTBOX_IDLE_MIN` | стартовый backoff на пустой выборке и сбое |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_LOCK_DURATION`, `OUTBOX_MAX_ATTEMPTS` | пачка, аренда `:in_work`, порог `:failed` |
 | `OUTBOX_PUBLISHED_TTL`, `OUTBOX_CLEANER_INTERVAL` | что и как часто убирает cleaner |
-| `OUTBOX_REFERENCE_PREFIX` | префикс producer reference writer'а очереди |
+| `OUTBOX_REFERENCE_PREFIX` | префикс producer reference writer'а очереди — опция `writer:` элемента `pollers:` |
 | `OUTBOX_ALLOW_CLUSTER` | разрешить старт при `DNS_CLUSTER_QUERY` ценой порядка |
 
 - Длительности (`OUTBOX_POLL_INTERVAL`, `OUTBOX_IDLE_MIN`, `OUTBOX_LOCK_DURATION`,
@@ -285,7 +288,8 @@ DLQ — `deps/core/docs/rules/14-events-outbox.md`, «Идемпотентнос
 - Окно до `:failed` задаёт тройка `OUTBOX_IDLE_MIN` / `OUTBOX_POLL_INTERVAL` /
   `OUTBOX_MAX_ATTEMPTS` (`deps/core/docs/rules/14-events-outbox.md`, «Poller scheduling»).
 - В `:test` runtime-блок очереди пропускается, значения задаёт overlay в `config/test.exs`:
-  `enabled: false`, `poller_name: nil` — wake тогда no-op.
+  `enabled: false` с остальными обязательными опциями дерева (опции проверяются и у выключенного
+  дерева) — оно отвечает `:ignore`, и wake после вставки никого не будит.
 
 ## Runbook: записи в `:failed`
 

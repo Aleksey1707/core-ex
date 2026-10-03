@@ -131,24 +131,14 @@ config :core,
 ### Подсистемы
 
 ```elixir
-# Читается Core только ради `Poller.wake/1` после записи в очередь.
-# Либо один поллер:
-config :core, Core.Outbox, poller_name: MyAppApp.Outbox.Poller
-# либо несколько, с разбиением по топикам:
-config :core, Core.Outbox,
-  pollers: [
-    [name: MyAppApp.Outbox.Poller.Orders, topics: ["orders"]],
-    [name: MyAppApp.Outbox.Poller.Rest, topics: :all]
-  ]
-
 # Ключ шифрования секретов (Fernet, 32 байта в base64). Обязателен, если используется
 # `Core.Security.Secret`. Проверяется на старте — `Core.Security.Secret.ensure_configured!/0`.
 config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYPTION_KEY")
 ```
 
-Остальные настройки outbox (интервалы, размер батча, TTL) библиотека не читает: они
-приходят `opts`-ами в `Core.Outbox.Poller` / `Core.Outbox.Cleaner` от supervisor'а
-потребителя. Где их держать и из каких env читать — конвенция приложения,
+Настройки outbox (поллеры, интервалы, размер батча, TTL) библиотека из конфигурации не читает:
+они приходят опциями в дерево очереди `Core.Outbox.Supervisor` («Supervision» ниже). Где их
+держать и из каких env читать — конвенция приложения,
 `deps/core/docs/rules/app/14-events-outbox.md`, «Конфигурация».
 
 ### Реализации репозиториев
@@ -172,36 +162,11 @@ end
 ```
 
 Проверки старта компонента стоят в его корне, а не в `start/2`
-(`docs/rules/app/17-otp-concurrency.md`, «Компонент»). Корень очереди `MyAppApp.Outbox.Supervisor`,
-если приложение ставит outbox в дерево:
-
-```elixir
-def start_link(_arg) do
-  outbox = Application.get_env(:core, Core.Outbox, [])
-
-  Core.Outbox.check_singleton!(
-    enabled?: Keyword.get(outbox, :enabled, false),
-    cluster_query: Application.get_env(:my_app, :dns_cluster_query),
-    allow_cluster?: Keyword.get(outbox, :allow_cluster, false)
-  )
-
-  # обязательно, если поллеров несколько (конфиг `pollers`):
-  Core.Outbox.validate_partition!(outbox[:pollers] || [])
-  ...
-end
-```
+(`docs/rules/app/17-otp-concurrency.md`, «Компонент»). Проверки очереди — единственность на
+кластере и непересечение фильтров поллеров — делает её дерево `Core.Outbox.Supervisor` при старте.
 
 `validate!/0` проверяет, что обязательные ключи заданы, `dao` и `codec` загружаются
 и экспортируют нужные функции, а `tz` известен базе часовых поясов.
-
-`Core.Outbox.check_singleton!/1` отказывает в старте, если outbox включён при заданной
-кластеризации: каждая нода поднимет свой поллер, и порядок доставки нарушится.
-`allow_cluster?: true` разрешает старт ценой порядка и пишет `warning`. Значения передаёт
-приложение: ключ кластеризации — его, а не библиотеки.
-
-`Core.Outbox.validate_partition!/1` отказывает в старте, если фильтры топиков двух
-поллеров пересекаются: `FOR UPDATE SKIP LOCKED` защищает от дублей, но не от перестановки,
-и общий топик у двух поллеров ломает порядок доставки молча.
 
 `Core.Mq.Stream.ensure_available!/0` / `Core.Mq.Kafka.ensure_available!/0` — опциональные
 проверки для тех, кто использует соответствующий адаптер. Различают два случая и дают
@@ -339,22 +304,36 @@ end
    elixir deps/core/scripts/boundary_lint.exs --consumer lib test
    ```
 
-5. **Supervision.** Библиотека не имеет своего OTP-приложения: `Core.Outbox.Poller`,
-   `Core.Outbox.Cleaner`, `Core.Mq.Stream.Connection`, `Core.PubSub.MqSubscriberReliable`
-   поднимает supervisor потребителя. Пример старта — `test/test_helper.exs`.
+5. **Supervision.** Библиотека не имеет своего OTP-приложения: готовые деревья
+   (`Core.Outbox.Supervisor`, `Core.Es.Projection.Supervisor`,
+   `Core.PubSub.MqSubscriberReliable.Supervisor`) и `Core.Mq.Stream.Connection` поднимает
+   `Application` потребителя. Пример старта — `test/test_helper.exs`.
 
-   Модуль доставки поллер берёт из опций, а не выводит из handle:
+   Очередь outbox поднимает только её дерево: оно стартует соединение, writer'ы, поллеры и
+   cleaner, проверяет единственность на кластере и разбиение топиков и само будит поллеры после
+   вставки. Опции и их смысл — moduledoc `Core.Outbox.Supervisor`:
 
    ```elixir
-   {Core.Outbox.Poller,
+   {Core.Outbox.Supervisor,
+    enabled: true,
+    cluster_query: System.get_env("DNS_CLUSTER_QUERY"),
     repo: Core.Outbox.Repo.Pg,
-    delivery_module: Core.Outbox.Delivery.Mq,
-    delivery: Core.Outbox.Delivery.Mq.new(Core.Mq.Stream.Writer, MyAppApp.Outbox.Writer),
+    pollers: [
+      [
+        name: MyAppApp.Outbox.Poller,
+        label: "stream",
+        writer:
+          {Core.Mq.Stream.Writer,
+           connection: MyApp.Mq.Connection, reference_prefix: "my_app-outbox", name: MyAppApp.Outbox.Writer}
+      ]
+    ],
     poll_interval_ms: 1_000,
     idle_min_ms: 50,
-    batch_size: Core.Outbox.BatchSize.new!(100),
-    lock_duration: Core.Outbox.LockDuration.new!(60),
-    max_attempts: Core.Outbox.Attempts.new!(10)}
+    batch_size: 100,
+    lock_duration_seconds: 60,
+    max_attempts: 10,
+    published_ttl_seconds: 604_800,
+    cleaner_interval_ms: 3_600_000}
    ```
 
    Проекция — одна на read-модель: `<ReadModel>.Projection` лежит в каталоге read-модели рядом

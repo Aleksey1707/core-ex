@@ -217,18 +217,19 @@ end
 | `Delivery.Mq` | JSON body + `Record.headers` как есть; `publish_many` → `Writer.put_many` (stop-on-first-error). Единственный Delivery: брокер подключается адаптером `Mq.Writer` (`Mq.Stream.Writer`, `Mq.Kafka.Writer`), не отдельным `Delivery.*`. Модуль реализации поллер берёт из опции `:delivery_module`; выводить его из `__struct__` handle MUST NOT — `Delivery.t()` структуры не требует |
 | `Cleaner` | TTL published |
 
-Поддерево очереди (`Writer` → `Poller` → `Cleaner`) собирает супервизор приложения; своего
-супервизора у библиотеки нет.
+Очередь поднимает только готовое дерево `Core.Outbox.Supervisor`: соединение (если задано) → на
+каждый поллер его writer-процесс (если есть) и сам поллер → `Cleaner`, `rest_for_one`, одно дерево
+на ноду. Опции, проверки старта и `watch_list/1` — moduledoc дерева; решение — ADR-0045.
+`Poller.init/1`, не найдя своего имени в отметке дерева, отказывает `ArgumentError`: поллер вне
+дерева не стартует.
 
-Ключ конфига — `Core.Outbox` (Core-namespace, не app-модуль `MyAppApp.Outbox`). Библиотека читает
-из него только цели пробуждения после commit `append` (`Outbox.Repo.Pg`):
+Цели пробуждения после commit `append` (`Outbox.Repo.Pg`) — отметка, которую дерево пишет в
+`:persistent_term` до подъёма детей: имена и фильтры топиков его поллеров, при `enabled: false` —
+пусто. Будится каждый поллер, чей фильтр совпал с пачкой; нода без дерева не будит никого. Ключ
+`config :core, Core.Outbox` библиотека не читает: опции дерева собирает приложение — где лежат
+значения и из каких env приходят, `deps/core/docs/rules/app/14-events-outbox.md`, «Конфигурация».
 
-- `poller_name` — atom имени GenServer; `nil` — wake no-op;
-- `pollers` — `[[name:, topics:], …]`: будится каждый поллер, чей фильтр топиков совпал с пачкой.
-
-Остальное — опции `Poller` / `Cleaner` (обязательные и дефолты — их moduledoc), их передаёт
-супервизор приложения. Где лежат значения, из каких env приходят и как задаются длительности —
-`deps/core/docs/rules/app/14-events-outbox.md`, «Конфигурация».
+Проверяется: `test/core/outbox/supervisor_test.exs`.
 
 ### Poller scheduling
 
@@ -245,9 +246,9 @@ end
   заранее: иначе непрерывный `append` при лежащем брокере держит интервал на минимуме.
 - Входящие `:wake` coalesce'ятся (`flush_wakes` в начале/конце цикла) — mailbox не растёт
   пропорционально RPS `append`.
-- `Outbox.Repo.append` регистрирует через `Helper.AfterCommit` вызов `Poller.wake/1` для целей из
-  `poller_name` / `pollers` (после outermost commit; вне TX — сразу). Same-VM only; другие
-  ноды — safety poll.
+- `Outbox.Repo.append` регистрирует через `Helper.AfterCommit` вызов `Poller.wake/1` для поллеров
+  из отметки дерева (после outermost commit; вне TX — сразу). Same-VM only; другие ноды — safety
+  poll.
 - `DAO` объявляется через `use Core.DAO`: `transact` / `transaction` обёрнуты в `AfterCommit.wrap`
   (depth / rollback-safe).
 
@@ -324,18 +325,19 @@ errors string↔atom keys). `append` чанкует `insert_all` (лимит п�
 Гарантия порядка держится на одном поллере на топик-группу; как приложение обеспечивает это на
 нодах и на старте — `deps/core/docs/rules/app/14-events-outbox.md`, «Единственность поллера».
 
-`Core.Outbox.check_singleton!/1` отказывает `ArgumentError` с инструкцией, если включённый outbox
-(`enabled?:`) стартует при заданной кластеризации (`cluster_query:`); с `allow_cluster?: true`
-пропускает старт и пишет `warning`. `cluster_query` `nil`, `:ignore` и `""` — кластеризации нет.
-Значения передаются опциями, а не читаются из конфигурации: ключ кластеризации принадлежит
-приложению (`10-architecture.md`).
+Обе проверки старта — внутри `Core.Outbox.Supervisor.start_link/1`, публичных функций у них нет:
 
-`Core.Outbox.validate_partition!/1` принимает конфиг `pollers` как есть и отказывает
-`ArgumentError`, если фильтры топиков двух поллеров пересекаются; раскладка на один поллер
-проверки не требует. Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`: два
-`{:except, _}` пересекаются всегда.
+- единственность на кластере: включённое дерево (`enabled: true`) при заданной кластеризации
+  (`cluster_query:`) отказывает `ArgumentError` с инструкцией; с `allow_cluster: true` стартует и
+  пишет `warning`. `cluster_query` `nil`, `:ignore` и `""` — кластеризации нет. Значение
+  передаётся опцией, а не читается из конфигурации: ключ кластеризации принадлежит приложению
+  (`10-architecture.md`);
+- непересечение фильтров: два поллера `pollers:` с пересекающимися фильтрами топиков —
+  `ArgumentError`. Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`: два
+  `{:except, _}` пересекаются всегда. Полнота разбиения не проверяется: топики вне фильтров ждут в
+  `pending`.
 
-Проверяется: `test/core/outbox/singleton_test.exs`, `test/core/outbox/partition_test.exs`.
+Проверяется: `test/core/outbox/supervisor_test.exs`, `test/core/outbox/partition_test.exs`.
 
 ## Трассировка цепочки
 

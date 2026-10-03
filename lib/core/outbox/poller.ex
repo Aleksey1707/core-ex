@@ -10,12 +10,16 @@ defmodule Core.Outbox.Poller do
   `poll_interval_ms`. `wake/1` будит цикл досрочно (после commit `append`); входящие
   `:wake` coalesce'ятся (`flush_wakes/0`).
 
-  Обязательные opts: `:repo`, `:delivery_module`, `:delivery`, `:poll_interval_ms`,
+  Обязательные opts: `:name`, `:repo`, `:delivery_module`, `:delivery`, `:poll_interval_ms`,
   `:idle_min_ms`, `:batch_size`, `:lock_duration`, `:max_attempts`.
   Опционально: `:topics` (`Outbox.topics_filter()`, default `:all`),
   `:context_factory` (`()-> Context.t()`, вызывается один раз в `init`,
-  default `Context.new/0`), `:name`, `:shutdown` (`child_spec/1`). Неизвестная опция, отсутствие
+  default `Context.new/0`), `:shutdown` (`child_spec/1`). Неизвестная опция, отсутствие
   обязательной и значение не той формы — `ArgumentError` при старте (`Core.Helper.StartOpts`).
+
+  Поллер стартует только из `Core.Outbox.Supervisor`: его опции собирает дерево, а wake после
+  вставки адресует поллеры по отметке дерева. Не найдя своего `:name` в отметке, `init/1`
+  отказывает `ArgumentError`.
   """
 
   use GenServer
@@ -27,6 +31,7 @@ defmodule Core.Outbox.Poller do
   alias Core.Outbox
   alias Core.Outbox.Delivery
   alias Core.Outbox.Record
+  alias Core.Outbox.Supervisor.Mark
   alias Core.Telemetry
 
   require Logger
@@ -160,6 +165,7 @@ defmodule Core.Outbox.Poller do
       topics: StartOpts.topics_filter!(@label, opts, :topics, :all)
     }
 
+    :ok = ensure_marked!(StartOpts.atom!(@label, opts, :name))
     {:ok, schedule(state, idle_min_ms)}
   end
 
@@ -198,6 +204,18 @@ defmodule Core.Outbox.Poller do
   end
 
   # ---
+
+  defp ensure_marked!(name) do
+    case Mark.member?(name) do
+      true ->
+        :ok
+
+      false ->
+        raise ArgumentError,
+              "#{@label}: поллер #{inspect(name)} не из отметки дерева очереди — " <>
+                "поллер стартует только из Core.Outbox.Supervisor"
+    end
+  end
 
   defp process(%__MODULE__{} = state) do
     start = System.monotonic_time()

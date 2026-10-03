@@ -9,7 +9,7 @@ defmodule Core do
   | Что | Как получает зависимость |
   |---|---|
   | Инфра-синглтоны (`Repo`, Codec-фасад, часовой пояс, ключ шифрования) | `Core.Config` (`config :core, ...`) |
-  | OTP-процессы (`Outbox.Poller`, `Outbox.Cleaner`, `Mq.Stream.*`) | `opts` от supervisor'а потребителя |
+  | OTP-процессы и деревья (`Outbox.Supervisor`, `Mq.Stream.*`) | `opts` от supervisor'а потребителя |
   | Макросы (`Repo.Pg`, `Prim.DateTime`, `Codec.Facade`) | `use`-опция, fallback → `Core.Config` |
 
   Контракт конфигурации целиком описан в `Core.Config` и `README.md`.

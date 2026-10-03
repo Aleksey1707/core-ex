@@ -103,18 +103,18 @@
   иначе цикл.
 
   Как править приложение (было → стало):
-  - `MyApp.Application`, `MyApp.PromEx`, `MyApp.Outbox`, `MyApp.MetricsServer`, `MyApp.Release` в
-    `lib/my_app/` → `MyAppApp.Application`, `MyAppApp.PromEx`, `MyAppApp.Outbox`,
-    `MyAppApp.MetricsServer`, `MyAppApp.Release` в `lib/my_app_app/`; корень границы — модуль
+  - `MyApp.Application`, `MyApp.PromEx`, `MyApp.MetricsServer`, `MyApp.Release` в `lib/my_app/` →
+    `MyAppApp.Application`, `MyAppApp.PromEx`, `MyAppApp.MetricsServer`, `MyAppApp.Release` в
+    `lib/my_app_app/`; `MyApp.Outbox` не переезжает, а уходит — пункт «Очередь outbox — готовое
+    дерево `Core.Outbox.Supervisor`»; корень границы — модуль
     `MyAppApp` в `lib/my_app_app.ex`: `use Boundary` с `deps` (контексты, подсистемы,
     `MyApp.Infra`, `MyAppWeb`) и `contexts/0`;
   - границы `MyApp.Application` и `MyApp.PromEx` с `top_level?: true`, mix-таски
     `classify_to: MyApp` → одна граница `MyAppApp`, `use Boundary, classify_to: MyAppApp`;
   - `mod: {MyApp.Application, []}` в `mix.exs` → `mod: {MyAppApp.Application, []}`; команды
     `bin/my_app eval 'MyApp.Release.<fun>(…)'` в скриптах выката, образе и runbook →
-    `bin/my_app eval 'MyAppApp.Release.<fun>(…)'`; имена `MyApp.Outbox.Poller*` в
-    `config :core, Core.Outbox` → `MyAppApp.Outbox.Poller*`; имя `MyApp.Supervisor` корня дерева
-    → `MyAppApp.Supervisor`;
+    `bin/my_app eval 'MyAppApp.Release.<fun>(…)'`; имя `MyApp.Supervisor` корня дерева →
+    `MyAppApp.Supervisor`;
   - новый модуль контекста `MyApp.Domain.<BC>.Supervision` в
     `lib/my_app/domain/<bc>/supervision.ex` с `projections/0`, `processes/0`, `children/0`,
     `watch_list/0`, а при плагинах `Core.Mq.PromEx` и `Core.Cache.PromEx` — `readers/0`,
@@ -291,6 +291,52 @@
     интеграционный тест с `Mox.stub_with(MyAppTest.Authz, MyApp.Domain.<BC>.Authz)`: отказ без
     права и успех с ним; у приложения с заглушкой мок и интеграционные тесты доступа не нужны;
   - общий контрактный набор, который гонялся и на тестовой реализации, → только на боевых.
+
+- **Очередь outbox — готовое дерево `Core.Outbox.Supervisor`, wake — по его отметке**
+  (`docs/rules/14-events-outbox.md`, «Outbox lifecycle», «Единственность поллера»;
+  `docs/rules/app/14-events-outbox.md`, «Единственность поллера», «Конфигурация»;
+  `docs/rules/app/17-otp-concurrency.md`, «Готовое дерево без корня», «Очередь outbox»; решение —
+  `docs/adr/0045-outbox-ready-tree.md`). Корень очереди писал каждый потребитель: порядок детей и
+  две проверки старта держали ревью и ратчет, проверка единственности у большинства была своей
+  копией с разной трактовкой пустого `DNS_CLUSTER_QUERY`. Wake после вставки читал имена поллеров
+  из `config :core, Core.Outbox`, корень — из своего ключа, и их расхождение было видно только
+  задержкой доставки до `poll_interval_ms`. Теперь очередь поднимает только дерево библиотеки:
+  соединение → на каждый поллер его writer и сам поллер → cleaner под `rest_for_one`, проверки
+  единственности на кластере и непересечения фильтров при старте, тумблер `enabled:` и
+  `watch_list/1`. До подъёма детей дерево пишет в `:persistent_term` отметку с именами и фильтрами
+  поллеров, и wake читает только её; `config :core, Core.Outbox` библиотека не читает нигде.
+  `Core.Outbox.Poller` вне дерева не стартует — `ArgumentError`, поэтому приложение со старым
+  корнем после обновления падает на старте, а не теряет wake молча.
+
+  Как править приложение (было → стало):
+  - рукописный корень очереди (`MyAppApp.Outbox.Supervisor` или `MyApp.Outbox.Supervisor`:
+    writer → поллер(ы) → cleaner) → удалить; в `MyAppApp.Application` ребёнком —
+    `{Core.Outbox.Supervisor, outbox_opts()}`, где `MyAppApp.Application.outbox_opts/0` собирает
+    опции из `config :my_app, Core.Outbox.Supervisor`; соединение Stream, у которого других
+    пользователей нет, → опция `connection: {Core.Mq.Stream.Connection, opts}` дерева;
+  - `config :core, Core.Outbox` в `config/runtime.exs` → `config :my_app, Core.Outbox.Supervisor`:
+    `enabled:`, `cluster_query:` (обязательна; прежнее значение `DNS_CLUSTER_QUERY`, `nil` — нет
+    кластера), `allow_cluster:` (было `allow_cluster?:` у проверки), `repo: Core.Outbox.Repo.Pg`,
+    `poll_interval_ms:`, `idle_min_ms:`, `batch_size:`, `lock_duration_seconds:`, `max_attempts:`,
+    `published_ttl_seconds:`, `cleaner_interval_ms:` — голыми положительными целыми, без `new!` в
+    Prim; дефолтов у tunables нет;
+  - `poller_name:` / `pollers: [[name:, topics:]]` → `pollers:` дерева, элемент —
+    `[name:, label:, topics:]` и ровно один из `writer: {Core.Mq.Stream.Writer, opts с name:}`
+    (writer, который поднимало приложение, — теперь его поднимает дерево перед поллером) или
+    `via: {Core.Mq.Kafka.Writer, client}` (процесс, которым владеет приложение); `label:` —
+    строка, метка компонента; `delivery_module:` / `delivery:` поллера собирает дерево; поллер
+    выключенного транспорта в список не входит — его топики ждут в `pending`;
+  - `reference_prefix` из ключа очереди → в опции `writer:` элемента (`outbox_opts/0` вынимает его
+    из ключа приложения, если он лежит там);
+  - вызовы `Core.Outbox.check_singleton!/1` и `Core.Outbox.validate_partition!/1` → удалить:
+    функций нет, обе проверки делает дерево; строку ратчета «корень очереди зовёт
+    `check_singleton!/1`» и его тест — удалить;
+  - тестовый overlay `config :core, Core.Outbox, enabled: false, poller_name: nil` →
+    `config :my_app, Core.Outbox.Supervisor, enabled: false` с остальными обязательными опциями;
+  - `watch_list/0` корня очереди → `Core.Outbox.Supervisor.watch_list(outbox_opts())` в склейке
+    `MyAppApp.Application.watch_list/0`; метки компонентов — `outbox_connection`,
+    `outbox_writer:<label>`, `outbox_poller:<label>`, `outbox_cleaner`: дашборды и алерты на
+    прежние метки (`outbox_poller`, `outbox:poller` и т. п.) правятся при переезде.
 
 ### Новое
 
