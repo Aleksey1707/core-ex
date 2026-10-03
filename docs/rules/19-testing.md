@@ -439,7 +439,16 @@ end
 - **дублёр** — своя реализация с поведением (in-memory хранилище, канал без сети): общий набор на
   нём MUST, если набор у behaviour есть, — он ловит расхождение дублёра с боевой реализацией, а
   «дублёр держит контракт адаптера буквально» (`deps/core/docs/rules/app/19-testing.md`,
-  «Обвязка `test/support`») без набора держится только ревью.
+  «Обвязка `test/support`») без набора держится только ревью (ADR-0052).
+
+```elixir
+# плохо — общий набор на моке: проверяет то, что тест сам задал
+use MyAppTest.StorageContract, impl: MyAppTest.StorageMock
+
+# хорошо — набор на боевой реализации и на дублёре
+use MyAppTest.StorageContract, impl: MyApp.Storage.S3
+use MyAppTest.StorageContract, impl: MyAppTest.Storage.InMemory
+```
 
 ```elixir
 defmodule MyAppTest.ReadRepoContract do

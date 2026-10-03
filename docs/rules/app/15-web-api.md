@@ -50,7 +50,7 @@
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
 | `MyAppWeb.ErrorJSON` | ответ Phoenix на исключение (`render_errors:` у `Endpoint`) |
-| `MyAppWeb.Accepted` | режим ожидания `wait:` из `Prefer` и ответ команды по результату usecase — 200 или 202, ответ создания; один на приложение («Ожидание проекции») |
+| `MyAppWeb.Accepted` | режим ожидания `wait:` из `Prefer` и ответ команды по результату usecase — 200, 202 или 204, ответ создания; один на приложение («Ожидание проекции») |
 | `MyAppWeb.Response`, `MyAppWeb.Response.Code` | конверт ответа `use Core.Web.Response, codes: MyAppWeb.Response.Code` (`deps/core/docs/rules/10-architecture.md`) |
 | `MyAppWeb.Endpoint`, `MyAppWeb.Router`, `MyAppWeb.Telemetry` | обвязка Phoenix |
 
@@ -232,6 +232,7 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
 | `respond-async`, `wait=0` | `:none` | 202 с `{id, version}` | `respond-async` / `wait=0` |
 | `wait=N` | `min(N с, предел)` | `:projected` — 200, `:accepted` — 202 | `wait=<применённое>` |
 | `respond-async, wait=N` | как `wait=N` | как `wait=N` | `wait=<применённое>`; на 202 — и `respond-async` |
+| любое (пакетная команда с пустым пакетом) | любой | `:unchanged` — 204 без тела | нет |
 
 `N` — секунды, MAY с дробной частью (`wait=0.2`): это шире RFC 7240. Точность и форму применённого
 задаёт `Core.Web.Prefer`.
@@ -247,12 +248,12 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
   usecase уже перевёл в `:accepted`: запись применена, и до экшена ошибкой они не доходят.
   Пакетная команда с пустым пакетом отдаёт `:unchanged` — ответ 204 без тела и без
   `Preference-Applied`: записи не было, и ни 200 («`GET` уже видит запись»), ни 202 («ещё не
-  видит») не верны (`deps/core/docs/adr/0051-batch-command-unchanged.md`). Операция такой команды
-  MUST объявлять и ответ 204.
+  видит») не верны (`deps/core/docs/adr/0051-batch-command-unchanged.md`).
 - Операция такой команды MUST объявлять ответ `accepted:` со схемой `MyAppWeb.Schemas.Written`,
-  операция создания — её же и в `ok:`. Параметр-заголовок `Prefer` и заголовок ответа
-  `Preference-Applied` на 200 и 202 операция MUST объявлять общими определениями
-  `MyAppWeb.Schemas.Prefer` («Раскладка»): без них клиент об отказе от ожидания не узнает.
+  операция создания — её же и в `ok:`, пакетная команда — ещё и `no_content:` без схемы.
+  Параметр-заголовок `Prefer` и заголовок ответа `Preference-Applied` на 200 и 202 операция MUST
+  объявлять общими определениями `MyAppWeb.Schemas.Prefer` («Раскладка»): без них клиент об отказе
+  от ожидания не узнает.
 - Ответ собирает один хелпер приложения — `MyAppWeb.Accepted` («Раскладка»): `wait/1` разбирает
   `Prefer` через `Core.Web.Prefer` и отдаёт режим `:none | pos_integer()` для `wait:` usecase,
   `respond/3` и `written/2` по результату usecase ставят `Preference-Applied` и отвечают 200 или
@@ -262,7 +263,7 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
   ждёт, и команда отвечает 202 при любом `Prefer`.
 - Ответ создания MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/2` (`conn`, результат
   usecase создания): ветка 202 у хелпера одна, и её тест покрывает и создание.
-- Ветку `:accepted` проверяет тест usecase, ответ 202 на неё — тест хелпера
+- Ветку `:accepted` проверяет тест usecase, ответ 202 на неё и 204 на `:unchanged` — тест хелпера
   (`19-testing.md`, «Event sourcing»).
 
 ```elixir
@@ -294,6 +295,8 @@ def respond(conn, {:projected, view}, render) when is_function(render, 2),
   do: conn |> applied(200) |> render.(view)
 
 def respond(conn, {:accepted, id, version}, _render), do: accepted(conn, id, version)
+
+def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 ```
 
 ## FallbackController

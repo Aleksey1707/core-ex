@@ -329,10 +329,10 @@ defmodule Core.Outbox.Supervisor do
     options!(StartOpts.boolean!(@label, opts, :enabled), opts)
   end
 
-  defp options!(false, opts), do: %{enabled: false, pollers: Enum.map(Keyword.get(opts, :pollers, []), &poller!/1)}
+  defp options!(false, opts), do: %{enabled: false, pollers: pollers!(Keyword.put_new(opts, :pollers, []))}
 
   defp options!(true, opts) do
-    pollers = Enum.map(StartOpts.list!(@label, opts, :pollers), &poller!/1)
+    pollers = pollers!(opts)
     connection = connection!(Keyword.get(opts, :connection))
     ensure_pollers!(pollers)
 
@@ -389,6 +389,8 @@ defmodule Core.Outbox.Supervisor do
   end
 
   defp ensure_pollers!(_pollers), do: :ok
+
+  defp pollers!(opts), do: Enum.map(StartOpts.list!(@label, opts, :pollers), &poller!/1)
 
   defp poller!(poller) do
     unless Keyword.keyword?(poller),

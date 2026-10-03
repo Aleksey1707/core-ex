@@ -127,6 +127,11 @@ defmodule Core.Outbox.SupervisorTest do
       assert Core.Outbox.Supervisor.watch_list(enabled: false) == []
     end
 
+    test "enabled: false — переданные pollers: проверяются, не-список — ArgumentError" do
+      assert start_error(enabled: false, pollers: :stream) =~
+               "Outbox.Supervisor: опция :pollers — ожидается список"
+    end
+
     test "значение не той формы — ArgumentError с именем опции" do
       for {key, value, expected} <- [
             {:enabled, "true", "true или false"},

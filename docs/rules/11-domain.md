@@ -130,7 +130,7 @@ wire-форму задаёт профиль кодека); `check_version: false
 
 `:external` описывает происхождение значения, а не роль: им MAY объявляться и ссылка агрегата на
 объект источника, которая id потока не является. Тест выпускает такой id «как источник» —
-`Ecto.UUID.generate() |> Id.new!()` в фикстуре; функции генерации в самом Prim MUST NOT.
+`Ecto.UUID.generate() |> Agg.ID.new!()` в фикстуре; функции генерации в самом Prim MUST NOT.
 
 Проверяется: `test/core/prim/uuid_test.exs`, describe «идентификатор из ключа (version: 5)» и
 «внешний идентификатор (version: :external)».

@@ -100,8 +100,10 @@ Mox принадлежат процессу теста, и тест с моко�
   контекста прав. Только он видит, что `account:` и пространства декларации сходятся с выданными
   правами. Операции модуля — табличным тестом в том же модуле теста: строка на usecase и
   пространство с его операциями, один сетап прав на таблицу. Операции, не объявленной в реестре,
-  тест не нужен — её ловит сверка порта. `async:` у него — по модели прав: ожидание её проекции —
-  `async: false` (`deps/core/docs/rules/19-testing.md`, «Case-модули»).
+  тест не нужен — её ловит сверка порта
+  (`deps/core/docs/adr/0052-authz-test-per-declaration-doubles-under-contract.md`). `async:` у него
+  — по модели прав: ожидание её проекции — `async: false` (`deps/core/docs/rules/19-testing.md`,
+  «Case-модули»).
 - Контрактный набор behaviour на мок не распространяется — его место занимает интеграционный тест
   модуля декларации (`deps/core/docs/rules/19-testing.md`, «Контрактные тесты behaviour»).
 - Декларация `use MyApp.Authz` в тестовом модуле MUST NOT: макрос выводит оглавление из имени
@@ -146,11 +148,11 @@ usecase через `Core.Es.Projection.Test.with_rebuilding/2` в `MyAppTest.Dat
 доводить тест до `:projection_timeout` — `deps/core/docs/rules/19-testing.md`, «Ветка неготовой
 read-модели».
 
-Тест хелпера MUST проходить три ветки `Prefer` (`15-web-api.md`, «Ожидание проекции»): без
-заголовка `wait/1` отдаёт предел хелпера, на `respond-async` — `:none`, на `wait=N` — урезанный
-таймаут; `respond/3` и `written/2` отвечают 200 на `:projected` и 202 на `:accepted`, и
-`Preference-Applied` сверяется в каждой ветке. Разбор самого заголовка проверяют тесты
-`Core.Web.Prefer` в библиотеке.
+Тест хелпера MUST проходить три ветки `Prefer` (`15-web-api.md`, «Ожидание проекции»): без заголовка
+`wait/1` отдаёт предел хелпера, на `respond-async` — `:none`, на `wait=N` — урезанный таймаут;
+`respond/3` и `written/2` отвечают 200 на `:projected` и 202 на `:accepted`, `respond/3` — 204 без
+`Preference-Applied` на `:unchanged`, и `Preference-Applied` сверяется в каждой ветке. Разбор самого
+заголовка проверяют тесты `Core.Web.Prefer` в библиотеке.
 
 Тесту, который read-модель не читает, прогон не нужен: версию для следующей команды он берёт
 из возврата usecase, а не из ReadRepo.

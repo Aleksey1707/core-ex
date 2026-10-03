@@ -30,6 +30,28 @@ defmodule RulesLintTest do
       assert out =~ "docs/rules/00-index.md:3: строка «Первый релиз» не по форме"
     end
 
+    test "строки внутри блока кода не считаются: пример формы из нормы", %{tmp_dir: dir} do
+      consumer(dir, """
+      Первый релиз: не состоялся
+
+      ```markdown
+      Первый релиз: не состоялся
+      Первый релиз: 2026-11-02, 0.1.0
+      ```
+      """)
+
+      {out, _code} = lint(dir)
+      refute out =~ "Первый релиз"
+    end
+
+    test "строка в разметке — не по форме, а не «нет строки»", %{tmp_dir: dir} do
+      consumer(dir, "# Свод\n\n**Первый релиз:** не состоялся\n")
+
+      assert {out, 1} = lint(dir)
+      assert out =~ "docs/rules/00-index.md:3: строка «Первый релиз» не по форме"
+      refute out =~ "нет строки"
+    end
+
     test "две строки — нарушение", %{tmp_dir: dir} do
       consumer(dir, "Первый релиз: не состоялся\nПервый релиз: 2026-11-02, 0.1.0\n")
 

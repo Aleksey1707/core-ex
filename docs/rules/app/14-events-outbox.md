@@ -75,6 +75,13 @@
   подписчика при смене топика производителя — compile-зависимость от модуля outbox и есть та связь,
   которую держит правило выше.
 
+  ```elixir
+  # хорошо — топик в голове функции подписчика: атрибут от производителя, а не литерал
+  @topic MyApp.Domain.Orders.Order.Outbox.topic()
+
+  defp rule(%Core.Mq.Message{topic: @topic} = message), do: ...
+  ```
+
 ```elixir
 # плохо — литерал топика производителя: подписчик не узнает о его переименовании
 topics: [
@@ -297,6 +304,18 @@ DLQ — `deps/core/docs/rules/14-events-outbox.md`, «Идемпотентнос
 - `cluster_query:` MUST задаваться явно и там, где кластеризации нет: база `cluster_query: nil` в
   общей части блока очереди `config/runtime.exs`, значение `DNS_CLUSTER_QUERY` — в prod-блоке. Без
   дефолта забытый ключ роняет старт включённой очереди, а не снимает проверку единственности молча.
+
+  ```elixir
+  # config/runtime.exs
+  config :my_app, Core.Outbox.Supervisor, cluster_query: nil, enabled: outbox_enabled?, ...
+
+  if config_env() == :prod do
+    config :my_app, Core.Outbox.Supervisor, cluster_query: System.get_env("DNS_CLUSTER_QUERY")
+  end
+  ```
+
+  Проверяется: старт дерева — включённое дерево без `cluster_query:` отказывает `ArgumentError`
+  (`test/core/outbox/supervisor_test.exs` библиотеки).
 - В `:test` runtime-блок очереди пропускается, overlay в `config/test.exs` —
   `config :my_app, Core.Outbox.Supervisor, enabled: false`: выключенному дереву прочие опции не
   нужны, оно отвечает `:ignore`, и wake после вставки никого не будит.

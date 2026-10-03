@@ -55,7 +55,7 @@ defmodule RulesLint do
   )
   @module_ref ~r/(?<![\w.])([A-Z][A-Za-z0-9]*)\.[A-Z][A-Za-z0-9]*/
 
-  @first_release "Первый релиз:"
+  @first_release ~r/^[\s*_>-]*Первый релиз:/u
   @first_release_form ~r/^Первый релиз: (не состоялся|\d{4}-\d{2}-\d{2}, \d+\.\d+\.\d+)$/
   @first_release_rule "deps/core/docs/rules/app/00-index.md, «Первый релиз»"
 
@@ -473,7 +473,8 @@ defmodule RulesLint do
   # ===== первый релиз =====
 
   # Строка состояния задаёт силу норм совместимости: без неё они действуют, и забытая строка
-  # видна только ревью. Проверяется одна строка в одной из двух форм.
+  # видна только ревью. Проверяется одна строка в одной из двух форм; блок кода — пример, а не
+  # состояние, а строка в разметке (`**Первый релиз:**`) — та же строка не по форме.
   defp check_first_release do
     path = Path.join(@dir, @index)
 
@@ -487,7 +488,17 @@ defmodule RulesLint do
     content
     |> String.split("\n")
     |> Enum.with_index(1)
-    |> Enum.filter(fn {line, _n} -> String.starts_with?(line, @first_release) end)
+    |> Enum.reduce({false, []}, &release_line/2)
+    |> elem(1)
+    |> Enum.reverse()
+  end
+
+  defp release_line({line, n}, {fenced, found}) do
+    cond do
+      Regex.match?(@fence, line) -> {not fenced, found}
+      not fenced and Regex.match?(@first_release, line) -> {fenced, [{line, n} | found]}
+      true -> {fenced, found}
+    end
   end
 
   defp first_release_errors(path, []),

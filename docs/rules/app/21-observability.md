@@ -40,6 +40,20 @@
   подписчиков и кеши под наблюдением — провайдер берёт из `readers/0`, `kafka_readers/0` и
   `caches/0` их объявлений `<BC>.Supervision` (`17-otp-concurrency.md`, «Объявления контекста»).
 - Провайдер MUST брать репозиторий через `Core.Config.repo!/1`, а не звать реализацию напрямую.
+- Плагин корня, который подписан на события компонента контекста, MUST брать их имена из модуля
+  telemetry компонента (`<Component>.Telemetry`), а не литералом: модуль входит в `exports`
+  контекста (`10-architecture.md`, «Boundary»), и переименованное событие ломает сборку плагина, а
+  не молча обнуляет метрику.
+
+  ```elixir
+  # плохо — литерал имени события компонента: переименование молча обнулит метрику
+  counter("my_app.order.dispatch.sent.count", event_name: [:my_app, :order, :dispatch, :sent])
+
+  # хорошо — имя из модуля telemetry компонента, экспортированного контекстом
+  counter("my_app.order.dispatch.sent.count",
+    event_name: MyApp.Domain.Orders.Order.Dispatch.Telemetry.sent()
+  )
+  ```
 - Сбой провайдера поглощают два уровня `rescue`, поэтому метрика застывает **незаметно** для
   алерта на неё: сбой виден только `PromExCollectFailing`
   (`deps/core/docs/rules/21-observability.md`, «Рекомендованные алерты»), а провайдер, который
