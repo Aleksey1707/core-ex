@@ -66,8 +66,10 @@ defmodule RulesLintTest do
     File.rm(Path.join(dir, "CLAUDE.md"))
     File.ln_s("AGENTS.md", Path.join(dir, "CLAUDE.md"))
     File.mkdir_p!(Path.join(dir, "deps"))
-    File.rm(Path.join(dir, "deps/core"))
-    File.ln_s(@root, Path.join(dir, "deps/core"))
+    link = Path.join(dir, "deps/core")
+    File.rm(link)
+    File.ln_s(@root, link)
+    on_exit(fn -> File.rm(link) end)
   end
 
   defp write(dir, path, content) do
