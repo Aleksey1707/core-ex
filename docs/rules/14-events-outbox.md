@@ -423,9 +423,9 @@ Span вокруг `Poller` MUST NOT: цикл поллера — периоди�
   `Core.Es.Projection.Supervisor` (`17-otp-concurrency.md`, «Дерево процессов»). Метку `component`
   метрик строит обязательная строка `component:` дерева и топик подписчика —
   `mq_reader:<component>:<топик>`, — а не имя процесса: перенос модуля компонента ряды метрик не
-  рвёт; повтор топика в дереве — `ArgumentError`. `readers/1` отдаёт stream-читателей дерева для
-  `readers:` плагина `Core.Mq.PromEx` с той же меткой, что у `mq_reader` в `watch_list/1`,
-  `kafka_readers/1` — читателей Kafka для `kafka_readers:`.
+  рвёт; повтор топика в дереве — `ArgumentError`. `stream_readers/1` отдаёт stream-читателей
+  дерева для `stream_readers:` плагина `Core.Mq.PromEx` с той же меткой, что у `mq_reader` в
+  `watch_list/1`, `kafka_readers/1` — читателей Kafka для `kafka_readers:`.
   Проверяется: `test/core/pubsub/mq_subscriber_reliable/supervisor_test.exs`.
 
 ### Runbook: сообщения в DLQ

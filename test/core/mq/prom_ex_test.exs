@@ -22,7 +22,7 @@ defmodule Core.Mq.PromExTest do
   def twins, do: [%{component: "orders", name: :mq_promex_first}, %{component: "orders", name: :mq_promex_second}]
 
   test "event_metrics и polling_metrics непусты" do
-    opts = [otp_app: :core, poll_rate: 5_000, readers: @readers]
+    opts = [otp_app: :core, poll_rate: 5_000, stream_readers: @readers]
 
     assert [%{metrics: event_metrics}] = List.wrap(PromEx.event_metrics(opts))
     assert event_metrics != []
@@ -58,7 +58,7 @@ defmodule Core.Mq.PromExTest do
     assert Enum.any?(poll_names, &String.contains?(&1, "mq.reader.pending"))
   end
 
-  test "без readers polling-группа не строится" do
+  test "без stream_readers polling-группа не строится" do
     assert [] = PromEx.polling_metrics(otp_app: :core)
   end
 

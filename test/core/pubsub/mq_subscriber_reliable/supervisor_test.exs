@@ -229,18 +229,18 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
     end
   end
 
-  describe "readers/1" do
+  describe "stream_readers/1" do
     test "только stream-читатели, метка — как у mq_reader в watch_list/1" do
       opts = stream_orders_opts()
       reader = %{component: "mq_reader:catalog:orders", name: @orders_reader}
 
-      assert MqSubscriberReliable.Supervisor.readers(opts) == [reader]
+      assert MqSubscriberReliable.Supervisor.stream_readers(opts) == [reader]
       assert reader in MqSubscriberReliable.Supervisor.watch_list(opts)
     end
 
     test "дерево не стартует — пусто" do
-      assert MqSubscriberReliable.Supervisor.readers(Keyword.put(stream_orders_opts(), :enabled, false)) == []
-      assert MqSubscriberReliable.Supervisor.readers(Keyword.put(stream_orders_opts(), :topics, [])) == []
+      assert MqSubscriberReliable.Supervisor.stream_readers(Keyword.put(stream_orders_opts(), :enabled, false)) == []
+      assert MqSubscriberReliable.Supervisor.stream_readers(Keyword.put(stream_orders_opts(), :topics, [])) == []
     end
   end
 
@@ -250,7 +250,7 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
       reader = %{component: "mq_reader:catalog:orders", name: @orders_reader}
 
       assert MqSubscriberReliable.Supervisor.kafka_readers(opts) == [reader]
-      assert MqSubscriberReliable.Supervisor.readers(opts) == []
+      assert MqSubscriberReliable.Supervisor.stream_readers(opts) == []
       assert reader in MqSubscriberReliable.Supervisor.watch_list(opts)
     end
 

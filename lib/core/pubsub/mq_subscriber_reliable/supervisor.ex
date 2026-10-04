@@ -39,7 +39,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   - `enabled:` — обязательна; `false` — дерево не стартует
   - `component:` — обязательна, непустая строка без `:`; из неё и топика строятся метки `component`
-    метрик (`watch_list/1`, `readers/1`), `:` — их разделитель
+    метрик (`watch_list/1`, `stream_readers/1`), `:` — их разделитель
   - `topics:` — обязательна; список `[reader: {модуль, опции}, subscriber: опции]` по топику, топики
     подписчиков без повторов
   - `dlq_writer:` — `{модуль Mq.Writer, опции}`; без него подписчик после `max_attempts` продолжает
@@ -91,7 +91,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
         }
 
   @typedoc """
-  Элемент `watch:` плагина `Core.Workers.PromEx` и `readers:` / `kafka_readers:` плагина
+  Элемент `watch:` плагина `Core.Workers.PromEx` и `stream_readers:` / `kafka_readers:` плагина
   `Core.Mq.PromEx`.
   """
   @type watch_item :: %{component: String.t(), name: atom()}
@@ -211,15 +211,15 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   # ===== readers =====
 
   @doc """
-  Элементы `readers:` плагина `Core.Mq.PromEx` — stream-читатели дерева с той же меткой, что у
+  Элементы `stream_readers:` плагина `Core.Mq.PromEx` — stream-читатели дерева с той же меткой, что у
   `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
 
   Читатель другого модуля в список не попадает: у `Core.Mq.Kafka.Reader` своя группа метрик опроса
   (`kafka_readers/1`), у прочих её нет. Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет.
   """
-  @spec readers(keyword()) :: [watch_item()]
+  @spec stream_readers(keyword()) :: [watch_item()]
 
-  def readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader)
+  def stream_readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader)
 
   @doc """
   Элементы `kafka_readers:` плагина `Core.Mq.PromEx` — читатели Kafka дерева с той же меткой, что

@@ -46,9 +46,9 @@
     агрегату → каталог по назначению `<BC>.<ReadModel>`; тип модели контекста — в каталог
     агрегата-владельца или в `values/`; модель нескольких агрегатов, которая не значение и не
     read-модель (правила и шаблоны расчёта, их реестр, кодеки и ошибки), → каталог понятия
-    `<BC>.<Concept>`, имя понятия — не `Process`; тип в каталоге агрегата, чьё имя совпало с актором
-    (`Users.User.System` рядом с `Users.User.System.Usecases`), → переименовать тип
-    (`User.Superuser`); адаптер канала, которому нужны данные другого контекста, → остаётся в
+    `<BC>.<Concept>`, имя понятия — не `Process`; тип в каталоге агрегата, чьё имя совпало с актором,
+    → переименовать тип, кроме учётной записи, от имени которой действует актор
+    (`Users.User.System` рядом с `Users.User.System.Usecases` остаётся); адаптер канала, которому нужны данные другого контекста, → остаётся в
     контексте и берёт их через `exports` владельца, его сетевой транспорт — подсистема без чтения
     контекстов; каталог ошибок нескольких владельцев `<BC>.Common.Errors` → `<BC>.Errors` в
     `<bc>/errors.ex`; аксессор `<BC>.Common.CurrentUser` → `<BC>.<Aggregate>.CurrentUser` в каталоге
@@ -127,7 +127,7 @@
     `MyAppApp.Supervisor`;
   - новый модуль контекста `MyApp.Domain.<BC>.Supervision` в `lib/my_app/domain/<bc>/supervision.ex`
     с `projections/0`, `processes/0`, `children/0`, `watch_list/0`, а при плагинах `Core.Mq.PromEx`
-    и `Core.Cache.PromEx` — `readers/0`, `kafka_readers/0`, `caches/0` (имена Cachex, `[atom()]`);
+    и `Core.Cache.PromEx` — `stream_readers/0`, `kafka_readers/0`, `caches/0` (имена Cachex, `[atom()]`);
     пустая часть — `[]`; контекст экспортирует `Supervision`, `MyAppApp.contexts/0` перечисляет
     такие модули в порядке зависимостей контекстов;
   - `MyApp.Projections.opts/0` со списком проекций → `MyAppApp.Application.projection_opts/0`
@@ -142,7 +142,7 @@
   - провайдер `MyApp.PromEx.Workers.watch_list/0` → `MyAppApp.Application.watch_list/0`, в нём —
     `watch_list/0` объявлений вместо корней компонентов контекстов; `watch:` плагина
     `Core.Workers.PromEx` → `{MyAppApp.Application, :watch_list, []}`; провайдеры читателей и
-    размеров кешей `MyApp.PromEx.*` → `MyAppApp.PromEx.*`, части контекстов — из `readers/0`,
+    размеров кешей `MyApp.PromEx.*` → `MyAppApp.PromEx.*`, части контекстов — из `stream_readers/0`,
     `kafka_readers/0` и `caches/0` объявлений;
   - архитектурный тест `MyApp.ArchitectureTest` и строка ратчета «web-слой не ссылается на `*Repo`
     и `DAO`» → удаляются; граница `MyAppWeb` → `check: [aliases: true]`;
@@ -407,6 +407,18 @@
     `MyAppApp.Application.watch_list/0`; метки компонентов — `outbox_connection`,
     `outbox_writer:<label>`, `outbox_poller:<label>`, `outbox_cleaner`: дашборды и алерты на
     прежние метки (`outbox_poller`, `outbox:poller` и т. п.) правятся при переезде.
+
+- **Stream-читатели называются по транспорту, как читатели Kafka** (`Core.Mq.PromEx`,
+  `Core.PubSub.MqSubscriberReliable.Supervisor`; `docs/rules/app/17-otp-concurrency.md`,
+  «Объявления контекста»). Пара `readers` / `kafka_readers` называла транспорт только у одного:
+  читатели различаются транспортом, потому что у каждого своя группа метрик. Имена по роли брокера
+  (внутренний / внешний) библиотека не вводит — роль задаёт место кода (контекст или точка входа
+  `MyAppIngest`), а не транспорт. Имена метрик не меняются. Правка у потребителя:
+  - `Core.PubSub.MqSubscriberReliable.Supervisor.readers/1` → `stream_readers/1`;
+  - опция `readers:` плагина `Core.Mq.PromEx` → `stream_readers:`; старый ключ плагин не читает, и
+    polling-группа stream-читателей молча пропадает;
+  - `readers/0` объявлений `<BC>.Supervision`, корней компонентов и провайдера читателей
+    приложения → `stream_readers/0`.
 
 ### Новое
 

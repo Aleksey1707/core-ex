@@ -6,8 +6,8 @@ defmodule Core.Mq.PromEx do
   reader'а, циклы и выбросы в DLQ reliable-подписчика. Polling-метрики: длина буфера,
   остаток текущего чанка, pending и наличие подписки у наблюдаемых reader'ов.
 
-  Опция `readers:` — MFA-провайдер списка наблюдаемых stream reader'ов
-  (`{MyAppApp.PromEx.Mq, :readers, []}` → `[%{component: String.t(), name: atom()}]`),
+  Опция `stream_readers:` — MFA-провайдер списка наблюдаемых stream reader'ов
+  (`{MyAppApp.PromEx.Mq, :stream_readers, []}` → `[%{component: String.t(), name: atom()}]`),
   как `watch:` у `Core.Workers.PromEx`: список процессов принадлежит рантайму
   потребителя, а не моменту сборки метрик (`10-architecture.md`). Без опции
   polling-группа не строится.
@@ -176,7 +176,7 @@ defmodule Core.Mq.PromEx do
   @doc false
   @impl true
   def polling_metrics(opts) do
-    reader_groups(opts, Keyword.get(opts, :readers)) ++
+    reader_groups(opts, Keyword.get(opts, :stream_readers)) ++
       kafka_reader_groups(opts, Keyword.get(opts, :kafka_readers)) ++
       dlq_groups(opts, Keyword.get(opts, :dlq_repo))
   end

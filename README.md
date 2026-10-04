@@ -403,7 +403,7 @@ end
        {Core.Outbox.PromEx, poll_rate: 5_000},
        {Core.Mq.PromEx,
         poll_rate: 5_000,
-        readers: {MyAppApp.PromEx.Mq, :readers, []},
+        stream_readers: {MyAppApp.PromEx.Mq, :stream_readers, []},
         kafka_readers: {MyAppApp.PromEx.Mq, :kafka_readers, []}},
        {Core.Workers.PromEx, poll_rate: 5_000, watch: {MyAppApp.Application, :watch_list, []}},
        {Core.Cache.PromEx, poll_rate: 5_000, sizes: {MyAppApp.PromEx.Caches, :sizes, []}},

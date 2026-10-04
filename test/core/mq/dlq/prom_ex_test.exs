@@ -11,7 +11,7 @@ defmodule Core.Mq.Dlq.PromExTest do
     assert metric.tags == [:subscriber, :topic, :status]
   end
 
-  test "без dlq_repo и readers группы нет" do
+  test "без dlq_repo и stream_readers группы нет" do
     assert [] = PromEx.polling_metrics(otp_app: :core)
   end
 
