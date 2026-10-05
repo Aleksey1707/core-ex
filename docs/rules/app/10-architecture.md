@@ -481,8 +481,9 @@ end
   `exports` реализация не входит — её называет только конфигурация.
 - Декларация MUST стоять на каждом модуле usecases, который проверяет доступ, — модуле актора и
   модуле общего чтения `<Aggregate>.Usecases` («Usecases»): `use MyApp.Authz` с типом учётной
-  записи `account:` и ключом пространства `namespace:`, общими для всех его usecases. Макрос даёт
-  `check_user/2`, и usecase называет им операцию первым шагом, до транзакции («Usecases»).
+  записи `account:` и ключом пространства `namespace:`, общими для всех его usecases. Декларация
+  импортирует макрос `check_user/2`, и usecase называет им операцию первым шагом, до транзакции
+  («Usecases»).
 - Модуль `Query` декларации MUST NOT нести: его зовут usecases, которые доступ уже проверили, —
   свои или другого контекста. Своя проверка в нём отказала бы вызывающему без права на чужое
   пространство (оформление заказа проверяет, что учётная запись клиента не заблокирована), а у
@@ -493,18 +494,20 @@ end
   роль в контексте держат учётные записи нескольких типов. Порт передаёт реализации список всегда.
 - Usecase, которому кроме пространства модуля нужно второе (файлы заказа в пространстве файлов),
   называет его ключом `check_user/3`: дополнительные ключи MUST перечисляться опцией `namespaces:`
-  декларации, и макрос генерирует по clause на каждый объявленный ключ — необъявленный даёт
-  `FunctionClauseError`, а литерал ключа — предупреждение типов при сборке. Ключ пространства
-  другого контекста в декларации MUST NOT: доступ к его данным проверяет его экспортированный
-  usecase, а сверка ключа идёт по оглавлению своего контекста.
+  декларации, и макрос сверяет ключ со списком декларации — ключ вне него даёт `CompileError` в
+  строке вызова. Ключ пространства другого контекста в декларации MUST NOT: доступ к его данным
+  проверяет его экспортированный usecase, а сверка ключа идёт по оглавлению своего контекста.
 - Пространства своих агрегатов — описание и операции — MUST объявляться в оглавлении контекста
   функцией `authz_namespaces/0` (см. «Модуль-оглавление»). Декларация называет ключи своего
   контекста, и макрос сверяет их с `authz_namespaces/0` оглавления: ключ, которого контекст не
-  объявил, — `CompileError`. Сверка MUST идти в теле модуля декларации, а не в теле макроса: только
-  тогда правка оглавления пересобирает модули деклараций (ADR-0042).
-- Операция в `check_user` MUST быть объявлена в пространстве: порт сверяет операции с реестром до
-  вызова реализации, и необъявленная — `ArgumentError`, ошибка программиста. Сверку проходит и
-  тест usecase с моком: мок подменяет реализацию, а не порт.
+  объявил, — `CompileError`. Оглавление MUST читать тело модуля декларации — сверка ключей и атрибут
+  пространств, по которому сверяет `check_user`; звать оглавление в теле макроса MUST NOT: только
+  чтение телом модуля пересобирает модули деклараций при правке оглавления (ADR-0042, ADR-0054).
+- Операции в `check_user` MUST быть литералом (`~w(update)a`) и объявлены в пространстве: макрос
+  сверяет их с пространствами оглавления, и необъявленная или нелитеральные операции —
+  `CompileError` в строке вызова. Порт сверяет операции ещё раз с реестром корня до вызова
+  реализации: реестр называет MFA конфигурации, и его расхождение с оглавлениями — `ArgumentError`,
+  ошибка программиста (ADR-0054).
 - Реестр MUST склеивать одна функция корня `MyAppApp.authz_namespaces/0` из оглавлений
   контекстов; ключ, объявленный двумя контекстами, — `CompileError` склейки. Реализация получает
   реестр функцией порта `MyApp.Authz.namespaces/0`, которая зовёт MFA корня из конфигурации: от
@@ -553,7 +556,7 @@ use MyApp.Authz,
 ```
 
 ```elixir
-# lib/my_app/authz.ex — ключи сверяет модуль декларации, реализацию берёт конфигурация в рантайме
+# lib/my_app/authz.ex — ключи и операции сверяет сборка, реализацию берёт конфигурация в рантайме
 @required ~w(account namespace)a
 @optional ~w(namespaces)a
 
@@ -565,20 +568,11 @@ defmacro __using__(opts) do
   # оглавление MyApp.Domain.<BC> — по имени модуля декларации (путь = имя модуля, «Раскладка»)
   index = index_of(__CALLER__.module)
 
-  checks =
-    for ns <- namespaces do
-      quote do
-        defp check_user(unquote(ns), ops, context),
-          do: MyApp.Authz.check(unquote(accounts), unquote(ns), ops, context)
-      end
-    end
-
   quote do
-    MyApp.Authz.declared!(unquote(index).authz_namespaces(), unquote(namespaces), __MODULE__)
-
-    defp check_user(ops, context), do: check_user(unquote(namespace), ops, context)
-
-    unquote_splicing(checks)
+    @authz_namespaces unquote(index).authz_namespaces()
+    @authz_declaration {unquote(accounts), unquote(namespace), unquote(namespaces)}
+    MyApp.Authz.declared!(@authz_namespaces, unquote(namespaces), __MODULE__)
+    import MyApp.Authz, only: [check_user: 2, check_user: 3]
   end
 end
 
@@ -590,7 +584,28 @@ def check(accounts, namespace, ops, %Context{} = context) do
   impl().check(accounts, namespace, ops, context)
 end
 
+@doc "Проверить доступ к пространству модуля; операции — литерал, сверяется при сборке."
+
+defmacro check_user(ops, context) do
+  {_accounts, namespace, _namespaces} = Module.get_attribute(__CALLER__.module, :authz_declaration)
+  check_call(namespace, ops, context, __CALLER__)
+end
+
+@doc "Проверить доступ к пространству из `namespaces:` декларации; ключ и операции — при сборке."
+
+defmacro check_user(namespace, ops, context), do: check_call(namespace, ops, context, __CALLER__)
+
 # ---
+
+# раскрывается только сигил: `@ops` и переменная остаются AST и не проходят сверку литерала;
+# ключ вне декларации, необъявленная или нелитеральные операции — CompileError в строке вызова
+defp check_call(namespace, ops, context, caller) do
+  {accounts, _namespace, namespaces} = Module.get_attribute(caller.module, :authz_declaration)
+  ops = if match?({:sigil_w, _, _}, ops), do: Macro.expand(ops, caller), else: ops
+  authz_namespaces = Module.get_attribute(caller.module, :authz_namespaces)
+  :ok = compiled_ops!(authz_namespaces, namespaces, namespace, ops, caller)
+  quote do: MyApp.Authz.check(unquote(accounts), unquote(namespace), unquote(ops), unquote(context))
+end
 
 defp impl, do: :my_app |> Application.fetch_env!(__MODULE__) |> Keyword.fetch!(:impl)
 
@@ -609,9 +624,10 @@ def authz_namespaces, do: @authz_namespaces
 ```
 
 Проверяется: `mix compile --warnings-as-errors` — ссылка контекста на реализацию и литерал
-реализации в порте — предупреждения `boundary`; необъявленный и дублированный ключ — `CompileError`
-макроса порта, ключ `check_user/3` вне декларации — предупреждение типов; необъявленная операция —
-`ArgumentError` порта в тесте usecase.
+реализации в порте — предупреждения `boundary`; необъявленный и дублированный ключ, ключ
+`check_user/3` вне декларации, необъявленная и нелитеральные операции — `CompileError` макроса
+порта, его тест — фикстурой контекста (`19-testing.md`, «Проверка доступа»); расхождение реестра
+корня с оглавлениями — `ArgumentError` порта.
 
 ## Usecases
 
