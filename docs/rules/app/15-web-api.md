@@ -50,7 +50,7 @@
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
 | `MyAppWeb.ErrorJSON` | ответ Phoenix на исключение (`render_errors:` у `Endpoint`) |
-| `MyAppWeb.Accepted` | режим ожидания `wait:` из `Prefer` и ответ команды по результату usecase — 200, 202 или 204, ответ создания; один на приложение («Ожидание проекции») |
+| `MyAppWeb.Accepted` | режим ожидания `wait:` из `Prefer` и ответ команды по результату usecase — 200, 202 или 204, ответ удаления; один на приложение («Ожидание проекции») |
 | `MyAppWeb.Response`, `MyAppWeb.Response.Code` | конверт ответа `use Core.Web.Response, codes: MyAppWeb.Response.Code` (`deps/core/docs/rules/10-architecture.md`) |
 | `MyAppWeb.Endpoint`, `MyAppWeb.Router`, `MyAppWeb.Telemetry` | обвязка Phoenix |
 
@@ -78,7 +78,7 @@ lib/my_app_web/{endpoint,router,telemetry}.ex
 - Схема, которую делят два ресурса, две версии или две поверхности, поднимается в `Schemas`
   ближайшего общего уровня (таблица выше), а не импортируется из соседнего ресурса. Разбор входа
   (`Params`), презентеры и плаги поднимаются по той же лестнице.
-- Ответ записи — `MyAppWeb.Schemas.Written` (`id` и целое `version`, оба обязательны; 200 создания
+- Ответ записи — `MyAppWeb.Schemas.Written` (`id` и целое `version`, оба обязательны; 200 удаления
   и 202 любой команды) и `MyAppWeb.Schemas.Created` (`id`, обязателен; создание state-stored) —
   MUST лежать в корне при любом числе поверхностей: форма ответа записи одна на приложение, и вторая
   поверхность берёт ту же схему, а не заводит копию. Туда же и по той же причине — определения
@@ -215,10 +215,10 @@ with {:ok, version} <- Params.optional_version(params),
 Экшен выводит режим из заголовка `Prefer` (RFC 7240), передаёт его usecase и выбирает статус по
 результату. Проекцию экшен не видит: её нет в `exports` контекста.
 
-Создание ждёт проекцию так же, но MUST отвечать не представлением, а `{id, version}` записи —
-одной схемой `MyAppWeb.Schemas.Written` на 200 и на 202: 200 значит, что `GET` по `id` уже видит
-запись, 202 — что ещё нет. Почему не представление — ADR-0027
-(`deps/core/docs/adr/0027-create-responds-id-and-version.md`).
+Создание и upsert отвечают так же, как команда. Удаление ждёт проекцию так же, но MUST отвечать
+не представлением, а `{id, version}` записи — одной схемой `MyAppWeb.Schemas.Written` на 200 и на
+202: 200 значит, что read-модель удаление уже видит, 202 — что ещё нет. Почему не представление —
+ADR-0055 (`deps/core/docs/adr/0055-create-and-upsert-respond-view.md`).
 
 Готовность ждать задаёт клиент, а не операция: `Prefer` MUST понимать каждая команда
 event-sourced агрегата, одинаково. Без ожидания ответ — всегда 202: 200 сохраняет смысл «`GET` уже
@@ -242,15 +242,16 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
 (`parse/1`, `mode/2`, `applied/3`). Команда state-stored агрегата и чтение `Prefer` не разбирают и
 `Preference-Applied` не ставят: ждать им нечего.
 
-- Usecase команды отдаёт `{:projected, view}` или `{:accepted, id, version}`, создание —
-  `{:projected | :accepted, id, version}` (`10-architecture.md`, «Usecases»): `:projected` —
-  ответ 200, `:accepted` — 202 с `{id, version}`. `:projection_timeout` и `:projection_rebuilding`
-  usecase уже перевёл в `:accepted`: запись применена, и до экшена ошибкой они не доходят.
+- Usecase команды, создания и upsert отдаёт `{:projected, view}` или `{:accepted, id, version}`,
+  удаление — `{:projected | :accepted, id, version}` (`10-architecture.md`, «Usecases»):
+  `:projected` — ответ 200, `:accepted` — 202 с `{id, version}`. `:projection_timeout` и
+  `:projection_rebuilding` usecase уже перевёл в `:accepted`: запись применена, и до экшена ошибкой
+  они не доходят.
   Пакетная команда с пустым пакетом отдаёт `:unchanged` — ответ 204 без тела и без
   `Preference-Applied`: записи не было, и ни 200 («`GET` уже видит запись»), ни 202 («ещё не
   видит») не верны (`deps/core/docs/adr/0051-batch-command-unchanged.md`).
 - Операция такой команды MUST объявлять ответ `accepted:` со схемой `MyAppWeb.Schemas.Written`,
-  операция создания — её же и в `ok:`, пакетная команда — ещё и `no_content:` без схемы.
+  операция удаления — её же и в `ok:`, пакетная команда — ещё и `no_content:` без схемы.
   Параметр-заголовок `Prefer` и заголовок ответа `Preference-Applied` на 200 и 202 операция MUST
   объявлять общими определениями `MyAppWeb.Schemas.Prefer` («Раскладка»): без них клиент об отказе
   от ожидания не узнает.
@@ -261,8 +262,8 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
   разборы разойдутся.
 - Экшен команды MUST передавать usecase `wait: MyAppWeb.Accepted.wait(conn)`: без опции usecase не
   ждёт, и команда отвечает 202 при любом `Prefer`.
-- Ответ создания MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/2` (`conn`, результат
-  usecase создания): ветка 202 у хелпера одна, и её тест покрывает и создание.
+- Ответ удаления MUST собирать тот же хелпер — `MyAppWeb.Accepted.written/2` (`conn`, результат
+  usecase удаления): ветка 202 у хелпера одна, и её тест покрывает и удаление.
 - Ветку `:accepted` проверяет тест usecase, ответ 202 на неё и 204 на `:unchanged` — тест хелпера
   (`19-testing.md`, «Event sourcing»).
 
@@ -278,8 +279,8 @@ wait = if get_req_header(conn, "prefer") == ["respond-async"], do: :none, else: 
 with {:ok, result} <- Agg.Client.Usecases.take(id, expected, context, wait: MyAppWeb.Accepted.wait(conn)),
      do: MyAppWeb.Accepted.respond(conn, result, &render_taken/2)
 
-# хорошо — создание: {id, version} и на 200, и на 202
-with {:ok, result} <- Agg.Client.Usecases.open(name, context, wait: MyAppWeb.Accepted.wait(conn)),
+# хорошо — удаление: {id, version} и на 200, и на 202
+with {:ok, result} <- Agg.Client.Usecases.delete(id, expected, context, wait: MyAppWeb.Accepted.wait(conn)),
      do: MyAppWeb.Accepted.written(conn, result)
 
 # хорошо — ядро хелпера (`alias Core.Web.Prefer`): режим — из `Prefer`, `Preference-Applied` — по

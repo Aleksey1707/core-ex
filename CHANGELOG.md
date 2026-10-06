@@ -1,5 +1,33 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Создание и upsert event-sourced агрегата отдают представление, как команда**
+  (`docs/rules/app/10-architecture.md`, «Usecases»; `docs/rules/22-projections.md`,
+  «Read-after-write»; `docs/rules/app/15-web-api.md`, «Ожидание проекции»; решение —
+  `docs/adr/0055-create-and-upsert-respond-view.md`, заменяет ADR-0027 в ответе создания на 200).
+  Создание отдавало `{id, version}` и при `:projected`: доводы ADR-0027 и ADR-0039 относились к
+  любой команде, а клиент после каждого создания читал представление вторым запросом. Теперь
+  создание и upsert при `:projected` отдают представление, прочитанное запросом актора; `{id,
+  version}` на 200 и на 202 осталось у удаления — операции, после которой запрос актора объект не
+  отдаёт: проекция удаляет строку или оставляет её, и форма ответа от этого не зависит. Операция,
+  после которой объект читается (архивирование, деактивация), — команда.
+
+  Как править приложение (было → стало):
+  - usecase создания и upsert `:: {:ok, {:projected | :accepted, ID.t(), Version.t()}}` →
+    `:: {:ok, {:projected, View.t()}} | {:ok, {:accepted, ID.t(), Version.t()}}`; ветка
+    `:projected` — `projected(id, version, context)` из хелпера ожидания, как у команды
+    (`docs/rules/22-projections.md`, «Read-after-write»);
+  - экшен создания `MyAppWeb.Accepted.written(conn, result)` →
+    `MyAppWeb.Accepted.respond(conn, result, render)`; операция создания объявляет в `ok:` схему
+    представления вместо `MyAppWeb.Schemas.Written`, `accepted:` — без изменений;
+  - удаление — без изменений; архивирование с формой удаления, после которого объект читается, →
+    исходы команды и `respond/3`;
+  - тесты, которые сопоставляли `{:ok, {:projected, ^id, version}}` создания, →
+    `{:ok, {:projected, view}}`.
+
 ## 0.11.0
 
 ### Ломающие изменения контракта

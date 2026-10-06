@@ -8,7 +8,8 @@
 границе» и «хелпер получает колбэк ожидания»; `Prefer` у клиента, 202 без ожидания,
 `Preference-Applied` по итоговому статусу и `Core.Web.Prefer` ADR-0030 сохраняет. Норма —
 `docs/rules/22-projections.md`, «Read-after-write»; `docs/rules/app/10-architecture.md`,
-«Usecases»; `docs/rules/app/15-web-api.md`, «Ожидание проекции».
+«Usecases»; `docs/rules/app/15-web-api.md`, «Ожидание проекции». Исход `:projected` у создания
+пересмотрен ADR-0055 (`0055-create-and-upsert-respond-view.md`): представление, как у команды.
 
 ## Контекст
 

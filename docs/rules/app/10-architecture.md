@@ -739,8 +739,8 @@ end)
 |---|---|
 | Команда | `:ok \| {:error, Error.t()}` |
 | Команда-создание | MAY `{:ok, <Aggregate>.ID.t()}` — идентификатор генерирует домен |
-| Команда event-sourced агрегата | `{:ok, {:projected, <ReadModel>.View.t()}} \| {:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
-| Создание, удаление и upsert event-sourced агрегата | `{:ok, {:projected \| :accepted, <Aggregate>.ID.t(), Version.t()}}` |
+| Команда, создание и upsert event-sourced агрегата | `{:ok, {:projected, <ReadModel>.View.t()}} \| {:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
+| Удаление event-sourced агрегата | `{:ok, {:projected \| :accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Команда event-sourced агрегата без read-модели | `{:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Пакетная команда event-sourced агрегата с пустым пакетом | `{:ok, :unchanged}` |
 | Запрос | `{:ok, <ReadModel>.View.t()} \| {:error, Error.t()}` — read-путь отдаёт представление |
@@ -754,9 +754,10 @@ end)
 
 - `:projected` — проекция дождалась: команда отдаёт представление, прочитанное после commit
   запросом чтения актора, — это исключение из CQS (`deps/core/docs/rules/20-agreements.md`, там
-  же); создание отдаёт `{id, version}` и в этом исходе — почему не представление, ADR-0027;
-  удаление и upsert — тоже `{id, version}`: после удаления читать нечего, а upsert — создание или
-  команда в зависимости от состояния, и форма исхода не должна от него зависеть;
+  же); создание и upsert — тоже: после них объект читается всегда. Удаление отдаёт `{id, version}`
+  и в этом исходе: строку удалённого объекта проекция удаляет или оставляет, и форма исхода не
+  должна от этого зависеть. Удаление — операция, после которой запрос актора объект не отдаёт;
+  после которой отдаёт (архивирование, деактивация) — команда (ADR-0055);
 - `:unchanged` — пакетная команда (вход — список изменений) получила пустой пакет: записи нет,
   ждать нечего, а агрегат-цель может быть не заведён, и версии у исхода нет. Только у пакетной
   команды: команда одного агрегата, чей `decide` не дал событий, отдаёт прежнюю форму
@@ -801,14 +802,18 @@ end
 ```
 
 ```elixir
-# event-sourced создание — {id, version} в обоих исходах ожидания; запись — `get_decision` и
-# `append` под `Es.Transact.run` в `write_open/3`, хелпер `awaited/2` —
+# event-sourced создание — исходы команды; запись — `get_decision` и `append` под
+# `Es.Transact.run` в `write_open/3`, хелперы `awaited/2` и `projected/3` —
 # `deps/core/docs/rules/22-projections.md`, «Read-after-write»
 def open(%Agg.Name{} = name, %Context{} = context, opts \\ []) do
   with :ok <- check_user(~w(create)a, context),
        {:ok, by} <- CurrentUser.get(context),
-       {:ok, {id, version}} <- write_open(name, by, context),
-       do: {:ok, {awaited(id, Keyword.get(opts, :wait, :none)), id, version}}
+       {:ok, {id, version}} <- write_open(name, by, context) do
+    case awaited(id, Keyword.get(opts, :wait, :none)) do
+      :projected -> projected(id, version, context)
+      :accepted -> {:ok, {:accepted, id, version}}
+    end
+  end
 end
 ```
 

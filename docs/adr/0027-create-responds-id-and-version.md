@@ -4,7 +4,9 @@
 колбэк ожидания, ADR-0039 (`0039-usecase-awaits-projection-by-wait.md`) перенёс ожидание в usecase —
 он отдаёт `{:projected | :accepted, id, version}`, а ответ собирает `MyAppWeb.Accepted.written/2`.
 Ответ создания `{id, version}` одной схемой `Written` на 200 и 202 и `{id}` схемой `Created` — в
-силе. Ниже — решение в редакции 2026-09-29.
+силе. Ответ создания event-sourced агрегата на 200 пересмотрен ADR-0055
+(`0055-create-and-upsert-respond-view.md`): представление, как у команды; `{id, version}` на 200
+осталось у удаления. Ниже — решение в редакции 2026-09-29.
 
 Создание event-sourced агрегата ждёт проекцию, как любая команда, и отвечает `{id, version}` записи
 одной схемой `MyAppWeb.Schemas.Written` на 200 и на 202: статус несёт готовность представления,
