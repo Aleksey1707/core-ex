@@ -133,30 +133,51 @@ defmodule Core.Es.Event.PayloadTest do
       assert mod.load_payload(Event.Renamed, %{"name" => "Отгрузка"}, InCodec) == {:ok, payload}
     end
 
-    test "ручная клауза для события с выводимой нагрузкой — предупреждение never match" do
-      {_result, diagnostics} =
-        Code.with_diagnostics(fn ->
-          Code.eval_quoted(
-            quote do
-              defmodule Core.Es.Event.PayloadTest.NeverMatch do
-                alias Core.EsFixture.Account.Event
+    test "ручная клауза для события с выводимой нагрузкой — CompileError never match" do
+      message =
+        ~r/never match — dump_payload\/2 для .*Event.Renamed .*load_payload\/3 для .*Event.Renamed .*выводит кодек/
 
-                use Core.Es.Event.Codec,
-                  event: Event,
-                  type: "never_match",
-                  tags: %{Event.Renamed => "never_match.renamed"}
+      assert_raise CompileError, message, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.PayloadTest.NeverMatch do
+              alias Core.EsFixture.Account.Event
 
-                def dump_payload(%Event.Renamed{payload: payload}, codec), do: %{"name" => codec.dump(payload.name)}
+              use Core.Es.Event.Codec,
+                event: Event,
+                type: "never_match",
+                tags: %{Event.Renamed => "never_match.renamed"}
 
-                def load_payload(Event.Renamed, _wire, _codec), do: {:error, :never}
-              end
+              def dump_payload(%Event.Renamed{payload: payload}, codec), do: %{"name" => codec.dump(payload.name)}
+
+              def load_payload(Event.Renamed, wire, codec), do: codec.load(Event.Renamed.Payload, wire)
             end
-          )
-        end)
+          end
+        )
+      end
+    end
 
-      assert [dump, load] = Enum.map(diagnostics, & &1.message)
-      assert dump =~ ~r/never match: dump_payload\/2 для .*Event.Renamed выводится по нагрузке/
-      assert load =~ ~r/never match: load_payload\/3 для .*Event.Renamed выводится по нагрузке/
+    test "@spec у dump_payload/2 и load_payload/3 — CompileError" do
+      assert_raise CompileError, ~r/@spec dump_payload\/2 .*load_payload\/3 .*контракт задаёт @callback/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.PayloadTest.Spec do
+              alias Core.EsFixture.Account.Event
+
+              use Core.Es.Event.Codec,
+                event: Event,
+                type: "payload_spec",
+                tags: %{Event.Opened => "payload_spec.opened", Event.Renamed => "payload_spec.renamed"}
+
+              @spec dump_payload(Event.Opened.t(), module()) :: map()
+              def dump_payload(%Event.Opened{payload: payload}, codec), do: %{"name" => codec.dump(payload.name)}
+
+              @spec load_payload(module(), term(), module()) :: {:ok, Event.Opened.Payload.t()}
+              def load_payload(Event.Opened, _wire, _codec), do: {:ok, nil}
+            end
+          end
+        )
+      end
     end
   end
 

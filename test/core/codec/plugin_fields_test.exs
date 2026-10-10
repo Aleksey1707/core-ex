@@ -346,20 +346,48 @@ defmodule Core.Codec.PluginFieldsTest do
       assert diagnostics == []
     end
 
-    test "ручная клауза на тип из fields: — предупреждение never match" do
-      {_result, diagnostics} =
-        Code.with_diagnostics(fn ->
-          compile_mixed(:NeverMatch, [
-            quote(do: def(dump(%U{} = u, _codec), do: u.b)),
-            quote(do: def(dump(%T{} = t, _codec), do: t.a)),
-            quote(do: def(load(U, wire, _codec), do: {:ok, %U{b: wire}})),
-            quote(do: def(load(T = type, _wire, _codec), do: {:ok, struct(type)}))
-          ])
-        end)
+    test "ручная клауза на тип из fields: — CompileError never match" do
+      assert_raise CompileError,
+                   ~r/never match — dump\/2 для .*NeverMatch.T \(строка \d+\), load\/3 для .*NeverMatch.T/,
+                   fn ->
+                     compile_mixed(:NeverMatch, [
+                       quote(do: def(dump(%U{} = u, _codec), do: u.b)),
+                       quote(do: def(dump(%T{} = t, _codec), do: t.a)),
+                       quote(do: def(load(U, wire, _codec), do: {:ok, %U{b: wire}})),
+                       quote(do: def(load(T, wire, codec), do: codec.load(T, wire)))
+                     ])
+                   end
+    end
 
-      assert [dump, load] = Enum.map(diagnostics, & &1.message)
-      assert dump =~ ~r/never match.*dump\/2.*NeverMatch.T.*fields:/
-      assert load =~ ~r/never match.*load\/3.*NeverMatch.T.*fields:/
+    test "тип из fields: в guard ручной клаузы — CompileError never match" do
+      assert_raise CompileError,
+                   ~r/never match — dump\/2 для .*GuardNeverMatch.T .*load\/3 для .*GuardNeverMatch.T /,
+                   fn ->
+                     compile_mixed(:GuardNeverMatch, [
+                       quote(do: def(dump(%mod{} = value, _codec) when mod in [T, U], do: value)),
+                       quote(
+                         do: def(load(type, wire, _codec) when type in [T, U] and is_map(wire), do: {:ok, struct(type)})
+                       )
+                     ])
+                   end
+    end
+
+    test "guard `and` из двух `in` — пересечение списков" do
+      compile_mixed(:GuardIntersection, [
+        quote(do: def(dump(%mod{} = value, _codec) when mod in [T, U] and mod in [U], do: value)),
+        quote(do: def(load(type, _wire, _codec) when type in [T, U] and type in [U], do: {:ok, struct(type)}))
+      ])
+    end
+
+    test "@spec у dump/2 и load/3 — CompileError" do
+      assert_raise CompileError, ~r/@spec dump\/2 \(строка \d+\), load\/3 .*контракт задаёт @callback/, fn ->
+        compile_mixed(:Spec, [
+          quote(do: @spec(dump(U.t(), module()) :: term())),
+          quote(do: def(dump(%U{} = u, _codec), do: u.b)),
+          quote(do: @spec(load(module(), term(), module()) :: {:ok, term()})),
+          quote(do: def(load(U, wire, _codec), do: {:ok, %U{b: wire}}))
+        ])
+      end
     end
   end
 
@@ -373,6 +401,15 @@ defmodule Core.Codec.PluginFieldsTest do
     test "тип вне fields: без ручной клаузы load/3 — CompileError" do
       assert_raise CompileError, ~r/требуется load\/3 для \[.*UncoveredLoad.U\]/, fn ->
         compile_mixed(:UncoveredLoad, [quote(do: def(dump(%U{} = u, _codec), do: u.b))])
+      end
+    end
+
+    test "клауза с типами в guard покрывает только их — CompileError" do
+      assert_raise CompileError, ~r/требуется load\/3 для \[.*GuardUncovered.U\]/, fn ->
+        compile_mixed(:GuardUncovered, [
+          quote(do: def(dump(%U{} = u, _codec), do: u.b)),
+          quote(do: def(load(type, _wire, _codec) when type in [Map], do: {:ok, struct(type)}))
+        ])
       end
     end
 

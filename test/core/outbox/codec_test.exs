@@ -31,11 +31,9 @@ defmodule Core.Outbox.CodecTest do
              )
 
     dumped = InCodec.dump(record)
-    assert dumped.topic == "products"
-    assert dumped.status == :new
-    assert length(dumped.errors) == 1
-    assert hd(dumped.errors).attempt == 1
-    assert hd(dumped.errors).message == "boom"
+    assert dumped["topic"] == "products"
+    assert dumped["status"] == :new
+    assert dumped["errors"] == [%{"attempt" => 1, "message" => "boom"}]
 
     assert {:ok, loaded} = InCodec.load(Record, dumped)
     assert loaded.id == record.id

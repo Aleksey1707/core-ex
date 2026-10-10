@@ -422,6 +422,22 @@ Safe — источник истины: при наличии entity-codec (`<Ag
 DB-only FK / JSON string-keys). Без `Prim.new` / ручной сборки struct. Bang —
 `Result.unwrap!(to_entity/to_model(...))` (`%Error{}` → `Exc`).
 
+Дамп фасада читается по строковым wire-ключам (`11-domain.md`, «Codec (Prim и Entity)»): колонка —
+атом схемы, значение — `dumped["<wire-ключ>"]`. Доступ `dumped.id` к дампу плагина по полям —
+`KeyError` при исполнении, сборка его не ловит.
+
+```elixir
+# плохо — атомарный ключ: дамп плагина по полям его не содержит
+%{id: dumped.id, topic: dumped.topic}
+
+# хорошо — lib/core/outbox/repo/pg/schema.ex
+def to_model(%Record{} = record) do
+  dumped = Config.codec().dump(record)
+
+  {:ok, %{id: dumped["id"], topic: dumped["topic"], errors: dumped["errors"]}}
+end
+```
+
 Когда какой вызов:
 
 - Свои строки / persist валидного domain (`use Repo.Pg`, write-путь агрегата, …) → bang

@@ -24,16 +24,11 @@ defmodule Core.EsFixture.Account.Event.Codec do
     upcasts: @upcasts
 
   @doc "Нагрузка события → wire."
-  @spec dump_payload(Event.Opened.t() | Event.Renamed.t(), module()) :: map()
-
   @impl true
   def dump_payload(%Event.Opened{payload: payload}, codec),
     do: %{"name" => codec.dump(payload.name)}
 
   @doc "Wire-нагрузка → `%Payload{}`."
-  @spec load_payload(module(), term(), module()) ::
-          {:ok, Event.Opened.Payload.t() | Event.Renamed.Payload.t()} | {:error, Core.Error.t()}
-
   @impl true
   def load_payload(Event.Opened, wire, codec) do
     with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do

@@ -30,8 +30,9 @@ defmodule Core.Es.Event.Codec do
   - `use Core.Es.ValueChanged` — спека `old_value` / `new_value` из её `type:` и `nilable:`
     (`Core.Es.ValueChanged.fields/2`).
 
-  Выведенные клаузы стоят перед ручными: ручная клауза для такого события — предупреждение
-  «never match» на её строке. Остальные нагрузки — ручные клаузы.
+  Выведенные клаузы стоят перед ручными: ручная клауза для такого события (литералом или guard
+  `when mod in [...]`) — `CompileError` «never match», как и `@spec` у `dump_payload/2` /
+  `load_payload/3` — контракт задаёт `@callback`. Остальные нагрузки — ручные клаузы.
 
   ## Проверки нагрузки
 
@@ -302,7 +303,7 @@ defmodule Core.Es.Event.Codec do
       )
     end
 
-    warn_never_match(env, Module.get_attribute(env.module, :es_derived))
+    check_derived!(env, Module.get_attribute(env.module, :es_derived))
 
     if map_size(upcasts) > 0,
       do: ensure_defined!(env.module, {:upcast, 2}, "у кодека непустые upcasts:", env)
@@ -686,21 +687,24 @@ defmodule Core.Es.Event.Codec do
 
   # Выведенные клаузы встают первыми, поэтому ручная клауза для такого события недостижима для
   # валидной нагрузки и молча ловила бы только невалидную.
-  defp warn_never_match(env, derived) do
+  defp check_derived!(_env, []), do: :ok
+
+  defp check_derived!(env, derived) do
     events = Enum.map(derived, &elem(&1, 0))
 
-    for {fun, form} <- [{{:dump_payload, 2}, :struct}, {{:load_payload, 3}, :module}],
-        {line, event} <- Core.Codec.Plugin.Opts.manual_targets(env.module, fun, length(derived), form),
-        event in events do
-      {name, arity} = fun
+    dead =
+      for {fun, form} <- [{{:dump_payload, 2}, :struct}, {{:load_payload, 3}, :module}],
+          {line, event} <- Core.Codec.Plugin.Opts.manual_targets(env.module, fun, length(derived), form),
+          event in events,
+          do: {fun, line, event}
 
-      IO.warn(
-        "клауза never match: #{name}/#{arity} для #{inspect(event)} выводится по нагрузке " <>
-          inspect(event.__es_payload__()),
-        file: env.file,
-        line: line
-      )
-    end
+    Core.Codec.Plugin.Opts.raise_never_match!(env, dead, "клаузы нагрузки события выводит кодек")
+
+    Core.Codec.Plugin.Opts.raise_specs!(
+      env,
+      [dump_payload: 2, load_payload: 3],
+      "у кодека с выводимыми клаузами нагрузки контракт задаёт @callback Core.Es.Event.Codec"
+    )
   end
 
   defp ensure_defined!(mod, {fun, arity}, reason, env) do

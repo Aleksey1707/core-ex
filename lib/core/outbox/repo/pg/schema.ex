@@ -111,26 +111,20 @@ defmodule Core.Outbox.Repo.Pg.Schema do
 
     {:ok,
      %{
-       id: dumped.id,
-       topic: dumped.topic,
-       key: dumped.key,
-       name: dumped.name,
-       payload: dumped.payload,
-       status: dumped.status,
-       attempts: dumped.attempts,
-       locked_until: dumped.locked_until,
-       lease_id: dumped.lease_id,
-       errors: Enum.map(dumped.errors, &error_codec_attrs_to_row/1),
-       created_at: dumped.created_at,
-       updated_at: dumped.updated_at,
-       published_at: dumped.published_at,
-       headers: dumped.headers
+       id: dumped["id"],
+       topic: dumped["topic"],
+       key: dumped["key"],
+       name: dumped["name"],
+       payload: dumped["payload"],
+       status: dumped["status"],
+       attempts: dumped["attempts"],
+       locked_until: dumped["locked_until"],
+       lease_id: dumped["lease_id"],
+       errors: dumped["errors"],
+       created_at: dumped["created_at"],
+       updated_at: dumped["updated_at"],
+       published_at: dumped["published_at"],
+       headers: dumped["headers"]
      }}
-  end
-
-  # ---
-
-  defp error_codec_attrs_to_row(%{attempt: attempt, message: message}) do
-    %{"attempt" => attempt, "message" => message}
   end
 end

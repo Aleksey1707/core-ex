@@ -42,6 +42,8 @@ defmodule Core.Codec.Plugin do
   ключа или `nil` при загрузке.
   Ключи спеки сверяются с полями struct без `__struct__` и `events`; расхождение — `CompileError`.
   `load/3` собирает struct литералом; первая ошибка поля — итог, лишние ключи игнорируются.
+  Дамп — map со строковыми ключами. Ручная клауза на тип из `fields:` и `@spec` у `dump/2` /
+  `load/3` такого плагина — `CompileError`.
   """
 
   alias Core.Error
@@ -135,7 +137,7 @@ defmodule Core.Codec.Plugin do
             do: unquote(Core.Codec.Plugin.Fields.load_body(type, fields))
       end
 
-      @after_compile {Core.Codec.Plugin.Opts, :after_compile!}
+      @before_compile Core.Codec.Plugin.Opts
     end
   end
 end

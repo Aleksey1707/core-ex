@@ -71,33 +71,34 @@ defmodule Core.Es.Event.DerivedPayloadTest do
   end
 
   describe "Event.Codec: ручная клауза для выводимой нагрузки" do
-    test "never match у нагрузки-Prim и ValueChanged" do
-      {_result, diagnostics} =
-        Code.with_diagnostics(fn ->
-          Code.eval_quoted(
-            quote do
-              defmodule Core.Es.Event.DerivedPayloadTest.NeverMatch do
-                alias Core.DerivedFixture.Event
+    test "never match у нагрузки-Prim и ValueChanged — CompileError" do
+      message =
+        ~r/never match — dump_payload\/2 для .*Event.Tagged .*load_payload\/3 для .*Event.Renamed .*load_payload\/3 для .*Event.Tagged /
 
-                use Core.Es.Event.Codec,
-                  event: Event,
-                  type: "derived_never_match",
-                  tags: %{
-                    Event.Tagged => "derived_never_match.tagged",
-                    Event.Renamed => "derived_never_match.renamed"
-                  }
+      assert_raise CompileError, message, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.DerivedPayloadTest.NeverMatch do
+              alias Core.DerivedFixture.Event
 
-                def dump_payload(%Event.Tagged{payload: payload}, codec), do: codec.dump(payload)
+              use Core.Es.Event.Codec,
+                event: Event,
+                type: "derived_never_match",
+                tags: %{
+                  Event.Tagged => "derived_never_match.tagged",
+                  Event.Renamed => "derived_never_match.renamed"
+                }
 
-                def load_payload(Event.Renamed, _wire, _codec), do: {:error, :never}
-              end
+              def dump_payload(%Event.Tagged{payload: payload}, codec), do: codec.dump(payload)
+
+              def load_payload(Event.Renamed, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
+
+              def load_payload(mod, wire, codec) when mod in [Event.Tagged],
+                do: codec.load(Core.EventFixture.Name, wire)
             end
-          )
-        end)
-
-      assert [dump, load] = Enum.map(diagnostics, & &1.message)
-      assert dump =~ ~r/never match: dump_payload\/2 для .*Event.Tagged выводится по нагрузке/
-      assert load =~ ~r/never match: load_payload\/3 для .*Event.Renamed выводится по нагрузке/
+          end
+        )
+      end
     end
   end
 
