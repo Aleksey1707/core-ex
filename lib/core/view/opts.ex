@@ -9,7 +9,7 @@ defmodule Core.View.Opts do
   """
 
   alias Core.Codec
-  alias Core.Prim
+  alias Core.Helper.FieldCheck
 
   @label "View"
   @scalar_types ~w(string boolean integer pos_integer non_neg_integer)a
@@ -103,14 +103,14 @@ defmodule Core.View.Opts do
 
   defp field!(name, opts, form_names, label) when is_atom(name) do
     if not Keyword.keyword?(opts) do
-      raise CompileError, description: "#{@label}: #{label}, поле #{name} — keyword-спека"
+      raise CompileError, description: "#{where(label, name)} — keyword-спека"
     end
 
     {kind_key, value} = kind_key!(name, opts, label)
     optional? = Keyword.get(opts, :optional, false)
 
     if not is_boolean(optional?) do
-      raise CompileError, description: "#{@label}: #{label}, поле #{name}: optional: — boolean"
+      raise CompileError, description: "#{where(label, name)}: optional: — boolean"
     end
 
     {name, spec!(kind_key, value, name, form_names, label), optional?}
@@ -124,23 +124,18 @@ defmodule Core.View.Opts do
       other ->
         raise CompileError,
           description:
-            "#{@label}: #{label}, поле #{name}: нужен ровно один из " <>
+            "#{where(label, name)}: нужен ровно один из " <>
               "prim:/enum:/type:/view:/form:/list:/jsonb:, задано #{inspect(other)}"
     end
   end
 
   defp spec!(:prim, mod, name, _form_names, label) do
-    ensure_compiled!(mod, name, label)
-
-    if not Prim.prim?(mod) do
-      raise CompileError,
-        description: "#{@label}: #{label}, поле #{name}: #{inspect(mod)} не Prim"
-    end
+    FieldCheck.prim!(mod, where(label, name))
 
     if mod.__domain_sensitive__() do
       raise CompileError,
         description:
-          "#{@label}: #{label}, поле #{name}: #{inspect(mod)} объявлен sensitive — " <>
+          "#{where(label, name)}: #{inspect(mod)} объявлен sensitive — " <>
             "чувствительное значение не место в read-модели"
     end
 
@@ -148,12 +143,7 @@ defmodule Core.View.Opts do
   end
 
   defp spec!(:enum, mod, name, _form_names, label) do
-    ensure_compiled!(mod, name, label)
-
-    if not Core.Enum.enum?(mod) do
-      raise CompileError,
-        description: "#{@label}: #{label}, поле #{name}: #{inspect(mod)} не Core.Enum"
-    end
+    FieldCheck.enum!(mod, where(label, name))
 
     {:enum, mod}
   end
@@ -162,7 +152,7 @@ defmodule Core.View.Opts do
     if type not in @scalar_types do
       raise CompileError,
         description:
-          "#{@label}: #{label}, поле #{name}: неизвестный type: #{inspect(type)}, " <>
+          "#{where(label, name)}: неизвестный type: #{inspect(type)}, " <>
             "ожидается один из #{inspect(@scalar_types)}"
     end
 
@@ -170,11 +160,11 @@ defmodule Core.View.Opts do
   end
 
   defp spec!(:view, mod, name, _form_names, label) do
-    ensure_compiled!(mod, name, label)
+    FieldCheck.module!(mod, where(label, name))
 
     if not function_exported?(mod, :__view__, 0) do
       raise CompileError,
-        description: "#{@label}: #{label}, поле #{name}: #{inspect(mod)} не Core.View"
+        description: "#{where(label, name)}: #{inspect(mod)} не Core.View"
     end
 
     {:view, mod}
@@ -183,7 +173,7 @@ defmodule Core.View.Opts do
   defp spec!(:form, form_name, name, form_names, label) do
     if form_name not in form_names do
       raise CompileError,
-        description: "#{@label}: #{label}, поле #{name}: форма #{inspect(form_name)} не объявлена в forms:"
+        description: "#{where(label, name)}: форма #{inspect(form_name)} не объявлена в forms:"
     end
 
     {:form, form_name}
@@ -194,7 +184,7 @@ defmodule Core.View.Opts do
 
     if optional? do
       raise CompileError,
-        description: "#{@label}: #{label}, поле #{name}: optional: задаётся у самого поля, не в list:"
+        description: "#{where(label, name)}: optional: задаётся у самого поля, не в list:"
     end
 
     {:list, spec}
@@ -202,12 +192,12 @@ defmodule Core.View.Opts do
 
   defp spec!(:jsonb, {mod, fun}, name, _form_names, label)
        when is_atom(mod) and is_atom(fun) do
-    ensure_compiled!(mod, name, label)
+    FieldCheck.module!(mod, where(label, name))
 
     if not function_exported?(mod, fun, 0) do
       raise CompileError,
         description:
-          "#{@label}: #{label}, поле #{name}: #{inspect(mod)}.#{fun}/0 не объявлена " <>
+          "#{where(label, name)}: #{inspect(mod)}.#{fun}/0 не объявлена " <>
             "(спека redump задаётся кодеком, который пишет эту wire-форму)"
     end
 
@@ -217,7 +207,7 @@ defmodule Core.View.Opts do
   defp spec!(:jsonb, other, name, _form_names, label) do
     raise CompileError,
       description:
-        "#{@label}: #{label}, поле #{name}: jsonb: — {Модуль, :функция} спеки redump, " <>
+        "#{where(label, name)}: jsonb: — {Модуль, :функция} спеки redump, " <>
           "задано #{inspect(other)}"
   end
 
@@ -227,30 +217,14 @@ defmodule Core.View.Opts do
     if kind not in @coercible_kinds do
       raise CompileError,
         description:
-          "#{@label}: #{label}, поле #{name}: у #{inspect(mod)} kind #{inspect(kind)} — " <>
+          "#{where(label, name)}: у #{inspect(mod)} kind #{inspect(kind)} — " <>
             "типизировать нечем; объявите поле через type:"
     end
 
     kind
   end
 
-  defp ensure_compiled!(mod, name, label) when is_atom(mod) do
-    case Code.ensure_compiled(mod) do
-      {:module, _} ->
-        :ok
-
-      {:error, reason} ->
-        raise CompileError,
-          description: "#{@label}: #{label}, поле #{name}: #{inspect(mod)} недоступен (#{reason})"
-    end
-  end
-
-  defp ensure_compiled!(other, name, label) do
-    raise CompileError,
-      description:
-        "#{@label}: #{label}, поле #{name}: ожидался модуль, " <>
-          "задано #{inspect(other)}"
-  end
+  defp where(label, name), do: "#{@label}: #{label}, поле #{name}"
 
   defp collect_forms({:form, name}, acc), do: MapSet.put(acc, name)
   defp collect_forms({:list, inner}, acc), do: collect_forms(inner, acc)

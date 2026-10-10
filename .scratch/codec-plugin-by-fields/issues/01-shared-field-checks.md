@@ -1,6 +1,6 @@
 # 01: Общие проверки спеки полей — префакторинг
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately).
 
@@ -9,9 +9,9 @@
 `Core.View` не меняется: те же `CompileError` с теми же текстами. Спека — `../spec.md`, «Спека полей плагина»;
 ADR-0056.
 
-- [ ] Общий хелпер элементарных проверок; `Core.View.Opts` зовёт его, а не держит свои копии.
-- [ ] Тексты и условия `CompileError` у View прежние; тесты View зелёные без правок.
-- [ ] Проверки, специфичные для View (sensitive, `coercible_kinds`, `view:` / `form:` / `jsonb:`), остаются в
+- [x] Общий хелпер элементарных проверок; `Core.View.Opts` зовёт его, а не держит свои копии.
+- [x] Тексты и условия `CompileError` у View прежние; тесты View зелёные без правок.
+- [x] Проверки, специфичные для View (sensitive, `coercible_kinds`, `view:` / `form:` / `jsonb:`), остаются в
       `Core.View.Opts`.
-- [ ] `CHANGELOG` не меняется — изменение внутреннее.
-- [ ] `make` зелёный.
+- [x] `CHANGELOG` не меняется — изменение внутреннее.
+- [x] `make` зелёный.
