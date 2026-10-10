@@ -85,6 +85,11 @@ round-trip-проверку `entity |> dump() |> load() == entity`.
 Round-trip на текущем коде **не** ловит переименования: меняются обе стороны сразу.
 От этого защищают golden-фикстуры (см. ниже).
 
+Плагин по полям (`fields:`) и нагрузка `Core.Es.Event.Payload` — не исключение: round-trip MUST и
+для них — он проверяет объявление автора, а не генератор. Событие с нагрузкой по полям покрывается
+golden-фикстурой, как событие ручного кодека (`14-events-outbox.md`, «Golden-фикстуры»): wire-ключ
+по умолчанию — имя поля (`docs/adr/0056-codec-plugin-by-fields.md`, «Цена»).
+
 ### View: round-trip неприменим
 
 `<Aggregate>.View.Codec` — dump-only (`loadable: false`), обратного преобразования у него нет.

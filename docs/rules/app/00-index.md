@@ -227,7 +227,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | Номер | Тема | Свод библиотеки |
 |---|---|---|
 | `10-architecture.md` | namespaces, раскладка, boundary, акторы, usecases, DI, `Transact.run` | есть |
-| `11-domain.md` | профили Codec, реестр плагинов, Prim и Enum, `ContextFactory` | есть |
+| `11-domain.md` | профили Codec, реестр плагинов, кодек по полям, Prim и Enum, `ContextFactory` | есть |
 | `12-errors.md` | словарь `ns`, каталоги ошибок, границы | есть |
 | `13-repos.md` | раскладка репозиториев, read vs write, View, Specs | есть |
 | `14-events-outbox.md` | теги событий, топики, поллер, подписчики, идемпотентность | есть |

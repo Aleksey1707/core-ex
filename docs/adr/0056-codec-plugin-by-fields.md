@@ -4,7 +4,9 @@
 генерирует библиотека: у сущности и агрегата — опцией `fields:` у `use Core.Codec.Plugin` (struct
 остаётся ручным), у нагрузки события — `use Core.Es.Event.Payload, fields:`, который порождает и
 struct, и спеку. Ручной плагин остаётся для всего, что расходится с полями сильнее переименования
-ключа. Норма — `docs/rules/11-domain.md` и `docs/rules/app/11-domain.md`, «Codec (Prim и Entity)».
+ключа. Норма — `docs/rules/11-domain.md`, «Плагин по полям (`fields:`)» и «Нагрузка по полям
+(`Core.Es.Event.Payload`)»; `docs/rules/app/11-domain.md`, «Кодек: по полям или ручной»; тесты —
+`docs/rules/19-testing.md`, «Codec: round-trip».
 
 ## Контекст
 

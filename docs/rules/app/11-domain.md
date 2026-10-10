@@ -67,6 +67,44 @@ def plugins, do: @plugins
 Событие — обычная сущность фасада: `InCodec.dump(event)` отдаёт конверт целиком,
 `InCodec.load(<Aggregate>.Event, wire)` восстанавливает его по тегу внутри конверта.
 
+## Кодек: по полям или ручной
+
+Контракт объявления по полям — `deps/core/docs/rules/11-domain.md`, «Плагин по полям
+(`fields:`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»; почему так —
+`deps/core/docs/adr/0056-codec-plugin-by-fields.md`.
+
+- Тип, чья wire-форма совпадает с полями один к одному (с точностью до переименования ключа
+  `wire:`), SHOULD объявляться по полям: сущность и агрегат — спекой `fields:` у
+  `use Core.Codec.Plugin`, нагрузка события — `use Core.Es.Event.Payload, fields:`.
+- Ручной плагин — для расхождения сильнее переименования ключа: union с разбором тега, словарь,
+  вычисляемое или сжатое поле, межполевой инвариант, который должен выполняться при загрузке.
+- Нагрузка события — value object со своим плагином — SHOULD писаться ручными клаузами кодека
+  события одной строкой через фасад: `codec.dump(value)` / `codec.load(Value, wire)`, а не повтором
+  полей value object спекой `Core.Es.Event.Payload`.
+
+```elixir
+# плохо — ручные клаузы повторяют поля один к одному
+def dump(%Order.Item{id: id, name: name}, codec), do: %{"id" => codec.dump(id), "name" => codec.dump(name)}
+
+def load(Order.Item, wire, codec) do
+  with {:ok, id} <- codec.load(Order.Item.ID, field(wire, :id)),
+       {:ok, name} <- codec.load(Order.Item.Name, field(wire, :name)),
+       do: {:ok, %Order.Item{id: id, name: name}}
+end
+
+# хорошо
+use Core.Codec.Plugin,
+  types: [Order.Item],
+  fields: [{Order.Item, id: [prim: Order.Item.ID], name: [prim: Order.Item.Name]}]
+
+# хорошо — нагрузка-value object через фасад
+def dump_payload(%Event.Moved{payload: %Address{} = address}, codec), do: codec.dump(address)
+def load_payload(Event.Moved, wire, codec), do: codec.load(Address, wire)
+```
+
+Round-trip и golden-фикстуры обязательны и для типов по полям —
+`deps/core/docs/rules/19-testing.md`, «Codec: round-trip».
+
 ## Агрегаты
 
 Вид агрегата — state-stored или event-sourced — выбирается на агрегат (`13-repos.md`, «Вид
