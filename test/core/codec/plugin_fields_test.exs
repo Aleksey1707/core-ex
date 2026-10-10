@@ -70,6 +70,79 @@ defmodule Core.Codec.PluginFieldsTest do
       plugins: [Plugin]
   end
 
+  defmodule Label do
+    defstruct [:name]
+  end
+
+  defmodule Money do
+    defstruct [:amount, :currency]
+  end
+
+  defmodule MixedPlugin do
+    use Core.Codec.Plugin,
+      types: [Label, Money],
+      fields: [{Label, name: [prim: Name]}]
+
+    @impl true
+    def dump(%Money{amount: amount, currency: currency}, _codec), do: "#{amount} #{currency}"
+
+    @impl true
+    def load(Money, wire, _codec) when is_binary(wire) do
+      [amount, currency] = String.split(wire, " ")
+      {:ok, %Money{amount: String.to_integer(amount), currency: currency}}
+    end
+  end
+
+  defmodule DumpOnlyPlugin do
+    use Core.Codec.Plugin,
+      types: [Label],
+      loadable: false,
+      fields: [{Label, name: [prim: Name]}]
+  end
+
+  defmodule Shape do
+    defmodule Circle do
+      defstruct [:kind, :radius]
+    end
+
+    defmodule Square do
+      defstruct [:kind, :side]
+    end
+  end
+
+  defmodule UnionPlugin do
+    require Error
+
+    use Core.Codec.Plugin,
+      types: [Shape.Circle, Shape.Square],
+      union: Shape,
+      fields: [
+        {Shape.Circle, kind: [type: :string], radius: [type: :pos_integer]},
+        {Shape.Square, kind: [type: :string], side: [type: :pos_integer]}
+      ]
+
+    @impl true
+    def load(Shape, wire, codec) when is_map(wire) do
+      case field(wire, :kind) do
+        "circle" -> load(Shape.Circle, wire, codec)
+        "square" -> load(Shape.Square, wire, codec)
+        _other -> {:error, Error.domain(Shape, code: :invalid_value, ns: :codec, message: "неизвестная фигура")}
+      end
+    end
+  end
+
+  defmodule MixedFacade do
+    use Core.Codec.Facade,
+      prim: Core.CodecFixture.Prim.Internal,
+      plugins: [MixedPlugin, UnionPlugin]
+  end
+
+  defmodule DumpOnlyFacade do
+    use Core.Codec.Facade,
+      prim: Core.CodecFixture.Prim.Internal,
+      plugins: [DumpOnlyPlugin]
+  end
+
   setup do
     item = %Item{
       id: ID.new!("6f1f8b8e-6b5a-4c47-9d5e-0b7c1d0e8f11"),
@@ -234,7 +307,99 @@ defmodule Core.Codec.PluginFieldsTest do
     end
   end
 
+  describe "смешанный плагин" do
+    test "типы по полям и ручные клаузы — round-trip через фасад" do
+      label = %Label{name: Name.new!("x")}
+      money = %Money{amount: 150, currency: "RUB"}
+
+      assert MixedFacade.dump(label) == %{"name" => "x"}
+      assert MixedFacade.dump(money) == "150 RUB"
+      assert MixedFacade.load(Label, MixedFacade.dump(label)) == {:ok, label}
+      assert MixedFacade.load(Money, MixedFacade.dump(money)) == {:ok, money}
+    end
+
+    test "loadable: false — только dump/2" do
+      assert DumpOnlyFacade.dump(%Label{name: Name.new!("x")}) == %{"name" => "x"}
+      refute function_exported?(DumpOnlyPlugin, :load, 3)
+    end
+
+    test "union: варианты по полям, клауза семейства — руками" do
+      circle = %Shape.Circle{kind: "circle", radius: 2}
+      square = %Shape.Square{kind: "square", side: 3}
+
+      assert MixedFacade.load(Shape, MixedFacade.dump(circle)) == {:ok, circle}
+      assert MixedFacade.load(Shape, MixedFacade.dump(square)) == {:ok, square}
+      assert {:error, %Error{code: :invalid_value}} = MixedFacade.load(Shape, %{"kind" => "oval"})
+    end
+
+    test "сгенерированные и ручные клаузы с @impl — без предупреждений" do
+      {_result, diagnostics} =
+        Code.with_diagnostics(fn ->
+          compile_mixed(:Grouped, [
+            quote(do: @impl(true)),
+            quote(do: def(dump(%U{} = u, _codec), do: u.b)),
+            quote(do: @impl(true)),
+            quote(do: def(load(U, wire, _codec), do: {:ok, %U{b: wire}}))
+          ])
+        end)
+
+      assert diagnostics == []
+    end
+
+    test "ручная клауза на тип из fields: — предупреждение never match" do
+      {_result, diagnostics} =
+        Code.with_diagnostics(fn ->
+          compile_mixed(:NeverMatch, [
+            quote(do: def(dump(%U{} = u, _codec), do: u.b)),
+            quote(do: def(dump(%T{} = t, _codec), do: t.a)),
+            quote(do: def(load(U, wire, _codec), do: {:ok, %U{b: wire}})),
+            quote(do: def(load(T = type, _wire, _codec), do: {:ok, struct(type)}))
+          ])
+        end)
+
+      assert [dump, load] = Enum.map(diagnostics, & &1.message)
+      assert dump =~ ~r/never match.*dump\/2.*NeverMatch.T.*fields:/
+      assert load =~ ~r/never match.*load\/3.*NeverMatch.T.*fields:/
+    end
+  end
+
   describe "сборка" do
+    test "тип вне fields: без ручной клаузы dump/2 — CompileError" do
+      assert_raise CompileError, ~r/требуется dump\/2 для \[.*Uncovered.U\]/, fn ->
+        compile_mixed(:Uncovered, [])
+      end
+    end
+
+    test "тип вне fields: без ручной клаузы load/3 — CompileError" do
+      assert_raise CompileError, ~r/требуется load\/3 для \[.*UncoveredLoad.U\]/, fn ->
+        compile_mixed(:UncoveredLoad, [quote(do: def(dump(%U{} = u, _codec), do: u.b))])
+      end
+    end
+
+    test "клауза с не-литералом первым аргументом покрывает тип" do
+      compile_mixed(:Catchall, [
+        quote(do: def(dump(value, _codec), do: value)),
+        quote(do: def(load(type, _wire, _codec), do: {:ok, struct(type)}))
+      ])
+    end
+
+    test "loadable: false — ручной load/3 не требуется" do
+      compile_mixed(:DumpOnlyMixed, [quote(do: def(dump(%U{} = u, _codec), do: u.b))], loadable: false)
+    end
+
+    test "union: без клаузы load/3 семейства — CompileError" do
+      assert_raise CompileError, ~r/требуется load\/3 для \[.*NoFamily.Family\]/, fn ->
+        compile_mixed(
+          :NoFamily,
+          [
+            quote(do: def(dump(%U{} = u, _codec), do: u.b)),
+            quote(do: def(load(U, wire, _codec), do: {:ok, %U{b: wire}}))
+          ],
+          union: true
+        )
+      end
+    end
+
     test "поле struct без спеки и поле спеки без struct — CompileError" do
       assert_raise CompileError, ~r/поля struct без спеки \[:b\], поля спеки без struct \[:c\]/, fn ->
         compile_plugin(:StructMismatch, a: [prim: Name], c: [prim: Name])
@@ -346,6 +511,36 @@ defmodule Core.Codec.PluginFieldsTest do
   end
 
   # ---
+
+  defp compile_mixed(name, clauses, opts \\ []) do
+    plugin = Module.concat(__MODULE__, name)
+    union = if Keyword.get(opts, :union, false), do: Module.concat(plugin, Family)
+
+    quote do
+      defmodule unquote(plugin) do
+        defmodule T do
+          defstruct [:a]
+        end
+
+        defmodule U do
+          defstruct [:b]
+        end
+
+        use Core.Codec.Plugin,
+          types: [T, U],
+          loadable: unquote(Keyword.get(opts, :loadable, true)),
+          union: unquote(union),
+          fields: [{T, a: [prim: Core.Codec.PluginFieldsTest.Name]}]
+
+        unquote_splicing(clauses)
+      end
+    end
+    |> Macro.prewalk(fn
+      {:__aliases__, _meta, [leaf]} when leaf in ~w(T U)a -> Module.concat(plugin, leaf)
+      ast -> ast
+    end)
+    |> Code.eval_quoted()
+  end
 
   defp compile_plugin(name, spec, opts \\ []) do
     plugin = Module.concat(__MODULE__, name)

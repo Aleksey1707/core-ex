@@ -458,7 +458,38 @@ use Core.Codec.Plugin,
   межполевые инварианты конструктора не выполняются — типу, которому они нужны на чтении, —
   ручной плагин. Первая ошибка поля — итог, лишние ключи wire игнорируются, результат сужен до
   `{:ok, %Type{}} | {:error, _}`
-- Плагин, все типы которого объявлены по полям, ручных `dump/2` / `load/3` не пишет
+- Плагин, все типы которого объявлены по полям, ручных `dump/2` / `load/3` не пишет. Многотиповый
+  плагин MAY смешивать: типы, повторяющие wire, — в `fields:`, нетривиальный — ручными клаузами
+  `dump/2` / `load/3` в том же плагине. Сгенерированные клаузы стоят первыми, ручные — одна с ними
+  функция, `@impl true` на ручной клаузе допустим. Ручная клауза на тип из `fields:` —
+  предупреждение сборки «never match»: валидное значение до неё не доходит, и она молча ловила бы
+  только невалидное; у одного типа один источник wire
+- Тип из `types:` без спеки и без ручной клаузы `dump/2` (при `loadable: true` — и `load/3`) —
+  `CompileError`. Клаузой типа считается та, чей первый аргумент — `%Type{}` (у `load/3` — `Type`)
+  или не литерал типа вовсе (переменная, `%mod{}`); проверка действует и на плагин без `fields:`
+- `loadable: false` — генерируется только `dump/2`
+- `union:` с `fields:` совместим: варианты семейства объявляются по полям, клауза
+  `load(Family, wire, codec)` пишется руками и выбирает вариант по тегу в данных — без неё
+  `CompileError`:
+
+  ```elixir
+  use Core.Codec.Plugin,
+    types: [Shape.Circle, Shape.Square],
+    union: Shape,
+    fields: [
+      {Shape.Circle, kind: [type: :string], radius: [type: :pos_integer]},
+      {Shape.Square, kind: [type: :string], side: [type: :pos_integer]}
+    ]
+
+  @impl true
+  def load(Shape, wire, codec) when is_map(wire) do
+    case field(wire, :kind) do
+      "circle" -> load(Shape.Circle, wire, codec)
+      "square" -> load(Shape.Square, wire, codec)
+      _other -> {:error, Error.domain(Shape, code: :invalid_value, ns: :codec, message: "...")}
+    end
+  end
+  ```
 
 ### Dump/load только через фасад
 

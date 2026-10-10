@@ -2,8 +2,9 @@ defmodule Core.Codec.Plugin.Opts do
   @moduledoc """
   Валидация опций `use Core.Codec.Plugin` и проверка контракта после компиляции.
 
-  Проверяет форму `types:` и `union:`, наличие `dump/2` и обязательность `load/3`
-  при `loadable: true`.
+  Проверяет форму `types:` и `union:` и после компиляции — что каждый тип плагина
+  обслужен `dump/2` (и `load/3` при `loadable: true`, вместе с семейством `union:`):
+  клаузой по `fields:` или ручной. Ручная клауза на тип из `fields:` — предупреждение.
   """
 
   @doc false
@@ -35,27 +36,80 @@ defmodule Core.Codec.Plugin.Opts do
 
   def after_compile!(env, _bytecode) do
     mod = env.module
+    generated = Enum.map(Module.get_attribute(mod, :codec_fields), &elem(&1, 0))
+    types = Module.get_attribute(mod, :codec_types)
 
-    # `dump/2` обязателен для любого плагина: фасад уже завёл clause на каждый его тип,
-    # и без функции она упала бы `UndefinedFunctionError` на первом дампе.
-    if not Module.defines?(mod, {:dump, 2}) do
-      raise CompileError,
-        description: "#{inspect(mod)}: плагину требуется dump/2",
-        file: env.file,
-        line: env.line
-    end
+    # `dump/2` обязателен для каждого типа: фасад уже завёл clause на каждый тип плагина,
+    # и без клаузы она упала бы `FunctionClauseError` на первом дампе.
+    check_clauses!(env, {:dump, 2}, types, generated)
 
-    if Module.get_attribute(mod, :codec_loadable) and not Module.defines?(mod, {:load, 3}) do
-      raise CompileError,
-        description: "#{inspect(mod)}: при loadable: true требуется load/3",
-        file: env.file,
-        line: env.line
+    if Module.get_attribute(mod, :codec_loadable) do
+      check_clauses!(env, {:load, 3}, types ++ List.wrap(Module.get_attribute(mod, :codec_union)), generated)
     end
 
     :ok
   end
 
   # ---
+
+  defp check_clauses!(env, fun, required, generated) do
+    manual = manual_targets(env.module, fun, length(generated))
+
+    warn_never_match(env, fun, manual, generated)
+    check_covered!(env, fun, required, generated, Enum.map(manual, &elem(&1, 1)))
+  end
+
+  # Клаузы `fields:` встают первыми (их порождает `use`), поэтому ручная клауза на такой тип
+  # недостижима для валидного значения и молча ловила бы только невалидное.
+  defp warn_never_match(env, {name, arity}, manual, generated) do
+    for {line, type} <- manual, type in generated do
+      IO.warn(
+        "клауза never match: #{name}/#{arity} для #{inspect(type)} сгенерирован по fields: плагина " <>
+          inspect(env.module),
+        file: env.file,
+        line: line
+      )
+    end
+  end
+
+  # Ручная клауза с первым аргументом не литералом типа может принять любой тип плагина.
+  defp check_covered!(env, {name, arity}, required, generated, targets) do
+    uncovered = if :any in targets, do: [], else: (required -- generated) -- targets
+
+    if uncovered != [] do
+      raise CompileError,
+        description:
+          "#{inspect(env.module)}: плагину требуется #{name}/#{arity} для #{inspect(uncovered)} — " <>
+            "их нет ни в fields:, ни в ручных клаузах",
+        file: env.file,
+        line: env.line
+    end
+  end
+
+  # Ручная клауза → {строка, тип первого аргумента или `:any`}; сгенерированные клаузы — первые,
+  # по одной на тип из `fields:`.
+  defp manual_targets(mod, {name, _arity} = fun, generated) do
+    case Module.get_definition(mod, fun) do
+      nil ->
+        []
+
+      {:v1, _kind, _meta, clauses} ->
+        clauses
+        |> Enum.drop(generated)
+        |> Enum.map(fn {meta, [arg | _rest], _guards, _body} -> {meta[:line], target(arg, name)} end)
+    end
+  end
+
+  defp target({:=, _meta, [left, right]}, name) do
+    case target(left, name) do
+      :any -> target(right, name)
+      type -> type
+    end
+  end
+
+  defp target({:%, _meta, [type, _fields]}, :dump) when is_atom(type), do: type
+  defp target(type, :load) when is_atom(type), do: type
+  defp target(_arg, _name), do: :any
 
   defp validate_modules!(types) do
     if not Enum.all?(types, &(is_atom(&1) and not is_nil(&1))) do

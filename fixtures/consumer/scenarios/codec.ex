@@ -91,6 +91,30 @@ defmodule ConsumerTest.BadCodecSharedPayload do
   def load_payload(Event.Revoked, _wire, _codec), do: {:ok, %Order.Amount{value: 1}}
 end
 
+defmodule ConsumerTest.BadFieldsCodec do
+  @moduledoc "Смешанный плагин с ручной клаузой на тип из `fields:`; в фасад не входит."
+
+  alias Consumer.Domain.Sales.Account
+
+  use Core.Codec.Plugin,
+    types: [Account.Profile.Contact, Account.Card],
+    fields: [{Account.Profile.Contact, name: [prim: Account.Name]}]
+
+  @impl true
+  def dump(%Account.Card{} = card, codec), do: %{"id" => codec.dump(card.id), "name" => codec.dump(card.name)}
+
+  # H9 — ручная клауза на тип из `fields:`: сгенерированная стоит выше
+  # expect: клауза never match
+  def dump(%Account.Profile.Contact{} = contact, codec), do: %{"name" => codec.dump(contact.name)}
+
+  @impl true
+  def load(Account.Card, wire, codec) when is_map(wire) do
+    with {:ok, id} <- codec.load(Account.ID, field(wire, :id)),
+         {:ok, name} <- codec.load(Account.Name, field(wire, :name)),
+         do: {:ok, %Account.Card{id: id, name: name}}
+  end
+end
+
 defmodule ConsumerTest.Codec do
   @moduledoc "Кодек событий напрямую и фасад Codec."
 

@@ -91,9 +91,12 @@ defmodule Core.Codec.Plugin do
                       @codec_loadable
                     )
 
+      # `@impl` и на колбэках `__codec_*__`, и на сгенерированных клаузах: ручная клауза с `@impl` у
+      # смешанного плагина иначе требует его от каждого колбэка из этого `use`.
       @doc false
       @spec __codec_types__() :: [module()]
 
+      @impl true
       def __codec_types__, do: @codec_types
 
       @doc false
@@ -104,6 +107,7 @@ defmodule Core.Codec.Plugin do
       @doc false
       @spec __codec_union__() :: module() | nil
 
+      @impl true
       def __codec_union__, do: @codec_union
 
       import Core.Helper.Map, only: [field: 2]
@@ -118,12 +122,14 @@ defmodule Core.Codec.Plugin do
         ]
 
       for {type, fields} <- @codec_fields do
+        @impl true
         def dump(unquote_splicing(Core.Codec.Plugin.Fields.dump_args(type, fields)))
             when unquote(Core.Codec.Plugin.Fields.dump_guard(fields)),
             do: unquote(Core.Codec.Plugin.Fields.dump_body(fields))
       end
 
       for {type, fields} <- @codec_fields, @codec_loadable do
+        @impl true
         def load(unquote_splicing(Core.Codec.Plugin.Fields.load_args(type)))
             when unquote(Core.Codec.Plugin.Fields.load_guard()),
             do: unquote(Core.Codec.Plugin.Fields.load_body(type, fields))
