@@ -162,7 +162,7 @@ defmodule ConsumerTest.Codec do
   # плагина не доходят, и там то же значение — `FunctionClauseError` при исполнении
   def h8_fields_dump_wrong_prim(%Account.Name{} = name),
     # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Codec.dump/2
-    do: Account.Profile.Codec.dump(%Account.Profile{id: name, name: name}, InCodec)
+    do: Account.Profile.Codec.dump(%Account.Profile{id: name, name: name, status: :placed, contacts: []}, InCodec)
 
   # H6 — команда в `dump/1` фасада: не Prim и не тип плагина
   def h6_dump_command(%Account.Cmd.Open{} = command),

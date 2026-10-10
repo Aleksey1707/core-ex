@@ -99,11 +99,15 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
   end
 
   def load_profile(data) do
-    with {:ok, profile} <- InCodec.load(Account.Profile, data), do: {profile.name, profile.note}
+    with {:ok, profile} <- InCodec.load(Account.Profile, data),
+         do: {profile.name, profile.note, profile.status, Enum.map(profile.contacts, & &1.name), profile.main}
   end
 
-  def dump_profile(%Account.ID{} = id, %Account.Name{} = name),
-    do: InCodec.dump(%Account.Profile{id: id, name: name, note: nil})
+  def dump_profile(%Account.ID{} = id, %Account.Name{} = name) do
+    contact = %Account.Profile.Contact{name: name}
+
+    InCodec.dump(%Account.Profile{id: id, name: name, status: :placed, contacts: [contact], main: contact})
+  end
 
   def dump(%Account.Event.Opened{} = event, %Account.Card{} = card, %Order.Amount{} = amount),
     do: {InCodec.dump(event), InCodec.dump(card), InCodec.dump(amount), InCodec.dump(InCodec.load!(Order.Amount, 1))}

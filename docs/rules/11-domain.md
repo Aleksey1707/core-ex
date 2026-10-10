@@ -419,17 +419,35 @@ use Core.Codec.Plugin,
     {Item,
      id: [prim: Item.ID],
      name: [prim: Item.Name, wire: "title"],
-     note: [prim: Item.Note, optional: true]}
+     note: [prim: Item.Note, optional: true],
+     status: [enum: Item.Status, default: "new"],
+     tags: [list: [entity: Item.Tag]]}
   ]
 ```
 
 - `fields:` — список пар `{Type, spec}`; ключи — подмножество `types:`, повтор типа или ключ вне
   `types:` — `CompileError`. Struct типа остаётся ручным
-- Поле спеки: `prim:` — любой Prim, включая композит, кастомный kind и sensitive; значение поля —
-  Prim-структура, дамп `codec.dump/1`, загрузка `codec.load(Prim, raw)`. `optional: true` — `nil` в
-  обе стороны, отсутствующий ключ даёт `nil`. `wire: "ключ"` — строка, по умолчанию имя поля
-  строкой; загрузка читает ключ через `field/2` — и строковый, и атомарный. Не Prim, неизвестный
+- Поле спеки — ровно один вид:
+
+  | Вид | Значение поля | Дамп | Загрузка | Голова `dump/2` |
+  |---|---|---|---|---|
+  | `prim: Prim` | Prim-структура; любой Prim, включая композит, кастомный kind и sensitive | `codec.dump/1` | `codec.load(Prim, raw)` | `%Prim{}` |
+  | `enum: Enum` | атом `Core.Enum` | как есть | `cast/1`, при `optional:` — `cast_optional/1`; отказ — ошибка загрузки | `is_atom`, `nil` — только при `optional:` |
+  | `entity: Mod` | struct, обслуживаемый фасадом | `codec.dump/1` | `codec.load(Mod, raw)` | `%Mod{}` |
+  | `list: спека` | список значений вида из спеки элемента | поэлементно | поэлементно; не список — `%Error{ns: :codec, code: :invalid_value}` | `is_list` |
+  | `type: скаляр` | скаляр `Core.View` или `:map` | как есть | как есть | по скаляру |
+
+- `optional: true` — `nil` в обе стороны, отсутствующий ключ даёт `nil`; у `list:` задаётся у
+  самого поля, не у элемента. `wire: "ключ"` — строка, по умолчанию имя поля строкой; загрузка
+  читает ключ через `field/2` — и строковый, и атомарный. Не Prim в `prim:`, не `Core.Enum` в
+  `enum:`, не struct в `entity:`, неизвестный `type:`, `optional:` внутри `list:`, неизвестный
   ключ и повтор wire-ключа — `CompileError` с именем плагина, типа и поля
+- `default:` — wire-литерал, который загрузка подставляет, если ключа нет или он `nil`, и грузит как
+  записанный (через Prim, `cast` enum); дамп поля обычный. Так развивается строка jsonb
+  state-stored агрегата: поле, добавленное в struct, читается из строк, записанных до него.
+  `default:` есть только в плагине — нагрузка события развивается новым тегом и апкастом
+  (`14-events-outbox.md`). `default:` с `optional: true` (два ответа на один `nil`) и при
+  `loadable: false` (загрузки нет) — `CompileError`
 - Ключи спеки MUST совпадать с полями struct без `__struct__` и `events` — расхождение в любую
   сторону `CompileError` со списком лишних и недостающих: поле, добавленное в struct, не теряется в
   wire молча

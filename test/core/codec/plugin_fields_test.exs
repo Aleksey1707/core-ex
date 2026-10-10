@@ -26,9 +26,19 @@ defmodule Core.Codec.PluginFieldsTest do
     defstruct [:name]
   end
 
+  defmodule Status do
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(new done)a
+  end
+
+  defmodule Card do
+    defstruct [:status, :prev_status, :tag, :parent, :tags, :statuses, :grid, :count, :meta, :label, :rank, :flag]
+  end
+
   defmodule Plugin do
     use Core.Codec.Plugin,
-      types: [Item, Tag],
+      types: [Item, Tag, Card],
       fields: [
         {Item,
          id: [prim: ID],
@@ -37,7 +47,20 @@ defmodule Core.Codec.PluginFieldsTest do
          secret: [prim: PrimFixture.Password],
          version: [prim: Version],
          note: [prim: Name, optional: true]},
-        {Tag, name: [prim: Name]}
+        {Tag, name: [prim: Name]},
+        {Card,
+         status: [enum: Status],
+         prev_status: [enum: Status, optional: true],
+         tag: [entity: Tag],
+         parent: [entity: Tag, optional: true],
+         tags: [list: [entity: Tag]],
+         statuses: [list: [enum: Status], optional: true],
+         grid: [list: [list: [prim: Name]]],
+         count: [type: :non_neg_integer],
+         meta: [type: :map, optional: true],
+         label: [prim: Name, default: "без имени"],
+         rank: [enum: Status, default: "new"],
+         flag: [type: :boolean, default: true]}
       ]
   end
 
@@ -112,6 +135,105 @@ defmodule Core.Codec.PluginFieldsTest do
     assert_raise FunctionClauseError, fn -> Facade.dump(%{item | note: "у окна"}) end
   end
 
+  describe "виды поля" do
+    setup do
+      card = %Card{
+        status: :done,
+        prev_status: nil,
+        tag: %Tag{name: Name.new!("a")},
+        parent: %Tag{name: Name.new!("p")},
+        tags: [%Tag{name: Name.new!("b")}, %Tag{name: Name.new!("c")}],
+        statuses: [:new, :done],
+        grid: [[Name.new!("x")], []],
+        count: 2,
+        meta: %{"k" => 1},
+        label: Name.new!("метка"),
+        rank: :done,
+        flag: false
+      }
+
+      %{card: card}
+    end
+
+    test "dump: enum и type — как есть, entity и list — через фасад", %{card: card} do
+      assert Facade.dump(card) == %{
+               "status" => :done,
+               "prev_status" => nil,
+               "tag" => %{"name" => "a"},
+               "parent" => %{"name" => "p"},
+               "tags" => [%{"name" => "b"}, %{"name" => "c"}],
+               "statuses" => [:new, :done],
+               "grid" => [["x"], []],
+               "count" => 2,
+               "meta" => %{"k" => 1},
+               "label" => "метка",
+               "rank" => :done,
+               "flag" => false
+             }
+    end
+
+    test "round-trip через фасад, enum из строки — cast", %{card: card} do
+      assert Facade.load(Card, Facade.dump(card)) == {:ok, card}
+
+      wire = %{Facade.dump(card) | "status" => "done", "statuses" => ["new", "done"]}
+      assert Facade.load(Card, wire) == {:ok, card}
+
+      card = %{card | parent: nil, statuses: nil, meta: nil}
+      assert Facade.load(Card, Facade.dump(card)) == {:ok, card}
+    end
+
+    test "optional: отсутствующий ключ — nil", %{card: card} do
+      wire = Map.drop(Facade.dump(card), ~w(prev_status parent statuses meta))
+
+      assert {:ok, %Card{prev_status: nil, parent: nil, statuses: nil, meta: nil}} = Facade.load(Card, wire)
+    end
+
+    test "отказ cast enum — ошибка загрузки", %{card: card} do
+      assert {:error, %Error{module: Status, code: :invalid_value}} =
+               Facade.load(Card, %{Facade.dump(card) | "status" => "lost"})
+
+      assert {:error, %Error{module: Status}} = Facade.load(Card, %{Facade.dump(card) | "statuses" => ["lost"]})
+    end
+
+    test "ошибка элемента list: и entity: — итог", %{card: card} do
+      assert {:error, %Error{module: Name}} = Facade.load(Card, %{Facade.dump(card) | "tags" => [%{"name" => ""}]})
+      assert {:error, %Error{module: Name}} = Facade.load(Card, %{Facade.dump(card) | "grid" => [[""]]})
+      assert {:error, %Error{module: Name}} = Facade.load(Card, %{Facade.dump(card) | "tag" => %{"name" => ""}})
+    end
+
+    test "list: не списком — ошибка загрузки", %{card: card} do
+      assert {:error, %Error{module: Card, ns: :codec, code: :invalid_value}} =
+               Facade.load(Card, Map.delete(Facade.dump(card), "tags"))
+
+      assert {:error, %Error{module: Card, code: :invalid_value}} =
+               Facade.load(Card, %{Facade.dump(card) | "grid" => ["x"]})
+    end
+
+    test "default: — при отсутствии ключа и при nil, загружается как записанное", %{card: card} do
+      wire =
+        card
+        |> Facade.dump()
+        |> Map.drop(~w(label flag))
+        |> Map.put("rank", nil)
+
+      assert {:ok, %Card{label: label, rank: :new, flag: true}} = Facade.load(Card, wire)
+      assert label == Name.new!("без имени")
+    end
+
+    test "default: не подменяет записанное значение, в т.ч. false", %{card: card} do
+      assert {:ok, %Card{flag: false, rank: :done}} = Facade.load(Card, Facade.dump(card))
+    end
+
+    test "значение не того вида — FunctionClauseError", %{card: card} do
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{card | status: "done"}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{card | status: nil}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{card | tag: Name.new!("a")}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{card | tags: nil}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{card | count: -1}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{card | meta: []}) end
+    end
+  end
+
   describe "сборка" do
     test "поле struct без спеки и поле спеки без struct — CompileError" do
       assert_raise CompileError, ~r/поля struct без спеки \[:b\], поля спеки без struct \[:c\]/, fn ->
@@ -173,11 +295,53 @@ defmodule Core.Codec.PluginFieldsTest do
         compile_plugin(:UnknownKey, a: [prim: Name, default_value: 1], b: [prim: Name])
       end
     end
+
+    test "не enum в enum: — CompileError" do
+      assert_raise CompileError, ~r/поле a: .*Name не Core.Enum/, fn ->
+        compile_plugin(:NotEnum, a: [enum: Name], b: [prim: Name])
+      end
+    end
+
+    test "не struct в entity: — CompileError" do
+      assert_raise CompileError, ~r/поле a: .*Status не struct/, fn ->
+        compile_plugin(:NotEntity, a: [entity: Core.Codec.PluginFieldsTest.Status], b: [prim: Name])
+      end
+    end
+
+    test "неизвестный type: — CompileError" do
+      assert_raise CompileError, ~r/поле a: неизвестный type: :atom/, fn ->
+        compile_plugin(:UnknownType, a: [type: :atom], b: [prim: Name])
+      end
+    end
+
+    test "два вида в поле — CompileError" do
+      assert_raise CompileError, ~r/поле a: нужен ровно один из prim:\/enum:\/entity:\/list:\/type:/, fn ->
+        compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
+      end
+    end
+
+    test "optional: внутри list: — CompileError" do
+      assert_raise CompileError, ~r/поле a: optional: задаётся у самого поля, не в list:/, fn ->
+        compile_plugin(:ListOptional, a: [list: [prim: Name, optional: true]], b: [prim: Name])
+      end
+    end
+
+    test "default: с optional: true — CompileError" do
+      assert_raise CompileError, ~r/поле a: default: и optional: true/, fn ->
+        compile_plugin(:DefaultOptional, a: [prim: Name, optional: true, default: "x"], b: [prim: Name])
+      end
+    end
+
+    test "default: при loadable: false — CompileError" do
+      assert_raise CompileError, ~r/поле a: default: при loadable: false/, fn ->
+        compile_plugin(:DefaultDumpOnly, [a: [prim: Name, default: "x"], b: [prim: Name]], loadable: false)
+      end
+    end
   end
 
   # ---
 
-  defp compile_plugin(name, spec) do
+  defp compile_plugin(name, spec, opts \\ []) do
     plugin = Module.concat(__MODULE__, name)
     type = Module.concat(plugin, T)
     spec = Macro.escape(spec)
@@ -191,6 +355,7 @@ defmodule Core.Codec.PluginFieldsTest do
 
           use Core.Codec.Plugin,
             types: [unquote(type)],
+            loadable: unquote(Keyword.get(opts, :loadable, true)),
             fields: [{unquote(type), unquote(spec)}]
         end
       end

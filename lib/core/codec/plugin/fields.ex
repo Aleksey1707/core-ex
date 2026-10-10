@@ -3,43 +3,65 @@ defmodule Core.Codec.Plugin.Fields do
   Спека полей Codec-плагина (`use Core.Codec.Plugin, fields:`): валидация и генерация
   клауз `dump/2` / `load/3` по ней.
 
-  Поле объявляется keyword-спекой с ровно одним kind-ключом (`prim:`) и необязательными
-  `optional: true` и `wire: "ключ"`. Ключи спеки сверяются с полями struct типа (без
-  `__struct__` и `events`) — расхождение в любую сторону даёт `CompileError`.
+  Поле объявляется keyword-спекой с ровно одним kind-ключом и необязательными
+  `optional: true`, `wire: "ключ"` и `default:`. Ключи спеки сверяются с полями struct типа
+  (без `__struct__` и `events`) — расхождение в любую сторону даёт `CompileError`.
 
-  Значение поля `prim:` — Prim-структура: дамп `codec.dump/1`, загрузка
-  `codec.load(Prim, raw)`. Загрузка собирает struct литералом после успешной загрузки
+  | Вид | Дамп | Загрузка |
+  |---|---|---|
+  | `prim: Prim` | `codec.dump/1` | `codec.load(Prim, raw)` |
+  | `enum: Enum` | атом как есть | `Enum.cast/1` (`cast_optional/1` при `optional:`) |
+  | `entity: Mod` | `codec.dump/1` | `codec.load(Mod, raw)` |
+  | `list: спека` | поэлементно по спеке | поэлементно по спеке; не список — ошибка |
+  | `type: скаляр` | как есть | как есть |
+
+  `default:` — wire-литерал, который загрузка подставляет вместо отсутствующего ключа или
+  `nil` и грузит как записанный. Загрузка собирает struct литералом после успешной загрузки
   всех полей; первая ошибка поля — итог, лишние ключи wire игнорируются.
   """
 
+  alias Core.Error
   alias Core.Helper.FieldCheck
+  alias Core.Result
+
+  require Error
 
   @label "Codec.Plugin"
-  @kind_keys ~w(prim)a
-  @extra_keys ~w(optional wire)a
+  @kind_keys ~w(prim enum entity list type)a
+  @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
+  @facade_kinds ~w(prim entity)a
+  @scalar_types ~w(string boolean integer pos_integer non_neg_integer map)a
 
   @typedoc "Нормализованная спека значения поля."
-  @type spec :: {:prim, module()}
+  @type spec ::
+          {:prim, module()}
+          | {:enum, module()}
+          | {:entity, module()}
+          | {:list, spec()}
+          | {:type, atom()}
 
-  @typedoc "Нормализованное поле: имя, спека значения, признак необязательности, wire-ключ."
-  @type field :: {atom(), spec(), boolean(), String.t()}
+  @typedoc "Значение `default:`: нет или wire-литерал."
+  @type default :: :none | {:default, term()}
+
+  @typedoc "Нормализованное поле: имя, спека значения, признак необязательности, wire-ключ, `default:`."
+  @type field :: {atom(), spec(), boolean(), String.t(), default()}
 
   # ===== спека =====
 
   @doc false
-  @spec fields!(module(), term(), [module()]) :: [{module(), [field()]}]
+  @spec fields!(module(), term(), [module()], boolean()) :: [{module(), [field()]}]
 
-  def fields!(_plugin, nil, _types), do: []
+  def fields!(_plugin, nil, _types, _loadable?), do: []
 
-  def fields!(plugin, fields, types) when is_list(fields) do
+  def fields!(plugin, fields, types, loadable?) when is_list(fields) do
     pairs = Enum.map(fields, &pair!(plugin, &1))
     check_types!(plugin, Enum.map(pairs, &elem(&1, 0)), types)
 
-    Enum.map(pairs, fn {type, spec} -> {type, type_fields!(plugin, type, spec)} end)
+    Enum.map(pairs, fn {type, spec} -> {type, type_fields!(plugin, type, spec, loadable?)} end)
   end
 
-  def fields!(plugin, other, _types) do
+  def fields!(plugin, other, _types, _loadable?) do
     raise CompileError,
       description: "#{@label} #{inspect(plugin)}: fields: — список пар {Тип, спека}, задано #{inspect(other)}"
   end
@@ -66,7 +88,7 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
-  defp type_fields!(plugin, type, spec) do
+  defp type_fields!(plugin, type, spec, loadable?) do
     where = "#{@label} #{inspect(plugin)}: fields:, тип #{inspect(type)}"
 
     if not Keyword.keyword?(spec) or spec == [] do
@@ -74,14 +96,14 @@ defmodule Core.Codec.Plugin.Fields do
     end
 
     check_unique!(Keyword.keys(spec), "#{where}: поля повторяются")
-    fields = Enum.map(spec, fn {name, opts} -> field!(name, opts, "#{where}, поле #{name}") end)
+    fields = Enum.map(spec, fn {name, opts} -> field!(name, opts, loadable?, "#{where}, поле #{name}") end)
     check_struct!(type, Keyword.keys(spec), where)
     check_unique!(Enum.map(fields, &elem(&1, 3)), "#{where}: wire-ключи повторяются")
 
     fields
   end
 
-  defp field!(name, opts, where) do
+  defp field!(name, opts, loadable?, where) do
     if not Keyword.keyword?(opts) do
       raise CompileError, description: "#{where} — keyword-спека"
     end
@@ -91,18 +113,57 @@ defmodule Core.Codec.Plugin.Fields do
       unknown -> raise CompileError, description: "#{where}: неизвестные ключи #{inspect(unknown)}"
     end
 
-    {name, spec!(opts, where), optional!(opts, where), wire!(name, opts, where)}
+    optional? = optional!(opts, where)
+
+    {name, spec!(opts, where), optional?, wire!(name, opts, where), default!(opts, optional?, loadable?, where)}
   end
 
   defp spec!(opts, where) do
     case Keyword.take(opts, @kind_keys) do
-      [prim: mod] ->
-        FieldCheck.prim!(mod, where)
-        {:prim, mod}
+      [{kind, value}] ->
+        kind_spec!(kind, value, where)
 
       other ->
-        raise CompileError, description: "#{where}: нужен ровно один из prim:, задано #{inspect(other)}"
+        raise CompileError,
+          description: "#{where}: нужен ровно один из prim:/enum:/entity:/list:/type:, задано #{inspect(other)}"
     end
+  end
+
+  defp kind_spec!(:prim, mod, where) do
+    FieldCheck.prim!(mod, where)
+    {:prim, mod}
+  end
+
+  defp kind_spec!(:enum, mod, where) do
+    FieldCheck.enum!(mod, where)
+    {:enum, mod}
+  end
+
+  defp kind_spec!(:entity, mod, where) do
+    check_module_struct!(mod, where)
+    {:entity, mod}
+  end
+
+  defp kind_spec!(:list, inner, where) do
+    if not Keyword.keyword?(inner) do
+      raise CompileError, description: "#{where}: list: — keyword-спека элемента"
+    end
+
+    if Keyword.has_key?(inner, :optional) do
+      raise CompileError, description: "#{where}: optional: задаётся у самого поля, не в list:"
+    end
+
+    case Keyword.keys(inner) -- @kind_keys do
+      [] -> {:list, spec!(inner, where)}
+      unknown -> raise CompileError, description: "#{where}: list: — неизвестные ключи #{inspect(unknown)}"
+    end
+  end
+
+  defp kind_spec!(:type, type, _where) when type in @scalar_types, do: {:type, type}
+
+  defp kind_spec!(:type, type, where) do
+    raise CompileError,
+      description: "#{where}: неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@scalar_types)}"
   end
 
   defp optional!(opts, where) do
@@ -120,12 +181,24 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
-  defp check_struct!(type, names, where) do
-    FieldCheck.module!(type, where)
+  defp default!(opts, optional?, loadable?, where) do
+    case {Keyword.fetch(opts, :default), optional?, loadable?} do
+      {:error, _optional?, _loadable?} ->
+        :none
 
-    if not function_exported?(type, :__struct__, 0) do
-      raise CompileError, description: "#{where}: #{inspect(type)} не struct"
+      {{:ok, _default}, true, _loadable?} ->
+        raise CompileError, description: "#{where}: default: и optional: true — два ответа на один nil"
+
+      {{:ok, _default}, false, false} ->
+        raise CompileError, description: "#{where}: default: при loadable: false не применяется — загрузки нет"
+
+      {{:ok, default}, false, true} ->
+        {:default, default}
     end
+  end
+
+  defp check_struct!(type, names, where) do
+    check_module_struct!(type, where)
 
     struct_keys = Map.keys(type.__struct__()) -- @skipped_keys
 
@@ -138,6 +211,14 @@ defmodule Core.Codec.Plugin.Fields do
           description:
             "#{where}: спека расходится со struct — поля struct без спеки #{inspect(Enum.sort(missing))}, " <>
               "поля спеки без struct #{inspect(Enum.sort(extra))}"
+    end
+  end
+
+  defp check_module_struct!(mod, where) do
+    FieldCheck.module!(mod, where)
+
+    if not function_exported?(mod, :__struct__, 0) do
+      raise CompileError, description: "#{where}: #{inspect(mod)} не struct"
     end
   end
 
@@ -164,8 +245,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   def dump_guard(fields) do
     fields
-    |> Enum.filter(fn {_name, _spec, optional?, _wire} -> optional? end)
-    |> Enum.map(&optional_guard/1)
+    |> Enum.flat_map(&field_guard/1)
     |> Enum.reduce(quote(generated: true, do: is_atom(unquote(codec_var()))), fn guard, acc ->
       quote(generated: true, do: unquote(acc) and unquote(guard))
     end)
@@ -175,29 +255,75 @@ defmodule Core.Codec.Plugin.Fields do
   @spec dump_body([field()]) :: Macro.t()
 
   def dump_body(fields) do
-    pairs = Enum.map(fields, fn {name, _spec, optional?, wire} -> {wire, dump_value(var(name), optional?)} end)
+    pairs =
+      Enum.map(fields, fn {name, spec, optional?, wire, _default} -> {wire, dump_value(spec, var(name), optional?)} end)
 
     quote(generated: true, do: %{unquote_splicing(pairs)})
   end
 
   # ---
 
-  defp dump_pattern({name, {:prim, mod}, false, _wire}),
+  defp dump_pattern({name, {kind, mod}, false, _wire, _default}) when kind in @facade_kinds,
     do: {name, quote(generated: true, do: %unquote(mod){} = unquote(var(name)))}
 
-  defp dump_pattern({name, _spec, true, _wire}), do: {name, var(name)}
+  defp dump_pattern({name, _spec, _optional?, _wire, _default}), do: {name, var(name)}
 
-  defp optional_guard({name, {:prim, mod}, true, _wire}) do
-    quote(generated: true, do: is_nil(unquote(var(name))) or is_struct(unquote(var(name)), unquote(mod)))
+  defp field_guard({_name, {kind, _mod}, false, _wire, _default}) when kind in @facade_kinds, do: []
+
+  defp field_guard({name, spec, false, _wire, _default}), do: [value_guard(spec, var(name))]
+
+  defp field_guard({name, spec, true, _wire, _default}) do
+    value = var(name)
+
+    [quote(generated: true, do: is_nil(unquote(value)) or unquote(value_guard(spec, value)))]
   end
 
-  defp dump_value(value, false), do: quote(generated: true, do: unquote(codec_var()).dump(unquote(value)))
+  defp value_guard({kind, mod}, value) when kind in @facade_kinds,
+    do: quote(generated: true, do: is_struct(unquote(value), unquote(mod)))
 
-  defp dump_value(value, true) do
-    quote generated: true do
-      if is_nil(unquote(value)), do: nil, else: unquote(codec_var()).dump(unquote(value))
+  defp value_guard({:enum, _mod}, value),
+    do: quote(generated: true, do: is_atom(unquote(value)) and not is_nil(unquote(value)))
+
+  defp value_guard({:list, _inner}, value), do: quote(generated: true, do: is_list(unquote(value)))
+  defp value_guard({:type, :string}, value), do: quote(generated: true, do: is_binary(unquote(value)))
+  defp value_guard({:type, :boolean}, value), do: quote(generated: true, do: is_boolean(unquote(value)))
+  defp value_guard({:type, :integer}, value), do: quote(generated: true, do: is_integer(unquote(value)))
+  defp value_guard({:type, :map}, value), do: quote(generated: true, do: is_map(unquote(value)))
+
+  defp value_guard({:type, :pos_integer}, value),
+    do: quote(generated: true, do: is_integer(unquote(value)) and unquote(value) > 0)
+
+  defp value_guard({:type, :non_neg_integer}, value),
+    do: quote(generated: true, do: is_integer(unquote(value)) and unquote(value) >= 0)
+
+  defp dump_value(spec, value, optional?) do
+    cond do
+      as_is?(spec) ->
+        value
+
+      optional? ->
+        quote(generated: true, do: if(is_nil(unquote(value)), do: nil, else: unquote(dump_expr(spec, value))))
+
+      true ->
+        dump_expr(spec, value)
     end
   end
+
+  defp dump_expr({kind, _mod}, value) when kind in @facade_kinds,
+    do: quote(generated: true, do: unquote(codec_var()).dump(unquote(value)))
+
+  defp dump_expr({:list, inner}, value) do
+    item = item_var()
+
+    quote(
+      generated: true,
+      do: Enum.map(unquote(value), fn unquote(item) -> unquote(dump_value(inner, item, false)) end)
+    )
+  end
+
+  defp as_is?({kind, _}) when kind in ~w(enum type)a, do: true
+  defp as_is?({:list, inner}), do: as_is?(inner)
+  defp as_is?({_kind, _mod}), do: false
 
   # ===== load =====
 
@@ -215,8 +341,8 @@ defmodule Core.Codec.Plugin.Fields do
   @spec load_body(module(), [field()]) :: Macro.t()
 
   def load_body(type, fields) do
-    steps = Enum.map(fields, &load_step/1)
-    pairs = Enum.map(fields, fn {name, _spec, _optional?, _wire} -> {name, var(name)} end)
+    steps = Enum.map(fields, &load_step(type, &1))
+    pairs = Enum.map(fields, fn {name, _spec, _optional?, _wire, _default} -> {name, var(name)} end)
 
     ok = quote(generated: true, do: {:ok, %unquote(type){unquote_splicing(pairs)}})
     error = quote(generated: true, do: ({:error, reason} -> {:error, reason}))
@@ -226,16 +352,58 @@ defmodule Core.Codec.Plugin.Fields do
 
   # ---
 
-  defp load_step({name, {:prim, mod}, optional?, wire}) do
-    raw = quote(generated: true, do: Core.Helper.Map.field(unquote(wire_var()), unquote(wire_key(wire))))
+  defp load_step(type, {name, spec, optional?, wire, default}) do
+    raw =
+      with_default(
+        quote(generated: true, do: Core.Helper.Map.field(unquote(wire_var()), unquote(wire_key(wire)))),
+        default
+      )
 
-    call =
-      if optional?,
-        do:
-          quote(generated: true, do: Core.Codec.Helper.load_optional(unquote(mod), unquote(raw), unquote(codec_var()))),
-        else: quote(generated: true, do: unquote(codec_var()).load(unquote(mod), unquote(raw)))
+    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(load_value(type, name, spec, raw, optional?)))
+  end
 
-    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(call))
+  defp with_default(raw, :none), do: raw
+
+  defp with_default(raw, {:default, default}) do
+    quote generated: true do
+      case unquote(raw) do
+        nil -> unquote(Macro.escape(default))
+        raw -> raw
+      end
+    end
+  end
+
+  defp load_value(_type, _name, {:type, _scalar}, raw, _optional?), do: quote(generated: true, do: {:ok, unquote(raw)})
+
+  defp load_value(_type, _name, {kind, mod}, raw, true) when kind in @facade_kinds,
+    do: quote(generated: true, do: Core.Codec.Helper.load_optional(unquote(mod), unquote(raw), unquote(codec_var())))
+
+  defp load_value(_type, _name, {:enum, mod}, raw, true),
+    do: quote(generated: true, do: unquote(mod).cast_optional(unquote(raw)))
+
+  defp load_value(type, name, spec, raw, true) do
+    quote generated: true do
+      case unquote(raw) do
+        nil -> {:ok, nil}
+        raw -> unquote(load_value(type, name, spec, quote(generated: true, do: raw), false))
+      end
+    end
+  end
+
+  defp load_value(_type, _name, {kind, mod}, raw, false) when kind in @facade_kinds,
+    do: quote(generated: true, do: unquote(codec_var()).load(unquote(mod), unquote(raw)))
+
+  defp load_value(_type, _name, {:enum, mod}, raw, false),
+    do: quote(generated: true, do: unquote(mod).cast(unquote(raw)))
+
+  defp load_value(type, name, {:list, inner}, raw, false) do
+    item = item_var()
+
+    quote generated: true do
+      Core.Codec.Plugin.Fields.load_list(unquote(type), unquote(name), unquote(raw), fn unquote(item) ->
+        unquote(load_value(type, name, inner, item, false))
+      end)
+    end
   end
 
   # `field/2` читает и атомарный, и строковый ключ, но принимает атом: wire-ключ — литерал
@@ -245,10 +413,28 @@ defmodule Core.Codec.Plugin.Fields do
 
   defp wire_var, do: Macro.var(:wire, __MODULE__)
 
+  # ===== загрузка списка =====
+
+  @doc false
+  @spec load_list(module(), atom(), term(), (term() -> Result.t(term()))) :: Result.t([term()])
+
+  def load_list(_type, _name, raw, fun) when is_list(raw) and is_function(fun, 1), do: Result.traverse(raw, fun)
+
+  def load_list(type, name, _raw, _fun) when is_atom(type) and is_atom(name) do
+    {:error,
+     Error.domain(type,
+       code: :invalid_value,
+       ns: :codec,
+       message: "#{inspect(type)}: поле #{name} — ожидается список"
+     )}
+  end
+
   # ===== общее =====
 
   # Поля — в своём контексте: поле с именем `codec` или `wire` не перекрывает аргумент функции.
   defp var(name), do: Macro.var(name, Core.Codec.Plugin.Fields.Value)
 
   defp codec_var, do: Macro.var(:codec, __MODULE__)
+
+  defp item_var, do: Macro.var(:item, __MODULE__)
 end

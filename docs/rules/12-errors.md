@@ -290,6 +290,9 @@ json(conn, Response.error(code, messages))
 - Репозитории (`Repo.Pg`): `not_found` / `version_mismatch` / … →
   `errors_mod.domain(behaviour, code, detail)`; незамапленный constraint и провал `changeset/2` →
   `%Error{kind: :app}` (`ns: :repo`, `code: :write_failed`) — см. `13-repos.md`.
+- Плагин по полям (`use Core.Codec.Plugin, fields:`): поле `list:` не списком при загрузке →
+  `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`, `module` — тип плагина); ошибки
+  Prim и `cast` enum — как есть (`11-domain.md`, «Плагин по полям»).
 - Хранилище событий (`Core.Es.Store.append`): отказ записи → `version_mismatch` →
   `errors_mod.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual, source:})`;
   код и `behaviour` задаёт write-репозиторий (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не
@@ -337,6 +340,7 @@ json(conn, Response.error(code, messages))
 | `Core.Outbox.Delivery.Mq` | `:outbox` | `:app` | `:encode_payload_failed` |
 | `Core.Security.Secret` | `:secret` | `:app` | `:encrypt_failed`, `:decrypt_failed` |
 | `Core.Repo.Pg` | `:repo` | `:app` | `:write_failed` |
+| `Core.Codec.Plugin.Fields` (модуль ошибки — тип плагина по полям) | `:codec` | `:domain` | `:invalid_value` |
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
 | `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |

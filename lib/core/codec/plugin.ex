@@ -30,11 +30,16 @@ defmodule Core.Codec.Plugin do
       {Item,
        id: [prim: Item.ID],
        name: [prim: Item.Name, wire: "title"],
-       note: [prim: Item.Note, optional: true]}
+       note: [prim: Item.Note, optional: true],
+       status: [enum: Item.Status, default: "new"],
+       tags: [list: [entity: Item.Tag]]}
     ]
   ```
 
-  Поле — `prim:` (любой Prim), `optional: true`, `wire: "ключ"` (по умолчанию имя поля строкой).
+  Поле — ровно один вид: `prim:` (любой Prim), `enum:` (`Core.Enum`), `entity:` (struct фасада),
+  `list:` (спека элемента), `type:` (скаляр `Core.View` или `:map`); плюс `optional: true`,
+  `wire: "ключ"` (по умолчанию имя поля строкой) и `default:` — wire-литерал вместо отсутствующего
+  ключа или `nil` при загрузке.
   Ключи спеки сверяются с полями struct без `__struct__` и `events`; расхождение — `CompileError`.
   `load/3` собирает struct литералом; первая ошибка поля — итог, лишние ключи игнорируются.
   """
@@ -79,7 +84,12 @@ defmodule Core.Codec.Plugin do
       @codec_types Core.Codec.Plugin.Opts.types!(opts)
       @codec_loadable Keyword.get(opts, :loadable, true)
       @codec_union Core.Codec.Plugin.Opts.union!(opts, @codec_loadable)
-      @codec_fields Core.Codec.Plugin.Fields.fields!(__MODULE__, Keyword.get(opts, :fields), @codec_types)
+      @codec_fields Core.Codec.Plugin.Fields.fields!(
+                      __MODULE__,
+                      Keyword.get(opts, :fields),
+                      @codec_types,
+                      @codec_loadable
+                    )
 
       @doc false
       @spec __codec_types__() :: [module()]
