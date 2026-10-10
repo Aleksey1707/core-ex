@@ -66,6 +66,24 @@ defmodule Core.Codec.Plugin.Fields do
       description: "#{@label} #{inspect(plugin)}: fields: — список пар {Тип, спека}, задано #{inspect(other)}"
   end
 
+  @doc false
+  @spec payload_fields!(module(), term()) :: [field()]
+
+  def payload_fields!(payload, spec) when is_atom(payload) do
+    where = "Es.Event.Payload #{inspect(payload)}: fields:"
+
+    case defaults(spec) do
+      [] ->
+        spec_fields!(spec, true, where)
+
+      names ->
+        raise CompileError,
+          description:
+            "#{where} — default: у нагрузки события нет (поля #{inspect(names)}): " <>
+              "развитие события — новый тег и апкаст"
+    end
+  end
+
   # ---
 
   defp pair!(_plugin, {type, spec}) when is_atom(type) and not is_nil(type), do: {type, spec}
@@ -88,16 +106,27 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
+  defp defaults(spec) do
+    if Keyword.keyword?(spec),
+      do: for({name, opts} <- spec, Keyword.keyword?(opts), Keyword.has_key?(opts, :default), do: name),
+      else: []
+  end
+
   defp type_fields!(plugin, type, spec, loadable?) do
     where = "#{@label} #{inspect(plugin)}: fields:, тип #{inspect(type)}"
+    fields = spec_fields!(spec, loadable?, where)
+    check_struct!(type, Keyword.keys(spec), where)
 
+    fields
+  end
+
+  defp spec_fields!(spec, loadable?, where) do
     if not Keyword.keyword?(spec) or spec == [] do
       raise CompileError, description: "#{where} — непустой keyword-список полей"
     end
 
     check_unique!(Keyword.keys(spec), "#{where}: поля повторяются")
     fields = Enum.map(spec, fn {name, opts} -> field!(name, opts, loadable?, "#{where}, поле #{name}") end)
-    check_struct!(type, Keyword.keys(spec), where)
     check_unique!(Enum.map(fields, &elem(&1, 3)), "#{where}: wire-ключи повторяются")
 
     fields
@@ -259,13 +288,8 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec dump_guard([field()]) :: Macro.t()
 
-  def dump_guard(fields) do
-    fields
-    |> Enum.flat_map(&field_guard/1)
-    |> Enum.reduce(quote(generated: true, do: is_atom(unquote(codec_var()))), fn guard, acc ->
-      quote(generated: true, do: unquote(acc) and unquote(guard))
-    end)
-  end
+  def dump_guard(fields),
+    do: and_guards([quote(generated: true, do: is_atom(unquote(codec_var()))) | field_guards(fields)])
 
   @doc false
   @spec dump_body([field()]) :: Macro.t()
@@ -277,7 +301,37 @@ defmodule Core.Codec.Plugin.Fields do
     quote(generated: true, do: %{unquote_splicing(pairs)})
   end
 
+  @doc false
+  @spec new_args([field()]) :: [Macro.t()]
+
+  def new_args(fields), do: Enum.map(fields, &elem(dump_pattern(&1), 1))
+
+  @doc false
+  @spec new_guard([field()]) :: Macro.t()
+
+  def new_guard(fields) do
+    case field_guards(fields) do
+      [] -> true
+      guards -> and_guards(guards)
+    end
+  end
+
+  @doc false
+  @spec new_body(module(), [field()]) :: Macro.t()
+
+  def new_body(type, fields) do
+    pairs = Enum.map(fields, fn {name, _spec, _optional?, _wire, _default} -> {name, var(name)} end)
+
+    quote(generated: true, do: %unquote(type){unquote_splicing(pairs)})
+  end
+
   # ---
+
+  defp field_guards(fields), do: Enum.flat_map(fields, &field_guard/1)
+
+  defp and_guards([first | rest]) do
+    Enum.reduce(rest, first, fn guard, acc -> quote(generated: true, do: unquote(acc) and unquote(guard)) end)
+  end
 
   defp dump_pattern({name, {kind, mod}, false, _wire, _default}) when kind in @facade_kinds,
     do: {name, quote(generated: true, do: %unquote(mod){} = unquote(var(name)))}
@@ -340,6 +394,25 @@ defmodule Core.Codec.Plugin.Fields do
   defp as_is?({kind, _}) when kind in ~w(enum type)a, do: true
   defp as_is?({:list, inner}), do: as_is?(inner)
   defp as_is?({_kind, _mod}), do: false
+
+  # ===== тип =====
+
+  @doc false
+  @spec typespec([field()]) :: keyword(Macro.t())
+
+  def typespec(fields) do
+    Enum.map(fields, fn
+      {name, spec, false, _wire, _default} -> {name, spec_type(spec)}
+      {name, spec, true, _wire, _default} -> {name, quote(do: unquote(spec_type(spec)) | nil)}
+    end)
+  end
+
+  # ---
+
+  defp spec_type({kind, mod}) when kind in ~w(prim enum entity)a, do: quote(do: unquote(mod).t())
+  defp spec_type({:list, inner}), do: quote(do: [unquote(spec_type(inner))])
+  defp spec_type({:type, :string}), do: quote(do: String.t())
+  defp spec_type({:type, scalar}), do: quote(do: unquote(scalar)())
 
   # ===== load =====
 

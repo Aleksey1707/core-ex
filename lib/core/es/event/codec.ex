@@ -20,6 +20,13 @@ defmodule Core.Es.Event.Codec do
   События без нагрузки (`payload: nil` у `use Es.Event`) клоуз не требуют вовсе —
   билдер знает о них из `__es_payload__/0`.
 
+  ## Выводимые клаузы нагрузки
+
+  Для события с нагрузкой по полям (`use Core.Es.Event.Payload`) кодек сам генерирует клаузы
+  `dump_payload/2` / `load_payload/3` по её спеке — тем же генератором, что у плагина по полям
+  (`Core.Codec.Plugin.Fields`). Выведенные клаузы стоят перед ручными: ручная клауза для такого
+  события — предупреждение «never match» на её строке. Остальные нагрузки — ручные клаузы.
+
   ## Проверки нагрузки
 
   Сборка кодека проверяет колбэки нагрузки по `tags:`: на каждое событие с нагрузкой макрос
@@ -88,7 +95,7 @@ defmodule Core.Es.Event.Codec do
   кодека — `CompileError`. Выведенный Prim агрегата кодек отдаёт тем же `__es_aggregate_id__/0`.
 
   Макрос занимает в вызывающем модуле имена `@es_event`, `@es_type`, `@es_aggregate_id`, `@es_by`,
-  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_use_line`, имена
+  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_use_line`, имена
   функций-проверок нагрузки и приватные `es_dump_payload/2`, `es_load_payload/3`.
   """
 
@@ -263,6 +270,10 @@ defmodule Core.Es.Event.Codec do
         defp es_load_payload(_mod, _wire, _codec), do: {:ok, nil}
       end
 
+      @es_derived Core.Es.Event.Codec.derived(@es_tag_by_mod)
+
+      unquote(derived_clauses())
+
       @before_compile Core.Es.Event.Codec
       @es_use_line unquote(__CALLER__.line)
     end
@@ -279,6 +290,8 @@ defmodule Core.Es.Event.Codec do
         &ensure_defined!(env.module, &1, "у кодека есть события с нагрузкой", env)
       )
     end
+
+    warn_never_match(env, Module.get_attribute(env.module, :es_derived))
 
     if map_size(upcasts) > 0,
       do: ensure_defined!(env.module, {:upcast, 2}, "у кодека непустые upcasts:", env)
@@ -368,6 +381,28 @@ defmodule Core.Es.Event.Codec do
         raise CompileError,
           description: "#{@label}: события кодека объявлены с разными #{fun}: #{inspect(pairs)}"
     end
+  end
+
+  # События кодека, чьи клаузы нагрузки кодек выводит сам: нагрузка по полям несёт свою спеку,
+  # и ручной код для неё был бы вторым источником wire.
+  @doc false
+  @spec derived(%{optional(module()) => String.t()}) :: [{module(), module(), [Core.Codec.Plugin.Fields.field()]}]
+
+  def derived(tags) when is_map(tags) do
+    for event <- Enum.sort(Map.keys(tags)),
+        payload = event.__es_payload__(),
+        not is_nil(payload),
+        derived_payload?(payload),
+        do: {event, payload, payload.__es_payload_fields__()}
+  end
+
+  @doc false
+  @spec dump_payload_args(module(), module(), [Core.Codec.Plugin.Fields.field()]) :: [Macro.t()]
+
+  def dump_payload_args(event, payload, fields) do
+    [pattern, codec] = Core.Codec.Plugin.Fields.dump_args(payload, fields)
+
+    [quote(generated: true, do: %unquote(event){payload: unquote(pattern)}), codec]
   end
 
   @doc "Несёт ли нагрузку хоть одно событие кодека."
@@ -567,6 +602,49 @@ defmodule Core.Es.Event.Codec do
 
       true ->
         :ok
+    end
+  end
+
+  defp derived_payload?(payload) do
+    Code.ensure_compiled!(payload)
+    function_exported?(payload, :__es_payload_fields__, 0)
+  end
+
+  # Клаузы `unquote` вставляют фрагментами: события известны только в теле модуля (`@es_derived`).
+  defp derived_clauses do
+    quote unquote: false do
+      for {event, payload, fields} <- @es_derived do
+        @impl true
+        def dump_payload(unquote_splicing(Core.Es.Event.Codec.dump_payload_args(event, payload, fields)))
+            when unquote(Core.Codec.Plugin.Fields.dump_guard(fields)),
+            do: unquote(Core.Codec.Plugin.Fields.dump_body(fields))
+      end
+
+      for {event, payload, fields} <- @es_derived do
+        @impl true
+        def load_payload(unquote_splicing(Core.Codec.Plugin.Fields.load_args(event)))
+            when unquote(Core.Codec.Plugin.Fields.load_guard()),
+            do: unquote(Core.Codec.Plugin.Fields.load_body(payload, fields))
+      end
+    end
+  end
+
+  # Выведенные клаузы встают первыми, поэтому ручная клауза для такого события недостижима для
+  # валидной нагрузки и молча ловила бы только невалидную.
+  defp warn_never_match(env, derived) do
+    events = Enum.map(derived, &elem(&1, 0))
+
+    for {fun, form} <- [{{:dump_payload, 2}, :struct}, {{:load_payload, 3}, :module}],
+        {line, event} <- Core.Codec.Plugin.Opts.manual_targets(env.module, fun, length(derived), form),
+        event in events do
+      {name, arity} = fun
+
+      IO.warn(
+        "клауза never match: #{name}/#{arity} для #{inspect(event)} выводится по нагрузке " <>
+          inspect(event.__es_payload__()),
+        file: env.file,
+        line: line
+      )
     end
   end
 

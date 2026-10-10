@@ -38,6 +38,11 @@ defmodule ConsumerTest.Draft do
     # expect: incompatible types given to Consumer.Domain.Sales.Account.Event.Opened.draft/1
     do: Account.Event.Opened.draft(Account.Event.Renamed.Payload.new(name))
 
+  # B2f — нагрузка по полям: поле не того Prim в позиционном `new`
+  def b2f_fields_payload_wrong_kind(%Order.Amount{} = amount),
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Event.Renamed.Payload.new/1
+    do: Account.Event.Renamed.draft(Account.Event.Renamed.Payload.new(amount))
+
   # B3 — `draft/0` события с нагрузкой
   # expect: Consumer.Domain.Sales.Account.Event.Opened.draft/0 is undefined or private
   def b3_payload_event_without_payload, do: Account.Event.Opened.draft()

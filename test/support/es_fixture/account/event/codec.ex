@@ -1,5 +1,5 @@
 defmodule Core.EsFixture.Account.Event.Codec do
-  @moduledoc "Кодек событий счёта (плагин фасадов `Core.CodecFixture.*`)."
+  @moduledoc "Кодек событий счёта (плагин фасадов `Core.CodecFixture.*`); клаузы нагрузки `Renamed` выводятся."
 
   alias Core.Es
   alias Core.EsFixture.Account
@@ -30,9 +30,6 @@ defmodule Core.EsFixture.Account.Event.Codec do
   def dump_payload(%Event.Opened{payload: payload}, codec),
     do: %{"name" => codec.dump(payload.name)}
 
-  def dump_payload(%Event.Renamed{payload: payload}, codec),
-    do: %{"name" => codec.dump(payload.name)}
-
   @doc "Wire-нагрузка → `%Payload{}`."
   @spec load_payload(module(), term(), module()) ::
           {:ok, Event.Opened.Payload.t() | Event.Renamed.Payload.t()} | {:error, Core.Error.t()}
@@ -41,12 +38,6 @@ defmodule Core.EsFixture.Account.Event.Codec do
   def load_payload(Event.Opened, wire, codec) do
     with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do
       {:ok, Event.Opened.Payload.new(name)}
-    end
-  end
-
-  def load_payload(Event.Renamed, wire, codec) do
-    with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do
-      {:ok, Event.Renamed.Payload.new(name)}
     end
   end
 

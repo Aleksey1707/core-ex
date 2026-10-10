@@ -3,10 +3,7 @@ defmodule Consumer.Domain.Sales.Account.Event.Renamed do
   alias Consumer.Domain.Sales.Values.UserID
 
   defmodule Payload do
-    @enforce_keys ~w(name)a
-    defstruct @enforce_keys
-
-    def new(%Account.Name{} = name), do: %__MODULE__{name: name}
+    use Core.Es.Event.Payload, fields: [name: [prim: Account.Name]]
   end
 
   use Core.Es.Event,

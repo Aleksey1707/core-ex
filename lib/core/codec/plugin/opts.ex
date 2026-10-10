@@ -7,6 +7,8 @@ defmodule Core.Codec.Plugin.Opts do
   клаузой по `fields:` или ручной. Ручная клауза на тип из `fields:` — предупреждение.
   """
 
+  # ===== опции =====
+
   @doc false
   @spec types!(keyword()) :: [module()]
 
@@ -52,8 +54,8 @@ defmodule Core.Codec.Plugin.Opts do
 
   # ---
 
-  defp check_clauses!(env, fun, required, generated) do
-    manual = manual_targets(env.module, fun, length(generated))
+  defp check_clauses!(env, {name, _arity} = fun, required, generated) do
+    manual = manual_targets(env.module, fun, length(generated), if(name == :dump, do: :struct, else: :module))
 
     warn_never_match(env, fun, manual, generated)
     check_covered!(env, fun, required, generated, Enum.map(manual, &elem(&1, 1)))
@@ -86,31 +88,6 @@ defmodule Core.Codec.Plugin.Opts do
     end
   end
 
-  # Ручная клауза → {строка, тип первого аргумента или `:any`}; сгенерированные клаузы — первые,
-  # по одной на тип из `fields:`.
-  defp manual_targets(mod, {name, _arity} = fun, generated) do
-    case Module.get_definition(mod, fun) do
-      nil ->
-        []
-
-      {:v1, _kind, _meta, clauses} ->
-        clauses
-        |> Enum.drop(generated)
-        |> Enum.map(fn {meta, [arg | _rest], _guards, _body} -> {meta[:line], target(arg, name)} end)
-    end
-  end
-
-  defp target({:=, _meta, [left, right]}, name) do
-    case target(left, name) do
-      :any -> target(right, name)
-      type -> type
-    end
-  end
-
-  defp target({:%, _meta, [type, _fields]}, :dump) when is_atom(type), do: type
-  defp target(type, :load) when is_atom(type), do: type
-  defp target(_arg, _name), do: :any
-
   defp validate_modules!(types) do
     if not Enum.all?(types, &(is_atom(&1) and not is_nil(&1))) do
       raise CompileError, description: "types: ожидается непустой список модулей"
@@ -130,4 +107,38 @@ defmodule Core.Codec.Plugin.Opts do
   defp validate_union!(other, _loadable?) do
     raise CompileError, description: "union: ожидается модуль, получено: #{inspect(other)}"
   end
+
+  # ===== ручные клаузы =====
+
+  # Ручные клаузы функции → {строка, модуль первого аргумента или :any}. Сгенерированные клаузы —
+  # первые `generated`, их порождает `use`. `form` — как первый аргумент называет модуль:
+  # `:struct` — паттерном `%Mod{}`, `:module` — литералом.
+  @doc false
+  @spec manual_targets(module(), {atom(), arity()}, non_neg_integer(), :struct | :module) ::
+          [{non_neg_integer() | nil, module() | :any}]
+
+  def manual_targets(mod, fun, generated, form) do
+    case Module.get_definition(mod, fun) do
+      nil ->
+        []
+
+      {:v1, _kind, _meta, clauses} ->
+        clauses
+        |> Enum.drop(generated)
+        |> Enum.map(fn {meta, [arg | _rest], _guards, _body} -> {meta[:line], target(arg, form)} end)
+    end
+  end
+
+  # ---
+
+  defp target({:=, _meta, [left, right]}, form) do
+    case target(left, form) do
+      :any -> target(right, form)
+      type -> type
+    end
+  end
+
+  defp target({:%, _meta, [type, _fields]}, :struct) when is_atom(type), do: type
+  defp target(type, :module) when is_atom(type), do: type
+  defp target(_arg, _form), do: :any
 end

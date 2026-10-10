@@ -1,5 +1,5 @@
 defmodule Consumer.Domain.Sales.Account.Event.Codec do
-  @moduledoc "Кодек с событиями с нагрузкой и без и с `upcasts:`."
+  @moduledoc "Кодек с событиями с нагрузкой и без, с `upcasts:` и с нагрузкой по полям `Renamed`."
 
   alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.Account.Event
@@ -22,19 +22,10 @@ defmodule Consumer.Domain.Sales.Account.Event.Codec do
   def dump_payload(%Event.Opened{payload: %Event.Opened.Payload{} = payload}, codec),
     do: %{"name" => codec.dump(payload.name)}
 
-  def dump_payload(%Event.Renamed{payload: %Event.Renamed.Payload{} = payload}, codec),
-    do: %{"name" => codec.dump(payload.name)}
-
   @impl true
   def load_payload(Event.Opened, wire, codec) do
     with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do
       {:ok, Event.Opened.Payload.new(name)}
-    end
-  end
-
-  def load_payload(Event.Renamed, wire, codec) do
-    with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do
-      {:ok, Event.Renamed.Payload.new(name)}
     end
   end
 

@@ -115,6 +115,30 @@ defmodule ConsumerTest.BadFieldsCodec do
   end
 end
 
+defmodule ConsumerTest.BadDerivedCodec do
+  @moduledoc "Кодек с ручными клаузами для события с нагрузкой по полям; в фасад не входит."
+
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Account.Event
+
+  use Core.Es.Event.Codec,
+    event: Event,
+    type: "bad_derived_codec",
+    tags: %{Event.Renamed => "bad_derived_codec.renamed"}
+
+  # H10 — ручные клаузы для события, чьи клаузы нагрузки выводятся по полям
+  # expect: клауза never match
+  def dump_payload(%Event.Renamed{payload: %Event.Renamed.Payload{} = payload}, codec),
+    do: %{"name" => codec.dump(payload.name)}
+
+  # expect: клауза never match
+  def load_payload(Event.Renamed, wire, codec) do
+    with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do
+      {:ok, Event.Renamed.Payload.new(name)}
+    end
+  end
+end
+
 defmodule ConsumerTest.Codec do
   @moduledoc "Кодек событий напрямую и фасад Codec."
 
