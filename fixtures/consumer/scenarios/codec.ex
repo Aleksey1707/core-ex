@@ -151,6 +151,19 @@ defmodule ConsumerTest.Codec do
   # expect: incompatible types given to Consumer.Codec.Internal.dump/1
   def h4_dump_not_struct, do: InCodec.dump("not a struct")
 
+  # H7 — опечатка в поле результата `load/2` плагина по полям
+  def h7_fields_load_typo(data) do
+    {:ok, profile} = InCodec.load(Account.Profile, data)
+    # expect: unknown key .nmae
+    profile.nmae
+  end
+
+  # H8 — поле не того Prim в `dump/2` плагина по полям; через `InCodec.dump/1` поля struct до головы
+  # плагина не доходят, и там то же значение — `FunctionClauseError` при исполнении
+  def h8_fields_dump_wrong_prim(%Account.Name{} = name),
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Codec.dump/2
+    do: Account.Profile.Codec.dump(%Account.Profile{id: name, name: name}, InCodec)
+
   # H6 — команда в `dump/1` фасада: не Prim и не тип плагина
   def h6_dump_command(%Account.Cmd.Open{} = command),
     # expect: incompatible types given to Consumer.Codec.Internal.dump/1

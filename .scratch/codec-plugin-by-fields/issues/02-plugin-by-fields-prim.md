@@ -1,6 +1,6 @@
 # 02: Трассирующий тикет — плагин по полям с `prim:`
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 01.
 
@@ -9,24 +9,24 @@
 `InCodec.load(Type, wire)` — `{:ok, %Type{}}` или первую ошибку поля. Сборка сверяет спеку со struct. Спека —
 `../spec.md`, «Спека полей плагина», «`use Core.Codec.Plugin, fields:`»; ADR-0056.
 
-- [ ] Опция `fields:` у `use Core.Codec.Plugin`: список пар `{Type, spec}`; ключ вне `types:` или повтор типа —
+- [x] Опция `fields:` у `use Core.Codec.Plugin`: список пар `{Type, spec}`; ключ вне `types:` или повтор типа —
       `CompileError`.
-- [ ] Спека плагина: `prim:` (любой Prim, включая composite, кастомный kind и sensitive), `optional:`, `wire:`
+- [x] Спека плагина: `prim:` (любой Prim, включая composite, кастомный kind и sensitive), `optional:`, `wire:`
       (строка; по умолчанию имя поля строкой); не Prim в `prim:` и неизвестный ключ — `CompileError` с именем
       плагина, типа и поля.
-- [ ] Ключи спеки строго равны полям struct без `__struct__` и `events`; расхождение в любую сторону —
+- [x] Ключи спеки строго равны полям struct без `__struct__` и `events`; расхождение в любую сторону —
       `CompileError` со списком лишних и недостающих.
-- [ ] `dump/2`: голова закрывает struct и каждое поле `%Prim{}` (с `nil` при `optional:`), код в
+- [x] `dump/2`: голова закрывает struct и каждое поле `%Prim{}` (с `nil` при `optional:`), код в
       `quote generated: true`; значения — `codec.dump/1`.
-- [ ] `load/3`: чтение через `field/2` (строковый и атомарный ключ), `codec.load(Prim, raw)`, первая ошибка — итог,
+- [x] `load/3`: чтение через `field/2` (строковый и атомарный ключ), `codec.load(Prim, raw)`, первая ошибка — итог,
       лишние ключи игнорируются, struct собирается литералом; результат сужен до `{:ok, %Type{}} | {:error, _}`.
-- [ ] Плагин, все типы которого объявлены по полям, не требует ручных `dump/2` / `load/3`.
-- [ ] Тесты фасада: round-trip, `optional:` (`nil` и отсутствующий ключ), чтение по `wire:`, первая ошибка, игнор
+- [x] Плагин, все типы которого объявлены по полям, не требует ручных `dump/2` / `load/3`.
+- [x] Тесты фасада: round-trip, `optional:` (`nil` и отсутствующий ключ), чтение по `wire:`, первая ошибка, игнор
       лишних ключей.
-- [ ] Тесты сборки (`Code.eval_quoted`): поле struct без спеки, поле спеки без struct, ключ вне `types:`, не Prim.
-- [ ] `fixtures/consumer`: плагин по полям без предупреждений; `# expect:` на опечатку в поле результата
+- [x] Тесты сборки (`Code.eval_quoted`): поле struct без спеки, поле спеки без struct, ключ вне `types:`, не Prim.
+- [x] `fixtures/consumer`: плагин по полям без предупреждений; `# expect:` на опечатку в поле результата
       `InCodec.load` и на поле не того Prim в `dump`.
-- [ ] `docs/rules/11-domain.md`, «Codec (Prim и Entity)»: опция `fields:`, `prim:` / `optional:` / `wire:`, сверка
+- [x] `docs/rules/11-domain.md`, «Codec (Prim и Entity)»: опция `fields:`, `prim:` / `optional:` / `wire:`, сверка
       со struct, загрузка литералом; `@moduledoc` `Core.Codec.Plugin`.
-- [ ] `CHANGELOG.md`, «Не выпущено»: «Новое» — плагин по полям; «Изменения контракта макросов» — опция `fields:`.
-- [ ] `make` зелёный, включая `consumer-check`.
+- [x] `CHANGELOG.md`, «Не выпущено»: «Новое» — плагин по полям; «Изменения контракта макросов» — опция `fields:`.
+- [x] `make` зелёный, включая `consumer-check`.
