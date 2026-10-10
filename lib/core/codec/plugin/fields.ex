@@ -31,7 +31,7 @@ defmodule Core.Codec.Plugin.Fields do
   @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
   @facade_kinds ~w(prim entity)a
-  @scalar_types ~w(string boolean integer pos_integer non_neg_integer map)a
+  @scalar_types FieldCheck.scalar_types() ++ ~w(map)a
 
   @typedoc "Нормализованная спека значения поля."
   @type spec ::
@@ -113,9 +113,10 @@ defmodule Core.Codec.Plugin.Fields do
       unknown -> raise CompileError, description: "#{where}: неизвестные ключи #{inspect(unknown)}"
     end
 
+    spec = spec!(opts, where)
     optional? = optional!(opts, where)
 
-    {name, spec!(opts, where), optional?, wire!(name, opts, where), default!(opts, optional?, loadable?, where)}
+    {name, spec, optional?, wire!(name, opts, where), default!(opts, spec, optional?, loadable?, where)}
   end
 
   defp spec!(opts, where) do
@@ -181,7 +182,7 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
-  defp default!(opts, optional?, loadable?, where) do
+  defp default!(opts, spec, optional?, loadable?, where) do
     case {Keyword.fetch(opts, :default), optional?, loadable?} do
       {:error, _optional?, _loadable?} ->
         :none
@@ -193,9 +194,24 @@ defmodule Core.Codec.Plugin.Fields do
         raise CompileError, description: "#{where}: default: при loadable: false не применяется — загрузки нет"
 
       {{:ok, default}, false, true} ->
+        check_default!(spec, default, where)
         {:default, default}
     end
   end
+
+  # Загрузку Prim и сущности без фасада не повторить, а `cast` enum — чистая функция модуля:
+  # опечатка в `default:` всплыла бы только на строке, записанной до появления поля.
+  defp check_default!({:enum, mod}, default, where) do
+    case mod.cast(default) do
+      {:ok, _value} ->
+        :ok
+
+      {:error, _reason} ->
+        raise CompileError, description: "#{where}: default: #{inspect(default)} не загружается #{inspect(mod)}"
+    end
+  end
+
+  defp check_default!(_spec, _default, _where), do: :ok
 
   defp check_struct!(type, names, where) do
     check_module_struct!(type, where)

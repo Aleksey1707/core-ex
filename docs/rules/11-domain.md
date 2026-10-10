@@ -446,8 +446,9 @@ use Core.Codec.Plugin,
   записанный (через Prim, `cast` enum); дамп поля обычный. Так развивается строка jsonb
   state-stored агрегата: поле, добавленное в struct, читается из строк, записанных до него.
   `default:` есть только в плагине — нагрузка события развивается новым тегом и апкастом
-  (`14-events-outbox.md`). `default:` с `optional: true` (два ответа на один `nil`) и при
-  `loadable: false` (загрузки нет) — `CompileError`
+  (`14-events-outbox.md`). `default:` с `optional: true` (два ответа на один `nil`), при
+  `loadable: false` (загрузки нет) и у `enum:` вне значений enum (`cast` отказал) — `CompileError`;
+  `default:` прочих видов сборка не грузит — у неё нет фасада
 - Ключи спеки MUST совпадать с полями struct без `__struct__` и `events` — расхождение в любую
   сторону `CompileError` со списком лишних и недостающих: поле, добавленное в struct, не теряется в
   wire молча

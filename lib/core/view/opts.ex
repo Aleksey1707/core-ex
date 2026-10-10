@@ -12,7 +12,7 @@ defmodule Core.View.Opts do
   alias Core.Helper.FieldCheck
 
   @label "View"
-  @scalar_types ~w(string boolean integer pos_integer non_neg_integer)a
+  @scalar_types FieldCheck.scalar_types()
 
   @prim_type_asts %{
     uuid: quote(do: String.t()),

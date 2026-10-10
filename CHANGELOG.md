@@ -34,8 +34,8 @@
 - **`use Core.Codec.Plugin, fields: [{Type, spec}]`** — необязательная опция плагина по полям.
   Ключи — подмножество `types:`, повтор типа или ключ вне `types:` — `CompileError`; ошибка спеки
   (не Prim в `prim:`, не `Core.Enum` в `enum:`, не struct в `entity:`, неизвестный `type:`,
-  `optional:` внутри `list:`, `default:` с `optional: true` или при `loadable: false`, неизвестный
-  ключ, расхождение со struct) — `CompileError` с именем плагина, типа и поля. Тип из `fields:`
+  `optional:` внутри `list:`, `default:` с `optional: true` или при `loadable: false`, `default:`
+  у `enum:` вне значений enum, неизвестный ключ, расхождение со struct) — `CompileError` с именем плагина, типа и поля. Тип из `fields:`
   делает ручные `dump/2` / `load/3` необязательными. Плагины без `fields:` собираются как прежде.
 
 ## 0.12.0

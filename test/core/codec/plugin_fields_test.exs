@@ -332,6 +332,12 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
+    test "default: enum: вне значений enum — CompileError" do
+      assert_raise CompileError, ~r/поле a: default: "nwe" не загружается .*Status/, fn ->
+        compile_plugin(:DefaultEnum, a: [enum: Core.Codec.PluginFieldsTest.Status, default: "nwe"], b: [prim: Name])
+      end
+    end
+
     test "default: при loadable: false — CompileError" do
       assert_raise CompileError, ~r/поле a: default: при loadable: false/, fn ->
         compile_plugin(:DefaultDumpOnly, [a: [prim: Name, default: "x"], b: [prim: Name]], loadable: false)
