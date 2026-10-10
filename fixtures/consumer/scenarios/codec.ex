@@ -67,28 +67,54 @@ defmodule ConsumerTest.BadCodecPayloadNew do
   end
 end
 
+defmodule ConsumerTest.Shared do
+  @moduledoc "События с общим ручным модулем нагрузки: нагрузку-Prim кодек вывел бы сам; в фасад не входят."
+
+  alias ConsumerTest.Shared
+
+  defmodule Payload do
+    @enforce_keys ~w(note)a
+    defstruct @enforce_keys
+  end
+
+  defmodule Given do
+    use Core.Es.Event,
+      aggregate_id: Consumer.Domain.Sales.Grants.ID,
+      by: Consumer.Domain.Sales.Values.UserID,
+      payload: ConsumerTest.Shared.Payload
+  end
+
+  defmodule Taken do
+    use Core.Es.Event,
+      aggregate_id: Consumer.Domain.Sales.Grants.ID,
+      by: Consumer.Domain.Sales.Values.UserID,
+      payload: ConsumerTest.Shared.Payload
+  end
+
+  @type t :: Shared.Given.t() | Shared.Taken.t()
+end
+
 defmodule ConsumerTest.BadCodecSharedPayload do
   @moduledoc "Кодек, чей `load_payload/3` отдаёт чужую нагрузку обоим событиям с общим модулем нагрузки; в фасад не входит."
 
-  alias Consumer.Domain.Sales.Grants
-  alias Consumer.Domain.Sales.Grants.Event
   alias Consumer.Domain.Sales.Order
+  alias ConsumerTest.Shared
 
   # H2g — H2 у обоих событий с общим модулем нагрузки: предупреждение на каждое
   # expect: the following clause will never match
   # expect: the following clause will never match
   use Core.Es.Event.Codec,
-    event: Event,
+    event: Shared,
     type: "bad_codec_shared_payload",
-    tags: %{Event.Granted => "bad_codec_shared_payload.granted", Event.Revoked => "bad_codec_shared_payload.revoked"}
+    tags: %{Shared.Given => "bad_codec_shared_payload.given", Shared.Taken => "bad_codec_shared_payload.taken"}
 
   @impl true
-  def dump_payload(%Event.Granted{payload: %Grants.RoleID{} = role}, codec), do: codec.dump(role)
-  def dump_payload(%Event.Revoked{payload: %Grants.RoleID{} = role}, codec), do: codec.dump(role)
+  def dump_payload(%Shared.Given{payload: %Shared.Payload{} = payload}, _codec), do: %{"note" => payload.note}
+  def dump_payload(%Shared.Taken{payload: %Shared.Payload{} = payload}, _codec), do: %{"note" => payload.note}
 
   @impl true
-  def load_payload(Event.Granted, _wire, _codec), do: {:ok, %Order.Amount{value: 1}}
-  def load_payload(Event.Revoked, _wire, _codec), do: {:ok, %Order.Amount{value: 1}}
+  def load_payload(Shared.Given, _wire, _codec), do: {:ok, %Order.Amount{value: 1}}
+  def load_payload(Shared.Taken, _wire, _codec), do: {:ok, %Order.Amount{value: 1}}
 end
 
 defmodule ConsumerTest.BadFieldsCodec do
@@ -137,6 +163,25 @@ defmodule ConsumerTest.BadDerivedCodec do
       {:ok, Event.Renamed.Payload.new(name)}
     end
   end
+end
+
+defmodule ConsumerTest.BadDerivedPrimCodec do
+  @moduledoc "Кодек с ручными клаузами для событий с нагрузкой-Prim и `ValueChanged`; в фасад не входит."
+
+  alias Consumer.Domain.Sales.Grants
+  alias Consumer.Domain.Sales.Grants.Event
+
+  use Core.Es.Event.Codec,
+    event: Event,
+    type: "bad_derived_prim_codec",
+    tags: %{Event.Granted => "bad_derived_prim_codec.granted", Event.Replaced => "bad_derived_prim_codec.replaced"}
+
+  # H11 — ручные клаузы для событий, чьи клаузы нагрузки выводятся из Prim и `ValueChanged`
+  # expect: клауза never match
+  def dump_payload(%Event.Granted{payload: %Grants.RoleID{}}, _codec), do: nil
+
+  # expect: клауза never match
+  def load_payload(Event.Replaced, _wire, _codec), do: {:error, :never}
 end
 
 defmodule ConsumerTest.Codec do

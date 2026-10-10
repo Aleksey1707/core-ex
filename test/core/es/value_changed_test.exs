@@ -19,6 +19,19 @@ defmodule Core.Es.ValueChangedTest do
       type: SampleName
   end
 
+  defmodule SampleStatus do
+    @moduledoc false
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(draft active)a
+  end
+
+  defmodule EnumSample do
+    @moduledoc false
+    use Core.Es.ValueChanged,
+      type: SampleStatus
+  end
+
   defmodule NilableSample do
     @moduledoc false
     use Core.Es.ValueChanged,
@@ -39,5 +52,22 @@ defmodule Core.Es.ValueChangedTest do
     assert %NilableSample{old_value: nil, new_value: ^price} = NilableSample.new(nil, price)
     assert %NilableSample{old_value: ^price, new_value: nil} = NilableSample.new(price, nil)
     assert %NilableSample{old_value: nil, new_value: nil} = NilableSample.new(nil, nil)
+  end
+
+  test "new/2 с enum-типом — атом, без nil" do
+    assert %EnumSample{old_value: :draft, new_value: :active} = EnumSample.new(:draft, :active)
+
+    assert_raise FunctionClauseError, fn -> EnumSample.new(nil, :active) end
+    assert_raise FunctionClauseError, fn -> EnumSample.new("draft", :active) end
+  end
+
+  test "голова new/2 закрывает тип значения" do
+    assert_raise FunctionClauseError, fn -> Sample.new(SamplePrice.new!("10.00"), SampleName.new!("new-name")) end
+    assert_raise FunctionClauseError, fn -> Sample.new(nil, SampleName.new!("new-name")) end
+  end
+
+  test "__es_value_changed__/0 отдаёт type: и nilable:" do
+    assert Sample.__es_value_changed__() == [type: SampleName, nilable: false]
+    assert NilableSample.__es_value_changed__() == [type: SamplePrice, nilable: true]
   end
 end

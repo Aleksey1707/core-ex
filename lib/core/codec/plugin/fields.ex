@@ -22,6 +22,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   alias Core.Error
   alias Core.Helper.FieldCheck
+  alias Core.Prim
   alias Core.Result
 
   require Error
@@ -81,6 +82,19 @@ defmodule Core.Codec.Plugin.Fields do
           description:
             "#{where} — default: у нагрузки события нет (поля #{inspect(names)}): " <>
               "развитие события — новый тег и апкаст"
+    end
+  end
+
+  @doc false
+  @spec value_spec(module(), String.t()) :: spec()
+
+  def value_spec(mod, where) when is_atom(mod) do
+    FieldCheck.module!(mod, where)
+
+    cond do
+      Prim.prim?(mod) -> {:prim, mod}
+      Core.Enum.enum?(mod) -> {:enum, mod}
+      true -> kind_spec!(:entity, mod, where)
     end
   end
 

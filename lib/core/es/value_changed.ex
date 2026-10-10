@@ -2,10 +2,18 @@ defmodule Core.Es.ValueChanged do
   @moduledoc """
   Базовый builder struct'а «значение изменено» (old/new).
 
-  Обязательная опция: `type:` — модуль типа значения.
+  Обязательная опция: `type:` — модуль типа значения: Prim, `Core.Enum` или struct сущности.
   Опционально: `nilable:` (default `false`) — допускает `nil` для old и new.
+
+  Порождаются `@enforce_keys`, `defstruct`, `@type t` и `new/2`, чья голова закрывает вид
+  значения: `%Type{}` у Prim и сущности, атом у enum, `nil` при `nilable: true`.
+
+  `__es_value_changed__/0` отдаёт `type:` и `nilable:`: по ним `Core.Es.Event.Codec` выводит
+  клаузы `dump_payload/2` / `load_payload/3` события с такой нагрузкой — map
+  `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
   """
 
+  alias Core.Codec.Plugin.Fields
   alias Core.Helper
 
   @required_keys ~w(type)a
@@ -32,31 +40,24 @@ defmodule Core.Es.ValueChanged do
         raise CompileError, description: "Es.ValueChanged: :nilable должен быть boolean"
       end
 
+      fields = Core.Es.ValueChanged.fields(type_mod, nilable?)
+
       @enforce_keys ~w(old_value new_value)a
       defstruct @enforce_keys
 
-      value_type =
-        if nilable?,
-          do: quote(do: unquote(type_mod).t() | nil),
-          else: quote(do: unquote(type_mod).t())
+      @type t :: %__MODULE__{unquote_splicing(Core.Codec.Plugin.Fields.typespec(fields))}
 
-      @type t :: %__MODULE__{old_value: unquote(value_type), new_value: unquote(value_type)}
+      @doc false
+      @spec __es_value_changed__() :: [type: module(), nilable: boolean()]
+
+      def __es_value_changed__, do: [type: unquote(type_mod), nilable: unquote(nilable?)]
 
       @doc "Создать запись изменения значения."
-      @spec new(unquote(value_type), unquote(value_type)) :: t()
+      @spec new(unquote_splicing(Keyword.values(Core.Codec.Plugin.Fields.typespec(fields)))) :: t()
 
-      if nilable? do
-        import Core.Guard, only: [is_opt: 2]
-
-        def new(old_value, new_value)
-            when is_opt(old_value, unquote(type_mod)) and is_opt(new_value, unquote(type_mod)) do
-          %__MODULE__{old_value: old_value, new_value: new_value}
-        end
-      else
-        def new(%unquote(type_mod){} = old_value, %unquote(type_mod){} = new_value) do
-          %__MODULE__{old_value: old_value, new_value: new_value}
-        end
-      end
+      def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(fields)))
+          when unquote(Core.Codec.Plugin.Fields.new_guard(fields)),
+          do: unquote(Core.Codec.Plugin.Fields.new_body(__MODULE__, fields))
     end
   end
 
@@ -69,4 +70,16 @@ defmodule Core.Es.ValueChanged do
   @spec optional_keys() :: [atom()]
 
   def optional_keys, do: @optional_keys
+
+  @doc """
+  Спека полей `old_value` / `new_value` по типу значения: Prim → `prim:`, `Core.Enum` → `enum:`,
+  иначе `entity:`; `nilable: true` → `optional: true`.
+  """
+  @spec fields(module(), boolean()) :: [Fields.field()]
+
+  def fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
+    spec = Fields.value_spec(type, "Es.ValueChanged: type:")
+
+    for name <- ~w(old_value new_value)a, do: {name, spec, nilable?, Atom.to_string(name), :none}
+  end
 end

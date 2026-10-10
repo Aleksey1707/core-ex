@@ -22,10 +22,16 @@ defmodule Core.Es.Event.Codec do
 
   ## Выводимые клаузы нагрузки
 
-  Для события с нагрузкой по полям (`use Core.Es.Event.Payload`) кодек сам генерирует клаузы
-  `dump_payload/2` / `load_payload/3` по её спеке — тем же генератором, что у плагина по полям
-  (`Core.Codec.Plugin.Fields`). Выведенные клаузы стоят перед ручными: ручная клауза для такого
-  события — предупреждение «never match» на её строке. Остальные нагрузки — ручные клаузы.
+  Кодек сам генерирует клаузы `dump_payload/2` / `load_payload/3` события, чья нагрузка:
+
+  - по полям (`use Core.Es.Event.Payload`) — по её спеке, тем же генератором, что у плагина по
+    полям (`Core.Codec.Plugin.Fields`);
+  - Prim — `codec.dump(payload)` / `codec.load(Prim, wire)`: в конверте голое значение;
+  - `use Core.Es.ValueChanged` — спека `old_value` / `new_value` из её `type:` и `nilable:`
+    (`Core.Es.ValueChanged.fields/2`).
+
+  Выведенные клаузы стоят перед ручными: ручная клауза для такого события — предупреждение
+  «never match» на её строке. Остальные нагрузки — ручные клаузы.
 
   ## Проверки нагрузки
 
@@ -99,9 +105,11 @@ defmodule Core.Es.Event.Codec do
   функций-проверок нагрузки и приватные `es_dump_payload/2`, `es_load_payload/3`.
   """
 
+  alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Es
   alias Core.Helper
+  alias Core.Prim
   alias Core.Version
 
   require Error
@@ -124,6 +132,9 @@ defmodule Core.Es.Event.Codec do
           at: term(),
           by: term()
         }
+
+  @typedoc "Как кодек выводит клаузы нагрузки: по спеке полей или фасадом для Prim."
+  @type derivation :: {:fields, [Fields.field()]} | :prim
 
   @typedoc "Общая часть события: идентификаторы, версия, автор и момент."
   @type header :: %{
@@ -383,26 +394,57 @@ defmodule Core.Es.Event.Codec do
     end
   end
 
-  # События кодека, чьи клаузы нагрузки кодек выводит сам: нагрузка по полям несёт свою спеку,
-  # и ручной код для неё был бы вторым источником wire.
+  # События кодека, чьи клаузы нагрузки кодек выводит сам: нагрузка по полям и `Es.ValueChanged`
+  # несут свою спеку, Prim кодируется фасадом целиком — ручной код для них был бы вторым
+  # источником wire.
   @doc false
-  @spec derived(%{optional(module()) => String.t()}) :: [{module(), module(), [Core.Codec.Plugin.Fields.field()]}]
+  @spec derived(%{optional(module()) => String.t()}) :: [{module(), module(), derivation()}]
 
   def derived(tags) when is_map(tags) do
     for event <- Enum.sort(Map.keys(tags)),
         payload = event.__es_payload__(),
         not is_nil(payload),
-        derived_payload?(payload),
-        do: {event, payload, payload.__es_payload_fields__()}
+        derivation = derivation(payload),
+        not is_nil(derivation),
+        do: {event, payload, derivation}
   end
 
   @doc false
-  @spec dump_payload_args(module(), module(), [Core.Codec.Plugin.Fields.field()]) :: [Macro.t()]
+  @spec dump_payload_clause(module(), module(), derivation()) :: {[Macro.t()], Macro.t(), Macro.t()}
 
-  def dump_payload_args(event, payload, fields) do
-    [pattern, codec] = Core.Codec.Plugin.Fields.dump_args(payload, fields)
+  def dump_payload_clause(event, payload, {:fields, fields}) do
+    [pattern, codec] = Fields.dump_args(payload, fields)
 
-    [quote(generated: true, do: %unquote(event){payload: unquote(pattern)}), codec]
+    {[quote(generated: true, do: %unquote(event){payload: unquote(pattern)}), codec], Fields.dump_guard(fields),
+     Fields.dump_body(fields)}
+  end
+
+  def dump_payload_clause(event, prim, :prim) do
+    {value, codec} = {var(:payload), var(:codec)}
+
+    {[quote(generated: true, do: %unquote(event){payload: %unquote(prim){} = unquote(value)}), codec],
+     quote(generated: true, do: is_atom(unquote(codec))),
+     quote(generated: true, do: unquote(codec).dump(unquote(value)))}
+  end
+
+  @doc false
+  @spec load_payload_clause(module(), module(), derivation()) :: {[Macro.t()], Macro.t(), Macro.t()}
+
+  def load_payload_clause(event, payload, {:fields, fields}),
+    do: {Fields.load_args(event), Fields.load_guard(), Fields.load_body(payload, fields)}
+
+  def load_payload_clause(event, prim, :prim) do
+    {value, wire, codec} = {var(:payload), var(:wire), var(:codec)}
+
+    body =
+      quote generated: true do
+        case unquote(codec).load(unquote(prim), unquote(wire)) do
+          {:ok, %unquote(prim){} = unquote(value)} -> {:ok, unquote(value)}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+
+    {[event, wire, codec], quote(generated: true, do: is_atom(unquote(codec))), body}
   end
 
   @doc "Несёт ли нагрузку хоть одно событие кодека."
@@ -605,26 +647,39 @@ defmodule Core.Es.Event.Codec do
     end
   end
 
-  defp derived_payload?(payload) do
+  defp derivation(payload) do
     Code.ensure_compiled!(payload)
-    function_exported?(payload, :__es_payload_fields__, 0)
+
+    cond do
+      function_exported?(payload, :__es_payload_fields__, 0) -> {:fields, payload.__es_payload_fields__()}
+      function_exported?(payload, :__es_value_changed__, 0) -> {:fields, value_changed_fields(payload)}
+      Prim.prim?(payload) -> :prim
+      true -> nil
+    end
   end
+
+  defp value_changed_fields(payload) do
+    [type: type, nilable: nilable?] = payload.__es_value_changed__()
+    Es.ValueChanged.fields(type, nilable?)
+  end
+
+  defp var(name), do: Macro.var(name, __MODULE__)
 
   # Клаузы `unquote` вставляют фрагментами: события известны только в теле модуля (`@es_derived`).
   defp derived_clauses do
     quote unquote: false do
-      for {event, payload, fields} <- @es_derived do
+      for {event, payload, derivation} <- @es_derived do
+        {args, guard, body} = Core.Es.Event.Codec.dump_payload_clause(event, payload, derivation)
+
         @impl true
-        def dump_payload(unquote_splicing(Core.Es.Event.Codec.dump_payload_args(event, payload, fields)))
-            when unquote(Core.Codec.Plugin.Fields.dump_guard(fields)),
-            do: unquote(Core.Codec.Plugin.Fields.dump_body(fields))
+        def dump_payload(unquote_splicing(args)) when unquote(guard), do: unquote(body)
       end
 
-      for {event, payload, fields} <- @es_derived do
+      for {event, payload, derivation} <- @es_derived do
+        {args, guard, body} = Core.Es.Event.Codec.load_payload_clause(event, payload, derivation)
+
         @impl true
-        def load_payload(unquote_splicing(Core.Codec.Plugin.Fields.load_args(event)))
-            when unquote(Core.Codec.Plugin.Fields.load_guard()),
-            do: unquote(Core.Codec.Plugin.Fields.load_body(payload, fields))
+        def load_payload(unquote_splicing(args)) when unquote(guard), do: unquote(body)
       end
     end
   end

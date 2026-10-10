@@ -13,6 +13,16 @@
   (переменная, `%mod{}`). Как править: плагин, который упал, — добавить клаузу непокрытого типа или
   убрать его из `types:` (было — `FunctionClauseError` при исполнении, стало — ошибка сборки).
 
+- **Ручные клаузы нагрузки-Prim и `Es.ValueChanged` в `Event.Codec` — «never match».** Кодек
+  теперь выводит клаузы `dump_payload/2` / `load_payload/3` таких событий сам и ставит их первыми
+  (`docs/rules/11-domain.md`, «Нагрузка-Prim и `Es.ValueChanged`»): у события один источник wire,
+  конверт прежний. Существующие ручные клаузы для них после обновления дают предупреждение «never
+  match» и под `--warnings-as-errors` валят сборку. Как править: удалить их (было —
+  `def dump_payload(%Event.Granted{payload: %RoleID{} = role}, codec), do: codec.dump(role)` и
+  `def load_payload(Event.Granted, wire, codec), do: codec.load(RoleID, wire)`, стало — ничего).
+  Ручная `load_payload/3` с переменной в первом аргументе (`def load_payload(mod, wire, codec)
+  when mod in [...]`) предупреждения не даёт, но для таких событий недостижима — удалить её так же.
+
 ### Новое
 
 - **Codec-плагин по полям** (`docs/rules/11-domain.md`, «Codec (Prim и Entity)»; решение —
@@ -72,11 +82,20 @@
   `optional:` внутри `list:`, `default:` с `optional: true` или при `loadable: false`, `default:`
   у `enum:` вне значений enum, неизвестный ключ, расхождение со struct) — `CompileError` с именем плагина, типа и поля. Тип из `fields:`
   делает ручные `dump/2` / `load/3` необязательными.
-- **`use Core.Es.Event.Codec` выводит клаузы нагрузки по полям.** Для события, чья нагрузка
-  объявлена `use Core.Es.Event.Payload`, кодек генерирует `dump_payload/2` / `load_payload/3` перед
-  ручными; ручная клауза для такого события — предупреждение «never match» (было — ручные клаузы
-  обязательны, стало — не пишутся). Кодек, все события с нагрузкой которого по полям, ручных клауз
-  не объявляет. Макрос занимает в кодеке ещё атрибут `@es_derived`.
+- **`use Core.Es.Event.Codec` выводит клаузы нагрузки по полям, нагрузки-Prim и
+  `Es.ValueChanged`.** Для события, чья нагрузка объявлена `use Core.Es.Event.Payload`, — Prim или
+  `use Core.Es.ValueChanged`, кодек генерирует `dump_payload/2` / `load_payload/3` перед ручными;
+  ручная клауза для такого события — предупреждение «never match» (было — ручные клаузы
+  обязательны, стало — не пишутся). Конверт не меняется: Prim — голое значение `codec.dump(p)`,
+  `ValueChanged` — `%{"old_value" => …, "new_value" => …}` по виду `type:` (Prim, `Core.Enum` —
+  атом, сущность), `nil` при `nilable: true`. Кодек, все события с нагрузкой которого выводятся,
+  ручных клауз не объявляет. Макрос занимает в кодеке ещё атрибут `@es_derived`.
+
+  Существующие ручные клаузы нагрузки-Prim и `ValueChanged` — «Ломающие изменения контракта».
+- **`use Core.Es.ValueChanged` принимает enum-тип и отдаёт свою спеку.** `type:` — Prim, `Core.Enum`
+  или struct сущности (раньше enum-тип не собирался: голова `new/2` требовала `%Type{}`); голова
+  `new/2` у enum — атом. `__es_value_changed__/0` отдаёт `[type: …, nilable: …]` — по нему кодек
+  событий строит спеку нагрузки.
 
 ## 0.12.0
 
