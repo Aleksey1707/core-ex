@@ -38,7 +38,6 @@ defmodule Core.Codec.PluginFieldsTest do
 
   defmodule Plugin do
     use Core.Codec.Plugin,
-      types: [Item, Tag, Card],
       fields: [
         {Item,
          id: [prim: ID],
@@ -80,7 +79,7 @@ defmodule Core.Codec.PluginFieldsTest do
 
   defmodule MixedPlugin do
     use Core.Codec.Plugin,
-      types: [Label, Money],
+      types: [Money],
       fields: [{Label, name: [prim: Name]}]
 
     @impl true
@@ -95,7 +94,6 @@ defmodule Core.Codec.PluginFieldsTest do
 
   defmodule DumpOnlyPlugin do
     use Core.Codec.Plugin,
-      types: [Label],
       loadable: false,
       fields: [{Label, name: [prim: Name]}]
   end
@@ -114,7 +112,6 @@ defmodule Core.Codec.PluginFieldsTest do
     require Error
 
     use Core.Codec.Plugin,
-      types: [Shape.Circle, Shape.Square],
       union: Shape,
       fields: [
         {Shape.Circle, kind: [type: :string], radius: [type: :pos_integer]},
@@ -443,14 +440,14 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
-    test "ключ fields: вне types: — CompileError" do
-      assert_raise CompileError, ~r/типы вне types:/, fn ->
+    test "тип в types: и в fields: — CompileError" do
+      assert_raise CompileError, ~r/типы объявлены в нескольких опциях: \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Codec.PluginFieldsTest.Foreign do
               use Core.Codec.Plugin,
                 types: [Core.Codec.PluginFieldsTest.Tag],
-                fields: [{Core.Codec.PluginFieldsTest.Item, id: [prim: Core.Codec.PluginFieldsTest.ID]}]
+                fields: [{Core.Codec.PluginFieldsTest.Tag, name: [prim: Core.Codec.PluginFieldsTest.Name]}]
             end
           end
         )
@@ -463,7 +460,6 @@ defmodule Core.Codec.PluginFieldsTest do
           quote do
             defmodule Core.Codec.PluginFieldsTest.Twice do
               use Core.Codec.Plugin,
-                types: [Core.Codec.PluginFieldsTest.Tag],
                 fields: [
                   {Core.Codec.PluginFieldsTest.Tag, name: [prim: Core.Codec.PluginFieldsTest.Name]},
                   {Core.Codec.PluginFieldsTest.Tag, name: [prim: Core.Codec.PluginFieldsTest.Name]}
@@ -564,7 +560,7 @@ defmodule Core.Codec.PluginFieldsTest do
         end
 
         use Core.Codec.Plugin,
-          types: [T, U],
+          types: [U],
           loadable: unquote(Keyword.get(opts, :loadable, true)),
           union: unquote(union),
           fields: [{T, a: [prim: Core.Codec.PluginFieldsTest.Name]}]
@@ -592,7 +588,6 @@ defmodule Core.Codec.PluginFieldsTest do
           end
 
           use Core.Codec.Plugin,
-            types: [unquote(type)],
             loadable: unquote(Keyword.get(opts, :loadable, true)),
             fields: [{unquote(type), unquote(spec)}]
         end

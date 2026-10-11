@@ -190,6 +190,28 @@ defmodule ConsumerTest.Codec do
     # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Codec.dump/2
     do: Account.Profile.Codec.dump(%Account.Profile{id: name, name: name, status: :placed, contacts: []}, InCodec)
 
+  # H9a — опечатка в поле результата `load/2` варианта семейства
+  def h9a_variant_load_typo(data) do
+    {:ok, mobile} = InCodec.load(Account.Profile.Channel.Mobile, data)
+    # expect: unknown key .numbr
+    mobile.numbr
+  end
+
+  # H9b — `:ok` по результату `load/2` семейства вариантов
+  def h9b_family_load_ok(data) do
+    case InCodec.load(Account.Profile.Channel, data) do
+      {:ok, channel} -> channel
+      # expect: the following clause will never match
+      :ok -> nil
+      {:error, _error} -> nil
+    end
+  end
+
+  # H9c — поле не того Prim в `dump/2` варианта
+  def h9c_variant_dump_wrong_prim(%Account.ID{} = id),
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Channel.Codec.dump/2
+    do: Account.Profile.Channel.Codec.dump(%Account.Profile.Channel.Email{address: id}, InCodec)
+
   # H6 — команда в `dump/1` фасада: не Prim и не тип плагина
   def h6_dump_command(%Account.Cmd.Open{} = command),
     # expect: incompatible types given to Consumer.Codec.Internal.dump/1

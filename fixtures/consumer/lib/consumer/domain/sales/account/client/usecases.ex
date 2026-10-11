@@ -109,6 +109,26 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
     InCodec.dump(%Account.Profile{id: id, name: name, status: :placed, contacts: [contact], main: contact})
   end
 
+  def load_channel(data) do
+    case InCodec.load(Account.Profile.Channel, data) do
+      {:ok, %Account.Profile.Channel.Email{} = email} -> {:ok, email.address}
+      {:ok, %Account.Profile.Channel.Mobile{} = mobile} -> {:ok, {mobile.kind, mobile.number}}
+      {:ok, %Account.Profile.Channel.Landline{} = landline} -> {:ok, landline.number}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def dump_channel(%Account.Name{} = number) do
+    mobile = %Account.Profile.Channel.Mobile{number: number}
+
+    {InCodec.dump(mobile), Account.Profile.Channel.Codec.type(mobile)}
+  end
+
+  def load_badge(data) do
+    with {:ok, %Account.Profile.Badge.Gold{} = gold} <- InCodec.load(Account.Profile.Badge.Gold, data),
+         do: {gold.tier, gold.since, InCodec.dump(gold)}
+  end
+
   def dump(%Account.Event.Opened{} = event, %Account.Card{} = card, %Order.Amount{} = amount),
     do: {InCodec.dump(event), InCodec.dump(card), InCodec.dump(amount), InCodec.dump(InCodec.load!(Order.Amount, 1))}
 

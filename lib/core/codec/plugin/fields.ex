@@ -51,18 +51,20 @@ defmodule Core.Codec.Plugin.Fields do
   # ===== спека =====
 
   @doc false
-  @spec fields!(module(), term(), [module()], boolean()) :: [{module(), [field()]}]
+  @spec fields!(module(), term(), boolean()) :: [{module(), [field()]}]
 
-  def fields!(_plugin, nil, _types, _loadable?), do: []
+  def fields!(_plugin, nil, _loadable?), do: []
 
-  def fields!(plugin, fields, types, loadable?) when is_list(fields) do
+  def fields!(plugin, fields, loadable?) when is_list(fields) do
     pairs = Enum.map(fields, &pair!(plugin, &1))
-    check_types!(plugin, Enum.map(pairs, &elem(&1, 0)), types)
+    check_unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: fields: — типы объявлены дважды")
 
-    Enum.map(pairs, fn {type, spec} -> {type, type_fields!(plugin, type, spec, loadable?)} end)
+    Enum.map(pairs, fn {type, spec} ->
+      {type, type_fields!(type, spec, [], loadable?, "#{@label} #{inspect(plugin)}: fields:, тип #{inspect(type)}")}
+    end)
   end
 
-  def fields!(plugin, other, _types, _loadable?) do
+  def fields!(plugin, other, _loadable?) do
     raise CompileError,
       description: "#{@label} #{inspect(plugin)}: fields: — список пар {Тип, спека}, задано #{inspect(other)}"
   end
@@ -83,6 +85,25 @@ defmodule Core.Codec.Plugin.Fields do
             "#{where} — default: у нагрузки события нет (поля #{inspect(names)}): " <>
               "развитие события — новый тег и апкаст"
     end
+  end
+
+  @doc false
+  @spec variant_fields!(module(), term(), [atom()], String.t()) :: [field()]
+
+  def variant_fields!(type, spec, skipped, where) when is_atom(type) and is_list(skipped),
+    do: type_fields!(type, spec, skipped, true, where)
+
+  @doc false
+  @spec struct_module!(module(), String.t()) :: :ok
+
+  def struct_module!(mod, where) do
+    FieldCheck.module!(mod, where)
+
+    if not function_exported?(mod, :__struct__, 0) do
+      raise CompileError, description: "#{where}: #{inspect(mod)} не struct"
+    end
+
+    :ok
   end
 
   @doc false
@@ -107,29 +128,15 @@ defmodule Core.Codec.Plugin.Fields do
       description: "#{@label} #{inspect(plugin)}: fields: — ожидается пара {Тип, спека}, задано #{inspect(other)}"
   end
 
-  defp check_types!(plugin, keys, types) do
-    check_unique!(keys, "#{@label} #{inspect(plugin)}: fields: — типы объявлены дважды")
-
-    case keys -- types do
-      [] ->
-        :ok
-
-      foreign ->
-        raise CompileError,
-          description: "#{@label} #{inspect(plugin)}: fields: — типы вне types:: #{inspect(foreign)}"
-    end
-  end
-
   defp defaults(spec) do
     if Keyword.keyword?(spec),
       do: for({name, opts} <- spec, Keyword.keyword?(opts), Keyword.has_key?(opts, :default), do: name),
       else: []
   end
 
-  defp type_fields!(plugin, type, spec, loadable?) do
-    where = "#{@label} #{inspect(plugin)}: fields:, тип #{inspect(type)}"
+  defp type_fields!(type, spec, skipped, loadable?, where) do
     fields = spec_fields!(spec, loadable?, where)
-    check_struct!(type, Keyword.keys(spec), where)
+    check_struct!(type, Keyword.keys(spec), skipped, where)
 
     fields
   end
@@ -184,7 +191,7 @@ defmodule Core.Codec.Plugin.Fields do
   end
 
   defp kind_spec!(:entity, mod, where) do
-    check_module_struct!(mod, where)
+    struct_module!(mod, where)
     {:entity, mod}
   end
 
@@ -256,10 +263,10 @@ defmodule Core.Codec.Plugin.Fields do
 
   defp check_default!(_spec, _default, _where), do: :ok
 
-  defp check_struct!(type, names, where) do
-    check_module_struct!(type, where)
+  defp check_struct!(type, names, skipped, where) do
+    struct_module!(type, where)
 
-    struct_keys = Map.keys(type.__struct__()) -- @skipped_keys
+    struct_keys = Map.keys(type.__struct__()) -- (@skipped_keys ++ skipped)
 
     case {struct_keys -- names, names -- struct_keys} do
       {[], []} ->
@@ -270,14 +277,6 @@ defmodule Core.Codec.Plugin.Fields do
           description:
             "#{where}: спека расходится со struct — поля struct без спеки #{inspect(Enum.sort(missing))}, " <>
               "поля спеки без struct #{inspect(Enum.sort(extra))}"
-    end
-  end
-
-  defp check_module_struct!(mod, where) do
-    FieldCheck.module!(mod, where)
-
-    if not function_exported?(mod, :__struct__, 0) do
-      raise CompileError, description: "#{where}: #{inspect(mod)} не struct"
     end
   end
 
@@ -308,12 +307,14 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec dump_body([field()]) :: Macro.t()
 
-  def dump_body(fields) do
-    pairs =
-      Enum.map(fields, fn {name, spec, optional?, wire, _default} -> {wire, dump_value(spec, var(name), optional?)} end)
+  def dump_body(fields), do: quote(generated: true, do: %{unquote_splicing(dump_pairs(fields))})
 
-    quote(generated: true, do: %{unquote_splicing(pairs)})
-  end
+  @doc false
+  @spec dump_pairs([field()]) :: [{String.t(), Macro.t()}]
+
+  def dump_pairs(fields),
+    do:
+      Enum.map(fields, fn {name, spec, optional?, wire, _default} -> {wire, dump_value(spec, var(name), optional?)} end)
 
   @doc false
   @spec new_args([field()]) :: [Macro.t()]

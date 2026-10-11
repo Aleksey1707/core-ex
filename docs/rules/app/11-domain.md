@@ -70,14 +70,23 @@ def plugins, do: @plugins
 ## Кодек: по полям или ручной
 
 Контракт объявления по полям — `deps/core/docs/rules/11-domain.md`, «Плагин по полям
-(`fields:`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»; почему так —
-`deps/core/docs/adr/0056-codec-plugin-by-fields.md`.
+(`fields:`)», «Варианты семейства (`variants:`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»;
+почему так — `deps/core/docs/adr/0056-codec-plugin-by-fields.md`,
+`deps/core/docs/adr/0057-union-variants-by-address.md`.
 
 - Тип, чья wire-форма совпадает с полями один к одному (с точностью до переименования ключа
   `wire:`), SHOULD объявляться по полям: сущность и агрегат — спекой `fields:` у
   `use Core.Codec.Plugin`, нагрузка события — `use Core.Es.Event.Payload, fields:`.
-- Ручной плагин — для расхождения сильнее переименования ключа: union с разбором тега, словарь,
-  вычисляемое или сжатое поле, межполевой инвариант, который должен выполняться при загрузке.
+- Семейство union, чей вариант узнаётся по адресу в данных (тег тегированной формы, тег и
+  дискриминатор, дискриминатор без обёртки), SHOULD объявляться `variants:`: разбор тега, выбор
+  варианта, `type/1` / `types/0` и ошибки разбора пишет библиотека. Вариант, чьи поля расходятся с
+  wire, — ручной `{Type, адрес}` с колбэками `dump_variant/2` / `load_variant/3`, а не ручной
+  плагин целиком.
+- `load(Variant, wire)` MUST принимать ту же форму, что отдаёт `dump(variant)`: тегированную форму,
+  а не голые поля, — `load(T, dump(x)) == {:ok, x}` и для варианта. Сгенерированная загрузка так и
+  устроена; ручной плагин с асимметричным `load(Variant, поля)` переводится на `variants:`.
+- Ручной плагин — для расхождения сильнее переименования ключа: словарь, вычисляемое или сжатое
+  поле, межполевой инвариант, который должен выполняться при загрузке.
 - Нагрузка события — value object со своим плагином — SHOULD писаться ручными клаузами кодека
   события одной строкой через фасад: `codec.dump(value)` / `codec.load(Value, wire)`, а не повтором
   полей value object спекой `Core.Es.Event.Payload`.
@@ -94,8 +103,24 @@ end
 
 # хорошо
 use Core.Codec.Plugin,
-  types: [Order.Item],
   fields: [{Order.Item, id: [prim: Order.Item.ID], name: [prim: Order.Item.Name]}]
+
+# плохо — разбор тега и выбор варианта руками
+def load(Order.Discount, wire, codec) when is_map(wire) do
+  case field(wire, :type) do
+    "fixed" -> load_fixed(field(wire, :fields), codec)
+    "percent" -> load_percent(field(wire, :fields), codec)
+    tag -> {:error, Order.Errors.domain(__MODULE__, :unknown_discount, tag)}
+  end
+end
+
+# хорошо — семейство вариантами
+use Core.Codec.Plugin,
+  union: Order.Discount,
+  variants: [
+    {Order.Discount.Fixed, "fixed", amount: [prim: Order.Amount]},
+    {Order.Discount.Percent, "percent", value: [prim: Order.Discount.Rate]}
+  ]
 
 # хорошо — нагрузка-value object через фасад
 def dump_payload(%Event.Moved{payload: %Address{} = address}, codec), do: codec.dump(address)

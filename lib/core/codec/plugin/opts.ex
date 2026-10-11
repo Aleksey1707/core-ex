@@ -2,10 +2,11 @@ defmodule Core.Codec.Plugin.Opts do
   @moduledoc """
   Валидация опций `use Core.Codec.Plugin` и проверка контракта перед сборкой модуля.
 
-  Проверяет форму `types:` и `union:` и перед сборкой — что каждый тип плагина обслужен `dump/2`
-  (и `load/3` при `loadable: true`, вместе с семейством `union:`) клаузой по `fields:` или ручной.
-  Ручная клауза на тип из `fields:` и `@spec` у `dump/2` / `load/3` плагина с `fields:` —
-  `CompileError`.
+  Проверяет форму `types:` и `union:`, что тип объявлен ровно одной из `types:` / `fields:` /
+  `variants:`, и перед сборкой — что каждый ручной тип обслужен `dump/2` (и `load/3` при
+  `loadable: true`, вместе с семейством `union:` без `variants:`) ручной клаузой, а ручной вариант —
+  колбэками `dump_variant/2` / `load_variant/3`. Ручная клауза на сгенерированный тип или семейство и
+  `@spec` у `dump/2` / `load/3` плагина с `fields:` или `variants:` — `CompileError`.
   """
 
   # ===== опции =====
@@ -14,13 +15,34 @@ defmodule Core.Codec.Plugin.Opts do
   @spec types!(keyword()) :: [module()]
 
   def types!(opts) do
-    case Keyword.get(opts, :types) do
-      types when is_list(types) and types != [] ->
+    case Keyword.get(opts, :types, []) do
+      types when is_list(types) ->
         validate_modules!(types)
 
       other ->
+        raise CompileError, description: "types: ожидается список модулей, получено: #{inspect(other)}"
+    end
+  end
+
+  @doc false
+  @spec all_types!(module(), [[module()]]) :: [module()]
+
+  def all_types!(plugin, groups) do
+    all = Enum.concat(groups)
+
+    case {all, all -- Enum.uniq(all)} do
+      {[], _dupes} ->
         raise CompileError,
-          description: "types: ожидается непустой список модулей, получено: #{inspect(other)}"
+          description: "Codec.Plugin #{inspect(plugin)}: нет типов — задайте types:, fields: или variants:"
+
+      {all, []} ->
+        all
+
+      {_all, dupes} ->
+        raise CompileError,
+          description:
+            "Codec.Plugin #{inspect(plugin)}: типы объявлены в нескольких опциях: #{inspect(Enum.uniq(dupes))} — " <>
+              "types: только для ручных типов"
     end
   end
 
@@ -37,50 +59,61 @@ defmodule Core.Codec.Plugin.Opts do
   @doc false
   defmacro __before_compile__(env) do
     mod = env.module
-    generated = Enum.map(Module.get_attribute(mod, :codec_fields), &elem(&1, 0))
-    types = Module.get_attribute(mod, :codec_types)
-    funs = if Module.get_attribute(mod, :codec_loadable), do: [dump: 2, load: 3], else: [dump: 2]
+    variants = Module.get_attribute(mod, :codec_variants)
+    union = Module.get_attribute(mod, :codec_union)
+    dumped = Enum.map(Module.get_attribute(mod, :codec_fields), &elem(&1, 0)) ++ Enum.map(variants, &elem(&1, 0))
+    loaded = if variants == [], do: dumped, else: dumped ++ [union]
+    generated = if Module.get_attribute(mod, :codec_loadable), do: [dump: dumped, load: loaded], else: [dump: dumped]
+    funs = Enum.map(generated, fn {name, _types} -> {name, arity(name)} end)
 
-    if generated != [] do
-      raise_never_match!(env, never_match(env, funs, generated), "тип сгенерирован по fields:")
-      raise_specs!(env, funs, "у плагина с fields: контракт задаёт @callback Core.Codec.Plugin")
+    if dumped != [] do
+      raise_never_match!(env, never_match(env, generated), "тип сгенерирован по fields: или variants:")
+      raise_specs!(env, funs, "у плагина с fields: или variants: контракт задаёт @callback Core.Codec.Plugin")
     end
 
     # `dump/2` обязателен для каждого типа: фасад уже завёл clause на каждый тип плагина,
     # и без клаузы она упала бы `FunctionClauseError` на первом дампе.
-    check_covered!(env, {:dump, 2}, types, generated)
+    types = Module.get_attribute(mod, :codec_types)
+    reason = "их нет ни в fields:, ни в variants:, ни в ручных клаузах"
+    check_covered!(env, {:dump, 2}, types, dumped, reason)
 
     if Module.get_attribute(mod, :codec_loadable) do
-      check_covered!(env, {:load, 3}, types ++ List.wrap(Module.get_attribute(mod, :codec_union)), generated)
+      check_covered!(env, {:load, 3}, types ++ List.wrap(union), loaded, reason)
     end
+
+    manual = for {variant, _address, _place, :manual} <- variants, do: variant
+    check_covered!(env, {:dump_variant, 2}, manual, [], "ручной вариант без колбэка")
+    check_covered!(env, {:load_variant, 3}, manual, [], "ручной вариант без колбэка")
 
     nil
   end
 
   # ---
 
-  # Клаузы `fields:` встают первыми (их порождает `use`), поэтому ручная клауза на такой тип
-  # недостижима для валидного значения и молча ловила бы только невалидное.
-  defp never_match(env, funs, generated) do
-    for {name, _arity} = fun <- funs,
-        {line, type} <- manual_targets(env.module, fun, length(generated), form(name)),
-        type in generated,
+  defp arity(:dump), do: 2
+  defp arity(:load), do: 3
+
+  # Клаузы `fields:` и `variants:` встают первыми (их порождает `use`), поэтому ручная клауза на
+  # такой тип недостижима для валидного значения и молча ловила бы только невалидное.
+  defp never_match(env, generated) do
+    for {name, types} <- generated,
+        fun = {name, arity(name)},
+        {line, type} <- manual_targets(env.module, fun, length(types), form(name)),
+        type in types,
         do: {fun, line, type}
   end
 
-  defp form(:dump), do: :struct
-  defp form(:load), do: :module
+  defp form(name) when name in ~w(dump dump_variant)a, do: :struct
+  defp form(name) when name in ~w(load load_variant)a, do: :module
 
   # Ручная клауза с первым аргументом не литералом типа может принять любой тип плагина.
-  defp check_covered!(env, {name, arity} = fun, required, generated) do
+  defp check_covered!(env, {name, arity} = fun, required, generated, reason) do
     targets = Enum.map(manual_targets(env.module, fun, length(generated), form(name)), &elem(&1, 1))
     uncovered = if :any in targets, do: [], else: (required -- generated) -- targets
 
     if uncovered != [] do
       raise CompileError,
-        description:
-          "#{inspect(env.module)}: плагину требуется #{name}/#{arity} для #{inspect(uncovered)} — " <>
-            "их нет ни в fields:, ни в ручных клаузах",
+        description: "#{inspect(env.module)}: плагину требуется #{name}/#{arity} для #{inspect(uncovered)} — #{reason}",
         file: env.file,
         line: env.line
     end
@@ -88,7 +121,7 @@ defmodule Core.Codec.Plugin.Opts do
 
   defp validate_modules!(types) do
     if not Enum.all?(types, &(is_atom(&1) and not is_nil(&1))) do
-      raise CompileError, description: "types: ожидается непустой список модулей"
+      raise CompileError, description: "types: ожидается список модулей"
     end
 
     types

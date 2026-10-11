@@ -3,7 +3,6 @@ defmodule Consumer.Domain.Sales.Account.Profile.Codec do
   alias Consumer.Domain.Sales.Order
 
   use Core.Codec.Plugin,
-    types: [Account.Profile, Account.Profile.Contact],
     fields: [
       {Account.Profile,
        id: [prim: Account.ID],

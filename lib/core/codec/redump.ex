@@ -17,8 +17,8 @@ defmodule Core.Codec.Redump do
   (`Core.Codec.coercible?/1`), и sensitive-Prim (read-путь чувствительных значений не
   возит — как и `Core.View`) — ошибка программиста, а не данных.
 
-  Envelope `{:tagged, _}` — map-представление полиморфной нагрузки: тег в ключе `type`,
-  значения в `fields`.
+  `{:tagged, _}` — тегированная форма варианта семейства: тег в ключе `type`, значения в `fields`;
+  ключи — общие с вариантами плагина (`Core.Codec.Plugin.Variants`).
   """
 
   alias Core.Codec
@@ -31,8 +31,8 @@ defmodule Core.Codec.Redump do
           | {:list, spec()}
           | {:tagged, %{optional(String.t()) => spec()}}
 
-  @tag_key :type
-  @payload_key :fields
+  @tag_key Core.Codec.Plugin.Variants.tag_key()
+  @payload_key Core.Codec.Plugin.Variants.fields_key()
 
   # ===== redump =====
 

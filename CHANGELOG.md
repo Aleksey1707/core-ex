@@ -53,18 +53,19 @@
   каждого поля. Многотиповый плагин смешивает типы по полям и ручные клаузы нетривиальных типов;
   ручная клауза на тип из `fields:` (литералом или guard `when mod in [...]`) — `CompileError`
   «never match», чтобы у типа был один источник wire; `@spec` у `dump/2` / `load/3` такого плагина —
-  `CompileError` (пункт о `@spec` выше). `loadable: false` генерирует только `dump/2`; с `union:`
-  варианты объявляются по полям, а клауза `load(Family, ...)` пишется руками.
+  `CompileError` (пункт о `@spec` выше). `loadable: false` генерирует только `dump/2`; варианты
+  семейства `union:` — `variants:` (пункт ниже). Тип объявляется ровно одной из опций: `types:`
+  теперь перечисляет только ручные типы и необязателен (ADR-0057) — типы спеки в нём не
+  повторяются, повтор — `CompileError`.
 
   Как править приложение (было → стало): плагин с ручными `dump/2` и `load/3`, повторяющими поля, →
 
   ```elixir
   use Core.Codec.Plugin,
-    types: [Item],
     fields: [{Item, id: [prim: Item.ID], name: [prim: Item.Name], note: [prim: Item.Note, optional: true]}]
   ```
 
-  без ручных клауз; остальное в плагине не меняется.
+  без ручных клауз и без `types: [Item]`; ручные типы смешанного плагина остаются в `types:`.
 
   Дамп плагина по полям — map со **строковыми** ключами (`"id" => …`), как конверт события; ручной
   плагин с атомарными ключами (`%{id: …}`) после перевода меняет форму дампа, а вызывающий, который
@@ -82,6 +83,39 @@
     строковые ключи;
   - дамп `Core.Outbox.Record` через фасад (`InCodec.dump(record)`): `Core.Outbox.Codec` объявлен по
     полям, `dumped.topic` → `dumped["topic"]`; запись outbox в БД не меняется.
+
+- **Варианты семейства — `use Core.Codec.Plugin, union: Family, variants: [...]`**
+  (`docs/rules/11-domain.md`, «Варианты семейства (`variants:`)»; решение —
+  `docs/adr/0057-union-variants-by-address.md`). Вариант объявляется адресом и спекой полей:
+  `"tag"` — тегированная форма `%{"type" => "tag", "fields" => поля}`, `{"tag", key: value}` — она
+  же с дискриминатором внутри `fields` (один тег у нескольких вариантов), `[key: value]` —
+  дискриминатор среди полей без обёртки. Раньше разбор тега, таблицу тег ↔ модуль, `type/1` /
+  `types/0`, выбор варианта и ошибки разбора каждый плагин писал руками, а `load(Variant, wire)`
+  у части потребителей ждал голые поля, хотя `dump` отдавал тегированную форму. Генерируются
+  `dump/2` варианта в форме адреса, симметричный `load(Variant, wire)`, `load(Family, wire)` на
+  любой term, `type/1`, `types/0` и `__codec_variants__/0`; ошибки разбора — `ns: :codec`:
+  `:invalid_value` (повреждённая форма) и `:unknown_tag` (`detail: %{tag:, discriminator:}`).
+  Вариант, чьи поля расходятся с wire, — `{Type, адрес}`: поля пишут колбэки `dump_variant/2` /
+  `load_variant/3`, адрес и выбор — библиотека. Ключи тегированной формы общие с
+  `Core.Codec.Redump` (`{:tagged, _}`).
+
+  Как править приложение (было → стало): ручные `dump(%Variant{})` →
+  `%{"type" => tag, "fields" => …}`, `load(Family, wire)` с разбором тега, `load(Variant, поля)`,
+  свои `type/1` / `types/0` и коды ошибок разбора →
+
+  ```elixir
+  use Core.Codec.Plugin,
+    union: Shape,
+    variants: [
+      {Shape.Circle, "circle", radius: [type: :pos_integer]},
+      {Shape.Rect, {"polygon", kind: :rect}, width: [type: :pos_integer], height: [type: :pos_integer]}
+    ]
+  ```
+
+  и удалить ручные клаузы, `type/1` / `types/0` и коды ошибок разбора из каталога. Вызывающий
+  `load(Variant, голые поля)` передаёт тегированную форму или грузит по семейству; поле struct
+  дискриминатора (`kind: :rect`) остаётся в struct, из спеки уходит. Wire не меняется: адрес и
+  дискриминатор пишутся как объявлены.
 
 - **Нагрузка события по полям — `use Core.Es.Event.Payload, fields: [...]`**
   (`docs/rules/11-domain.md`, «Нагрузка по полям»; ADR-0056). Одна декларация даёт struct
@@ -117,14 +151,31 @@
   `load_payload/3`, повторяющие поля, → спека `fields:` или `use Core.Es.Event.Payload` (примеры —
   пункты выше); round-trip-тест и golden-фикстуры при переводе остаются как были.
 
+  Семейство union, чей вариант узнаётся по адресу в данных, SHOULD объявляться `variants:` (ручной
+  разбор тега → `variants:`, пример — пункт о вариантах выше); `load(Variant, wire)` MUST принимать
+  ту же форму, что отдаёт `dump(variant)` (было — `load(Variant, поля)` при тегированном `dump`,
+  стало — `load(Variant, тегированная форма)`; сгенерированная загрузка так и устроена).
+
 ### Изменения контракта макросов
 
 - **`use Core.Codec.Plugin, fields: [{Type, spec}]`** — необязательная опция плагина по полям.
-  Ключи — подмножество `types:`, повтор типа или ключ вне `types:` — `CompileError`; ошибка спеки
+  Повтор типа или тип, названный ещё и в `types:` / `variants:`, — `CompileError`; ошибка спеки
   (не Prim в `prim:`, не `Core.Enum` в `enum:`, не struct в `entity:`, неизвестный `type:`,
   `optional:` внутри `list:`, `default:` с `optional: true` или при `loadable: false`, `default:`
-  у `enum:` вне значений enum, неизвестный ключ, расхождение со struct) — `CompileError` с именем плагина, типа и поля. Тип из `fields:`
-  делает ручные `dump/2` / `load/3` необязательными.
+  у `enum:` вне значений enum, неизвестный ключ, расхождение со struct) — `CompileError` с именем
+  плагина, типа и поля. Тип из `fields:` делает ручные `dump/2` / `load/3` необязательными.
+- **`types:` у `use Core.Codec.Plugin` — только ручные типы, необязателен.** Типы плагина
+  (`__codec_types__/0`) — объединение `types:`, ключей `fields:` и модулей `variants:`; плагин без
+  типов — `CompileError` (было — `types:` обязателен и перечисляет все типы, стало — только ручные).
+- **`use Core.Codec.Plugin, variants: [...]`** — варианты семейства; требует `union:`. Проверки
+  сборки (`CompileError` с именем плагина и варианта): две формы адреса в плагине, повтор адреса,
+  общий тег без дискриминатора у каждого варианта, разные ключи дискриминатора у одного тега,
+  wire-ключ поля, равный ключу дискриминатора, значение по умолчанию поля дискриминатора, не равное
+  объявленному; ручной вариант без клаузы `dump_variant/2` / `load_variant/3`; ручная клауза
+  `dump/2` / `load/3` на вариант или семейство — «never match»; `@spec` у `dump/2` / `load/3` —
+  как у `fields:`. Новые optional `@callback` `Core.Codec.Plugin`: `dump_variant/2`,
+  `load_variant/3`. Плагин с `variants:` занимает имена `type/1`, `types/0`, `__codec_variants__/0`
+  и приватную `__codec_variant__/3`.
 - **`use Core.Es.Event.Codec` выводит клаузы нагрузки по полям, нагрузки-Prim и
   `Es.ValueChanged`.** Для события, чья нагрузка объявлена `use Core.Es.Event.Payload`, — Prim или
   `use Core.Es.ValueChanged`, кодек генерирует `dump_payload/2` / `load_payload/3` перед ручными;

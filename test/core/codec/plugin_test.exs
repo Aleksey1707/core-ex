@@ -136,8 +136,8 @@ defmodule Core.Codec.PluginTest do
     end
   end
 
-  test "types обязательны и непусты" do
-    assert_raise CompileError, ~r/нет обязательных опций: \[:types\]/, fn ->
+  test "плагин без типов — CompileError" do
+    assert_raise CompileError, ~r/нет типов — задайте types:, fields: или variants:/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.NoTypes do
@@ -147,7 +147,7 @@ defmodule Core.Codec.PluginTest do
       )
     end
 
-    assert_raise CompileError, ~r/types: ожидается непустой список/, fn ->
+    assert_raise CompileError, ~r/нет типов/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.EmptyTypes do

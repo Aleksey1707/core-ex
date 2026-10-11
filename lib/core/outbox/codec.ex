@@ -7,10 +7,6 @@ defmodule Core.Outbox.Codec do
   """
 
   use Core.Codec.Plugin,
-    types: [
-      Core.Outbox.Record,
-      Core.Outbox.RecordError
-    ],
     fields: [
       {Core.Outbox.Record,
        id: [prim: Core.Outbox.ID],

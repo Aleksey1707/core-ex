@@ -9,7 +9,9 @@ defmodule Consumer.Domain.Sales do
   - Акторы: `Client` — usecases в каталоге каждого агрегата и read-модели.
   - Значения без владельца (`Values`): `UserID`, идентификаторы из ключа `DeliveryID` и `InspectionID`.
   - Read-модели: активность `Activity` по назначению — проекция на события `Account` и `Order`.
-  - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec`.
+  - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec`, семейства
+    вариантов `Account.Profile.Channel.Codec` (тегированная форма с дискриминатором) и
+    `Account.Profile.Badge.Codec` (без обёртки).
   - Компоненты: нет.
   - Другие контексты: нет.
   """
@@ -40,6 +42,8 @@ defmodule Consumer.Domain.Sales do
       Account.Outbox,
       Order.Outbox,
       Account.Card.Codec,
-      Account.Profile.Codec
+      Account.Profile.Codec,
+      Account.Profile.Channel.Codec,
+      Account.Profile.Badge.Codec
     ]
 end

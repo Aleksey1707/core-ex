@@ -18,6 +18,21 @@ defmodule Core.Codec.Plugin do
   опцией `union:`, фасад заводит для него клоузу `load/2`, а какой конкретно тип лежит в
   данных — решает сам плагин. Так у фасада остаётся одна ось диспетчеризации — модуль.
 
+  Варианты, которые узнаются по адресу в данных, объявляются `variants:`, и разбор генерирует
+  плагин (`Core.Codec.Plugin.Variants`):
+
+  ```elixir
+  use Core.Codec.Plugin,
+    union: Shape,
+    variants: [
+      {Shape.Circle, "circle", radius: [type: :pos_integer]},
+      {Shape.Rect, {"polygon", kind: :rect}, width: [type: :pos_integer], height: [type: :pos_integer]},
+      {Shape.Blob, "blob"}
+    ]
+  ```
+
+  Ручной вариант (`{Type, адрес}`) пишет только поля — колбэками `dump_variant/2` / `load_variant/3`.
+
   ## Плагин по полям (`fields:`)
 
   Тип, чья wire-форма повторяет поля один к одному, объявляется спекой полей, и `dump/2` /
@@ -25,7 +40,6 @@ defmodule Core.Codec.Plugin do
 
   ```elixir
   use Core.Codec.Plugin,
-    types: [Item],
     fields: [
       {Item,
        id: [prim: Item.ID],
@@ -43,7 +57,8 @@ defmodule Core.Codec.Plugin do
   Ключи спеки сверяются с полями struct без `__struct__` и `events`; расхождение — `CompileError`.
   `load/3` собирает struct литералом; первая ошибка поля — итог, лишние ключи игнорируются.
   Дамп — map со строковыми ключами. Ручная клауза на тип из `fields:` и `@spec` у `dump/2` /
-  `load/3` такого плагина — `CompileError`.
+  `load/3` такого плагина — `CompileError`. Тип из `fields:` в `types:` не повторяется: `types:` —
+  только ручные типы.
   """
 
   alias Core.Error
@@ -64,34 +79,45 @@ defmodule Core.Codec.Plugin do
   @doc "Модуль (тип или семейство) + wire → domain (опционально при `loadable: false`)."
   @callback load(module(), term(), codec()) :: {:ok, term()} | {:error, Error.t()}
 
-  @optional_callbacks load: 3
+  @doc "Поля ручного варианта (`{Mod, адрес}` в `variants:`) → map; адрес и обёртку пишет плагин."
+  @callback dump_variant(struct(), codec()) :: map()
+
+  @doc "Модуль ручного варианта + его поля → вариант; адрес уже сверен плагином."
+  @callback load_variant(module(), map(), codec()) :: {:ok, struct()} | {:error, Error.t()}
+
+  @optional_callbacks load: 3, dump_variant: 2, load_variant: 3
 
   @doc """
   Объявить entity-плагин.
 
   ## Opts
 
-  - `types:` — непустой список модулей struct
+  - `types:` — список модулей struct с ручными `dump/2` / `load/3`
   - `loadable:` — `true` (default), если есть `load/3`; `false` — только `dump/2`
   - `union:` — модуль-семейство типов: фасад отдаёт ему `load/3` с тегом внутри данных
   - `fields:` — список пар `{Type, spec}`: типы, для которых `dump/2` / `load/3` генерируются
     по спеке полей
+  - `variants:` — варианты семейства `union:`: `{Type, адрес, spec}` или `{Type, адрес}`
+    (`Core.Codec.Plugin.Variants`)
+
+  Тип объявляется ровно одной из `types:` / `fields:` / `variants:`; хотя бы одна из них обязательна.
   """
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(opts, ~w(types)a, ~w(loadable union fields)a, "Codec.Plugin")
+      Helper.Opts.validate!(opts, [], ~w(types loadable union fields variants)a, "Codec.Plugin")
 
       @behaviour Core.Codec.Plugin
 
-      @codec_types Core.Codec.Plugin.Opts.types!(opts)
       @codec_loadable Keyword.get(opts, :loadable, true)
       @codec_union Core.Codec.Plugin.Opts.union!(opts, @codec_loadable)
-      @codec_fields Core.Codec.Plugin.Fields.fields!(
-                      __MODULE__,
-                      Keyword.get(opts, :fields),
-                      @codec_types,
-                      @codec_loadable
-                    )
+      @codec_fields Core.Codec.Plugin.Fields.fields!(__MODULE__, Keyword.get(opts, :fields), @codec_loadable)
+      @codec_variants Core.Codec.Plugin.Variants.variants!(__MODULE__, Keyword.get(opts, :variants), @codec_union)
+      @codec_types Core.Codec.Plugin.Opts.all_types!(__MODULE__, [
+                     Core.Codec.Plugin.Opts.types!(opts),
+                     Enum.map(@codec_fields, &elem(&1, 0)),
+                     Enum.map(@codec_variants, &elem(&1, 0))
+                   ])
+      @codec_variants_info Core.Codec.Plugin.Variants.introspection(@codec_variants)
 
       # `@impl` и на колбэках `__codec_*__`, и на сгенерированных клаузах: ручная клауза с `@impl` у
       # смешанного плагина иначе требует его от каждого колбэка из этого `use`.
@@ -112,6 +138,11 @@ defmodule Core.Codec.Plugin do
       @impl true
       def __codec_union__, do: @codec_union
 
+      @doc false
+      @spec __codec_variants__() :: [{module(), term(), [Core.Codec.Plugin.Fields.field()] | :manual}]
+
+      def __codec_variants__, do: @codec_variants_info
+
       import Core.Helper.Map, only: [field: 2]
 
       import Core.Codec.Helper,
@@ -130,11 +161,55 @@ defmodule Core.Codec.Plugin do
             do: unquote(Core.Codec.Plugin.Fields.dump_body(fields))
       end
 
+      for variant <- @codec_variants do
+        @impl true
+        def dump(unquote_splicing(Core.Codec.Plugin.Variants.dump_args(variant)))
+            when unquote(Core.Codec.Plugin.Variants.dump_guard(variant)),
+            do: unquote(Core.Codec.Plugin.Variants.dump_body(variant))
+      end
+
       for {type, fields} <- @codec_fields, @codec_loadable do
         @impl true
         def load(unquote_splicing(Core.Codec.Plugin.Fields.load_args(type)))
             when unquote(Core.Codec.Plugin.Fields.load_guard()),
             do: unquote(Core.Codec.Plugin.Fields.load_body(type, fields))
+      end
+
+      for {type, _address, _place, _fields} = variant <- @codec_variants do
+        @impl true
+        def load(unquote_splicing(Core.Codec.Plugin.Variants.load_args(type)))
+            when unquote(Core.Codec.Plugin.Variants.load_guard()),
+            do: unquote(Core.Codec.Plugin.Variants.load_body(variant))
+      end
+
+      if @codec_variants != [] do
+        @impl true
+        def load(unquote_splicing(Core.Codec.Plugin.Variants.load_args(@codec_union)))
+            when unquote(Core.Codec.Plugin.Variants.load_guard()),
+            do:
+              unquote(
+                Core.Codec.Plugin.Variants.family_body(@codec_union, Core.Codec.Plugin.Variants.index(@codec_variants))
+              )
+
+        for variant <- @codec_variants do
+          defp __codec_variant__(unquote_splicing(Core.Codec.Plugin.Variants.variant_args(variant)))
+               when unquote(Core.Codec.Plugin.Variants.variant_guard(variant)),
+               do: unquote(Core.Codec.Plugin.Variants.variant_body(variant))
+        end
+
+        @codec_type_by_mod Core.Codec.Plugin.Variants.type_by_mod(@codec_variants)
+
+        @doc "Wire-тег варианта по struct или модулю (у адреса без обёртки — значение дискриминатора)."
+        @spec type(struct() | module()) :: String.t()
+
+        def type(%mod{}) when is_map_key(@codec_type_by_mod, mod), do: Map.fetch!(@codec_type_by_mod, mod)
+
+        def type(mod) when is_atom(mod) and is_map_key(@codec_type_by_mod, mod), do: Map.fetch!(@codec_type_by_mod, mod)
+
+        @doc "Множество wire-тегов вариантов."
+        @spec types() :: MapSet.t(String.t())
+
+        def types, do: MapSet.new(Map.values(@codec_type_by_mod))
       end
 
       @before_compile Core.Codec.Plugin.Opts

@@ -293,6 +293,10 @@ json(conn, Response.error(code, messages))
 - Плагин по полям (`use Core.Codec.Plugin, fields:`): поле `list:` не списком при загрузке →
   `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`, `module` — тип плагина); ошибки
   Prim и `cast` enum — как есть (`11-domain.md`, «Плагин по полям»).
+- Варианты семейства (`use Core.Codec.Plugin, variants:`): повреждённая форма →
+  `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`); адрес вне семейства или не этого
+  варианта → `code: :unknown_tag`, `detail: %{tag:, discriminator:}`; `module` — семейство или тип
+  варианта (`11-domain.md`, «Варианты семейства»).
 - Хранилище событий (`Core.Es.Store.append`): отказ записи → `version_mismatch` →
   `errors_mod.domain(behaviour, :version_mismatch, %{aggregate_id, expected, actual, source:})`;
   код и `behaviour` задаёт write-репозиторий (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не

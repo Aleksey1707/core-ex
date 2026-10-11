@@ -21,7 +21,9 @@ defmodule Consumer.Codec do
     Consumer.Domain.Sales.Ping.Event.Codec,
     Consumer.Domain.Sales.Grants.Event.Codec,
     Consumer.Domain.Sales.Account.Card.Codec,
-    Consumer.Domain.Sales.Account.Profile.Codec
+    Consumer.Domain.Sales.Account.Profile.Codec,
+    Consumer.Domain.Sales.Account.Profile.Channel.Codec,
+    Consumer.Domain.Sales.Account.Profile.Badge.Codec
   ]
 
   def plugins, do: @plugins

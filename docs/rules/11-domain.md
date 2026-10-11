@@ -373,13 +373,16 @@ use Core.Codec.Facade,
   не ловит, при исполнении — `ArgumentError`
 - Полиморфный wire (тег внутри данных) грузится через **модуль-семейство**:
   `InCodec.load(<Aggregate>.Event, data)`. Семейство объявляет плагин опцией `union:`, конкретный
-  тип выбирает он же — фасад про теги не знает
+  тип выбирает он же — фасад про теги не знает. Варианты семейства с адресом в данных — «Варианты
+  семейства (`variants:`)»
 - Модули типов и семейств уникальны между плагинами (`CompileError` на компиляции фасада); теги
   уникальны **внутри своего плагина**, а не приложения
-- Plugin: `use Core.Codec.Plugin, types: [...]`; `loadable: true|false`; `union: Мод` (требует
-  `loadable: true`); `dump/2` обязателен всегда, `loadable: true` требует ещё `load/3`
-  (`CompileError`)
-- Генерируются `__codec_types__/0`, `__codec_union__/0`, `__codec_loadable__/0`
+- Plugin: `use Core.Codec.Plugin, types: [...]` — ручные типы; `fields:` — типы по полям;
+  `variants:` — варианты семейства; тип — ровно в одной из трёх, хотя бы одна обязательна
+  (`CompileError`); `loadable: true|false`; `union: Мод` (требует `loadable: true`); у ручного типа
+  `dump/2` обязателен всегда, `loadable: true` требует ещё `load/3` (`CompileError`)
+- Генерируются `__codec_types__/0` (объединение трёх опций), `__codec_union__/0`,
+  `__codec_loadable__/0`, `__codec_variants__/0`
 - `loadable: false` — dump-only (как `<Aggregate>.View.Codec`: у read-модели обратного пути нет)
 - Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по
   atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` /
@@ -418,7 +421,6 @@ use Core.Codec.Facade,
 
 ```elixir
 use Core.Codec.Plugin,
-  types: [Item],
   fields: [
     {Item,
      id: [prim: Item.ID],
@@ -429,8 +431,8 @@ use Core.Codec.Plugin,
   ]
 ```
 
-- `fields:` — список пар `{Type, spec}`; ключи — подмножество `types:`, повтор типа или ключ вне
-  `types:` — `CompileError`. Struct типа остаётся ручным
+- `fields:` — список пар `{Type, spec}`; повтор типа или тип, названный ещё и в `types:` /
+  `variants:`, — `CompileError`. Struct типа остаётся ручным
 - Поле спеки — ровно один вид:
 
   | Вид | Значение поля | Дамп | Загрузка | Голова `dump/2` |
@@ -470,37 +472,76 @@ use Core.Codec.Plugin,
   молча ловила бы только невалидное; у одного типа один источник wire. Тип задаёт литерал в
   голове (`%Type{}`, у `load/3` — `Type`) или guard переменной первого аргумента
   (`when mod in [...]`)
-- `@spec` у `dump/2` / `load/3` плагина с `fields:` — `CompileError`: спека — контракт всей
-  функции, включая сгенерированные клаузы, и спека ручного типа сузила бы их без сигнала сборки,
-  только ошибкой Dialyzer у вызывающего. Контракт задаёт `@callback` `Core.Codec.Plugin`
-  (`20-agreements.md`, «Спецификации типов»)
+- `@spec` у `dump/2` / `load/3` плагина с `fields:` или `variants:` — `CompileError`: спека —
+  контракт всей функции, включая сгенерированные клаузы, и спека ручного типа сузила бы их без
+  сигнала сборки, только ошибкой Dialyzer у вызывающего. Контракт задаёт `@callback`
+  `Core.Codec.Plugin` (`20-agreements.md`, «Спецификации типов»)
 - Тип из `types:` без спеки и без ручной клаузы `dump/2` (при `loadable: true` — и `load/3`) —
   `CompileError`. Клаузой типа считается та, чей первый аргумент — `%Type{}` (у `load/3` — `Type`),
   переменная с guard `var in [...]` — для модулей списка, или не литерал типа вовсе (переменная,
   `%mod{}`); проверка действует и на плагин без `fields:`
 - `loadable: false` — генерируется только `dump/2`
-- `union:` с `fields:` совместим: варианты семейства объявляются по полям, клауза
-  `load(Family, wire, codec)` пишется руками и выбирает вариант по тегу в данных — без неё
-  `CompileError`:
+- `union:` без `variants:` с `fields:` совместим: варианты объявляются по полям, клауза
+  `load(Family, wire, codec)` пишется руками — без неё `CompileError`. Семейство, чей вариант
+  узнаётся по адресу в данных, объявляется `variants:` (ниже)
 
-  ```elixir
-  use Core.Codec.Plugin,
-    types: [Shape.Circle, Shape.Square],
-    union: Shape,
-    fields: [
-      {Shape.Circle, kind: [type: :string], radius: [type: :pos_integer]},
-      {Shape.Square, kind: [type: :string], side: [type: :pos_integer]}
-    ]
+### Варианты семейства (`variants:`)
 
-  @impl true
-  def load(Shape, wire, codec) when is_map(wire) do
-    case field(wire, :kind) do
-      "circle" -> load(Shape.Circle, wire, codec)
-      "square" -> load(Shape.Square, wire, codec)
-      _other -> {:error, Error.domain(Shape, code: :invalid_value, ns: :codec, message: "...")}
-    end
-  end
-  ```
+Вариант семейства (термины — `CONTEXT.md`) объявляется адресом и спекой полей, а дамп в форме
+адреса, загрузку варианта и семейства и ошибки разбора генерирует `use Core.Codec.Plugin`
+(решение — ADR-0057):
+
+```elixir
+use Core.Codec.Plugin,
+  union: Shape,
+  variants: [
+    {Shape.Circle, "circle", radius: [type: :pos_integer]},
+    {Shape.Rect, {"polygon", kind: :rect}, width: [type: :pos_integer], height: [type: :pos_integer]},
+    {Shape.Triangle, {"polygon", kind: :triangle}, sides: [list: [type: :pos_integer]]},
+    {Shape.Blob, "blob"}
+  ]
+
+@impl true
+def dump_variant(%Shape.Blob{} = blob, codec), do: %{"points" => dump_many(blob.points, codec)}
+
+@impl true
+def load_variant(Shape.Blob, fields, codec) when is_map(fields) do
+  with {:ok, points} <- load_many(Shape.Point, field(fields, :points), codec),
+       do: {:ok, %Shape.Blob{points: points}}
+end
+```
+
+- `variants:` — `{Type, адрес, spec}` (поля по спеке, как у `fields:`) или `{Type, адрес}` (ручной
+  вариант); требует `union:`, иначе `CompileError`
+- Адрес — одна из форм, одна на плагин:
+
+  | Адрес | Wire |
+  |---|---|
+  | `"tag"` | `%{"type" => "tag", "fields" => поля}` — тегированная форма |
+  | `{"tag", key: value}` | тегированная форма, `"key" => value` внутри `fields` |
+  | `[key: value]` | поля и `"key" => value` без обёртки |
+
+- Дискриминатор — одна пара `key: value`, значение атомом или строкой; дамп пишет его как объявлено
+  (атом — атомом, как `enum:`), загрузка сравнивает по строке. Поле struct с именем
+  дискриминатора в спеку не входит: загрузка оставляет его значение по умолчанию, и оно MUST
+  равняться `value`
+- `CompileError`: две формы адреса в плагине, повтор адреса, общий тег у вариантов без
+  дискриминатора у каждого, разные ключи дискриминатора у одного тега (у формы без обёртки — во
+  всём плагине), wire-ключ поля спеки, равный ключу дискриминатора, значение поля дискриминатора по
+  умолчанию, не равное `value`
+- Ручной вариант пишет только поля — колбэками `dump_variant/2` / `load_variant/3` (optional
+  `@callback` `Core.Codec.Plugin`, `@impl true`); адрес, обёртку и выбор варианта пишет плагин.
+  Ручной вариант без клаузы колбэка — `CompileError`
+- Генерируются `dump/2` варианта в форме адреса, `load(Type, wire, codec)` — сверяет адрес и грузит
+  поля, так что `load(Type, dump(x)) == {:ok, x}`, `load(Family, wire, codec)` — на любой term,
+  `type/1` (тег; у формы без обёртки — значение дискриминатора строкой) и `types/0`. Ручная клауза
+  `dump/2` / `load/3` на вариант или семейство — `CompileError` «never match», `@spec` у `dump/2` /
+  `load/3` — `CompileError`, как у `fields:`
+- Ошибки разбора — `%Error{kind: :domain, ns: :codec}`: повреждённая форма (не map, нет тега-строки,
+  `fields` не map, нет дискриминатора) — `:invalid_value`; адрес вне семейства или, у
+  `load(Type, …)`, не этого варианта — `:unknown_tag` с `detail: %{tag:, discriminator:}`
+- Ключи тегированной формы общие с `Core.Codec.Redump` (`{:tagged, _}`). Адрес — wire-контракт:
+  переименование ломает чтение записанного, ловят его golden-фикстуры
 
 ### Dump/load только через фасад
 
