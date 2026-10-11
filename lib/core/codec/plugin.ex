@@ -60,7 +60,7 @@ defmodule Core.Codec.Plugin do
 
   Поле — ровно один вид: `prim:` (любой Prim), `enum:` (`Core.Enum`), `entity:` (struct фасада),
   `union:` (вариант семейства: дамп в форме адреса, загрузка `codec.load(Family, raw)`, голова —
-  только `is_struct`), `list:` (спека элемента), `type:` (скаляр `Core.View` или `:map`); плюс
+  только `is_struct`), `list:` (спека элемента), `type:` (как у `Core.View`: скаляр или `:map`); плюс
   `optional: true`, `wire: "ключ"` (по умолчанию имя поля строкой) и `default:` — wire-литерал
   вместо отсутствующего ключа или `nil` при загрузке.
   Ключи спеки сверяются с полями struct без `__struct__` и `events`; расхождение — `CompileError`.

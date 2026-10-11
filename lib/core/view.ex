@@ -29,7 +29,7 @@ defmodule Core.View do
   |---|---|---|
   | `prim:` | Prim-модуль | `Codec.Helper.dump_raw/3` (в формате профиля кодека) |
   | `enum:` | модуль `Core.Enum` | атом как есть |
-  | `type:` | `:string` / `:boolean` / `:integer` / `:pos_integer` / `:non_neg_integer` | как есть |
+  | `type:` | `:string` / `:boolean` / `:integer` / `:pos_integer` / `:non_neg_integer` / `:map` | как есть |
   | `view:` | вложенный View | его кодеком через фасад |
   | `form:` | имя формы из `forms:` | дампером формы (`dump_form/3`) |
   | `list:` | вложенная спека | поэлементно |
@@ -48,6 +48,10 @@ defmodule Core.View do
   `variants:` или объявляет колбэк `redump_spec/1`, разрешает фасад при исполнении. Prim, `Core.Enum` и
   не собранный модуль — `CompileError`; есть ли у типа спека, сборка не проверяет. `jsonb: {Мод, :fun}` —
   для форм без типа: словаря, варианта, который выбирает родитель, тега вне jsonb.
+
+  `type: :map` — jsonb без форматируемых Prim (`:uuid` / `:datetime` / `:date` / `:decimal`) на любой
+  глубине: словарь строк, свободная map. Переводить в ней нечего, поэтому она уходит как есть, без
+  спеки пере-дампа; форма с такими Prim — `jsonb:`.
 
   `jsonb:` типизируется `map()`; jsonb-массив объявляется `list: [jsonb: Type]` (или
   `list: [jsonb: {Мод, :спека}]`) — тогда и тип (`[map()]`), и пере-дамп идут поэлементно.

@@ -13,7 +13,7 @@ defmodule Core.View.Opts do
   alias Core.Prim
 
   @label "View"
-  @scalar_types FieldCheck.scalar_types()
+  @type_values FieldCheck.type_values()
 
   @prim_type_asts %{
     uuid: quote(do: String.t()),
@@ -150,11 +150,11 @@ defmodule Core.View.Opts do
   end
 
   defp spec!(:type, type, name, _form_names, label) do
-    if type not in @scalar_types do
+    if type not in @type_values do
       raise CompileError,
         description:
           "#{where(label, name)}: неизвестный type: #{inspect(type)}, " <>
-            "ожидается один из #{inspect(@scalar_types)}"
+            "ожидается один из #{inspect(@type_values)}"
     end
 
     {:type, type}

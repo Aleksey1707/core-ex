@@ -1,7 +1,7 @@
 defmodule Core.Helper.FieldCheck do
   @moduledoc """
   Элементарные compile-time проверки модуля в спеке поля: модуль собран, является Prim,
-  является `Core.Enum`; общий набор скаляров `type:`.
+  является `Core.Enum`; общий набор значений `type:`.
 
   Общие для деклараций полей (`Core.View`, спека полей Codec-плагина): специфичные
   проверки остаются у каждой декларации. `where` — префикс текста ошибки, по которому видно
@@ -10,10 +10,10 @@ defmodule Core.Helper.FieldCheck do
 
   alias Core.Prim
 
-  @doc "Скаляры `type:`, общие для деклараций полей."
-  @spec scalar_types() :: [atom()]
+  @doc "Значения `type:`, общие для деклараций полей: скаляры и свободная map."
+  @spec type_values() :: [atom()]
 
-  def scalar_types, do: ~w(string boolean integer pos_integer non_neg_integer)a
+  def type_values, do: ~w(string boolean integer pos_integer non_neg_integer map)a
 
   @doc "Проверить, что `mod` — собранный модуль."
   @spec module!(term(), String.t()) :: :ok

@@ -443,7 +443,7 @@ use Core.Codec.Plugin,
   | `entity: Mod` | struct, обслуживаемый фасадом | `codec.dump/1` | `codec.load(Mod, raw)` | `%Mod{}` |
   | `union: Family` | вариант семейства (`union:` у его плагина) | `codec.dump/1` — форма адреса варианта | `codec.load(Family, raw)` | `is_struct` |
   | `list: спека` | список значений вида из спеки элемента | поэлементно | поэлементно; не список — `%Error{ns: :codec, code: :invalid_value}` | `is_list` |
-  | `type: скаляр` | скаляр `Core.View` или `:map` | как есть | как есть | по скаляру |
+  | `type: скаляр` | скаляр или `:map` — как `type:` у `Core.View` | как есть | как есть | по скаляру |
 
 - `optional: true` — `nil` в обе стороны, отсутствующий ключ даёт `nil`; у `list:` задаётся у
   самого поля, не у элемента. `wire: "ключ"` — строка, по умолчанию имя поля строкой; загрузка

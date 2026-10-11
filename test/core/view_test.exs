@@ -177,6 +177,17 @@ defmodule Core.ViewTest do
       assert %{reading: nil} = ViewFixture.Typed.Codec.dump(ViewFixture.Typed.new(readings: [], entries: []), OutCodec)
     end
 
+    test "type: :map уходит как есть, nil проходит" do
+      attrs = %{"a" => 1, "b" => %{"c" => ["d"]}}
+      entry = %{"attrs" => attrs}
+      free = ViewFixture.Free.new(attrs: attrs, extra: nil, items: [attrs, %{}], entries: [entry])
+
+      assert %{attrs: ^attrs, extra: nil, items: [^attrs, %{}], entries: [%{attrs: ^attrs}]} =
+               OutCodec.dump(free)
+
+      assert %{extra: ^attrs} = OutCodec.dump(%{free | extra: attrs})
+    end
+
     test "форма внутри формы дампится своим набором полей" do
       listy = ViewFixture.Listy.new(payloads: [], marks: [%{code: "m1", inner: %{at: @at}}])
 
@@ -231,6 +242,20 @@ defmodule Core.ViewTest do
       assert "[map()]" = fields[:readings]
     end
 
+    test "type: :map типизирован map()" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Free)
+      fields = struct_type_fields(types)
+
+      assert "map()" = fields[:attrs]
+      assert "map() | nil" = fields[:extra]
+      assert "[map()]" = fields[:items]
+
+      assert {:type, {:entry, form_type, []}} =
+               Enum.find(types, &match?({:type, {:entry, _, []}}, &1))
+
+      assert type_to_string(form_type) =~ "attrs: map()"
+    end
+
     test "форма получает именованный тип" do
       {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Sample)
 
@@ -275,8 +300,8 @@ defmodule Core.ViewTest do
       end
     end
 
-    test "неизвестный скалярный тип" do
-      assert_raise CompileError, ~r/неизвестный type:/, fn ->
+    test "неизвестный type:" do
+      assert_raise CompileError, ~r/неизвестный type:.*:map/, fn ->
         define(fields: [n: [type: :float]])
       end
     end

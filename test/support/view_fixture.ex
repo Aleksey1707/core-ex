@@ -156,6 +156,23 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule Free do
+    @moduledoc false
+
+    use Core.View,
+      fields: [
+        attrs: [type: :map],
+        extra: [type: :map, optional: true],
+        items: [list: [type: :map]],
+        entries: [list: [form: :entry]]
+      ],
+      forms: [
+        entry: [
+          attrs: [type: :map]
+        ]
+      ]
+  end
+
   defmodule Plain do
     @moduledoc false
 
@@ -174,6 +191,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.External,
       plugins: [
+        Core.ViewFixture.Free.Codec,
         Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
@@ -189,6 +207,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.Internal,
       plugins: [
+        Core.ViewFixture.Free.Codec,
         Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,

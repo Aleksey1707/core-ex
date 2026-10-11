@@ -36,7 +36,7 @@ defmodule Core.Codec.Plugin.Fields do
   @skipped_keys ~w(__struct__ events)a
   @facade_kinds ~w(prim entity union)a
   @pattern_kinds ~w(prim entity)a
-  @scalar_types FieldCheck.scalar_types() ++ ~w(map)a
+  @type_values FieldCheck.type_values()
 
   @typedoc "Нормализованная спека значения поля."
   @type spec ::
@@ -234,11 +234,11 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
-  defp kind_spec!(:type, type, _where) when type in @scalar_types, do: {:type, type}
+  defp kind_spec!(:type, type, _where) when type in @type_values, do: {:type, type}
 
   defp kind_spec!(:type, type, where) do
     raise CompileError,
-      description: "#{where}: неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@scalar_types)}"
+      description: "#{where}: неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@type_values)}"
   end
 
   defp optional!(opts, where) do
