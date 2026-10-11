@@ -11,6 +11,11 @@ defmodule Core.Codec.Facade do
   Наружу фасад отдаёт три функции — `dump/1`, `load/2`, `load!/2`
   (`Core.Codec.Facade.Behaviour`). Значение без плагина уходит в Prim-профиль.
 
+  Служебная `__codec_redump__/1` отдаёт `Core.Codec.Redump` спеку пере-дампа типа по ссылке
+  `{:codec, Type}`: её выводит или объявляет колбэком `redump_spec/1` плагин типа. Тип плагина без
+  спеки (ручной без клаузы колбэка) и модуль без плагина — `ArgumentError`, где названы тип и плагин
+  (фасад).
+
   ## Семейства типов
 
   Плагин с `union:` (образец — `Core.Es.Event.Codec`) получает клоузу `load/2` на сам
@@ -124,6 +129,19 @@ defmodule Core.Codec.Facade do
 
       def load!(mod, raw) when is_atom(mod) do
         Core.Result.unwrap!(load(mod, raw))
+      end
+
+      @doc false
+      @spec __codec_redump__(module()) :: Core.Codec.Redump.spec()
+
+      @impl true
+      for plugin <- @plugins,
+          mod <- Core.Codec.Facade.load_mods(plugin) do
+        def __codec_redump__(unquote(mod)), do: unquote(plugin).__codec_redump__(unquote(mod))
+      end
+
+      def __codec_redump__(mod) when is_atom(mod) do
+        raise ArgumentError, "#{inspect(mod)}: нет codec-плагина в фасаде #{inspect(__MODULE__)} — спеки redump нет"
       end
     end
   end

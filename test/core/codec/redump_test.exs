@@ -159,6 +159,62 @@ defmodule Core.Codec.RedumpTest do
            } = Redump.run(value, spec, Profile)
   end
 
+  describe "run/3 — {:codec, mod}" do
+    defmodule Stub do
+      def __codec_redump__(ID), do: {:prim, ID}
+      def __codec_redump__(Tree), do: {:map, %{id: {:prim, ID}, next: {:codec, Tree}}}
+
+      def dump(prim), do: Profile.dump(prim)
+    end
+
+    test "берёт спеку у фасада и переводит по ней" do
+      assert Redump.run(@uuid, {:codec, ID}, Stub) == @hex
+    end
+
+    test "рекурсивная ссылка разворачивается по данным" do
+      value = %{"id" => @uuid, "next" => %{"id" => @uuid, "next" => nil}}
+
+      assert %{"id" => @hex, "next" => %{"id" => @hex, "next" => nil}} = Redump.run(value, {:codec, Tree}, Stub)
+    end
+
+    test "nil — как есть, без обращения к фасаду" do
+      assert nil == Redump.run(nil, {:codec, Unknown}, Stub)
+    end
+  end
+
+  describe "run/3 — :sensitive" do
+    test "ключ удаляется из результата" do
+      spec = {:map, %{id: {:prim, ID}, token: :sensitive}}
+
+      assert Redump.run(%{"id" => @uuid, "token" => "s"}, spec, Profile) == %{"id" => @hex}
+      assert Redump.run(%{token: "s"}, spec, Profile) == %{}
+    end
+
+    test "ключа нет — ничего не делается" do
+      assert Redump.run(%{"name" => "Иван"}, {:map, %{token: :sensitive}}, Profile) == %{"name" => "Иван"}
+    end
+  end
+
+  describe "validate!/1 — {:codec, mod} и :sensitive" do
+    test "принимает {:codec, M} без проверки существования и :sensitive полем map" do
+      assert Redump.validate!({:codec, Missing.Type}) == {:codec, Missing.Type}
+
+      spec = {:map, %{token: :sensitive, "wire-key": {:list, {:codec, Missing.Type}}}}
+
+      assert Redump.validate!(spec) == spec
+    end
+
+    test "отвергает :sensitive вне значения поля map" do
+      for spec <- [:sensitive, {:list, :sensitive}, {:tagged, %{"t" => :sensitive}}] do
+        assert_raise ArgumentError, ~r/только значением поля/, fn -> Redump.validate!(spec) end
+      end
+    end
+
+    test "отвергает {:codec, _} не с модулем" do
+      assert_raise ArgumentError, ~r/неверная спека Redump/, fn -> Redump.validate!({:codec, "Type"}) end
+    end
+  end
+
   describe "validate!/1" do
     test "принимает все четыре формы спеки" do
       assert Redump.validate!({:prim, At}) == {:prim, At}

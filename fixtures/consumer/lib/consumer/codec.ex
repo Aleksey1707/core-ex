@@ -23,7 +23,8 @@ defmodule Consumer.Codec do
     Consumer.Domain.Sales.Account.Card.Codec,
     Consumer.Domain.Sales.Account.Profile.Codec,
     Consumer.Domain.Sales.Account.Profile.Channel.Codec,
-    Consumer.Domain.Sales.Account.Profile.Badge.Codec
+    Consumer.Domain.Sales.Account.Profile.Badge.Codec,
+    Consumer.Domain.Sales.Account.View.Codec
   ]
 
   def plugins, do: @plugins

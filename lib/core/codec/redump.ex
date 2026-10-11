@@ -19,6 +19,13 @@ defmodule Core.Codec.Redump do
 
   `{:tagged, _}` — тегированная форма варианта семейства: тег в ключе `type`, значения в `fields`;
   ключи — общие с вариантами плагина (`Core.Codec.Plugin.Variants`).
+
+  `{:codec, Type}` — ссылка на спеку типа другого плагина: её отдаёт `codec.__codec_redump__/1`
+  при исполнении (выведенная плагином по `fields:` / `variants:` или колбэк `redump_spec/1`
+  ручного плагина). Тип без спеки и модуль без плагина — `ArgumentError` фасада.
+
+  `:sensitive` — значение поля `{:map, _}`: ключ удаляется из результата. Так выведенная спека
+  описывает sensitive-поле, которое спека полей плагина допускает на write-пути.
   """
 
   alias Core.Codec
@@ -27,9 +34,10 @@ defmodule Core.Codec.Redump do
 
   @type spec ::
           {:prim, module()}
-          | {:map, %{optional(atom()) => spec()}}
+          | {:map, %{optional(atom()) => spec() | :sensitive}}
           | {:list, spec()}
           | {:tagged, %{optional(String.t()) => spec()}}
+          | {:codec, module()}
 
   @tag_key Core.Codec.Plugin.Variants.tag_key()
   @payload_key Core.Codec.Plugin.Variants.fields_key()
@@ -43,6 +51,10 @@ defmodule Core.Codec.Redump do
 
   def run(value, {:prim, mod}, codec) when is_atom(mod) do
     Codec.Helper.dump_raw(mod, value, codec)
+  end
+
+  def run(value, {:codec, mod}, codec) when is_atom(mod) and is_atom(codec) do
+    run(value, codec.__codec_redump__(mod), codec)
   end
 
   def run(value, {:list, spec}, codec) when is_list(value) do
@@ -74,9 +86,10 @@ defmodule Core.Codec.Redump do
 
   defp run_fields(map, fields, codec) do
     Enum.reduce(fields, map, fn {field, spec}, acc ->
-      case Helper.Map.key(acc, field) do
-        {:ok, key} -> Map.put(acc, key, run(Map.fetch!(acc, key), spec, codec))
-        :error -> acc
+      case {Helper.Map.key(acc, field), spec} do
+        {{:ok, key}, :sensitive} -> Map.delete(acc, key)
+        {{:ok, key}, spec} -> Map.put(acc, key, run(Map.fetch!(acc, key), spec, codec))
+        {:error, _spec} -> acc
       end
     end)
   end
@@ -112,6 +125,12 @@ defmodule Core.Codec.Redump do
     end
   end
 
+  def validate!({:codec, mod} = spec) when is_atom(mod) and not is_nil(mod), do: spec
+
+  def validate!(:sensitive) do
+    raise ArgumentError, "узел :sensitive допустим только значением поля {:map, _}"
+  end
+
   def validate!({:list, inner} = spec) do
     validate!(inner)
 
@@ -133,11 +152,12 @@ defmodule Core.Codec.Redump do
   def validate!(other) do
     raise ArgumentError,
           "неверная спека Redump: #{inspect(other)}; ожидается {:prim, Mod}, " <>
-            "{:map, %{поле => спека}}, {:list, спека} или {:tagged, %{тег => спека}}"
+            "{:map, %{поле => спека}}, {:list, спека}, {:tagged, %{тег => спека}} или {:codec, Mod}"
   end
 
   # ---
 
+  defp validate_field!({field, :sensitive}) when is_atom(field), do: :ok
   defp validate_field!({field, spec}) when is_atom(field), do: validate!(spec)
 
   defp validate_field!({field, _spec}) do

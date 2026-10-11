@@ -98,6 +98,12 @@ defmodule Core.View.Dumper do
     quote(do: dump_form(unquote(name), unquote(value), unquote(codec)))
   end
 
+  defp dump_ast({:jsonb, type}, value, codec, _depth) when is_atom(type) do
+    quote do
+      Core.Codec.Redump.run(unquote(value), {:codec, unquote(type)}, unquote(codec))
+    end
+  end
+
   defp dump_ast({:jsonb, {mod, fun}}, value, codec, _depth) do
     quote do
       Core.Codec.Redump.run(unquote(value), unquote(mod).unquote(fun)(), unquote(codec))

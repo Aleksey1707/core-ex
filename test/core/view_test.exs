@@ -39,6 +39,8 @@ defmodule Core.ViewTest do
 
   defp payload, do: %{"measured_at" => "2024-06-01T12:00:00.123456Z"}
 
+  defp json_roundtrip(value), do: Jason.decode!(Jason.encode!(value))
+
   describe "структура" do
     test "обязательные поля в @enforce_keys, optional — нет" do
       assert %ViewFixture.Sample{id: @uuid, status: :new, weight: nil} =
@@ -154,6 +156,27 @@ defmodule Core.ViewTest do
       assert same == measured
     end
 
+    test "jsonb: Type и list: [jsonb: Type] переводятся по выведенной спеке типа" do
+      reading = %ViewFixture.Reading{
+        measured_at: ViewFixture.MeasuredAt.new!(@measured_at),
+        weight: ViewFixture.Weight.new!(Decimal.new("10.5")),
+        status: :done
+      }
+
+      stored = json_roundtrip(InCodec.dump(reading))
+      entry = %{"reading" => stored, "readings" => [stored]}
+      typed = ViewFixture.Typed.new(reading: stored, readings: [stored, stored], entries: [entry])
+      expected = json_roundtrip(OutCodec.dump(reading))
+
+      assert %{
+               reading: ^expected,
+               readings: [^expected, ^expected],
+               entries: [%{reading: ^expected, readings: [^expected]}]
+             } = ViewFixture.Typed.Codec.dump(typed, OutCodec)
+
+      assert %{reading: nil} = ViewFixture.Typed.Codec.dump(ViewFixture.Typed.new(readings: [], entries: []), OutCodec)
+    end
+
     test "форма внутри формы дампится своим набором полей" do
       listy = ViewFixture.Listy.new(payloads: [], marks: [%{code: "m1", inner: %{at: @at}}])
 
@@ -198,6 +221,14 @@ defmodule Core.ViewTest do
 
       assert "[map()]" = fields[:payloads]
       assert "[mark()]" = fields[:marks]
+    end
+
+    test "jsonb: Type типизирован как jsonb: {Mod, :fun}" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Typed)
+      fields = struct_type_fields(types)
+
+      assert "map() | nil" = fields[:reading]
+      assert "[map()]" = fields[:readings]
     end
 
     test "форма получает именованный тип" do
@@ -293,13 +324,27 @@ defmodule Core.ViewTest do
       end
     end
 
-    test "jsonb требует ссылку на функцию-спеку" do
-      assert_raise CompileError, ~r/спеки redump/, fn ->
+    test "jsonb требует модуль типа или ссылку на функцию-спеку" do
+      assert_raise CompileError, ~r/поле payload: jsonb: — модуль типа или \{Модуль, :функция\} спеки redump/, fn ->
+        define(fields: [payload: [jsonb: "spec"]])
+      end
+
+      assert_raise CompileError, ~r/поле payload: :spec недоступен/, fn ->
         define(fields: [payload: [jsonb: :spec]])
       end
 
       assert_raise CompileError, ~r/не объявлена/, fn ->
         define(fields: [payload: [jsonb: {Core.ViewFixture.Specs, :missing_spec}]])
+      end
+    end
+
+    test "jsonb: Prim или Core.Enum — CompileError" do
+      assert_raise CompileError, ~r/поле payload: jsonb: .*ViewFixture.Weight — Prim/, fn ->
+        define(fields: [payload: [jsonb: Core.ViewFixture.Weight]])
+      end
+
+      assert_raise CompileError, ~r/поле payloads: jsonb: .*ViewFixture.Status — Core.Enum/, fn ->
+        define(fields: [payloads: [list: [jsonb: Core.ViewFixture.Status]]])
       end
     end
 

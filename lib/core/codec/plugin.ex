@@ -33,6 +33,14 @@ defmodule Core.Codec.Plugin do
 
   Ручной вариант (`{Type, адрес}`) пишет только поля — колбэками `dump_variant/2` / `load_variant/3`.
 
+  ## Спека пере-дампа
+
+  Спеку `Core.Codec.Redump` каждого типа из `fields:`, варианта из `variants:` и семейства с
+  `variants:` плагин выводит сам и отдаёт служебной `__codec_redump__/1` (`Core.Codec.Plugin.Redump`):
+  тип по полям — `{:map, %{wire-ключ => спека}}`, вариант — форма его дампа, семейство — слияние спек
+  вариантов. Ручной тип, ручной вариант (спека его полей) и семейство без `variants:` объявляют спеку
+  колбэком `redump_spec/1`; клауза колбэка на тип с выведенной спекой — `CompileError`.
+
   ## Плагин по полям (`fields:`)
 
   Тип, чья wire-форма повторяет поля один к одному, объявляется спекой полей, и `dump/2` /
@@ -86,7 +94,13 @@ defmodule Core.Codec.Plugin do
   @doc "Модуль ручного варианта + его поля → вариант; адрес уже сверен плагином."
   @callback load_variant(module(), map(), codec()) :: {:ok, struct()} | {:error, Error.t()}
 
-  @optional_callbacks load: 3, dump_variant: 2, load_variant: 3
+  @doc """
+  Спека пере-дампа (`Core.Codec.Redump`) ручного типа, ручного варианта (спека его полей, `{:map, _}`)
+  или семейства `union:` без `variants:`; спеку типов из `fields:` / `variants:` выводит плагин.
+  """
+  @callback redump_spec(module()) :: Core.Codec.Redump.spec()
+
+  @optional_callbacks load: 3, dump_variant: 2, load_variant: 3, redump_spec: 1
 
   @doc """
   Объявить entity-плагин.
@@ -214,6 +228,7 @@ defmodule Core.Codec.Plugin do
       end
 
       @before_compile Core.Codec.Plugin.Opts
+      @before_compile Core.Codec.Plugin.Redump
     end
   end
 end

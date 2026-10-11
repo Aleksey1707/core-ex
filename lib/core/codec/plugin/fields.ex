@@ -537,12 +537,17 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
+  defp wire_var, do: Macro.var(:wire, __MODULE__)
+
+  # ===== wire-ключ =====
+
   # `field/2` читает и атомарный, и строковый ключ, но принимает атом: wire-ключ — литерал
   # спеки в коде плагина, а не внешние данные, и таблицу атомов не засоряет.
-  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
-  defp wire_key(wire), do: String.to_atom(wire)
+  @doc false
+  @spec wire_key(String.t()) :: atom()
 
-  defp wire_var, do: Macro.var(:wire, __MODULE__)
+  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
+  def wire_key(wire) when is_binary(wire), do: String.to_atom(wire)
 
   # ===== загрузка списка =====
 

@@ -10,6 +10,7 @@ defmodule Core.View.Opts do
 
   alias Core.Codec
   alias Core.Helper.FieldCheck
+  alias Core.Prim
 
   @label "View"
   @scalar_types FieldCheck.scalar_types()
@@ -42,7 +43,7 @@ defmodule Core.View.Opts do
           | {:view, module()}
           | {:form, atom()}
           | {:list, spec()}
-          | {:jsonb, {module(), atom()}}
+          | {:jsonb, module() | {module(), atom()}}
 
   @typedoc "Нормализованное поле: имя, спека значения, признак необязательности."
   @type field :: {atom(), spec(), boolean()}
@@ -204,10 +205,28 @@ defmodule Core.View.Opts do
     {:jsonb, {mod, fun}}
   end
 
+  # Есть ли у типа спека, знает только фасад: её выводит или объявляет плагин типа (`{:codec, Type}`).
+  defp spec!(:jsonb, type, name, _form_names, label) when is_atom(type) do
+    FieldCheck.module!(type, where(label, name))
+
+    cond do
+      Prim.prim?(type) ->
+        raise CompileError,
+          description: "#{where(label, name)}: jsonb: #{inspect(type)} — Prim, а не тип плагина; нужен prim:"
+
+      Core.Enum.enum?(type) ->
+        raise CompileError,
+          description: "#{where(label, name)}: jsonb: #{inspect(type)} — Core.Enum, а не тип плагина; нужен enum:"
+
+      true ->
+        {:jsonb, type}
+    end
+  end
+
   defp spec!(:jsonb, other, name, _form_names, label) do
     raise CompileError,
       description:
-        "#{where(label, name)}: jsonb: — {Модуль, :функция} спеки redump, " <>
+        "#{where(label, name)}: jsonb: — модуль типа или {Модуль, :функция} спеки redump, " <>
           "задано #{inspect(other)}"
   end
 

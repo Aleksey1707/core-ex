@@ -141,6 +141,32 @@
   и удалить клаузы этого события из кодека; вызовы `Event.X.draft(Event.X.Payload.new(...))` не
   меняются.
 
+- **Спека пере-дампа выводится из спеки полей** (`docs/rules/13-repos.md`, «jsonb-нагрузка на
+  read-пути»; `docs/rules/11-domain.md`, «Плагин по полям (`fields:`)», «Варианты семейства
+  (`variants:`)»; решение — `docs/adr/0059-derived-redump-spec.md`). Спеку `Core.Codec.Redump` типа
+  из `fields:`, варианта из `variants:` и семейства с `variants:` генерирует плагин: ручная спека
+  повторяла Prim полей, уже объявленные спекой кодека, а расхождение с ним ловил только сверочный
+  тест. Тип по полям — `{:map, %{wire-ключ => спека}}`: приводимый Prim (и plain-kind) —
+  `{:prim, P}`, `entity:` / `union:` — `{:codec, M}`, `list:` — `{:list, _}`, sensitive —
+  `:sensitive`; кастомный kind, `enum:` и `type:` не входят. Вариант — форма его дампа
+  (тегированный — `{:tagged, %{тег => {:map, поля}}}`, без обёртки — `{:map, поля}`); семейство
+  сливает спеки вариантов одного тега (формы без обёртки — всех), одноимённый ключ с разной спекой —
+  `CompileError`. Ручной плагин объявляет спеку колбэком `redump_spec/1`.
+
+  Узлы `Core.Codec.Redump`: `{:codec, Type}` — спеку типа отдаёт фасад, переданный в `run/3`, при
+  исполнении (тип плагина без спеки — `ArgumentError` с именами типа и плагина, модуль без
+  плагина — с именами типа и фасада); `:sensitive` — значение поля `{:map, _}`, ключ удаляется из результата. `validate!/1`
+  принимает оба, прежние ручные спеки проходят без изменений. `Core.View`: `jsonb: Type` и
+  `list: [jsonb: Type]` — пере-дамп по `{:codec, Type}`, тип `map()` / `[map()]`; Prim, `Core.Enum`
+  и не собранный модуль — `CompileError`; `jsonb: {Mod, :fun}` не меняется.
+
+  Как править приложение (было → стало): ручная спека типа по полям или семейства с `variants:` и
+  ссылка `jsonb: {Order.Line.Codec, :snapshot_redump_spec}` → `jsonb: Order.Line`, функция спеки
+  удаляется; `def snapshot_redump_spec` ручного плагина → `@impl true def redump_spec(Order.Snapshot)`
+  с той же спекой и `jsonb: Order.Snapshot`; вызов спеки чужого плагина внутри ручной
+  (`Other.Codec.item_redump_spec()`) → `{:codec, Other.Item}`. Сверочный тест read-wire для формы,
+  целиком выведенной плагином, можно удалить; для формы с ручной частью он остаётся.
+
 - **Норма потребителя: тип один к одному с wire — по полям** (`docs/rules/app/11-domain.md`, «Кодек:
   по полям или ручной»; `docs/rules/19-testing.md`, «Codec: round-trip»; ADR-0056). SHOULD: сущность,
   агрегат и нагрузка события, чья wire-форма совпадает с полями (с точностью до `wire:`), объявляются
@@ -166,6 +192,15 @@
   `discount: [union: Order.Discount, optional: true]` в спеке полей; свой код ошибки обёртки для
   повреждённой формы уходит — загрузка семейства отвечает `:invalid_value` / `:unknown_tag`.
 
+  Спеку пере-дампа jsonb типа по полям, варианта и семейства с `variants:` выводит плагин: ручная
+  спека такого типа — MUST NOT, ручной плагин объявляет спеку колбэком `redump_spec/1`, на спеку
+  чужого типа ссылаются `{:codec, Type}`; jsonb-поле View — `jsonb: Type`, если у формы есть тип
+  (`docs/rules/app/11-domain.md`, «Кодек: по полям или ручной»; `docs/rules/app/13-repos.md`,
+  «View»). Сверка read-wire обязательна только для формы с ручной частью (`docs/rules/19-testing.md`,
+  «jsonb на read-пути: контракт wire»). Как править (было → стало): ручная спека типа по полям и
+  `jsonb: {Mod, :fun}` на неё → `jsonb: Type`; `<форма>_redump_spec/0` ручного плагина →
+  `redump_spec/1`; вызов функции спеки чужого плагина → `{:codec, M}`.
+
 ### Изменения контракта макросов
 
 - **`use Core.Codec.Plugin, fields: [{Type, spec}]`** — необязательная опция плагина по полям.
@@ -187,6 +222,14 @@
   как у `fields:`. Новые optional `@callback` `Core.Codec.Plugin`: `dump_variant/2`,
   `load_variant/3`. Плагин с `variants:` занимает имена `type/1`, `types/0`, `__codec_variants__/0`
   и приватную `__codec_variant__/3`.
+- **`__codec_redump__/1` у плагина и фасада, колбэк `redump_spec/1`.** `use Core.Codec.Plugin`
+  генерирует `__codec_redump__/1` (`@doc false`) на каждый свой тип и семейство и занимает это имя.
+  Новый optional `@callback redump_spec(module()) :: Core.Codec.Redump.spec()` `Core.Codec.Plugin`:
+  клаузы — на ручные типы, ручные варианты (спека их полей) и семейство `union:` без `variants:`;
+  клауза на тип с выведенной спекой — `CompileError` «never match». `use Core.Codec.Facade`
+  генерирует `__codec_redump__/1`, `Core.Codec.Facade.Behaviour` получает
+  `@callback __codec_redump__(module()) :: Core.Codec.Redump.spec()`: контракт «`dump/1`, `load/2`,
+  `load!/2` — и больше ничего» уточнён до «никаких функций данных».
 - **`use Core.Es.Event.Codec` выводит клаузы нагрузки по полям, нагрузки-Prim и
   `Es.ValueChanged`.** Для события, чья нагрузка объявлена `use Core.Es.Event.Payload`, — Prim или
   `use Core.Es.ValueChanged`, кодек генерирует `dump_payload/2` / `load_payload/3` перед ручными;

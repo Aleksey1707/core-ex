@@ -63,6 +63,24 @@ defmodule Core.ViewFixture do
     end
   end
 
+  defmodule Reading do
+    @moduledoc false
+
+    defstruct [:measured_at, :weight, :status]
+  end
+
+  defmodule Reading.Codec do
+    @moduledoc false
+
+    use Core.Codec.Plugin,
+      fields: [
+        {Core.ViewFixture.Reading,
+         measured_at: [prim: Core.ViewFixture.MeasuredAt],
+         weight: [prim: Core.ViewFixture.Weight, wire: "kg"],
+         status: [enum: Core.ViewFixture.Status]}
+      ]
+  end
+
   defmodule Nested do
     @moduledoc false
 
@@ -121,6 +139,23 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule Typed do
+    @moduledoc false
+
+    use Core.View,
+      fields: [
+        reading: [jsonb: Core.ViewFixture.Reading, optional: true],
+        readings: [list: [jsonb: Core.ViewFixture.Reading]],
+        entries: [list: [form: :entry]]
+      ],
+      forms: [
+        entry: [
+          reading: [jsonb: Core.ViewFixture.Reading],
+          readings: [list: [jsonb: Core.ViewFixture.Reading]]
+        ]
+      ]
+  end
+
   defmodule Plain do
     @moduledoc false
 
@@ -142,7 +177,9 @@ defmodule Core.ViewFixture do
         Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
-        Core.ViewFixture.Sample.Codec
+        Core.ViewFixture.Reading.Codec,
+        Core.ViewFixture.Sample.Codec,
+        Core.ViewFixture.Typed.Codec
       ]
   end
 
@@ -155,7 +192,9 @@ defmodule Core.ViewFixture do
         Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
-        Core.ViewFixture.Sample.Codec
+        Core.ViewFixture.Reading.Codec,
+        Core.ViewFixture.Sample.Codec,
+        Core.ViewFixture.Typed.Codec
       ]
   end
 end

@@ -382,7 +382,8 @@ use Core.Codec.Facade,
   (`CompileError`); `loadable: true|false`; `union: Мод` (требует `loadable: true`); у ручного типа
   `dump/2` обязателен всегда, `loadable: true` требует ещё `load/3` (`CompileError`)
 - Генерируются `__codec_types__/0` (объединение трёх опций), `__codec_union__/0`,
-  `__codec_loadable__/0`, `__codec_variants__/0`
+  `__codec_loadable__/0`, `__codec_variants__/0`, `__codec_redump__/1` (спека пере-дампа типа —
+  `13-repos.md`, «jsonb-нагрузка на read-пути»)
 - `loadable: false` — dump-only (как `<Aggregate>.View.Codec`: у read-модели обратного пути нет)
 - Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по
   atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` /
@@ -491,6 +492,21 @@ use Core.Codec.Plugin,
 - `union:` без `variants:` с `fields:` совместим: варианты объявляются по полям, клауза
   `load(Family, wire, codec)` пишется руками — без неё `CompileError`. Семейство, чей вариант
   узнаётся по адресу в данных, объявляется `variants:` (ниже)
+- Спеку пере-дампа (`Core.Codec.Redump`) типа плагин выводит из спеки полей — `{:map, %{wire-ключ =>
+  спека}}` (решение — ADR-0059):
+
+  | Вид поля | В спеке |
+  |---|---|
+  | `prim:` с приводимым kind, включая plain-kind (`:string`, `:integer`) | `{:prim, P}` |
+  | `prim:` с кастомным kind, `enum:`, `type:` | нет |
+  | `prim:` sensitive (и элементом `list:`) | `:sensitive` — ключ удаляется на read-пути |
+  | `entity: M`, `union: F` | `{:codec, M}` / `{:codec, F}` |
+  | `list: спека` | `{:list, спека элемента}`; нет, если у элемента её нет |
+
+- Ручной плагин объявляет спеку ручного типа колбэком `redump_spec/1` (optional `@callback`
+  `Core.Codec.Plugin`, `@impl true`); тип без клаузы колбэка — `ArgumentError` при первом
+  пере-дампе с именами типа и плагина. Клауза `redump_spec/1` на тип из `fields:` — `CompileError`
+  «never match», как ручная клауза `dump/2`
 
 ### Варианты семейства (`variants:`)
 
@@ -549,6 +565,17 @@ end
   `load(Type, …)`, не этого варианта — `:unknown_tag` с `detail: %{tag:, discriminator:}`
 - Ключи тегированной формы общие с `Core.Codec.Redump` (`{:tagged, _}`). Адрес — wire-контракт:
   переименование ломает чтение записанного, ловят его golden-фикстуры
+- Спека пере-дампа варианта — форма его дампа: тегированный — `{:tagged, %{тег => {:map, поля}}}`,
+  без обёртки — `{:map, поля}`; дискриминатор в неё не входит. Семейство с тегированной формой даёт
+  `{:tagged, %{тег => {:map, …}}}`, где спеки вариантов одного тега слиты в одну map; форма без
+  обёртки — `{:map, слияние спек всех вариантов}`. Одноимённый wire-ключ с разной спекой у сливаемых
+  вариантов — `CompileError` с именами плагина, вариантов и ключа: пока нет узла дискриминатора,
+  слитые варианты делят спеку ключа (ADR-0059)
+- Ручной вариант объявляет спеку **своих полей** (`{:map, _}`) клаузой `redump_spec/1`: обёртку и
+  слияние делает плагин, конфликт с ручным вариантом — `ArgumentError` при запросе спеки семейства.
+  Ручной вариант без клаузы — `ArgumentError` и у варианта, и у семейства. Клауза `redump_spec/1`
+  на вариант по спеке или на семейство с `variants:` — `CompileError` «never match»; семейство
+  `union:` без `variants:` объявляет спеку клаузой колбэка
 
 ### Dump/load только через фасад
 

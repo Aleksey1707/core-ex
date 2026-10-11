@@ -8,7 +8,8 @@ defmodule Consumer.Domain.Sales do
     `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата.
   - Акторы: `Client` — usecases в каталоге каждого агрегата и read-модели.
   - Значения без владельца (`Values`): `UserID`, идентификаторы из ключа `DeliveryID` и `InspectionID`.
-  - Read-модели: активность `Activity` по назначению — проекция на события `Account` и `Order`.
+  - Read-модели: активность `Activity` по назначению — проекция на события `Account` и `Order`;
+    представление `Account.View` с `jsonb:` по типу плагина по полям и по семейству.
   - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (поля `union:`), семейства
     вариантов `Account.Profile.Channel.Codec` (тегированная форма с дискриминатором) и
     `Account.Profile.Badge.Codec` (без обёртки).
@@ -44,6 +45,7 @@ defmodule Consumer.Domain.Sales do
       Account.Card.Codec,
       Account.Profile.Codec,
       Account.Profile.Channel.Codec,
-      Account.Profile.Badge.Codec
+      Account.Profile.Badge.Codec,
+      Account.View.Codec
     ]
 end

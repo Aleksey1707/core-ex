@@ -73,7 +73,8 @@ def plugins, do: @plugins
 (`fields:`)», «Варианты семейства (`variants:`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»;
 почему так — `deps/core/docs/adr/0056-codec-plugin-by-fields.md`,
 `deps/core/docs/adr/0057-union-variants-by-address.md`,
-`deps/core/docs/adr/0058-union-field-open-head.md`.
+`deps/core/docs/adr/0058-union-field-open-head.md`,
+`deps/core/docs/adr/0059-derived-redump-spec.md`.
 
 - Тип, чья wire-форма совпадает с полями один к одному (с точностью до переименования ключа
   `wire:`), SHOULD объявляться по полям: сущность и агрегат — спекой `fields:` у
@@ -96,6 +97,11 @@ def plugins, do: @plugins
 - Нагрузка события — value object со своим плагином — SHOULD писаться ручными клаузами кодека
   события одной строкой через фасад: `codec.dump(value)` / `codec.load(Value, wire)`, а не повтором
   полей value object спекой `Core.Es.Event.Payload`.
+- Спеку пере-дампа jsonb (`Core.Codec.Redump`) типа по полям, варианта и семейства с `variants:`
+  выводит плагин: ручная спека такого типа MUST NOT — View ссылается на тип `jsonb: Type`. Ручной
+  плагин объявляет спеку колбэком `redump_spec/1`, а не функцией `<форма>_redump_spec/0`; на спеку
+  типа другого плагина ручная спека ссылается узлом `{:codec, Type}`, а не вызовом его функции
+  (`deps/core/docs/rules/13-repos.md`, «jsonb-нагрузка на read-пути»).
 
 ```elixir
 # плохо — ручные клаузы повторяют поля один к одному
@@ -145,6 +151,21 @@ use Core.Codec.Plugin,
 # хорошо — нагрузка-value object через фасад
 def dump_payload(%Event.Moved{payload: %Address{} = address}, codec), do: codec.dump(address)
 def load_payload(Event.Moved, wire, codec), do: codec.load(Address, wire)
+```
+
+```elixir
+# плохо — ручная спека повторяет спеку полей, на чужую спеку — вызов функции
+def snapshot_redump_spec,
+  do: {:map, %{id: {:prim, Order.Line.ID}, discount: Order.Discount.Codec.discount_redump_spec()}}
+
+use Core.View, fields: [snapshot: [jsonb: {Order.Line.Codec, :snapshot_redump_spec}]]
+
+# хорошо — спеку выводит плагин по полям, View ссылается на тип
+use Core.View, fields: [snapshot: [jsonb: Order.Line]]
+
+# хорошо — ручной плагин: колбэк, чужой тип — ссылкой {:codec, _}
+@impl true
+def redump_spec(Order.Summary), do: {:map, %{total: {:prim, Order.Amount}, lines: {:list, {:codec, Order.Line}}}}
 ```
 
 Round-trip и golden-фикстуры обязательны и для типов по полям —
