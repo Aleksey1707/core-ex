@@ -9,7 +9,7 @@ defmodule Core.Es.ValueChanged do
   значения: `%Type{}` у Prim и сущности, атом у enum, `nil` при `nilable: true`.
 
   `__es_value_changed__/0` отдаёт `type:` и `nilable:`: по ним `Core.Es.Event.Codec` выводит
-  клаузы `dump_payload/2` / `load_payload/3` события с такой нагрузкой — map
+  клаузы нагрузки события с такой нагрузкой — map
   `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
   """
 

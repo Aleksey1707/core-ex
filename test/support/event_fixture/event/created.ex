@@ -7,17 +7,8 @@ defmodule Core.EventFixture.Event.Created do
   defmodule Payload do
     @moduledoc "Нагрузка `Created`."
 
-    alias Core.EventFixture.Name
-
-    @enforce_keys ~w(name)a
-    defstruct @enforce_keys
-
-    @type t :: %__MODULE__{name: Name.t()}
-
-    @doc "Собрать нагрузку."
-    @spec new(Name.t()) :: t()
-
-    def new(%Name{} = name), do: %__MODULE__{name: name}
+    use Core.Es.Event.Payload,
+      fields: [name: [prim: Core.EventFixture.Name]]
   end
 
   use Core.Es.Event,

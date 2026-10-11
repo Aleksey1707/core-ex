@@ -1,7 +1,6 @@
 defmodule Consumer.Domain.Sales.Account.Event.Codec do
-  @moduledoc "Кодек с событиями с нагрузкой и без, с `upcasts:` и с нагрузкой по полям `Renamed`."
+  @moduledoc "Кодек с событиями с нагрузкой и без, с `upcasts:`; нагрузку `Opened` кодирует ручной плагин её типа."
 
-  alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.Account.Event
 
   @tag_by_mod %{
@@ -17,17 +16,6 @@ defmodule Consumer.Domain.Sales.Account.Event.Codec do
     type: "account",
     tags: @tag_by_mod,
     upcasts: @upcasts
-
-  @impl true
-  def dump_payload(%Event.Opened{payload: %Event.Opened.Payload{} = payload}, codec),
-    do: %{"name" => codec.dump(payload.name)}
-
-  @impl true
-  def load_payload(Event.Opened, wire, codec) do
-    with {:ok, name} <- codec.load(Account.Name, field(wire, :name)) do
-      {:ok, Event.Opened.Payload.new(name)}
-    end
-  end
 
   @impl true
   def upcast("account.opened.v1", envelope),

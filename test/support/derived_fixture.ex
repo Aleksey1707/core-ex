@@ -1,11 +1,12 @@
 defmodule Core.DerivedFixture do
   @moduledoc """
   События, чьи клаузы нагрузки `Core.Es.Event.Codec` выводит сам: нагрузка-Prim,
-  `Core.Es.ValueChanged` с Prim-, nilable- и enum-типом и нагрузка по полям с вариантом
-  семейства `Core.DerivedFixture.Mark` (`union:`).
+  `Core.Es.ValueChanged` с Prim-, nilable- и enum-типом, нагрузка по полям с вариантом
+  семейства `Core.DerivedFixture.Mark` (`union:`) и нагрузка-сущность `Core.DerivedFixture.Place`
+  со своим плагином.
 
-  `Core.DerivedFixture.Event.Codec` ручных клауз не объявляет; он и `Core.DerivedFixture.Mark.Codec`
-  зарегистрированы в `Core.CodecFixture.plugins/0`.
+  `Core.DerivedFixture.Event.Codec` ручных клауз не объявляет; он, `Core.DerivedFixture.Mark.Codec` и
+  `Core.DerivedFixture.Place.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
   """
 
   defmodule Note do
@@ -59,16 +60,43 @@ defmodule Core.DerivedFixture do
       ]
   end
 
+  defmodule Place do
+    @moduledoc "Место — сущность с ручным плагином, нагрузка события целиком."
+
+    @enforce_keys ~w(name floor)a
+    defstruct @enforce_keys
+  end
+
+  defmodule Place.Codec do
+    @moduledoc "Ручной плагин места: нестандартную wire-форму нагрузки задаёт плагин её типа."
+
+    alias Core.DerivedFixture.Place
+    alias Core.EventFixture.Name
+
+    use Core.Codec.Plugin,
+      types: [Place]
+
+    @impl true
+    def dump(%Place{name: name, floor: floor}, codec), do: %{"name" => codec.dump(name), "level" => floor}
+
+    @impl true
+    def load(Place, wire, codec) when is_map(wire) do
+      with {:ok, name} <- codec.load(Name, field(wire, :name)),
+           do: {:ok, %Place{name: name, floor: field(wire, :level)}}
+    end
+  end
+
   defmodule Event do
     @moduledoc "События с выводимой нагрузкой."
 
+    alias Core.DerivedFixture.Event.Located
     alias Core.DerivedFixture.Event.Marked
     alias Core.DerivedFixture.Event.NoteChanged
     alias Core.DerivedFixture.Event.Renamed
     alias Core.DerivedFixture.Event.StatusChanged
     alias Core.DerivedFixture.Event.Tagged
 
-    @type t :: Tagged.t() | Renamed.t() | NoteChanged.t() | StatusChanged.t() | Marked.t()
+    @type t :: Tagged.t() | Renamed.t() | NoteChanged.t() | StatusChanged.t() | Marked.t() | Located.t()
   end
 
   defmodule Event.Tagged do
@@ -148,6 +176,15 @@ defmodule Core.DerivedFixture do
       payload: Payload
   end
 
+  defmodule Event.Located do
+    @moduledoc "Нагрузка — сущность со своим плагином."
+
+    use Core.Es.Event,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      payload: Core.DerivedFixture.Place
+  end
+
   defmodule Event.Codec do
     @moduledoc "Кодек без ручных клауз: нагрузку всех событий он выводит сам."
 
@@ -161,7 +198,8 @@ defmodule Core.DerivedFixture do
         Event.Renamed => "derived.renamed",
         Event.NoteChanged => "derived.note_changed",
         Event.StatusChanged => "derived.status_changed",
-        Event.Marked => "derived.marked"
+        Event.Marked => "derived.marked",
+        Event.Located => "derived.located"
       }
   end
 end

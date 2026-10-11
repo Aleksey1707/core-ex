@@ -110,31 +110,67 @@ defmodule Core.Es.Event.DerivedPayloadTest do
     end
   end
 
-  describe "Event.Codec: ручная клауза для выводимой нагрузки" do
-    test "never match у нагрузки-Prim и ValueChanged — CompileError" do
-      message =
-        ~r/never match — dump_payload\/2 для .*Event.Tagged .*load_payload\/3 для .*Event.Renamed .*load_payload\/3 для .*Event.Tagged /
+  describe "Event.Codec: нагрузка-сущность с ручным плагином" do
+    test "нагрузка в конверте — дамп плагина сущности" do
+      located = event(Event.Located, place())
+
+      assert InCodec.dump(located)["payload"] == %{"name" => "Склад", "level" => 2}
+    end
+
+    test "dump/load через фасад — round-trip по модулю события и по семейству" do
+      located = event(Event.Located, place())
+      wire = json(InCodec.dump(located))
+
+      assert InCodec.load(Event.Located, wire) == {:ok, located}
+      assert InCodec.load(DerivedFixture.Event, wire) == {:ok, located}
+    end
+
+    test "ошибка плагина сущности — ошибка load события" do
+      wire = put_in(json(InCodec.dump(event(Event.Located, place()))), ["payload", "name"], "")
+
+      assert {:error, %Error{}} = InCodec.load(Event.Located, wire)
+    end
+  end
+
+  describe "Event.Codec: ручные клаузы нагрузки" do
+    test "dump_payload/2 в кодеке событий — CompileError с подсказкой о плагине" do
+      assert_raise CompileError,
+                   ~r/объявляет dump_payload\/2 \(строка \d+\) — нагрузку события кодирует плагин её типа/,
+                   fn ->
+                     Code.eval_quoted(
+                       quote do
+                         defmodule Core.Es.Event.DerivedPayloadTest.ManualDump do
+                           alias Core.DerivedFixture.Event
+
+                           use Core.Es.Event.Codec,
+                             event: Event,
+                             type: "derived_manual_dump",
+                             tags: %{Event.Located => "derived_manual_dump.located"}
+
+                           def dump_payload(%Event.Located{payload: place}, _codec), do: %{"name" => place.name.value}
+                         end
+                       end
+                     )
+                   end
+    end
+
+    test "dump_payload/2 и load_payload/3 в кодеке событий — одна CompileError на обе" do
+      message = ~r/объявляет dump_payload\/2 \(строка \d+\), load_payload\/3 \(строка \d+\) — нагрузку события/
 
       assert_raise CompileError, message, fn ->
         Code.eval_quoted(
           quote do
-            defmodule Core.Es.Event.DerivedPayloadTest.NeverMatch do
+            defmodule Core.Es.Event.DerivedPayloadTest.ManualLoad do
               alias Core.DerivedFixture.Event
 
               use Core.Es.Event.Codec,
                 event: Event,
-                type: "derived_never_match",
-                tags: %{
-                  Event.Tagged => "derived_never_match.tagged",
-                  Event.Renamed => "derived_never_match.renamed"
-                }
+                type: "derived_manual_load",
+                tags: %{Event.Tagged => "derived_manual_load.tagged"}
 
-              def dump_payload(%Event.Tagged{payload: payload}, codec), do: codec.dump(payload)
+              def dump_payload(%Event.Tagged{payload: name}, codec), do: codec.dump(name)
 
-              def load_payload(Event.Renamed, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
-
-              def load_payload(mod, wire, codec) when mod in [Event.Tagged],
-                do: codec.load(Core.EventFixture.Name, wire)
+              def load_payload(Event.Tagged, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
             end
           end
         )
@@ -145,6 +181,8 @@ defmodule Core.Es.Event.DerivedPayloadTest do
   defp renamed, do: Event.Renamed.Payload.new(Name.new!("Склад"), Name.new!("Отгрузка"))
 
   defp marked, do: Event.Marked.Payload.new(%DerivedFixture.Mark.Star{size: 3}, nil)
+
+  defp place, do: %DerivedFixture.Place{name: Name.new!("Склад"), floor: 2}
 
   defp json(wire), do: Jason.decode!(Jason.encode!(wire))
 

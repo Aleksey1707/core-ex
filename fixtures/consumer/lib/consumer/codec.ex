@@ -17,6 +17,7 @@ defmodule Consumer.Codec do
   @plugins [
     Core.Outbox.Codec,
     Consumer.Domain.Sales.Account.Event.Codec,
+    Consumer.Domain.Sales.Account.Codec,
     Consumer.Domain.Sales.Order.Event.Codec,
     Consumer.Domain.Sales.Ping.Event.Codec,
     Consumer.Domain.Sales.Grants.Event.Codec,

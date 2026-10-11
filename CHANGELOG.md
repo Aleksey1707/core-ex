@@ -14,26 +14,41 @@
   плагин, который упал, — добавить клаузу непокрытого типа или убрать его из `types:` (было —
   `FunctionClauseError` при исполнении, стало — ошибка сборки).
 
-- **Ручные клаузы нагрузки-Prim и `Es.ValueChanged` в `Event.Codec` — `CompileError` «never
-  match».** Кодек теперь выводит клаузы `dump_payload/2` / `load_payload/3` таких событий сам и
-  ставит их первыми (`docs/rules/11-domain.md`, «Нагрузка-Prim и `Es.ValueChanged`»): у события
-  один источник wire, конверт прежний. Существующие ручные клаузы для них после обновления валят
-  сборку одной ошибкой со списком клауз и строк — и литерал события в голове, и guard
-  `when mod in [...]`. Ошибка останавливает сборку до вывода типов, и тот не добавляет к мёртвой
-  клаузе ложных предупреждений о её теле. Как править: удалить их (было —
-  `def dump_payload(%Event.Granted{payload: %RoleID{} = role}, codec), do: codec.dump(role)`,
-  `def load_payload(Event.Granted, wire, codec), do: codec.load(RoleID, wire)` и
-  `def load_payload(mod, wire, codec) when mod in [Event.Granted, ...]`, стало — ничего; из списка
-  guard убрать выводимые события).
+- **Колбэков `dump_payload/2` / `load_payload/3` у `Core.Es.Event.Codec` больше нет: нагрузку
+  события кодек выводит сам, её нестандартную форму задаёт плагин её типа** (решение —
+  `docs/adr/0060-event-payload-via-codec-plugin.md`; `docs/rules/11-domain.md`, «Нагрузка-сущность»;
+  норма потребителя — `docs/rules/app/11-domain.md`, «Кодек: по полям или ручной»).
+  Нагрузку-struct, которая не по полям, не `Es.ValueChanged` и не Prim, кодек передаёт фасаду целиком,
+  как нагрузку-Prim: клаузы `codec.dump(payload)` / `codec.load(Payload, wire)` повторялись в кодеках
+  событий шаблоном, а у формы нагрузки было два места — плагин типа и кодек событий. Конверт не
+  меняется. Определение `dump_payload/2` или `load_payload/3` в модуле кодека — `CompileError` с
+  подсказкой, куда перенести форму; ошибка останавливает сборку до вывода типов. Как править:
+  - передача фасаду — удалить (было —
+    `def dump_payload(%Event.Moved{payload: %Address{} = a}, codec), do: codec.dump(a)` и
+    `def load_payload(Event.Moved, wire, codec), do: codec.load(Address, wire)`, стало — ничего);
+  - клаузы нагрузки-Prim и `ValueChanged` — удалить; клаузы нагрузки, повторяющей поля, — удалить,
+    а нагрузку объявить `use Core.Es.Event.Payload`;
+  - нестандартная форма — ручной плагин типа нагрузки в `<Aggregate>.Codec` с теми же телами, плагин —
+    в `plugins:` фасада (было — `def dump_payload(%Event.Opened{payload: p}, codec), do: …` и
+    `def load_payload(Event.Opened, wire, codec), do: …`, стало — `use Core.Codec.Plugin,
+    types: [Event.Opened.Payload]` с `dump(%Event.Opened.Payload{} = p, codec)` и
+    `load(Event.Opened.Payload, wire, codec)`); `@spec` и `@impl true` у прежних клауз уходят вместе
+    с ними.
 
-- **`@spec` у `dump_payload/2` / `load_payload/3` кодека с выводимыми клаузами — `CompileError`**
+- **Нагрузка-сущность события без плагина в фасаде — `CompileError` сборки фасада**
+  (`Core.Codec.Facade.validate_es_payloads!/1`). Тип нагрузки-сущности каждого события кодеков
+  событий из `plugins:` обязан быть в `__codec_types__` какого-то плагина того же фасада: иначе
+  событие не записать и не прочитать, а ошибка всплывала бы `ArgumentError` при исполнении. Как
+  править: объявить тип нагрузки в Codec-плагине (по полям или ручном) и добавить плагин в
+  `plugins:` (было — `payload: Address` без плагина `Address`, `ArgumentError` на первом `dump`;
+  стало — `use Core.Codec.Plugin, fields: [{Address, …}]` в `plugins:` фасада).
+
+- **`@spec` у `dump/2` / `load/3` плагина с `fields:` — `CompileError`**
   (`docs/rules/20-agreements.md`, «Спецификации типов»). Спека ручной клаузы — контракт всей
-  функции, включая выведенные: `@spec dump_payload(Event.Opened.t(), module()) :: map()` сужал
-  контракт и для нагрузки-Prim, чей дамп — не map, а сборка молчала — ловил только Dialyzer у
-  вызывающего (`breaks the contract` на фасаде). То же у `dump/2` / `load/3` плагина с `fields:`.
-  Как править: удалить `@spec` у этих функций, `@doc` и `@impl true` остаются (было —
-  `@spec load_payload(module(), term(), module()) :: ...`, стало — без спеки; контракт задаёт
-  `@callback`).
+  функции, включая выведенные: она сужала контракт для сгенерированных клауз, а сборка молчала —
+  ловил только Dialyzer у вызывающего (`breaks the contract` на фасаде). Как править: удалить
+  `@spec` у этих функций, `@doc` и `@impl true` остаются (было — `@spec dump(Order.Item.t(),
+  module()) :: map()`, стало — без спеки; контракт задаёт `@callback`).
 
 ### Новое
 
@@ -249,17 +264,13 @@
   генерирует `__codec_redump__/1`, `Core.Codec.Facade.Behaviour` получает
   `@callback __codec_redump__(module()) :: Core.Codec.Redump.spec()`: контракт «`dump/1`, `load/2`,
   `load!/2` — и больше ничего» уточнён до «никаких функций данных».
-- **`use Core.Es.Event.Codec` выводит клаузы нагрузки по полям, нагрузки-Prim и
-  `Es.ValueChanged`.** Для события, чья нагрузка объявлена `use Core.Es.Event.Payload`, — Prim или
-  `use Core.Es.ValueChanged`, кодек генерирует `dump_payload/2` / `load_payload/3` перед ручными;
-  ручная клауза для такого события — `CompileError` «never match», `@spec` у `dump_payload/2` /
-  `load_payload/3` — тоже (было — ручные клаузы обязательны, стало — не пишутся). Конверт не
-  меняется: Prim — голое значение `codec.dump(p)`, `ValueChanged` — `%{"old_value" => …,
-  "new_value" => …}` по виду `type:` (Prim, `Core.Enum` — атом, сущность), `nil` при
-  `nilable: true`. Кодек, все события с нагрузкой которого выводятся,
-  ручных клауз не объявляет. Макрос занимает в кодеке ещё атрибут `@es_derived`.
-
-  Существующие ручные клаузы нагрузки-Prim и `ValueChanged` — «Ломающие изменения контракта».
+- **`use Core.Es.Event.Codec` выводит клаузы нагрузки любого события.** Нагрузка
+  `use Core.Es.Event.Payload` и `use Core.Es.ValueChanged` — по её спеке, Prim и сущность — передачей
+  фасаду целиком (было — ручные клаузы обязательны, стало — не пишутся; ручные — «Ломающие изменения
+  контракта»). Конверт не меняется: Prim — голое значение `codec.dump(p)`, сущность — дамп плагина её
+  типа, `ValueChanged` — `%{"old_value" => …, "new_value" => …}` по виду `type:` (Prim, `Core.Enum` —
+  атом, сущность), `nil` при `nilable: true`. Макрос занимает в кодеке ещё атрибуты `@es_derived` и
+  `@es_payloadless`.
 - **`use Core.Es.ValueChanged` принимает enum-тип и отдаёт свою спеку.** `type:` — Prim, `Core.Enum`
   или struct сущности (раньше enum-тип не собирался: голова `new/2` требовала `%Type{}`); голова
   `new/2` у enum — атом. `__es_value_changed__/0` отдаёт `[type: …, nilable: …]` — по нему кодек

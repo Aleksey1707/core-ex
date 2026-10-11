@@ -37,7 +37,8 @@ defmodule Core.CodecFixture do
     Core.EventFixture.Event.Codec,
     Core.EsFixture.Account.Event.Codec,
     Core.DerivedFixture.Event.Codec,
-    Core.DerivedFixture.Mark.Codec
+    Core.DerivedFixture.Mark.Codec,
+    Core.DerivedFixture.Place.Codec
   ]
 
   @doc "Плагины entity-фасадов."

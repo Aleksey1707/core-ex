@@ -94,7 +94,7 @@ defmodule Core.Es.Event.CodecTest do
       assert {:ok, ^event} = InCodec.load(EventFixture.Event, data)
     end
 
-    test "нагрузка неверной формы после апкаста — доменная ошибка load_payload" do
+    test "нагрузка неверной формы после апкаста — доменная ошибка загрузки нагрузки" do
       data =
         EventFixture.created()
         |> InCodec.dump()
@@ -334,21 +334,6 @@ defmodule Core.Es.Event.CodecTest do
       end
     end
 
-    test "событие с нагрузкой без dump_payload/2 — CompileError" do
-      assert_raise CompileError, ~r/обязан объявить dump_payload\/2/, fn ->
-        Code.eval_quoted(
-          quote do
-            defmodule Core.Es.Event.CodecTest.NoPayloadClauses do
-              use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
-                type: "codec_test",
-                tags: %{Core.EventFixture.Event.Created => "no_clauses.created"}
-            end
-          end
-        )
-      end
-    end
-
     test "кодек событий без нагрузки клоуз не требует" do
       {mod, _} =
         Code.eval_quoted(
@@ -365,7 +350,6 @@ defmodule Core.Es.Event.CodecTest do
         )
 
       assert mod.type(Core.EventFixture.Event.Closed) == "payloadless.closed"
-      refute function_exported?(mod, :dump_payload, 2)
     end
 
     test "модуль нагрузки, общий у двух событий, — кодек собирается" do
@@ -394,10 +378,6 @@ defmodule Core.Es.Event.CodecTest do
                   Core.Es.Event.CodecTest.Granted => "shared.granted",
                   Core.Es.Event.CodecTest.Revoked => "shared.revoked"
                 }
-
-              def dump_payload(%{payload: name}, codec), do: codec.dump(name)
-
-              def load_payload(_mod, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
             end
 
             Core.Es.Event.CodecTest.SharedPayloadCodec

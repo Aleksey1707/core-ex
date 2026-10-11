@@ -38,10 +38,10 @@
   событий без нагрузки), `Grants` (два события делят нагрузку-Prim, третье несёт `Es.ValueChanged`,
   четвёртое — нагрузку по полям с вариантами семейств `union:`; клаузы нагрузки кодек выводит сам),
   `NeverFails` и `AlwaysFails` (`decide` никогда не ошибается / только ошибается), события `Parcel` без
-  агрегата (кодек, чей `load_payload/3` никогда не ошибается), идентификаторы из ключа (`DeliveryID`, составной ключ —
+  агрегата (кодек вне фасада), идентификаторы из ключа (`DeliveryID`, составной ключ —
   `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов, dump-only плагин
   фасада `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (с полями `union:`), нагрузка по полям
-  `Account.Event.Renamed.Payload` и представление `Account.View` с `jsonb:` по типу `Account.Profile` и
+  `Account.Event.Renamed.Payload`, ручной плагин нагрузки `Account.Event.Opened.Payload` (`Account.Codec`) и представление `Account.View` с `jsonb:` по типу `Account.Profile` и
   семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Актор `Client` — usecases с
   типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —

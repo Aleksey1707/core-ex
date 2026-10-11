@@ -9,52 +9,25 @@ defmodule Core.Es.Event.Codec do
         type: "delivery",
         tags: @tag_by_mod
 
-  Кодек агрегата определяет только специфику нагрузки:
+  Нагрузку события кодек выводит сам, ручных клауз нет. Кодек агрегата определяет только
+  `upcast(old_tag, envelope)` — нагрузку записанного события старого тега → нагрузку следующего
+  тега цепочки `upcasts:`; обязателен при непустой карте.
 
-  - `dump_payload(event, codec)` — нагрузка события в wire;
-  - `load_payload(mod, wire, codec)` — wire → `%Payload{}` (не событие: конверт
-    разбирает и событие собирает билдер);
-  - `upcast(old_tag, envelope)` — нагрузка записанного события старого тега → нагрузка
-    следующего тега цепочки `upcasts:`; обязателен при непустой карте.
-
-  События без нагрузки (`payload: nil` у `use Es.Event`) клоуз не требуют вовсе —
-  билдер знает о них из `__es_payload__/0`.
-
-  ## Выводимые клаузы нагрузки
-
-  Кодек сам генерирует клаузы `dump_payload/2` / `load_payload/3` события, чья нагрузка:
+  ## Выводимая нагрузка
 
   - по полям (`use Core.Es.Event.Payload`) — по её спеке, тем же генератором, что у плагина по
     полям (`Core.Codec.Plugin.Fields`);
-  - Prim — `codec.dump(payload)` / `codec.load(Prim, wire)`: в конверте голое значение;
   - `use Core.Es.ValueChanged` — спека `old_value` / `new_value` из её `type:` и `nilable:`
-    (`Core.Es.ValueChanged.fields/2`).
+    (`Core.Es.ValueChanged.fields/2`);
+  - Prim — `codec.dump(payload)` / `codec.load(Prim, wire)`: в конверте голое значение;
+  - любая другая struct — так же, целиком через фасад: её wire-форму задаёт плагин её типа (по
+    полям или ручной). Что такой плагин есть, проверяет сборка фасада
+    (`Core.Codec.Facade.validate_es_payloads!/1`).
 
-  Выведенные клаузы стоят перед ручными: ручная клауза для такого события (литералом или guard
-  `when mod in [...]`) — `CompileError` «never match», как и `@spec` у `dump_payload/2` /
-  `load_payload/3` — контракт задаёт `@callback`. Остальные нагрузки — ручные клаузы.
+  События без нагрузки (`payload: nil` у `use Es.Event`) в конверте несут `nil`.
 
-  ## Проверки нагрузки
-
-  Сборка кодека проверяет колбэки нагрузки по `tags:`: на каждое событие с нагрузкой макрос
-  генерирует функции-проверки (`Core.Es.Check`):
-
-  - `"dump_payload/2 принимает <Event>"` — литеральный вызов
-    `dump_payload(%Event.Mod{payload: %Payload{}} = event, codec)`;
-  - `"load_payload/3 отдаёт нагрузку <Payload>"` — вызов `load_payload(Event.Mod, wire, codec)` и
-    сопоставление результата с `{:ok, %Payload{}}` и `{:error, _}`. У модуля нагрузки, общего у
-    нескольких событий, функция одна — с clause на каждое событие.
-
-  Предупреждение компилятора указывает на строку `use`, а имя функции в нём называет нарушенное
-  утверждение. Ловятся:
-
-  - событие с нагрузкой без clause `dump_payload/2` или `load_payload/3`;
-  - `load_payload/3`, отдающий нагрузку другого события, — литералом или конструктором
-    `Payload.new`.
-
-  Clause `{:error, _}` размечена `generated: true`: у `load_payload/3`, который никогда не
-  ошибается, она недостижима, но предупреждения не даёт. Кодек без событий с нагрузкой проверок
-  нагрузки не получает.
+  `dump_payload/2` или `load_payload/3` в модуле кодека — `CompileError`: нестандартная
+  wire-форма нагрузки живёт в плагине её типа, а не в кодеке событий (ADR-0060).
 
   ## Место в фасаде
 
@@ -102,8 +75,8 @@ defmodule Core.Es.Event.Codec do
   кодека — `CompileError`. Выведенный Prim агрегата кодек отдаёт тем же `__es_aggregate_id__/0`.
 
   Макрос занимает в вызывающем модуле имена `@es_event`, `@es_type`, `@es_aggregate_id`, `@es_by`,
-  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_use_line`, имена
-  функций-проверок нагрузки и приватные `es_dump_payload/2`, `es_load_payload/3`.
+  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless` и приватные
+  `es_dump_payload/2`, `es_load_payload/3`.
   """
 
   alias Core.Codec.Plugin.Fields
@@ -134,8 +107,11 @@ defmodule Core.Es.Event.Codec do
           by: term()
         }
 
-  @typedoc "Как кодек выводит клаузы нагрузки: по спеке полей или фасадом для Prim."
-  @type derivation :: {:fields, [Fields.field()]} | :prim
+  @typedoc """
+  Как кодек выводит клаузы нагрузки: по спеке полей или передачей фасаду целиком — Prim фасад
+  кодирует встроенно, сущность — плагином её типа.
+  """
+  @type derivation :: {:fields, [Fields.field()]} | :prim | :plugin
 
   @typedoc "Общая часть события: идентификаторы, версия, автор и момент."
   @type header :: %{
@@ -146,22 +122,15 @@ defmodule Core.Es.Event.Codec do
           by: struct()
         }
 
-  @doc "Нагрузка события → wire."
-  @callback dump_payload(event :: struct(), codec :: module()) :: term()
-
-  @doc "Модуль события + wire-нагрузка → `%Payload{}`."
-  @callback load_payload(mod :: module(), wire :: term(), codec :: module()) ::
-              {:ok, struct()} | {:error, Error.t()}
-
   @doc """
   Конверт записанного события старого тега → нагрузка следующего тега цепочки `upcasts:`.
 
   Тег шага берётся из карты, заголовок конверта колбэк только читает; ошибку формы
-  возвращённой нагрузки ловит `load_payload/3`.
+  возвращённой нагрузки ловит загрузка нагрузки.
   """
   @callback upcast(old_tag :: String.t(), envelope :: wire()) :: term()
 
-  @optional_callbacks dump_payload: 2, load_payload: 3, upcast: 2
+  @optional_callbacks upcast: 2
 
   @doc "Объявить кодек событий агрегата."
   defmacro __using__(opts) do
@@ -265,52 +234,23 @@ defmodule Core.Es.Event.Codec do
         end
       end
 
-      # Клоузы нагрузки существуют, только если её кто-то из событий несёт: у кодека,
-      # где все события без нагрузки, вызов `dump_payload/2` был бы обращением к
-      # функции, которой неоткуда взяться.
-      if Core.Es.Event.Codec.with_payload?(@es_tag_by_mod) do
-        defp es_dump_payload(%mod{} = event, codec) do
-          if is_nil(mod.__es_payload__()), do: nil, else: dump_payload(event, codec)
-        end
-
-        defp es_load_payload(mod, wire, codec) do
-          if is_nil(mod.__es_payload__()), do: {:ok, nil}, else: load_payload(mod, wire, codec)
-        end
-      else
-        defp es_dump_payload(_event, _codec), do: nil
-
-        defp es_load_payload(_mod, _wire, _codec), do: {:ok, nil}
-      end
-
       @es_derived Core.Es.Event.Codec.derived(@es_tag_by_mod)
+      @es_payloadless Core.Es.Event.Codec.payloadless(@es_tag_by_mod)
 
       unquote(derived_clauses())
 
       @before_compile Core.Es.Event.Codec
-      @es_use_line unquote(__CALLER__.line)
     end
   end
 
   @doc false
   defmacro __before_compile__(env) do
-    tags = Module.get_attribute(env.module, :es_tag_by_mod)
     upcasts = Module.get_attribute(env.module, :es_upcasts)
 
-    if with_payload?(tags) do
-      Enum.each(
-        [dump_payload: 2, load_payload: 3],
-        &ensure_defined!(env.module, &1, "у кодека есть события с нагрузкой", env)
-      )
-    end
-
-    check_derived!(env, Module.get_attribute(env.module, :es_derived))
+    refute_manual_payload!(env)
 
     if map_size(upcasts) > 0,
       do: ensure_defined!(env.module, {:upcast, 2}, "у кодека непустые upcasts:", env)
-
-    quote do
-      (unquote_splicing(payload_checks(env.module, tags)))
-    end
   end
 
   @doc false
@@ -395,9 +335,9 @@ defmodule Core.Es.Event.Codec do
     end
   end
 
-  # События кодека, чьи клаузы нагрузки кодек выводит сам: нагрузка по полям и `Es.ValueChanged`
-  # несут свою спеку, Prim кодируется фасадом целиком — ручной код для них был бы вторым
-  # источником wire.
+  # Клаузы нагрузки кодек выводит для каждого события с нагрузкой: нагрузка по полям и
+  # `Es.ValueChanged` несут свою спеку, Prim и сущность кодирует фасад целиком (сущность — плагином
+  # её типа). Ручной код здесь был бы вторым источником wire.
   @doc false
   @spec derived(%{optional(module()) => String.t()}) :: [{module(), module(), derivation()}]
 
@@ -405,9 +345,29 @@ defmodule Core.Es.Event.Codec do
     for event <- Enum.sort(Map.keys(tags)),
         payload = event.__es_payload__(),
         not is_nil(payload),
-        derivation = derivation(payload),
-        not is_nil(derivation),
-        do: {event, payload, derivation}
+        do: {event, payload, derivation(payload)}
+  end
+
+  @doc false
+  @spec payloadless(%{optional(module()) => String.t()}) :: [module()]
+
+  def payloadless(tags) when is_map(tags),
+    do: Enum.filter(Enum.sort(Map.keys(tags)), &is_nil(&1.__es_payload__()))
+
+  @doc """
+  События с нагрузкой-сущностью и её тип: такую нагрузку кодирует плагин фасада.
+
+  Нагрузка по полям, `Es.ValueChanged` и Prim сюда не входят: первые две кодек выводит по их
+  спеке, Prim фасад кодирует встроенно.
+  """
+  @spec plugin_payloads([module()]) :: [{module(), module()}]
+
+  def plugin_payloads(events) when is_list(events) do
+    for event <- events,
+        payload = event.__es_payload__(),
+        not is_nil(payload),
+        derivation(payload) == :plugin,
+        do: {event, payload}
   end
 
   @doc false
@@ -420,10 +380,10 @@ defmodule Core.Es.Event.Codec do
      Fields.dump_body(fields)}
   end
 
-  def dump_payload_clause(event, prim, :prim) do
+  def dump_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, codec} = {var(:payload), var(:codec)}
 
-    {[quote(generated: true, do: %unquote(event){payload: %unquote(prim){} = unquote(value)}), codec],
+    {[quote(generated: true, do: %unquote(event){payload: %unquote(payload){} = unquote(value)}), codec],
      quote(generated: true, do: is_atom(unquote(codec))),
      quote(generated: true, do: unquote(codec).dump(unquote(value)))}
   end
@@ -434,13 +394,13 @@ defmodule Core.Es.Event.Codec do
   def load_payload_clause(event, payload, {:fields, fields}),
     do: {Fields.load_args(event), Fields.load_guard(), Fields.load_body(payload, fields)}
 
-  def load_payload_clause(event, prim, :prim) do
+  def load_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, wire, codec} = {var(:payload), var(:wire), var(:codec)}
 
     body =
       quote generated: true do
-        case unquote(codec).load(unquote(prim), unquote(wire)) do
-          {:ok, %unquote(prim){} = unquote(value)} -> {:ok, unquote(value)}
+        case unquote(codec).load(unquote(payload), unquote(wire)) do
+          {:ok, %unquote(payload){} = unquote(value)} -> {:ok, unquote(value)}
           {:error, reason} -> {:error, reason}
         end
       end
@@ -448,18 +408,11 @@ defmodule Core.Es.Event.Codec do
     {[event, wire, codec], quote(generated: true, do: is_atom(unquote(codec))), body}
   end
 
-  @doc "Несёт ли нагрузку хоть одно событие кодека."
-  @spec with_payload?(%{optional(module()) => String.t()}) :: boolean()
-
-  def with_payload?(tags) when is_map(tags) do
-    Enum.any?(Map.keys(tags), &(not is_nil(&1.__es_payload__())))
-  end
-
   @doc """
   Событие → конверт wire.
 
-  `type` и `payload` приходят от кодека агрегата: тег знает только он, нагрузку собирает
-  его `dump_payload/2`.
+  `type` и `payload` приходят от кодека агрегата: тег знает только он, нагрузку он выводит
+  сам.
   """
   @spec dump_envelope(struct(), String.t(), term(), module()) :: wire()
 
@@ -655,7 +608,7 @@ defmodule Core.Es.Event.Codec do
       function_exported?(payload, :__es_payload_fields__, 0) -> {:fields, payload.__es_payload_fields__()}
       function_exported?(payload, :__es_value_changed__, 0) -> {:fields, value_changed_fields(payload)}
       Prim.prim?(payload) -> :prim
-      true -> nil
+      true -> :plugin
     end
   end
 
@@ -672,39 +625,49 @@ defmodule Core.Es.Event.Codec do
       for {event, payload, derivation} <- @es_derived do
         {args, guard, body} = Core.Es.Event.Codec.dump_payload_clause(event, payload, derivation)
 
-        @impl true
-        def dump_payload(unquote_splicing(args)) when unquote(guard), do: unquote(body)
+        defp es_dump_payload(unquote_splicing(args)) when unquote(guard), do: unquote(body)
+      end
+
+      for event <- @es_payloadless do
+        defp es_dump_payload(%unquote(event){}, _codec), do: nil
       end
 
       for {event, payload, derivation} <- @es_derived do
         {args, guard, body} = Core.Es.Event.Codec.load_payload_clause(event, payload, derivation)
 
-        @impl true
-        def load_payload(unquote_splicing(args)) when unquote(guard), do: unquote(body)
+        defp es_load_payload(unquote_splicing(args)) when unquote(guard), do: unquote(body)
+      end
+
+      for event <- @es_payloadless do
+        defp es_load_payload(unquote(event), _wire, _codec), do: {:ok, nil}
       end
     end
   end
 
-  # Выведенные клаузы встают первыми, поэтому ручная клауза для такого события недостижима для
-  # валидной нагрузки и молча ловила бы только невалидную.
-  defp check_derived!(_env, []), do: :ok
+  # Нагрузку события кодек выводит всегда, а нестандартная wire-форма — дело плагина её типа: ручная
+  # клауза в кодеке событий была бы вторым источником wire.
+  defp refute_manual_payload!(env) do
+    case manual_payload_funs(env.module) do
+      [] ->
+        :ok
 
-  defp check_derived!(env, derived) do
-    events = Enum.map(derived, &elem(&1, 0))
+      [{_fun, line} | _rest] = funs ->
+        listed = Enum.map_join(funs, ", ", fn {fun, line} -> "#{fun} (строка #{line})" end)
 
-    dead =
-      for {fun, form} <- [{{:dump_payload, 2}, :struct}, {{:load_payload, 3}, :module}],
-          {line, event} <- Core.Codec.Plugin.Opts.manual_targets(env.module, fun, length(derived), form),
-          event in events,
-          do: {fun, line, event}
+        raise CompileError,
+          description:
+            "#{@label}: #{inspect(env.module)} объявляет #{listed} — нагрузку события кодирует " <>
+              "плагин её типа: перенесите форму в Codec-плагин нагрузки (или объявите нагрузку " <>
+              "`use Core.Es.Event.Payload`) и удалите клаузы",
+          file: env.file,
+          line: line || env.line
+    end
+  end
 
-    Core.Codec.Plugin.Opts.raise_never_match!(env, dead, "клаузы нагрузки события выводит кодек")
-
-    Core.Codec.Plugin.Opts.raise_specs!(
-      env,
-      [dump_payload: 2, load_payload: 3],
-      "у кодека с выводимыми клаузами нагрузки контракт задаёт @callback Core.Es.Event.Codec"
-    )
+  defp manual_payload_funs(module) do
+    for {fun, arity} <- [dump_payload: 2, load_payload: 3],
+        {:v1, _kind, _meta, [{meta, _args, _guards, _body} | _rest]} <- [Module.get_definition(module, {fun, arity})],
+        do: {"#{fun}/#{arity}", meta[:line]}
   end
 
   defp ensure_defined!(mod, {fun, arity}, reason, env) do
@@ -714,31 +677,6 @@ defmodule Core.Es.Event.Codec do
         file: env.file,
         line: env.line
     end
-  end
-
-  defp payload_checks(module, tags) do
-    line = Module.get_attribute(module, :es_use_line)
-    events = Enum.reject(Enum.sort(Map.keys(tags)), &is_nil(&1.__es_payload__()))
-
-    Enum.map(events, &dump_check(&1, line)) ++
-      Enum.map(Enum.sort_by(events, & &1.__es_payload__()), &load_check(&1, line))
-  end
-
-  defp dump_check(event, line) do
-    args = [quote(do: unquote(Es.Check.event_pattern(event)) = event), quote(do: codec)]
-    Es.Check.define("dump_payload/2 принимает", event, args, quote(do: dump_payload(event, codec)), line)
-  end
-
-  # Имя называет модуль нагрузки, а он бывает общим у нескольких событий: у такой функции-проверки
-  # clause на каждое событие, и они идут подряд. Одно тело на все события не годится — после
-  # первого предупреждения в теле вывод типов остальные не сообщает.
-  defp load_check(event, line) do
-    payload = event.__es_payload__()
-    [ok] = quote(do: ({:ok, %unquote(payload){}} -> :ok))
-    [error] = quote(generated: true, do: ({:error, _} -> :ok))
-    body = quote(do: case(load_payload(unquote(event), wire, codec), do: unquote([ok, error])))
-
-    Es.Check.define("load_payload/3 отдаёт нагрузку", payload, [event, quote(do: wire), quote(do: codec)], body, line)
   end
 
   defp fetch_tag(data, module) do

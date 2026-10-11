@@ -7,15 +7,8 @@ defmodule Core.EsFixture.Account.Event.Opened do
   defmodule Payload do
     @moduledoc "Нагрузка `Opened`."
 
-    @enforce_keys ~w(name)a
-    defstruct @enforce_keys
-
-    @type t :: %__MODULE__{name: Account.Name.t()}
-
-    @doc "Собрать нагрузку."
-    @spec new(Account.Name.t()) :: t()
-
-    def new(%Account.Name{} = name), do: %__MODULE__{name: name}
+    use Core.Es.Event.Payload,
+      fields: [name: [prim: Account.Name]]
   end
 
   use Core.Es.Event,

@@ -94,9 +94,11 @@ def plugins, do: @plugins
   устроена; ручной плагин с асимметричным `load(Variant, поля)` переводится на `variants:`.
 - Ручной плагин — для расхождения сильнее переименования ключа: словарь, вычисляемое или сжатое
   поле, межполевой инвариант, который должен выполняться при загрузке.
-- Нагрузка события — value object со своим плагином — SHOULD писаться ручными клаузами кодека
-  события одной строкой через фасад: `codec.dump(value)` / `codec.load(Value, wire)`, а не повтором
-  полей value object спекой `Core.Es.Event.Payload`.
+- Нагрузка события — value object со своим плагином — SHOULD объявляться самим типом
+  (`payload: Address`), а не повтором его полей спекой `Core.Es.Event.Payload`: кодек события
+  передаёт её фасаду без клауз. Нестандартная wire-форма нагрузки — ручной плагин её типа в
+  `<Aggregate>.Codec`; клаузы `dump_payload/2` / `load_payload/3` в кодеке событий — `CompileError`
+  (`deps/core/docs/rules/11-domain.md`, «Нагрузка-сущность»).
 - Спеку пере-дампа jsonb (`Core.Codec.Redump`) типа по полям, варианта и семейства с `variants:`
   выводит плагин: ручная спека такого типа MUST NOT — View ссылается на тип `jsonb: Type`. Ручной
   плагин объявляет спеку колбэком `redump_spec/1`, а не функцией `<форма>_redump_spec/0`; на спеку
@@ -148,9 +150,11 @@ end
 use Core.Codec.Plugin,
   fields: [{Order.Line, id: [prim: Order.Line.ID], discount: [union: Order.Discount, optional: true]}]
 
-# хорошо — нагрузка-value object через фасад
-def dump_payload(%Event.Moved{payload: %Address{} = address}, codec), do: codec.dump(address)
-def load_payload(Event.Moved, wire, codec), do: codec.load(Address, wire)
+# хорошо — нагрузка-value object: событие объявляет её тип, кодек события клауз не пишет
+use Core.Es.Event,
+  aggregate_id: Agg.ID,
+  by: User.ID,
+  payload: Address
 ```
 
 ```elixir

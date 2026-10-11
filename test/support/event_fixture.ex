@@ -97,7 +97,6 @@ defmodule Core.EventFixture do
 
     alias Core.Es
     alias Core.EventFixture.Event
-    alias Core.EventFixture.Name
 
     # Тег квалифицирован именем агрегата: он виден в брокере и в event store рядом
     # с чужими, хотя модуль выбирает внутри этого кодека.
@@ -113,24 +112,6 @@ defmodule Core.EventFixture do
       type: "fixture",
       tags: @tag_by_mod,
       upcasts: @upcasts
-
-    @doc "Нагрузка события → wire."
-    @spec dump_payload(Event.t(), module()) :: map()
-
-    @impl true
-    def dump_payload(%Event.Created{payload: payload}, codec),
-      do: %{"name" => codec.dump(payload.name)}
-
-    @doc "Wire-нагрузка → `%Payload{}`."
-    @spec load_payload(module(), term(), module()) ::
-            {:ok, Event.Created.Payload.t()} | {:error, Core.Error.t()}
-
-    @impl true
-    def load_payload(Event.Created, wire, codec) do
-      with {:ok, name} <- codec.load(Name, field(wire, :name)) do
-        {:ok, Event.Created.Payload.new(name)}
-      end
-    end
 
     @doc "Нагрузка записанного события старого тега → нагрузка следующего тега цепочки."
     @spec upcast(String.t(), Es.Event.Codec.wire()) :: wire_payload()

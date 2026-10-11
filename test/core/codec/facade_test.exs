@@ -254,6 +254,20 @@ defmodule Core.Codec.FacadeTest do
     end
   end
 
+  test "нагрузка-сущность события без плагина в фасаде — CompileError с типом и кодеком" do
+    assert_raise CompileError, ~r/нагрузку .*DerivedFixture.Place события .*Event.Located .*не обслуживает/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.NoPayloadPlugin do
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: [Core.DerivedFixture.Event.Codec, Core.DerivedFixture.Mark.Codec]
+          end
+        end
+      )
+    end
+  end
+
   test "duplicate codec types raise CompileError" do
     assert_raise CompileError, ~r/объявлен дважды/, fn ->
       Code.eval_quoted(

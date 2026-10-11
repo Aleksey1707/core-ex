@@ -23,7 +23,8 @@ defmodule Core.Codec.Facade do
   модуль-семейство: `codec.load(<Aggregate>.Event, data)` возвращает то событие, тег
   которого лежит в данных. Выбор конкретного типа — задача плагина, фасад про теги
   не знает: модули типов и семейств обязаны быть уникальными между плагинами, и это
-  проверяется на компиляции. Так же уникален между кодеками событий тип агрегата (`type:`).
+  проверяется на компиляции. Так же уникален между кодеками событий тип агрегата (`type:`), а
+  нагрузку-сущность события обязан обслуживать плагин того же фасада.
 
   ## Сужение результата
 
@@ -61,6 +62,7 @@ defmodule Core.Codec.Facade do
 
       Core.Codec.Facade.validate_mods!(@plugins)
       Core.Codec.Facade.validate_es_types!(@plugins)
+      Core.Codec.Facade.validate_es_payloads!(@plugins)
 
       require Core.Guard
 
@@ -251,7 +253,7 @@ defmodule Core.Codec.Facade do
   defp error_clause(:load), do: quote(generated: true, do: ({:error, reason} -> {:error, reason}))
   defp error_clause(:load!), do: quote(generated: true, do: ({:error, %Core.Error{} = error} -> raise Core.Exc, error))
 
-  # ===== типы агрегата =====
+  # ===== кодеки событий =====
 
   @doc """
   Проверить типы агрегата кодеков событий среди плагинов (compile-time).
@@ -267,6 +269,32 @@ defmodule Core.Codec.Facade do
       |> ensure_plugins!()
       |> Enum.filter(&function_exported?(&1, :__es_type__, 0))
       |> Enum.reduce(%{}, &put_unique_es_type!/2)
+
+    :ok
+  end
+
+  @doc """
+  Проверить, что нагрузку-сущность каждого события кодеков событий обслуживает плагин фасада
+  (compile-time).
+
+  Такую нагрузку кодек событий передаёт фасаду целиком (`Core.Es.Event.Codec.plugin_payloads/1`),
+  и без плагина её типа событие не записать и не прочитать.
+  """
+  @spec validate_es_payloads!([module()]) :: :ok
+
+  def validate_es_payloads!(plugins) when is_list(plugins) do
+    plugins = ensure_plugins!(plugins)
+    served = MapSet.new(Enum.flat_map(plugins, & &1.__codec_types__()))
+
+    for plugin <- plugins,
+        function_exported?(plugin, :__es_type__, 0),
+        {event, payload} <- Core.Es.Event.Codec.plugin_payloads(plugin.__es_mods__()),
+        not MapSet.member?(served, payload) do
+      raise CompileError,
+        description:
+          "нагрузку #{inspect(payload)} события #{inspect(event)} (#{inspect(plugin)}) " <>
+            "не обслуживает ни один плагин фасада: объявите её тип в Codec-плагине и добавьте его в plugins:"
+    end
 
     :ok
   end
