@@ -14,7 +14,8 @@ defmodule Core.Codec.Facade do
   Служебная `__codec_redump__/1` отдаёт `Core.Codec.Redump` спеку пере-дампа типа по ссылке
   `{:codec, Type}`: её выводит или объявляет колбэком `redump_spec/1` плагин типа. Тип плагина без
   спеки (ручной без клаузы колбэка) и модуль без плагина — `ArgumentError`, где названы тип и плагин
-  (фасад).
+  (фасад); бросает его сам фасад, не вызывая плагин (`__codec_redump_missing__/0`). Фасад без единого
+  типа со спекой объявляет `__codec_redump__/1` как `no_return()`.
 
   ## Семейства типов
 
@@ -132,18 +133,43 @@ defmodule Core.Codec.Facade do
       end
 
       @doc false
-      @spec __codec_redump__(module()) :: Core.Codec.Redump.spec()
+      if Core.Codec.Facade.redump?(@plugins),
+        do: @spec(__codec_redump__(module()) :: Core.Codec.Redump.spec()),
+        else: @spec(__codec_redump__(module()) :: no_return())
 
       @impl true
       for plugin <- @plugins,
-          mod <- Core.Codec.Facade.load_mods(plugin) do
+          missing = plugin.__codec_redump_missing__(),
+          mod <- Core.Codec.Facade.load_mods(plugin),
+          not List.keymember?(missing, mod, 0) do
         def __codec_redump__(unquote(mod)), do: unquote(plugin).__codec_redump__(unquote(mod))
+      end
+
+      for plugin <- @plugins,
+          {mod, culprit} <- plugin.__codec_redump_missing__() do
+        def __codec_redump__(unquote(mod)), do: Core.Codec.Plugin.Redump.missing!(unquote(culprit), unquote(plugin))
       end
 
       def __codec_redump__(mod) when is_atom(mod) do
         raise ArgumentError, "#{inspect(mod)}: нет codec-плагина в фасаде #{inspect(__MODULE__)} — спеки redump нет"
       end
     end
+  end
+
+  @doc """
+  Есть ли у плагинов фасада хоть один тип со спекой пере-дампа.
+
+  Без него каждая клауза `__codec_redump__/1` фасада бросает, и `@spec` со спекой разошёлся бы с
+  success typing `none()` у Dialyzer.
+  """
+  @spec redump?([module()]) :: boolean()
+
+  def redump?(plugins) when is_list(plugins) do
+    Enum.any?(plugins, fn plugin ->
+      missing = plugin.__codec_redump_missing__()
+
+      Enum.any?(load_mods(plugin), &(not List.keymember?(missing, &1, 0)))
+    end)
   end
 
   @doc """

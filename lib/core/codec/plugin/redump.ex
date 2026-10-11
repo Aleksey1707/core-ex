@@ -19,7 +19,9 @@ defmodule Core.Codec.Plugin.Redump do
   варианта — `ArgumentError` при запросе спеки семейства.
 
   Ручной тип, ручной вариант (спека его полей, `{:map, _}`) и семейство без `variants:` берут спеку
-  у колбэка `redump_spec/1`; без клаузы колбэка — `ArgumentError` с именами типа и плагина.
+  у колбэка `redump_spec/1`. Тип без клаузы колбэка клаузы `__codec_redump__/1` не получает: он уходит в
+  `__codec_redump_missing__/0` (`{тип, тип без клаузы}` — у семейства это его ручной вариант), и
+  `ArgumentError` с именами типа и плагина бросает фасад.
   Клауза колбэка на тип с выведенной спекой — `CompileError`.
   """
 
@@ -53,12 +55,31 @@ defmodule Core.Codec.Plugin.Redump do
     check_derived!(env, targets, derived ++ unions)
     check_merge!(plugin, variants)
 
-    clauses =
-      Enum.map(fields, &fields_clause/1) ++
-        Enum.map(variants, &variant_clause(&1, covered?)) ++
-        Enum.map(unions, &family_clause(&1, variants, covered?)) ++
-        Enum.map(manual, &manual_clause(&1, covered?))
+    entries =
+      Enum.map(fields, &fields_redump/1) ++
+        Enum.map(variants, &variant_redump(&1, covered?)) ++
+        Enum.map(unions, &family_redump(&1, variants, covered?)) ++
+        Enum.map(manual, &manual_redump(&1, covered?))
 
+    missing = for {:missing, type, culprit} <- entries, do: {type, culprit}
+
+    quote do
+      @doc false
+      @spec __codec_redump_missing__() :: [{module(), module()}]
+
+      def __codec_redump_missing__, do: unquote(missing)
+
+      unquote(redump_ast(for {:spec, type, body} <- entries, do: clause(type, body)))
+    end
+  end
+
+  # ---
+
+  # Тип без спеки клаузы не получает: клауза, которая только бросает, дала бы функции success typing
+  # `none()` против `@spec` и вызову фасада — «will not succeed» у Dialyzer. Отказ бросает фасад.
+  defp redump_ast([]), do: nil
+
+  defp redump_ast(clauses) do
     quote do
       @doc false
       @spec __codec_redump__(module()) :: Core.Codec.Redump.spec()
@@ -66,8 +87,6 @@ defmodule Core.Codec.Plugin.Redump do
       unquote_splicing(clauses)
     end
   end
-
-  # ---
 
   defp check_derived!(env, targets, derived) do
     dead =
@@ -87,36 +106,34 @@ defmodule Core.Codec.Plugin.Redump do
     end
   end
 
-  defp fields_clause({type, fields}), do: clause(type, Macro.escape(fields_spec(fields)))
+  defp fields_redump({type, fields}), do: {:spec, type, Macro.escape(fields_spec(fields))}
 
-  defp variant_clause({mod, _address, place, :manual}, covered?) do
+  defp variant_redump({mod, _address, place, :manual}, covered?) do
     if covered?.(mod),
       do:
-        clause(
-          mod,
-          quote(do: Core.Codec.Plugin.Redump.variant_spec(unquote(Macro.escape(place)), redump_spec(unquote(mod))))
-        ),
-      else: clause(mod, missing(mod))
+        {:spec, mod,
+         quote(do: Core.Codec.Plugin.Redump.variant_spec(unquote(Macro.escape(place)), redump_spec(unquote(mod))))},
+      else: {:missing, mod, mod}
   end
 
-  defp variant_clause({mod, _address, place, fields}, _covered?),
-    do: clause(mod, Macro.escape(variant_spec(place, fields_spec(fields))))
+  defp variant_redump({mod, _address, place, fields}, _covered?),
+    do: {:spec, mod, Macro.escape(variant_spec(place, fields_spec(fields)))}
 
   # Семейство с ручным вариантом сливает спеки при исполнении: спеку его полей отдаёт колбэк.
-  defp family_clause(union, variants, covered?) do
+  defp family_redump(union, variants, covered?) do
     manual = for {mod, _address, _place, :manual} <- variants, do: mod
 
     case {manual, Enum.reject(manual, covered?)} do
       {[], []} ->
         {:ok, spec} = family(for {mod, _address, place, fields} <- variants, do: {mod, place, fields_spec(fields)})
 
-        clause(union, Macro.escape(spec))
+        {:spec, union, Macro.escape(spec)}
 
       {_manual, [uncovered | _rest]} ->
-        clause(union, missing(uncovered))
+        {:missing, union, uncovered}
 
       {_manual, []} ->
-        clause(union, quote(do: Core.Codec.Plugin.Redump.family!(__MODULE__, unquote(Enum.map(variants, &entry/1)))))
+        {:spec, union, quote(do: Core.Codec.Plugin.Redump.family!(__MODULE__, unquote(Enum.map(variants, &entry/1))))}
     end
   end
 
@@ -125,13 +142,11 @@ defmodule Core.Codec.Plugin.Redump do
 
   defp entry({mod, _address, place, fields}), do: Macro.escape({mod, place, fields_spec(fields)})
 
-  defp manual_clause(type, covered?) do
+  defp manual_redump(type, covered?) do
     if covered?.(type),
-      do: clause(type, quote(do: redump_spec(unquote(type)))),
-      else: clause(type, missing(type))
+      do: {:spec, type, quote(do: redump_spec(unquote(type)))},
+      else: {:missing, type, type}
   end
-
-  defp missing(type), do: quote(do: Core.Codec.Plugin.Redump.missing!(unquote(type), __MODULE__))
 
   defp clause(type, body) do
     quote do

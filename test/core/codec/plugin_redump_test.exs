@@ -378,6 +378,19 @@ defmodule Core.Codec.PluginRedumpTest do
       end
     end
 
+    test "тип без спеки клаузы плагина не получает — отказ бросает фасад" do
+      refute function_exported?(NoSpecPlugin, :__codec_redump__, 1)
+      assert NoSpecPlugin.__codec_redump_missing__() == [{Cell.Dot, Cell.Dot}, {Cell, Cell.Dot}]
+
+      assert LegacyPlugin.__codec_redump_missing__() == [{Legacy.Mark, Legacy.Mark}]
+      assert LegacyPlugin.__codec_redump__(Legacy) == {:map, %{at: {:prim, At}}}
+    end
+
+    test "фасад без единой спеки — признак для @spec no_return()" do
+      refute Core.Codec.Facade.redump?([NoSpecPlugin])
+      assert Core.Codec.Facade.redump?([NoSpecPlugin, LegacyPlugin])
+    end
+
     test "модуль без плагина" do
       assert_raise ArgumentError, ~r/Unknown: нет codec-плагина в фасаде .*PluginRedumpTest.Out/, fn ->
         Redump.run(%{}, {:codec, Unknown}, Out)

@@ -239,7 +239,10 @@
   `load_variant/3`. Плагин с `variants:` занимает имена `type/1`, `types/0`, `__codec_variants__/0`
   и приватную `__codec_variant__/3`.
 - **`__codec_redump__/1` у плагина и фасада, колбэк `redump_spec/1`.** `use Core.Codec.Plugin`
-  генерирует `__codec_redump__/1` (`@doc false`) на каждый свой тип и семейство и занимает это имя.
+  генерирует `__codec_redump__/1` (`@doc false`) на каждый свой тип и семейство со спекой и
+  `__codec_redump_missing__/0` — типы без неё; оба имени заняты. Плагин без спек (кодек событий,
+  `View.Codec`, ручной без `redump_spec/1`) `__codec_redump__/1` не имеет: отказ по типу без спеки
+  бросает фасад, и у Dialyzer нет `invalid_contract` на плагине и «will not succeed» на фасаде.
   Новый optional `@callback redump_spec(module()) :: Core.Codec.Redump.spec()` `Core.Codec.Plugin`:
   клаузы — на ручные типы, ручные варианты (спека их полей) и семейство `union:` без `variants:`;
   клауза на тип с выведенной спекой — `CompileError` «never match». `use Core.Codec.Facade`
