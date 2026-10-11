@@ -1,7 +1,7 @@
 defmodule Consumer.Domain.Sales.Grants do
   @moduledoc """
-  Агрегат, у кодека которого два события делят нагрузку-Prim, а третье несёт `Es.ValueChanged`:
-  клаузы нагрузки кодек выводит сам.
+  Агрегат, у кодека которого два события делят нагрузку-Prim, третье несёт `Es.ValueChanged`, а
+  четвёртое — нагрузку по полям с вариантами семейств (`union:`): клаузы нагрузки кодек выводит сам.
   """
 
   alias Consumer.Domain.Sales.Grants.Cmd
@@ -46,4 +46,6 @@ defmodule Consumer.Domain.Sales.Grants do
 
   def evolve(%__MODULE__{} = state, %Event.Replaced{payload: %Event.Replaced.Payload{} = payload}),
     do: %{state | roles: state.roles |> MapSet.delete(payload.old_value) |> MapSet.put(payload.new_value)}
+
+  def evolve(%__MODULE__{} = state, %Event.Badged{payload: %Event.Badged.Payload{}}), do: state
 end

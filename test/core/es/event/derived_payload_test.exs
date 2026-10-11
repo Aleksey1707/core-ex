@@ -70,6 +70,46 @@ defmodule Core.Es.Event.DerivedPayloadTest do
     end
   end
 
+  describe "Event.Codec: нагрузка по полям с union:" do
+    test "new/N — вариант семейства; не struct в голове — FunctionClauseError" do
+      star = %DerivedFixture.Mark.Star{size: 3}
+
+      assert Event.Marked.Payload.new(star, nil) == %Event.Marked.Payload{mark: star, prev: nil}
+      assert_raise FunctionClauseError, fn -> Event.Marked.Payload.new(Map.new(size: 3), nil) end
+      assert_raise FunctionClauseError, fn -> Event.Marked.Payload.new(star, Map.new(color: "red")) end
+    end
+
+    test "вариант в форме адреса в конверте, round-trip через фасад" do
+      payload = Event.Marked.Payload.new(%DerivedFixture.Mark.Star{size: 3}, %DerivedFixture.Mark.Dot{color: "red"})
+      marked = event(Event.Marked, payload)
+
+      assert InCodec.dump(marked)["payload"] == %{
+               "mark" => %{"type" => "star", "fields" => %{"size" => 3}},
+               "prev" => %{"type" => "dot", "fields" => %{"color" => "red"}}
+             }
+
+      assert InCodec.load(DerivedFixture.Event, json(InCodec.dump(marked))) == {:ok, marked}
+
+      unmarked = event(Event.Marked, %{payload | prev: nil})
+
+      assert InCodec.load(Event.Marked, json(InCodec.dump(unmarked))) == {:ok, unmarked}
+    end
+
+    test "спека нагрузки — {:union, Family}" do
+      assert [
+               {:mark, {:union, DerivedFixture.Mark}, false, "mark", :none},
+               {:prev, {:union, DerivedFixture.Mark}, true, "prev", :none}
+             ] =
+               Event.Marked.Payload.__es_payload_fields__()
+    end
+
+    test "адрес вне семейства — ошибка load" do
+      wire = put_in(json(InCodec.dump(event(Event.Marked, marked()))), ["payload", "mark", "type"], "cross")
+
+      assert {:error, %Error{ns: :codec, code: :unknown_tag}} = InCodec.load(Event.Marked, wire)
+    end
+  end
+
   describe "Event.Codec: ручная клауза для выводимой нагрузки" do
     test "never match у нагрузки-Prim и ValueChanged — CompileError" do
       message =
@@ -103,6 +143,8 @@ defmodule Core.Es.Event.DerivedPayloadTest do
   end
 
   defp renamed, do: Event.Renamed.Payload.new(Name.new!("Склад"), Name.new!("Отгрузка"))
+
+  defp marked, do: Event.Marked.Payload.new(%DerivedFixture.Mark.Star{size: 3}, nil)
 
   defp json(wire), do: Jason.decode!(Jason.encode!(wire))
 

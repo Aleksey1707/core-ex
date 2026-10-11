@@ -4,12 +4,12 @@ defmodule Consumer.Domain.Sales do
 
   - Агрегаты: `Account` (event-sourced, кодек с `upcasts:`, модуль ключа `NameKey`, процесс), `Order`
     (enum `Status` отдельным файлом в guard `is_enum/2` самого агрегата), `Ping` (события без нагрузки),
-    `Grants` (два события делят модуль нагрузки), `NeverFails` и `AlwaysFails` (`decide` никогда не
-    ошибается / только ошибается); события `Parcel` без агрегата.
+    `Grants` (два события делят модуль нагрузки, нагрузка по полям с `union:`), `NeverFails` и
+    `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата.
   - Акторы: `Client` — usecases в каталоге каждого агрегата и read-модели.
   - Значения без владельца (`Values`): `UserID`, идентификаторы из ключа `DeliveryID` и `InspectionID`.
   - Read-модели: активность `Activity` по назначению — проекция на события `Account` и `Order`.
-  - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec`, семейства
+  - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (поля `union:`), семейства
     вариантов `Account.Profile.Channel.Codec` (тегированная форма с дискриминатором) и
     `Account.Profile.Badge.Codec` (без обёртки).
   - Компоненты: нет.

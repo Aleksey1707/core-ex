@@ -12,11 +12,14 @@ defmodule Core.Codec.Plugin.Fields do
   | `prim: Prim` | `codec.dump/1` | `codec.load(Prim, raw)` |
   | `enum: Enum` | атом как есть | `Enum.cast/1` (`cast_optional/1` при `optional:`) |
   | `entity: Mod` | `codec.dump/1` | `codec.load(Mod, raw)` |
+  | `union: Family` | `codec.dump/1` | `codec.load(Family, raw)` |
   | `list: спека` | поэлементно по спеке | поэлементно по спеке; не список — ошибка |
   | `type: скаляр` | как есть | как есть |
 
   `default:` — wire-литерал, который загрузка подставляет вместо отсутствующего ключа или
-  `nil` и грузит как записанный. Загрузка собирает struct литералом после успешной загрузки
+  `nil` и грузит как записанный. Голова `dump/2` закрывает Prim и сущность поля паттерном, а
+  вариант семейства (`union:`) — только `is_struct`: варианты знает плагин семейства, а не этот
+  (ADR-0058). Загрузка собирает struct литералом после успешной загрузки
   всех полей; первая ошибка поля — итог, лишние ключи wire игнорируются.
   """
 
@@ -28,10 +31,11 @@ defmodule Core.Codec.Plugin.Fields do
   require Error
 
   @label "Codec.Plugin"
-  @kind_keys ~w(prim enum entity list type)a
+  @kind_keys ~w(prim enum entity union list type)a
   @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
-  @facade_kinds ~w(prim entity)a
+  @facade_kinds ~w(prim entity union)a
+  @pattern_kinds ~w(prim entity)a
   @scalar_types FieldCheck.scalar_types() ++ ~w(map)a
 
   @typedoc "Нормализованная спека значения поля."
@@ -39,6 +43,7 @@ defmodule Core.Codec.Plugin.Fields do
           {:prim, module()}
           | {:enum, module()}
           | {:entity, module()}
+          | {:union, module()}
           | {:list, spec()}
           | {:type, atom()}
 
@@ -176,7 +181,8 @@ defmodule Core.Codec.Plugin.Fields do
 
       other ->
         raise CompileError,
-          description: "#{where}: нужен ровно один из prim:/enum:/entity:/list:/type:, задано #{inspect(other)}"
+          description:
+            "#{where}: нужен ровно один из #{Enum.map_join(@kind_keys, "/", &"#{&1}:")}, задано #{inspect(other)}"
     end
   end
 
@@ -193,6 +199,24 @@ defmodule Core.Codec.Plugin.Fields do
   defp kind_spec!(:entity, mod, where) do
     struct_module!(mod, where)
     {:entity, mod}
+  end
+
+  # Семейство struct не имеет: struct здесь — вариант или Prim, а модуль `Core.Enum` — enum, и поле
+  # с ними работало бы на одном значении и молча ломалось на остальных.
+  defp kind_spec!(:union, mod, where) do
+    FieldCheck.module!(mod, where)
+
+    cond do
+      function_exported?(mod, :__struct__, 0) ->
+        raise CompileError,
+          description: "#{where}: union: #{inspect(mod)} — struct, а не семейство; нужен entity: или prim:"
+
+      Core.Enum.enum?(mod) ->
+        raise CompileError, description: "#{where}: union: #{inspect(mod)} — Core.Enum, а не семейство; нужен enum:"
+
+      true ->
+        {:union, mod}
+    end
   end
 
   defp kind_spec!(:list, inner, where) do
@@ -348,12 +372,12 @@ defmodule Core.Codec.Plugin.Fields do
     Enum.reduce(rest, first, fn guard, acc -> quote(generated: true, do: unquote(acc) and unquote(guard)) end)
   end
 
-  defp dump_pattern({name, {kind, mod}, false, _wire, _default}) when kind in @facade_kinds,
+  defp dump_pattern({name, {kind, mod}, false, _wire, _default}) when kind in @pattern_kinds,
     do: {name, quote(generated: true, do: %unquote(mod){} = unquote(var(name)))}
 
   defp dump_pattern({name, _spec, _optional?, _wire, _default}), do: {name, var(name)}
 
-  defp field_guard({_name, {kind, _mod}, false, _wire, _default}) when kind in @facade_kinds, do: []
+  defp field_guard({_name, {kind, _mod}, false, _wire, _default}) when kind in @pattern_kinds, do: []
 
   defp field_guard({name, spec, false, _wire, _default}), do: [value_guard(spec, var(name))]
 
@@ -363,8 +387,10 @@ defmodule Core.Codec.Plugin.Fields do
     [quote(generated: true, do: is_nil(unquote(value)) or unquote(value_guard(spec, value)))]
   end
 
-  defp value_guard({kind, mod}, value) when kind in @facade_kinds,
+  defp value_guard({kind, mod}, value) when kind in @pattern_kinds,
     do: quote(generated: true, do: is_struct(unquote(value), unquote(mod)))
+
+  defp value_guard({:union, _family}, value), do: quote(generated: true, do: is_struct(unquote(value)))
 
   defp value_guard({:enum, _mod}, value),
     do: quote(generated: true, do: is_atom(unquote(value)) and not is_nil(unquote(value)))
@@ -424,6 +450,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   # ---
 
+  defp spec_type({:union, _family}), do: quote(do: struct())
   defp spec_type({kind, mod}) when kind in ~w(prim enum entity)a, do: quote(do: unquote(mod).t())
   defp spec_type({:list, inner}), do: quote(do: [unquote(spec_type(inner))])
   defp spec_type({:type, :string}), do: quote(do: String.t())

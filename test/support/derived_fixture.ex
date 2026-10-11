@@ -1,10 +1,11 @@
 defmodule Core.DerivedFixture do
   @moduledoc """
-  События, чьи клаузы нагрузки `Core.Es.Event.Codec` выводит сам: нагрузка-Prim и
-  `Core.Es.ValueChanged` с Prim-, nilable- и enum-типом.
+  События, чьи клаузы нагрузки `Core.Es.Event.Codec` выводит сам: нагрузка-Prim,
+  `Core.Es.ValueChanged` с Prim-, nilable- и enum-типом и нагрузка по полям с вариантом
+  семейства `Core.DerivedFixture.Mark` (`union:`).
 
-  `Core.DerivedFixture.Event.Codec` ручных клауз не объявляет и зарегистрирован в
-  `Core.CodecFixture.plugins/0`.
+  `Core.DerivedFixture.Event.Codec` ручных клауз не объявляет; он и `Core.DerivedFixture.Mark.Codec`
+  зарегистрированы в `Core.CodecFixture.plugins/0`.
   """
 
   defmodule Note do
@@ -29,15 +30,45 @@ defmodule Core.DerivedFixture do
     use Core.Enum, name: "Статус", values: ~w(draft active)a
   end
 
+  defmodule Mark do
+    @moduledoc "Метка — семейство вариантов в тегированной форме."
+
+    defmodule Star do
+      @moduledoc "Метка: звезда."
+
+      defstruct [:size]
+    end
+
+    defmodule Dot do
+      @moduledoc "Метка: точка."
+
+      defstruct [:color]
+    end
+  end
+
+  defmodule Mark.Codec do
+    @moduledoc "Варианты метки."
+
+    alias Core.DerivedFixture.Mark
+
+    use Core.Codec.Plugin,
+      union: Mark,
+      variants: [
+        {Mark.Star, "star", size: [type: :pos_integer]},
+        {Mark.Dot, "dot", color: [type: :string]}
+      ]
+  end
+
   defmodule Event do
     @moduledoc "События с выводимой нагрузкой."
 
+    alias Core.DerivedFixture.Event.Marked
     alias Core.DerivedFixture.Event.NoteChanged
     alias Core.DerivedFixture.Event.Renamed
     alias Core.DerivedFixture.Event.StatusChanged
     alias Core.DerivedFixture.Event.Tagged
 
-    @type t :: Tagged.t() | Renamed.t() | NoteChanged.t() | StatusChanged.t()
+    @type t :: Tagged.t() | Renamed.t() | NoteChanged.t() | StatusChanged.t() | Marked.t()
   end
 
   defmodule Event.Tagged do
@@ -98,6 +129,25 @@ defmodule Core.DerivedFixture do
       payload: Payload
   end
 
+  defmodule Event.Marked do
+    @moduledoc "Нагрузка по полям с вариантом семейства."
+
+    defmodule Payload do
+      @moduledoc "Новая метка и прежняя, если была."
+
+      use Core.Es.Event.Payload,
+        fields: [
+          mark: [union: Core.DerivedFixture.Mark],
+          prev: [union: Core.DerivedFixture.Mark, optional: true]
+        ]
+    end
+
+    use Core.Es.Event,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      payload: Payload
+  end
+
   defmodule Event.Codec do
     @moduledoc "Кодек без ручных клауз: нагрузку всех событий он выводит сам."
 
@@ -110,7 +160,8 @@ defmodule Core.DerivedFixture do
         Event.Tagged => "derived.tagged",
         Event.Renamed => "derived.renamed",
         Event.NoteChanged => "derived.note_changed",
-        Event.StatusChanged => "derived.status_changed"
+        Event.StatusChanged => "derived.status_changed",
+        Event.Marked => "derived.marked"
       }
   end
 end

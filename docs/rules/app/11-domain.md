@@ -72,7 +72,8 @@ def plugins, do: @plugins
 Контракт объявления по полям — `deps/core/docs/rules/11-domain.md`, «Плагин по полям
 (`fields:`)», «Варианты семейства (`variants:`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»;
 почему так — `deps/core/docs/adr/0056-codec-plugin-by-fields.md`,
-`deps/core/docs/adr/0057-union-variants-by-address.md`.
+`deps/core/docs/adr/0057-union-variants-by-address.md`,
+`deps/core/docs/adr/0058-union-field-open-head.md`.
 
 - Тип, чья wire-форма совпадает с полями один к одному (с точностью до переименования ключа
   `wire:`), SHOULD объявляться по полям: сущность и агрегат — спекой `fields:` у
@@ -82,6 +83,11 @@ def plugins, do: @plugins
   варианта, `type/1` / `types/0` и ошибки разбора пишет библиотека. Вариант, чьи поля расходятся с
   wire, — ручной `{Type, адрес}` с колбэками `dump_variant/2` / `load_variant/3`, а не ручной
   плагин целиком.
+- Поле, которое хранит вариант семейства, SHOULD объявляться видом `union: Family` в спеке полей
+  типа или нагрузки, а не ручной обёрткой над `codec.dump/1` / `codec.load(Family, raw)`: такая
+  обёртка — единственное, что держит тип с остальными полями один к одному ручным. Повреждённую
+  форму и адрес вне семейства отвечает загрузка семейства (`:invalid_value` / `:unknown_tag`), свой
+  код ошибки обёртки уходит.
 - `load(Variant, wire)` MUST принимать ту же форму, что отдаёт `dump(variant)`: тегированную форму,
   а не голые поля, — `load(T, dump(x)) == {:ok, x}` и для варианта. Сгенерированная загрузка так и
   устроена; ручной плагин с асимметричным `load(Variant, поля)` переводится на `variants:`.
@@ -121,6 +127,20 @@ use Core.Codec.Plugin,
     {Order.Discount.Fixed, "fixed", amount: [prim: Order.Amount]},
     {Order.Discount.Percent, "percent", value: [prim: Order.Discount.Rate]}
   ]
+
+# плохо — поле с вариантом семейства держит тип ручным ради обёртки
+def dump(%Order.Line{id: id, discount: discount}, codec),
+  do: %{"id" => codec.dump(id), "discount" => dump_optional(discount, codec)}
+
+def load(Order.Line, wire, codec) do
+  with {:ok, id} <- codec.load(Order.Line.ID, field(wire, :id)),
+       {:ok, discount} <- load_optional(Order.Discount, field(wire, :discount), codec),
+       do: {:ok, %Order.Line{id: id, discount: discount}}
+end
+
+# хорошо — поле видом union:
+use Core.Codec.Plugin,
+  fields: [{Order.Line, id: [prim: Order.Line.ID], discount: [union: Order.Discount, optional: true]}]
 
 # хорошо — нагрузка-value object через фасад
 def dump_payload(%Event.Moved{payload: %Address{} = address}, codec), do: codec.dump(address)

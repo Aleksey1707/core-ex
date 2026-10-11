@@ -43,6 +43,11 @@ defmodule ConsumerTest.Draft do
     # expect: incompatible types given to Consumer.Domain.Sales.Account.Event.Renamed.Payload.new/1
     do: Account.Event.Renamed.draft(Account.Event.Renamed.Payload.new(amount))
 
+  # B2u — нагрузка по полям: не-struct в поле с вариантом семейства (`union:`) в позиционном `new`
+  def b2u_fields_payload_union_not_struct(%Account.Profile.Badge.Gold{} = badge),
+    # expect: incompatible types given to Consumer.Domain.Sales.Grants.Event.Badged.Payload.new/2
+    do: Grants.Event.Badged.draft(Grants.Event.Badged.Payload.new(badge, "email"))
+
   # B3 — `draft/0` события с нагрузкой
   # expect: Consumer.Domain.Sales.Account.Event.Opened.draft/0 is undefined or private
   def b3_payload_event_without_payload, do: Account.Event.Opened.draft()

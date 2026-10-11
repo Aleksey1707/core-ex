@@ -506,6 +506,24 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
+    test "union: — не модуль, struct или Core.Enum, в том числе в list: — CompileError с подсказкой вида" do
+      assert_raise CompileError, ~r/поле a: .*NoSuchFamily недоступен/, fn ->
+        compile_plugin(:UnionMissing, a: [union: Core.Codec.PluginFieldsTest.NoSuchFamily], b: [prim: Name])
+      end
+
+      assert_raise CompileError, ~r/поле a: union: .*Tag — struct, а не семейство; нужен entity:/, fn ->
+        compile_plugin(:UnionStruct, a: [union: Core.Codec.PluginFieldsTest.Tag], b: [prim: Name])
+      end
+
+      assert_raise CompileError, ~r/поле a: union: .*Name — struct, а не семейство; нужен entity: или prim:/, fn ->
+        compile_plugin(:UnionPrim, a: [union: Core.Codec.PluginFieldsTest.Name], b: [prim: Name])
+      end
+
+      assert_raise CompileError, ~r/поле a: union: .*Status — Core.Enum, а не семейство; нужен enum:/, fn ->
+        compile_plugin(:UnionEnum, a: [list: [union: Core.Codec.PluginFieldsTest.Status]], b: [prim: Name])
+      end
+    end
+
     test "неизвестный type: — CompileError" do
       assert_raise CompileError, ~r/поле a: неизвестный type: :atom/, fn ->
         compile_plugin(:UnknownType, a: [type: :atom], b: [prim: Name])
@@ -513,7 +531,7 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "два вида в поле — CompileError" do
-      assert_raise CompileError, ~r/поле a: нужен ровно один из prim:\/enum:\/entity:\/list:\/type:/, fn ->
+      assert_raise CompileError, ~r/поле a: нужен ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
         compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
       end
     end

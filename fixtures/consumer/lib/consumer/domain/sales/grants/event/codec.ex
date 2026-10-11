@@ -4,7 +4,8 @@ defmodule Consumer.Domain.Sales.Grants.Event.Codec do
   @tag_by_mod %{
     Event.Granted => "grants.granted",
     Event.Revoked => "grants.revoked",
-    Event.Replaced => "grants.replaced"
+    Event.Replaced => "grants.replaced",
+    Event.Badged => "grants.badged"
   }
 
   use Core.Es.Event.Codec,

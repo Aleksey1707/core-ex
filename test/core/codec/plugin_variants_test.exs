@@ -80,10 +80,33 @@ defmodule Core.Codec.PluginVariantsTest do
       ]
   end
 
+  defmodule Drawing do
+    defstruct [:shape, :pet, :shapes, :backdrop]
+  end
+
+  defmodule Frame do
+    defmodule Box do
+      defstruct [:shape]
+    end
+  end
+
+  defmodule DrawingPlugin do
+    use Core.Codec.Plugin,
+      union: Frame,
+      fields: [
+        {Drawing,
+         shape: [union: Shape],
+         pet: [union: Pet, optional: true],
+         shapes: [list: [union: Shape]],
+         backdrop: [union: Shape, default: %{"type" => "square", "fields" => %{"side" => 1}}]}
+      ],
+      variants: [{Frame.Box, "box", shape: [union: Shape]}]
+  end
+
   defmodule Facade do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.Internal,
-      plugins: [ShapePlugin, PetPlugin]
+      plugins: [ShapePlugin, PetPlugin, DrawingPlugin]
   end
 
   describe "dump" do
@@ -187,6 +210,58 @@ defmodule Core.Codec.PluginVariantsTest do
     end
   end
 
+  describe "поле union:" do
+    test "dump — вариант в форме своего адреса" do
+      assert Facade.dump(drawing()) == %{
+               "shape" => %{"type" => "circle", "fields" => %{"radius" => 5}},
+               "pet" => %{"kind" => :cat, "name" => "Барсик"},
+               "shapes" => [
+                 %{"type" => "square", "fields" => %{"side" => 1}},
+                 %{"type" => "polygon", "fields" => %{"kind" => :rect, "width" => 2, "height" => 3}}
+               ],
+               "backdrop" => %{"type" => "blob", "fields" => %{"points" => "a,b"}}
+             }
+    end
+
+    test "round-trip: поле, optional: nil, элементы list:, вложенное семейство варианта" do
+      for value <- [drawing(), %{drawing() | pet: nil, shapes: []}] do
+        assert Facade.load(Drawing, Facade.dump(value)) == {:ok, value}
+      end
+
+      box = %Frame.Box{shape: rect()}
+
+      assert Facade.dump(box) == %{
+               "type" => "box",
+               "fields" => %{
+                 "shape" => %{"type" => "polygon", "fields" => %{"kind" => :rect, "width" => 2, "height" => 3}}
+               }
+             }
+
+      assert Facade.load(Frame, Facade.dump(box)) == {:ok, box}
+    end
+
+    test "optional: отсутствующий ключ — nil; default: — при отсутствии ключа" do
+      wire = Map.drop(Facade.dump(drawing()), ~w(pet backdrop))
+
+      assert {:ok, %Drawing{pet: nil, backdrop: %Shape.Square{side: 1}}} = Facade.load(Drawing, wire)
+    end
+
+    test "ошибка загрузки семейства — ошибка поля" do
+      wire = Facade.dump(drawing())
+
+      assert {:error, %Error{ns: :codec, code: :invalid_value}} =
+               Facade.load(Drawing, %{wire | "shape" => "circle"})
+
+      assert {:error, %Error{ns: :codec, code: :unknown_tag, detail: %{tag: "hexagon"}}} =
+               Facade.load(Drawing, %{wire | "shapes" => [%{"type" => "hexagon", "fields" => %{}}]})
+    end
+
+    test "не struct в поле union: — FunctionClauseError" do
+      assert_raise FunctionClauseError, fn -> DrawingPlugin.dump(%{drawing() | shape: %{radius: 5}}, Facade) end
+      assert_raise FunctionClauseError, fn -> DrawingPlugin.dump(%{drawing() | pet: :cat}, Facade) end
+    end
+  end
+
   describe "интроспекция" do
     test "type/1 и types/0 — по всем формам адреса" do
       assert ShapePlugin.type(rect()) == "polygon"
@@ -205,6 +280,11 @@ defmodule Core.Codec.PluginVariantsTest do
 
       assert {Shape.Blob, "blob", :manual} = List.keyfind(variants, Shape.Blob, 0)
       assert length(variants) == 5
+    end
+
+    test "поле union: в спеке — {:union, Family}" do
+      assert [{Frame.Box, "box", [{:shape, {:union, Shape}, false, "shape", :none}]}] =
+               DrawingPlugin.__codec_variants__()
     end
 
     test "типы плагина — fields: и variants:, без types:" do
@@ -365,6 +445,15 @@ defmodule Core.Codec.PluginVariantsTest do
   defp rect, do: %Shape.Rect{width: 2, height: 3}
 
   defp cat, do: %Pet.Cat{name: Name.new!("Барсик")}
+
+  defp drawing do
+    %Drawing{
+      shape: %Shape.Circle{radius: 5},
+      pet: cat(),
+      shapes: [%Shape.Square{side: 1}, rect()],
+      backdrop: %Shape.Blob{points: ~w(a b)}
+    }
+  end
 
   defp compile(name, variants, opts \\ []) do
     plugin = Module.concat(__MODULE__, name)
