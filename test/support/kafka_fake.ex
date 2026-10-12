@@ -14,9 +14,9 @@ defmodule Core.KafkaFake do
   `:message_too_large`: продюсер партиции падает, как `brod_producer`, с причиной `exit:` —
   `:not_retriable` (по умолчанию) или `:reached_max_retries`.
 
-  Метаданные неизвестного топика отдаются только на запрос без автосоздания
-  (`{:all, topics}` — `:brod.get_partitions_count_safe/2`): запрос с автосозданием роняет
-  подделку, и тест видит `:client_down`.
+  Метаданные неизвестного топика — пустой ответ и на запрос одного топика (`[topic]` —
+  `:brod.get_partitions_count/2` читателя), и на запрос всего кластера (`{:all, topics}` —
+  `:brod.get_partitions_count_safe/2` писателя).
 
   Чтение: у каждой партиции — поддельный `brod_consumer` под ключом `{:consumer, topic,
   partition}` с его протоколом (`subscribe` / `unsubscribe` — call, `ack` — cast, пачки —
@@ -176,6 +176,8 @@ defmodule Core.KafkaFake do
   end
 
   @impl true
+  def handle_call({:get_metadata, [_topic]}, _from, state), do: {:reply, {:ok, %{topics: []}}, state}
+
   def handle_call({:get_metadata, {:all, _topics}}, _from, state), do: {:reply, {:ok, %{topics: []}}, state}
 
   def handle_call(:get_workers_table, _from, state), do: {:reply, {:ok, state.table}, state}

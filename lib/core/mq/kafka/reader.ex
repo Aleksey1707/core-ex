@@ -524,7 +524,7 @@ if Code.ensure_loaded?(:brod) do
     end
 
     defp partitions_count(state) do
-      brod_call(fn -> :brod.get_partitions_count_safe(state.client, state.topic_name) end)
+      brod_call(fn -> :brod.get_partitions_count(state.client, state.topic_name) end)
     end
 
     defp start_consumer(state) do
@@ -631,7 +631,7 @@ if Code.ensure_loaded?(:brod) do
     # продюсеров, поэтому метаданные перечитываются явно.
     defp check_partitions(%__MODULE__{partition_count: count, lease: lease} = state)
          when is_integer(count) and not is_nil(lease) do
-      _ = brod_call(fn -> :brod_client.get_metadata_safe(state.client, state.topic_name) end)
+      _ = brod_call(fn -> :brod_client.get_metadata(state.client, state.topic_name) end)
 
       case partitions_count(state) do
         {:ok, new_count} when new_count > count ->
