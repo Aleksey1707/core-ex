@@ -5,7 +5,7 @@ defmodule Core.LabelsFixture do
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
-  семейства; фикстурные резолверы имён.
+  семейства; фикстурные резолверы имён; модуль дампа сведений на wire (`Core.Web.Labels`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
   набор ратчета полноты: в кодек не входят событие с id без вида и событие другого агрегата.
@@ -297,6 +297,19 @@ defmodule Core.LabelsFixture do
 
     def unit(%Core.LabelsFixture.Unit{value: "kg"}), do: "Килограмм"
     def unit(%Core.LabelsFixture.Unit{value: "pc"}), do: "Штука"
+  end
+
+  defmodule Wire do
+    @moduledoc "Дамп сведений на wire: внешний профиль кодека, ссылка на учётную запись `%{id, login}`."
+
+    use Core.Web.Labels,
+      codec: Core.CodecFixture.External,
+      user_ref: [dump: &Core.LabelsFixture.Wire.user_ref/2]
+
+    @doc "Ссылка на учётную запись: дамп id и имя."
+    @spec user_ref(String.t(), String.t() | nil) :: %{id: String.t(), login: String.t() | nil}
+
+    def user_ref(id, login) when is_binary(id), do: %{id: id, login: login}
   end
 
   defmodule Event do

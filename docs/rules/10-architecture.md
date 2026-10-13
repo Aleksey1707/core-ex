@@ -161,6 +161,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
+| `Core.Web.Labels` | сведения события на wire: `use` в модуле приложения порождает `to_wire/2` — `%{title, details}` для JSON (`11-domain.md`, «Wire сведений») |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
 
 `Core.Web.*` возвращает **данные**: map обёртки и кортеж ответа. Ни `Plug.Conn`, ни

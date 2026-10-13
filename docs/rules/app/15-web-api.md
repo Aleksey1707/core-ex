@@ -8,7 +8,8 @@
 
 Общую часть границы даёт библиотека: обёртка ответа (`Core.Web.Response`), разбор
 параметров (`Core.Web.Params`), таблица `%Error{}` → статус (`Core.Web.ErrorMapper`), camelCase
-(`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`) —
+(`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`), сведения событий на wire
+(`Core.Web.Labels`) —
 `deps/core/docs/rules/10-architecture.md`, «Граница HTTP». Приложение её конфигурирует, а не
 повторяет: своих копий этих модулей быть
 не должно.
@@ -345,6 +346,33 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 - Публичный API презентера — `to_map/1`, при необходимости сокращённая форма для вложенных
   ссылок. Больше одной формы на ресурс без нужды не заводить: расхождение форм — расхождение
   контракта.
+
+### Сведения событий
+
+Действует, если приложение отдаёт сведения событий (`11-domain.md`, «Подписи»).
+
+Название и сведения события MUST уходить на wire через модуль приложения с `use Core.Web.Labels`
+(`deps/core/docs/rules/11-domain.md`, «Wire сведений»): презентер события вставляет результат
+`to_wire/2` рядом со своими машинными полями. Свой обход сведений в презентере MUST NOT: вид
+строкой, число строкой и форма ссылки — контракт клиента, общий для всех приложений, и ручная копия
+расходится с ним молча.
+
+Дамп самого события (`id`, `type`, `payload`, `at`, `by`) и подмена строк-id в машинной нагрузке
+ссылками на учётную запись — дело приложения: `to_wire/2` их не трогает.
+
+```elixir
+# плохо — свой дамп сведений в презентере
+%{title: title, details: Enum.map(details, &dump_detail(&1, refs))}
+
+# хорошо — модуль дампа рядом с презентером события
+defmodule MyAppWeb.Presenters.EventLabels do
+  use Core.Web.Labels,
+    codec: MyApp.Codec.External,
+    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2]
+end
+
+Map.merge(%{id: fields.id, type: fields.type, payload: payload}, EventLabels.to_wire(event, refs))
+```
 
 ## Связанные правила
 

@@ -3,7 +3,7 @@ defmodule Consumer.Codec do
 
   use Boundary,
     check: [out: false],
-    exports: [Internal]
+    exports: [Internal, External]
 
   defmodule Prim.Internal do
     use Core.Codec,
@@ -12,6 +12,15 @@ defmodule Consumer.Codec do
       datetime_tz: "Etc/UTC",
       date: :date,
       decimal: :decimal
+  end
+
+  defmodule Prim.External do
+    use Core.Codec,
+      uuid: :hex,
+      datetime: :iso8601,
+      datetime_tz: :app,
+      date: :iso8601,
+      decimal: :string
   end
 
   @plugins [

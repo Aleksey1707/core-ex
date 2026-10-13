@@ -5,7 +5,7 @@ defmodule ConsumerWeb do
   """
 
   use Boundary,
-    deps: [Consumer.Domain.Sales],
+    deps: [Consumer.Domain.Sales, Consumer.Codec],
     check: [aliases: true]
 
   alias Consumer.Domain.Sales.Account

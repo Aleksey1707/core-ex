@@ -23,12 +23,13 @@
 
   ```text
   lib/consumer/infra.ex, infra/{dao,stream_id}.ex    # граница-сток: DAO и namespace UUIDv5
-  lib/consumer/codec.ex, codec/internal.ex           # граница кодека: реестр плагинов с Prim-профилем, фасад
+  lib/consumer/codec.ex, codec/{internal,external}.ex  # граница кодека: реестр плагинов с Prim-профилями, фасады
   lib/consumer/domain/sales.ex                       # оглавление — корень границы контекста
   lib/consumer/domain/sales/<aggregate>{.ex,/**}     # каталог агрегата: cmd/, event/, репозитории, кодеки
   lib/consumer/domain/sales/<aggregate>/client/usecases.ex  # usecases актора Client
   lib/consumer/domain/sales/values/<value>.ex        # значения без владельца: UserID, DeliveryID, …
   lib/consumer/domain/sales/activity/                # read-модель по назначению со своей проекцией
+  lib/consumer_web/presenters/event.ex               # граница web: сведения события на wire
   ```
 
   Контекст `Consumer.Domain.Sales` — граница верхнего уровня: `deps` — кодек и сток, `exports` — модули
@@ -49,7 +50,9 @@
   (`Es.ValueChanged`), подписи значений `Order.Status` и вызов его `label/1` в usecases заказа, вид id
   каждого вида — ссылка на запись `Account.ID` и учётная запись `Values.UserID` с резолвером
   `Account.Query` (`Core.Labels.Resolver`), только id `Grants.RoleID`, — Prim текстом `Account.Currency` и
-  словарь ссылок страницы потока счёта (`Core.Labels.Refs.get/2`) в его usecases.
+  словарь ссылок страницы потока счёта (`Core.Labels.Refs.get/2`) в его usecases; дамп сведений на wire —
+  презентер `ConsumerWeb.Presenters.Event` с `use Core.Web.Labels` на внешнем профиле кодека, без
+  `open_api_spex`.
   Актор `Client` — usecases с типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие

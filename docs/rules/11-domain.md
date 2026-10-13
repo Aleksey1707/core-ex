@@ -1120,6 +1120,35 @@ end
 
 Проверяется: `test/core/labels/refs_test.exs`.
 
+### Wire сведений (`Core.Web.Labels`)
+
+Домен JSON не знает: сведения на wire отдаёт модуль приложения с `use Core.Web.Labels` (ADR-0064).
+Свою часть формы приложение задаёт опциями.
+
+```elixir
+defmodule MyAppWeb.Presenters.EventLabels do
+  use Core.Web.Labels,
+    codec: MyApp.Codec.External,
+    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2]
+end
+```
+
+- `codec:` — внешний профиль кодека (модуль с `dump/1`), `user_ref: [dump:]` — захват функции
+  «дамп id, имя → map» арности 2; обе обязательны, иное — `CompileError`
+- Порождается `to_wire/2`: событие и словарь ссылок страницы → `%{title, details}`
+- Вид — строкой; `:number` — строкой с десятичной точкой (integer — `Integer.to_string/1`,
+  decimal — нормальная запись, строка кодека — как есть); `:text`, `:date`, `:datetime` — Prim
+  дампом `codec:`, строка — как есть
+- `:ref` — `%{entity, id, name}`: вид записи — camelCase атома, id — дампом `codec:`; `:user` —
+  результат `dump:` от дампа id и имени
+- `:group` и `:list` — рекурсивно; `:change` — `%{label, kind: "change", old, new}`; у элемента
+  списка и стороны изменения `label` нет
+- Id, которого нет в словаре ссылок, — `ArgumentError`: словарь собирают с той же страницы событий
+- Результат `to_wire/2` сужен в модуле приложения: опечатка в ключе и не событие на входе —
+  предупреждение сборки потребителя
+
+Проверяется: `test/core/web/labels_test.exs`; сужение — `make consumer-check`.
+
 ### Ратчет полноты (`Core.Labels.CompletenessCase`)
 
 Полноту объявлений на всём приложении держит case-модуль, а не сборка: она видит один модуль
