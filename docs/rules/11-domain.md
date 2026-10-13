@@ -1090,6 +1090,36 @@ use Core.Labels.Text, with: &Agg.Currency.title/1
 Проверяется: сборка библиотеки — `Core.Labels.Details` берёт вид каждого значения
 `type_values/0` через `Keyword.fetch!`.
 
+### Словарь ссылок (`Core.Labels.Refs`)
+
+`Refs.get/2` — словарь ссылок страницы событий: страница (`Core.Pagination.Result`), список событий
+или событие и контекст → `Result.t(%{id => имя | nil})`. Имя по id отдаёт резолвер — модуль из
+`resolver:` у `Core.Labels.ID`, реализующий `Core.Labels.Resolver`: один колбэк
+`get_names(ids, context)`, контекст последним.
+
+```elixir
+defmodule Agg.Query do
+  @behaviour Core.Labels.Resolver
+
+  @impl true
+  def get_names(ids, %Context{} = context), do: ...
+end
+```
+
+- Id с резолвером (`kind: :ref`, `kind: :user`) находится у автора события и на любой глубине
+  нагрузки: struct'ы, ключи и значения map'ы, списки, нагрузка-семейство, Prim-композит; остальные
+  поля события (`aggregate_id`, `id`) в сведения не выходят и не обходятся
+- В `Date`, `DateTime`, `NaiveDateTime`, `Time`, `Decimal`, Prim без вида id, id `kind: :id` и
+  Prim с `Core.Labels.Text` сборщик не спускается; вид модуля проверяется один раз на модуль в
+  пределах вызова
+- Id группируются по резолверу, резолвер вызывается один раз на группу пачкой уникальных id: запрос
+  на событие страница не делает
+- Без id с резолвером — `{:ok, %{}}` без вызовов: страница без ссылок в базу не ходит
+- Отказ резолвера — итог словаря: ссылка на незаведённую запись не прячется; у записи без имени —
+  `nil`
+
+Проверяется: `test/core/labels/refs_test.exs`.
+
 Нормы приложения, отдающего сведения событий, — `deps/core/docs/rules/app/11-domain.md`,
 «Подписи».
 

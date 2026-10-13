@@ -72,18 +72,28 @@
     функции (захват арности 1), в том числе внутри Prim-композита; вместе с `Core.Labels.ID` —
     `CompileError`;
   - свободная map'а с id в ключах подписывается `[label:, key:, value:]` и выходит `:list` из групп
-    «ключ — значение»; подписи map'ы у поля, которое не map'а, и ключ вне трёх — `CompileError`.
+    «ключ — значение»; подписи map'ы у поля, которое не map'а, и ключ вне трёх — `CompileError`;
+  - `Core.Labels.Refs.get/2` — словарь ссылок: страница событий (`Core.Pagination.Result`), список
+    или событие и контекст → `{:ok, %{id => имя | nil}}`. Id видов `:ref` и `:user` находятся у
+    автора события и на любой глубине нагрузки — struct'ы, ключи и значения map'ы, списки,
+    семейство, композит; в даты, decimal и Prim без вида id сборщик не спускается. Резолвер —
+    модуль из `resolver:`, реализующий `Core.Labels.Resolver` (`get_names(ids, context)`), —
+    вызывается один раз на группу id пачкой; без id с резолвером — `{:ok, %{}}` без вызовов, отказ
+    резолвера — итог.
 
   Подключение по желанию: модуль без объявлений собирается как прежде. Потребитель со своей
   подсистемой подписей переходит переименованием: `MyApp.Labels.Event` → `Core.Labels.Event`,
   `MyApp.Labels.Fields` → `Core.Labels.Fields`, `MyApp.Labels.Values` → `Core.Labels.Values`,
   `MyApp.Labels.Details` → `Core.Labels.Details`, `MyApp.Labels.Id` → `Core.Labels.ID`,
-  `MyApp.Labels.Text` → `Core.Labels.Text`; вид записи — атомом вместо camelCase-строки
-  (`entity: "stockItem"` → `entity: :stock_item`); ошибки сборки объявлений — `CompileError` вместо
-  `ArgumentError`. Новый раздел яруса потребителя `app/11-domain.md`, «Подписи», действует только на
-  приложение, отдающее сведения событий; ручные `label/1` / `labels/0` у Enum в нём — MUST NOT,
+  `MyApp.Labels.Text` → `Core.Labels.Text`, свой сборщик словаря ссылок и behaviour резолвера →
+  `Core.Labels.Refs.get/2` и `@behaviour Core.Labels.Resolver` с колбэком `get_names/2`; вид записи
+  — атомом вместо camelCase-строки (`entity: "stockItem"` → `entity: :stock_item`); ошибки сборки
+  объявлений — `CompileError` вместо `ArgumentError`. Новый раздел яруса потребителя
+  `app/11-domain.md`, «Подписи», действует только на приложение, отдающее сведения событий; ручные `label/1` / `labels/0` у Enum в нём — MUST NOT,
   строка таблицы `@moduledoc` подписью не служит, вид объявлен у каждого Prim-идентификатора,
-  достижимого из сведений.
+  достижимого из сведений. В `app/13-repos.md`, «Страница потока», — страница событий уходит со
+  словарём ссылок, его собирает тот же usecase одним `Refs.get/2`, резолвер — `Query`
+  контекста-владельца записи.
 
 ### Изменения контракта макросов
 

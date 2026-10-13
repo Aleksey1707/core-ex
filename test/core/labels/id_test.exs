@@ -3,14 +3,15 @@ defmodule Core.Labels.IDTest do
 
   alias Core.Labels.ID
   alias Core.LabelsFixture.ItemID
+  alias Core.LabelsFixture.ItemQuery
   alias Core.LabelsFixture.Name
-  alias Core.LabelsFixture.Resolver
   alias Core.LabelsFixture.SnapshotID
   alias Core.LabelsFixture.UserID
+  alias Core.LabelsFixture.UserQuery
 
   test "find/1 — объявление вида id" do
-    assert ID.find(ItemID) == %{kind: :ref, entity: :stock_item, resolver: Resolver}
-    assert ID.find(UserID) == %{kind: :user, entity: nil, resolver: Resolver}
+    assert ID.find(ItemID) == %{kind: :ref, entity: :stock_item, resolver: ItemQuery}
+    assert ID.find(UserID) == %{kind: :user, entity: nil, resolver: UserQuery}
     assert ID.find(SnapshotID) == %{kind: :id, entity: nil, resolver: nil}
   end
 
@@ -34,13 +35,13 @@ defmodule Core.Labels.IDTest do
 
     test ":ref без entity: — CompileError" do
       assert_raise CompileError, ~r/NoEntity: `kind: :ref` без `entity:`/, fn ->
-        compile_id(:NoEntity, kind: :ref, resolver: Resolver)
+        compile_id(:NoEntity, kind: :ref, resolver: ItemQuery)
       end
     end
 
     test ":ref с entity: не атомом — CompileError" do
       assert_raise CompileError, ~r/StringEntity: entity: — атом вида записи, задано "stockItem"/, fn ->
-        compile_id(:StringEntity, kind: :ref, entity: "stockItem", resolver: Resolver)
+        compile_id(:StringEntity, kind: :ref, entity: "stockItem", resolver: ItemQuery)
       end
     end
 
@@ -64,13 +65,13 @@ defmodule Core.Labels.IDTest do
 
     test ":user с entity: — CompileError" do
       assert_raise CompileError, ~r/UserEntity: `entity:` у `kind: :user` не задаётся/, fn ->
-        compile_id(:UserEntity, kind: :user, entity: :item, resolver: Resolver)
+        compile_id(:UserEntity, kind: :user, entity: :item, resolver: UserQuery)
       end
     end
 
     test ":id с resolver: — CompileError" do
       assert_raise CompileError, ~r/IdResolver: `resolver:` у `kind: :id` не задаётся/, fn ->
-        compile_id(:IdResolver, kind: :id, resolver: Resolver)
+        compile_id(:IdResolver, kind: :id, resolver: ItemQuery)
       end
     end
 

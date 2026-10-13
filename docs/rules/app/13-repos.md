@@ -460,6 +460,22 @@ SELECT 'agg.login', ARRAY[lower(login)], id FROM agg_logins
 (роли выдаются не при заведении пользователя). Выбор MUST быть записан рядом: проверка по
 отстающей проекции даёт `:not_found` на только что созданный агрегат.
 
+Приложение, отдающее сведения событий (`11-domain.md`, «Подписи»), MUST
+отдавать со страницей событий словарь ссылок, и собирает его тот же usecase — одним вызовом
+`Core.Labels.Refs.get/2` от страницы после проверки прав. Сборка словаря в контроллере или
+презентере MUST NOT: контекст и резолверы — в домене. Резолвер — `Query` контекста-владельца
+записи с `@behaviour Core.Labels.Resolver`; имя по id на событие MUST NOT — запрос на каждую строку
+страницы (`deps/core/docs/rules/11-domain.md`, «Словарь ссылок»).
+
+```elixir
+def history(id, limit, offset, %Context{} = context) do
+  with :ok <- check_access(id, context),
+       {:ok, page} <- @repo.page_stream(id, limit, offset, context),
+       {:ok, refs} <- Core.Labels.Refs.get(page, context),
+       do: {:ok, {page, refs}}
+end
+```
+
 ## Проекции read-модели
 
 Таблицы, которые читают ReadRepo event-sourced агрегатов, пишут проекции

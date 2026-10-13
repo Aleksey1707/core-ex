@@ -48,7 +48,8 @@
   семейства `Account.Profile.Channel`, название и подпись изменения `change:` у `Grants.Event.Replaced`
   (`Es.ValueChanged`), подписи значений `Order.Status` и вызов его `label/1` в usecases заказа, вид id
   каждого вида — ссылка на запись `Account.ID` и учётная запись `Values.UserID` с резолвером
-  `Account.Query`, только id `Grants.RoleID`, — и Prim текстом `Account.Currency`.
+  `Account.Query` (`Core.Labels.Resolver`), только id `Grants.RoleID`, — Prim текстом `Account.Currency` и
+  словарь ссылок страницы потока счёта (`Core.Labels.Refs.get/2`) в его usecases.
   Актор `Client` — usecases с типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие

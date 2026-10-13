@@ -4,7 +4,8 @@ defmodule Core.LabelsFixture do
   нагрузка с полями Enum, нагрузка с вложенными struct'ами, списками, семейством и Prim-композитом,
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
-  Prim текстом и map'ой с id в ключах, нагрузка с id без вида.
+  Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
+  семейства; фикстурные резолверы имён.
   """
 
   alias Core.EventFixture.ActorID
@@ -49,8 +50,52 @@ defmodule Core.LabelsFixture do
       name: "Момент"
   end
 
-  defmodule Resolver do
-    @moduledoc "Резолвер имён по id."
+  defmodule Names do
+    @moduledoc """
+    Имена фикстурных резолверов: из `:names` контекста, id вне него — отказ `:not_found`.
+
+    Каждый вызов резолвера шлёт процессу теста `{:get_names, резолвер, ids}`.
+    """
+
+    alias Core.Context
+    alias Core.Error
+
+    require Error
+
+    @doc "Имена по id для резолвера `resolver`."
+    @spec get(module(), [struct()], Context.t()) :: {:ok, %{struct() => String.t() | nil}} | {:error, Error.t()}
+
+    def get(resolver, ids, %Context{} = context) when is_atom(resolver) and is_list(ids) do
+      send(self(), {:get_names, resolver, ids})
+      names = Context.find(context, :names) || %{}
+
+      case Enum.reject(ids, &Map.has_key?(names, &1)) do
+        [] -> {:ok, Map.take(names, ids)}
+        missing -> {:error, Error.domain(code: :not_found, ns: resolver, message: "Запись не найдена", detail: missing)}
+      end
+    end
+  end
+
+  defmodule ItemQuery do
+    @moduledoc "Резолвер имён позиций."
+
+    @behaviour Core.Labels.Resolver
+
+    @spec get_names([struct()], Core.Context.t()) :: Core.Result.t(%{struct() => String.t() | nil})
+
+    @impl true
+    def get_names(ids, context), do: Core.LabelsFixture.Names.get(__MODULE__, ids, context)
+  end
+
+  defmodule UserQuery do
+    @moduledoc "Резолвер имён учётных записей."
+
+    @behaviour Core.Labels.Resolver
+
+    @spec get_names([struct()], Core.Context.t()) :: Core.Result.t(%{struct() => String.t() | nil})
+
+    @impl true
+    def get_names(ids, context), do: Core.LabelsFixture.Names.get(__MODULE__, ids, context)
   end
 
   defmodule ItemID do
@@ -63,7 +108,7 @@ defmodule Core.LabelsFixture do
     use Core.Labels.ID,
       kind: :ref,
       entity: :stock_item,
-      resolver: Core.LabelsFixture.Resolver
+      resolver: Core.LabelsFixture.ItemQuery
   end
 
   defmodule UserID do
@@ -75,7 +120,7 @@ defmodule Core.LabelsFixture do
 
     use Core.Labels.ID,
       kind: :user,
-      resolver: Core.LabelsFixture.Resolver
+      resolver: Core.LabelsFixture.UserQuery
   end
 
   defmodule SnapshotID do
@@ -208,6 +253,16 @@ defmodule Core.LabelsFixture do
       use Core.Labels.Fields,
         fields: [width: [type: :pos_integer], height: [type: :pos_integer]],
         labels: [width: "Ширина", height: "Высота", kind: :hidden]
+    end
+
+    defmodule Pin do
+      @moduledoc "Вариант: метка на позиции."
+
+      defstruct [:item, kind: :pin]
+
+      use Core.Labels.Fields,
+        fields: [item: [prim: Core.LabelsFixture.ItemID]],
+        labels: [item: "Позиция", kind: :hidden]
     end
   end
 
@@ -493,6 +548,41 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция связана"
+    end
+
+    defmodule Assigned do
+      @moduledoc "Событие позиции от учётной записи: id в нагрузке, в варианте семейства, рядом даты и сумма."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка назначения."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            assignee: [prim: LabelsFixture.UserID],
+            shape: [union: LabelsFixture.Shape],
+            amount: [prim: LabelsFixture.Amount],
+            day: [prim: LabelsFixture.Day],
+            moment: [prim: LabelsFixture.Moment]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            assignee: "Исполнитель",
+            shape: "Фигура",
+            amount: "Сумма",
+            day: "День",
+            moment: "Момент"
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: LabelsFixture.ItemID,
+        by: LabelsFixture.UserID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Исполнитель назначен"
     end
 
     defmodule Unmarked do

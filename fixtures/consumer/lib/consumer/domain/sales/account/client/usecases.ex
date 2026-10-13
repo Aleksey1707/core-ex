@@ -74,6 +74,17 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
     end
   end
 
+  def history_refs(
+        %Account.ID{} = id,
+        %Pagination.Limit{} = limit,
+        %Pagination.Offset{} = offset,
+        %Context{} = context
+      ) do
+    with {:ok, page} <- @repo.page_stream(id, limit, offset, context),
+         {:ok, refs} <- Core.Labels.Refs.get(page, context),
+         do: {:ok, {page.items, map_size(refs)}}
+  end
+
   def load(data) do
     case InCodec.load(Account.Event, data) do
       {:ok, %Account.Event.Opened{} = event} -> {:opened, event.payload.name}
