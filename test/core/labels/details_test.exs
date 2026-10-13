@@ -169,6 +169,63 @@ defmodule Core.Labels.DetailsTest do
               ]}
   end
 
+  describe "изменение «было → стало»" do
+    test "Core.Es.ValueChanged на Prim — одно сведение change, стороны без подписи" do
+      old = Name.new!("Склад")
+      new = Name.new!("Склад у реки")
+      payload = Event.NameChanged.Payload.new(old, new)
+
+      assert Details.build(event(Event.NameChanged, payload)) ==
+               {"Название изменено",
+                [%{label: "Название", kind: :change, old: %{kind: :text, value: old}, new: %{kind: :text, value: new}}]}
+    end
+
+    test "Core.Es.ValueChanged на Enum — подпись значения; сторона без значения — value: nil" do
+      payload = Event.StatusSwitched.Payload.new(nil, :active)
+
+      assert Details.build(event(Event.StatusSwitched, payload)) ==
+               {"Статус переключён",
+                [
+                  %{
+                    label: "Статус",
+                    kind: :change,
+                    old: %{kind: :text, value: nil},
+                    new: %{kind: :text, value: "Активна"}
+                  }
+                ]}
+    end
+
+    test "ручной struct с value: [text: …] — текст функцией" do
+      payload = %Event.OriginChanged.Payload{old_value: %Address{}, new_value: %Line{}}
+
+      assert Details.build(event(Event.OriginChanged, payload)) ==
+               {"Источник изменён",
+                [
+                  %{
+                    label: "Источник",
+                    kind: :change,
+                    old: %{kind: :text, value: "Адрес"},
+                    new: %{kind: :text, value: "Позиция"}
+                  }
+                ]}
+    end
+
+    test "ручной struct с value: [list: …] — стороны списком элементов" do
+      payload = %Event.TagsChanged.Payload{old_value: [], new_value: ~w(urgent)a}
+
+      assert Details.build(event(Event.TagsChanged, payload)) ==
+               {"Метки изменены",
+                [
+                  %{
+                    label: "Метки",
+                    kind: :change,
+                    old: %{kind: :list, value: []},
+                    new: %{kind: :list, value: [%{kind: :text, value: "urgent"}]}
+                  }
+                ]}
+    end
+  end
+
   test "нагрузка-Prim — одно сведение с подписью payload:" do
     name = Name.new!("Склад")
 

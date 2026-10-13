@@ -20,6 +20,10 @@ defmodule Core.Labels.Details do
 
   Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim, значение — композит как есть.
 
+  Struct изменения (`change:`) выходит одним сведением `%{label, kind: :change, old, new}`: подпись —
+  `change:`, стороны `old` / `new` — `%{kind, value}` по виду значения изменения, без подписи; сторона
+  без значения — `value: nil`.
+
   Вид `type:` задан на каждое значение списка типов проверки полей
   (`Core.Helper.FieldCheck.type_values/0`): новый тип без вида не собирает библиотеку.
 
@@ -38,8 +42,10 @@ defmodule Core.Labels.Details do
   @typedoc "Значение сведения: Prim, строка, целое, сведения группы или элементы списка."
   @type value :: struct() | String.t() | integer() | [t()] | [item()] | nil
 
-  @typedoc "Сведение: подписанное значение со своим видом."
-  @type t :: %{label: String.t(), kind: kind(), value: value()}
+  @typedoc "Сведение: подписанное значение со своим видом или изменение «было → стало»."
+  @type t ::
+          %{label: String.t(), kind: kind(), value: value()}
+          | %{label: String.t(), kind: :change, old: item(), new: item()}
 
   @typedoc "Элемент списка: значение со своим видом, без подписи."
   @type item :: %{kind: kind(), value: value()}
@@ -71,11 +77,21 @@ defmodule Core.Labels.Details do
   end
 
   defp struct_details(%module{} = struct) do
+    case Fields.change(module) do
+      nil -> fields_details(module, struct)
+      {label, spec} -> [change_detail(label, spec, struct)]
+    end
+  end
+
+  defp fields_details(module, struct) do
     labels = module.__label_fields__()
 
     for {name, spec} <- Fields.specs(module),
         do: detail(Keyword.fetch!(labels, name), spec, Map.fetch!(struct, name))
   end
+
+  defp change_detail(label, spec, %{old_value: old, new_value: new}),
+    do: %{label: label, kind: :change, old: item(spec, old), new: item(spec, new)}
 
   defp detail(label, spec, value), do: %{label: label, kind: kind(spec), value: value(spec, value)}
 

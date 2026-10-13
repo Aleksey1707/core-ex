@@ -45,7 +45,8 @@
   семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Подписи событий
   (`Core.Labels.*`): название у `Account.Event.Renamed`, `Account.Event.Opened` и `Account.Event.Closed`,
   подписи полей нагрузки `Renamed`, спека видимых полей `fields:` у ручной нагрузки `Opened` и у вариантов
-  семейства `Account.Profile.Channel`, подписи значений `Order.Status` и вызов его `label/1` в usecases заказа.
+  семейства `Account.Profile.Channel`, название и подпись изменения `change:` у `Grants.Event.Replaced`
+  (`Es.ValueChanged`), подписи значений `Order.Status` и вызов его `label/1` в usecases заказа.
   Актор `Client` — usecases с типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие

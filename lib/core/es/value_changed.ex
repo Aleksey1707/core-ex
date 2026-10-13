@@ -11,6 +11,9 @@ defmodule Core.Es.ValueChanged do
   `__es_value_changed__/0` отдаёт `type:` и `nilable:`: по ним `Core.Es.Event.Codec` выводит
   клаузы нагрузки события с такой нагрузкой — map
   `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
+
+  Макрос занимает в модуле имя `@es_value_changed`: по нему `use Core.Labels.Fields, change:` ниже
+  берёт вид значения изменения.
   """
 
   alias Core.Codec.Plugin.Fields
@@ -47,10 +50,12 @@ defmodule Core.Es.ValueChanged do
 
       @type t :: %__MODULE__{unquote_splicing(Core.Codec.Plugin.Fields.typespec(fields))}
 
+      @es_value_changed [type: type_mod, nilable: nilable?]
+
       @doc false
       @spec __es_value_changed__() :: [type: module(), nilable: boolean()]
 
-      def __es_value_changed__, do: [type: unquote(type_mod), nilable: unquote(nilable?)]
+      def __es_value_changed__, do: @es_value_changed
 
       @doc "Создать запись изменения значения."
       @spec new(unquote_splicing(Keyword.values(Core.Codec.Plugin.Fields.typespec(fields)))) :: t()

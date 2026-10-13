@@ -85,7 +85,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "fields: без labels: — CompileError" do
-      assert_raise CompileError, ~r/Labels.Fields: нет обязательных опций: \[:labels\]/, fn ->
+      assert_raise CompileError, ~r/FieldsOnly: одна из опций `labels:` \/ `change:`/, fn ->
         compile_struct(:FieldsOnly, fields: [city: [prim: Core.LabelsFixture.Name], zip: [type: :string]])
       end
     end
@@ -200,7 +200,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "без labels: — CompileError" do
-      assert_raise CompileError, ~r/Labels.Fields: нет обязательных опций: \[:labels\]/, fn ->
+      assert_raise CompileError, ~r/NoLabels: одна из опций `labels:` \/ `change:`/, fn ->
         compile_payload(:NoLabels, [])
       end
     end
@@ -240,6 +240,102 @@ defmodule Core.Labels.FieldsTest do
     end
   end
 
+  describe "change:" do
+    test "Core.Es.ValueChanged — вида значения в объявлении нет, видимых полей нет" do
+      {{:module, module, _bytecode, _result}, _binding} = compile_value_changed(:Changed, change: "Название")
+
+      assert Fields.specs(module) == []
+      assert Fields.paths(module) == []
+    end
+
+    test "labels: вместе с change: — CompileError" do
+      assert_raise CompileError, ~r/Both: одна из опций `labels:` \/ `change:`, задано обе/, fn ->
+        compile_value_changed(:Both, change: "Название", labels: [old_value: "Было", new_value: "Стало"])
+      end
+    end
+
+    test "value: у Core.Es.ValueChanged — CompileError" do
+      assert_raise CompileError, ~r/Typed: `value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`/, fn ->
+        compile_value_changed(:Typed, change: "Название", value: [prim: Core.LabelsFixture.Name])
+      end
+    end
+
+    test "fields: вместе с change: — CompileError" do
+      assert_raise CompileError, ~r/WithFields: `fields:` вместе с `change:`/, fn ->
+        compile_value_changed(:WithFields, change: "Название", fields: [old_value: [prim: Core.LabelsFixture.Name]])
+      end
+    end
+
+    test "пустая подпись изменения — CompileError" do
+      assert_raise CompileError, ~r/BlankChange: change: — непустая строка, задано ""/, fn ->
+        compile_value_changed(:BlankChange, change: "")
+      end
+    end
+
+    test "use выше Core.Es.ValueChanged — CompileError" do
+      assert_raise CompileError, ~r/Late: `use Core.Labels.Fields, change:` подключается после/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.FieldsTest.Late do
+              use Core.Labels.Fields,
+                change: "Название",
+                value: [prim: Core.LabelsFixture.Name]
+
+              use Core.Es.ValueChanged, type: Core.LabelsFixture.Name
+            end
+          end
+        )
+      end
+    end
+
+    test "ручной struct изменения без value: — CompileError" do
+      assert_raise CompileError, ~r/NoValue: ручной struct изменения без `value:`/, fn ->
+        compile_change(:NoValue, [:old_value, :new_value], change: "Значение")
+      end
+    end
+
+    test "value: без change: — CompileError" do
+      assert_raise CompileError, ~r/Orphan: `value:` без `change:`/, fn ->
+        compile_change(:Orphan, [:old_value, :new_value],
+          labels: [old_value: "Было", new_value: "Стало"],
+          value: [type: :string]
+        )
+      end
+    end
+
+    test "struct без old_value / new_value — CompileError" do
+      assert_raise CompileError, ~r/Current: struct изменения без полей: \[:new_value\]/, fn ->
+        compile_change(:Current, [:old_value, :current], change: "Значение", value: [type: :string])
+      end
+    end
+
+    test "value: разбирается нормализатором плагина по полям — его отказ" do
+      assert_raise CompileError, ~r/NotEnum: value:.*Core.LabelsFixture.Count.*не Core.Enum/, fn ->
+        compile_change(:NotEnum, [:old_value, :new_value], change: "Значение", value: [enum: Core.LabelsFixture.Count])
+      end
+    end
+
+    test "value: text: не захватом — CompileError" do
+      assert_raise CompileError, ~r/NotCaptureValue: value:.*text: — захват функции арности 1/, fn ->
+        compile_change(:NotCaptureValue, [:old_value, :new_value], change: "Значение", value: [text: "текст"])
+      end
+    end
+
+    test "вложенный struct без Core.Labels.Fields — CompileError" do
+      assert_raise CompileError,
+                   ~r/BareValue: вложенный struct без `use Core.Labels.Fields`: \[:old_value, :new_value\]/,
+                   fn ->
+                     compile_change(:BareValue, [:old_value, :new_value], change: "Значение", value: [entity: URI])
+                   end
+    end
+
+    test "свободная map — CompileError" do
+      assert_raise CompileError, ~r/MapValue: свободная map подписью не выходит/, fn ->
+        compile_change(:MapValue, [:old_value, :new_value], change: "Значение", value: [type: :map])
+      end
+    end
+  end
+
   test "свободная map под :hidden собирается" do
     {{:module, module, _bytecode, _result}, _binding} =
       compile_payload(:HiddenMap, [labels: [name: "Название", note: :hidden]], :map)
@@ -256,6 +352,34 @@ defmodule Core.Labels.FieldsTest do
       quote do
         defmodule unquote(module) do
           defstruct [:city, :zip]
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
+
+  defp compile_value_changed(name, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          use Core.Es.ValueChanged, type: Core.LabelsFixture.Name
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
+
+  defp compile_change(name, fields, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          defstruct unquote(fields)
 
           use Core.Labels.Fields, unquote(opts)
         end

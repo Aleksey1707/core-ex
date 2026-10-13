@@ -922,11 +922,44 @@ end
 - Видимое поле без спеки, спека скрытого поля или поля вне struct'а — `CompileError`
 - `text:` не захватом функции арности 1, `text:` / `list: [text: …]` с другими ключами —
   `CompileError`
-- `fields:` без `labels:`, модуль без struct'а — `CompileError`
+- Без `labels:` и `change:`, модуль без struct'а — `CompileError`
+
+Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
+двух опций: изменение выходит в сведения одним сведением, а не двумя полями. Вид значения у
+`Core.Es.ValueChanged` берётся из его `type:`; у ручного struct'а с полями `old_value` / `new_value`
+его задаёт `value:` — спека одного значения на языке `fields:`, вместе с `text:`.
+
+```elixir
+defmodule Payload do
+  use Core.Es.ValueChanged,
+    type: Agg.Name
+
+  use Core.Labels.Fields, change: "Название"
+end
+
+defmodule Payload do
+  defstruct [:old_value, :new_value]
+
+  use Core.Labels.Fields,
+    change: "Метки",
+    value: [list: [text: &Atom.to_string/1]]
+end
+```
+
+- `labels:` вместе с `change:`, `fields:` вместе с `change:` — `CompileError`
+- Ручной struct изменения без `value:`, `value:` у `Core.Es.ValueChanged` (у вида значения один
+  источник — `type:`), `value:` без `change:` — `CompileError`
+- Struct без `old_value` / `new_value` под `change:`, пустая подпись изменения — `CompileError`
+- `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct` — `CompileError`: иначе
+  `Core.Es.ValueChanged` ниже сошёл бы за ручной struct
+- Свободная map и вложенный struct без `use Core.Labels.Fields` в виде значения — `CompileError`,
+  как у поля
 
 Интроспекция:
 
-- `specs/1` — спека видимых полей в порядке объявления: спеки нагрузки или `fields:`
+- `specs/1` — спека видимых полей в порядке объявления: спеки нагрузки или `fields:`; у изменения —
+  пусто
+- `change/1` — подпись и вид значения изменения или `nil` у struct'а с подписями полей
 - `paths/1` — подписи видимых полей типа по пути поля (`[:address, :city]`), без значения: поля
   вложенного struct'а — под путём своего поля, поля элемента списка struct'ов — под путём списка;
   `union:` даёт только свою подпись — варианты по типу не известны
@@ -970,12 +1003,16 @@ use Core.Labels.Values,
 | `:date`, `:datetime` | Prim `:date`, `:datetime` |
 | `:group` | `entity:` — сведения вложенного struct'а; `union:` — сведения полей варианта по его `Core.Labels.Fields` |
 | `:list` | `list:` — элементы `%{kind, value}` вида спеки элемента, без подписи |
+| `:change` | struct изменения (`change:`) — вместо `value` стороны `old` и `new`: `%{kind, value}` вида значения изменения, без подписи |
 
 - Сведения идут в порядке спеки полей; `:hidden` в них не попадает
 - Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim: обёртка роли не меняет
   отображение
 - Поле без значения — `value: nil` со своим видом; нагрузка `nil` — пустые сведения; нагрузка-Prim —
   одно сведение с подписью `payload:`
+- Struct изменения — одно сведение `%{label, kind: :change, old, new}`; сторона без значения —
+  `value: nil`
+
 Проверяется: `test/core/labels/details_test.exs`.
 
 Вид `type:` MUST задаваться на каждое значение `Core.Helper.FieldCheck.type_values/0`, отдельный

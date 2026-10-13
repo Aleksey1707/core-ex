@@ -1,6 +1,6 @@
 # 04: Изменение «было → стало»
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 03.
 
@@ -9,13 +9,13 @@
 из его `type:`, у ручного struct'а с полями `old_value` / `new_value` — из `value:` на языке спеки `fields:`.
 Спека — `../spec.md`, «Модули домена», user stories 15–17; ADR-0063.
 
-- [ ] `Details.build/1`: изменение — `%{label, kind: :change, old, new}`, стороны — `%{kind, value}` без подписи;
+- [x] `Details.build/1`: изменение — `%{label, kind: :change, old, new}`, стороны — `%{kind, value}` без подписи;
       сторона без значения — `value: nil`.
-- [ ] Отказы сборки: `labels:` вместе с `change:`; ручной struct изменения без `value:`; `value:` у
+- [x] Отказы сборки: `labels:` вместе с `change:`; ручной struct изменения без `value:`; `value:` у
       `Core.Es.ValueChanged`; `value:` без `change:`; struct без `old_value` / `new_value` под `change:`.
-- [ ] Тесты: изменение `Core.Es.ValueChanged` с Prim и с Enum, ручной struct с `value: [text: …]` и
+- [x] Тесты: изменение `Core.Es.ValueChanged` с Prim и с Enum, ручной struct с `value: [text: …]` и
       `value: [list: …]`, отказы сборки.
-- [ ] Фикстура-потребитель: нагрузка `Core.Es.ValueChanged` с подписью изменения; `make consumer-check` зелёный.
-- [ ] Свод: механизм `change:` / `value:` — `docs/rules/11-domain.md`, «Подписи».
-- [ ] `CHANGELOG.md` — дополняется пункт подсистемы подписей.
-- [ ] `make` зелёный.
+- [x] Фикстура-потребитель: нагрузка `Core.Es.ValueChanged` с подписью изменения; `make consumer-check` зелёный.
+- [x] Свод: механизм `change:` / `value:` — `docs/rules/11-domain.md`, «Подписи».
+- [x] `CHANGELOG.md` — дополняется пункт подсистемы подписей.
+- [x] `make` зелёный.

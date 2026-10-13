@@ -57,6 +57,12 @@
     спеке поля и значением-Prim без дампа; поле `enum:` — `:text` с подписью значения, `text:` —
     результат функции; вложенный struct и вариант семейства (`union:`) — `:group` своих сведений,
     список — `:list` из элементов `%{kind, value}` без подписи; Prim-композит — вид базового Prim.
+  - нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения
+    `use Core.Labels.Fields, change:` и выходит в сведения одним сведением
+    `%{label, kind: :change, old, new}` со сторонами `%{kind, value}` без подписи. Вид значения у
+    `Core.Es.ValueChanged` — из его `type:`, у ручного struct'а с полями `old_value` / `new_value` —
+    из `value:` на языке спеки `fields:`; `labels:` вместе с `change:`, ручной struct без `value:`,
+    `value:` у `Core.Es.ValueChanged` или без `change:` — `CompileError`.
 
   Подключение по желанию: модуль без объявлений собирается как прежде. Потребитель со своей
   подсистемой подписей переходит переименованием: `MyApp.Labels.Event` → `Core.Labels.Event`,
@@ -74,6 +80,9 @@
   удаляются, вызовы `MyAppWeb.Response.*` → `Core.Web.Response.*` (`alias Core.Web.Response`); свой
   код ответа — код ошибки в каталоге агрегата или своя клоза `map/1` маппера. `boundary_lint
   --consumer` больше не считает `Response` частью корня `MyAppWeb`.
+- **`use Core.Es.ValueChanged` занимает в модуле имя `@es_value_changed`**: по нему
+  `use Core.Labels.Fields, change:` ниже берёт вид значения изменения из `type:`. Свой атрибут
+  `@es_value_changed` в модуле нагрузки переименовывается.
 
 ## 0.13.2
 

@@ -2,7 +2,8 @@ defmodule Core.LabelsFixture do
   @moduledoc """
   События и нагрузки с подписями (`Core.Labels.*`): нагрузка по полям всех видов сведений,
   нагрузка с полями Enum, нагрузка с вложенными struct'ами, списками, семейством и Prim-композитом,
-  нагрузка с ручным плагином и полями `text:`, нагрузка-Prim и событие без нагрузки.
+  нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
+  ручной struct с `value:`), нагрузка-Prim и событие без нагрузки.
   """
 
   alias Core.EventFixture.ActorID
@@ -285,6 +286,89 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Метки расставлены"
+    end
+
+    defmodule NameChanged do
+      @moduledoc "Событие «было → стало» на Prim: `Core.Es.ValueChanged` с подписью изменения."
+
+      defmodule Payload do
+        @moduledoc "Изменение названия."
+
+        use Core.Es.ValueChanged,
+          type: Core.LabelsFixture.Name
+
+        use Core.Labels.Fields, change: "Название"
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Название изменено"
+    end
+
+    defmodule StatusSwitched do
+      @moduledoc "Событие «было → стало» на Enum: стороны могут быть без значения."
+
+      defmodule Payload do
+        @moduledoc "Изменение статуса."
+
+        use Core.Es.ValueChanged,
+          type: Core.LabelsFixture.Status,
+          nilable: true
+
+        use Core.Labels.Fields, change: "Статус"
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Статус переключён"
+    end
+
+    defmodule OriginChanged do
+      @moduledoc "Событие с ручным struct'ом изменения: вид значения — `value: [text: …]`."
+
+      defmodule Payload do
+        @moduledoc "Изменение источника: значение — один из двух struct'ов."
+
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Источник",
+          value: [text: &Core.LabelsFixture.Texts.origin/1]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Источник изменён"
+    end
+
+    defmodule TagsChanged do
+      @moduledoc "Событие с ручным struct'ом изменения: вид значения — `value: [list: …]`."
+
+      defmodule Payload do
+        @moduledoc "Изменение меток: значение — список открытых атомов."
+
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Метки",
+          value: [list: [text: &Atom.to_string/1]]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Метки изменены"
     end
 
     defmodule Renamed do

@@ -54,7 +54,30 @@ defmodule Core.Labels.Fields do
   нагрузки — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки,
   спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
 
-  Макрос занимает в модуле имена `__label_fields__/0` и `__label_specs__/0`.
+  Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
+  двух опций. Вид значения у `Core.Es.ValueChanged` берётся из его `type:`, у ручного struct'а с
+  полями `old_value` / `new_value` — из `value:`, спеки одного значения на языке `fields:`:
+
+      defmodule Payload do
+        use Core.Es.ValueChanged,
+          type: MyApp.Domain.Sales.Account.Name
+
+        use Core.Labels.Fields, change: "Название"
+      end
+
+      defmodule MyApp.Domain.Sales.Account.TagsChanged do
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Метки",
+          value: [list: [text: &Atom.to_string/1]]
+      end
+
+  Сборку ломают: `labels:` или `fields:` вместе с `change:`, ручной struct изменения без `value:`,
+  `value:` у `Core.Es.ValueChanged` или без `change:`, struct без `old_value` / `new_value` под
+  `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct`.
+
+  Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
 
   alias Core.Codec.Plugin
@@ -70,12 +93,15 @@ defmodule Core.Labels.Fields do
   @type path :: [atom(), ...]
 
   @label "Labels.Fields"
-  @required_keys ~w(labels)a
-  @optional_keys ~w(fields)a
+  @required_keys []
+  @optional_keys ~w(labels change fields value)a
 
   # ===== объявление =====
 
-  @doc "Объявить решение по каждому полю (`labels:`) и спеку видимых полей struct'а без неё (`fields:`)."
+  @doc """
+  Объявить решение по каждому полю (`labels:`) и спеку видимых полей struct'а без неё (`fields:`) либо
+  подпись изменения (`change:`) и вид его значения у ручного struct'а (`value:`).
+  """
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
       Core.Helper.Opts.validate!(
@@ -85,8 +111,11 @@ defmodule Core.Labels.Fields do
         "Labels.Fields"
       )
 
-      @label_specs Core.Labels.Fields.specs!(__MODULE__, Keyword.get(opts, :fields))
-      @label_fields Core.Labels.Fields.labels!(__MODULE__, Keyword.fetch!(opts, :labels))
+      declared = Core.Labels.Fields.declare!(__MODULE__, opts)
+
+      @label_specs declared.specs
+      @label_fields declared.fields
+      @label_change declared.change
       @after_compile Core.Labels.Fields
 
       @doc false
@@ -98,6 +127,11 @@ defmodule Core.Labels.Fields do
       @spec __label_specs__() :: [{atom(), Core.Labels.Fields.spec()}]
 
       def __label_specs__, do: @label_specs
+
+      @doc false
+      @spec __label_change__() :: {String.t(), Core.Labels.Fields.spec()} | nil
+
+      def __label_change__, do: @label_change
     end
   end
 
@@ -111,11 +145,38 @@ defmodule Core.Labels.Fields do
 
   def optional_keys, do: @optional_keys
 
-  # Спека нагрузки известна уже при раскрытии `use`: `use Core.Es.Event.Payload` выше положил её в атрибут.
   @doc false
-  @spec specs!(module(), term()) :: [{atom(), spec()}]
+  @spec declare!(module(), keyword()) :: %{
+          specs: [{atom(), spec()}],
+          fields: [{atom(), label()}],
+          change: {String.t(), spec()} | nil
+        }
 
-  def specs!(module, fields) when is_atom(module) do
+  def declare!(module, opts) when is_atom(module) and is_list(opts) do
+    case {Keyword.fetch(opts, :labels), Keyword.fetch(opts, :change)} do
+      {{:ok, labels}, :error} ->
+        if Keyword.has_key?(opts, :value), do: reject!(module, "`value:` без `change:` — вид значения задаёт изменение")
+
+        %{specs: specs!(module, Keyword.get(opts, :fields)), fields: labels!(module, labels), change: nil}
+
+      {:error, {:ok, label}} ->
+        if Keyword.has_key?(opts, :fields),
+          do: reject!(module, "`fields:` вместе с `change:` — вид значения изменения задаёт `value:`")
+
+        %{specs: [], fields: [], change: change!(module, label, Keyword.get(opts, :value))}
+
+      {:error, :error} ->
+        reject!(module, "одна из опций `labels:` / `change:`, задано ни одной")
+
+      {{:ok, _labels}, {:ok, _label}} ->
+        reject!(module, "одна из опций `labels:` / `change:`, задано обе")
+    end
+  end
+
+  # ---
+
+  # Спека нагрузки известна уже при раскрытии `use`: `use Core.Es.Event.Payload` выше положил её в атрибут.
+  defp specs!(module, fields) do
     case {Module.get_attribute(module, :es_payload_fields), fields} do
       {nil, nil} ->
         raise CompileError,
@@ -137,20 +198,49 @@ defmodule Core.Labels.Fields do
     end
   end
 
-  @doc false
-  @spec labels!(module(), term()) :: [{atom(), label()}]
-
-  def labels!(module, labels) when is_atom(module) do
+  defp labels!(module, labels) do
     where = "#{where(module)}: labels:"
 
     for {field, label} <- Check.keyword!(labels, where), do: {field, label!(label, "#{where} поле #{field}")}
   end
 
-  # ---
+  # Вид значения `Core.Es.ValueChanged` известен при раскрытии `use`: его `use` выше положил `type:` в атрибут.
+  # Struct нужен уже здесь: без него `use` выше `use Core.Es.ValueChanged` сошёл бы за ручной struct.
+  defp change!(module, label, value) do
+    label = Check.text!(label, "#{where(module)}: change:")
+
+    if not Module.defines?(module, {:__struct__, 0}),
+      do:
+        reject!(
+          module,
+          "`use Core.Labels.Fields, change:` подключается после `use Core.Es.ValueChanged` или `defstruct`"
+        )
+
+    case {Module.get_attribute(module, :es_value_changed), value} do
+      {nil, nil} ->
+        reject!(module, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
+
+      {nil, value} ->
+        [value: spec] = parse!([value: value], "#{where(module)}: value:")
+        {label, spec}
+
+      {changed, nil} ->
+        {label, Plugin.Fields.value_spec(Keyword.fetch!(changed, :type), "#{where(module)}: change:")}
+
+      {_changed, _value} ->
+        reject!(module, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
+    end
+  end
+
+  defp reject!(module, message), do: raise(CompileError, description: "#{where(module)}: #{message}")
 
   defp fields!(module, fields) do
     where = "#{where(module)}: fields:"
-    fields = Check.keyword!(fields, where)
+
+    parse!(Check.keyword!(fields, where), where)
+  end
+
+  defp parse!(fields, where) do
     {texts, rest} = Enum.split_with(fields, fn {_name, opts} -> text?(opts) end)
     texts = Map.new(texts, fn {name, opts} -> {name, text_spec!(opts, "#{where}, поле #{name}")} end)
     specs = Map.merge(texts, normalize!(rest, where))
@@ -190,22 +280,24 @@ defmodule Core.Labels.Fields do
 
   def __after_compile__(env, _bytecode) do
     module = env.module
-    payload? = Module.defines?(module, {:__es_payload_fields__, 0})
 
     if not Module.defines?(module, {:__struct__, 0}) do
       fail!(env, "не struct — `fields:` подписывает поля struct'а")
     end
 
     fields = Map.keys(module.__struct__()) -- [:__struct__]
-    labels = module.__label_fields__()
-    labelled = Keyword.keys(labels)
 
-    ensure_none!(env, fields -- labelled, "поля без подписи или `:hidden`")
-    ensure_none!(env, labelled -- fields, "подписи полей вне struct'а")
+    visible =
+      case change(module) do
+        nil ->
+          ensure_labels!(env, fields)
+          specs(module)
 
-    if not payload?, do: ensure_specs!(env, module.__label_specs__(), labels, fields)
+        {_label, spec} ->
+          ensure_none!(env, ~w(old_value new_value)a -- fields, "struct изменения без полей")
+          [old_value: spec, new_value: spec]
+      end
 
-    visible = specs(module)
     maps = for {name, spec} <- visible, map?(spec), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
@@ -214,6 +306,18 @@ defmodule Core.Labels.Fields do
   end
 
   # ---
+
+  defp ensure_labels!(env, fields) do
+    module = env.module
+    labels = module.__label_fields__()
+    labelled = Keyword.keys(labels)
+
+    ensure_none!(env, fields -- labelled, "поля без подписи или `:hidden`")
+    ensure_none!(env, labelled -- fields, "подписи полей вне struct'а")
+
+    if not Module.defines?(module, {:__es_payload_fields__, 0}),
+      do: ensure_specs!(env, module.__label_specs__(), labels, fields)
+  end
 
   defp ensure_specs!(env, specs, labels, fields) do
     specced = Keyword.keys(specs)
@@ -244,7 +348,12 @@ defmodule Core.Labels.Fields do
 
   # ===== интроспекция =====
 
-  @doc "Спека видимых полей struct'а — в порядке объявления спеки, без `:hidden`."
+  @doc "Подпись и вид значения изменения (`change:`); у struct'а с подписями полей — `nil`."
+  @spec change(module()) :: {String.t(), spec()} | nil
+
+  def change(module) when is_atom(module), do: module.__label_change__()
+
+  @doc "Спека видимых полей struct'а — в порядке объявления спеки, без `:hidden`; у изменения — пусто."
   @spec specs(module()) :: [{atom(), spec()}]
 
   def specs(module) when is_atom(module) do
