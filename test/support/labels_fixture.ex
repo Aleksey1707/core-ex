@@ -3,7 +3,8 @@ defmodule Core.LabelsFixture do
   События и нагрузки с подписями (`Core.Labels.*`): нагрузка по полям всех видов сведений,
   нагрузка с полями Enum, нагрузка с вложенными struct'ами, списками, семейством и Prim-композитом,
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
-  ручной struct с `value:`), нагрузка-Prim и событие без нагрузки.
+  ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
+  Prim текстом и map'ой с id в ключах, нагрузка с id без вида.
   """
 
   alias Core.EventFixture.ActorID
@@ -46,6 +47,80 @@ defmodule Core.LabelsFixture do
 
     use Core.Prim.DateTime,
       name: "Момент"
+  end
+
+  defmodule Resolver do
+    @moduledoc "Резолвер имён по id."
+  end
+
+  defmodule ItemID do
+    @moduledoc "Id позиции — ссылка на запись."
+
+    use Core.Prim.UUID,
+      name: "Позиция",
+      version: 7
+
+    use Core.Labels.ID,
+      kind: :ref,
+      entity: :stock_item,
+      resolver: Core.LabelsFixture.Resolver
+  end
+
+  defmodule UserID do
+    @moduledoc "Id учётной записи — ссылка на учётную запись."
+
+    use Core.Prim.UUID,
+      name: "Пользователь",
+      version: 7
+
+    use Core.Labels.ID,
+      kind: :user,
+      resolver: Core.LabelsFixture.Resolver
+  end
+
+  defmodule SnapshotID do
+    @moduledoc "Id снимка — только id."
+
+    use Core.Prim.UUID,
+      name: "Снимок",
+      version: 7
+
+    use Core.Labels.ID, kind: :id
+  end
+
+  defmodule BareID do
+    @moduledoc "Id без вида в сведениях."
+
+    use Core.Prim.UUID,
+      name: "Без вида",
+      version: 7
+  end
+
+  defmodule AuthorID do
+    @moduledoc "Автор — Prim-композит над id учётной записи."
+
+    use Core.Prim.Compose,
+      name: "Автор",
+      of: Core.LabelsFixture.UserID
+  end
+
+  defmodule Unit do
+    @moduledoc "Единица измерения — код, который человек читает по имени."
+
+    use Core.Prim.String,
+      name: "Единица",
+      min_len: 1,
+      max_len: 10
+
+    use Core.Labels.Text, with: &Core.LabelsFixture.Texts.unit/1
+  end
+
+  defmodule BaseUnit do
+    @moduledoc "Базовая единица — Prim-композит над единицей с текстом."
+
+    use Core.Prim.Compose,
+      name: "Базовая единица",
+      of: Core.LabelsFixture.Unit
   end
 
   defmodule Status do
@@ -144,6 +219,12 @@ defmodule Core.LabelsFixture do
 
     def origin(%Core.LabelsFixture.Address{}), do: "Адрес"
     def origin(%Core.LabelsFixture.Line{}), do: "Позиция"
+
+    @doc "Имя единицы измерения по коду."
+    @spec unit(Core.LabelsFixture.Unit.t()) :: String.t()
+
+    def unit(%Core.LabelsFixture.Unit{value: "kg"}), do: "Килограмм"
+    def unit(%Core.LabelsFixture.Unit{value: "pc"}), do: "Штука"
   end
 
   defmodule Event do
@@ -369,6 +450,68 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Метки изменены"
+    end
+
+    defmodule Linked do
+      @moduledoc "Событие с id каждого вида, Prim текстом и map'ой с id в ключах."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка со ссылками."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            item: [prim: LabelsFixture.ItemID],
+            backup: [prim: LabelsFixture.ItemID, optional: true],
+            items: [list: [prim: LabelsFixture.ItemID]],
+            owner: [prim: LabelsFixture.UserID],
+            author: [prim: LabelsFixture.AuthorID],
+            snapshot: [prim: LabelsFixture.SnapshotID],
+            unit: [prim: LabelsFixture.Unit],
+            base_unit: [prim: LabelsFixture.BaseUnit],
+            limits: [type: :map, optional: true]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            item: "Позиция",
+            backup: "Запасная позиция",
+            items: "Позиции",
+            owner: "Владелец",
+            author: "Автор",
+            snapshot: "Снимок",
+            unit: "Единица",
+            base_unit: "Базовая единица",
+            limits: [label: "Лимиты", key: "Позиция", value: "Лимит"]
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Позиция связана"
+    end
+
+    defmodule Unmarked do
+      @moduledoc "Событие с id без вида в сведениях."
+
+      defmodule Payload do
+        @moduledoc "Нагрузка с id без вида."
+
+        use Core.Es.Event.Payload, fields: [ref: [prim: Core.LabelsFixture.BareID]]
+
+        use Core.Labels.Fields, labels: [ref: "Ссылка"]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Ссылка без вида"
     end
 
     defmodule Renamed do

@@ -23,6 +23,14 @@ defmodule Core.Labels.Fields do
   Решение по полю — подпись (непустая строка) или `:hidden`: поле в сведения не попадает. Вид поля
   в сведениях (`Core.Labels.Details`) у нагрузки берётся из её спеки, в объявлении подписей его нет.
 
+  Свободная map'а (`type: :map`) с id в ключах подписывается ключом и значением —
+  `[label:, key:, value:]` — и выходит в сведения списком групп «ключ — значение»:
+
+      use Core.Labels.Fields,
+        labels: [
+          limits: [label: "Лимиты", key: "Счёт", value: "Лимит"]
+        ]
+
   У struct'а без спеки полей — нагрузки с ручным плагином кодека, вложенного struct'а сведений,
   варианта семейства — вид видимых полей задаёт `fields:` на языке спеки плагина по полям
   (`Core.Codec.Plugin.Fields`), её разбирает тот же нормализатор:
@@ -49,8 +57,9 @@ defmodule Core.Labels.Fields do
   других ключей.
 
   Полнота проверяется на `@after_compile`, где уже есть struct и спека нагрузки. Сборку ломают:
-  поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, подпись у
-  свободной map'ы (`type: :map`), вложенный struct (`entity:`) без `use Core.Labels.Fields`; у
+  поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, свободная
+  map'а (`type: :map`) с подписью строкой, подписи map'ы у поля, которое не map'а, ключ подписи map'ы
+  вне `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у
   нагрузки — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки,
   спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
 
@@ -83,8 +92,11 @@ defmodule Core.Labels.Fields do
   alias Core.Codec.Plugin
   alias Core.Labels.Check
 
-  @typedoc "Решение по полю: подпись или скрыто."
-  @type label :: String.t() | :hidden
+  @typedoc "Решение по полю: подпись, подписи map'ы с id в ключах или скрыто."
+  @type label :: String.t() | map_label() | :hidden
+
+  @typedoc "Подписи map'ы с id в ключах: поля, ключа и значения."
+  @type map_label :: [label: String.t(), key: String.t(), value: String.t()]
 
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
   @type spec :: Plugin.Fields.spec() | {:text, (term() -> String.t())} | {:list, spec()}
@@ -95,6 +107,7 @@ defmodule Core.Labels.Fields do
   @label "Labels.Fields"
   @required_keys []
   @optional_keys ~w(labels change fields value)a
+  @map_keys ~w(label key value)a
 
   # ===== объявление =====
 
@@ -271,6 +284,13 @@ defmodule Core.Labels.Fields do
   defp pairs(fields), do: for({name, spec, _optional?, _wire, _default} <- fields, do: {name, spec})
 
   defp label!(:hidden, _where), do: :hidden
+
+  defp label!([_ | _] = map, where) do
+    Core.Helper.Opts.validate!(map, @map_keys, [], where)
+
+    for key <- @map_keys, do: {key, Check.text!(Keyword.fetch!(map, key), "#{where} #{key}:")}
+  end
+
   defp label!(text, where), do: Check.text!(text, where)
 
   # ===== проверка полноты =====
@@ -298,10 +318,19 @@ defmodule Core.Labels.Fields do
           [old_value: spec, new_value: spec]
       end
 
-    maps = for {name, spec} <- visible, map?(spec), do: name
+    labelled_maps = for {name, [_ | _]} <- module.__label_fields__(), do: name
+    not_maps = for {name, spec} <- visible, name in labelled_maps, spec != {:type, :map}, do: name
+    maps = for {name, spec} <- visible, map?(spec), name not in labelled_maps, do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
-    ensure_none!(env, maps, "свободная map подписью не выходит — `:hidden`")
+    ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
+
+    ensure_none!(
+      env,
+      maps,
+      "свободная map'а выходит подписями ключа и значения — `[label:, key:, value:]` или `:hidden`"
+    )
+
     ensure_none!(env, unlabelled, "вложенный struct без `use Core.Labels.Fields`")
   end
 
@@ -366,7 +395,8 @@ defmodule Core.Labels.Fields do
   Подписи видимых полей типа по пути поля, без значения, — в порядке объявления спеки.
 
   Поля вложенного struct'а (`entity:`) идут под путём своего поля, поля элемента списка struct'ов —
-  под путём списка. Поле `union:` даёт только свою подпись: варианты семейства по типу не известны.
+  под путём списка. Поле `union:` даёт только свою подпись: варианты семейства по типу не известны;
+  map'а с id в ключах — подпись поля (`label:`).
   """
   @spec paths(module()) :: [{path(), String.t()}]
 
@@ -376,7 +406,7 @@ defmodule Core.Labels.Fields do
     Enum.flat_map(specs(module), fn {name, spec} ->
       nested = for {path, label} <- nested_paths(spec), do: {[name | path], label}
 
-      [{[name], Keyword.fetch!(labels, name)} | nested]
+      [{[name], text(Keyword.fetch!(labels, name))} | nested]
     end)
   end
 
@@ -385,6 +415,9 @@ defmodule Core.Labels.Fields do
   defp nested_paths({:entity, mod}), do: paths(mod)
   defp nested_paths({:list, inner}), do: nested_paths(inner)
   defp nested_paths(_spec), do: []
+
+  defp text(label: label, key: _key, value: _value), do: label
+  defp text(label), do: label
 
   # ===== общее =====
 

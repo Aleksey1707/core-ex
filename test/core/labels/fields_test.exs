@@ -3,6 +3,7 @@ defmodule Core.Labels.FieldsTest do
 
   alias Core.Labels.Fields
   alias Core.LabelsFixture.Address
+  alias Core.LabelsFixture.Event.Linked
   alias Core.LabelsFixture.Event.Shipped
   alias Core.LabelsFixture.Event.Tagged
   alias Core.LabelsFixture.Event.Updated
@@ -38,6 +39,10 @@ defmodule Core.Labels.FieldsTest do
 
     test "скрытое поле путей не даёт; text: — подпись поля" do
       assert Fields.paths(Tagged.Payload) == [{[:origin], "Источник"}, {[:tags], "Метки"}, {[:count], "Количество"}]
+    end
+
+    test "map'а с id в ключах — подпись поля" do
+      assert {[:limits], "Лимиты"} in Fields.paths(Linked.Payload)
     end
   end
 
@@ -205,9 +210,45 @@ defmodule Core.Labels.FieldsTest do
       end
     end
 
-    test "подпись у свободной map'ы — CompileError" do
-      assert_raise CompileError, ~r/Meta: свободная map подписью не выходит — `:hidden`: \[:note\]/, fn ->
+    test "подпись строкой у свободной map'ы — CompileError" do
+      assert_raise CompileError, ~r/Meta: свободная map'а выходит подписями ключа и значения.*: \[:note\]/, fn ->
         compile_payload(:Meta, [labels: [name: "Название", note: "Данные"]], :map)
+      end
+    end
+
+    test "подписи map'ы у поля, которое не map'а — CompileError" do
+      assert_raise CompileError,
+                   ~r/NotMap: подписи map'ы `\[label:, key:, value:\]` у поля, которое не map'а: \[:note\]/,
+                   fn ->
+                     compile_payload(:NotMap,
+                       labels: [name: "Название", note: [label: "Данные", key: "Ключ", value: "Значение"]]
+                     )
+                   end
+    end
+
+    test "неизвестный ключ подписей map'ы — CompileError" do
+      assert_raise CompileError, ~r/UnknownKey: labels: поле note: неизвестные опции: \[:hint\]/, fn ->
+        compile_payload(
+          :UnknownKey,
+          [labels: [name: "Название", note: [label: "Данные", key: "Ключ", value: "Значение", hint: "?"]]],
+          :map
+        )
+      end
+    end
+
+    test "подписи map'ы без ключа — CompileError" do
+      assert_raise CompileError, ~r/NoKey: labels: поле note: нет обязательных опций: \[:key\]/, fn ->
+        compile_payload(:NoKey, [labels: [name: "Название", note: [label: "Данные", value: "Значение"]]], :map)
+      end
+    end
+
+    test "пустая подпись ключа map'ы — CompileError" do
+      assert_raise CompileError, ~r/BlankKey: labels: поле note key: — непустая строка, задано ""/, fn ->
+        compile_payload(
+          :BlankKey,
+          [labels: [name: "Название", note: [label: "Данные", key: "", value: "Значение"]]],
+          :map
+        )
       end
     end
 
@@ -330,10 +371,22 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "свободная map — CompileError" do
-      assert_raise CompileError, ~r/MapValue: свободная map подписью не выходит/, fn ->
+      assert_raise CompileError, ~r/MapValue: свободная map'а выходит подписями ключа и значения/, fn ->
         compile_change(:MapValue, [:old_value, :new_value], change: "Значение", value: [type: :map])
       end
     end
+  end
+
+  test "map'а с подписями ключа и значения собирается; спека — map" do
+    {{:module, module, _bytecode, _result}, _binding} =
+      compile_payload(
+        :LabelledMap,
+        [labels: [name: "Название", note: [value: "Лимит", key: "Счёт", label: "Лимиты"]]],
+        :map
+      )
+
+    assert Fields.specs(module) == [name: {:prim, Name}, note: {:type, :map}]
+    assert Fields.paths(module) == [{[:name], "Название"}, {[:note], "Лимиты"}]
   end
 
   test "свободная map под :hidden собирается" do

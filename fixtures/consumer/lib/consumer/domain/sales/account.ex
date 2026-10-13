@@ -16,6 +16,11 @@ defmodule Consumer.Domain.Sales.Account do
     use Core.Prim.UUID,
       name: "Счёт",
       version: 7
+
+    use Core.Labels.ID,
+      kind: :ref,
+      entity: :account,
+      resolver: Consumer.Domain.Sales.Account.Query
   end
 
   defmodule Name do
@@ -23,6 +28,18 @@ defmodule Consumer.Domain.Sales.Account do
       name: "Название счёта",
       min_len: 1,
       max_len: 50
+  end
+
+  defmodule Currency do
+    use Core.Prim.String,
+      name: "Валюта счёта",
+      min_len: 3,
+      max_len: 3
+
+    use Core.Labels.Text, with: &Consumer.Domain.Sales.Account.Currency.title/1
+
+    def title(%__MODULE__{value: "RUB"}), do: "Рубль"
+    def title(%__MODULE__{} = currency), do: value(currency)
   end
 
   defstruct id: nil, version: nil, name: nil, status: nil

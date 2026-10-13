@@ -62,15 +62,28 @@
     `%{label, kind: :change, old, new}` со сторонами `%{kind, value}` без подписи. Вид значения у
     `Core.Es.ValueChanged` — из его `type:`, у ручного struct'а с полями `old_value` / `new_value` —
     из `value:` на языке спеки `fields:`; `labels:` вместе с `change:`, ручной struct без `value:`,
-    `value:` у `Core.Es.ValueChanged` или без `change:` — `CompileError`.
+    `value:` у `Core.Es.ValueChanged` или без `change:` — `CompileError`;
+  - `use Core.Labels.ID, kind:` в Prim-идентификаторе после `use Core.Prim.*` — вид id в сведениях:
+    `:ref` (`entity:` — вид записи атомом, `resolver:`) — `%{kind: :ref, entity, value: id}`, `:user`
+    (`resolver:`) — `%{kind: :user, value: id}`, `:id` — `:text` с id; опция не своего вида и
+    отсутствие обязательной — `CompileError`. Prim-идентификатор без вида в сведениях —
+    `ArgumentError` с именем модуля;
+  - `use Core.Labels.Text, with:` в Prim после `use Core.Prim.*` — Prim выходит `:text` с результатом
+    функции (захват арности 1), в том числе внутри Prim-композита; вместе с `Core.Labels.ID` —
+    `CompileError`;
+  - свободная map'а с id в ключах подписывается `[label:, key:, value:]` и выходит `:list` из групп
+    «ключ — значение»; подписи map'ы у поля, которое не map'а, и ключ вне трёх — `CompileError`.
 
   Подключение по желанию: модуль без объявлений собирается как прежде. Потребитель со своей
   подсистемой подписей переходит переименованием: `MyApp.Labels.Event` → `Core.Labels.Event`,
   `MyApp.Labels.Fields` → `Core.Labels.Fields`, `MyApp.Labels.Values` → `Core.Labels.Values`,
-  `MyApp.Labels.Details` → `Core.Labels.Details`; ошибки сборки объявлений — `CompileError` вместо
+  `MyApp.Labels.Details` → `Core.Labels.Details`, `MyApp.Labels.Id` → `Core.Labels.ID`,
+  `MyApp.Labels.Text` → `Core.Labels.Text`; вид записи — атомом вместо camelCase-строки
+  (`entity: "stockItem"` → `entity: :stock_item`); ошибки сборки объявлений — `CompileError` вместо
   `ArgumentError`. Новый раздел яруса потребителя `app/11-domain.md`, «Подписи», действует только на
   приложение, отдающее сведения событий; ручные `label/1` / `labels/0` у Enum в нём — MUST NOT,
-  строка таблицы `@moduledoc` подписью не служит.
+  строка таблицы `@moduledoc` подписью не служит, вид объявлен у каждого Prim-идентификатора,
+  достижимого из сведений.
 
 ### Изменения контракта макросов
 

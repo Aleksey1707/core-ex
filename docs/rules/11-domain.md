@@ -893,7 +893,9 @@ end
 
 - Полнота — на `@after_compile`: поле без решения и подпись поля вне struct'а — `CompileError`
 - Повтор поля, пустая или не строковая подпись — `CompileError`
-- Свободная map (`type: :map`) подписью не выходит — `:hidden`, иначе `CompileError`
+- Свободная map (`type: :map`) с id в ключах выходит подписями поля, ключа и значения —
+  `[label:, key:, value:]`, иначе `:hidden`; подпись строкой у map'ы, подписи map'ы у поля, которое
+  не map'а, ключ вне `label:` / `key:` / `value:` и пустая подпись в них — `CompileError`
 - Вложенный struct (`entity:`) без `use Core.Labels.Fields` — `CompileError`
 - `use` не после `use Core.Es.Event.Payload` и без `fields:` — `CompileError`
 
@@ -962,7 +964,8 @@ end
 - `change/1` — подпись и вид значения изменения или `nil` у struct'а с подписями полей
 - `paths/1` — подписи видимых полей типа по пути поля (`[:address, :city]`), без значения: поля
   вложенного struct'а — под путём своего поля, поля элемента списка struct'ов — под путём списка;
-  `union:` даёт только свою подпись — варианты по типу не известны
+  `union:` даёт только свою подпись — варианты по типу не известны; map'а с id в ключах — подпись
+  поля `label:`
 
 Проверяется: `test/core/labels/fields_test.exs`.
 
@@ -991,6 +994,63 @@ use Core.Labels.Values,
 
 Проверяется: `test/core/labels/values_test.exs`; вывод типов — `make consumer-check`.
 
+### Вид id (`Core.Labels.ID`)
+
+`use Core.Labels.ID` в Prim-идентификаторе после `use Core.Prim.*` — как id выходит в сведения:
+
+| `kind:` | В сведениях | Опции |
+|---|---|---|
+| `:ref` | ссылка на запись `%{kind: :ref, entity: вид записи, value: id}` | `entity:` — атом, `resolver:` |
+| `:user` | ссылка на учётную запись `%{kind: :user, value: id}` | `resolver:` |
+| `:id` | только id — `%{kind: :text, value: id}`, без похода в резолвер | — |
+
+```elixir
+use Core.Prim.UUID,
+  name: "Счёт",
+  version: 7
+
+use Core.Labels.ID,
+  kind: :ref,
+  entity: :account,
+  resolver: Agg.Query
+```
+
+Вид записи — атом, не wire-строка: camelCase на wire делает wire. Резолвер — модуль, который отдаёт
+текущее имя записи по id.
+
+- `kind:` вне `~w(ref user id)a`, отсутствие `kind:` — `CompileError`
+- `entity:` — атом, обязателен у `:ref`, у `:user` и `:id` — `CompileError`
+- `resolver:` — модуль, обязателен у `:ref` и `:user`, у `:id` — `CompileError`
+- `use` не после `use Core.Prim.*` и вместе с `use Core.Labels.Text` — `CompileError`: у значения
+  один способ выйти в сведения
+
+`Core.Labels.ID.find/1` — объявление по модулю или `nil`.
+
+Проверяется: `test/core/labels/id_test.exs`.
+
+### Prim текстом (`Core.Labels.Text`)
+
+`use Core.Labels.Text, with:` в Prim после `use Core.Prim.*` — функция текста: Prim, значение
+которого — машинный код, выходит в сведения видом `:text` с её результатом. Функция получает Prim,
+`nil` ей не передаётся.
+
+```elixir
+use Core.Prim.String,
+  name: "Валюта",
+  min_len: 3,
+  max_len: 3
+
+use Core.Labels.Text, with: &Agg.Currency.title/1
+```
+
+- `with:` не захватом функции арности 1 (`&Mod.fun/1`) — `CompileError`: анонимная функция модуля,
+  который ещё собирается, в атрибут не сохраняется
+- `use` не после `use Core.Prim.*` и вместе с `use Core.Labels.ID` — `CompileError`
+
+`Core.Labels.Text.find/1` — функция по модулю или `nil`.
+
+Проверяется: `test/core/labels/text_test.exs`.
+
 ### Сведения события (`Core.Labels.Details`)
 
 `Details.build/1` — чистая функция «событие → `{название, сведения}`». Сведение —
@@ -998,16 +1058,25 @@ use Core.Labels.Values,
 
 | `kind` | Спека поля |
 |---|---|
-| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет»; `enum:` — подпись значения; `text:` — результат функции |
+| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет»; `enum:` — подпись значения; `text:` и Prim с `Core.Labels.Text` — результат функции; id `kind: :id` |
 | `:number` | Prim `:integer`, `:decimal`; `type:` целого |
 | `:date`, `:datetime` | Prim `:date`, `:datetime` |
+| `:user` | id `kind: :user` |
+| `:ref` | id `kind: :ref`; рядом `entity` — вид записи |
 | `:group` | `entity:` — сведения вложенного struct'а; `union:` — сведения полей варианта по его `Core.Labels.Fields` |
-| `:list` | `list:` — элементы `%{kind, value}` вида спеки элемента, без подписи |
+| `:list` | `list:` — элементы `%{kind, value}` вида спеки элемента, без подписи; map'а с `[label:, key:, value:]` — группы «ключ — значение» |
 | `:change` | struct изменения (`change:`) — вместо `value` стороны `old` и `new`: `%{kind, value}` вида значения изменения, без подписи |
 
 - Сведения идут в порядке спеки полей; `:hidden` в них не попадает
 - Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim: обёртка роли не меняет
-  отображение
+  отображение. Вид id или текст базы действует и на композит: значение — база с объявлением, текст —
+  функция от неё
+- Map'а с id в ключах — список групп по паре: ключ с подписью `key:`, значение с подписью `value:`;
+  вид каждого — по самому значению (Prim, строка, число, `boolean`, `nil`). Ссылками ключи выходят,
+  только если нагрузку грузит ручной плагин с Prim в ключах: `type: :map` плагина по полям грузит
+  map'у как есть, и ключи-строки выходят текстом
+- Prim-идентификатор (`Core.Prim.UUID`) без `Core.Labels.ID` и `Core.Labels.Text` — `ArgumentError`
+  с именем модуля: ошибка программиста, а не молчаливый текст
 - Поле без значения — `value: nil` со своим видом; нагрузка `nil` — пустые сведения; нагрузка-Prim —
   одно сведение с подписью `payload:`
 - Struct изменения — одно сведение `%{label, kind: :change, old, new}`; сторона без значения —

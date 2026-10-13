@@ -20,6 +20,8 @@ defmodule Consumer.Domain.Sales.Grants do
     use Core.Prim.UUID,
       name: "Роль",
       version: 7
+
+    use Core.Labels.ID, kind: :id
   end
 
   defstruct id: nil, version: nil, roles: MapSet.new()

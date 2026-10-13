@@ -7,14 +7,21 @@ defmodule Core.Labels.DetailsTest do
   alias Core.Labels.Details
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Amount
+  alias Core.LabelsFixture.AuthorID
+  alias Core.LabelsFixture.BareID
+  alias Core.LabelsFixture.BaseUnit
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
+  alias Core.LabelsFixture.ItemID
   alias Core.LabelsFixture.Line
   alias Core.LabelsFixture.Moment
   alias Core.LabelsFixture.Name
   alias Core.LabelsFixture.Shape
+  alias Core.LabelsFixture.SnapshotID
   alias Core.LabelsFixture.Title
+  alias Core.LabelsFixture.Unit
+  alias Core.LabelsFixture.UserID
   alias Core.Version
 
   describe "нагрузка по полям" do
@@ -223,6 +230,85 @@ defmodule Core.Labels.DetailsTest do
                     new: %{kind: :list, value: [%{kind: :text, value: "urgent"}]}
                   }
                 ]}
+    end
+  end
+
+  describe "вид id и Prim текстом" do
+    test "ref — ссылка с видом записи, user — учётная запись, id — текстом; Prim с текстом — текст функции" do
+      item = ItemID.new()
+      other = ItemID.new()
+      owner = UserID.new()
+      author = UserID.new()
+      snapshot = SnapshotID.new()
+
+      payload =
+        Event.Linked.Payload.new(
+          item,
+          nil,
+          [other],
+          owner,
+          AuthorID.new!(author),
+          snapshot,
+          Unit.new!("kg"),
+          BaseUnit.new!("pc"),
+          nil
+        )
+
+      assert Details.build(event(Event.Linked, payload)) ==
+               {"Позиция связана",
+                [
+                  %{label: "Позиция", kind: :ref, entity: :stock_item, value: item},
+                  %{label: "Запасная позиция", kind: :ref, entity: :stock_item, value: nil},
+                  %{label: "Позиции", kind: :list, value: [%{kind: :ref, entity: :stock_item, value: other}]},
+                  %{label: "Владелец", kind: :user, value: owner},
+                  %{label: "Автор", kind: :user, value: author},
+                  %{label: "Снимок", kind: :text, value: snapshot},
+                  %{label: "Единица", kind: :text, value: "Килограмм"},
+                  %{label: "Базовая единица", kind: :text, value: "Штука"},
+                  %{label: "Лимиты", kind: :list, value: nil}
+                ]}
+    end
+
+    test "map'а с id в ключах — список групп «ключ — значение», вид значения — по самому значению" do
+      item = ItemID.new()
+      count = Count.new!(5)
+
+      payload =
+        Event.Linked.Payload.new(
+          ItemID.new(),
+          nil,
+          [],
+          UserID.new(),
+          AuthorID.new!(UserID.new()),
+          SnapshotID.new(),
+          Unit.new!("kg"),
+          BaseUnit.new!("kg"),
+          %{item => count}
+        )
+
+      {_title, details} = Details.build(event(Event.Linked, payload))
+
+      assert %{
+               label: "Лимиты",
+               kind: :list,
+               value: [
+                 %{
+                   kind: :group,
+                   value: [
+                     %{label: "Позиция", kind: :ref, entity: :stock_item, value: item},
+                     %{label: "Лимит", kind: :number, value: count}
+                   ]
+                 }
+               ]
+             } in details
+    end
+
+    test "id без Core.Labels.ID — ArgumentError с именем модуля" do
+      payload = Event.Unmarked.Payload.new(BareID.new())
+
+      assert_raise ArgumentError, ~r/Core.LabelsFixture.BareID: id без вида в сведениях/, fn ->
+        Details.build(event(Event.Unmarked, payload))
+      end
     end
   end
 

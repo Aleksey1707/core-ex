@@ -1,7 +1,7 @@
 defmodule Core.Labels.Check do
   @moduledoc """
   Compile-time проверки объявлений подписей (`Core.Labels.*`): текст подписи, keyword-список
-  решений без повторов и захват функции.
+  решений без повторов, захват функции и Prim — хост объявления вида значения.
 
   Общие для всех `use Core.Labels.*`: опции `use` проверяет `Core.Helper.Opts.validate!/4`, а
   значения опций — эти функции. `where` — префикс текста ошибки, по которому видно объявление и
@@ -31,6 +31,28 @@ defmodule Core.Labels.Check do
     else
       raise CompileError,
         description: "#{where} — захват функции арности #{arity} (`&Mod.fun/#{arity}`), задано #{inspect(fun)}"
+    end
+  end
+
+  @doc """
+  Проверить хост объявления вида значения (`Core.Labels.ID`, `Core.Labels.Text`): Prim, объявленный
+  выше, без второго такого объявления — значение выходит в сведения одним способом.
+  """
+  @spec prim!(module(), String.t(), String.t()) :: :ok
+
+  def prim!(module, macro, where) when is_atom(module) and is_binary(macro) and is_binary(where) do
+    cond do
+      not Module.defines?(module, {:__domain_kind__, 0}) ->
+        raise CompileError, description: "#{where}: не Prim: `use #{macro}` подключается после `use Core.Prim.*`"
+
+      Module.defines?(module, {:__label_id__, 0}) or Module.defines?(module, {:__label_text__, 0}) ->
+        raise CompileError,
+          description:
+            "#{where}: `use Core.Labels.ID` и `use Core.Labels.Text` вместе — " <>
+              "значение выходит в сведения одним способом"
+
+      true ->
+        :ok
     end
   end
 
