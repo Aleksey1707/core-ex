@@ -30,6 +30,7 @@
   lib/consumer/domain/sales/values/<value>.ex        # значения без владельца: UserID, DeliveryID, …
   lib/consumer/domain/sales/activity/                # read-модель по назначению со своей проекцией
   lib/consumer_web/presenters/event.ex               # граница web: сведения события на wire
+  lib/consumer_web/schemas/event.ex                  # граница web: событие страницы событий на wire
   ```
 
   Контекст `Consumer.Domain.Sales` — граница верхнего уровня: `deps` — кодек и сток, `exports` — модули
@@ -52,7 +53,8 @@
   `Account.Query` (`Core.Labels.Resolver`), только id `Grants.RoleID`, — Prim текстом `Account.Currency` и
   словарь ссылок страницы потока счёта (`Core.Labels.Refs.get/2`) в его usecases; дамп сведений на wire —
   презентер `ConsumerWeb.Presenters.Event` с `use Core.Web.Labels` на внешнем профиле кодека, без
-  `open_api_spex`.
+  `open_api_spex`; событие страницы событий — `ConsumerWeb.Schemas.Event` с `use Core.Web.Event` и
+  ссылкой на учётную запись `user_ref:`, с точечной правкой результата `to_wire/2`.
   Актор `Client` — usecases с типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие

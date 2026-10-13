@@ -122,8 +122,33 @@
   событий, подключает `Core.Labels.CompletenessCase` в `test/my_app/labels/completeness_test.exs`.
   В `app/15-web-api.md`, «Сведения событий», — сведения уходят на wire только через модуль с
   `use Core.Web.Labels`; свой обход сведений в презентере и ручная копия схемы сведений — MUST NOT,
-  схема события ссылается на модуль с `use`; дамп события и подмена строк-id в машинной нагрузке
-  остаются у приложения.
+  схема события ссылается на модуль с `use`; дамп события — `Core.Web.Event` (пункт ниже).
+
+- **Событие страницы событий `Core.Web.Event`** (решение —
+  `docs/adr/0066-event-page-event-absorbs-details-wire.md`; норма — `docs/rules/app/15-web-api.md`,
+  «Событие страницы событий»). Раньше приложение со страницей событий писало презентер события
+  руками, и копии у приложений расходились только формой автора. Теперь его даёт
+  `use Core.Web.Event, codec:, user_ref: [dump:]` в модуле приложения: порождает `to_wire/2` —
+  событие и словарь ссылок страницы → `%{id, aggregateId, version, type, payload, at, by}`. Поля
+  конверта — дампом `codec:` (внешний профиль кодека), `version` — версия агрегата после события,
+  ключи нагрузки — camelCase, id в нагрузке — строки дампа без подмены ссылками. `by` без
+  `user_ref:` — дамп id, с ним — результат `dump:` (захват «дамп id, имя → map» арности 2) от дампа
+  id и имени из словаря ссылок; автор вне словаря — `ArgumentError`. Нет `codec:`, `codec:` без
+  `dump/1`, неизвестная опция, `user_ref:` без `dump:` или с неизвестной опцией, `dump:` не захватом
+  арности 2 — `CompileError`.
+
+  Переход: свой презентер события
+  (`fields = event |> OutCodec.dump() |> Es.Event.Codec.to_fields()` и сборка
+  `%{id, aggregateId, type, payload: Keys.camelize(...), at, by}`) → модуль с `use Core.Web.Event` и
+  `Response.page_data(page, &Event.to_wire(&1, refs))`; словарь ссылок собирает usecase страницы
+  событий (`Core.Labels.Refs.get/2`, без резолверов — пустой без запросов). Автор строкой id → модуль
+  без `user_ref:`; автор ссылкой `{id, login}` → `user_ref: [dump:]`, у типа id автора —
+  `use Core.Labels.ID, kind: :user, resolver:`; функция `dump:` получает имя `nil`, если у записи
+  его нет. Своё правило у отдельного
+  события — правкой результата: `%{Event.to_wire(event, refs) | payload: nil}`. Подмена строк-id
+  учётных записей в нагрузке пропадает: имена — в сведениях события. В `app/15-web-api.md` — новый
+  раздел «Событие страницы событий»: событие уходит на wire только через модуль с
+  `use Core.Web.Event`, свой презентер события — MUST NOT.
 
 - **OpenAPI-схема обёртки ответа `Core.Web.Response.Schema`** (решение —
   `docs/adr/0065-response-wrapper-schema-functions.md`; норма — `docs/rules/10-architecture.md`,

@@ -9,7 +9,8 @@
 Общую часть границы даёт библиотека: обёртка ответа и её схема (`Core.Web.Response`,
 `Core.Web.Response.Schema`), разбор параметров (`Core.Web.Params`), таблица `%Error{}` → статус
 (`Core.Web.ErrorMapper`), camelCase (`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`),
-сведения событий на wire и их схема (`Core.Web.Labels`) — `deps/core/docs/rules/10-architecture.md`,
+событие страницы событий на wire (`Core.Web.Event`), сведения событий на wire и их схема
+(`Core.Web.Labels`) — `deps/core/docs/rules/10-architecture.md`,
 «Граница HTTP». Приложение её конфигурирует, а не повторяет: своих копий этих модулей быть
 не должно.
 
@@ -350,6 +351,38 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
   ссылок. Больше одной формы на ресурс без нужды не заводить: расхождение форм — расхождение
   контракта.
 
+### Событие страницы событий
+
+Действует, если приложение отдаёт страницу событий агрегата.
+
+Событие страницы событий MUST дампиться модулем приложения с `use Core.Web.Event`
+(`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»): экшен страницы событий передаёт его
+`to_wire/2` в `Response.page_data/2` вместе со словарём ссылок страницы (`Core.Labels.Refs.get/2` в
+usecase). Свой презентер события MUST NOT: поля, их имена, camelCase нагрузки и форма автора —
+контракт клиента, общий для всех приложений, и ручная копия расходится с ним молча.
+
+Точечная правка результата `to_wire/2` MAY — например, скрыть нагрузку отдельного события. Подмену
+строк-id в машинной нагрузке ссылками `to_wire/2` не делает: имена для человека — в сведениях
+события.
+
+```elixir
+# плохо — свой презентер события
+fields = event |> OutCodec.dump() |> Es.Event.Codec.to_fields()
+%{id: fields.id, aggregateId: fields.aggregate_id, payload: Keys.camelize(fields.payload)}
+
+# хорошо — один модуль на приложение
+defmodule MyAppWeb.Schemas.Event do
+  use Core.Web.Event,
+    codec: MyApp.Codec.External,
+    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2]
+end
+
+json(conn, Response.success(Response.page_data(page, &Event.to_wire(&1, refs))))
+
+# точечная правка
+def to_map(%Order.Event.FileStored{} = event, refs), do: %{Event.to_wire(event, refs) | payload: nil}
+```
+
 ### Сведения событий
 
 Действует, если приложение отдаёт сведения событий (`11-domain.md`, «Подписи»).
@@ -364,8 +397,8 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 сведений, и схема события ссылается на него (`items: MyAppWeb.Schemas.EventDetail`). Ручная копия
 схемы сведений MUST NOT: схема и дамп заданы одним объявлением, копия расходится с дампом молча.
 
-Дамп самого события (`id`, `type`, `payload`, `at`, `by`) и подмена строк-id в машинной нагрузке
-ссылками на учётную запись — дело приложения: `to_wire/2` их не трогает.
+Дамп самого события (`id`, `type`, `payload`, `at`, `by`) — модуль с `use Core.Web.Event`
+(«Событие страницы событий»): `to_wire/2` модуля сведений его не трогает.
 
 ```elixir
 # плохо — свой дамп сведений в презентере
@@ -381,7 +414,7 @@ defmodule MyAppWeb.Schemas.EventDetail do
     ]
 end
 
-Map.merge(%{id: fields.id, type: fields.type, payload: payload}, EventDetail.to_wire(event, refs))
+Map.merge(Event.to_wire(event, refs), EventDetail.to_wire(event, refs))
 ```
 
 ## Связанные правила
