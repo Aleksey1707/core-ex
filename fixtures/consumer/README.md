@@ -42,8 +42,10 @@
   `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов, dump-only плагин
   фасада `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (с полями `union:`), нагрузка по полям
   `Account.Event.Renamed.Payload`, ручной плагин нагрузки `Account.Event.Opened.Payload` (`Account.Codec`) и представление `Account.View` с `jsonb:` по типу `Account.Profile` и
-  семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Актор `Client` — usecases с
-  типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
+  семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Подписи событий
+  (`Core.Labels.*`): название у `Account.Event.Renamed` и `Account.Event.Closed`, подписи полей
+  нагрузки `Renamed`.
+  Актор `Client` — usecases с типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие
   линтеры библиотеки фикстуру не проверяют.

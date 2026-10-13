@@ -6,4 +6,6 @@ defmodule Consumer.Domain.Sales.Account.Event.Closed do
     aggregate_id: Account.ID,
     by: UserID,
     payload: nil
+
+  use Core.Labels.Event, title: "Счёт закрыт"
 end

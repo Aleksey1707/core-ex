@@ -2,9 +2,9 @@
 
 - **Область.** `lib/core/prim/**`, `lib/core/enum.ex`, `lib/core/validator/**`, `lib/core/codec/**`,
   `lib/core/view.ex`, `lib/core/context*`, `lib/core/result.ex`, `lib/core/option.ex`,
-  `lib/core/es/**`; у потребителя — агрегаты, профили Codec и entity-фасады.
+  `lib/core/es/**`, `lib/core/labels/**`; у потребителя — агрегаты, профили Codec и entity-фасады.
 - **Читать перед.** Новым Prim, Enum, кодеком, событием, командой или View; правкой агрегата,
-  профиля Codec, `Core.View`; выбором между агрегатом и представлением.
+  профиля Codec, `Core.View`, подписей событий; выбором между агрегатом и представлением.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 Строительные блоки:
@@ -846,6 +846,84 @@ end
 (`14-events-outbox.md`, «Совместимость событий»; там же golden-фикстуры).
 
 Детали flush / outbox — `14-events-outbox.md`.
+
+## Подписи
+
+Подписи событий для человека объявляются отдельными `use Core.Labels.*` после основного `use`
+модуля, а не опциями `Core.Es.Event` и `Core.Es.Event.Payload` (ADR-0063). Модуль без них
+собирается как прежде. Термины — `CONTEXT.md`, «Подписи».
+
+```elixir
+defmodule Renamed do
+  defmodule Payload do
+    use Core.Es.Event.Payload,
+      fields: [name: [prim: Agg.Name], source: [type: :string]]
+
+    use Core.Labels.Fields,
+      labels: [name: "Название", source: :hidden]
+  end
+
+  use Es.Event,
+    aggregate_id: Agg.ID,
+    by: User.ID,
+    payload: Payload
+
+  use Core.Labels.Event, title: "Запись переименована"
+end
+```
+
+Ошибки сборки объявлений — `CompileError`; опции `use` проверяет `Core.Helper.Opts.validate!/4`,
+текст подписи и keyword-список решений без повторов — `Core.Labels.Check`. Своя проверка текста
+или опций в модуле объявления MUST NOT.
+
+### Название события (`Core.Labels.Event`)
+
+- `title:` обязательна — непустая строка
+- `payload:` — подпись нагрузки-Prim: у неё обязательна, у нагрузки-struct'а и у события без
+  нагрузки — `CompileError`; нагрузку-struct подписывает `Core.Labels.Fields`
+- нагрузка-struct без `use Core.Labels.Fields` — `CompileError`
+- `use` вне модуля `use Core.Es.Event` — `CompileError`: хост проверяется по интроспекции события
+
+Проверяется: `test/core/labels/event_test.exs`.
+
+### Подписи полей (`Core.Labels.Fields`)
+
+`labels:` — решение по каждому полю нагрузки `Core.Es.Event.Payload`: подпись или `:hidden`.
+Вид поля в сведениях берётся из спеки нагрузки, в объявлении подписей его нет.
+
+- Полнота — на `@after_compile`: поле без решения и подпись поля вне struct'а — `CompileError`
+- Повтор поля, пустая или не строковая подпись — `CompileError`
+- Свободная map (`type: :map`) подписью не выходит — `:hidden`, иначе `CompileError`
+- `use` не после `use Core.Es.Event.Payload` — `CompileError`
+
+`Core.Labels.Fields.specs/1` отдаёт спеку видимых полей в порядке спеки нагрузки.
+
+Проверяется: `test/core/labels/fields_test.exs`.
+
+### Сведения события (`Core.Labels.Details`)
+
+`Details.build/1` — чистая функция «событие → `{название, сведения}`». Сведение —
+`%{label, kind, value}`, значение — Prim как есть: дампа нет, в JSON его переводит wire.
+
+| `kind` | Спека поля |
+|---|---|
+| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет» |
+| `:number` | Prim `:integer`, `:decimal`; `type:` целого |
+| `:date`, `:datetime` | Prim `:date`, `:datetime` |
+
+- Сведения идут в порядке спеки нагрузки; `:hidden` в них не попадает
+- Поле без значения — `value: nil` со своим видом; нагрузка `nil` — пустые сведения; нагрузка-Prim —
+  одно сведение с подписью `payload:`
+Проверяется: `test/core/labels/details_test.exs`.
+
+Вид `type:` MUST задаваться на каждое значение `Core.Helper.FieldCheck.type_values/0`, отдельный
+перечень видов MUST NOT: новый тип проверки полей иначе дошёл бы до сведений без вида.
+
+Проверяется: сборка библиотеки — `Core.Labels.Details` берёт вид каждого значения
+`type_values/0` через `Keyword.fetch!`.
+
+Нормы приложения, отдающего сведения событий, — `deps/core/docs/rules/app/11-domain.md`,
+«Подписи».
 
 ## Version
 
