@@ -22,3 +22,8 @@ stories 52–54; ADR-0064.
 - [x] Свод: `docs/rules/app/15-web-api.md` — схема сведений — модуль с `use Core.Web.Labels`, ручная копия MUST NOT.
 - [x] `CHANGELOG.md` — дополняется пункт подсистемы подписей; правка `app/**` — тем же коммитом.
 - [x] `make` зелёный.
+
+## Comments
+
+- 2026-10-14: поглощён `.scratch/web-event/` (ADR-0066): код переезжает во внутренний `Core.Web.Event.Details`,
+  публичного `Core.Web.Labels` нет.
