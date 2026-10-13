@@ -109,7 +109,7 @@ behaviour — менять библиотеку для этого не нужн�
 | Нужно | Объявите у себя | Появится |
 |---|---|---|
 | схема сведений событий | `{:open_api_spex, "~> 3.21"}` | модуль с `use Core.Web.Labels` — ещё и схема семейства сведений (`schema/0`) и вложенные схемы видов; опция `user_ref: [schema:]` становится обязательной |
-| схема обёртки ответа | `{:open_api_spex, "~> 3.21"}` | `Core.Web.Response.Schema`: `error()` — схема `ErrorResponse` на все статусы ошибки |
+| схема обёртки ответа | `{:open_api_spex, "~> 3.21"}` | `Core.Web.Response.Schema`: `success(data)` / `success()` / `page(item)` — схемы успеха и страницы со схемой данных аргументом, `error()` — схема `ErrorResponse` на все статусы ошибки |
 | без OpenAPI | — | `use Core.Web.Labels` порождает только дамп `to_wire/2` |
 
 Для `use Core.Web.Labels` наличие `open_api_spex` проверяется при раскрытии `use` в модуле

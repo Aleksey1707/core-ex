@@ -129,7 +129,8 @@
   `docs/adr/0065-response-wrapper-schema-functions.md`; норма — `docs/rules/10-architecture.md`,
   «OpenAPI-схемы wire»). Раньше схему обёртки приложение описывало руками, и смена обёртки (ADR-0062)
   молча оставила её в старой форме. Теперь схему того, что пишет `Core.Web.Response`, даёт
-  библиотека, и тест сверяет с ней `Response.error/2,3` и каждую строку `Core.Web.ErrorMapper.map/2`.
+  библиотека, и тест сверяет с ней `Response.success/0,1`, страницу `page_data/2` под `success/1`,
+  `Response.error/2,3` и каждую строку `Core.Web.ErrorMapper.map/2`.
   Модуль собирается, только если `open_api_spex` был у приложения при сборке `core`: добавленный
   позже требует `mix deps.compile core --force`. `Response.Schema.error()` — модуль
   `Core.Web.Response.Schema.Error` с названием `ErrorResponse`, одна схема на все статусы ошибки:
@@ -140,7 +141,32 @@
   `{"Ошибка", "application/json", MyAppWeb.Schemas.Error}` → стало
   `{"Ошибка", "application/json", Response.Schema.error()}`; пример своего компонента старой формы
   (`{code, messages, data}`) больше не проходит ратчет примеров (`app/15-web-api.md`, «Schemas»).
-  В `app/15-web-api.md`, «Раскладка», схема ошибки ушла из `MyAppWeb.Schemas.*`.
+  `Response.Schema.success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы,
+  без названия и без опции `title:`: `{status: enum ["ok"], data}`, у `success()` `data` — объект
+  без свойств, у `page(item)` — `{items: [item], total: integer ≥ 0}`; `data` / `item` — модуль
+  схемы, `%OpenApiSpex.Schema{}` или `%OpenApiSpex.Reference{}`. Объекты открытые
+  (`additionalProperties: false` нет): новое поле обёртки не ломает валидацию ответа у клиента.
+  Своя схема обёртки переписывается по способу:
+  - хелпер, отдающий анонимную `%Schema{}`: было `data_response(Order)` / `info_response()` /
+    `page(Order)` → стало `Response.Schema.success(Order)` / `success()` / `page(Order)`; хелпер и
+    модули страниц ресурсов удаляются;
+  - хелпер с названием: было `of(Order, "OrderResponse")` / `empty("OkResponse")` /
+    `of(page_of(Order, "OrderPage"), "OrderPageResponse")` → стало те же вызовы без названия
+    (`success(Order)` / `success()` / `page(Order)`): названия ответов уходят из components,
+    тип ответа генератор клиента называет сам;
+  - модуль ответа на операцию поверх хелпера: было
+    `{"Заказ", "application/json", MyAppWeb.Schemas.OrderResponse}` с `schema/0` над хелпером →
+    стало `{"Заказ", "application/json", Response.Schema.success(Order)}` по месту в `operation/2`,
+    модуль удаляется;
+  - `allOf` над своим компонентом обёртки: было
+    `%Schema{allOf: [MyAppWeb.Schemas.Envelope, %Schema{properties: %{data: Order}}]}` в модуле
+    ответа → стало `Response.Schema.success(Order)` по месту, компонент обёртки и модули ответов
+    удаляются.
+
+  В `app/15-web-api.md`, «Schemas», — схема обёртки ответа, страницы и ошибки —
+  `Core.Web.Response.Schema`, своя — MUST NOT (было: «собираются общими хелперами»); в «Раскладке»
+  обёртка, страница и ошибка ушли из `MyAppWeb.Schemas.*`; в `app/00-index.md` — строка
+  устаревшей формы.
 
 ### Изменения контракта макросов
 

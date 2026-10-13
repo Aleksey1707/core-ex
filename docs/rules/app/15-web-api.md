@@ -6,12 +6,11 @@
   плага аутентификации и обработки ошибок HTTP.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
-Общую часть границы даёт библиотека: обёртка ответа (`Core.Web.Response`), разбор
-параметров (`Core.Web.Params`), таблица `%Error{}` → статус (`Core.Web.ErrorMapper`), camelCase
-(`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`), сведения событий на wire
-и их схема (`Core.Web.Labels`) —
-`deps/core/docs/rules/10-architecture.md`, «Граница HTTP». Приложение её конфигурирует, а не
-повторяет: своих копий этих модулей быть
+Общую часть границы даёт библиотека: обёртка ответа и её схема (`Core.Web.Response`,
+`Core.Web.Response.Schema`), разбор параметров (`Core.Web.Params`), таблица `%Error{}` → статус
+(`Core.Web.ErrorMapper`), camelCase (`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`),
+сведения событий на wire и их схема (`Core.Web.Labels`) — `deps/core/docs/rules/10-architecture.md`,
+«Граница HTTP». Приложение её конфигурирует, а не повторяет: своих копий этих модулей быть
 не должно.
 
 ## Поверхности и версии
@@ -46,7 +45,7 @@
 | `MyAppWeb.<Api>.<Version>.<Group>.<Resource>.*` | ресурс группы без своего ресурса (`/security/roles`): `<Group>` — только namespace, его `Schemas` и `Params` — по той же лестнице |
 | `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
 | `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
-| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: обёртка ответа, страница, ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
+| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
 | `MyAppWeb.Params.*` | разбор входа, общий для поверхностей; общий для версий или ресурсов — `<Api>.Params.*`, `<Api>.<Version>.Params.*` |
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
@@ -92,12 +91,12 @@ lib/my_app_web/{endpoint,router,telemetry}.ex
 ```elixir
 # плохо — схема, общая для поверхностей, лежит в одной из них; вложенный ресурс — сосед родителя;
 # ответ записи у единственной поверхности — в её namespace
-defmodule MyAppWeb.Public.V1.Schemas.Page do
+defmodule MyAppWeb.Public.V1.Schemas.UserRef do
 defmodule MyAppWeb.Public.V1.OrderItem.Controller do
 defmodule MyAppWeb.Public.V1.Schemas.Written do
 
 # хорошо — ответ записи в корне при любом числе поверхностей
-defmodule MyAppWeb.Schemas.Page do
+defmodule MyAppWeb.Schemas.UserRef do
 defmodule MyAppWeb.Public.V1.Order.Item.Controller do
 defmodule MyAppWeb.Schemas.Written do
 
@@ -318,7 +317,11 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 ## Schemas
 
 - Только контракт HTTP request/response; смешивать с domain-struct и Ecto-схемой MUST NOT.
-- Обёртка ответа и страницы собираются общими хелперами, а не переписываются в каждом ресурсе.
+- Схема обёртки ответа, страницы и ошибки — `Core.Web.Response.Schema` (`success/0,1`, `page/1`,
+  `error/0`), схема данных эндпоинта — её аргументом. Своя схема обёртки, страницы или ошибки —
+  хелпер, модуль ответа на операцию, компонент под `allOf` — MUST NOT: копия расходится с тем, что
+  пишет `Core.Web.Response`, молча (`deps/core/docs/rules/10-architecture.md`,
+  «OpenAPI-схемы wire»).
 - Значения справочников берутся из самого enum (`Enum.map(Status.values(), …)`), а не
   выписываются строками: иначе список разойдётся с доменом.
 - Форма, повторяющаяся в нескольких ответах, объявляется отдельной схемой и подключается
