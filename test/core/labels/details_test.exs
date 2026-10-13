@@ -5,12 +5,16 @@ defmodule Core.Labels.DetailsTest do
   alias Core.EventFixture.ActorID
   alias Core.EventFixture.AggID
   alias Core.Labels.Details
+  alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Amount
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
+  alias Core.LabelsFixture.Line
   alias Core.LabelsFixture.Moment
   alias Core.LabelsFixture.Name
+  alias Core.LabelsFixture.Shape
+  alias Core.LabelsFixture.Title
   alias Core.Version
 
   describe "нагрузка по полям" do
@@ -78,6 +82,91 @@ defmodule Core.Labels.DetailsTest do
 
       assert %{label: "Прежний статус", kind: :text, value: nil} in details
     end
+  end
+
+  describe "вложенность" do
+    test "struct — группа, список — элементы без подписи, семейство — группа варианта, композит — вид базы" do
+      city = Name.new!("Казань")
+      title = Name.new!("Болт")
+      count = Count.new!(4)
+      heading = Title.new!("Срочная отправка")
+
+      payload =
+        Event.Shipped.Payload.new(
+          %Address{city: city, zip: "420000", checksum: "x1"},
+          nil,
+          [%Line{title: title, count: count}],
+          [count],
+          %Shape.Circle{radius: 3},
+          heading
+        )
+
+      assert Details.build(event(Event.Shipped, payload)) ==
+               {"Заказ отправлен",
+                [
+                  %{
+                    label: "Адрес",
+                    kind: :group,
+                    value: [
+                      %{label: "Город", kind: :text, value: city},
+                      %{label: "Индекс", kind: :text, value: "420000"}
+                    ]
+                  },
+                  %{label: "Запасной адрес", kind: :group, value: nil},
+                  %{
+                    label: "Позиции",
+                    kind: :list,
+                    value: [
+                      %{
+                        kind: :group,
+                        value: [
+                          %{label: "Наименование", kind: :text, value: title},
+                          %{label: "Количество", kind: :number, value: count}
+                        ]
+                      }
+                    ]
+                  },
+                  %{label: "Счётчики", kind: :list, value: [%{kind: :number, value: count}]},
+                  %{label: "Фигура", kind: :group, value: [%{label: "Радиус", kind: :number, value: 3}]},
+                  %{label: "Заголовок", kind: :text, value: heading}
+                ]}
+    end
+
+    test "вариант семейства — группа полей своего варианта" do
+      payload =
+        Event.Shipped.Payload.new(
+          %Address{city: Name.new!("Казань")},
+          nil,
+          [],
+          [],
+          %Shape.Rect{width: 2, height: 5},
+          Title.new!("Отправка")
+        )
+
+      {_title, details} = Details.build(event(Event.Shipped, payload))
+
+      assert %{label: "Фигура", kind: :group, value: [%{label: "Ширина", value: 2}, %{label: "Высота", value: 5}]} =
+               Enum.find(details, &(&1.label == "Фигура"))
+
+      assert %{label: "Позиции", kind: :list, value: []} in details
+    end
+  end
+
+  test "спека fields: и text: — текст функцией, у списка — по элементу; скрытое не выходит" do
+    count = Count.new!(2)
+    payload = %Event.Tagged.Payload{origin: %Line{}, tags: ~w(urgent fragile)a, count: count, trace: "t-1"}
+
+    assert Details.build(event(Event.Tagged, payload)) ==
+             {"Метки расставлены",
+              [
+                %{label: "Источник", kind: :text, value: "Позиция"},
+                %{
+                  label: "Метки",
+                  kind: :list,
+                  value: [%{kind: :text, value: "urgent"}, %{kind: :text, value: "fragile"}]
+                },
+                %{label: "Количество", kind: :number, value: count}
+              ]}
   end
 
   test "нагрузка-Prim — одно сведение с подписью payload:" do

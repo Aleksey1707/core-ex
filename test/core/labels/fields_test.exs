@@ -2,12 +2,164 @@ defmodule Core.Labels.FieldsTest do
   use ExUnit.Case, async: true
 
   alias Core.Labels.Fields
+  alias Core.LabelsFixture.Address
+  alias Core.LabelsFixture.Event.Shipped
+  alias Core.LabelsFixture.Event.Tagged
   alias Core.LabelsFixture.Event.Updated
   alias Core.LabelsFixture.Name
 
   test "specs/1 — видимые поля в порядке спеки нагрузки" do
     assert Keyword.keys(Fields.specs(Updated.Payload)) == ~w(name count amount day moment note urgent rank)a
     assert Keyword.fetch!(Fields.specs(Updated.Payload), :name) == {:prim, Name}
+  end
+
+  test "specs/1 — спека fields: в порядке объявления, без скрытых полей" do
+    assert Fields.specs(Address) == [city: {:prim, Name}, zip: {:type, :string}]
+    assert Keyword.keys(Fields.specs(Tagged.Payload)) == ~w(origin tags count)a
+  end
+
+  describe "paths/1" do
+    test "поля типа и вложенных struct'ов в порядке объявления; элемент списка — под путём списка" do
+      assert Fields.paths(Shipped.Payload) == [
+               {[:address], "Адрес"},
+               {[:address, :city], "Город"},
+               {[:address, :zip], "Индекс"},
+               {[:backup], "Запасной адрес"},
+               {[:backup, :city], "Город"},
+               {[:backup, :zip], "Индекс"},
+               {[:lines], "Позиции"},
+               {[:lines, :title], "Наименование"},
+               {[:lines, :count], "Количество"},
+               {[:counts], "Счётчики"},
+               {[:shape], "Фигура"},
+               {[:title], "Заголовок"}
+             ]
+    end
+
+    test "скрытое поле путей не даёт; text: — подпись поля" do
+      assert Fields.paths(Tagged.Payload) == [{[:origin], "Источник"}, {[:tags], "Метки"}, {[:count], "Количество"}]
+    end
+  end
+
+  describe "спека fields:" do
+    test "у нагрузки события — CompileError" do
+      assert_raise CompileError, ~r/Both: спека поля и у нагрузки события, и в `fields:`.*\[:name\]/, fn ->
+        compile_payload(:Both,
+          labels: [name: "Название", note: :hidden],
+          fields: [name: [prim: Core.LabelsFixture.Name]]
+        )
+      end
+    end
+
+    test "видимое поле без спеки — CompileError" do
+      assert_raise CompileError, ~r/NoSpec: видимые поля без спеки `fields:`: \[:zip\]/, fn ->
+        compile_struct(:NoSpec, fields: [city: [prim: Core.LabelsFixture.Name]], labels: [city: "Город", zip: "Индекс"])
+      end
+    end
+
+    test "спека скрытого поля — CompileError" do
+      assert_raise CompileError, ~r/HiddenSpec: спека скрытых полей: \[:zip\]/, fn ->
+        compile_struct(:HiddenSpec,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [type: :string]],
+          labels: [city: "Город", zip: :hidden]
+        )
+      end
+    end
+
+    test "спека поля вне struct'а — CompileError" do
+      assert_raise CompileError, ~r/ExtraSpec: спека полей вне struct'а: \[:extra\]/, fn ->
+        compile_struct(:ExtraSpec,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [type: :string], extra: [type: :string]],
+          labels: [city: "Город", zip: "Индекс"]
+        )
+      end
+    end
+
+    test "спека разбирается нормализатором плагина по полям — его отказ" do
+      assert_raise CompileError, ~r/NotPrim: fields:, поле city: Core.LabelsFixture.Count.*не Core.Enum/, fn ->
+        compile_struct(:NotPrim,
+          fields: [city: [enum: Core.LabelsFixture.Count], zip: [type: :string]],
+          labels: [city: "Город", zip: "Индекс"]
+        )
+      end
+    end
+
+    test "fields: без labels: — CompileError" do
+      assert_raise CompileError, ~r/Labels.Fields: нет обязательных опций: \[:labels\]/, fn ->
+        compile_struct(:FieldsOnly, fields: [city: [prim: Core.LabelsFixture.Name], zip: [type: :string]])
+      end
+    end
+
+    test "модуль без struct'а — CompileError" do
+      assert_raise CompileError, ~r/NoStruct: не struct/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.FieldsTest.NoStruct do
+              use Core.Labels.Fields,
+                fields: [city: [prim: Core.LabelsFixture.Name]],
+                labels: [city: "Город"]
+            end
+          end
+        )
+      end
+    end
+
+    test "вложенный struct без Core.Labels.Fields — CompileError" do
+      assert_raise CompileError, ~r/Bare: вложенный struct без `use Core.Labels.Fields`: \[:zip\]/, fn ->
+        compile_struct(:Bare,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [entity: URI]]],
+          labels: [city: "Город", zip: "Индекс"]
+        )
+      end
+    end
+  end
+
+  describe "text:" do
+    test "не захват — CompileError" do
+      assert_raise CompileError, ~r/NotCapture: fields:, поле zip: text: — захват функции арности 1/, fn ->
+        compile_struct(:NotCapture,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [text: "почтовый"]],
+          labels: [city: "Город", zip: "Индекс"]
+        )
+      end
+    end
+
+    test "захват другой арности — CompileError" do
+      assert_raise CompileError, ~r/Arity2: fields:, поле zip: list: text: — захват функции арности 1/, fn ->
+        compile_struct(:Arity2,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [text: &Map.get/2]]],
+          labels: [city: "Город", zip: "Индекс"]
+        )
+      end
+    end
+
+    test "анонимная функция — CompileError" do
+      assert_raise CompileError, ~r/Anon: fields:, поле zip: text: — захват функции арности 1/, fn ->
+        compile_struct(
+          :Anon,
+          quote(
+            do: [
+              fields: [city: [prim: Core.LabelsFixture.Name], zip: [text: fn zip -> zip end]],
+              labels: [city: "Город", zip: "Индекс"]
+            ]
+          )
+        )
+      end
+    end
+
+    test "с другими ключами — CompileError" do
+      assert_raise CompileError, ~r/Mixed: fields:, поле zip — `text:` без других ключей/, fn ->
+        compile_struct(
+          :Mixed,
+          quote(
+            do: [
+              fields: [city: [prim: Core.LabelsFixture.Name], zip: [text: &Kernel.to_string/1, optional: true]],
+              labels: [city: "Город", zip: "Индекс"]
+            ]
+          )
+        )
+      end
+    end
   end
 
   describe "отказ сборки" do
@@ -96,6 +248,20 @@ defmodule Core.Labels.FieldsTest do
   end
 
   # ---
+
+  defp compile_struct(name, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          defstruct [:city, :zip]
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
 
   defp compile_payload(name, opts, note_type \\ :string) do
     module = Module.concat(__MODULE__, name)

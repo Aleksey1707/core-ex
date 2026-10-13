@@ -92,6 +92,13 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
+  # Служебный вход для подсистем библиотеки, которые говорят на языке спеки полей (`Core.Labels.Fields`):
+  # struct'а и его сверки здесь нет — их проверяет сама подсистема.
+  @doc false
+  @spec normalize!(term(), String.t()) :: [field()]
+
+  def normalize!(spec, where) when is_binary(where), do: spec_fields!(spec, true, where)
+
   @doc false
   @spec variant_fields!(module(), term(), [atom()], String.t()) :: [field()]
 

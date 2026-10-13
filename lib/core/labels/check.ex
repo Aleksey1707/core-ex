@@ -1,7 +1,7 @@
 defmodule Core.Labels.Check do
   @moduledoc """
-  Compile-time проверки объявлений подписей (`Core.Labels.*`): текст подписи и keyword-список
-  решений без повторов.
+  Compile-time проверки объявлений подписей (`Core.Labels.*`): текст подписи, keyword-список
+  решений без повторов и захват функции.
 
   Общие для всех `use Core.Labels.*`: опции `use` проверяет `Core.Helper.Opts.validate!/4`, а
   значения опций — эти функции. `where` — префикс текста ошибки, по которому видно объявление и
@@ -16,6 +16,21 @@ defmodule Core.Labels.Check do
       text
     else
       raise CompileError, description: "#{where} — непустая строка, задано #{inspect(text)}"
+    end
+  end
+
+  @doc """
+  Проверить захват функции заданной арности (`&Mod.fun/1`): анонимная функция модуля, который ещё
+  собирается, в атрибут не сохраняется.
+  """
+  @spec capture!(term(), arity(), String.t()) :: function()
+
+  def capture!(fun, arity, where) when is_integer(arity) and is_binary(where) do
+    if is_function(fun, arity) and Function.info(fun, :type) == {:type, :external} do
+      fun
+    else
+      raise CompileError,
+        description: "#{where} — захват функции арности #{arity} (`&Mod.fun/#{arity}`), задано #{inspect(fun)}"
     end
   end
 

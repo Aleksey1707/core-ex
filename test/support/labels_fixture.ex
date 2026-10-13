@@ -1,7 +1,8 @@
 defmodule Core.LabelsFixture do
   @moduledoc """
   События и нагрузки с подписями (`Core.Labels.*`): нагрузка по полям всех видов сведений,
-  нагрузка с полями Enum, нагрузка-Prim и событие без нагрузки.
+  нагрузка с полями Enum, нагрузка с вложенными struct'ами, списками, семейством и Prim-композитом,
+  нагрузка с ручным плагином и полями `text:`, нагрузка-Prim и событие без нагрузки.
   """
 
   alias Core.EventFixture.ActorID
@@ -67,6 +68,81 @@ defmodule Core.LabelsFixture do
         archived: "В архиве",
         draft: "Черновик"
       ]
+  end
+
+  defmodule Title do
+    @moduledoc "Заголовок — Prim-композит над названием."
+
+    use Core.Prim.Compose,
+      name: "Заголовок",
+      of: Core.LabelsFixture.Name
+  end
+
+  defmodule Address do
+    @moduledoc "Адрес — вложенный struct сведений со спекой видимых полей."
+
+    defstruct [:city, :zip, :checksum]
+
+    use Core.Labels.Fields,
+      fields: [
+        city: [prim: Core.LabelsFixture.Name],
+        zip: [type: :string, optional: true]
+      ],
+      labels: [
+        city: "Город",
+        zip: "Индекс",
+        checksum: :hidden
+      ]
+  end
+
+  defmodule Line do
+    @moduledoc "Позиция — элемент списка struct'ов."
+
+    defstruct [:title, :count]
+
+    use Core.Labels.Fields,
+      fields: [
+        title: [prim: Core.LabelsFixture.Name],
+        count: [prim: Core.LabelsFixture.Count]
+      ],
+      labels: [
+        title: "Наименование",
+        count: "Количество"
+      ]
+  end
+
+  defmodule Shape do
+    @moduledoc "Фигура — семейство вариантов."
+
+    defmodule Circle do
+      @moduledoc "Вариант: круг."
+
+      defstruct [:radius, kind: :circle]
+
+      use Core.Labels.Fields,
+        fields: [radius: [type: :pos_integer]],
+        labels: [radius: "Радиус", kind: :hidden]
+    end
+
+    defmodule Rect do
+      @moduledoc "Вариант: прямоугольник."
+
+      defstruct [:width, :height, kind: :rect]
+
+      use Core.Labels.Fields,
+        fields: [width: [type: :pos_integer], height: [type: :pos_integer]],
+        labels: [width: "Ширина", height: "Высота", kind: :hidden]
+    end
+  end
+
+  defmodule Texts do
+    @moduledoc "Функции текста значений без собственного модуля."
+
+    @doc "Источник: один из двух struct'ов."
+    @spec origin(struct()) :: String.t()
+
+    def origin(%Core.LabelsFixture.Address{}), do: "Адрес"
+    def origin(%Core.LabelsFixture.Line{}), do: "Позиция"
   end
 
   defmodule Event do
@@ -140,6 +216,75 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Статус сменён"
+    end
+
+    defmodule Shipped do
+      @moduledoc "Событие с вложенным struct'ом, списками, семейством и Prim-композитом."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка с вложенностью."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            address: [entity: LabelsFixture.Address],
+            backup: [entity: LabelsFixture.Address, optional: true],
+            lines: [list: [entity: LabelsFixture.Line]],
+            counts: [list: [prim: LabelsFixture.Count]],
+            shape: [union: LabelsFixture.Shape],
+            title: [prim: LabelsFixture.Title]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            address: "Адрес",
+            backup: "Запасной адрес",
+            lines: "Позиции",
+            counts: "Счётчики",
+            shape: "Фигура",
+            title: "Заголовок"
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Заказ отправлен"
+    end
+
+    defmodule Tagged do
+      @moduledoc "Событие с нагрузкой ручного плагина: спека видимых полей `fields:` и поля `text:`."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка без спеки полей."
+
+        defstruct [:origin, :tags, :count, :trace]
+
+        use Core.Labels.Fields,
+          fields: [
+            origin: [text: &LabelsFixture.Texts.origin/1],
+            tags: [list: [text: &Atom.to_string/1]],
+            count: [prim: LabelsFixture.Count]
+          ],
+          labels: [
+            origin: "Источник",
+            tags: "Метки",
+            count: "Количество",
+            trace: :hidden
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Метки расставлены"
     end
 
     defmodule Renamed do

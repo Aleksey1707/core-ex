@@ -888,15 +888,48 @@ end
 
 ### Подписи полей (`Core.Labels.Fields`)
 
-`labels:` — решение по каждому полю нагрузки `Core.Es.Event.Payload`: подпись или `:hidden`.
-Вид поля в сведениях берётся из спеки нагрузки, в объявлении подписей его нет.
+`labels:` — решение по каждому полю struct'а: подпись или `:hidden`. У нагрузки
+`Core.Es.Event.Payload` вид поля в сведениях берётся из её спеки, в объявлении подписей его нет.
 
 - Полнота — на `@after_compile`: поле без решения и подпись поля вне struct'а — `CompileError`
 - Повтор поля, пустая или не строковая подпись — `CompileError`
 - Свободная map (`type: :map`) подписью не выходит — `:hidden`, иначе `CompileError`
-- `use` не после `use Core.Es.Event.Payload` — `CompileError`
+- Вложенный struct (`entity:`) без `use Core.Labels.Fields` — `CompileError`
+- `use` не после `use Core.Es.Event.Payload` и без `fields:` — `CompileError`
 
-`Core.Labels.Fields.specs/1` отдаёт спеку видимых полей в порядке спеки нагрузки.
+Struct без спеки полей — нагрузка с ручным плагином кодека, вложенный struct сведений, вариант
+семейства — объявляет спеку **видимых** полей `fields:` на языке плагина по полям («Плагин по полям
+(`fields:`)»). Её разбирает нормализатор `Core.Codec.Plugin.Fields`; копия разбора в подсистеме
+MUST NOT: язык спеки один, и новый вид плагина иначе разошёлся бы с подписями. Сверх языка плагина —
+вид `text:`: захват функции арности 1, значение выходит текстом её результата; так подписывается
+значение без собственного модуля — поле с одним из двух struct'ов, список открытых атомов.
+
+```elixir
+defmodule Address do
+  defstruct [:city, :origin, :tags, :checksum]
+
+  use Core.Labels.Fields,
+    fields: [
+      city: [prim: Agg.City],
+      origin: [text: &__MODULE__.origin_text/1],
+      tags: [list: [text: &Atom.to_string/1]]
+    ],
+    labels: [city: "Город", origin: "Источник", tags: "Метки", checksum: :hidden]
+end
+```
+
+- Спека поля и у нагрузки события, и в `fields:` — `CompileError`: у вида поля один источник
+- Видимое поле без спеки, спека скрытого поля или поля вне struct'а — `CompileError`
+- `text:` не захватом функции арности 1, `text:` / `list: [text: …]` с другими ключами —
+  `CompileError`
+- `fields:` без `labels:`, модуль без struct'а — `CompileError`
+
+Интроспекция:
+
+- `specs/1` — спека видимых полей в порядке объявления: спеки нагрузки или `fields:`
+- `paths/1` — подписи видимых полей типа по пути поля (`[:address, :city]`), без значения: поля
+  вложенного struct'а — под путём своего поля, поля элемента списка struct'ов — под путём списка;
+  `union:` даёт только свою подпись — варианты по типу не известны
 
 Проверяется: `test/core/labels/fields_test.exs`.
 
@@ -932,11 +965,15 @@ use Core.Labels.Values,
 
 | `kind` | Спека поля |
 |---|---|
-| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет»; `enum:` — подпись значения |
+| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет»; `enum:` — подпись значения; `text:` — результат функции |
 | `:number` | Prim `:integer`, `:decimal`; `type:` целого |
 | `:date`, `:datetime` | Prim `:date`, `:datetime` |
+| `:group` | `entity:` — сведения вложенного struct'а; `union:` — сведения полей варианта по его `Core.Labels.Fields` |
+| `:list` | `list:` — элементы `%{kind, value}` вида спеки элемента, без подписи |
 
-- Сведения идут в порядке спеки нагрузки; `:hidden` в них не попадает
+- Сведения идут в порядке спеки полей; `:hidden` в них не попадает
+- Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim: обёртка роли не меняет
+  отображение
 - Поле без значения — `value: nil` со своим видом; нагрузка `nil` — пустые сведения; нагрузка-Prim —
   одно сведение с подписью `payload:`
 Проверяется: `test/core/labels/details_test.exs`.
