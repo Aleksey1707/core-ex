@@ -1120,27 +1120,27 @@ end
 
 Проверяется: `test/core/labels/refs_test.exs`.
 
-### Wire сведений (`Core.Web.Labels`)
+### Wire сведений (`Core.Web.Event`, `labels: true`)
 
-Домен JSON не знает: сведения на wire и их OpenAPI-схему отдаёт модуль приложения с
-`use Core.Web.Labels` (ADR-0064). Свою часть формы приложение задаёт опциями.
+Домен JSON не знает: название и сведения на wire отдаёт событие страницы событий — модуль
+приложения с `use Core.Web.Event` и `labels: true` (ADR-0066). Профиль кодека и ссылка на учётную
+запись объявляются один раз на событие и сведения: автор события и учётная запись в сведениях
+выходят одной формой.
 
 ```elixir
-defmodule MyAppWeb.Schemas.EventDetail do
-  use Core.Web.Labels,
+defmodule MyAppWeb.Schemas.Event do
+  use Core.Web.Event,
     codec: MyApp.Codec.External,
-    user_ref: [
-      dump: &MyAppWeb.Presenters.User.ref/2,
-      schema: MyAppWeb.Schemas.UserRef
-    ]
+    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2],
+    labels: true
 end
 ```
 
 - `codec:` — внешний профиль кодека (модуль с `dump/1`), `user_ref: [dump:]` — захват функции
-  «дамп id, имя → map» арности 2; обе обязательны, иное — `CompileError`
-- `user_ref: [schema:]` — модуль схемы OpenApiSpex той map'ы, что отдаёт `dump:`; при
-  `open_api_spex` у приложения обязателен, иное — `CompileError`; без него не требуется
-- Порождается `to_wire/2`: событие и словарь ссылок страницы → `%{title, details}`
+  «дамп id, имя → map» арности 2; `labels:` — boolean, по умолчанию `false`; `labels: true` без
+  `user_ref:` — `CompileError`
+- `to_wire/2` (событие и словарь ссылок страницы) при `labels: true` добавляет к полям события
+  `title` и `details`
 - Вид — строкой; `:number` — строкой с десятичной точкой (integer — `Integer.to_string/1`,
   decimal — нормальная запись, строка кодека — как есть); `:text`, `:date`, `:datetime` — Prim
   дампом `codec:`, строка — как есть
@@ -1151,14 +1151,10 @@ end
 - Id, которого нет в словаре ссылок, — `ArgumentError`: словарь собирают с той же страницы событий
 - Результат `to_wire/2` сужен в модуле приложения: опечатка в ключе и не событие на входе —
   предупреждение сборки потребителя
-- При `open_api_spex` (проверка — при раскрытии `use`) модуль — схема семейства сведений:
-  `schema/0` — `oneOf` по видам с дискриминатором `kind`; схемы видов — вложенные модули
-  `KindText` … `KindChange` с названиями от последнего сегмента имени модуля (`EventDetail`,
-  `EventDetailText`, …); группа, список и стороны изменения ссылаются на схему семейства, значение
-  `user` — на `schema:`. Без `open_api_spex` модуль — только дамп
 
-Проверяется: `test/core/web/labels_test.exs` — дамп каждого вида сверяется со схемой того же `use`;
-сужение и сборка без `open_api_spex` — `make consumer-check`.
+Проверяется: `test/core/web/event/details_test.exs` — дамп каждого вида;
+`test/core/web/event_test.exs` — отказы сборки; сужение и сборка без `open_api_spex` —
+`make consumer-check`.
 
 ### Ратчет полноты (`Core.Labels.CompletenessCase`)
 

@@ -9,10 +9,9 @@
 Общую часть границы даёт библиотека: обёртка ответа и её схема (`Core.Web.Response`,
 `Core.Web.Response.Schema`), разбор параметров (`Core.Web.Params`), таблица `%Error{}` → статус
 (`Core.Web.ErrorMapper`), camelCase (`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`),
-событие страницы событий на wire (`Core.Web.Event`), сведения событий на wire и их схема
-(`Core.Web.Labels`) — `deps/core/docs/rules/10-architecture.md`,
-«Граница HTTP». Приложение её конфигурирует, а не повторяет: своих копий этих модулей быть
-не должно.
+событие страницы событий на wire с названием и сведениями (`Core.Web.Event`) —
+`deps/core/docs/rules/10-architecture.md`, «Граница HTTP». Приложение её конфигурирует, а не
+повторяет: своих копий этих модулей быть не должно.
 
 ## Поверхности и версии
 
@@ -387,34 +386,23 @@ def to_map(%Order.Event.FileStored{} = event, refs), do: %{Event.to_wire(event, 
 
 Действует, если приложение отдаёт сведения событий (`11-domain.md`, «Подписи»).
 
-Название и сведения события MUST уходить на wire через модуль приложения с `use Core.Web.Labels`
-(`deps/core/docs/rules/11-domain.md`, «Wire сведений»): презентер события вставляет результат
-`to_wire/2` рядом со своими машинными полями. Свой обход сведений в презентере MUST NOT: вид
-строкой, число строкой и форма ссылки — контракт клиента, общий для всех приложений, и ручная копия
-расходится с ним молча.
-
-Схема сведений — тот же модуль с `use Core.Web.Labels`: с `open_api_spex` он и есть схема семейства
-сведений, и схема события ссылается на него (`items: MyAppWeb.Schemas.EventDetail`). Ручная копия
-схемы сведений MUST NOT: схема и дамп заданы одним объявлением, копия расходится с дампом молча.
-
-Дамп самого события (`id`, `type`, `payload`, `at`, `by`) — модуль с `use Core.Web.Event`
-(«Событие страницы событий»): `to_wire/2` модуля сведений его не трогает.
+Название и сведения события MUST уходить на wire тем же модулем события страницы событий — с
+`use Core.Web.Event, labels: true` (`deps/core/docs/rules/11-domain.md`, «Wire сведений»): его
+`to_wire/2` отдаёт `title` и `details` рядом с полями события. Свой обход сведений в презентере
+MUST NOT: вид строкой, число строкой и форма ссылки — контракт клиента, общий для всех приложений,
+и ручная копия расходится с ним молча.
 
 ```elixir
 # плохо — свой дамп сведений в презентере
 %{title: title, details: Enum.map(details, &dump_detail(&1, refs))}
 
-# хорошо — один модуль: дамп сведений и их схема
-defmodule MyAppWeb.Schemas.EventDetail do
-  use Core.Web.Labels,
+# хорошо — сведения включены в событие страницы событий
+defmodule MyAppWeb.Schemas.Event do
+  use Core.Web.Event,
     codec: MyApp.Codec.External,
-    user_ref: [
-      dump: &MyAppWeb.Presenters.User.ref/2,
-      schema: MyAppWeb.Schemas.UserRef
-    ]
+    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2],
+    labels: true
 end
-
-Map.merge(Event.to_wire(event, refs), EventDetail.to_wire(event, refs))
 ```
 
 ## Связанные правила

@@ -162,8 +162,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` |
 | `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы со схемой данных аргументом, `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
-| `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON (ADR-0066) |
-| `Core.Web.Labels` | сведения события на wire: `use` в модуле приложения порождает `to_wire/2` — `%{title, details}` для JSON, при `open_api_spex` — и их схему (`11-domain.md`, «Wire сведений») |
+| `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON, при `labels: true` — с названием и сведениями (ADR-0066; `11-domain.md`, «Wire сведений») |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
 
 `Core.Web.*` возвращает **данные**: map обёртки и кортеж ответа. Ни `Plug.Conn`, ни
@@ -219,7 +218,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 
 - Модуль библиотеки MUST NOT ссылаться на `OpenApiSpex` безусловно. Схема с параметром
   приложения — код в `quote` макроса, который включается, только если при раскрытии `use`
-  `Code.ensure_loaded?(OpenApiSpex)` (образец — `Core.Web.Labels`); модуль схемы без параметра —
+  `Code.ensure_loaded?(OpenApiSpex)`; модуль схемы без параметра —
   под `if Code.ensure_loaded?(OpenApiSpex)`, ссылки на него из безусловных — в
   `elixirc_options: [no_warn_undefined: [...]]`, как у адаптеров брокеров.
 - Схема и дамп с параметром приложения (профиль кодека, ссылка на учётную запись) MUST
@@ -237,9 +236,8 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
   условным модулем.
 
 Проверяется: `make compile-no-optional` — сборка без `open_api_spex`; `make consumer-check` —
-фикстура-потребитель без `open_api_spex` собирает модуль с `use Core.Web.Labels` без
-предупреждений; сверка дампа со схемой — `test/core/web/labels_test.exs`,
-`test/core/web/response/schema_test.exs`.
+фикстура-потребитель без `open_api_spex` собирает модули с `use Core.Web.Event` без
+предупреждений; сверка дампа со схемой — `test/core/web/response/schema_test.exs`.
 
 ## Связанные правила
 

@@ -1,16 +1,16 @@
 defmodule ConsumerWeb.Presenters.Event do
-  @moduledoc "Название и сведения события на wire рядом с его машинными полями: предупреждений быть не должно."
+  @moduledoc "Событие страницы событий с названием и сведениями на wire: предупреждений быть не должно."
 
-  use Core.Web.Labels,
+  use Core.Web.Event,
     codec: Consumer.Codec.External,
-    user_ref: [dump: &ConsumerWeb.Presenters.Event.user_ref/2]
+    user_ref: [dump: &ConsumerWeb.Presenters.Event.user_ref/2],
+    labels: true
 
-  alias Consumer.Codec.External, as: OutCodec
   alias Consumer.Domain.Sales.Account
 
   def to_map(%Account.Event.Renamed{} = event, refs) do
-    %{title: title, details: details} = to_wire(event, refs)
-    %{id: OutCodec.dump(event.id), title: title, details: details}
+    %{id: id, by: by, title: title, details: details} = to_wire(event, refs)
+    %{id: id, by: by, title: title, details: details}
   end
 
   def user_ref(id, login) when is_binary(id), do: %{id: id, login: login}

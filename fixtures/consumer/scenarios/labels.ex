@@ -9,7 +9,7 @@ defmodule ConsumerTest.Labels do
 end
 
 defmodule ConsumerTest.WebLabels do
-  @moduledoc "Результат `to_wire/2` сужен: опечатка в ключе — предупреждение."
+  @moduledoc "Результат `to_wire/2` с `labels: true` сужен: опечатка в ключе — предупреждение."
 
   alias Consumer.Domain.Sales.Account
 

@@ -108,14 +108,9 @@ behaviour — менять библиотеку для этого не нужн�
 
 | Нужно | Объявите у себя | Появится |
 |---|---|---|
-| схема сведений событий | `{:open_api_spex, "~> 3.21"}` | модуль с `use Core.Web.Labels` — ещё и схема семейства сведений (`schema/0`) и вложенные схемы видов; опция `user_ref: [schema:]` становится обязательной |
 | схема обёртки ответа | `{:open_api_spex, "~> 3.21"}` | `Core.Web.Response.Schema`: `success(data)` / `success()` / `page(item)` — схемы успеха и страницы со схемой данных аргументом, `error()` — схема `ErrorResponse` на все статусы ошибки |
-| без OpenAPI | — | `use Core.Web.Labels` порождает только дамп `to_wire/2` |
 
-Для `use Core.Web.Labels` наличие `open_api_spex` проверяется при раскрытии `use` в модуле
-приложения, а не при сборке `core`: пересобирать `core` после добавления зависимости не нужно —
-достаточно пересобрать модуль с `use` (`mix compile --force`). `Core.Web.Response.Schema` —
-модуль самой библиотеки и собирается вместе с `core`, как адаптер брокера: добавленный позже
+`Core.Web.Response.Schema` — модуль самой библиотеки и собирается вместе с `core`, как адаптер брокера: добавленный позже
 `open_api_spex` требует пересборки `core` (`mix deps.compile core --force`), иначе сборка спеки
 падает `UndefinedFunctionError`. Решение — `docs/adr/0064-openapi-schemas-optional.md`,
 `docs/adr/0065-response-wrapper-schema-functions.md`.

@@ -67,8 +67,24 @@ defmodule Core.Web.EventTest do
     end
 
     test "неизвестная опция — CompileError" do
-      assert_raise CompileError, ~r/Web.Event: неизвестные опции: \[:labels\]/, fn ->
-        compile_event(:Unknown, codec: External, labels: true)
+      assert_raise CompileError, ~r/Web.Event: неизвестные опции: \[:title\]/, fn ->
+        compile_event(:Unknown, codec: External, title: true)
+      end
+    end
+
+    test "labels: true без user_ref: — CompileError" do
+      assert_raise CompileError, ~r/LabelsNoUserRef: labels: true требует user_ref:/, fn ->
+        compile_event(:LabelsNoUserRef, codec: External, labels: true)
+      end
+
+      assert_raise CompileError, ~r/LabelsNilUserRef: labels: true требует user_ref:/, fn ->
+        compile_event(:LabelsNilUserRef, codec: External, user_ref: nil, labels: true)
+      end
+    end
+
+    test "labels: не boolean — CompileError" do
+      assert_raise CompileError, ~r/LabelsNotBoolean: labels: ожидается boolean, получено :yes/, fn ->
+        compile_event(:LabelsNotBoolean, codec: External, user_ref: [dump: &WithUser.user_ref/2], labels: :yes)
       end
     end
 

@@ -1,7 +1,5 @@
-defmodule Core.Web.LabelsTest do
+defmodule Core.Web.Event.DetailsTest do
   use ExUnit.Case, async: true
-
-  import OpenApiSpex.TestAssertions
 
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
@@ -23,12 +21,8 @@ defmodule Core.Web.LabelsTest do
   alias Core.LabelsFixture.Title
   alias Core.LabelsFixture.Unit
   alias Core.LabelsFixture.UserID
-  alias Core.LabelsFixture.UserRef
-  alias Core.LabelsFixture.Wire
+  alias Core.LabelsFixture.WebEvent
   alias Core.Version
-  alias OpenApiSpex.Components
-  alias OpenApiSpex.Info
-  alias OpenApiSpex.OpenApi
 
   describe "нагрузка по полям" do
     test "вид строкой, число строкой с десятичной точкой, дата и дата-время дампом кодека, «Да»" do
@@ -85,14 +79,37 @@ defmodule Core.Web.LabelsTest do
   end
 
   test "decimal кодека — нормальная запись строкой" do
-    {{:module, wire, _bytecode, _exports}, []} =
-      compile_wire(:DecimalProfile, codec: Core.CodecFixture.Internal, user_ref: user_ref())
+    {{:module, web_event, _bytecode, _exports}, []} =
+      compile_event(:DecimalProfile,
+        codec: Core.CodecFixture.Internal,
+        user_ref: [dump: &WebEvent.user_ref/2],
+        labels: true
+      )
 
-    payload = Event.Assigned.Payload.new(UserID.new(), %Shape.Circle{radius: 1}, Amount.new!("1E+3"), day(), moment())
-    %Event.Assigned{by: by} = event = assigned(payload)
+    payload =
+      Event.Updated.Payload.new(
+        Name.new!("Склад"),
+        Count.new!(3),
+        Amount.new!("1E+3"),
+        day(),
+        moment(),
+        nil,
+        true,
+        1,
+        "импорт"
+      )
 
-    assert %{details: [_assignee, _shape, %{label: "Сумма", kind: "number", value: "1000"} | _]} =
-             wire.to_wire(event, %{payload.assignee => "Исполнитель", by => "Автор"})
+    %Event.Updated{by: by} = event = event(Event.Updated, payload)
+
+    assert %{details: [_name, _count, %{label: "Сумма", kind: "number", value: "1000"} | _]} =
+             web_event.to_wire(event, %{by => "Автор"})
+  end
+
+  test "title и details — рядом с полями события, автор — ссылкой на учётную запись" do
+    %Event.Closed{by: by} = closed = event(Event.Closed, nil)
+
+    assert %{type: "labels_web.closed", by: %{login: "Автор"}, title: "Запись закрыта", details: []} =
+             WebEvent.to_wire(closed, %{by => "Автор"})
   end
 
   test "вложенность: группа, список групп и чисел без подписи, вариант семейства, композит" do
@@ -159,28 +176,17 @@ defmodule Core.Web.LabelsTest do
     end
 
     test "map'а с id в ключах — список групп «ключ — значение»" do
-      [item, keyed] = for _ <- 1..2, do: ItemID.new()
-      [owner, author] = for _ <- 1..2, do: UserID.new()
+      keyed = ItemID.new()
+      payload = %Event.Limited.Payload{limits: %{keyed => Count.new!(5)}}
 
-      payload =
-        Event.Linked.Payload.new(
-          item,
-          nil,
-          [],
-          owner,
-          AuthorID.new!(author),
-          SnapshotID.new(),
-          Unit.new!("kg"),
-          BaseUnit.new!("kg"),
-          %{keyed => Count.new!(5)}
-        )
-
-      refs = %{item => "Позиция 1", keyed => "Позиция 5", owner => "Владелец", author => "Автор"}
-      %{"details" => details} = wire(event(Event.Linked, payload), refs)
-
-      assert list("Лимиты", [
-               %{"kind" => "group", "value" => [ref("Позиция", keyed, "Позиция 5"), number("Лимит", "5")]}
-             ]) in details
+      assert wire(event(Event.Limited, payload), %{keyed => "Позиция 5"}) == %{
+               "title" => "Лимиты заданы",
+               "details" => [
+                 list("Лимиты", [
+                   %{"kind" => "group", "value" => [ref("Позиция", keyed, "Позиция 5"), number("Лимит", "5")]}
+                 ])
+               ]
+             }
     end
 
     test "id, которого нет в словаре ссылок, — ArgumentError" do
@@ -197,8 +203,10 @@ defmodule Core.Web.LabelsTest do
           nil
         )
 
+      %Event.Linked{by: by} = event = event(Event.Linked, payload)
+
       assert_raise ArgumentError, ~r/нет в словаре ссылок/, fn ->
-        Wire.to_wire(event(Event.Linked, payload), %{})
+        WebEvent.to_wire(event, %{by => "Автор"})
       end
     end
   end
@@ -234,135 +242,33 @@ defmodule Core.Web.LabelsTest do
              "details" => [text("Название", "Склад")]
            }
 
-    closed = Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())
-
-    assert wire(closed, %{}) == %{"title" => "Запись закрыта", "details" => []}
-  end
-
-  describe "схема" do
-    test "семейство видов с дискриминатором kind, названия от модуля приложения" do
-      %OpenApi{components: %Components{schemas: schemas}} = spec()
-
-      kinds = ~w(text number date datetime user ref group list change)
-      titles = ~w(WireText WireNumber WireDate WireDateTime WireUser WireRef WireGroup WireList WireChange)
-      mapping = Map.new(Enum.zip(kinds, titles), fn {kind, title} -> {kind, "#/components/schemas/#{title}"} end)
-
-      assert %{discriminator: %{propertyName: "kind", mapping: ^mapping}, oneOf: one_of} = schemas["Wire"]
-      assert length(one_of) == length(kinds)
-      assert Enum.all?(titles ++ ["UserRef"], &Map.has_key?(schemas, &1))
-    end
-
-    test "форма вне схемы — отказ" do
-      %OpenApi{components: %Components{schemas: %{"Wire" => schema}}} = spec = spec()
-
-      for detail <- [
-            %{"kind" => "number", "value" => 3},
-            %{"kind" => "date", "value" => "13.10.2026"},
-            %{"kind" => "unknown", "value" => "x"},
-            %{"label" => "Автор", "kind" => "user", "value" => %{"id" => "u1"}},
-            %{"kind" => "ref", "value" => %{"id" => "i1", "name" => nil}},
-            %{"kind" => "group", "value" => [%{"kind" => "text", "value" => 1}]},
-            %{"label" => "Название", "kind" => "change", "old" => %{"kind" => "text", "value" => "a"}}
-          ] do
-        assert {:error, _} = OpenApiSpex.cast_value(detail, schema, spec), inspect(detail)
-      end
-    end
-  end
-
-  describe "отказ сборки" do
-    test "user_ref: без schema: при open_api_spex — CompileError" do
-      assert_raise CompileError, ~r/NoSchema: user_ref: нет обязательных опций: \[:schema\]/, fn ->
-        compile_wire(:NoSchema, codec: External, user_ref: [dump: &Wire.user_ref/2])
-      end
-    end
-
-    test "schema: не схема OpenApiSpex — CompileError" do
-      assert_raise CompileError, ~r/user_ref: schema: модуль URI должен экспортировать schema\/0/, fn ->
-        compile_wire(:BadSchema, codec: External, user_ref: [dump: &Wire.user_ref/2, schema: URI])
-      end
-    end
-
-    test "без codec: — CompileError" do
-      assert_raise CompileError, ~r/Web.Labels: нет обязательных опций: \[:codec\]/, fn ->
-        compile_wire(:NoCodec, user_ref: user_ref())
-      end
-    end
-
-    test "codec: без dump/1 — CompileError" do
-      assert_raise CompileError, ~r/Web.Labels: codec: модуль URI должен экспортировать dump\/1/, fn ->
-        compile_wire(:BadCodec, codec: URI, user_ref: user_ref())
-      end
-    end
-
-    test "без user_ref: — CompileError" do
-      assert_raise CompileError, ~r/Web.Labels: нет обязательных опций: \[:user_ref\]/, fn ->
-        compile_wire(:NoUserRef, codec: External)
-      end
-    end
-
-    test "user_ref: без dump: — CompileError" do
-      assert_raise CompileError, ~r/NoDump: user_ref: нет обязательных опций: \[:dump\]/, fn ->
-        compile_wire(:NoDump, codec: External, user_ref: [schema: UserRef])
-      end
-    end
-
-    test "user_ref: с неизвестной опцией — CompileError" do
-      assert_raise CompileError, ~r/Unknown: user_ref: неизвестные опции: \[:login\]/, fn ->
-        compile_wire(:Unknown, codec: External, user_ref: [login: true] ++ user_ref())
-      end
-    end
-
-    test "dump: не захват функции арности 2 — CompileError" do
-      assert_raise CompileError, ~r/Arity: user_ref: dump: — захват функции арности 2/, fn ->
-        compile_wire(:Arity, codec: External, user_ref: [dump: &Kernel.inspect/1, schema: UserRef])
-      end
-    end
+    assert wire(event(Event.Closed, nil), %{}) == %{"title" => "Запись закрыта", "details" => []}
   end
 
   # ---
 
-  # Каждый дамп сверяется со схемой того же `use` (ADR-0064).
-  defp wire(event, refs) do
-    wire =
-      event
-      |> Wire.to_wire(refs)
-      |> Jason.encode!()
-      |> Jason.decode!()
-
-    spec = spec()
-
-    for detail <- wire["details"], do: assert_schema(detail, "Wire", spec)
-
-    wire
+  # Название и сведения — JSON дампа: автор события в словаре ссылок, поля конверта не сверяются.
+  defp wire(%_{by: by} = event, refs) do
+    event
+    |> WebEvent.to_wire(Map.put(refs, by, "Автор"))
+    |> Map.take(~w(title details)a)
+    |> Jason.encode!()
+    |> Jason.decode!()
   end
 
-  defp spec do
-    OpenApiSpex.add_schemas(
-      %OpenApi{
-        info: %Info{title: "Core.Web.LabelsTest", version: "0"},
-        paths: %{},
-        components: %Components{schemas: %{}}
-      },
-      [Wire]
-    )
-  end
-
-  defp user_ref, do: [dump: &Wire.user_ref/2, schema: UserRef]
-
+  defp event(Event.Closed, nil), do: Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())
   defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
-
-  defp assigned(payload), do: Event.Assigned.new(payload, ItemID.new(), Version.new(), UserID.new(), At.now!())
 
   defp day, do: Day.new!(~D[2026-10-13])
   defp moment, do: Moment.new!(~U[2026-10-13 09:30:00.000000Z])
 
-  defp compile_wire(name, opts) do
+  defp compile_event(name, opts) do
     module = Module.concat(__MODULE__, name)
 
     Code.eval_quoted(
       quote do
         defmodule unquote(module) do
-          use Core.Web.Labels, unquote(opts)
+          use Core.Web.Event, unquote(opts)
         end
       end
     )

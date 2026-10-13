@@ -5,10 +5,14 @@ defmodule Core.LabelsFixture do
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
-  семейства; фикстурные резолверы имён; модуль дампа сведений на wire и их схемы (`Core.Web.Labels`).
+  семейства; фикстурные резолверы имён; событие страницы событий со сведениями (`Core.Web.Event`,
+  `labels: true`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
-  набор ратчета полноты: в кодек не входят событие с id без вида и событие другого агрегата.
+  набор ратчета полноты: в кодек не входят событие с id без вида и событие другого агрегата. Кодек
+  `Core.LabelsFixture.WebEvent.Codec` — события с нагрузкой, которую дампят фасады: он, плагин
+  семейства, плагин вложенных struct'ов `Core.LabelsFixture.Codec` и ручной плагин нагрузки
+  `Core.LabelsFixture.Event.Limited.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
   """
 
   alias Core.EventFixture.ActorID
@@ -297,42 +301,6 @@ defmodule Core.LabelsFixture do
 
     def unit(%Core.LabelsFixture.Unit{value: "kg"}), do: "Килограмм"
     def unit(%Core.LabelsFixture.Unit{value: "pc"}), do: "Штука"
-  end
-
-  defmodule UserRef do
-    @moduledoc "OpenAPI-схема ссылки на учётную запись `%{id, login}`."
-
-    alias OpenApiSpex.Schema
-
-    require OpenApiSpex
-
-    OpenApiSpex.schema(
-      %{
-        title: "UserRef",
-        type: :object,
-        properties: %{id: %Schema{type: :string}, login: %Schema{type: :string, nullable: true}},
-        required: ~w(id login)a
-      },
-      struct?: false
-    )
-  end
-
-  defmodule Wire do
-    @moduledoc """
-    Дамп сведений на wire и их схема: внешний профиль кодека, ссылка на учётную запись `%{id, login}`.
-    """
-
-    use Core.Web.Labels,
-      codec: Core.CodecFixture.External,
-      user_ref: [
-        dump: &Core.LabelsFixture.Wire.user_ref/2,
-        schema: Core.LabelsFixture.UserRef
-      ]
-
-    @doc "Ссылка на учётную запись: дамп id и имя."
-    @spec user_ref(String.t(), String.t() | nil) :: %{id: String.t(), login: String.t() | nil}
-
-    def user_ref(id, login) when is_binary(id), do: %{id: id, login: login}
   end
 
   defmodule Event do
@@ -659,6 +627,27 @@ defmodule Core.LabelsFixture do
       use Core.Labels.Event, title: "Ссылка без вида"
     end
 
+    defmodule Limited do
+      @moduledoc "Событие с map'ой с id в ключах на ручном плагине: ключи дампит кодек."
+
+      defmodule Payload do
+        @moduledoc "Лимиты по позициям."
+
+        defstruct [:limits]
+
+        use Core.Labels.Fields,
+          fields: [limits: [type: :map]],
+          labels: [limits: [label: "Лимиты", key: "Позиция", value: "Лимит"]]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Лимиты заданы"
+    end
+
     defmodule Renamed do
       @moduledoc "Событие с нагрузкой-Prim."
 
@@ -707,5 +696,88 @@ defmodule Core.LabelsFixture do
       event: Event,
       type: "labels",
       tags: @tag_by_mod
+  end
+
+  defmodule Codec do
+    @moduledoc "Плагин вложенных struct'ов нагрузки и ручной нагрузки `Event.Limited` — для дампа событий фасадами."
+
+    alias Core.LabelsFixture
+
+    use Core.Codec.Plugin,
+      fields: [
+        {LabelsFixture.Address,
+         city: [prim: LabelsFixture.Name],
+         zip: [type: :string, optional: true],
+         checksum: [type: :string, optional: true]},
+        {LabelsFixture.Line, title: [prim: LabelsFixture.Name], count: [prim: LabelsFixture.Count]}
+      ]
+  end
+
+  defmodule Event.Limited.Codec do
+    @moduledoc "Ручной плагин нагрузки `Event.Limited`: ключи-id и значения — дампом кодека."
+
+    alias Core.LabelsFixture.Count
+    alias Core.LabelsFixture.Event.Limited
+    alias Core.LabelsFixture.ItemID
+    alias Core.Result
+
+    use Core.Codec.Plugin,
+      types: [Limited.Payload]
+
+    @impl true
+    def dump(%Limited.Payload{limits: limits}, codec),
+      do: %{"limits" => Map.new(limits, fn {id, limit} -> {codec.dump(id), codec.dump(limit)} end)}
+
+    @impl true
+    def load(Limited.Payload, %{"limits" => limits}, codec) when is_map(limits) do
+      limits
+      |> Map.to_list()
+      |> Result.traverse(&load_limit(&1, codec))
+      |> Result.map(&%Limited.Payload{limits: Map.new(&1)})
+    end
+
+    # ---
+
+    defp load_limit({id, limit}, codec) do
+      with {:ok, id} <- codec.load(ItemID, id),
+           {:ok, limit} <- codec.load(Count, limit),
+           do: {:ok, {id, limit}}
+    end
+  end
+
+  defmodule WebEvent.Codec do
+    @moduledoc "Кодек событий страницы событий со сведениями (плагин фасадов `Core.CodecFixture.*`)."
+
+    alias Core.LabelsFixture.Event
+
+    @tag_by_mod %{
+      Event.Updated => "labels_web.updated",
+      Event.Shipped => "labels_web.shipped",
+      Event.NameChanged => "labels_web.name_changed",
+      Event.StatusSwitched => "labels_web.status_switched",
+      Event.Linked => "labels_web.linked",
+      Event.Limited => "labels_web.limited",
+      Event.Renamed => "labels_web.renamed",
+      Event.Closed => "labels_web.closed"
+    }
+
+    use Core.Es.Event.Codec,
+      event: Event,
+      type: "labels_web",
+      tags: @tag_by_mod
+  end
+
+  defmodule WebEvent do
+    @moduledoc "Событие страницы событий со сведениями; ссылка на учётную запись — `%{id, login}`."
+
+    use Core.Web.Event,
+      codec: Core.CodecFixture.External,
+      user_ref: [dump: &Core.LabelsFixture.WebEvent.user_ref/2],
+      labels: true
+
+    @doc "Ссылка на учётную запись: дамп id и имя."
+    @spec user_ref(String.t(), String.t() | nil) :: %{id: String.t(), login: String.t() | nil}
+
+    def user_ref(id, login) when is_binary(id), do: %{id: id, login: login}
   end
 end

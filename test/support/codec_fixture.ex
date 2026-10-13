@@ -7,7 +7,9 @@ defmodule Core.CodecFixture do
   Доменных плагинов у библиотеки нет: в списке — `Core.Outbox.Codec`, без которого
   `Outbox.Repo.Pg.Schema` не смог бы писать и читать записи очереди, и кодеки событий
   агрегатов тестов: `Core.EventFixture.Event.Codec`, `Core.EsFixture.Account.Event.Codec`,
-  `Core.DerivedFixture.Event.Codec` и `Core.WebEventFixture.Event.Codec`.
+  `Core.DerivedFixture.Event.Codec`, `Core.WebEventFixture.Event.Codec` и `Core.LabelsFixture.WebEvent.Codec`
+  с плагинами нагрузки `Core.LabelsFixture.Shape.Codec`, `Core.LabelsFixture.Codec` и
+  `Core.LabelsFixture.Event.Limited.Codec`.
   """
 
   defmodule Prim.Internal do
@@ -39,7 +41,11 @@ defmodule Core.CodecFixture do
     Core.DerivedFixture.Event.Codec,
     Core.DerivedFixture.Mark.Codec,
     Core.DerivedFixture.Place.Codec,
-    Core.WebEventFixture.Event.Codec
+    Core.WebEventFixture.Event.Codec,
+    Core.LabelsFixture.WebEvent.Codec,
+    Core.LabelsFixture.Shape.Codec,
+    Core.LabelsFixture.Codec,
+    Core.LabelsFixture.Event.Limited.Codec
   ]
 
   @doc "Плагины entity-фасадов."

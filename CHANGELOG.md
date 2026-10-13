@@ -87,19 +87,8 @@
     семейства со спекой его плагина. Пустой обход — провал; провал перечисляет все пробелы с модулем
     и полем. Свой тест полноты переносится на него: числовые нижние границы и перечень кодеков
     удаляются;
-  - `use Core.Web.Labels, codec:, user_ref: [dump:]` в модуле приложения — wire сведений: порождает
-    `to_wire/2` — событие и словарь ссылок → `%{title, details}` для JSON. Вид — строкой, число —
-    строкой с десятичной точкой, текст и даты — дампом `codec:` (внешний профиль кодека), ссылка на
-    запись — `%{entity, id, name}` с видом записи в camelCase, ссылка на учётную запись — результат
-    `dump:` (захват «дамп id, имя → map» арности 2), изменение — `%{label, kind: "change", old, new}`;
-    у элемента списка и стороны изменения `label` нет. Id вне словаря ссылок — `ArgumentError`. Нет
-    опции, `codec:` без `dump/1`, `dump:` не захватом арности 2 — `CompileError`. Если у приложения
-    есть `open_api_spex` (теперь — `optional: true` зависимость библиотеки, ADR-0064), тот же `use`
-    делает модуль схемой семейства сведений: `schema/0` — `oneOf` по видам с дискриминатором `kind`,
-    схемы видов — вложенные модули `KindText` … `KindChange` с названиями от последнего сегмента имени
-    модуля (`EventDetail`, `EventDetailText`, …), значение `user` ссылается на модуль схемы из
-    обязательной тогда `user_ref: [schema:]`; без неё или `schema:` без `schema/0` — `CompileError`.
-    Без `open_api_spex` модуль остаётся только дампом, и `schema:` не требуется.
+  - название и сведения на wire — событие страницы событий с `labels: true` (пункт о
+    `Core.Web.Event` ниже).
 
   Подключение по желанию: модуль без объявлений собирается как прежде. Потребитель со своей
   подсистемой подписей переходит переименованием: `MyApp.Labels.Event` → `Core.Labels.Event`,
@@ -108,21 +97,14 @@
   `MyApp.Labels.Text` → `Core.Labels.Text`, свой сборщик словаря ссылок и behaviour резолвера →
   `Core.Labels.Refs.get/2` и `@behaviour Core.Labels.Resolver` с колбэком `get_names/2`; вид записи
   — атомом вместо camelCase-строки (`entity: "stockItem"` → `entity: :stock_item`); ошибки сборки
-  объявлений — `CompileError` вместо `ArgumentError`; свой дамп сведений в презентере события
-  (`dump_detail/2` над `Details.build/1`) и своя схема сведений с модулями видов → один модуль с
-  `use Core.Web.Labels, user_ref: [dump:, schema:]` на месте прежней схемы (`MyAppWeb.Schemas.EventDetail`)
-  и `Map.merge(машинные_поля, EventDetail.to_wire(event, refs))`, wire `title` / `details` и названия схем
-  видов не меняются; схема ссылки на запись `{entity, id, name}` — внутри схемы вида `ref`, отдельный
-  модуль схемы ссылки удаляется. Новый раздел яруса потребителя
+  объявлений — `CompileError` вместо `ArgumentError`; свой дамп сведений в презентере события — см.
+  переход в пункте о `Core.Web.Event`. Новый раздел яруса потребителя
   `app/11-domain.md`, «Подписи», действует только на приложение, отдающее сведения событий; ручные `label/1` / `labels/0` у Enum в нём — MUST NOT,
   строка таблицы `@moduledoc` подписью не служит, вид объявлен у каждого Prim-идентификатора,
   достижимого из сведений. В `app/13-repos.md`, «Страница потока», — страница событий уходит со
   словарём ссылок, его собирает тот же usecase одним `Refs.get/2`, резолвер — `Query`
   контекста-владельца записи. В `app/19-testing.md`, «Ратчеты», — приложение, отдающее сведения
   событий, подключает `Core.Labels.CompletenessCase` в `test/my_app/labels/completeness_test.exs`.
-  В `app/15-web-api.md`, «Сведения событий», — сведения уходят на wire только через модуль с
-  `use Core.Web.Labels`; свой обход сведений в презентере и ручная копия схемы сведений — MUST NOT,
-  схема события ссылается на модуль с `use`; дамп события — `Core.Web.Event` (пункт ниже).
 
 - **Событие страницы событий `Core.Web.Event`** (решение —
   `docs/adr/0066-event-page-event-absorbs-details-wire.md`; норма — `docs/rules/app/15-web-api.md`,
@@ -137,6 +119,15 @@
   `dump/1`, неизвестная опция, `user_ref:` без `dump:` или с неизвестной опцией, `dump:` не захватом
   арности 2 — `CompileError`.
 
+  `labels: true` (по умолчанию `false`) добавляет `title` и `details` — название и сведения события
+  (`Core.Labels.Details.build/1`) для JSON: вид — строкой, число — строкой с десятичной точкой, текст
+  и даты — дампом `codec:`, ссылка на запись — `%{entity, id, name}` с видом записи в camelCase,
+  ссылка на учётную запись — результат `dump:` той же `user_ref:`, что у `by`, изменение —
+  `%{label, kind: "change", old, new}`; у элемента списка и стороны изменения `label` нет; id вне
+  словаря ссылок — `ArgumentError`. Профиль кодека и ссылка на учётную запись объявляются один раз
+  на событие и сведения, поэтому автор события и учётная запись в сведениях не расходятся формой.
+  `labels:` не boolean и `labels: true` без `user_ref:` — `CompileError`.
+
   Переход: свой презентер события
   (`fields = event |> OutCodec.dump() |> Es.Event.Codec.to_fields()` и сборка
   `%{id, aggregateId, type, payload: Keys.camelize(...), at, by}`) → модуль с `use Core.Web.Event` и
@@ -146,9 +137,13 @@
   `use Core.Labels.ID, kind: :user, resolver:`; функция `dump:` получает имя `nil`, если у записи
   его нет. Своё правило у отдельного
   события — правкой результата: `%{Event.to_wire(event, refs) | payload: nil}`. Подмена строк-id
-  учётных записей в нагрузке пропадает: имена — в сведениях события. В `app/15-web-api.md` — новый
+  учётных записей в нагрузке пропадает: имена — в сведениях события. Свой дамп сведений в презентере
+  события (`dump_detail/2` над `Details.build/1` и `Map.merge(машинные_поля, %{title, details})`) →
+  `labels: true` у того же модуля; wire `title` / `details` не меняется. В `app/15-web-api.md` — новый
   раздел «Событие страницы событий»: событие уходит на wire только через модуль с
-  `use Core.Web.Event`, свой презентер события — MUST NOT.
+  `use Core.Web.Event`, свой презентер события — MUST NOT; в разделе «Сведения событий» — сведения
+  уходят на wire только через тот же модуль с `labels: true`, свой обход сведений в презентере —
+  MUST NOT.
 
 - **OpenAPI-схема обёртки ответа `Core.Web.Response.Schema`** (решение —
   `docs/adr/0065-response-wrapper-schema-functions.md`; норма — `docs/rules/10-architecture.md`,
@@ -156,6 +151,7 @@
   молча оставила её в старой форме. Теперь схему того, что пишет `Core.Web.Response`, даёт
   библиотека, и тест сверяет с ней `Response.success/0,1`, страницу `page_data/2` под `success/1`,
   `Response.error/2,3` и каждую строку `Core.Web.ErrorMapper.map/2`.
+  `open_api_spex` теперь — `optional: true` зависимость библиотеки (ADR-0064).
   Модуль собирается, только если `open_api_spex` был у приложения при сборке `core`: добавленный
   позже требует `mix deps.compile core --force`. `Response.Schema.error()` — модуль
   `Core.Web.Response.Schema.Error` с названием `ErrorResponse`, одна схема на все статусы ошибки:
