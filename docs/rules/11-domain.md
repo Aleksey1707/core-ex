@@ -900,6 +900,31 @@ end
 
 Проверяется: `test/core/labels/fields_test.exs`.
 
+### Подписи значений (`Core.Labels.Values`)
+
+`use Core.Labels.Values, labels:` в Enum после `use Core.Enum` — подпись каждого значения. Порождает
+`label/1` — подпись значения — и `labels/0` — пары «значение — подпись» в порядке `values/0`, а не
+`labels:`.
+
+```elixir
+use Core.Enum,
+  name: first_line(@moduledoc),
+  values: ~w(active closed)a
+
+use Core.Labels.Values,
+  labels: [active: "Активна", closed: "Закрыта"]
+```
+
+- `label/1` принимает только значения Enum: голова закрывает домен, иное — `FunctionClauseError`, а
+  при известном значении — предупреждение компилятора
+- Значение без подписи и подпись вне Enum — `CompileError`
+- Повтор значения, пустая или не строковая подпись, `labels:` не keyword-списком — `CompileError`
+- `use` не после `use Core.Enum` — `CompileError`
+
+Поле нагрузки вида `enum:` выходит в сведения текстом — подписью значения.
+
+Проверяется: `test/core/labels/values_test.exs`; вывод типов — `make consumer-check`.
+
 ### Сведения события (`Core.Labels.Details`)
 
 `Details.build/1` — чистая функция «событие → `{название, сведения}`». Сведение —
@@ -907,7 +932,7 @@ end
 
 | `kind` | Спека поля |
 |---|---|
-| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет» |
+| `:text` | Prim `:string`; `type: :string`; `type: :boolean` — «Да» / «Нет»; `enum:` — подпись значения |
 | `:number` | Prim `:integer`, `:decimal`; `type:` целого |
 | `:date`, `:datetime` | Prim `:date`, `:datetime` |
 

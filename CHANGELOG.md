@@ -44,16 +44,20 @@
     ещё `payload:` (подпись нагрузки);
   - `use Core.Labels.Fields, labels:` в нагрузке `Core.Es.Event.Payload` после её `use`: по каждому
     полю подпись или `:hidden`; нагрузка-struct события с названием без него не собирается;
+  - `use Core.Labels.Values, labels:` в Enum после `use Core.Enum`: подпись каждого значения;
+    порождает `label/1` (только значения Enum, иное — `FunctionClauseError`) и `labels/0` — пары в
+    порядке `values/0`;
   - `Core.Labels.Details.build/1` — событие → `{название, сведения}`; сведение —
     `%{label, kind, value}` с видом `:text`, `:number`, `:date`, `:datetime` по спеке нагрузки и
-    значением-Prim без дампа.
+    значением-Prim без дампа; поле `enum:` — `:text` с подписью значения.
 
   Подключение по желанию: модуль без объявлений собирается как прежде. Потребитель со своей
   подсистемой подписей переходит переименованием: `MyApp.Labels.Event` → `Core.Labels.Event`,
-  `MyApp.Labels.Fields` → `Core.Labels.Fields`, `MyApp.Labels.Details` → `Core.Labels.Details`;
-  ошибки сборки объявлений — `CompileError` вместо `ArgumentError`. Новый раздел яруса
-  потребителя `app/11-domain.md`, «Подписи», действует только на приложение, отдающее сведения
-  событий.
+  `MyApp.Labels.Fields` → `Core.Labels.Fields`, `MyApp.Labels.Values` → `Core.Labels.Values`,
+  `MyApp.Labels.Details` → `Core.Labels.Details`; ошибки сборки объявлений — `CompileError` вместо
+  `ArgumentError`. Новый раздел яруса потребителя `app/11-domain.md`, «Подписи», действует только на
+  приложение, отдающее сведения событий; ручные `label/1` / `labels/0` у Enum в нём — MUST NOT,
+  строка таблицы `@moduledoc` подписью не служит.
 
 ### Изменения контракта макросов
 

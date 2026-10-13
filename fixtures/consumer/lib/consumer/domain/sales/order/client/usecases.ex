@@ -18,4 +18,6 @@ defmodule Consumer.Domain.Sales.Order.Client.Usecases do
       end
     end)
   end
+
+  def status_label(%Order{} = order), do: Order.Status.label(Order.status(order))
 end

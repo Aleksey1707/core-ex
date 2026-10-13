@@ -1,7 +1,7 @@
 defmodule Core.LabelsFixture do
   @moduledoc """
   События и нагрузки с подписями (`Core.Labels.*`): нагрузка по полям всех видов сведений,
-  нагрузка-Prim и событие без нагрузки.
+  нагрузка с полями Enum, нагрузка-Prim и событие без нагрузки.
   """
 
   alias Core.EventFixture.ActorID
@@ -44,6 +44,29 @@ defmodule Core.LabelsFixture do
 
     use Core.Prim.DateTime,
       name: "Момент"
+  end
+
+  defmodule Status do
+    @moduledoc """
+    Статус.
+
+    | Значение | Описание |
+    |---|---|
+    | `:draft` | черновик |
+    | `:active` | действует |
+    | `:archived` | убран в архив |
+    """
+
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(draft active archived)a
+
+    use Core.Labels.Values,
+      labels: [
+        active: "Активна",
+        archived: "В архиве",
+        draft: "Черновик"
+      ]
   end
 
   defmodule Event do
@@ -90,6 +113,33 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Запись изменена"
+    end
+
+    defmodule StatusChanged do
+      @moduledoc "Событие с нагрузкой из полей Enum: обязательное и необязательное."
+
+      defmodule Payload do
+        @moduledoc "Нагрузка с полями Enum."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            status: [enum: Core.LabelsFixture.Status],
+            previous: [enum: Core.LabelsFixture.Status, optional: true]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            status: "Статус",
+            previous: "Прежний статус"
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Статус сменён"
     end
 
     defmodule Renamed do

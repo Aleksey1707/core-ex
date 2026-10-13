@@ -3,14 +3,15 @@ defmodule Core.Labels.Details do
   Название и сведения события: чистая функция «событие → `{название, сведения}`» (ADR-0063).
 
   Обходит нагрузку по объявлениям — название события и подпись нагрузки-Prim
-  (`Core.Labels.Event`), подписи полей нагрузки (`Core.Labels.Fields`) — и отдаёт список
-  сведений из Prim-значений. Дампа нет: значения — Prim как есть, в JSON их переводит wire.
+  (`Core.Labels.Event`), подписи полей нагрузки (`Core.Labels.Fields`), подписи значений Enum
+  (`Core.Labels.Values`) — и отдаёт список сведений из Prim-значений. Дампа нет: значения — Prim
+  как есть, в JSON их переводит wire.
 
   Сведение — `%{label, kind, value}`. Вид — по спеке поля нагрузки:
 
   | `kind` | Спека поля | `value` |
   |---|---|---|
-  | `:text` | Prim `kind: :string`; `type: :string`, `type: :boolean` | Prim; строка; «Да» / «Нет» |
+  | `:text` | Prim `kind: :string`; `type: :string`, `type: :boolean`; `enum:` | Prim; строка; «Да» / «Нет»; подпись |
   | `:number` | Prim `kind: :integer`, `kind: :decimal`; `type:` целого | Prim; целое |
   | `:date` | Prim `kind: :date` | Prim |
   | `:datetime` | Prim `kind: :datetime` | Prim |
@@ -69,6 +70,7 @@ defmodule Core.Labels.Details do
   defp detail(label, spec, value), do: %{label: label, kind: kind(spec), value: value(spec, value)}
 
   defp kind({:prim, module}), do: prim_kind(module.__domain_kind__())
+  defp kind({:enum, _module}), do: :text
   defp kind({:type, type}), do: type_kind(type)
 
   defp prim_kind(:string), do: :text
@@ -83,5 +85,6 @@ defmodule Core.Labels.Details do
   defp value(_spec, nil), do: nil
   defp value({:type, :boolean}, true), do: "Да"
   defp value({:type, :boolean}, false), do: "Нет"
+  defp value({:enum, module}, value), do: module.label(value)
   defp value(_spec, value), do: value
 end

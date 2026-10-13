@@ -59,6 +59,27 @@ defmodule Core.Labels.DetailsTest do
     end
   end
 
+  describe "поле Enum" do
+    test "сведение text с подписью значения" do
+      payload = Event.StatusChanged.Payload.new(:active, :draft)
+
+      assert Details.build(event(Event.StatusChanged, payload)) ==
+               {"Статус сменён",
+                [
+                  %{label: "Статус", kind: :text, value: "Активна"},
+                  %{label: "Прежний статус", kind: :text, value: "Черновик"}
+                ]}
+    end
+
+    test "поле без значения — value: nil" do
+      payload = Event.StatusChanged.Payload.new(:archived, nil)
+
+      {_title, details} = Details.build(event(Event.StatusChanged, payload))
+
+      assert %{label: "Прежний статус", kind: :text, value: nil} in details
+    end
+  end
+
   test "нагрузка-Prim — одно сведение с подписью payload:" do
     name = Name.new!("Склад")
 

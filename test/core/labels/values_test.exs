@@ -1,0 +1,91 @@
+defmodule Core.Labels.ValuesTest do
+  use ExUnit.Case, async: true
+
+  alias Core.LabelsFixture.Status
+
+  test "label/1 — подпись значения" do
+    assert Status.label(:active) == "Активна"
+    assert Status.label(:archived) == "В архиве"
+  end
+
+  test "label/1 вне Enum — FunctionClauseError" do
+    assert_raise FunctionClauseError, fn -> Status.label(Enum.random([:unknown])) end
+  end
+
+  test "labels/0 — пары в порядке values/0, а не labels:" do
+    assert Status.labels() == [draft: "Черновик", active: "Активна", archived: "В архиве"]
+    assert Keyword.keys(Status.labels()) == Status.values()
+  end
+
+  describe "отказ сборки" do
+    test "значение без подписи — CompileError" do
+      assert_raise CompileError, ~r/Missing: значения без подписи: \[:done\]/, fn ->
+        compile_enum(:Missing, labels: [new: "Новый"])
+      end
+    end
+
+    test "подпись вне Enum — CompileError" do
+      assert_raise CompileError, ~r/Extra: подписи значений вне Enum: \[:lost\]/, fn ->
+        compile_enum(:Extra, labels: [new: "Новый", done: "Готов", lost: "Потерян"])
+      end
+    end
+
+    test "повтор значения — CompileError" do
+      assert_raise CompileError, ~r/Twice: labels: — ключи повторяются \[:new\]/, fn ->
+        compile_enum(:Twice, labels: [new: "Новый", new: "Свежий", done: "Готов"])
+      end
+    end
+
+    test "пустая подпись — CompileError" do
+      assert_raise CompileError, ~r/Blank: labels: значение done — непустая строка, задано ""/, fn ->
+        compile_enum(:Blank, labels: [new: "Новый", done: ""])
+      end
+    end
+
+    test "не строковая подпись — CompileError" do
+      assert_raise CompileError, ~r/NotText: labels: значение done — непустая строка, задано :hidden/, fn ->
+        compile_enum(:NotText, labels: [new: "Новый", done: :hidden])
+      end
+    end
+
+    test "labels: не keyword-список — CompileError" do
+      assert_raise CompileError, ~r/List: labels: — непустой keyword-список, задано \["Новый"\]/, fn ->
+        compile_enum(:List, labels: ["Новый"])
+      end
+    end
+
+    test "без labels: — CompileError" do
+      assert_raise CompileError, ~r/Labels.Values: нет обязательных опций: \[:labels\]/, fn ->
+        compile_enum(:NoLabels, [])
+      end
+    end
+
+    test "модуль без use Core.Enum — CompileError" do
+      assert_raise CompileError, ~r/NotEnum — не Enum: `use Core.Labels.Values` подключается после/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.ValuesTest.NotEnum do
+              use Core.Labels.Values, labels: [new: "Новый"]
+            end
+          end
+        )
+      end
+    end
+  end
+
+  # ---
+
+  defp compile_enum(name, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          use Core.Enum, name: "Статус", values: ~w(new done)a
+
+          use Core.Labels.Values, unquote(opts)
+        end
+      end
+    )
+  end
+end

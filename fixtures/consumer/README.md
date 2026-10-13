@@ -44,7 +44,7 @@
   `Account.Event.Renamed.Payload`, ручной плагин нагрузки `Account.Event.Opened.Payload` (`Account.Codec`) и представление `Account.View` с `jsonb:` по типу `Account.Profile` и
   семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Подписи событий
   (`Core.Labels.*`): название у `Account.Event.Renamed` и `Account.Event.Closed`, подписи полей
-  нагрузки `Renamed`.
+  нагрузки `Renamed`, подписи значений `Order.Status` и вызов его `label/1` в usecases заказа.
   Актор `Client` — usecases с типовыми вызовами в каталоге каждого агрегата и read-модели; создание счёта ждёт проекцию `Activity` по `wait:`.
   Собирается без единого предупреждения — это страховка от ложных срабатываний. «Корректный» здесь —
   по типам и раскладке: `@doc` и `@spec` не пишутся, на вывод типов они не влияют, а Credo и прочие
