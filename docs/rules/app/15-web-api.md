@@ -46,7 +46,7 @@
 | `MyAppWeb.<Api>.<Version>.<Group>.<Resource>.*` | ресурс группы без своего ресурса (`/security/roles`): `<Group>` — только namespace, его `Schemas` и `Params` — по той же лестнице |
 | `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
 | `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
-| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: обёртка ответа, страница, ошибка, ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
+| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: обёртка ответа, страница, ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
 | `MyAppWeb.Params.*` | разбор входа, общий для поверхностей; общий для версий или ресурсов — `<Api>.Params.*`, `<Api>.<Version>.Params.*` |
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |

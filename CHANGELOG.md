@@ -125,6 +125,23 @@
   схема события ссылается на модуль с `use`; дамп события и подмена строк-id в машинной нагрузке
   остаются у приложения.
 
+- **OpenAPI-схема обёртки ответа `Core.Web.Response.Schema`** (решение —
+  `docs/adr/0065-response-wrapper-schema-functions.md`; норма — `docs/rules/10-architecture.md`,
+  «OpenAPI-схемы wire»). Раньше схему обёртки приложение описывало руками, и смена обёртки (ADR-0062)
+  молча оставила её в старой форме. Теперь схему того, что пишет `Core.Web.Response`, даёт
+  библиотека, и тест сверяет с ней `Response.error/2,3` и каждую строку `Core.Web.ErrorMapper.map/2`.
+  Модуль собирается, только если `open_api_spex` был у приложения при сборке `core`: добавленный
+  позже требует `mix deps.compile core --force`. `Response.Schema.error()` — модуль
+  `Core.Web.Response.Schema.Error` с названием `ErrorResponse`, одна схема на все статусы ошибки:
+  `status` — `enum ["error"]`, `code` — строка без перечисления, `message`, открытый `data` с
+  необязательным составом множества ошибок `errors: [{code, message}]`; пример — доменная ошибка с
+  `data.errors`. Свой компонент ошибки → `Response.Schema.error()` (`alias Core.Web.Response`: лист
+  `Schema` занят `OpenApiSpex.Schema`), свой модуль удаляется: было
+  `{"Ошибка", "application/json", MyAppWeb.Schemas.Error}` → стало
+  `{"Ошибка", "application/json", Response.Schema.error()}`; пример своего компонента старой формы
+  (`{code, messages, data}`) больше не проходит ратчет примеров (`app/15-web-api.md`, «Schemas»).
+  В `app/15-web-api.md`, «Раскладка», схема ошибки ушла из `MyAppWeb.Schemas.*`.
+
 ### Изменения контракта макросов
 
 - **`use Core.Web.Response, codes:` и `Core.Web.Response.Code` удалены** (ADR-0062). Код ответа

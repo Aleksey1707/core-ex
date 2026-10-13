@@ -160,6 +160,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | `Core.Web.Prefer` | заголовок `Prefer` (RFC 7240) → предпочтения `respond-async` / `wait`, режим ответа при серверном пределе (`mode/2`) и значение `Preference-Applied` по итоговому статусу (`applied/3`) |
 | `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` |
+| `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
 | `Core.Web.Labels` | сведения события на wire: `use` в модуле приложения порождает `to_wire/2` — `%{title, details}` для JSON, при `open_api_spex` — и их схему (`11-domain.md`, «Wire сведений») |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
@@ -216,22 +217,28 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 (ADR-0064).
 
 - Модуль библиотеки MUST NOT ссылаться на `OpenApiSpex` безусловно. Схема с параметром
-  потребителя — код в `quote` макроса, который включается, только если при раскрытии `use`
+  приложения — код в `quote` макроса, который включается, только если при раскрытии `use`
   `Code.ensure_loaded?(OpenApiSpex)` (образец — `Core.Web.Labels`); модуль схемы без параметра —
   под `if Code.ensure_loaded?(OpenApiSpex)`, ссылки на него из безусловных — в
   `elixirc_options: [no_warn_undefined: [...]]`, как у адаптеров брокеров.
-- Схема и дамп с параметром потребителя (профиль кодека, ссылка на учётную запись) MUST
-  порождаться одним `use` в модуле потребителя: параметр задан один раз и в схеме, и в дампе.
+- Схема и дамп с параметром приложения (профиль кодека, ссылка на учётную запись) MUST
+  порождаться одним `use` в модуле потребителя, параметр — опцией этого `use`: он задан один раз и
+  в схеме, и в дампе.
   Названия схем — от имени модуля потребителя, модули схем — в его пространстве.
-- Порождённые схемы MUST NOT строиться макросом `OpenApiSpex.schema/2`: он выключает
-  предупреждения всего модуля потребителя, а с ними — храповик вывода типов порождённых функций
-  (ADR-0014). Схема — `OpenApiSpex.build_schema/2` в атрибуте и `schema/0` под
+- Схема данных места вызова (схема `data` эндпоинта) MUST приходить аргументом функции условного
+  модуля библиотеки, а не опцией `use` и не модулем ответа у потребителя: с дампом она параметр не
+  делит, и порождать в его пространстве нечего (ADR-0065, `Core.Web.Response.Schema`).
+- Схемы библиотеки — порождённые и модули — MUST NOT строиться макросом `OpenApiSpex.schema/2`:
+  он выключает предупреждения всего модуля, у потребителя — и храповик вывода типов порождённых
+  функций (ADR-0014). Схема — `OpenApiSpex.build_schema/2` в атрибуте и `schema/0` под
   `@behaviour OpenApiSpex.Schema`.
-- Тест библиотеки MUST сверять дамп каждой формы со схемой, порождённой тем же `use`.
+- Тест библиотеки MUST сверять дамп каждой формы со схемой, порождённой тем же `use` или отданной
+  условным модулем.
 
 Проверяется: `make compile-no-optional` — сборка без `open_api_spex`; `make consumer-check` —
 фикстура-потребитель без `open_api_spex` собирает модуль с `use Core.Web.Labels` без
-предупреждений; сверка дампа со схемой — `test/core/web/labels_test.exs`.
+предупреждений; сверка дампа со схемой — `test/core/web/labels_test.exs`,
+`test/core/web/response/schema_test.exs`.
 
 ## Связанные правила
 
