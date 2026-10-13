@@ -5,7 +5,7 @@ defmodule Core.Labels.CompletenessCase do
 
       defmodule MyApp.Labels.CompletenessTest do
         use Core.Labels.CompletenessCase,
-          app: :my_app,
+          otp_app: :my_app,
           async: true
       end
 
@@ -35,14 +35,14 @@ defmodule Core.Labels.CompletenessCase do
   6. спека видимых полей `fields:` каждого варианта семейства с подписями совпадает со спекой его
      плагина (`variants:`): иначе подписи варианта разошлись бы с его wire-формой. Поле-дискриминатор
      в спеку плагина не входит и не сверяется. Семейство поля `union:` без плагина среди модулей
-     `app:` — провал, даже если плагин лежит в другом приложении: его вариантов обход не знает.
+     `otp_app:` — провал, даже если плагин лежит в другом приложении: его вариантов обход не знает.
 
   Логика теста — функция `check_*` (`:ok | {:error, пробелы}`), сам тест — `assert :ok = …`:
   провал перечисляет все пробелы разом, с модулем-владельцем, полем и модулем без объявления.
 
   ## Opts
 
-  - `app:` — приложение, чьи модули проверяются, обязательная; не загружено — провал всех тестов
+  - `otp_app:` — приложение, чьи модули проверяются, обязательная; не загружено — провал всех тестов
   - `async:` — опция `ExUnit.Case`, необязательная, по умолчанию `true`; явное значение требует
     `Credo.Check.Refactor.PassAsyncInTestCases`
   """
@@ -53,7 +53,7 @@ defmodule Core.Labels.CompletenessCase do
   alias Core.Labels.Text
 
   @label "Labels.CompletenessCase"
-  @required_keys ~w(app)a
+  @required_keys ~w(otp_app)a
   @optional_keys ~w(async)a
 
   @typedoc "Пробел: модуль-владелец, поле и модуль значения без объявления."
@@ -86,14 +86,14 @@ defmodule Core.Labels.CompletenessCase do
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    app = Helper.Opts.atom!(lit, :app, @label)
+    otp_app = Helper.Opts.atom!(lit, :otp_app, @label)
     async = async!(lit)
 
     quote do
       use ExUnit.Case, async: unquote(async)
 
       setup_all do
-        %{modules: Core.Labels.CompletenessCase.modules!(unquote(app))}
+        %{modules: Core.Labels.CompletenessCase.modules!(unquote(otp_app))}
       end
 
       test "обход находит события", %{modules: modules} do

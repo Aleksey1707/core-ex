@@ -105,21 +105,21 @@ defmodule Core.Labels.CompletenessCaseTest do
   end
 
   describe "опции" do
-    test "без app: — CompileError" do
-      assert_raise CompileError, ~r/нет обязательных опций: \[:app\]/, fn -> use_case(async: true) end
+    test "без otp_app: — CompileError" do
+      assert_raise CompileError, ~r/нет обязательных опций: \[:otp_app\]/, fn -> use_case(async: true) end
     end
 
-    test "app: не атом — CompileError" do
-      assert_raise CompileError, ~r/app: ожидается атом/, fn -> use_case(app: "core") end
+    test "otp_app: не атом — CompileError" do
+      assert_raise CompileError, ~r/otp_app: ожидается атом/, fn -> use_case(otp_app: "core") end
     end
 
     test "async: не boolean — CompileError" do
-      assert_raise CompileError, ~r/async: ожидается boolean/, fn -> use_case(app: :core, async: :yes) end
+      assert_raise CompileError, ~r/async: ожидается boolean/, fn -> use_case(otp_app: :core, async: :yes) end
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:otp_app\]/, fn ->
-        use_case(app: :core, otp_app: :core)
+      assert_raise CompileError, ~r/неизвестные опции: \[:app\]/, fn ->
+        use_case(otp_app: :core, app: :core)
       end
     end
   end
