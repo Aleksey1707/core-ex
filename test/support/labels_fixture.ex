@@ -5,7 +5,7 @@ defmodule Core.LabelsFixture do
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
-  семейства; фикстурные резолверы имён; модуль дампа сведений на wire (`Core.Web.Labels`).
+  семейства; фикстурные резолверы имён; модуль дампа сведений на wire и их схемы (`Core.Web.Labels`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
   набор ратчета полноты: в кодек не входят событие с id без вида и событие другого агрегата.
@@ -299,12 +299,35 @@ defmodule Core.LabelsFixture do
     def unit(%Core.LabelsFixture.Unit{value: "pc"}), do: "Штука"
   end
 
+  defmodule UserRef do
+    @moduledoc "OpenAPI-схема ссылки на учётную запись `%{id, login}`."
+
+    alias OpenApiSpex.Schema
+
+    require OpenApiSpex
+
+    OpenApiSpex.schema(
+      %{
+        title: "UserRef",
+        type: :object,
+        properties: %{id: %Schema{type: :string}, login: %Schema{type: :string, nullable: true}},
+        required: ~w(id login)a
+      },
+      struct?: false
+    )
+  end
+
   defmodule Wire do
-    @moduledoc "Дамп сведений на wire: внешний профиль кодека, ссылка на учётную запись `%{id, login}`."
+    @moduledoc """
+    Дамп сведений на wire и их схема: внешний профиль кодека, ссылка на учётную запись `%{id, login}`.
+    """
 
     use Core.Web.Labels,
       codec: Core.CodecFixture.External,
-      user_ref: [dump: &Core.LabelsFixture.Wire.user_ref/2]
+      user_ref: [
+        dump: &Core.LabelsFixture.Wire.user_ref/2,
+        schema: Core.LabelsFixture.UserRef
+      ]
 
     @doc "Ссылка на учётную запись: дамп id и имя."
     @spec user_ref(String.t(), String.t() | nil) :: %{id: String.t(), login: String.t() | nil}

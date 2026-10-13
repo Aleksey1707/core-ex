@@ -1,6 +1,8 @@
 defmodule Core.Web.LabelsTest do
   use ExUnit.Case, async: true
 
+  import OpenApiSpex.TestAssertions
+
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
   alias Core.EventFixture.ActorID
@@ -21,8 +23,12 @@ defmodule Core.Web.LabelsTest do
   alias Core.LabelsFixture.Title
   alias Core.LabelsFixture.Unit
   alias Core.LabelsFixture.UserID
+  alias Core.LabelsFixture.UserRef
   alias Core.LabelsFixture.Wire
   alias Core.Version
+  alias OpenApiSpex.Components
+  alias OpenApiSpex.Info
+  alias OpenApiSpex.OpenApi
 
   describe "нагрузка по полям" do
     test "вид строкой, число строкой с десятичной точкой, дата и дата-время дампом кодека, «Да»" do
@@ -80,7 +86,7 @@ defmodule Core.Web.LabelsTest do
 
   test "decimal кодека — нормальная запись строкой" do
     {{:module, wire, _bytecode, _exports}, []} =
-      compile_wire(:DecimalProfile, codec: Core.CodecFixture.Internal, user_ref: [dump: &Wire.user_ref/2])
+      compile_wire(:DecimalProfile, codec: Core.CodecFixture.Internal, user_ref: user_ref())
 
     payload = Event.Assigned.Payload.new(UserID.new(), %Shape.Circle{radius: 1}, Amount.new!("1E+3"), day(), moment())
     %Event.Assigned{by: by} = event = assigned(payload)
@@ -233,16 +239,58 @@ defmodule Core.Web.LabelsTest do
     assert wire(closed, %{}) == %{"title" => "Запись закрыта", "details" => []}
   end
 
+  describe "схема" do
+    test "семейство видов с дискриминатором kind, названия от модуля приложения" do
+      %OpenApi{components: %Components{schemas: schemas}} = spec()
+
+      kinds = ~w(text number date datetime user ref group list change)
+      titles = ~w(WireText WireNumber WireDate WireDateTime WireUser WireRef WireGroup WireList WireChange)
+      mapping = Map.new(Enum.zip(kinds, titles), fn {kind, title} -> {kind, "#/components/schemas/#{title}"} end)
+
+      assert %{discriminator: %{propertyName: "kind", mapping: ^mapping}, oneOf: one_of} = schemas["Wire"]
+      assert length(one_of) == length(kinds)
+      assert Enum.all?(titles ++ ["UserRef"], &Map.has_key?(schemas, &1))
+    end
+
+    test "форма вне схемы — отказ" do
+      %OpenApi{components: %Components{schemas: %{"Wire" => schema}}} = spec = spec()
+
+      for detail <- [
+            %{"kind" => "number", "value" => 3},
+            %{"kind" => "date", "value" => "13.10.2026"},
+            %{"kind" => "unknown", "value" => "x"},
+            %{"label" => "Автор", "kind" => "user", "value" => %{"id" => "u1"}},
+            %{"kind" => "ref", "value" => %{"id" => "i1", "name" => nil}},
+            %{"kind" => "group", "value" => [%{"kind" => "text", "value" => 1}]},
+            %{"label" => "Название", "kind" => "change", "old" => %{"kind" => "text", "value" => "a"}}
+          ] do
+        assert {:error, _} = OpenApiSpex.cast_value(detail, schema, spec), inspect(detail)
+      end
+    end
+  end
+
   describe "отказ сборки" do
+    test "user_ref: без schema: при open_api_spex — CompileError" do
+      assert_raise CompileError, ~r/NoSchema: user_ref: нет обязательных опций: \[:schema\]/, fn ->
+        compile_wire(:NoSchema, codec: External, user_ref: [dump: &Wire.user_ref/2])
+      end
+    end
+
+    test "schema: не схема OpenApiSpex — CompileError" do
+      assert_raise CompileError, ~r/user_ref: schema: модуль URI должен экспортировать schema\/0/, fn ->
+        compile_wire(:BadSchema, codec: External, user_ref: [dump: &Wire.user_ref/2, schema: URI])
+      end
+    end
+
     test "без codec: — CompileError" do
       assert_raise CompileError, ~r/Web.Labels: нет обязательных опций: \[:codec\]/, fn ->
-        compile_wire(:NoCodec, user_ref: [dump: &Wire.user_ref/2])
+        compile_wire(:NoCodec, user_ref: user_ref())
       end
     end
 
     test "codec: без dump/1 — CompileError" do
       assert_raise CompileError, ~r/Web.Labels: codec: модуль URI должен экспортировать dump\/1/, fn ->
-        compile_wire(:BadCodec, codec: URI, user_ref: [dump: &Wire.user_ref/2])
+        compile_wire(:BadCodec, codec: URI, user_ref: user_ref())
       end
     end
 
@@ -254,31 +302,52 @@ defmodule Core.Web.LabelsTest do
 
     test "user_ref: без dump: — CompileError" do
       assert_raise CompileError, ~r/NoDump: user_ref: нет обязательных опций: \[:dump\]/, fn ->
-        compile_wire(:NoDump, codec: External, user_ref: [])
+        compile_wire(:NoDump, codec: External, user_ref: [schema: UserRef])
       end
     end
 
     test "user_ref: с неизвестной опцией — CompileError" do
       assert_raise CompileError, ~r/Unknown: user_ref: неизвестные опции: \[:login\]/, fn ->
-        compile_wire(:Unknown, codec: External, user_ref: [dump: &Wire.user_ref/2, login: true])
+        compile_wire(:Unknown, codec: External, user_ref: [login: true] ++ user_ref())
       end
     end
 
     test "dump: не захват функции арности 2 — CompileError" do
       assert_raise CompileError, ~r/Arity: user_ref: dump: — захват функции арности 2/, fn ->
-        compile_wire(:Arity, codec: External, user_ref: [dump: &Kernel.inspect/1])
+        compile_wire(:Arity, codec: External, user_ref: [dump: &Kernel.inspect/1, schema: UserRef])
       end
     end
   end
 
   # ---
 
+  # Каждый дамп сверяется со схемой того же `use` (ADR-0064).
   defp wire(event, refs) do
-    event
-    |> Wire.to_wire(refs)
-    |> Jason.encode!()
-    |> Jason.decode!()
+    wire =
+      event
+      |> Wire.to_wire(refs)
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    spec = spec()
+
+    for detail <- wire["details"], do: assert_schema(detail, "Wire", spec)
+
+    wire
   end
+
+  defp spec do
+    OpenApiSpex.add_schemas(
+      %OpenApi{
+        info: %Info{title: "Core.Web.LabelsTest", version: "0"},
+        paths: %{},
+        components: %Components{schemas: %{}}
+      },
+      [Wire]
+    )
+  end
+
+  defp user_ref, do: [dump: &Wire.user_ref/2, schema: UserRef]
 
   defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
 

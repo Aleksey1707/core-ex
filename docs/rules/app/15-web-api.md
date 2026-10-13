@@ -9,7 +9,7 @@
 Общую часть границы даёт библиотека: обёртка ответа (`Core.Web.Response`), разбор
 параметров (`Core.Web.Params`), таблица `%Error{}` → статус (`Core.Web.ErrorMapper`), camelCase
 (`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`), сведения событий на wire
-(`Core.Web.Labels`) —
+и их схема (`Core.Web.Labels`) —
 `deps/core/docs/rules/10-architecture.md`, «Граница HTTP». Приложение её конфигурирует, а не
 повторяет: своих копий этих модулей быть
 не должно.
@@ -357,6 +357,10 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 строкой, число строкой и форма ссылки — контракт клиента, общий для всех приложений, и ручная копия
 расходится с ним молча.
 
+Схема сведений — тот же модуль с `use Core.Web.Labels`: с `open_api_spex` он и есть схема семейства
+сведений, и схема события ссылается на него (`items: MyAppWeb.Schemas.EventDetail`). Ручная копия
+схемы сведений MUST NOT: схема и дамп заданы одним объявлением, копия расходится с дампом молча.
+
 Дамп самого события (`id`, `type`, `payload`, `at`, `by`) и подмена строк-id в машинной нагрузке
 ссылками на учётную запись — дело приложения: `to_wire/2` их не трогает.
 
@@ -364,14 +368,17 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 # плохо — свой дамп сведений в презентере
 %{title: title, details: Enum.map(details, &dump_detail(&1, refs))}
 
-# хорошо — модуль дампа рядом с презентером события
-defmodule MyAppWeb.Presenters.EventLabels do
+# хорошо — один модуль: дамп сведений и их схема
+defmodule MyAppWeb.Schemas.EventDetail do
   use Core.Web.Labels,
     codec: MyApp.Codec.External,
-    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2]
+    user_ref: [
+      dump: &MyAppWeb.Presenters.User.ref/2,
+      schema: MyAppWeb.Schemas.UserRef
+    ]
 end
 
-Map.merge(%{id: fields.id, type: fields.type, payload: payload}, EventLabels.to_wire(event, refs))
+Map.merge(%{id: fields.id, type: fields.type, payload: payload}, EventDetail.to_wire(event, refs))
 ```
 
 ## Связанные правила

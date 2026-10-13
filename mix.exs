@@ -52,6 +52,8 @@ defmodule Core.MixProject do
       # потребителей, кто объявил соответствующий клиент у себя (см. README).
       {:rabbitmq_stream, "~> 0.4.2", optional: true},
       {:brod, "~> 4.7", optional: true},
+      # OpenAPI-схемы wire: порождаются у потребителя, у которого зависимость есть (ADR-0064)
+      {:open_api_spex, "~> 3.21", optional: true},
       # Криптография
       {:argon2_elixir, "~> 4.1"},
       {:fernetex, "~> 0.5"},
