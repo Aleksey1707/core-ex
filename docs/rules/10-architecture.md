@@ -158,62 +158,55 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 |---|---|
 | `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `If-Match` → `Version`: `explicit_version/2` (только явная), `expected_version/2` (`*` → `:current`), `optional_version/2` (нет заголовка → `:current`) |
 | `Core.Web.Prefer` | заголовок `Prefer` (RFC 7240) → предпочтения `respond-async` / `wait`, режим ответа при серверном пределе (`mode/2`) и значение `Preference-Applied` по итоговому статусу (`applied/3`) |
-| `Core.Web.Response` + `Core.Web.Response.Code` | конверт `%{code, messages[, data]}` и его числовые коды; `use Core.Web.Response, codes:` — конверт на своём словаре |
-| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, код конверта, текст, уровень лога}` |
+| `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
+| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
 
-`Core.Web.*` возвращает **данные**: map конверта и кортеж ответа. Ни `Plug.Conn`, ни
+`Core.Web.*` возвращает **данные**: map обёртки и кортеж ответа. Ни `Plug.Conn`, ни
 `Phoenix.Controller` в них не участвуют (исключение — `MetricsPlug`, он и есть плаг).
 
 Что остаётся у потребителя (роутер, эндпоинт, контроллеры, `FallbackController`, схемы, плаги,
 презентеры) — `deps/core/docs/rules/app/15-web-api.md`.
 
-`Core.Web.ErrorMapper.map/2` — чистая функция: `{статус, код конверта, текст, уровень лога}`.
+`Core.Web.ErrorMapper.map/2` — чистая функция: `{статус, обёртка ответа, уровень лога}`.
 `Logger` зовёт потребитель по возвращённому уровню (`nil` — не логировать): так таблица остаётся
 запросом и проверяется тестом построчно.
 
-| Ошибка | Статус | Код | Текст | Лог |
+| Ошибка | Статус | `code` | `message` | Лог |
 |---|---|---|---|---|
-| `%Error{kind: :domain, code: :version_mismatch}` | 412 | `:diff_version` | `message` | — |
-| `%Error{kind: :domain, code: :access_denied}` | 403 | `:error` | `message` | — |
-| `%Error{code: c}` любого `kind`, `c` в `auth_codes:` | 401 | `:auth_error` | константа | `:debug` |
-| `%Error{kind: :domain}` | 400 | `:domain_error` | `message` | — |
-| `%Error{kind: :app}` с любым `code` | 500 | `:critical` | шаблон | `:error` |
-| прочее (не `%Error{}`) | 500 | `:critical` | шаблон | `:error` |
+| `%Error{kind: :domain, code: :version_mismatch}` | 412 | `"version_mismatch"` | `message` | — |
+| `%Error{kind: :domain, code: :access_denied}` | 403 | `"access_denied"` | `message` | — |
+| `%Error{code: c}` любого `kind`, `c` в `auth_codes:` | 401 | `"not_authorized"` | константа | `:debug` |
+| `%Error{kind: :domain}` | 400 | `code` ошибки | `message` | — |
+| `%Error{kind: :app}` с любым `code` | 500 | `"internal_error"` | шаблон | `:error` |
+| прочее (не `%Error{}`) | 500 | `"internal_error"` | шаблон | `:error` |
 
 - Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту показывать
   нельзя, и она обязана попасть в лог (`12-errors.md`).
-- Доменный `:not_found` — 400 `:domain_error` по строке `kind: :domain`; своя строка 404 в
+- Доменный `:not_found` — 400 по строке `kind: :domain`; своя строка 404 в
   `Core.Web.ErrorMapper.map/2` MUST NOT. `:not_found` домен отдаёт и на ресурс из URI, и на запись,
   на которую ссылается тело команды, а по `%Error{}` маппер их не различит: 404 на существующий
   ресурс клиент прочтёт как «ресурса нет». Отказу домена на команде с `If-Match` 404 не нужен —
   по RFC 9110 §13.2.1 ответу достаточно не быть ни 2xx, ни 412. Приложение, чей домен разводит
   коды «ресурс не найден» и «ссылка не найдена», MAY отдать 404 своей клозой `map/1` перед
   делегированием.
-- На 401 наружу MUST уходить константный текст независимо от причины: разные тексты позволяют
-  перебирать учётки, сессии и токены. Причина — только в лог (`Error.format_chain/1`).
+- На 401 наружу MUST уходить константные код и текст независимо от причины: разные коды и тексты
+  позволяют перебирать учётки, сессии и токены. Причина — только в лог (`Error.format_chain/1`).
 - Опции: `auth_codes:` (дефолт `~w(unauthorized auth_failed invalid_token session_not_found)a`),
   `unauthorized_message:`, `critical_message:`.
 - Своя строка таблицы — клоза `map/1` маппера приложения. Свои клозы MUST объявляться **перед**
   делегированием в `Core.Web.ErrorMapper.map/2`: `map/2` не макрос и не behaviour, и порядок
   клоз — это приоритет строк.
+- Состав множества ошибок (`Error.many`) маппер отдаёт в `data.errors` (`[%{code, message}]`) только
+  на доменных строках: на 401 и 500 тексты элементов MUST NOT уходить наружу (`12-errors.md`,
+  «Состав на границе HTTP»).
+- `code` обёртки — код `%Error{}`, отдельного словаря кодов ответа нет: свой код ответа — код
+  ошибки в каталоге `<Aggregate>.Errors` или своя клоза `map/1`
+  (`{429, Core.Web.Response.error(:quota_exceeded, err.message), :debug}`).
 
 Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно, `:not_found` → 400 отдельным
-тестом.
-
-Расширение под потребителя — тремя независимыми шагами, каждый нужен только по надобности:
-
-| Нужно | Как |
-|---|---|
-| свой статус/код для конкретной ошибки | свои клозы `map/1` перед делегированием в `Core.Web.ErrorMapper.map/2` |
-| больше кодов конверта | свой `Core.Enum` поверх базового: `codes: Map.merge(Core.Web.Response.Code.codes(), %{...})` |
-| отдать эти коды в конверт | `use Core.Web.Response, codes: MyAppWeb.Response.Code` |
-
-Словарь потребителя MUST покрывать `Core.Web.Response.Code.values/0` — эти значения
-возвращает `ErrorMapper.map/2`.
-
-Проверяется: компиляция — билдер `Core.Web.Response`.
+тестом, состав `Error.many` — describe «множество ошибок».
 
 ## Связанные правила
 

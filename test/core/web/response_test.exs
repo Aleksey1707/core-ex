@@ -1,269 +1,33 @@
 defmodule Core.Web.ResponseTest do
   use ExUnit.Case, async: true
 
-  alias Core.Error
   alias Core.Pagination
   alias Core.Web.Response
 
-  require Error
-
-  # Process.get/1 → dynamic(); намеренный misuse пустого списка без type warning
-  defp empty_messages do
-    Process.put({__MODULE__, :empty_messages}, [])
-    Process.get({__MODULE__, :empty_messages})
+  test "success без данных — пустой data" do
+    assert Response.success() == %{status: "ok", data: %{}}
   end
 
-  test "коды конверта round-trip по всем значениям" do
-    for value <- Response.Code.values() do
-      assert {:ok, ^value} = Response.Code.from_code(Response.Code.to_code(value))
-    end
+  test "success с данными" do
+    assert Response.success(%{id: "1"}) == %{status: "ok", data: %{id: "1"}}
   end
 
-  test "известные коды конверта соответствуют контракту API" do
-    assert Response.Code.to_code(:success) == 0
-    assert Response.Code.to_code(:domain_error) == 2
-    assert Response.Code.to_code(:diff_version) == 3
-    assert Response.Code.to_code(:auth_error) == 8
-    assert Response.Code.to_code(:critical) == 9
-  end
-
-  test "values упорядочены по коду" do
-    assert Response.Code.values() ==
-             ~w(success error domain_error diff_version auth_error critical)a
-  end
-
-  test "success без данных и с данными" do
-    assert Response.success() == %{code: 0, messages: []}
-    assert Response.success(%{id: "1"}) == %{code: 0, messages: [], data: %{id: "1"}}
-  end
-
-  test "success с сообщениями" do
-    assert Response.success(%{id: "1"}, ["частично"]) ==
-             %{code: 0, messages: ["частично"], data: %{id: "1"}}
-
-    assert Response.success(%{id: "1"}, []) == %{code: 0, messages: [], data: %{id: "1"}}
-  end
-
-  test "error кладёт текст в messages" do
-    assert Response.error(:domain_error, "нельзя") == %{code: 2, messages: ["нельзя"]}
+  test "error — код строкой, текст и пустой data" do
+    assert Response.error(:invalid, "нельзя") ==
+             %{status: "error", data: %{}, code: "invalid", message: "нельзя"}
   end
 
   test "error с данными" do
-    assert Response.error(:domain_error, "нельзя", %{field: "name"}) ==
-             %{code: 2, messages: ["нельзя"], data: %{field: "name"}}
-  end
-
-  test "error кладёт список сообщений как есть" do
-    assert Response.error(:domain_error, ["имя пусто", "срок в прошлом"]) ==
-             %{code: 2, messages: ["имя пусто", "срок в прошлом"]}
-  end
-
-  test "error со списком сообщений и данными" do
-    assert Response.error(:domain_error, ["имя пусто", "срок в прошлом"], %{field: "name"}) ==
-             %{code: 2, messages: ["имя пусто", "срок в прошлом"], data: %{field: "name"}}
-  end
-
-  test "error с пустым списком — FunctionClauseError" do
-    empty = empty_messages()
-
-    assert_raise FunctionClauseError, fn -> Response.error(:domain_error, empty) end
-
-    assert_raise FunctionClauseError, fn ->
-      Response.error(:domain_error, empty, %{field: "name"})
-    end
-  end
-
-  test "error со списком не-строк — FunctionClauseError" do
-    assert_raise FunctionClauseError, fn -> Response.error(:domain_error, [:not_a_string]) end
-  end
-
-  test "error принимает состав множества ошибок" do
-    error =
-      Error.many(
-        code: :invalid,
-        ns: :test,
-        message: "форма невалидна",
-        errors: [
-          Error.domain(code: :blank, ns: :test, message: "имя пусто"),
-          Error.domain(code: :past, ns: :test, message: "срок в прошлом")
-        ]
-      )
-
-    assert Response.error(:domain_error, Error.messages(error)) ==
-             %{code: 2, messages: ["имя пусто", "срок в прошлом"]}
-  end
-
-  describe "свой словарь кодов" do
-    defmodule Code do
-      @moduledoc """
-      Код статуса конверта потребителя
-      """
-
-      import Core.Helper.String, only: [first_line: 1]
-
-      use Core.Enum,
-        name: first_line(@moduledoc),
-        codes: Map.merge(Response.Code.codes(), %{not_found: 10, conflict: 11, throttled: 4096})
-    end
-
-    defmodule CustomResponse do
-      @moduledoc false
-
-      use Core.Web.Response, codes: Core.Web.ResponseTest.Code
-    end
-
-    test "словарь собирается поверх базового, базовые коды не меняются" do
-      assert Code.to_code(:domain_error) == Response.Code.to_code(:domain_error)
-      assert Code.to_code(:not_found) == 10
-      assert Code.to_code(:throttled) == 4096
-      assert Code.values() -- Response.Code.values() == ~w(not_found conflict throttled)a
-    end
-
-    test "конверт отдаёт коды своего словаря" do
-      assert CustomResponse.error(:not_found, "нет") == %{code: 10, messages: ["нет"]}
-      assert CustomResponse.error(:domain_error, "нельзя") == %{code: 2, messages: ["нельзя"]}
-      assert CustomResponse.success(%{id: "1"}) == %{code: 0, messages: [], data: %{id: "1"}}
-      assert CustomResponse.success() == %{code: 0, messages: []}
-
-      assert CustomResponse.success(%{id: "1"}, ["частично"]) ==
-               %{code: 0, messages: ["частично"], data: %{id: "1"}}
-
-      assert CustomResponse.error(:not_found, "нет", %{id: "1"}) ==
-               %{code: 10, messages: ["нет"], data: %{id: "1"}}
-    end
-
-    test "конверт потребителя принимает список сообщений" do
-      assert CustomResponse.error(:domain_error, ["имя пусто", "срок в прошлом"]) ==
-               %{code: 2, messages: ["имя пусто", "срок в прошлом"]}
-
-      assert CustomResponse.error(:not_found, ["нет"], %{id: "1"}) ==
-               %{code: 10, messages: ["нет"], data: %{id: "1"}}
-    end
-
-    test "конверт потребителя с пустым списком — FunctionClauseError" do
-      empty = empty_messages()
-
-      assert_raise FunctionClauseError, fn -> CustomResponse.error(:domain_error, empty) end
-
-      assert_raise FunctionClauseError, fn ->
-        CustomResponse.error(:domain_error, empty, %{id: "1"})
-      end
-    end
-
-    test "код вне словаря — FunctionClauseError" do
-      assert_raise FunctionClauseError, fn -> CustomResponse.error(:unknown_code, "нет") end
-    end
-
-    test "конверт принимает результат ErrorMapper" do
-      error = Error.domain(code: :boom, ns: :test, message: "бум")
-      {_status, code, message, _level} = Core.Web.ErrorMapper.map(error)
-
-      assert CustomResponse.error(code, message) == %{code: 2, messages: ["бум"]}
-    end
-
-    test "page_data генерируется вместе с остальным конвертом" do
-      page = %Pagination.Result{items: [%{id: 1}], count: 1}
-
-      assert CustomResponse.page_data(page, &%{"id" => &1.id}) ==
-               %{count: 1, items: [%{"id" => 1}]}
-    end
-
-    test "словарь без базовых значений отвергается на компиляции" do
-      assert_raise CompileError, ~r/не покрывает базовые значения/, fn ->
-        Elixir.Code.eval_quoted(
-          quote do
-            defmodule Core.Web.ResponseTest.Narrow do
-              use Core.Enum, name: "Узкий", codes: %{success: 0, error: 1}
-            end
-
-            defmodule Core.Web.ResponseTest.NarrowResponse do
-              use Core.Web.Response, codes: Core.Web.ResponseTest.Narrow
-            end
-          end
-        )
-      end
-    end
-
-    test "словарь со строковыми кодами отвергается на компиляции" do
-      assert_raise CompileError, ~r/целочисленные коды/, fn ->
-        Elixir.Code.eval_quoted(
-          quote do
-            defmodule Core.Web.ResponseTest.Strings do
-              use Core.Enum,
-                name: "Строковый",
-                codes: %{
-                  success: "OK",
-                  error: "ERR",
-                  domain_error: "DOM",
-                  diff_version: "VER",
-                  auth_error: "AUTH",
-                  critical: "CRIT"
-                }
-            end
-
-            defmodule Core.Web.ResponseTest.StringsResponse do
-              use Core.Web.Response, codes: Core.Web.ResponseTest.Strings
-            end
-          end
-        )
-      end
-    end
-
-    test "свой код из зарезервированного диапазона отвергается на компиляции" do
-      assert_raise CompileError, ~r/нарушает контракт кодов/, fn ->
-        Elixir.Code.eval_quoted(
-          quote do
-            defmodule Core.Web.ResponseTest.Reserved do
-              use Core.Enum,
-                name: "Зарезервированный",
-                codes: Map.merge(Core.Web.Response.Code.codes(), %{not_found: 4})
-            end
-
-            defmodule Core.Web.ResponseTest.ReservedResponse do
-              use Core.Web.Response, codes: Core.Web.ResponseTest.Reserved
-            end
-          end
-        )
-      end
-    end
-
-    test "переопределение кода базового значения отвергается на компиляции" do
-      assert_raise CompileError, ~r/нарушает контракт кодов/, fn ->
-        Elixir.Code.eval_quoted(
-          quote do
-            defmodule Core.Web.ResponseTest.Shifted do
-              use Core.Enum,
-                name: "Сдвинутый",
-                codes: Map.merge(Core.Web.Response.Code.codes(), %{diff_version: 12})
-            end
-
-            defmodule Core.Web.ResponseTest.ShiftedResponse do
-              use Core.Web.Response, codes: Core.Web.ResponseTest.Shifted
-            end
-          end
-        )
-      end
-    end
-
-    test "неизвестная опция билдера отвергается на компиляции" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:foo\]/, fn ->
-        Elixir.Code.eval_quoted(
-          quote do
-            defmodule Core.Web.ResponseTest.BadOpts do
-              use Core.Web.Response, codes: Core.Web.ResponseTest.Code, foo: 1
-            end
-          end
-        )
-      end
-    end
+    assert Response.error(:invalid, "нельзя", %{errors: []}) ==
+             %{status: "error", data: %{errors: []}, code: "invalid", message: "нельзя"}
   end
 
   test "page прогоняет элементы через presenter" do
     page = %Pagination.Result{items: [%{id: 1}, %{id: 2}], count: 7}
 
     assert Response.page_data(page, &%{"id" => &1.id}) == %{
-             count: 7,
-             items: [%{"id" => 1}, %{"id" => 2}]
+             items: [%{"id" => 1}, %{"id" => 2}],
+             total: 7
            }
   end
 end

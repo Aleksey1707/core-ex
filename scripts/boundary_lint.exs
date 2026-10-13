@@ -39,7 +39,7 @@ defmodule BoundaryLint do
   @own_apps ~w(core argon2_elixir)a
   @repo_keys ~w(Repo ReadRepo)a
   @entry_suffixes ~w(Web Ingest App)
-  @web_parts ~w(Endpoint Router Telemetry ErrorJSON FallbackController ErrorMapper Accepted Response
+  @web_parts ~w(Endpoint Router Telemetry ErrorJSON FallbackController ErrorMapper Accepted
                 Schemas Presenters Plugs Params)
 
   def run(["--consumer" | dirs]) do

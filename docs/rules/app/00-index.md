@@ -231,7 +231,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | `12-errors.md` | словарь `ns`, каталоги ошибок, границы | есть |
 | `13-repos.md` | раскладка репозиториев, read vs write, View, Specs | есть |
 | `14-events-outbox.md` | теги событий, топики, поллер, подписчики, идемпотентность | есть |
-| `15-web-api.md` | Controller / Schemas / Presenter, конверт, аутентификация | нет |
+| `15-web-api.md` | Controller / Schemas / Presenter, обёртка ответа, аутентификация | нет |
 | `16-caching.md` | `<ReadRepo>.Cached`, ACL в ключе, инвалидация | нет |
 | `17-otp-concurrency.md` | дерево процессов, компоненты и тумблеры, наблюдение, циклы | есть |
 | `18-migrations.md` | блокировки, expand/contract, backfill, append-only | нет |

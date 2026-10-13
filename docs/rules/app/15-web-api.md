@@ -6,7 +6,7 @@
   плага аутентификации и обработки ошибок HTTP.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
-Общую часть границы даёт библиотека: конверт (`Core.Web.Response` и его словарь кодов), разбор
+Общую часть границы даёт библиотека: обёртка ответа (`Core.Web.Response`), разбор
 параметров (`Core.Web.Params`), таблица `%Error{}` → статус (`Core.Web.ErrorMapper`), camelCase
 (`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`) —
 `deps/core/docs/rules/10-architecture.md`, «Граница HTTP». Приложение её конфигурирует, а не
@@ -45,13 +45,12 @@
 | `MyAppWeb.<Api>.<Version>.<Group>.<Resource>.*` | ресурс группы без своего ресурса (`/security/roles`): `<Group>` — только namespace, его `Schemas` и `Params` — по той же лестнице |
 | `MyAppWeb.<Api>.<Version>.Schemas.*` | схемы, общие для ресурсов одной версии поверхности |
 | `MyAppWeb.<Api>.Schemas.*` | схемы, общие для версий одной поверхности |
-| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: конверт, страница, ошибка, ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
+| `MyAppWeb.Schemas.*` | схемы, общие для поверхностей: обёртка ответа, страница, ошибка, ответ записи `Written` / `Created`, заголовки `Prefer` / `Preference-Applied` |
 | `MyAppWeb.Params.*` | разбор входа, общий для поверхностей; общий для версий или ресурсов — `<Api>.Params.*`, `<Api>.<Version>.Params.*` |
 | `MyAppWeb.Presenters.*`, `MyAppWeb.Plugs.*` | View / domain → map ответа, одна форма на весь HTTP-слой; контекст и аутентификация. Презентер или плаг одной поверхности (версии, ресурса) — по той же лестнице, что `Schemas` |
 | `MyAppWeb.FallbackController`, `MyAppWeb.ErrorMapper` | ответ на ошибку и таблица статусов; один на приложение в корне, MAY — свой у поверхности (`<Api>.FallbackController`) |
 | `MyAppWeb.ErrorJSON` | ответ Phoenix на исключение (`render_errors:` у `Endpoint`) |
 | `MyAppWeb.Accepted` | режим ожидания `wait:` из `Prefer` и ответ команды по результату usecase — 200, 202 или 204, ответ удаления; один на приложение («Ожидание проекции») |
-| `MyAppWeb.Response`, `MyAppWeb.Response.Code` | конверт ответа `use Core.Web.Response, codes: MyAppWeb.Response.Code` (`deps/core/docs/rules/10-architecture.md`) |
 | `MyAppWeb.Endpoint`, `MyAppWeb.Router`, `MyAppWeb.Telemetry` | обвязка Phoenix |
 
 ```text
@@ -79,11 +78,11 @@ lib/my_app_web/{endpoint,router,telemetry}.ex
   ближайшего общего уровня (таблица выше), а не импортируется из соседнего ресурса. Разбор входа
   (`Params`), презентеры и плаги поднимаются по той же лестнице.
 - Ответ записи — `MyAppWeb.Schemas.Written` (`id` и целое `version`, оба обязательны; 200 удаления
-  и 202 любой команды) и `MyAppWeb.Schemas.Created` (`id`, обязателен; создание state-stored) —
-  MUST лежать в корне при любом числе поверхностей: форма ответа записи одна на приложение, и вторая
-  поверхность берёт ту же схему, а не заводит копию. Туда же и по той же причине — определения
-  заголовков ожидания `MyAppWeb.Schemas.Prefer`: параметр запроса `Prefer` и заголовок ответа
-  `Preference-Applied` («Ожидание проекции»).
+  и 202 любой команды) и `MyAppWeb.Schemas.Created` (`id`, обязателен; создание state-stored),
+  обе — в `data` обёртки ответа, — MUST лежать в корне при любом числе поверхностей: форма ответа
+  записи одна на приложение, и вторая поверхность берёт ту же схему, а не заводит копию. Туда же
+  и по той же причине — определения заголовков ожидания `MyAppWeb.Schemas.Prefer`: параметр
+  запроса `Prefer` и заголовок ответа `Preference-Applied` («Ожидание проекции»).
 - Модуль одной поверхности лежит в её namespace, общий для поверхностей — в корне под ролью из
   таблицы. `Helper` и другие имена без роли — MUST NOT: новая роль корня — новая строка таблицы.
 - `ErrorJSON` MUST лежать в `lib/my_app_web/error_json.ex`, а не в `controllers/`, куда его кладёт
@@ -92,12 +91,12 @@ lib/my_app_web/{endpoint,router,telemetry}.ex
 ```elixir
 # плохо — схема, общая для поверхностей, лежит в одной из них; вложенный ресурс — сосед родителя;
 # ответ записи у единственной поверхности — в её namespace
-defmodule MyAppWeb.Public.V1.Schemas.Envelope do
+defmodule MyAppWeb.Public.V1.Schemas.Page do
 defmodule MyAppWeb.Public.V1.OrderItem.Controller do
 defmodule MyAppWeb.Public.V1.Schemas.Written do
 
 # хорошо — ответ записи в корне при любом числе поверхностей
-defmodule MyAppWeb.Schemas.Envelope do
+defmodule MyAppWeb.Schemas.Page do
 defmodule MyAppWeb.Public.V1.Order.Item.Controller do
 defmodule MyAppWeb.Schemas.Written do
 
@@ -255,6 +254,8 @@ ADR-0039 (`deps/core/docs/adr/0039-usecase-awaits-projection-by-wait.md`).
   Параметр-заголовок `Prefer` и заголовок ответа `Preference-Applied` на 200 и 202 операция MUST
   объявлять общими определениями `MyAppWeb.Schemas.Prefer` («Раскладка»): без них клиент об отказе
   от ожидания не узнает.
+- Тело 200 и 202 — обёртка ответа `Response.success/1` (представление или `{id, version}` в `data`),
+  204 — без тела (ADR-0062, `deps/core/docs/adr/0062-response-wrapper.md`).
 - Ответ собирает один хелпер приложения — `MyAppWeb.Accepted` («Раскладка»): `wait/1` разбирает
   `Prefer` через `Core.Web.Prefer` и отдаёт режим `:none | pos_integer()` для `wait:` usecase,
   `respond/3` и `written/2` по результату usecase ставят `Preference-Applied` и отвечают 200 или
@@ -303,20 +304,20 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 ## FallbackController
 
 `FallbackController` таблицы статусов не содержит: он зовёт маппер приложения, отправляет
-конверт и логирует на уровне, который вернула таблица.
+обёртку ответа, которую вернула таблица, и логирует на её уровне.
 
 - Таблица маппера приложения — чистая функция, проверяемая тестом построчно: свои клозы `map/1`
   перед делегированием в `Core.Web.ErrorMapper.map/2` (`deps/core/docs/rules/10-architecture.md`,
   «Граница HTTP»).
 - `%Ecto.Changeset{}` в клозах MUST NOT: репозиторий его не отдаёт (`13-repos.md`).
 - Ошибку, не дошедшую до контроллера (неизвестный маршрут, неразобранное тело, отказ плага,
-  непойманное исключение), MUST отдавать тем же конвертом: клиент разбирает ответ одинаково на
+  непойманное исключение), MUST отдавать той же обёрткой: клиент разбирает ответ одинаково на
   любой ошибке API, и сгенерированный фреймворком формат здесь MUST NOT.
 
 ## Schemas
 
 - Только контракт HTTP request/response; смешивать с domain-struct и Ecto-схемой MUST NOT.
-- Конверт и страницы собираются общими хелперами, а не переписываются в каждом ресурсе.
+- Обёртка ответа и страницы собираются общими хелперами, а не переписываются в каждом ресурсе.
 - Значения справочников берутся из самого enum (`Enum.map(Status.values(), …)`), а не
   выписываются строками: иначе список разойдётся с доменом.
 - Форма, повторяющаяся в нескольких ответах, объявляется отдельной схемой и подключается
@@ -332,7 +333,7 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 | Представление | `OutCodec.dump(view)` — формат задаёт `<Aggregate>.View.Codec` |
 | Агрегат | `OutCodec.dump(agg)` либо ручной маппинг полей под форму API |
 | События | `OutCodec.dump(event)` → конверт целиком; нагрузка — `camelize` |
-| Страница | презентер отдаёт **один** элемент; `%{count, items}` собирает конверт |
+| Страница | презентер отдаёт **один** элемент; `%{items, total}` собирает `Response.page_data/2` |
 
 - Query-usecases отдают **представление**, а не агрегат: на read-пути презентер агрегаты не
   трогает (`13-repos.md`).

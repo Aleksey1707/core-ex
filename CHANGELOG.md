@@ -1,5 +1,45 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Обёртка ответа `Core.Web.Response`: `status` и строковый `code` из `%Error{}`** (решение —
+  `docs/adr/0062-response-wrapper.md`; норма — `docs/rules/10-architecture.md`, «Граница HTTP»;
+  `docs/rules/12-errors.md`, «Состав на границе HTTP»; `docs/rules/app/15-web-api.md`). Раньше тело
+  было `{code: <int>, messages: [...], data}`, а код ответа — число из словаря
+  `Core.Web.Response.Code` или `Core.Enum` потребителя, грубо дублирующее код `%Error{}`. Теперь —
+  форма, которую уже читает общий фронт: успех `{status: "ok", data}` (пустой — `data: %{}`),
+  ошибка `{status: "error", data, code, message}`, где `code` — код доменной ошибки строкой,
+  `"internal_error"` на 500 и `"not_authorized"` на 401. HTTP-статусы и тексты маппера не
+  менялись. Правка потребителя:
+  - `success()` → `%{status: "ok", data: %{}}`, `success(data)` → `%{status: "ok", data: data}`;
+    `success(data, messages)` удалён — предупреждения кладутся в свой `data`;
+  - `error(code, text | [texts])` → `error(code, text)` / `error(code, text, data)`: `code` — атом
+    кода ошибки (строка — `FunctionClauseError`), текст — одна строка;
+  - `page_data/2` → `%{items, total}` вместо `%{count, items}`; схемы страницы в OpenApiSpex
+    переименовывают `count` → `total`;
+  - `Core.Web.ErrorMapper.map/2` → `{status, body, level}` вместо `{status, code, text, level}`:
+    `body` — готовая обёртка, fallback-контроллер отправляет её как есть
+    (`conn |> put_status(status) |> json(body)`). Своя клоза маппера:
+    `{429, :error, err.message, :debug}` →
+    `{429, Core.Web.Response.error(:quota_exceeded, err.message), :debug}`;
+  - состав `Error.many` собирает маппер: на доменных строках — `data.errors: [%{code, message}]`.
+    Ветка fallback-контроллера `if code == :domain_error, do: Error.messages(error)` удаляется;
+  - тесты контроллеров: `%{"code" => 2, "messages" => [m]}` →
+    `%{"status" => "error", "code" => "<код>", "message" => m}`, `%{"code" => 0, "data" => d}` →
+    `%{"status" => "ok", "data" => d}`;
+  - ответ 202 (`{id, version}`) — в обёртке `Response.success/1`, 204 — по-прежнему без тела.
+
+### Изменения контракта макросов
+
+- **`use Core.Web.Response, codes:` и `Core.Web.Response.Code` удалены** (ADR-0062). Код ответа
+  теперь — код `%Error{}`, и словарь кодов ответа стал вторым источником кода рядом с каталогом
+  `<Aggregate>.Errors`. Правка потребителя: модули `MyAppWeb.Response` и `MyAppWeb.Response.Code`
+  удаляются, вызовы `MyAppWeb.Response.*` → `Core.Web.Response.*` (`alias Core.Web.Response`); свой
+  код ответа — код ошибки в каталоге агрегата или своя клоза `map/1` маппера. `boundary_lint
+  --consumer` больше не считает `Response` частью корня `MyAppWeb`.
+
 ## 0.13.2
 
 ### Новое

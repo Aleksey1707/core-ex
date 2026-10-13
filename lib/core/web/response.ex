@@ -1,265 +1,52 @@
 defmodule Core.Web.Response do
   @moduledoc """
-  Конверт ответа API: `%{code, messages}` / `%{code, messages, data}`.
+  Обёртка ответа API: `%{status: "ok", data}` / `%{status: "error", data, code, message}`.
 
-  Готовый конверт на базовом словаре (`Core.Web.Response.Code`) — сам этот модуль.
-  Потребителю, которому базовых кодов мало, — билдер:
+  `code` ошибки — строка: код `%Error{}` (`to_string(error.code)`) или константа
+  `Core.Web.ErrorMapper` (`"internal_error"`, `"not_authorized"`). Решение — ADR-0062.
 
-      defmodule MyAppWeb.Response do
-        use Core.Web.Response, codes: MyAppWeb.Response.Code
-      end
-
-  Словарь потребителя — `Core.Enum` с целочисленными `codes:`. Он обязан **покрывать**
-  `Core.Web.Response.Code.values/0`: эти значения возвращает `Core.Web.ErrorMapper.map/2`,
-  и конверт обязан уметь их отдать. Проще всего собрать его поверх базового — тогда
-  и покрытие есть, и общие коды не разъедутся:
-
-      use Core.Enum,
-        name: first_line(@moduledoc),
-        codes: Map.merge(Core.Web.Response.Code.codes(), %{not_found: 10, conflict: 11})
-
-  Свои значения нумеруются любыми целыми кодами вне `Core.Web.Response.Code.reserved_codes/0`
-  (`0..9` — за библиотекой); базовым значениям коды менять нельзя. Нарушение — `CompileError`.
-
-  Конверт не зависит ни от Plug, ни от Phoenix: это map, который контроллер отдаёт
-  своим `json/2`. `page_data/2` — не конверт, а данные под `success/1`:
+  Обёртка не зависит ни от Plug, ни от Phoenix: это map, который контроллер отдаёт
+  своим `json/2`. `page_data/2` — не обёртка, а данные под `success/1`:
   `success(page_data(result, &to_map/1))`.
   """
 
-  alias Core.Helper
   alias Core.Pagination
-  alias Core.Web.Response
 
-  @required_keys ~w(codes)a
-  @optional_keys ~w()a
-  @label "Web.Response"
-  @codes_exports [{:to_code, 1}, {:codes, 0}, {:values, 0}]
+  @typedoc "Успешный ответ."
+  @type success :: %{status: String.t(), data: term()}
 
-  @doc "Объявить конверт ответа на своём словаре кодов (`codes:`)."
-  defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Web.Response.required_keys(),
-        Core.Web.Response.optional_keys(),
-        Core.Web.Response.label()
-      )
+  @typedoc "Ответ с ошибкой."
+  @type error :: %{status: String.t(), data: map(), code: String.t(), message: String.t()}
 
-      @response_codes Core.Web.Response.codes_module!(opts)
+  @doc "Успешный ответ без данных: `data` — пустой объект."
+  @spec success() :: success()
 
-      @doc "Успешный ответ без данных."
-      @spec success() :: map()
-
-      def success, do: Core.Web.Response.__success__(@response_codes)
-
-      @doc "Успешный ответ с данными."
-      @spec success(term()) :: map()
-
-      def success(data), do: Core.Web.Response.__success__(@response_codes, data)
-
-      @doc "Успешный ответ с данными и сообщениями."
-      @spec success(term(), [String.t()]) :: map()
-
-      def success(data, messages),
-        do: Core.Web.Response.__success__(@response_codes, data, messages)
-
-      @doc """
-      Ответ с ошибкой.
-
-      `code` обязан входить в словарь `codes:`; иначе — `FunctionClauseError` из его
-      `to_code/1`. В `@spec` тип словаря не выразить: модуль приходит опцией `use`.
-
-      Второй аргумент — текст или непустой список текстов (состав множества ошибок,
-      `Core.Error.messages/1`). Пустой список — `FunctionClauseError`.
-      """
-      @spec error(atom(), String.t() | [String.t()]) :: map()
-
-      def error(code, messages), do: Core.Web.Response.__error__(@response_codes, code, messages)
-
-      @doc """
-      Ответ с ошибкой и данными.
-
-      Требования к `code` и сообщениям — те же, что у `error/2`.
-      """
-      @spec error(atom(), String.t() | [String.t()], term()) :: map()
-
-      def error(code, messages, data),
-        do: Core.Web.Response.__error__(@response_codes, code, messages, data)
-
-      @doc """
-      Данные страницы — `%{count, items}` через presenter.
-
-      Не конверт: результат кладётся в `success/1`.
-      """
-      @spec page_data(Pagination.Result.t(item), (item -> map())) :: map() when item: var
-
-      def page_data(result, to_map), do: Core.Web.Response.__page_data__(result, to_map)
-    end
-  end
-
-  @doc "Успешный ответ без данных."
-  @spec success() :: map()
-
-  def success, do: __success__(Response.Code)
+  def success, do: success(%{})
 
   @doc "Успешный ответ с данными."
-  @spec success(term()) :: map()
+  @spec success(term()) :: success()
 
-  def success(data), do: __success__(Response.Code, data)
+  def success(data), do: %{status: "ok", data: data}
 
-  @doc "Успешный ответ с данными и сообщениями."
-  @spec success(term(), [String.t()]) :: map()
+  @doc "Ответ с ошибкой: код, текст для человека и пустой `data`."
+  @spec error(atom(), String.t()) :: error()
 
-  def success(data, messages), do: __success__(Response.Code, data, messages)
+  def error(code, message), do: error(code, message, %{})
 
-  @doc """
-  Ответ с ошибкой.
+  @doc "Ответ с ошибкой и данными (состав множества ошибок — `%{errors: [...]}`)."
+  @spec error(atom(), String.t(), map()) :: error()
 
-  Сообщение — текст или непустой список текстов (состав множества ошибок,
-  `Core.Error.messages/1`). Пустой список — `FunctionClauseError`.
-  """
-  @spec error(Response.Code.t(), String.t() | [String.t()]) :: map()
-
-  def error(code, messages), do: __error__(Response.Code, code, messages)
+  def error(code, message, data) when is_atom(code) and is_binary(message) and is_map(data),
+    do: %{status: "error", data: data, code: Atom.to_string(code), message: message}
 
   @doc """
-  Ответ с ошибкой и данными.
+  Данные страницы — `%{items, total}` через presenter.
 
-  Требования к сообщениям — те же, что у `error/2`.
+  Не обёртка: результат кладётся в `success/1`.
   """
-  @spec error(Response.Code.t(), String.t() | [String.t()], term()) :: map()
+  @spec page_data(Pagination.Result.t(item), (item -> map())) :: %{items: [map()], total: non_neg_integer()}
+        when item: var
 
-  def error(code, messages, data), do: __error__(Response.Code, code, messages, data)
-
-  @doc """
-  Данные страницы — `%{count, items}` через presenter.
-
-  Не конверт: результат кладётся в `success/1`.
-  """
-  @spec page_data(Pagination.Result.t(item), (item -> map())) :: map() when item: var
-
-  def page_data(result, to_map), do: __page_data__(result, to_map)
-
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec label() :: String.t()
-
-  def label, do: @label
-
-  @doc false
-  @spec codes_module!(keyword()) :: module()
-
-  def codes_module!(opts) do
-    codes = Helper.Opts.module!(opts, :codes, @label, exports: @codes_exports)
-
-    ensure_integer_codes!(codes)
-    ensure_covers_base!(codes)
-    ensure_codes_contract!(codes)
-
-    codes
-  end
-
-  @doc false
-  @spec __success__(module()) :: map()
-
-  def __success__(codes), do: %{code: codes.to_code(:success), messages: []}
-
-  @doc false
-  @spec __success__(module(), term()) :: map()
-
-  def __success__(codes, data), do: __success__(codes, data, [])
-
-  @doc false
-  @spec __success__(module(), term(), [String.t()]) :: map()
-
-  def __success__(codes, data, messages) when is_list(messages),
-    do: %{code: codes.to_code(:success), messages: messages, data: data}
-
-  @doc false
-  @spec __error__(module(), atom(), String.t() | [String.t()]) :: map()
-
-  def __error__(codes, code, message) when is_atom(code) and is_binary(message),
-    do: __error__(codes, code, [message])
-
-  def __error__(codes, code, [message | _] = messages)
-      when is_atom(code) and is_binary(message),
-      do: %{code: codes.to_code(code), messages: messages}
-
-  @doc false
-  @spec __error__(module(), atom(), String.t() | [String.t()], term()) :: map()
-
-  def __error__(codes, code, message, data) when is_atom(code) and is_binary(message),
-    do: __error__(codes, code, [message], data)
-
-  def __error__(codes, code, [message | _] = messages, data)
-      when is_atom(code) and is_binary(message),
-      do: %{code: codes.to_code(code), messages: messages, data: data}
-
-  @doc false
-  @spec __page_data__(Pagination.Result.t(item), (item -> map())) :: map() when item: var
-
-  def __page_data__(%Pagination.Result{items: items, count: count}, to_map)
-      when is_function(to_map, 1) do
-    %{count: count, items: Enum.map(items, to_map)}
-  end
-
-  # ---
-
-  defp ensure_integer_codes!(codes) do
-    if Enum.all?(codes.codes(), fn {_value, code} -> is_integer(code) end) do
-      :ok
-    else
-      raise CompileError,
-        description: "#{@label}: codes: словарь #{inspect(codes)} обязан иметь целочисленные коды"
-    end
-  end
-
-  # Базовые значения возвращает `Core.Web.ErrorMapper.map/2`; словарь, который их не знает,
-  # упал бы на первой же ошибке в рантайме — ловим на компиляции.
-  defp ensure_covers_base!(codes) do
-    case Response.Code.values() -- codes.values() do
-      [] ->
-        :ok
-
-      missing ->
-        raise CompileError,
-          description:
-            "#{@label}: codes: словарь #{inspect(codes)} не покрывает базовые значения " <>
-              "#{inspect(missing)} — их возвращает Core.Web.ErrorMapper.map/2"
-    end
-  end
-
-  # `0..9` — за библиотекой: в них добавляются новые базовые значения, и код, занятый
-  # потребителем, разошёлся бы со следующей версией `Core`.
-  defp ensure_codes_contract!(codes) do
-    base = Response.Code.codes()
-
-    case Enum.reject(codes.codes(), &allowed_code?(&1, base)) do
-      [] ->
-        :ok
-
-      invalid ->
-        raise CompileError,
-          description:
-            "#{@label}: codes: словарь #{inspect(codes)} нарушает контракт кодов " <>
-              "#{inspect(Map.new(invalid))} — базовым значениям коды менять нельзя, " <>
-              "свои нумеруются вне #{inspect(Response.Code.reserved_codes())}"
-    end
-  end
-
-  defp allowed_code?({value, code}, base) do
-    case Map.fetch(base, value) do
-      {:ok, base_code} -> code == base_code
-      :error -> code not in Response.Code.reserved_codes()
-    end
-  end
+  def page_data(%Pagination.Result{items: items, count: count}, to_map) when is_function(to_map, 1),
+    do: %{items: Enum.map(items, to_map), total: count}
 end

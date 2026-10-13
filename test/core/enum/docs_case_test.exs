@@ -138,7 +138,6 @@ defmodule Core.Enum.DocsCaseTest do
           do: assert(enum in enums)
 
       assert Core.ViewFixture.Status in enums
-      assert Core.Web.Response.Code in enums
       assert enums == Enum.sort(enums)
     end
 

@@ -159,7 +159,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 | Функция | Назначение |
 |---|---|
 | `Error.many` | собрать контейнер; арности и attrs — «Структура» |
-| `Error.messages/1` | тексты клиенту: у контейнера — `to_string/1` каждого элемента в порядке состава, у обычной ошибки — `[to_string(error)]` |
+| `Error.messages/1` | тексты для показа: у контейнера — `to_string/1` каждого элемента в порядке состава, у обычной ошибки — `[to_string(error)]` |
 | `Error.format_chain/1` | печать состава в лог (см. «Оборачивание (cause-цепочка)») |
 | `Exc.message/1` | текст bang-границы: у контейнера — `format_chain/1`, у обычной ошибки — `to_string/1` |
 | `Result.traverse_all/2` | пройти список целиком и собрать все провалы: `{:ok, [b]}` либо `{:error, [Error.t()]}` |
@@ -189,7 +189,7 @@ MUST NOT класть в `Error.detail` сырой credential — заголов
 ### Сборка на call site
 
 `Result.traverse_all/2` отдаёт **голый список** ошибок. Наружу он MUST NOT уходить: на reason
-формы `[%Error{}]` `ErrorMapper.map/2` отдаёт 500 `:critical`. Список MUST заворачиваться в
+формы `[%Error{}]` `ErrorMapper.map/2` отдаёт 500 `"internal_error"`. Список MUST заворачиваться в
 `Error.many` в теле той же функции — `ns`, `code` и текст «в целом» знает только она.
 
 ```elixir
@@ -211,23 +211,26 @@ end
 
 ### Состав на границе HTTP
 
-`ErrorMapper.map/2` состава не видит: контейнер уходит строкой таблицы по своим `kind` и `code`
-и даёт клиенту один текст — `message` контейнера на доменных строках, константу на 401 и 500
-(`10-architecture.md`, «Граница HTTP»). Состав подставляет
-fallback-контроллер потребителя через `Error.messages/1`, и MUST раскрываться только там, где
-маппер вернул код `:domain_error`: на 401 и 500 наружу MUST уходить константа маппера, а не
-тексты элементов.
+Состав раскрывает `ErrorMapper.map/2`: контейнер уходит строкой таблицы по своим `kind` и `code`
+(`10-architecture.md`, «Граница HTTP»), а на доменных строках обёртка ответа несёт его код и текст
+и состав в `data.errors` — `[%{code, message}]` в порядке элементов. На 401 и 500 наружу уходят
+константы маппера, тексты элементов MUST NOT: прикладной элемент делает контейнер прикладным, а
+его текст клиенту не показывается.
 
-```elixir
-# плохо — состав уходит на любом коде: 401 и 500 перестают быть константой
-json(conn, Response.error(code, Error.messages(error)))
-
-# хорошо — состав только на доменном ответе
-messages = if code == :domain_error, do: Error.messages(error), else: [text]
-json(conn, Response.error(code, messages))
+```json
+{
+  "status": "error",
+  "code": "invalid",
+  "message": "Форма невалидна",
+  "data": {
+    "errors": [{"code": "blank", "message": "Имя пусто"}, {"code": "past", "message": "Срок в прошлом"}]
+  }
+}
 ```
 
-Конверт со списком строк собирает `Response.error/2,3`; пустой список — `FunctionClauseError`.
+Fallback-контроллер состав сам не собирает: он отправляет обёртку, которую вернул маппер.
+
+Проверяется: `test/core/web/error_mapper_test.exs` — describe «множество ошибок».
 
 ## Матрица категорий
 
