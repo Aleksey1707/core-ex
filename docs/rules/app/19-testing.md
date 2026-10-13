@@ -18,6 +18,7 @@
 | `MyAppTest.ConnCase` | контроллеры и плаги |
 | `Core.Es.EventCompatCase` | golden-фикстуры событий агрегата |
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции |
+| `Core.Labels.CompletenessCase` | полнота подписей, если приложение отдаёт сведения событий |
 
 - `async:`, причины `async: false` и уборка после них, тест репозитория через behaviour —
   `deps/core/docs/rules/19-testing.md`, «Case-модули».
@@ -188,6 +189,7 @@ read-модели».
 | `watch_list/0` согласован с конфигурацией | `17-otp-concurrency.md` |
 | состав `plugins/0` PromEx и провайдеры публикуют метрику | `21-observability.md`, «Метрики» |
 | примеры тел в спецификации проходят валидацию схем | `15-web-api.md` |
+| у каждого события название, у struct'а, Enum и id нагрузки — объявление подписей | `11-domain.md`, «Подписи» |
 
 - Ратчет описаний enum — `test/my_app/enum_docs_test.exs`, один на приложение:
   `use Core.Enum.DocsCase, otp_app: :my_app`, а не своя копия сверки; что он сверяет —
@@ -199,6 +201,10 @@ read-модели».
 - Ратчет `constraint_errors` — `test/my_app/repo/constraint_errors_test.exs`, один на
   приложение: `use Core.Repo.ConstraintErrorsCase, otp_app: :my_app`, а не своя копия сверки;
   что он сверяет — `deps/core/docs/rules/19-testing.md`, «`constraint_errors`».
+- Ратчет полноты подписей — `test/my_app/labels/completeness_test.exs`, один на приложение.
+  Приложение, отдающее сведения событий, MUST подключить его: `use Core.Labels.CompletenessCase,
+  app: :my_app`, а не своя копия сверки и не тест на агрегат. Что он сверяет —
+  `deps/core/docs/rules/11-domain.md`, «Ратчет полноты».
 - Новый ратчет MUST объяснять в `@moduledoc`, какое правило он проверяет и почему проверка
   именно такая: иначе следующий прочтёт его как тест поведения и ослабит.
 - Ратчет со списком-исключением MUST быть заморожен: список пополняется **только** вместе со

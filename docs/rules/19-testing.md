@@ -15,6 +15,7 @@
 | `Core.Es.ProjectionCase` | очистка `clear/0` проекции на golden-фикстурах, один тест-модуль на проекцию (см. «Проекции») |
 | `Core.Repo.ConstraintErrorsCase` | сверка `constraint_errors` с `changeset/2` и БД, один тест-модуль на приложение (см. «`constraint_errors`») |
 | `Core.Enum.DocsCase` | описание каждого значения `Core.Enum` в `@moduledoc`, один тест-модуль на приложение (см. «Enum: описания и внешние коды») |
+| `Core.Labels.CompletenessCase` | полнота подписей событий, один тест-модуль на приложение (`11-domain.md`, «Ратчет полноты») |
 
 Тестовая обвязка библиотеки живёт в `test/support`: `Core.DataCase`, `Core.TestRepo` (роль
 `MyApp.Infra.DAO`), `Core.CodecFixture.*` (роль `MyApp.Codec.*`); фикстуры `Core.*Fixture`, дублёр

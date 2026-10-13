@@ -6,6 +6,9 @@ defmodule Core.LabelsFixture do
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
   семейства; фикстурные резолверы имён.
+
+  Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
+  набор ратчета полноты: в кодек не входят событие с id без вида и событие другого агрегата.
   """
 
   alias Core.EventFixture.ActorID
@@ -266,6 +269,20 @@ defmodule Core.LabelsFixture do
     end
   end
 
+  defmodule Shape.Codec do
+    @moduledoc "Варианты фигуры: форма без обёртки, дискриминатор `kind`."
+
+    alias Core.LabelsFixture.Shape
+
+    use Core.Codec.Plugin,
+      union: Shape,
+      variants: [
+        {Shape.Circle, [kind: :circle], radius: [type: :pos_integer]},
+        {Shape.Rect, [kind: :rect], width: [type: :pos_integer], height: [type: :pos_integer]},
+        {Shape.Pin, [kind: :pin], item: [prim: Core.LabelsFixture.ItemID]}
+      ]
+  end
+
   defmodule Texts do
     @moduledoc "Функции текста значений без собственного модуля."
 
@@ -284,6 +301,8 @@ defmodule Core.LabelsFixture do
 
   defmodule Event do
     @moduledoc false
+
+    @type t :: struct()
 
     defmodule Updated do
       @moduledoc "Событие с нагрузкой по полям: поле каждого вида, необязательное и скрытое."
@@ -627,5 +646,30 @@ defmodule Core.LabelsFixture do
 
       use Core.Labels.Event, title: "Запись закрыта"
     end
+  end
+
+  defmodule Event.Codec do
+    @moduledoc "Кодек событий с подписями — полный набор ратчета полноты (`Core.Labels.CompletenessCase`)."
+
+    alias Core.LabelsFixture.Event
+
+    @tag_by_mod %{
+      Event.Updated => "labels.updated",
+      Event.StatusChanged => "labels.status_changed",
+      Event.Shipped => "labels.shipped",
+      Event.Tagged => "labels.tagged",
+      Event.NameChanged => "labels.name_changed",
+      Event.StatusSwitched => "labels.status_switched",
+      Event.OriginChanged => "labels.origin_changed",
+      Event.TagsChanged => "labels.tags_changed",
+      Event.Linked => "labels.linked",
+      Event.Renamed => "labels.renamed",
+      Event.Closed => "labels.closed"
+    }
+
+    use Core.Es.Event.Codec,
+      event: Event,
+      type: "labels",
+      tags: @tag_by_mod
   end
 end
