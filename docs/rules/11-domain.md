@@ -1131,7 +1131,10 @@ end
 defmodule MyAppWeb.Schemas.Event do
   use Core.Web.Event,
     codec: MyApp.Codec.External,
-    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2],
+    user_ref: [
+      dump: &MyAppWeb.Presenters.User.ref/2,
+      schema: MyAppWeb.Schemas.UserRef
+    ],
     labels: true
 end
 ```
@@ -1151,8 +1154,12 @@ end
 - Id, которого нет в словаре ссылок, — `ArgumentError`: словарь собирают с той же страницы событий
 - Результат `to_wire/2` сужен в модуле приложения: опечатка в ключе и не событие на входе —
   предупреждение сборки потребителя
+- При `open_api_spex` у приложения схема сведений — вложенный модуль `Detail` того же модуля
+  (`oneOf` по видам с дискриминатором `kind`, `<Имя>Detail`, `<Имя>DetailText`, …), значение вида
+  `user` — схема `user_ref: [schema:]`, обязательной тогда опции (`10-architecture.md`,
+  «OpenAPI-схемы wire»)
 
-Проверяется: `test/core/web/event/details_test.exs` — дамп каждого вида;
+Проверяется: `test/core/web/event/details_test.exs` — дамп каждого вида и его сверка со схемой;
 `test/core/web/event_test.exs` — отказы сборки; сужение и сборка без `open_api_spex` —
 `make consumer-check`.
 

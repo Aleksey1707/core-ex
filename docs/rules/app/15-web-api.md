@@ -322,6 +322,7 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
   хелпер, модуль ответа на операцию, компонент под `allOf` — MUST NOT: копия расходится с тем, что
   пишет `Core.Web.Response`, молча (`deps/core/docs/rules/10-architecture.md`,
   «OpenAPI-схемы wire»).
+- Схема события страницы событий и его сведений — «Событие страницы событий», «Сведения событий».
 - Значения справочников берутся из самого enum (`Enum.map(Status.values(), …)`), а не
   выписываются строками: иначе список разойдётся с доменом.
 - Форма, повторяющаяся в нескольких ответах, объявляется отдельной схемой и подключается
@@ -360,6 +361,11 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 usecase). Свой презентер события MUST NOT: поля, их имена, camelCase нагрузки и форма автора —
 контракт клиента, общий для всех приложений, и ручная копия расходится с ним молча.
 
+Схема события — тот же модуль с `use Core.Web.Event`: с `open_api_spex` он и есть схема события, а
+страница событий описывается `Response.Schema.page(MyAppWeb.Schemas.Event)`. Ручная схема события и
+ручная схема страницы событий MUST NOT: схема и дамп заданы одним объявлением, копия расходится с
+дампом молча. Схема ссылки на учётную запись — `user_ref: [schema:]` того же `use`.
+
 Точечная правка результата `to_wire/2` MAY — например, скрыть нагрузку отдельного события. Подмену
 строк-id в машинной нагрузке ссылками `to_wire/2` не делает: имена для человека — в сведениях
 события.
@@ -369,14 +375,25 @@ usecase). Свой презентер события MUST NOT: поля, их и
 fields = event |> OutCodec.dump() |> Es.Event.Codec.to_fields()
 %{id: fields.id, aggregateId: fields.aggregate_id, payload: Keys.camelize(fields.payload)}
 
-# хорошо — один модуль на приложение
+# плохо — своя схема события
+defmodule MyAppWeb.Schemas.Event do
+  OpenApiSpex.schema(%{title: "Event", type: :object, properties: %{id: %Schema{type: :string}, ...}})
+end
+
+# хорошо — один модуль на приложение: дамп и схема
 defmodule MyAppWeb.Schemas.Event do
   use Core.Web.Event,
     codec: MyApp.Codec.External,
-    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2]
+    user_ref: [
+      dump: &MyAppWeb.Presenters.User.ref/2,
+      schema: MyAppWeb.Schemas.UserRef
+    ]
 end
 
 json(conn, Response.success(Response.page_data(page, &Event.to_wire(&1, refs))))
+
+# в operation/2
+responses: [ok: {"События", "application/json", Response.Schema.page(MyAppWeb.Schemas.Event)}]
 
 # точечная правка
 def to_map(%Order.Event.FileStored{} = event, refs), do: %{Event.to_wire(event, refs) | payload: nil}
@@ -388,9 +405,10 @@ def to_map(%Order.Event.FileStored{} = event, refs), do: %{Event.to_wire(event, 
 
 Название и сведения события MUST уходить на wire тем же модулем события страницы событий — с
 `use Core.Web.Event, labels: true` (`deps/core/docs/rules/11-domain.md`, «Wire сведений»): его
-`to_wire/2` отдаёт `title` и `details` рядом с полями события. Свой обход сведений в презентере
-MUST NOT: вид строкой, число строкой и форма ссылки — контракт клиента, общий для всех приложений,
-и ручная копия расходится с ним молча.
+`to_wire/2` отдаёт `title` и `details` рядом с полями события, а его схема с `open_api_spex` —
+схему сведений вложенным модулем `MyAppWeb.Schemas.Event.Detail`. Свой обход сведений в презентере и
+ручная схема сведений MUST NOT: вид строкой, число строкой и форма ссылки — контракт клиента, общий
+для всех приложений, и ручная копия расходится с ним молча.
 
 ```elixir
 # плохо — свой дамп сведений в презентере
@@ -400,7 +418,10 @@ MUST NOT: вид строкой, число строкой и форма ссы�
 defmodule MyAppWeb.Schemas.Event do
   use Core.Web.Event,
     codec: MyApp.Codec.External,
-    user_ref: [dump: &MyAppWeb.Presenters.User.ref/2],
+    user_ref: [
+      dump: &MyAppWeb.Presenters.User.ref/2,
+      schema: MyAppWeb.Schemas.UserRef
+    ],
     labels: true
 end
 ```

@@ -1,6 +1,8 @@
 defmodule Core.Web.Event.DetailsTest do
   use ExUnit.Case, async: true
 
+  import OpenApiSpex.TestAssertions
+
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
   alias Core.EventFixture.ActorID
@@ -23,6 +25,10 @@ defmodule Core.Web.Event.DetailsTest do
   alias Core.LabelsFixture.UserID
   alias Core.LabelsFixture.WebEvent
   alias Core.Version
+  alias Core.WebEventFixture.UserRef
+  alias OpenApiSpex.Components
+  alias OpenApiSpex.Info
+  alias OpenApiSpex.OpenApi
 
   describe "нагрузка по полям" do
     test "вид строкой, число строкой с десятичной точкой, дата и дата-время дампом кодека, «Да»" do
@@ -82,7 +88,7 @@ defmodule Core.Web.Event.DetailsTest do
     {{:module, web_event, _bytecode, _exports}, []} =
       compile_event(:DecimalProfile,
         codec: Core.CodecFixture.Internal,
-        user_ref: [dump: &WebEvent.user_ref/2],
+        user_ref: [dump: &WebEvent.user_ref/2, schema: UserRef],
         labels: true
       )
 
@@ -245,15 +251,62 @@ defmodule Core.Web.Event.DetailsTest do
     assert wire(event(Event.Closed, nil), %{}) == %{"title" => "Запись закрыта", "details" => []}
   end
 
+  describe "схема" do
+    test "семейство видов Detail с дискриминатором kind, названия от модуля приложения" do
+      %OpenApi{components: %Components{schemas: schemas}} = spec()
+
+      kinds = ~w(text number date datetime user ref group list change)
+      suffixes = ~w(Text Number Date DateTime User Ref Group List Change)
+      titles = Enum.map(suffixes, &"WebEventDetail#{&1}")
+      mapping = Map.new(Enum.zip(kinds, titles), fn {kind, title} -> {kind, "#/components/schemas/#{title}"} end)
+
+      assert %{discriminator: %{propertyName: "kind", mapping: ^mapping}, oneOf: one_of} = schemas["WebEventDetail"]
+      assert length(one_of) == length(kinds)
+      assert Enum.all?(titles ++ ["UserRef"], &Map.has_key?(schemas, &1))
+    end
+
+    test "форма вне схемы — отказ" do
+      %OpenApi{components: %Components{schemas: %{"WebEventDetail" => schema}}} = spec = spec()
+
+      for detail <- [
+            %{"kind" => "number", "value" => 3},
+            %{"kind" => "date", "value" => "13.10.2026"},
+            %{"kind" => "unknown", "value" => "x"},
+            %{"label" => "Автор", "kind" => "user", "value" => %{"id" => "u1"}},
+            %{"kind" => "ref", "value" => %{"id" => "i1", "name" => nil}},
+            %{"kind" => "group", "value" => [%{"kind" => "text", "value" => 1}]},
+            %{"label" => "Название", "kind" => "change", "old" => %{"kind" => "text", "value" => "a"}}
+          ] do
+        assert {:error, _} = OpenApiSpex.cast_value(detail, schema, spec), inspect(detail)
+      end
+    end
+  end
+
   # ---
 
   # Название и сведения — JSON дампа: автор события в словаре ссылок, поля конверта не сверяются.
+  # Дамп целиком сверяется со схемой того же `use` (ADR-0064).
   defp wire(%_{by: by} = event, refs) do
-    event
-    |> WebEvent.to_wire(Map.put(refs, by, "Автор"))
-    |> Map.take(~w(title details)a)
-    |> Jason.encode!()
-    |> Jason.decode!()
+    wire =
+      event
+      |> WebEvent.to_wire(Map.put(refs, by, "Автор"))
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    assert_schema(wire, "WebEvent", spec())
+
+    Map.take(wire, ~w(title details))
+  end
+
+  defp spec do
+    OpenApiSpex.add_schemas(
+      %OpenApi{
+        info: %Info{title: "Core.Web.Event.DetailsTest", version: "0"},
+        paths: %{},
+        components: %Components{schemas: %{}}
+      },
+      [WebEvent]
+    )
   end
 
   defp event(Event.Closed, nil), do: Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())

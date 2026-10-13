@@ -772,7 +772,10 @@ defmodule Core.LabelsFixture do
 
     use Core.Web.Event,
       codec: Core.CodecFixture.External,
-      user_ref: [dump: &Core.LabelsFixture.WebEvent.user_ref/2],
+      user_ref: [
+        dump: &Core.LabelsFixture.WebEvent.user_ref/2,
+        schema: Core.WebEventFixture.UserRef
+      ],
       labels: true
 
     @doc "Ссылка на учётную запись: дамп id и имя."

@@ -128,6 +128,17 @@
   на событие и сведения, поэтому автор события и учётная запись в сведениях не расходятся формой.
   `labels:` не boolean и `labels: true` без `user_ref:` — `CompileError`.
 
+  Если у приложения есть `open_api_spex` (проверка — при раскрытии `use`), тот же `use` делает модуль
+  схемой события (`schema/0`), и страница событий описывается
+  `Response.Schema.page(MyAppWeb.Schemas.Event)`. Название — последний сегмент имени модуля, объект
+  открытый, все поля обязательны: `type` — строка без перечисления, `version` — целое от 1,
+  `payload` — схема без типа, nullable, `at` — `date-time`, `by` — строка без `user_ref:` и модуль
+  схемы `user_ref: [schema:]` с ним. При `labels: true` — ещё `title` и `details`: схема сведений —
+  вложенный модуль `Detail` (`oneOf` по видам с дискриминатором `kind`, название `<Имя>Detail`), схемы
+  видов — его модули `Text` … `Change` (`<Имя>DetailText`, …). `user_ref: [schema:]` при
+  `open_api_spex` обязательна: без неё или `schema:` без `schema/0` — `CompileError`. Без
+  `open_api_spex` модуль — только дамп, и `schema:` не требуется.
+
   Переход: свой презентер события
   (`fields = event |> OutCodec.dump() |> Es.Event.Codec.to_fields()` и сборка
   `%{id, aggregateId, type, payload: Keys.camelize(...), at, by}`) → модуль с `use Core.Web.Event` и
@@ -139,11 +150,15 @@
   события — правкой результата: `%{Event.to_wire(event, refs) | payload: nil}`. Подмена строк-id
   учётных записей в нагрузке пропадает: имена — в сведениях события. Свой дамп сведений в презентере
   события (`dump_detail/2` над `Details.build/1` и `Map.merge(машинные_поля, %{title, details})`) →
-  `labels: true` у того же модуля; wire `title` / `details` не меняется. В `app/15-web-api.md` — новый
+  `labels: true` у того же модуля; wire `title` / `details` не меняется. Своя схема события и страницы
+  событий → `user_ref: [dump:, schema:]` у того же модуля и `Response.Schema.page(MyAppWeb.Schemas.Event)`
+  в `operation/2`; своя схема сведений с модулями видов и отдельная схема ссылки на запись
+  `{entity, id, name}` удаляются — названия схем видов в OpenAPI-документе меняются
+  (`KindText` → `EventDetailText`), JSON ответа — нет. В `app/15-web-api.md` — новый
   раздел «Событие страницы событий»: событие уходит на wire только через модуль с
-  `use Core.Web.Event`, свой презентер события — MUST NOT; в разделе «Сведения событий» — сведения
-  уходят на wire только через тот же модуль с `labels: true`, свой обход сведений в презентере —
-  MUST NOT.
+  `use Core.Web.Event`, свой презентер события, своя схема события и страницы событий — MUST NOT; в
+  разделе «Сведения событий» — сведения уходят на wire только через тот же модуль с `labels: true`,
+  свой обход сведений в презентере и своя схема сведений — MUST NOT.
 
 - **OpenAPI-схема обёртки ответа `Core.Web.Response.Schema`** (решение —
   `docs/adr/0065-response-wrapper-schema-functions.md`; норма — `docs/rules/10-architecture.md`,

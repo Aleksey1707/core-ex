@@ -1,8 +1,8 @@
 defmodule Core.WebEventFixture do
   @moduledoc """
   События страницы событий для тестов `Core.Web.Event`: нагрузка с многословными полями и вложенной
-  map'ой, событие без нагрузки. `Core.WebEventFixture.Event.Codec` зарегистрирован в
-  `Core.CodecFixture.plugins/0` — иначе фасады не смогли бы дампить события.
+  map'ой, событие без нагрузки; OpenAPI-схема ссылки на учётную запись. `Core.WebEventFixture.Event.Codec`
+  зарегистрирован в `Core.CodecFixture.plugins/0` — иначе фасады не смогли бы дампить события.
   """
 
   defmodule AggID do
@@ -72,6 +72,24 @@ defmodule Core.WebEventFixture do
       tags: @tag_by_mod
   end
 
+  defmodule UserRef do
+    @moduledoc "OpenAPI-схема ссылки на учётную запись `%{id, login}`."
+
+    alias OpenApiSpex.Schema
+
+    require OpenApiSpex
+
+    OpenApiSpex.schema(
+      %{
+        title: "UserRef",
+        type: :object,
+        properties: %{id: %Schema{type: :string}, login: %Schema{type: :string, nullable: true}},
+        required: ~w(id login)a
+      },
+      struct?: false
+    )
+  end
+
   defmodule Plain do
     @moduledoc "Событие страницы событий без ссылки на учётную запись: автор — дамп id."
 
@@ -83,7 +101,10 @@ defmodule Core.WebEventFixture do
 
     use Core.Web.Event,
       codec: Core.CodecFixture.External,
-      user_ref: [dump: &Core.WebEventFixture.WithUser.user_ref/2]
+      user_ref: [
+        dump: &Core.WebEventFixture.WithUser.user_ref/2,
+        schema: Core.WebEventFixture.UserRef
+      ]
 
     @doc "Ссылка на учётную запись: дамп id и имя."
     @spec user_ref(String.t(), String.t() | nil) :: %{id: String.t(), login: String.t() | nil}
