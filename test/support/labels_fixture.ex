@@ -68,11 +68,12 @@ defmodule Core.LabelsFixture do
 
     alias Core.Context
     alias Core.Error
+    alias Core.Result
 
     require Error
 
     @doc "Имена по id для резолвера `resolver`."
-    @spec get(module(), [struct()], Context.t()) :: {:ok, %{struct() => String.t() | nil}} | {:error, Error.t()}
+    @spec get(module(), [struct()], Context.t()) :: Result.t(%{struct() => String.t() | nil})
 
     def get(resolver, ids, %Context{} = context) when is_atom(resolver) and is_list(ids) do
       send(self(), {:get_names, resolver, ids})

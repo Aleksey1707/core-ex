@@ -112,12 +112,13 @@ git tag v0.3.4 && git push origin HEAD v0.3.4
 ## Команды
 
 ```bash
-make                     # boundary-check → rules-check → layout-check → format-check → compile → compile-no-optional → consumer-check → deps-clean → xref → dialyzer → test → credo → audit
+make                     # boundary-check → rules-check → layout-check → spec-check → format-check → compile → compile-no-optional → consumer-check → deps-clean → xref → dialyzer → test → credo → audit
 make boundary-check      # главный инвариант: библиотека не знает потребителя
 make rules-check         # оба яруса docs/rules против стандартов 00-index.md
 make layout-check        # разделители внутри модуля: # --- и # ===== <имя> =====
+make spec-check          # форма результата в типах — через Core.Result
 make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
-make consumer-check      # фикстура-потребитель: раскладка под boundary_lint --consumer и храповик вывода типов
+make consumer-check      # фикстура-потребитель: раскладка под boundary_lint --consumer, spec_lint и храповик вывода типов
 make release-check       # версия сведена в mix.exs, README.md и CHANGELOG.md (и с тегом на коммите)
 make release VERSION=X.Y.Z # свести версию в трёх местах: «Не выпущено» → ## X.Y.Z
 make infra-up            # Postgres + RabbitMQ + Kafka (podman compose, deploy/infra)
@@ -138,10 +139,11 @@ mix docs
 | `boundary-check` | `scripts/boundary_lint.exs` — библиотека не знает потребителя (`docs/rules/10-architecture.md`) |
 | `rules-check` | `scripts/rules_lint.exs` — оба яруса свода против стандартов `docs/rules/00-index.md` и `docs/rules/app/00-index.md` |
 | `layout-check` | `scripts/layout_lint.exs` — разделители модуля (`docs/rules/20-agreements.md`, «Разделители внутри модуля») |
+| `spec-check` | `scripts/spec_lint.exs` — форма результата в `@spec` / `@callback` / `@type` через `Core.Result` (`docs/rules/20-agreements.md`, «Форма результата») |
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
 | `compile` | `mix compile --warnings-as-errors` |
 | `compile-no-optional` | сборка без optional-клиентов брокеров (`docs/rules/10-architecture.md`) |
-| `consumer-check` | фикстура-потребитель `fixtures/consumer`: `boundary_lint --consumer` над её `lib/` и предупреждения против маркеров `# expect:` (ADR-0014) |
+| `consumer-check` | фикстура-потребитель `fixtures/consumer`: `boundary_lint --consumer` и `spec_lint` над её `lib/` и предупреждения против маркеров `# expect:` (ADR-0014) |
 | `deps-clean` | `mix deps.clean --unused` — неиспользуемые зависимости |
 | `xref` | `mix xref graph --format cycles` — храповик на циклы компиляции |
 | `dialyzer` | `mix dialyzer` |

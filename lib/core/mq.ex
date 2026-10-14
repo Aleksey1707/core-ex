@@ -7,6 +7,7 @@ defmodule Core.Mq do
   import Core.Guard, only: [is_opt: 2]
 
   alias Core.Error
+  alias Core.Result
 
   require Error
 
@@ -38,7 +39,7 @@ defmodule Core.Mq do
       value_type: binary()
 
     @doc false
-    @spec cast(term()) :: {:ok, binary()} | {:error, {:invalid_key, String.t()}}
+    @spec cast(term()) :: Result.t(binary(), {:invalid_key, String.t()})
 
     def cast(value) when is_binary(value) and byte_size(value) > 0, do: {:ok, value}
 
@@ -60,7 +61,7 @@ defmodule Core.Mq do
       value_type: String.t()
 
     @doc false
-    @spec cast(term()) :: {:ok, String.t()} | {:error, {:invalid_header_key, String.t()}}
+    @spec cast(term()) :: Result.t(String.t(), {:invalid_header_key, String.t()})
 
     def cast(value) when is_binary(value) and byte_size(value) > 0 do
       if String.valid?(value),
@@ -131,7 +132,7 @@ defmodule Core.Mq do
     Имена заголовков нормализуются в lowercase; при повторе имени побеждает последнее значение.
     """
     @spec new(Topic.t(), headers_in(), binary() | nil, Key.t() | nil, Position.t() | nil) ::
-            {:ok, t()} | {:error, Error.t()}
+            Result.t(t())
 
     def new(topic, headers, body, key \\ nil, position \\ nil)
 
@@ -158,7 +159,7 @@ defmodule Core.Mq do
     end
 
     @doc "Получить заголовок или доменную ошибку."
-    @spec get_header(t(), HeaderKey.t()) :: {:ok, String.t()} | {:error, Error.t()}
+    @spec get_header(t(), HeaderKey.t()) :: Result.t(String.t())
 
     def get_header(%__MODULE__{} = message, %HeaderKey{} = key) do
       case find_header(message, key) do

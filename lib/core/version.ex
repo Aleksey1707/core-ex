@@ -5,7 +5,6 @@ defmodule Core.Version do
 
   import Core.Helper.String, only: [first_line: 1]
 
-  alias Core.Error
   alias Core.Prim
   alias Core.Result
 
@@ -35,7 +34,7 @@ defmodule Core.Version do
   def next(%__MODULE__{value: value}), do: new!(value + 1)
 
   @doc "Парсинг: `\"*\"` → `:current`, иначе — `new/1`."
-  @spec parse(term()) :: {:ok, expected()} | {:error, Error.t()}
+  @spec parse(term()) :: Result.t(expected())
 
   def parse("*"), do: {:ok, :current}
   def parse(value), do: new(value)

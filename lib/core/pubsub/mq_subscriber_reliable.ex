@@ -47,6 +47,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   alias Core.Otel
   alias Core.PubSub
   alias Core.Repo
+  alias Core.Result
   alias Core.Telemetry
 
   require Logger
@@ -150,7 +151,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   @doc "Подписаться на чтение сообщений."
-  @spec subscribe(t(), subscriber_data(), Context.t()) :: :ok | {:error, Error.t()}
+  @spec subscribe(t(), subscriber_data(), Context.t()) :: Result.unit()
 
   @impl true
   def subscribe(server, data, %Context{}) do
@@ -158,7 +159,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   @doc "Отписаться от чтения."
-  @spec unsubscribe(t(), Context.t()) :: :ok | {:error, Error.t()}
+  @spec unsubscribe(t(), Context.t()) :: Result.unit()
 
   @impl true
   def unsubscribe(server, %Context{}) do

@@ -2,7 +2,7 @@ DOCKER ?= podman
 
 # Порядок совпадает с .pre-commit-config.yaml.
 .PHONY: default
-default: boundary-check rules-check layout-check format-check compile compile-no-optional \
+default: boundary-check rules-check layout-check spec-check format-check compile compile-no-optional \
          consumer-check deps-clean xref dialyzer test credo audit
 
 # Главный инвариант: библиотека не знает приложения-потребителя (`10-architecture.md`).
@@ -19,6 +19,11 @@ rules-check:
 .PHONY: layout-check
 layout-check:
 	elixir scripts/layout_lint.exs
+
+# Форма результата в типах — через `Core.Result` (`docs/rules/20-agreements.md`, «Форма результата»).
+.PHONY: spec-check
+spec-check:
+	elixir scripts/spec_lint.exs
 
 # Сведение версии выпуска: `mix.exs`, `README.md` и верхний раздел `CHANGELOG.md` — одна версия,
 # и та же, что у тега на коммите. Вне выпуска («Не выпущено» в CHANGELOG) — всегда зелёный.
@@ -61,12 +66,13 @@ compile-no-optional:
 	mix compile --no-optional-deps --warnings-as-errors
 
 # Фикстура-потребитель (`fixtures/consumer/README.md`): её `lib/` — образец раскладки bounded context
-# под `boundary_lint --consumer`, а предупреждения компилятора и Boundary сверяются с маркерами
+# под `boundary_lint --consumer` и `spec_lint`, а предупреждения компилятора и Boundary сверяются с маркерами
 # `# expect:` в её исходниках (храповик вывода типов и границ). Зависимости фикстуры тянутся, только
 # когда их нет или lock библиотеки ушёл вперёд; окружение — всегда `dev`, один `_build`.
 .PHONY: consumer-check
 consumer-check:
-	cd fixtures/consumer && elixir ../../scripts/boundary_lint.exs --consumer && export MIX_ENV=dev && \
+	cd fixtures/consumer && elixir ../../scripts/boundary_lint.exs --consumer && \
+		elixir ../../scripts/spec_lint.exs && export MIX_ENV=dev && \
 		(mix deps.loadpaths --no-compile >/dev/null 2>&1 || mix deps.get) && \
 		mix run --no-start --no-compile check.exs
 

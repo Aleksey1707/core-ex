@@ -12,6 +12,7 @@ defmodule Core.Es.Projection.Test do
   alias Core.Es.Projection
   alias Core.Es.Projection.Checkpoint
   alias Core.Es.Projection.Supervisor.Mark
+  alias Core.Result
 
   @label "Es.Projection.Test.with_rebuilding"
 
@@ -25,7 +26,7 @@ defmodule Core.Es.Projection.Test do
   ошибка — как есть.
   """
   @spec run_until_idle(module() | [module()], keyword()) ::
-          :ok | {:error, :locked | :outdated | Error.t()}
+          Result.unit(:locked | :outdated | Error.t())
 
   def run_until_idle(projections, opts \\ [])
 

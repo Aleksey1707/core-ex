@@ -17,6 +17,7 @@ defmodule Core.EsFixture.Projection do
   alias Core.Error
   alias Core.EsFixture.Account
   alias Core.EventFixture
+  alias Core.Result
 
   require Error
 
@@ -47,7 +48,7 @@ defmodule Core.EsFixture.Projection do
   end
 
   @doc "Событие потока → строка read-модели."
-  @spec project(Core.Es.Event.t()) :: :ok | {:error, Error.t()}
+  @spec project(Core.Es.Event.t()) :: Result.unit()
 
   @impl true
   def project(%Account.Event.Opened{payload: payload} = event),

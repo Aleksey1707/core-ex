@@ -72,8 +72,8 @@ defmodule Core.Codec.Plugin do
   только ручные типы.
   """
 
-  alias Core.Error
   alias Core.Helper
+  alias Core.Result
 
   @typedoc "Модуль entity-фасада (`Core.Codec.Facade.Behaviour`)."
   @type codec :: module()
@@ -88,13 +88,13 @@ defmodule Core.Codec.Plugin do
   @callback dump(struct(), codec()) :: term()
 
   @doc "Модуль (тип или семейство) + wire → domain (опционально при `loadable: false`)."
-  @callback load(module(), term(), codec()) :: {:ok, term()} | {:error, Error.t()}
+  @callback load(module(), term(), codec()) :: Result.t()
 
   @doc "Поля ручного варианта (`{Mod, адрес}` в `variants:`) → map; адрес и обёртку пишет плагин."
   @callback dump_variant(struct(), codec()) :: map()
 
   @doc "Модуль ручного варианта + его поля → вариант; адрес уже сверен плагином."
-  @callback load_variant(module(), map(), codec()) :: {:ok, struct()} | {:error, Error.t()}
+  @callback load_variant(module(), map(), codec()) :: Result.t(struct())
 
   @doc """
   Спека пере-дампа (`Core.Codec.Redump`) ручного типа, ручного варианта (спека его полей, `{:map, _}`)

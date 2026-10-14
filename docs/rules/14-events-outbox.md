@@ -75,8 +75,8 @@ write-репозиторий объявляет `outbox: :none` (`13-repos.md`).
 
 API:
 
-- `from_event/1` → `{:ok, Record.t()} | {:error, Error.t()}`
-- `from_events/1` → `{:ok, [Record.t()]} | {:error, Error.t()}`
+- `from_event/1` → `Result.t(Record.t())`
+- `from_events/1` → `Result.t([Record.t()])`
 - `topic/0` → `String.t()` — топик из `topic:`; его берёт подписчик
   (`deps/core/docs/rules/app/14-events-outbox.md`, «Топики и запись в очередь»)
 

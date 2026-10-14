@@ -9,6 +9,8 @@ if Code.ensure_loaded?(RabbitMQStream.Connection) do
 
     use RabbitMQStream.Connection
 
+    alias Core.Result
+
     @doc """
     Последний подтверждённый `publishing_id` для producer reference на топике.
 
@@ -18,7 +20,7 @@ if Code.ensure_loaded?(RabbitMQStream.Connection) do
     чего после рестарта writer публикует с уже использованных publishing_id, а брокер их
     молча отбрасывает по дедупликации. Зовём библиотечную функцию напрямую.
     """
-    @spec producer_sequence(String.t(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+    @spec producer_sequence(String.t(), String.t()) :: Result.t(non_neg_integer(), term())
 
     def producer_sequence(stream_name, producer_reference)
         when is_binary(stream_name) and is_binary(producer_reference) do

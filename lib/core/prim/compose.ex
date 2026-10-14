@@ -10,8 +10,8 @@ defmodule Core.Prim.Compose do
   (`sensitive: false` поверх чувствительной базы) нельзя — `CompileError`.
   """
 
-  alias Core.Error
   alias Core.Prim
+  alias Core.Result
 
   use Core.Prim.Wrapper,
     label: "Prim.Compose",
@@ -29,7 +29,7 @@ defmodule Core.Prim.Compose do
       @base Keyword.fetch!(opts, :of)
 
       @doc false
-      @spec __compose_cast__(term()) :: {:ok, term()} | {:error, Error.t()}
+      @spec __compose_cast__(term()) :: Core.Result.t()
 
       def __compose_cast__(raw) do
         Core.Prim.Compose.cast(raw, @base, __MODULE__)
@@ -65,7 +65,7 @@ defmodule Core.Prim.Compose do
   end
 
   @doc "Cast: базовый Prim / себя / raw через `base.new/1`."
-  @spec cast(term(), module(), module()) :: {:ok, term()} | {:error, Error.t()}
+  @spec cast(term(), module(), module()) :: Result.t()
 
   def cast(%base{} = prim, base, _self), do: {:ok, prim}
 

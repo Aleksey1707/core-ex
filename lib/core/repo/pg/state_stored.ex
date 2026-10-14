@@ -58,7 +58,7 @@ defmodule Core.Repo.Pg.StateStored do
   ## Страница потока
 
   `page_stream(id, limit, offset, context)` →
-  `{:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}` — страница
+  `Core.Result.t(Core.Pagination.Result.t(Core.Es.Event.t()))` — страница
   потока агрегата по возрастанию версии, `total` — весь поток. Реализация и исходы —
   `Core.Es.Store`, «Страница потока».
 
@@ -276,7 +276,7 @@ defmodule Core.Repo.Pg.StateStored do
               Core.Pagination.Limit.t(),
               Core.Pagination.Offset.t(),
               Core.Context.t()
-            ) :: {:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}
+            ) :: Core.Result.t(Core.Pagination.Result.t(Core.Es.Event.t()))
 
       def page_stream(
             %unquote(cfg.id){} = id,

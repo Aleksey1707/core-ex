@@ -6,7 +6,6 @@ defmodule Core.PubSub.OutboxPublisher do
   @behaviour Core.PubSub.Publisher
 
   alias Core.Context
-  alias Core.Error
   alias Core.Outbox.Record
   alias Core.Result
 
@@ -29,7 +28,7 @@ defmodule Core.PubSub.OutboxPublisher do
   end
 
   @doc "Опубликовать сообщение через запись в outbox."
-  @spec publish(t(), message(), metadata(), Context.t()) :: :ok | {:error, Error.t()}
+  @spec publish(t(), message(), metadata(), Context.t()) :: Result.unit()
 
   @impl true
   def publish(%__MODULE__{} = publisher, message, metadata, %Context{} = context) do

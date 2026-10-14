@@ -91,6 +91,7 @@ if Code.ensure_loaded?(:brod) do
     alias Core.Mq
     alias Core.Mq.Kafka.Reader.Store
     alias Core.Mq.Message
+    alias Core.Result
     alias Core.Telemetry
 
     require Error
@@ -186,7 +187,7 @@ if Code.ensure_loaded?(:brod) do
       do: poll(server, deadline(timeout))
 
     @doc "Зафиксировать смещение сообщения в работе."
-    @spec commit(t()) :: :ok | {:error, Error.t()}
+    @spec commit(t()) :: Result.unit()
 
     @impl true
     def commit(server), do: GenServer.call(server, :commit, @call_timeout)

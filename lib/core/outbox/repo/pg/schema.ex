@@ -8,9 +8,9 @@ defmodule Core.Outbox.Repo.Pg.Schema do
   import Ecto.Changeset
 
   alias Core.Config
-  alias Core.Error
   alias Core.Outbox
   alias Core.Outbox.Record
+  alias Core.Result
 
   defmodule JsonList do
     @moduledoc """
@@ -82,7 +82,7 @@ defmodule Core.Outbox.Repo.Pg.Schema do
   end
 
   @doc "Преобразовать строку БД в доменную запись."
-  @spec to_entity(t()) :: {:ok, Record.t()} | {:error, Error.t()}
+  @spec to_entity(t()) :: Result.t(Record.t())
 
   def to_entity(%__MODULE__{} = row) do
     Config.codec().load(Record, %{
@@ -104,7 +104,7 @@ defmodule Core.Outbox.Repo.Pg.Schema do
   end
 
   @doc "Распаковать доменную запись в map для changeset/insert."
-  @spec to_model(Record.t()) :: {:ok, map()} | {:error, Error.t()}
+  @spec to_model(Record.t()) :: Result.t(map())
 
   def to_model(%Record{} = record) do
     dumped = Config.codec().dump(record)

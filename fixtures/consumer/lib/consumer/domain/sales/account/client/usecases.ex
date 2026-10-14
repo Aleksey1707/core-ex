@@ -14,11 +14,14 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
   alias Core.Es
   alias Core.Helper.Transact
   alias Core.Pagination
+  alias Core.Result
   alias Core.Version
 
   require Core.Config
 
   @repo Core.Config.repo!(Account.Repo)
+
+  @spec freeze(Account.ID.t(), Version.t(), Account.Cmd.Freeze.t(), Context.t()) :: Result.unit()
 
   def freeze(%Account.ID{} = id, %Version{} = version, %Account.Cmd.Freeze{} = command, %Context{} = context) do
     Transact.run(DAO, fn ->

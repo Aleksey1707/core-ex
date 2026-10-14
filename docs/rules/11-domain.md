@@ -65,7 +65,7 @@ MUST помечаться и чек-лист секрета — `12-errors.md`, 
 
 | Функция | Возврат |
 |---|---|
-| `new/1` | `{:ok, t()} \| {:error, Error.t()}` |
+| `new/1` | `Result.t(t())` |
 | `new!/1` | `t()`; при ошибке — `raise Exc, error` |
 | `value/1` | внутреннее значение |
 | `__domain_kind__/0` | атом kind для Codec |
@@ -212,7 +212,7 @@ end
 |---|---|
 | `values/0` | список атомов |
 | `member?/1` | `boolean()` |
-| `cast/1` | `{:ok, t()} \| {:error, Error.t()}` (`ns: :enum`, `:invalid_value`) |
+| `cast/1` | `Result.t(t())` (`ns: :enum`, `:invalid_value`) |
 | `cast!/1` | `t()`; при ошибке — `raise Exc` |
 | `cast_optional/1` | как `cast/1`; `nil` → `{:ok, nil}` |
 | `cast_optional!/1` | как `cast_optional/1`; при ошибке — `raise Exc` |
@@ -262,7 +262,7 @@ use Core.Enum,
 источника, а порядок не зависит от внутреннего устройства map.
 
 Добавляет `@type code`, `codes/0` (карта `значение => код`), `to_code/1`, `from_code/1`
-(`{:ok, t()} | {:error, Error.t()}`) и `from_code!/1`.
+(`Result.t(t())`) и `from_code!/1`.
 
 | Тип кодов | `from_code/1` принимает | Не принимает |
 |---|---|---|
@@ -1280,24 +1280,7 @@ Prim, nullable FK → Prim).
 | `Result.unit(e)` | `:ok \| {:error, e}` | то же, причина не `%Error{}` |
 | `Option.t(a)` | `a \| nil` | опциональное значение |
 
-Локальный `@type`, чья форма совпадает с результатом, MUST выражаться этими типами, а не заводить
-форме второе имя: имя результата одно на библиотеку, а параметр называет причину. Тип с третьим
-вариантом (`{:skip, _}` у `Core.PubSub.handler_result`) или объединяющий unit с valued
-(`Core.Helper.Savepoint.result`) MAY оставаться таплом: через типы он длиннее и читается хуже.
-
-```elixir
-# плохо — форма переписана прописью в каждом модуле
-@type result :: :ok | {:error, {code(), detail()}}
-@type to_message :: (message(), metadata() -> {:ok, Message.t()} | {:error, Error.t()})
-
-# хорошо — имя одно, параметр называет причину
-@type result :: Result.unit({code(), detail()})
-@type to_message :: (message(), metadata() -> Result.t(Message.t()))
-```
-
-В `@spec` функции развёрнутая форма MAY оставаться: там она — контракт, читаемый глазами на месте,
-и так записаны спеки repo-методов, `@callback` behaviour'ов и таблицы возвратов `13-repos.md`.
-Правило про второе имя формы касается `@type`, где имя как раз и заводится.
+Где эти типы обязательны вместо тапла — `20-agreements.md`, «Форма результата».
 
 Состав обоих модулей — по назначению функции. Набор полон намеренно: соседняя функция
 назначения есть всегда, и call site не проверяет это перед вызовом.

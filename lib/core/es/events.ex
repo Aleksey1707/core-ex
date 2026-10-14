@@ -91,7 +91,7 @@ defmodule Core.Es.Events do
   end
 
   @doc "Получить событие по id."
-  @spec get(t(e), Es.Event.ID.t()) :: {:ok, e} | {:error, Error.t()} when e: Es.Event.t()
+  @spec get(t(e), Es.Event.ID.t()) :: Result.t(e) when e: Es.Event.t()
 
   def get(events, %Es.Event.ID{} = id) when is_list(events) do
     case find(events, id) do
@@ -115,7 +115,7 @@ defmodule Core.Es.Events do
   end
 
   @doc "Получить первое (newest) событие указанного модуля."
-  @spec get_by_type(t(e), module()) :: {:ok, e} | {:error, Error.t()} when e: Es.Event.t()
+  @spec get_by_type(t(e), module()) :: Result.t(e) when e: Es.Event.t()
 
   def get_by_type(events, type) when is_list(events) and is_atom(type) do
     case find_by_type(events, type) do
@@ -138,7 +138,7 @@ defmodule Core.Es.Events do
   def last([event | _]) when is_map(event), do: event
 
   @doc "Самое новое событие."
-  @spec get_last(t(e)) :: {:ok, e} | {:error, Error.t()} when e: Es.Event.t()
+  @spec get_last(t(e)) :: Result.t(e) when e: Es.Event.t()
 
   def get_last(events) when is_list(events) do
     case last(events) do
@@ -161,7 +161,7 @@ defmodule Core.Es.Events do
   def first(events) when is_list(events), do: List.last(events)
 
   @doc "Самое старое событие."
-  @spec get_first(t(e)) :: {:ok, e} | {:error, Error.t()} when e: Es.Event.t()
+  @spec get_first(t(e)) :: Result.t(e) when e: Es.Event.t()
 
   def get_first(events) when is_list(events) do
     case first(events) do

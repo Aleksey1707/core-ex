@@ -17,6 +17,7 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
   alias Core.Es
   alias Core.EsFixture.Account
   alias Core.Pagination
+  alias Core.Result
   alias Core.Version
 
   @table __MODULE__
@@ -34,7 +35,7 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
 
   @doc "Состояние счёта из его потока."
   @spec get(Account.ID.t(), Version.expected(), Context.t(), keyword()) ::
-          {:ok, Account.t()} | {:error, Error.t()}
+          Result.t(Account.t())
 
   @impl true
   defdelegate get(id, version, context, opts \\ []), to: Account.Repo.Pg
@@ -44,9 +45,9 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
           Account.ID.t(),
           Version.expected(),
           Context.t(),
-          (Account.t() -> {:ok, decision} | {:error, reason}),
+          (Account.t() -> Result.t(decision, reason)),
           keyword()
-        ) :: {:ok, decision} | {:error, reason | Error.t()}
+        ) :: Result.t(decision, reason | Error.t())
         when decision: var, reason: var
 
   @impl true
@@ -54,27 +55,27 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
 
   @doc "Состояния счетов по парам `{id, version}`."
   @spec get_many([{Account.ID.t(), Version.expected()}], Context.t(), keyword()) ::
-          {:ok, [Account.t()]} | {:error, Error.t()}
+          Result.t([Account.t()])
 
   @impl true
   defdelegate get_many(pairs, context, opts \\ []), to: Account.Repo.Pg
 
   @doc "Дочитать поток счёта после `state.version`."
   @spec refresh(Account.t(), Version.expected(), Context.t(), keyword()) ::
-          {:ok, Account.t()} | {:error, Error.t()}
+          Result.t(Account.t())
 
   @impl true
   defdelegate refresh(state, version, context, opts \\ []), to: Account.Repo.Pg
 
   @doc "Страница потока счёта."
   @spec page_stream(Account.ID.t(), Pagination.Limit.t(), Pagination.Offset.t(), Context.t()) ::
-          {:ok, Pagination.Result.t(Es.Event.t())} | {:error, Error.t()}
+          Result.t(Pagination.Result.t(Es.Event.t()))
 
   @impl true
   defdelegate page_stream(id, limit, offset, context), to: Account.Repo.Pg
 
   @doc "Записать события; перед поставленной гонкой — конкурирующее событие."
-  @spec append([Es.Event.t()], Context.t(), keyword()) :: :ok | {:error, Error.t()}
+  @spec append([Es.Event.t()], Context.t(), keyword()) :: Result.unit()
 
   @impl true
   def append(events, %Context{} = context, opts \\ []) when is_list(events) and is_list(opts) do

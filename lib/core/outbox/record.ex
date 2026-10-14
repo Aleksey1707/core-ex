@@ -5,7 +5,6 @@ defmodule Core.Outbox.Record do
 
   import Core.Guard
 
-  alias Core.Error
   alias Core.Option
   alias Core.Outbox
   alias Core.Result
@@ -52,7 +51,7 @@ defmodule Core.Outbox.Record do
           payload(),
           headers() | nil,
           Outbox.CreatedAt.t() | nil
-        ) :: {:ok, t()} | {:error, Error.t()}
+        ) :: Result.t(t())
 
   def new(topic, key, name, payload, headers \\ nil, created_at \\ nil)
 
@@ -99,7 +98,7 @@ defmodule Core.Outbox.Record do
   меняет токен, и запись результата прежним владельцем становится no-op.
   """
   @spec reserve(t(), Outbox.LockedUntil.t(), Outbox.LeaseID.t(), Outbox.UpdatedAt.t()) ::
-          {:ok, t()} | {:error, Error.t()}
+          Result.t(t())
 
   def reserve(
         %__MODULE__{} = record,
@@ -154,7 +153,7 @@ defmodule Core.Outbox.Record do
   При `attempts >= max_attempts` → `:failed`, иначе → `:new` для retry.
   """
   @spec record_failure(t(), Outbox.ErrorMessage.t(), Outbox.Attempts.t(), Outbox.UpdatedAt.t()) ::
-          {:ok, t()} | {:error, Error.t()}
+          Result.t(t())
 
   def record_failure(
         %__MODULE__{} = record,

@@ -7,7 +7,6 @@ defmodule Core.Prim.Date do
   `from/1`, `from!/1` (из date- или datetime-Prim, с приведением в `tz:`).
   """
 
-  alias Core.Error
   alias Core.Prim
   alias Core.Result
   alias Core.Validator
@@ -40,7 +39,7 @@ defmodule Core.Prim.Date do
       @tz Keyword.get(opts, :tz)
 
       @doc "Сегодняшняя дата в tz модуля/конфига."
-      @spec today() :: {:ok, t()} | {:error, Error.t()}
+      @spec today() :: Core.Result.t(t())
 
       def today do
         tz = @tz || Core.Config.tz()
@@ -71,7 +70,7 @@ defmodule Core.Prim.Date do
 
       Datetime приводится к дате в tz модуля/конфига.
       """
-      @spec from(term()) :: {:ok, t()} | {:error, Error.t()}
+      @spec from(term()) :: Core.Result.t(t())
 
       def from(%mod{value: value} = prim)
           when is_atom(mod) and (is_struct(value, Date) or is_struct(value, DateTime)) do
@@ -104,7 +103,7 @@ defmodule Core.Prim.Date do
   end
 
   @doc false
-  @spec cast(term()) :: {:ok, Date.t()} | {:error, {:invalid_date, String.t()}}
+  @spec cast(term()) :: Result.t(Date.t(), {:invalid_date, String.t()})
 
   def cast(%Date{} = value), do: {:ok, value}
 
@@ -119,7 +118,7 @@ defmodule Core.Prim.Date do
 
   @doc "Достать `%Date{}` из date/datetime-Prim; datetime приводится к дате в `tz`."
   @spec extract(module(), String.t(), module(), struct(), String.t()) ::
-          {:ok, Date.t()} | {:error, Error.t()}
+          Result.t(Date.t())
 
   def extract(target, name, mod, prim, tz)
       when is_atom(target) and is_binary(name) and is_atom(mod) and is_struct(prim) and

@@ -32,6 +32,7 @@ defmodule Core.Outbox.Delivery.Mq do
   alias Core.Otel
   alias Core.Outbox
   alias Core.Outbox.Record
+  alias Core.Result
 
   require Error
 
@@ -50,7 +51,7 @@ defmodule Core.Outbox.Delivery.Mq do
   end
 
   @doc "Опубликовать запись outbox через MQ writer."
-  @spec publish(t(), Record.t()) :: :ok | {:error, Error.t()}
+  @spec publish(t(), Record.t()) :: Result.unit()
 
   @impl true
   def publish(%__MODULE__{} = delivery, %Record{} = record) do
@@ -75,7 +76,7 @@ defmodule Core.Outbox.Delivery.Mq do
   end
 
   @doc "Record → MQ Message."
-  @spec to_message(Record.t()) :: {:ok, Message.t()} | {:error, Error.t()}
+  @spec to_message(Record.t()) :: Result.t(Message.t())
 
   def to_message(%Record{} = record) do
     with {:ok, topic} <- Mq.Topic.new(Outbox.Topic.value(record.topic)),

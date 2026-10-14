@@ -34,6 +34,7 @@ defmodule Core.Mq.Dlq.Reader do
   alias Core.Mq
   alias Core.Mq.Dlq.Store
   alias Core.Mq.Message
+  alias Core.Result
 
   require Error
   require Logger
@@ -85,7 +86,7 @@ defmodule Core.Mq.Dlq.Reader do
     do: poll(server, deadline(timeout))
 
   @doc "Пометить запись в работе обработанной."
-  @spec commit(t()) :: :ok | {:error, Error.t()}
+  @spec commit(t()) :: Result.unit()
 
   @impl true
   def commit(server), do: GenServer.call(server, :commit, @call_timeout)

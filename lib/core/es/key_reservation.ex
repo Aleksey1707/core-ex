@@ -132,6 +132,7 @@ defmodule Core.Es.KeyReservation do
   alias Core.Es
   alias Core.Es.KeyReservation.Schema
   alias Core.Helper
+  alias Core.Result
   alias Core.Telemetry
 
   require Error
@@ -342,7 +343,7 @@ defmodule Core.Es.KeyReservation do
   # отказа из `code:` модуля ключа и detail `%{scope: scope}`.
   @doc false
   @spec append([declaration()], [Es.Event.t()], Context.t(), (atom(), map() -> Error.t())) ::
-          :ok | {:error, Error.t()}
+          Result.unit()
 
   def append(declarations, events, context, taken)
 

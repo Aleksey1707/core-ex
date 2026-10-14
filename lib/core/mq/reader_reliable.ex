@@ -14,9 +14,10 @@ defmodule Core.Mq.ReaderReliable do
 
   alias Core.Error
   alias Core.Mq.Message
+  alias Core.Result
 
   @type t :: term()
 
   @callback get(t(), timeout()) :: {:ok, Message.t()} | :empty | {:error, Error.t()}
-  @callback commit(t()) :: :ok | {:error, Error.t()}
+  @callback commit(t()) :: Result.unit()
 end

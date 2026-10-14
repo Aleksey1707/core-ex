@@ -15,13 +15,14 @@ defmodule Core.Es.Projection.Await do
   alias Core.Es.Projection.Batch
   alias Core.Es.Projection.Checkpoint
   alias Core.Otel
+  alias Core.Result
   alias Core.Telemetry
 
   require Error
 
   @doc false
   @spec run(module(), Projection.t(), String.t(), struct(), non_neg_integer()) ::
-          :ok | {:error, Error.t()}
+          Result.unit()
 
   def run(projection, declaration, type, %_{} = aggregate_id, timeout)
       when is_atom(projection) and is_binary(type) and is_integer(timeout) and timeout >= 0 do

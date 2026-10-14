@@ -22,7 +22,7 @@ defmodule Core.Es.Aggregate do
 
   ## Колбэки
 
-  - `decide(command, state)` → `{:ok, [result]} | {:error, Error.t()}` — решение по команде
+  - `decide(command, state)` → `Result.t([result])` — решение по команде
     (`use Core.Es.Cmd`). Элемент результата — черновик события от модуля события:
     `Event.Mod.draft(payload)` или `Event.Mod.draft()` у события без нагрузки (`Core.Es.Event`,
     «Черновик события»); `{:ok, []}` — команда без изменений.
@@ -46,7 +46,7 @@ defmodule Core.Es.Aggregate do
   - `fold(state, command, results)` → `%Agg{}` — свёртка результата `decide/2`: несколько событий
     одной команды автор сворачивает через `with`, чтобы следующее решение видело состояние после
     предыдущего;
-  - `execute(state, command)` → `{:ok, {[Es.Event], %Agg{}}} | {:error, Error.t()}` — чистый шаг
+  - `execute(state, command)` → `Result.t({[Es.Event], %Agg{}})` — чистый шаг
     «`decide/2` → события → `fold/2`»; `{:ok, []}` даёт `{:ok, {[], state}}` без роста версии;
   - `__es_event_codec__/0` — кодек событий агрегата.
 
@@ -73,6 +73,7 @@ defmodule Core.Es.Aggregate do
   alias Core.Error
   alias Core.Es
   alias Core.Helper
+  alias Core.Result
   alias Core.Version
 
   @label "Es.Aggregate"
@@ -85,7 +86,7 @@ defmodule Core.Es.Aggregate do
 
   @doc "Решение по команде: события, которые случатся, или доменный отказ."
   @callback decide(command :: struct(), state :: struct()) ::
-              {:ok, [result()]} | {:error, Error.t()}
+              Result.t([result()])
 
   @doc "Применение события к состоянию."
   @callback evolve(state :: struct(), event :: Es.Event.t()) :: struct()
@@ -125,7 +126,7 @@ defmodule Core.Es.Aggregate do
 
       @doc "Исполнить команду: события решения `decide/2` и состояние после них."
       @spec execute(%__MODULE__{}, struct()) ::
-              {:ok, {[Core.Es.Event.t()], %__MODULE__{}}} | {:error, Core.Error.t()}
+              Core.Result.t({[Core.Es.Event.t()], %__MODULE__{}})
 
       def execute(%__MODULE__{} = state, command) when is_struct(command) do
         case Core.Es.Aggregate.apply_decision(__MODULE__, state, command, decide(command, state)) do
@@ -159,8 +160,8 @@ defmodule Core.Es.Aggregate do
   # ===== команда =====
 
   @doc false
-  @spec apply_decision(module(), struct(), struct(), {:ok, [result()]} | {:error, Error.t()}) ::
-          {:ok, {[Es.Event.t()], struct()}} | {:error, Error.t()}
+  @spec apply_decision(module(), struct(), struct(), Result.t([result()])) ::
+          Result.t({[Es.Event.t()], struct()})
 
   def apply_decision(aggregate, state, %{by: by, at: at} = command, decision)
       when is_struct(state, aggregate) and is_struct(command) do

@@ -10,10 +10,10 @@ defmodule Core.Codec.Facade.Behaviour do
   `Core.Codec.Redump`: какой плагин обслуживает тип, знает только фасад.
   """
 
-  alias Core.Error
+  alias Core.Result
 
   @callback dump(struct()) :: term()
-  @callback load(module(), term()) :: {:ok, term()} | {:error, Error.t()}
+  @callback load(module(), term()) :: Result.t()
   @callback load!(module(), term()) :: term()
   @callback __codec_redump__(module()) :: Core.Codec.Redump.spec()
 end

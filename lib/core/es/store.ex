@@ -144,7 +144,7 @@ defmodule Core.Es.Store do
           Context.t(),
           (mismatch_detail() -> Error.t()),
           keyword()
-        ) :: :ok | {:error, Error.t()}
+        ) :: Result.unit()
 
   def append(event_codec, events, context, mismatch, opts \\ [])
 
@@ -334,7 +334,7 @@ defmodule Core.Es.Store do
           Pagination.Limit.t(),
           Pagination.Offset.t(),
           Context.t()
-        ) :: {:ok, Pagination.Result.t(Es.Event.t())} | {:error, Error.t()}
+        ) :: Result.t(Pagination.Result.t(Es.Event.t()))
 
   def read_stream(
         event_codec,

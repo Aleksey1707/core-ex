@@ -13,10 +13,11 @@ defmodule Core.Outbox.Delivery do
 
   alias Core.Error
   alias Core.Outbox.Record
+  alias Core.Result
 
   @type t :: term()
 
-  @callback publish(t(), Record.t()) :: :ok | {:error, Error.t()}
+  @callback publish(t(), Record.t()) :: Result.unit()
 
   @callback publish_many(t(), [Record.t()]) :: :ok | {:error, non_neg_integer(), Error.t()}
 end

@@ -559,7 +559,7 @@ defmodule Core.Codec.Plugin.Fields do
   # ===== загрузка списка =====
 
   @doc false
-  @spec load_list(module(), atom(), term(), (term() -> Result.t(term()))) :: Result.t([term()])
+  @spec load_list(module(), atom(), term(), (term() -> Result.t())) :: Result.t([term()])
 
   def load_list(_type, _name, raw, fun) when is_list(raw) and is_function(fun, 1), do: Result.traverse(raw, fun)
 

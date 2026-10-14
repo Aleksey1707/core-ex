@@ -61,7 +61,7 @@ defmodule Core.Es.Outbox do
 
       @doc "Список событий → список записей outbox."
       @spec from_events([event()]) ::
-              {:ok, [Core.Outbox.Record.t()]} | {:error, Core.Error.t()}
+              Core.Result.t([Core.Outbox.Record.t()])
 
       def from_events(events) when is_list(events) do
         Core.Result.traverse(events, &from_event/1)
@@ -69,7 +69,7 @@ defmodule Core.Es.Outbox do
 
       @doc "Одно событие → запись outbox."
       @spec from_event(event()) ::
-              {:ok, Core.Outbox.Record.t()} | {:error, Core.Error.t()}
+              Core.Result.t(Core.Outbox.Record.t())
 
       def from_event(event) do
         payload = es_codec().dump(event)

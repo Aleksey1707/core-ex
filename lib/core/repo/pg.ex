@@ -524,7 +524,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Получить сущность по id и version."
   @spec get(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()}
+          Result.t(struct())
 
   def get(pg, id, version, context, opts \\ []) do
     db_id = pg.to_id.(id)
@@ -561,7 +561,7 @@ defmodule Core.Repo.Pg do
           Version.expected(),
           Context.t(),
           Repo.opts()
-        ) :: {:ok, struct()} | {:error, Error.t()}
+        ) :: Result.t(struct())
 
   def get_by(pg, filter, detail, version, context, opts \\ []) do
     case dao(pg).one(from(x in read_scope(pg, context), where: ^filter), opts) do
@@ -619,7 +619,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Найти сущности по парам id/version (без incomplete)."
   @spec find_many(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
-          {:ok, [struct()]} | {:error, Error.t()}
+          Result.t([struct()])
 
   def find_many(pg, pairs, context, opts \\ []) do
     with :ok <- ensure_non_empty(pg, pairs) do
@@ -632,7 +632,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Получить все сущности по парам id/version."
   @spec get_many(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
-          {:ok, [struct()]} | {:error, Error.t()}
+          Result.t([struct()])
 
   def get_many(pg, pairs, context, opts \\ []) do
     with :ok <- ensure_non_empty(pg, pairs) do
@@ -652,7 +652,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Проверить существование по id и version."
   @spec exists?(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
-          {:ok, boolean()} | {:error, Error.t()}
+          Result.t(boolean())
 
   def exists?(pg, id, version, context, opts \\ [])
 
@@ -678,7 +678,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Проверить существование всех пар id/version."
   @spec exists_all?(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
-          {:ok, boolean()} | {:error, Error.t()}
+          Result.t(boolean())
 
   def exists_all?(pg, pairs, context, opts \\ []) do
     with :ok <- ensure_non_empty(pg, pairs) do
@@ -700,7 +700,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Вставить сущность; вернуть её же и положить эталоном в `Repo.Sc` после commit."
   @spec insert(map(), struct(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()}
+          Result.t(struct())
 
   def insert(pg, entity, context, opts \\ []) do
     case raw_insert(pg, entity, context, opts) do
@@ -711,7 +711,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Обновить сущность; вернуть её же и положить эталоном в `Repo.Sc` после commit."
   @spec update(map(), struct(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()}
+          Result.t(struct())
 
   def update(pg, entity, context, opts \\ []) do
     case raw_update(pg, entity, context, opts) do
@@ -751,7 +751,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Удалить сущность по id и version."
   @spec delete(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
-          :ok | {:error, Error.t()}
+          Result.unit()
 
   def delete(pg, id, version, context, opts \\ []) do
     db_id = pg.to_id.(id)
@@ -771,7 +771,7 @@ defmodule Core.Repo.Pg do
 
   @doc "Сохранить сущность (insert или update)."
   @spec save(map(), struct(), Context.t(), Repo.opts()) ::
-          {:ok, struct()} | {:error, Error.t()}
+          Result.t(struct())
 
   def save(pg, entity, context, opts \\ []) do
     case known_to_exist?(pg, entity, context, opts) do

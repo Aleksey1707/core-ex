@@ -10,19 +10,19 @@ defmodule Core.Es.Aggregate.Repo do
 
   Генерирует `@callback`:
 
-  - `get(id, version, context, opts)` → `{:ok, state} | {:error, Error.t()}` — состояние из
+  - `get(id, version, context, opts)` → `Result.t(state)` — состояние из
     потока агрегата;
-  - `get_decision(id, version, context, fun, opts)` → `{:ok, decision} | {:error, reason}` —
+  - `get_decision(id, version, context, fun, opts)` → `Result.t(decision, reason)` —
     решение `fun.(state)` над состоянием из потока; явная версия на пустом потоке сверяется после
     решения (ADR-0016);
-  - `get_many(pairs, context, opts)` → `{:ok, [state]} | {:error, Error.t()}` — состояния в
+  - `get_many(pairs, context, opts)` → `Result.t([state])` — состояния в
     порядке пар `{id, version}`;
-  - `append(events, context, opts)` → `:ok | {:error, Error.t()}` — запись событий
+  - `append(events, context, opts)` → `Result.unit()` — запись событий
     `Agg.execute/2`;
-  - `refresh(state, version, context, opts)` → `{:ok, state} | {:error, Error.t()}` — хвост
+  - `refresh(state, version, context, opts)` → `Result.t(state)` — хвост
     потока после `state.version`;
   - `page_stream(id, limit, offset, context)` →
-    `{:ok, Pagination.Result.t(Es.Event.t())} | {:error, Error.t()}` — страница потока агрегата
+    `Result.t(Pagination.Result.t(Es.Event.t()))` — страница потока агрегата
     для читающего usecase.
 
   Реализация — `use Core.Es.Aggregate.Repo.Pg` (исходы — там), резолв — `Core.Config.repo!/1`
@@ -83,42 +83,42 @@ defmodule Core.Es.Aggregate.Repo do
                   version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: keyword()
-                ) :: {:ok, unquote(aggregate).t()} | {:error, Core.Error.t()}
+                ) :: Core.Result.t(unquote(aggregate).t())
 
       @callback get_decision(
                   id :: unquote(id).t(),
                   version :: Core.Version.expected(),
                   context :: Core.Context.t(),
-                  fun :: (unquote(aggregate).t() -> {:ok, decision} | {:error, reason}),
+                  fun :: (unquote(aggregate).t() -> Core.Result.t(decision, reason)),
                   opts :: keyword()
-                ) :: {:ok, decision} | {:error, reason | Core.Error.t()}
+                ) :: Core.Result.t(decision, reason | Core.Error.t())
                 when decision: var, reason: var
 
       @callback get_many(
                   pairs :: [{unquote(id).t(), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: keyword()
-                ) :: {:ok, [unquote(aggregate).t()]} | {:error, Core.Error.t()}
+                ) :: Core.Result.t([unquote(aggregate).t()])
 
       @callback append(
                   events :: [Core.Es.Event.t()],
                   context :: Core.Context.t(),
                   opts :: keyword()
-                ) :: :ok | {:error, Core.Error.t()}
+                ) :: Core.Result.unit()
 
       @callback refresh(
                   state :: unquote(aggregate).t(),
                   version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: keyword()
-                ) :: {:ok, unquote(aggregate).t()} | {:error, Core.Error.t()}
+                ) :: Core.Result.t(unquote(aggregate).t())
 
       @callback page_stream(
                   id :: unquote(id).t(),
                   limit :: Core.Pagination.Limit.t(),
                   offset :: Core.Pagination.Offset.t(),
                   context :: Core.Context.t()
-                ) :: {:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}
+                ) :: Core.Result.t(Core.Pagination.Result.t(Core.Es.Event.t()))
     end
   end
 

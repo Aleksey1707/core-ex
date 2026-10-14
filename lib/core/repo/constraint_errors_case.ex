@@ -52,6 +52,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
 
   alias Core.Helper
   alias Core.Repo
+  alias Core.Result
 
   @label "Repo.ConstraintErrorsCase"
   @required_keys ~w(otp_app)a
@@ -166,7 +167,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
   # ===== ключи маппинга =====
 
   @doc false
-  @spec check_mapping_declared([module()]) :: :ok | {:error, undeclared()}
+  @spec check_mapping_declared([module()]) :: Result.unit(undeclared())
 
   def check_mapping_declared(repos) when is_list(repos) do
     repos
@@ -187,7 +188,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
   # ===== покрытие changeset/2 =====
 
   @doc false
-  @spec check_constraints_mapped([module()]) :: :ok | {:error, unmapped()}
+  @spec check_constraints_mapped([module()]) :: Result.unit(unmapped())
 
   def check_constraints_mapped(repos) when is_list(repos) do
     repos
@@ -209,7 +210,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
   # ===== имена в БД =====
 
   @doc false
-  @spec check_constraint_names([module()], module()) :: :ok | {:error, missing()}
+  @spec check_constraint_names([module()], module()) :: Result.unit(missing())
 
   def check_constraint_names(repos, dao) when is_list(repos) and is_atom(dao) do
     repos
@@ -246,7 +247,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
   # ===== FK дочерних таблиц =====
 
   @doc false
-  @spec check_children_foreign_keys([module()], module()) :: :ok | {:error, unmapped_foreign_keys()}
+  @spec check_children_foreign_keys([module()], module()) :: Result.unit(unmapped_foreign_keys())
 
   def check_children_foreign_keys(repos, dao) when is_list(repos) and is_atom(dao) do
     repos
@@ -272,7 +273,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
   # ===== read-репозитории =====
 
   @doc false
-  @spec check_read_repos([module()]) :: :ok | {:error, mapped()}
+  @spec check_read_repos([module()]) :: Result.unit(mapped())
 
   def check_read_repos(repos) when is_list(repos) do
     repos

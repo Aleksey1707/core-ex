@@ -29,6 +29,7 @@ defmodule Core.Prim do
   alias Core.Error
   alias Core.Helper
   alias Core.Mutator
+  alias Core.Result
   alias Core.Validator
 
   require Error
@@ -64,7 +65,7 @@ defmodule Core.Prim do
       @type t :: %__MODULE__{value: unquote(value_type)}
 
       @doc "Создать Prim из raw."
-      @spec new(term()) :: {:ok, t()} | {:error, Error.t()}
+      @spec new(term()) :: Core.Result.t(t())
 
       def new(raw) do
         with {:ok, value} <- Core.Prim.run_cast(@cast, raw, @pipeline_opts),
@@ -140,8 +141,9 @@ defmodule Core.Prim do
     end
   end
 
-  @type error :: {:error, {atom(), String.t()}} | {:error, Error.t()}
-  @type cast_result :: {:ok, term()} | error()
+  @type reason :: {atom(), String.t()} | Error.t()
+  @type error :: {:error, reason()}
+  @type cast_result :: Result.t(term(), reason())
   @type cast_spec :: (term() -> cast_result()) | (term(), keyword() -> cast_result())
   @type mutate_spec :: Mutator.mutate_spec() | [Mutator.mutate_spec()]
   @type validate_spec :: Validator.validate_spec() | [Validator.validate_spec()]
@@ -294,7 +296,7 @@ defmodule Core.Prim do
   end
 
   @doc false
-  @spec normalize_validate(:ok | error()) :: :ok | error()
+  @spec normalize_validate(Result.unit(reason())) :: Result.unit(reason())
 
   def normalize_validate(:ok), do: :ok
 
@@ -310,7 +312,7 @@ defmodule Core.Prim do
   end
 
   @doc false
-  @spec check_byte_limit(binary(), pos_integer() | nil, atom()) :: :ok | error()
+  @spec check_byte_limit(binary(), pos_integer() | nil, atom()) :: Result.unit(reason())
 
   # Граница по байтам, а не по символам или цифрам: любой разбор ввода (`String.valid?/1`,
   # `Integer.parse/1`, `Decimal.new/1`) обходит его целиком, то есть делает ровно ту
@@ -359,7 +361,7 @@ defmodule Core.Prim do
   end
 
   @doc false
-  @spec run_validates(validate_spec(), term(), keyword()) :: :ok | error()
+  @spec run_validates(validate_spec(), term(), keyword()) :: Result.unit(reason())
 
   def run_validates(nil, _value, _opts), do: :ok
 

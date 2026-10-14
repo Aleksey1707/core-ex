@@ -38,6 +38,7 @@ defmodule Core.Mq.Stream.Writer do
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.Mq.Stream.Codec
+  alias Core.Result
   alias Core.Telemetry
 
   require Error
@@ -85,7 +86,7 @@ defmodule Core.Mq.Stream.Writer do
   end
 
   @doc "Опубликовать сообщение."
-  @spec put(GenServer.server(), Message.t()) :: :ok | {:error, Error.t()}
+  @spec put(GenServer.server(), Message.t()) :: Result.unit()
 
   @impl true
   def put(server, %Message{} = message) do

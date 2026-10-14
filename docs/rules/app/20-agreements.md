@@ -24,7 +24,7 @@
 Состав и порядок MUST быть одинаковы в `Makefile` и в `.pre-commit-config.yaml`:
 
 ```text
-boundary-check → rules-check → layout-check → format-check → compile → deps-clean →
+boundary-check → rules-check → layout-check → spec-check → format-check → compile → deps-clean →
 dialyzer → test → credo → security → audit
 ```
 
@@ -33,6 +33,7 @@ dialyzer → test → credo → security → audit
 | `boundary-check` | `deps/core/scripts/boundary_lint.exs --consumer lib test` — DI через `Core.Config.repo!/1` (`13-repos.md`); в `lib/` правила раскладки из таблицы маркеров `10-architecture.md`, «Отступление»: путь файла, оглавление и корень контекста, проекции, корень web; направления держит `boundary` на шаге `compile` |
 | `rules-check` | `deps/core/scripts/rules_lint.exs --consumer` — форма локального свода, его карты и ссылки на оба яруса (`00-index.md`) |
 | `layout-check` | `deps/core/scripts/layout_lint.exs` — разделители внутри модуля (`deps/core/docs/rules/20-agreements.md`) |
+| `spec-check` | `deps/core/scripts/spec_lint.exs` — форма результата в типах через `Core.Result` (`deps/core/docs/rules/20-agreements.md`, «Форма результата») |
 | `format-check` | `mix format --check-formatted` — падает, а не правит |
 | `compile` | `--warnings-as-errors`: предупреждение `boundary` — отказ сборки (`10-architecture.md`, «Boundary») |
 | `deps-clean` | `mix deps.clean --unused` |
@@ -44,9 +45,9 @@ dialyzer → test → credo → security → audit
 
 - Порядок не произвольный: дешёвые проверки идут раньше дорогих, а линтеры — раньше
   компиляции, чтобы не ждать сборку ради замечания о форме.
-- Шаги, чей скрипт приезжает из библиотеки (`boundary-check`, `rules-check`, `layout-check`),
-  MUST звать его из `deps/core/scripts/`, а не копировать к себе: правило и его проверка
-  обновляются вместе.
+- Шаги, чей скрипт приезжает из библиотеки (`boundary-check`, `rules-check`, `layout-check`,
+  `spec-check`), MUST звать его из `deps/core/scripts/`, а не копировать к себе: правило и его
+  проверка обновляются вместе.
 - Пропустить шаг MUST NOT: пайплайн, разный в двух приложениях, перестаёт быть нормой и
   становится привычкой конкретного репозитория.
 - `xref` в пайплайн не входит — это диагностика, а не гейт.

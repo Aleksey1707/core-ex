@@ -29,6 +29,7 @@ defmodule Core.Otel.Es do
   alias Core.Error
   alias Core.Es
   alias Core.Otel
+  alias Core.Result
   alias Core.Version
 
   @attr_projection_name "core.es.projection.name"
@@ -110,8 +111,8 @@ defmodule Core.Otel.Es do
   Выполнить `fun` — ожидание проекции после записи — в span'е `await <имя проекции>` внутри
   трейса вызывающего; `{:error, _}` результата отмечается `Core.Otel.record_error/1`.
   """
-  @spec await(String.t(), String.t(), String.t(), (-> :ok | {:error, Error.t()})) ::
-          :ok | {:error, Error.t()}
+  @spec await(String.t(), String.t(), String.t(), (-> Result.unit())) ::
+          Result.unit()
 
   def await(projection_name, type, aggregate_id, fun)
       when is_binary(projection_name) and is_binary(type) and is_binary(aggregate_id) and
@@ -140,8 +141,8 @@ defmodule Core.Otel.Es do
   Выполнить `fun` — команду `command` агрегата — в span'е `execute <тип>` внутри трейса
   вызывающего; прикладная `{:error, _}` результата отмечается `Core.Otel.record_error/1`.
   """
-  @spec execute(String.t(), String.t(), module(), (-> {:ok, Version.t() | nil} | {:error, Error.t()})) ::
-          {:ok, Version.t() | nil} | {:error, Error.t()}
+  @spec execute(String.t(), String.t(), module(), (-> Result.t(Version.t() | nil))) ::
+          Result.t(Version.t() | nil)
 
   def execute(type, aggregate_id, command, fun)
       when is_binary(type) and is_binary(aggregate_id) and is_atom(command) and

@@ -66,6 +66,7 @@ defmodule Core.StateStoredFixture do
     alias Core.Config
     alias Core.Es
     alias Core.EventFixture.AggID
+    alias Core.Result
     alias Core.StateStoredFixture.Child
     alias Core.StateStoredFixture.Entity
     alias Core.Version
@@ -89,7 +90,7 @@ defmodule Core.StateStoredFixture do
     def base_query, do: from(e in __MODULE__, preload: [:children])
 
     @doc "Строка → агрегат."
-    @spec to_entity(t()) :: {:ok, Entity.t()} | {:error, Core.Error.t()}
+    @spec to_entity(t()) :: Result.t(Entity.t())
 
     def to_entity(%__MODULE__{} = row) do
       with {:ok, id} <- Config.codec().load(AggID, row.id),

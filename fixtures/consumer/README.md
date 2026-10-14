@@ -4,8 +4,9 @@
 её видит настоящий потребитель. Проверяет три вещи, все — шагом `make consumer-check`:
 
 - **раскладку**: `lib/` — живой образец bounded context по своду потребителя
-  (`docs/rules/app/10-architecture.md`, «Раскладка»), и `boundary_lint --consumer` проходит на нём
-  без нарушений; линтер печатает все нарушения, и шаг на них падает, не доходя до сверки;
+  (`docs/rules/app/10-architecture.md`, «Раскладка»), и `boundary_lint --consumer` и `spec_lint`
+  проходят на нём без нарушений; линтеры печатают все нарушения, и шаг на них падает, не доходя до
+  сверки;
 - **границы**: контекст, кодек и сток — границы Boundary с именами из таблицы namespaces
   (`docs/rules/app/10-architecture.md`, «Top-level namespaces», «Boundary»); ссылка чужой границы на
   неэкспортированный модуль контекста и ссылка web на `DAO`, в том числе значением, — предупреждения
@@ -85,6 +86,7 @@ make consumer-check                                   # из корня библ
 cd fixtures/consumer
 mix deps.get                                          # первый раз; без сети — HEX_OFFLINE=1 из кеша hex
 elixir ../../scripts/boundary_lint.exs --consumer     # раскладка lib/
+elixir ../../scripts/spec_lint.exs                    # форма результата в типах
 mix run --no-start --no-compile check.exs             # сверка
 mix run --no-start --no-compile check.exs --dump      # все предупреждения: file:line: заголовок [функция]
 bash selftest.sh                                      # самопроверка сверки

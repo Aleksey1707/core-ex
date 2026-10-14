@@ -25,6 +25,7 @@ defmodule Core.Prim.UUID do
   """
 
   alias Core.Prim
+  alias Core.Result
   alias Core.Validator
 
   use Core.Prim.Wrapper,
@@ -204,7 +205,7 @@ defmodule Core.Prim.UUID do
   end
 
   @doc false
-  @spec cast(term()) :: {:ok, String.t()} | {:error, {:invalid_uuid, String.t()}}
+  @spec cast(term()) :: Result.t(String.t(), {:invalid_uuid, String.t()})
 
   def cast(value) when is_binary(value) do
     {:ok, normalize(value)}

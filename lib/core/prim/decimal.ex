@@ -15,6 +15,7 @@ defmodule Core.Prim.Decimal do
   """
 
   alias Core.Prim
+  alias Core.Result
   alias Core.Validator
 
   use Core.Prim.Wrapper,
@@ -67,13 +68,13 @@ defmodule Core.Prim.Decimal do
   end
 
   @doc false
-  @spec cast(term()) :: {:ok, Decimal.t()} | {:error, {:invalid_decimal, String.t()}}
+  @spec cast(term()) :: Result.t(Decimal.t(), {:invalid_decimal, String.t()})
 
   # Арность 1 — для вызова без опций (read-путь кодека): значение оттуда уже разобрано.
   def cast(value), do: cast(value, [])
 
   @doc false
-  @spec cast(term(), keyword()) :: {:ok, Decimal.t()} | {:error, {:invalid_decimal, String.t()}}
+  @spec cast(term(), keyword()) :: Result.t(Decimal.t(), {:invalid_decimal, String.t()})
 
   def cast(%Decimal{} = value, _opts), do: finite(value)
 

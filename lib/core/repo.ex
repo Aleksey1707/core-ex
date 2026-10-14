@@ -168,7 +168,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
+                  Core.Result.t(unquote(cfg.item))
     end
   end
 
@@ -209,7 +209,7 @@ defmodule Core.Repo do
                   pairs :: [{unquote(cfg.id), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
-                ) :: {:ok, [unquote(cfg.item)]} | {:error, Core.Error.t()}
+                ) :: Core.Result.t([unquote(cfg.item)])
     end
   end
 
@@ -219,7 +219,7 @@ defmodule Core.Repo do
                   pairs :: [{unquote(cfg.id), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
-                ) :: {:ok, [unquote(cfg.item)]} | {:error, Core.Error.t()}
+                ) :: Core.Result.t([unquote(cfg.item)])
     end
   end
 
@@ -230,7 +230,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
+                  Core.Result.t(unquote(cfg.item))
     end
   end
 
@@ -241,7 +241,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
+                  Core.Result.t(unquote(cfg.item))
     end
   end
 
@@ -252,7 +252,7 @@ defmodule Core.Repo do
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
                 ) ::
-                  {:ok, unquote(cfg.item)} | {:error, Core.Error.t()}
+                  Core.Result.t(unquote(cfg.item))
     end
   end
 
@@ -263,7 +263,7 @@ defmodule Core.Repo do
                   version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
-                ) :: :ok | {:error, Core.Error.t()}
+                ) :: Core.Result.unit()
     end
   end
 
@@ -274,7 +274,7 @@ defmodule Core.Repo do
                   version :: Core.Version.expected(),
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
-                ) :: {:ok, boolean()} | {:error, Core.Error.t()}
+                ) :: Core.Result.t(boolean())
     end
   end
 
@@ -284,7 +284,7 @@ defmodule Core.Repo do
                   pairs :: [{unquote(cfg.id), Core.Version.expected()}],
                   context :: Core.Context.t(),
                   opts :: Core.Repo.opts()
-                ) :: {:ok, boolean()} | {:error, Core.Error.t()}
+                ) :: Core.Result.t(boolean())
     end
   end
 

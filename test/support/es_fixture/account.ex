@@ -18,6 +18,7 @@ defmodule Core.EsFixture.Account do
   alias Core.EsFixture.Account.Cmd
   alias Core.EsFixture.Account.Errors
   alias Core.EsFixture.Account.Event
+  alias Core.Result
   alias Core.Version
 
   use Core.Es.Aggregate,
@@ -54,7 +55,7 @@ defmodule Core.EsFixture.Account do
   # ===== decide =====
 
   @doc "Решение по команде счёта."
-  @spec decide(Cmd.t(), t()) :: {:ok, [Es.Aggregate.result()]} | {:error, Core.Error.t()}
+  @spec decide(Cmd.t(), t()) :: Result.t([Es.Aggregate.result()])
 
   @impl true
   def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),

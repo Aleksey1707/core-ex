@@ -34,7 +34,7 @@ defmodule Core.Web.Params do
   end
 
   @doc "Обязательное значение по ключу; иначе `{:error, %Error{}}`."
-  @spec get(map(), atom()) :: {:ok, term()} | {:error, Error.t()}
+  @spec get(map(), atom()) :: Result.t()
 
   def get(map, key) when is_map(map) and is_atom(key) do
     case find(map, key) do
@@ -54,7 +54,7 @@ defmodule Core.Web.Params do
   Опции — `limit_default:` (#{@limit_default}) и `offset_default:` (#{@offset_default}).
   """
   @spec page(map(), keyword()) ::
-          {:ok, {Pagination.Limit.t(), Pagination.Offset.t()}} | {:error, Error.t()}
+          Result.t({Pagination.Limit.t(), Pagination.Offset.t()})
 
   def page(map, opts \\ []) when is_map(map) and is_list(opts) do
     with {:ok, limit} <- parse_limit(map, opts),
@@ -71,7 +71,7 @@ defmodule Core.Web.Params do
   `key` — имя параметра в схеме запроса, а не заголовок `conn`: `Plug` отдаёт имена
   заголовков в нижнем регистре, и на `Map.new(conn.req_headers)` дефолт не совпадёт.
   """
-  @spec explicit_version(map(), atom()) :: {:ok, Version.t()} | {:error, Error.t()}
+  @spec explicit_version(map(), atom()) :: Result.t(Version.t())
 
   def explicit_version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
     case expected_version(map, key) do
@@ -86,7 +86,7 @@ defmodule Core.Web.Params do
 
   Отсутствие параметра — `:missing_param`; `key` — как у `explicit_version/2`.
   """
-  @spec expected_version(map(), atom()) :: {:ok, Version.expected()} | {:error, Error.t()}
+  @spec expected_version(map(), atom()) :: Result.t(Version.expected())
 
   def expected_version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
     case get(map, key) do
@@ -100,7 +100,7 @@ defmodule Core.Web.Params do
 
   Отсутствие параметра и `"*"` → `:current`; `key` — как у `explicit_version/2`.
   """
-  @spec optional_version(map(), atom()) :: {:ok, Version.expected()} | {:error, Error.t()}
+  @spec optional_version(map(), atom()) :: Result.t(Version.expected())
 
   def optional_version(map, key \\ @if_match_key) when is_map(map) and is_atom(key) do
     case find(map, key) do

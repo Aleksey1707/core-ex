@@ -7,7 +7,6 @@ defmodule Core.Codec.Helper do
   """
 
   alias Core.Codec
-  alias Core.Error
   alias Core.Result
 
   @typedoc "Модуль entity-фасада (`Core.Codec.Facade.Behaviour`)."
@@ -48,7 +47,7 @@ defmodule Core.Codec.Helper do
   end
 
   @doc "Load опционального Prim: `nil` → `{:ok, nil}`."
-  @spec load_optional(module(), term(), codec()) :: {:ok, term()} | {:error, Error.t()}
+  @spec load_optional(module(), term(), codec()) :: Result.t()
 
   def load_optional(mod, nil, _codec) when is_atom(mod), do: {:ok, nil}
 
@@ -57,7 +56,7 @@ defmodule Core.Codec.Helper do
   end
 
   @doc "Load списка сущностей через `codec.load/2`."
-  @spec load_many(module(), list(), codec()) :: {:ok, list()} | {:error, Error.t()}
+  @spec load_many(module(), list(), codec()) :: Result.t(list())
 
   def load_many(mod, list, codec) when is_atom(mod) and is_list(list) and is_atom(codec) do
     Result.traverse(list, &codec.load(mod, &1))

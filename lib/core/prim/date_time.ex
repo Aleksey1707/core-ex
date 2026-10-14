@@ -46,7 +46,7 @@ defmodule Core.Prim.DateTime do
       @tz Keyword.get(type_opts, :tz)
 
       @doc "Текущее время в tz модуля/конфига."
-      @spec now() :: {:ok, t()} | {:error, Error.t()}
+      @spec now() :: Core.Result.t(t())
 
       def now do
         tz = @tz || Core.Config.tz()
@@ -82,7 +82,7 @@ defmodule Core.Prim.DateTime do
       )
 
       @doc "Собрать из другого datetime-Prim (полный pipeline целевого `new/1`)."
-      @spec from(term()) :: {:ok, t()} | {:error, Error.t()}
+      @spec from(term()) :: Core.Result.t(t())
 
       def from(%mod{value: %DateTime{}} = prim) when is_atom(mod) do
         if Prim.prim?(mod),
@@ -131,7 +131,7 @@ defmodule Core.Prim.DateTime do
   end
 
   @doc false
-  @spec cast(term()) :: {:ok, DateTime.t()} | {:error, {:invalid_datetime, String.t()}}
+  @spec cast(term()) :: Result.t(DateTime.t(), {:invalid_datetime, String.t()})
 
   def cast(%DateTime{} = value), do: {:ok, value}
 
@@ -146,7 +146,7 @@ defmodule Core.Prim.DateTime do
 
   @doc false
   @spec mutate(DateTime.t(), keyword()) ::
-          {:ok, DateTime.t()} | {:error, {:invalid_datetime, String.t()}}
+          Result.t(DateTime.t(), {:invalid_datetime, String.t()})
 
   @impl true
   def mutate(%DateTime{} = value, opts) do

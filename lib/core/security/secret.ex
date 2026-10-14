@@ -19,7 +19,7 @@ defmodule Core.Security.Secret do
   @type t :: %__MODULE__{cipher: String.t()}
 
   @doc "Зашифровать plaintext → `%Secret{}`."
-  @spec new(String.t()) :: {:ok, t()} | {:error, Error.t()}
+  @spec new(String.t()) :: Result.t(t())
 
   def new(plaintext) when is_binary(plaintext) and plaintext != "" do
     case Fernet.generate(plaintext, key: secret_key()) do
@@ -38,7 +38,7 @@ defmodule Core.Security.Secret do
   end
 
   @doc "Собрать `%Secret{}` из уже зашифрованного значения."
-  @spec from_cipher(String.t()) :: {:ok, t()} | {:error, Error.t()}
+  @spec from_cipher(String.t()) :: Result.t(t())
 
   def from_cipher(cipher) when is_binary(cipher) and cipher != "" do
     {:ok, %__MODULE__{cipher: cipher}}
@@ -50,7 +50,7 @@ defmodule Core.Security.Secret do
   def cipher(%__MODULE__{cipher: cipher}), do: cipher
 
   @doc "Расшифровать секрет → plaintext."
-  @spec reveal(t()) :: {:ok, String.t()} | {:error, Error.t()}
+  @spec reveal(t()) :: Result.t(String.t())
 
   def reveal(%__MODULE__{cipher: cipher}) do
     case Fernet.verify(cipher, key: secret_key(), enforce_ttl: false) do

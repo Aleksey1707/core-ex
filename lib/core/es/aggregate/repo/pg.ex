@@ -154,6 +154,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Es.Store.Schema
   alias Core.Helper
   alias Core.Helper.Transact
+  alias Core.Result
   alias Core.Telemetry
   alias Core.Version
 
@@ -324,7 +325,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   @doc false
   @spec get(map(), struct(), Version.expected(), Context.t(), keyword()) ::
-          {:ok, struct()} | {:error, Error.t()}
+          Result.t(struct())
 
   def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts),
     do: load_stream(cfg, :get, struct(cfg.aggregate, id: id), version, opts)
@@ -335,9 +336,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           struct(),
           Version.expected(),
           Context.t(),
-          (struct() -> {:ok, decision} | {:error, reason}),
+          (struct() -> Result.t(decision, reason)),
           keyword()
-        ) :: {:ok, decision} | {:error, reason | Error.t()}
+        ) :: Result.t(decision, reason | Error.t())
         when decision: var, reason: var
 
   def get_decision(cfg, id, version, %Context{}, fun, opts)
@@ -350,14 +351,14 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   @doc false
   @spec get_many(map(), [{struct(), Version.expected()}], Context.t(), keyword()) ::
-          {:ok, [struct()]} | {:error, Error.t()}
+          Result.t([struct()])
 
   def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts),
     do: load(cfg, :get_many, initial_states!(cfg, pairs), opts, &verify_versions(cfg, &1, pairs))
 
   @doc false
   @spec refresh(map(), struct(), Version.expected(), Context.t(), keyword()) ::
-          {:ok, struct()} | {:error, Error.t()}
+          Result.t(struct())
 
   def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts),
     do: load_stream(cfg, :refresh, state, version, opts)
@@ -605,7 +606,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # ===== запись =====
 
   @doc false
-  @spec append(map(), [Es.Event.t()], Context.t(), keyword()) :: :ok | {:error, Error.t()}
+  @spec append(map(), [Es.Event.t()], Context.t(), keyword()) :: Result.unit()
 
   def append(cfg, events, context, opts)
 

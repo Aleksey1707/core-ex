@@ -14,6 +14,7 @@ defmodule Core.Enum do
 
   alias Core.Error
   alias Core.Helper
+  alias Core.Result
 
   require Error
 
@@ -66,7 +67,7 @@ defmodule Core.Enum do
       def member?(value), do: value in @enum_values
 
       @doc "Привести atom/binary к значению enum."
-      @spec cast(term()) :: {:ok, t()} | {:error, Error.t()}
+      @spec cast(term()) :: Core.Result.t(t())
 
       def cast(value) when value in @enum_values, do: {:ok, value}
 
@@ -85,7 +86,7 @@ defmodule Core.Enum do
       def cast!(value), do: Result.unwrap!(cast(value))
 
       @doc "Как `cast/1`; `nil` → `{:ok, nil}`."
-      @spec cast_optional(term() | nil) :: {:ok, t() | nil} | {:error, Error.t()}
+      @spec cast_optional(term() | nil) :: Core.Result.t(t() | nil)
 
       def cast_optional(nil), do: {:ok, nil}
       def cast_optional(value), do: cast(value)
@@ -134,7 +135,7 @@ defmodule Core.Enum do
         стали бы одним значением, а строковый код `"5"` перестал бы отличаться от
         целочисленного.
         """
-        @spec from_code(term()) :: {:ok, t()} | {:error, Error.t()}
+        @spec from_code(term()) :: Core.Result.t(t())
 
         def from_code(code) when is_map_key(@enum_value_by_code, code) do
           {:ok, Map.fetch!(@enum_value_by_code, code)}
@@ -300,7 +301,7 @@ defmodule Core.Enum do
 
   @doc false
   @spec from_binary_code(module(), String.t(), %{term() => atom()}, code_kind(), String.t()) ::
-          {:ok, atom()} | {:error, Error.t()}
+          Result.t(atom())
 
   # Сюда приходят только строки, не совпавшие с кодом напрямую: у строкового enum это
   # сразу промах, у целочисленного — ещё не разобранное число («20» из XML-атрибута).

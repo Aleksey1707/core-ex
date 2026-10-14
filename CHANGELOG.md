@@ -23,6 +23,30 @@
   страницы событий — сверить с клиентом до выката: `version` → `aggregateVersion` в JSON и в схеме
   события OpenAPI-документа.
 
+### Новое
+
+- **Форма результата в типах — через `Core.Result`** (решение — `docs/adr/0070-result-form-in-typespecs.md`;
+  норма — `docs/rules/20-agreements.md`, «Форма результата»). Раньше имён `Core.Result` требовал
+  только локальный `@type`, а в `@spec` пропись была разрешена — и две формы одного контракта
+  жили рядом, в том числе в своде потребителя. Теперь `@spec`, `@callback` и `@type` пишут
+  результат типами `Result.t(a)`, `Result.t(a, e)`, `Result.unit()`, `Result.unit(e)`; параметр,
+  совпадающий с умолчанием, не пишется. Таплом остаются форма с третьим вариантом (`{:skip, _}`) и
+  объединение unit с valued. Спеки библиотеки и таблицы возвратов свода (`13-repos.md`,
+  `app/10-architecture.md`, «Usecases») переведены; поведение не менялось.
+
+  Норму проверяет новый скрипт `deps/core/scripts/spec_lint.exs` — шаг `spec-check` пайплайна
+  потребителя после `layout-check` (`deps/core/docs/rules/app/20-agreements.md`, «Пайплайн
+  проверок»): цель в `Makefile` и хук в `.pre-commit-config.yaml` вызывают
+  `elixir deps/core/scripts/spec_lint.exs`. Скрипт сканирует `lib/**` и `test/support/**` и на
+  каждое нарушение печатает замену. Как править:
+  - `{:ok, T} | {:error, Error.t()}` → `Result.t(T)`, `{:ok, term()} | {:error, Error.t()}` →
+    `Result.t()`;
+  - `:ok | {:error, Error.t()}` → `Result.unit()`;
+  - причина не `%Error{}`: `{:ok, T} | {:error, R}` → `Result.t(T, R)`, `:ok | {:error, R}` →
+    `Result.unit(R)`; несколько причин — `Result.unit(:locked | Error.t())`;
+  - в модуль, где появился `Result.*`, — `alias Core.Result`; ставший лишним `alias Core.Error`
+    удаляется (иначе предупреждение `unused alias`).
+
 ## 0.14.0
 
 ### Ломающие изменения контракта

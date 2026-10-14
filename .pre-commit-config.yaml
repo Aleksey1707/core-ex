@@ -13,8 +13,8 @@ repos:
       - id: check-symlinks
 
   # Порядок как у `make` (Makefile default):
-  #   boundary-check → rules-check → layout-check → format-check → compile → compile-no-optional →
-  #   consumer-check → deps-clean → xref → dialyzer → test → credo → audit
+  #   boundary-check → rules-check → layout-check → spec-check → format-check → compile →
+  #   compile-no-optional → consumer-check → deps-clean → xref → dialyzer → test → credo → audit
   - repo: local
     hooks:
       - id: boundary-lint
@@ -34,6 +34,13 @@ repos:
       - id: layout-lint
         name: "Layout: разделители внутри модуля"
         entry: elixir scripts/layout_lint.exs
+        language: system
+        require_serial: true
+        pass_filenames: false
+
+      - id: spec-lint
+        name: "Spec: форма результата через Core.Result"
+        entry: elixir scripts/spec_lint.exs
         language: system
         require_serial: true
         pass_filenames: false

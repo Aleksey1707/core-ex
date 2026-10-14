@@ -60,7 +60,7 @@ defmodule Core.Context.Accessor do
       def find(%Context{} = context), do: Context.find(context, @context_accessor_key)
 
       @doc "Получить значение; при отсутствии — ошибка."
-      @spec get(Context.t()) :: {:ok, unquote(context_accessor_value)} | {:error, Error.t()}
+      @spec get(Context.t()) :: Core.Result.t(unquote(context_accessor_value))
 
       def get(%Context{} = context), do: Context.get(context, @context_accessor_key)
 

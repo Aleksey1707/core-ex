@@ -15,6 +15,7 @@ defmodule Core.Mq.Stream.Codec do
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.Option
+  alias Core.Result
 
   require Error
 
@@ -26,7 +27,7 @@ defmodule Core.Mq.Stream.Codec do
   Tombstone (`body: nil`), ключ и значение заголовка не в UTF-8 — `{:error, _}`: конверту их
   не выразить без искажения (ADR-0032), и выброс такого сообщения в стрим отказывает громко.
   """
-  @spec encode(Message.t()) :: {:ok, binary()} | {:error, Error.t()}
+  @spec encode(Message.t()) :: Result.t(binary())
 
   def encode(%Message{} = message) do
     with :ok <- encodable_body(message.body),
@@ -108,7 +109,7 @@ defmodule Core.Mq.Stream.Codec do
   # ===== decode =====
 
   @doc "JSON binary → Message."
-  @spec decode(binary()) :: {:ok, Message.t()} | {:error, Error.t()}
+  @spec decode(binary()) :: Result.t(Message.t())
 
   def decode(raw) when is_binary(raw) do
     with {:ok, map} <- decode_json(raw),

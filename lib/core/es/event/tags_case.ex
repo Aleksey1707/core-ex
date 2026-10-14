@@ -65,6 +65,7 @@ defmodule Core.Es.Event.TagsCase do
   """
 
   alias Core.Helper
+  alias Core.Result
 
   @label "Es.Event.TagsCase"
   @required_keys ~w(otp_app)a
@@ -252,7 +253,7 @@ defmodule Core.Es.Event.TagsCase do
   # ===== формат типа =====
 
   @doc false
-  @spec check_type_format([codec()], [module()]) :: :ok | {:error, bad_type()}
+  @spec check_type_format([codec()], [module()]) :: Result.unit(bad_type())
 
   def check_type_format(codecs, except_types) when is_list(codecs) and is_list(except_types) do
     codecs
@@ -265,7 +266,7 @@ defmodule Core.Es.Event.TagsCase do
 
   @doc false
   @spec check_tag_format([codec()], %{optional(module()) => [String.t()]}, [module()]) ::
-          :ok | {:error, bad_tag()}
+          Result.unit(bad_tag())
 
   def check_tag_format(codecs, except_tags, except_types)
       when is_list(codecs) and is_map(except_tags) and is_list(except_types) do
@@ -288,7 +289,7 @@ defmodule Core.Es.Event.TagsCase do
   # ===== уникальность =====
 
   @doc false
-  @spec check_tag_uniqueness([codec()]) :: :ok | {:error, duplicate_tags()}
+  @spec check_tag_uniqueness([codec()]) :: Result.unit(duplicate_tags())
 
   def check_tag_uniqueness(codecs) when is_list(codecs) do
     codecs
@@ -298,7 +299,7 @@ defmodule Core.Es.Event.TagsCase do
   end
 
   @doc false
-  @spec check_type_uniqueness([codec()]) :: :ok | {:error, duplicate_types()}
+  @spec check_type_uniqueness([codec()]) :: Result.unit(duplicate_types())
 
   def check_type_uniqueness(codecs) when is_list(codecs) do
     codecs

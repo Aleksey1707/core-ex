@@ -138,6 +138,7 @@ defmodule Core.Es.Aggregate.Process do
   alias Core.Helper
   alias Core.Helper.StartOpts
   alias Core.Otel
+  alias Core.Result
   alias Core.Telemetry
   alias Core.Version
 
@@ -167,7 +168,7 @@ defmodule Core.Es.Aggregate.Process do
           version: Version.expected(),
           command: struct(),
           context: Context.t(),
-          fun: ([Es.Event.t()] -> :ok | {:error, Error.t()}) | nil
+          fun: ([Es.Event.t()] -> Result.unit()) | nil
         }
 
   @typedoc "Элемент `watch:` плагина `Core.Workers.PromEx`."
@@ -206,9 +207,9 @@ defmodule Core.Es.Aggregate.Process do
               Core.Version.expected(),
               struct(),
               Core.Context.t(),
-              ([Core.Es.Event.t()] -> :ok | {:error, Core.Error.t()}) | nil,
+              ([Core.Es.Event.t()] -> Core.Result.unit()) | nil,
               keyword()
-            ) :: {:ok, Core.Version.t() | nil} | {:error, Core.Error.t()}
+            ) :: Core.Result.t(Core.Version.t() | nil)
 
       def execute(
             %unquote(id){} = id,
@@ -262,7 +263,7 @@ defmodule Core.Es.Aggregate.Process do
 
   @doc false
   @spec execute(module(), cfg(), call(), keyword()) ::
-          {:ok, Version.t() | nil} | {:error, Error.t()}
+          Result.t(Version.t() | nil)
 
   def execute(process, cfg, call, opts) when is_atom(process) and is_list(opts) do
     timeout = timeout!(opts)

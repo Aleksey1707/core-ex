@@ -41,6 +41,7 @@ defmodule Core.Enum.DocsCase do
   """
 
   alias Core.Helper
+  alias Core.Result
 
   @label "Enum.DocsCase"
   @required_keys ~w(otp_app)a
@@ -120,7 +121,7 @@ defmodule Core.Enum.DocsCase do
   # ===== таблица =====
 
   @doc false
-  @spec check_table([module()]) :: :ok | {:error, no_table()}
+  @spec check_table([module()]) :: Result.unit(no_table())
 
   def check_table(enums) when is_list(enums) do
     case Enum.flat_map(enums, &missing_table/1) do
@@ -142,7 +143,7 @@ defmodule Core.Enum.DocsCase do
   # ===== строки значений =====
 
   @doc false
-  @spec check_undocumented([module()]) :: :ok | {:error, undocumented()}
+  @spec check_undocumented([module()]) :: Result.unit(undocumented())
 
   def check_undocumented(enums) when is_list(enums) do
     enums
@@ -152,7 +153,7 @@ defmodule Core.Enum.DocsCase do
   end
 
   @doc false
-  @spec check_unknown([module()]) :: :ok | {:error, unknown()}
+  @spec check_unknown([module()]) :: Result.unit(unknown())
 
   def check_unknown(enums) when is_list(enums) do
     enums

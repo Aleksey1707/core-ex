@@ -6,7 +6,7 @@ defmodule Core.Outbox do
 
   import Core.Helper.String, only: [first_line: 1]
 
-  alias Core.Error
+  alias Core.Result
 
   @typedoc "Фильтр топиков при reserve: все / только / кроме."
   @type topics_filter :: :all | {:only, [String.t()]} | {:except, [String.t()]}
@@ -135,7 +135,7 @@ defmodule Core.Outbox do
       min: 0
 
     @doc "Инкремент счётчика попыток."
-    @spec inc(t()) :: {:ok, t()} | {:error, Error.t()}
+    @spec inc(t()) :: Result.t(t())
 
     def inc(%__MODULE__{} = attempts), do: new(value(attempts) + 1)
   end
@@ -163,7 +163,7 @@ defmodule Core.Outbox do
       max_len: @max_len
 
     @doc "Создать сообщение с обрезкой до #{@max_len} символов."
-    @spec create(String.t()) :: {:ok, t()} | {:error, Error.t()}
+    @spec create(String.t()) :: Result.t(t())
 
     def create(raw) when is_binary(raw) do
       trimmed = String.trim(raw)

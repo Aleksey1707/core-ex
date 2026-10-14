@@ -34,12 +34,13 @@ if Code.ensure_loaded?(:brod) do
     alias Core.Mq
     alias Core.Mq.Kafka.Partitioner
     alias Core.Mq.Message
+    alias Core.Result
     alias Core.Telemetry
 
     require Error
 
     @doc "Опубликовать сообщение."
-    @spec put(atom(), Message.t()) :: :ok | {:error, Error.t()}
+    @spec put(atom(), Message.t()) :: Result.unit()
 
     @impl true
     def put(client, %Message{} = message) when is_atom(client) do

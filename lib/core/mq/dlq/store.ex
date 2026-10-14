@@ -12,6 +12,7 @@ defmodule Core.Mq.Dlq.Store do
   """
 
   alias Core.Error
+  alias Core.Result
 
   require Error
 
@@ -144,7 +145,7 @@ defmodule Core.Mq.Dlq.Store do
   `{:error, %Error{code: :dlq_lease_lost}}` — запись перехвачена другим токеном или уже не
   `requeued`, статус не изменён.
   """
-  @spec commit(Ecto.Repo.t(), pos_integer(), lease()) :: :ok | {:error, Error.t()}
+  @spec commit(Ecto.Repo.t(), pos_integer(), lease()) :: Result.unit()
 
   def commit(repo, id, <<_::128>> = lease) when is_atom(repo) and is_integer(id) do
     case Ecto.Adapters.SQL.query!(repo, @commit_sql, [id, lease]) do

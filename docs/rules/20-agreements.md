@@ -219,7 +219,7 @@ with_lock(id, context, fn -> ... end, opts)
 | Имя | Возврат | Исключения |
 |---|---|---|
 | `find` | `T \| nil` | Допускается; SHOULD предпочитать `get` |
-| `get` | `{:ok, T} \| {:error, reason}` | Не поднимать; ошибка — в `{:error, _}` |
+| `get` | `Result.t(T, reason)` | Не поднимать; ошибка — в `{:error, _}` |
 | `get!` | `T` | При отсутствии/ошибке — `raise` |
 
 Контракты repo-методов (`get`/`get!`/`list`/`page`/…) — см. `13-repos.md`.
@@ -230,7 +230,7 @@ with_lock(id, context, fn -> ... end, opts)
 def find(nil), do: nil
 def find(%Prim{value: value}), do: value
 
-@spec get(Prim.t() | nil) :: {:ok, term()} | {:error, Error.t()}
+@spec get(Prim.t() | nil) :: Result.t()
 
 def get(prim) do
   case find(prim) do
@@ -314,6 +314,35 @@ def foo(...) do
   ...
 end
 ```
+
+### Форма результата
+
+Результат в `@spec`, `@callback` и `@type` MUST записываться типами `Core.Result`, а не таплом
+прописью: имя формы одно на библиотеку, а параметр называет причину. Формы и когда какая —
+`11-domain.md`, «Result / Option»; решение — ADR-0070.
+
+- Параметр, совпадающий с умолчанием, MUST NOT: `Result.t(a)`, а не `Result.t(a, Error.t())`;
+  `Result.t()`, а не `Result.t(term())`; `Result.unit()`, а не `Result.unit(Error.t())`.
+- Несколько причин — объединение в параметре: `Result.unit(:locked | Error.t())`.
+- В `quote` — полный путь `Core.Result.t(…)`, как и у прочих модулей генерируемого кода.
+- Форма с третьим вариантом (`{:skip, _}` у `Core.PubSub.handler_result`) и объединение unit с
+  valued (`Core.Helper.Savepoint.result`) MAY оставаться таплом: через типы она длиннее и читается
+  хуже. Конструктор одного варианта (`@spec error(a) :: {:error, a}`) — не результат.
+- `a | nil` через `Option.t(a)` — не требуется.
+
+```elixir
+# плохо — форма переписана прописью
+@spec get(ID.t(), Context.t()) :: {:ok, Agg.t()} | {:error, Error.t()}
+@callback put(t(), Message.t()) :: :ok | {:error, Error.t()}
+@type result :: :ok | {:error, {code(), detail()}}
+
+# хорошо
+@spec get(ID.t(), Context.t()) :: Result.t(Agg.t())
+@callback put(t(), Message.t()) :: Result.unit()
+@type result :: Result.unit({code(), detail()})
+```
+
+Проверяется: `make spec-check` (`scripts/spec_lint.exs`).
 
 ## Домен функции и инференс типов (Elixir 1.20+)
 
@@ -513,7 +542,7 @@ defp archive_groups(groups, by, context) do
 # плохо — публичная функция после приватных: возврат наверх не виден
 defp to_datetime_fmt(%DateTime{} = dt, :datetime), do: dt
 
-@spec load_builtin(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
+@spec load_builtin(module(), term(), atom()) :: Result.t()
 
 def load_builtin(mod, raw, _kind) when is_atom(mod), do: mod.new(raw)
 
@@ -522,7 +551,7 @@ defp to_datetime_fmt(%DateTime{} = dt, :datetime), do: dt
 
 # ===== load =====
 
-@spec load_builtin(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
+@spec load_builtin(module(), term(), atom()) :: Result.t()
 
 def load_builtin(mod, raw, _kind) when is_atom(mod), do: mod.new(raw)
 ```

@@ -27,9 +27,9 @@ defmodule Core.Repo.Pg.Children do
 
   import Ecto.Query, only: [dynamic: 2, from: 2]
 
-  alias Core.Error
   alias Core.Helper
   alias Core.Repo
+  alias Core.Result
 
   @chunk_size 500
 
@@ -51,7 +51,7 @@ defmodule Core.Repo.Pg.Children do
 
   Родителя в БД до этого не было, поэтому ни `delete_all`, ни `on_conflict` не нужны.
   """
-  @spec insert(map(), [spec()], struct(), Repo.opts()) :: :ok | {:error, Error.t()}
+  @spec insert(map(), [spec()], struct(), Repo.opts()) :: Result.unit()
 
   def insert(pg, specs, entity, opts) do
     each_spec(specs, &insert_rows(pg, &1, entity, opts))
@@ -63,7 +63,7 @@ defmodule Core.Repo.Pg.Children do
   `baseline` — эталон агрегата (`Repo.Pg.baseline/3`) или `nil`. С эталоном пишется только diff;
   без него — `delete_all` всего, чего нет в текущем наборе, плюс upsert набора.
   """
-  @spec sync(map(), [spec()], struct(), struct() | nil, Repo.opts()) :: :ok | {:error, Error.t()}
+  @spec sync(map(), [spec()], struct(), struct() | nil, Repo.opts()) :: Result.unit()
 
   def sync(pg, specs, entity, baseline, opts) do
     each_spec(specs, &sync_rows(pg, &1, entity, baseline, opts))

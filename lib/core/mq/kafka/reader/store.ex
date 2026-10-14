@@ -14,6 +14,7 @@ defmodule Core.Mq.Kafka.Reader.Store do
   """
 
   alias Core.Error
+  alias Core.Result
 
   require Error
 
@@ -88,7 +89,7 @@ defmodule Core.Mq.Kafka.Reader.Store do
   смещение не записано.
   """
   @spec commit(Ecto.Repo.t(), String.t(), String.t(), lease(), non_neg_integer(), non_neg_integer()) ::
-          :ok | {:error, Error.t()}
+          Result.unit()
 
   def commit(repo, subscriber, topic, <<_::128>> = lease, partition, next_offset)
       when is_atom(repo) and is_binary(subscriber) and is_binary(topic) and is_integer(partition) and

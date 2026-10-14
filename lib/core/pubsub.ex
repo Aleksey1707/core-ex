@@ -9,6 +9,7 @@ defmodule Core.PubSub do
 
   alias Core.Context
   alias Core.Error
+  alias Core.Result
 
   @type skip_reason :: term()
   @type handler_result :: :ok | {:skip, skip_reason()} | {:reject, Error.t()} | {:error, Error.t()}
@@ -28,7 +29,7 @@ defmodule Core.PubSub do
     @type message :: term()
     @type metadata :: term()
 
-    @callback publish(t(), message(), metadata(), Context.t()) :: :ok | {:error, Error.t()}
+    @callback publish(t(), message(), metadata(), Context.t()) :: Result.unit()
   end
 
   defmodule Subscriber do
@@ -42,7 +43,7 @@ defmodule Core.PubSub do
     @type t :: term()
     @type data :: term()
 
-    @callback subscribe(t(), data(), Context.t()) :: :ok | {:error, Error.t()}
-    @callback unsubscribe(t(), Context.t()) :: :ok | {:error, Error.t()}
+    @callback subscribe(t(), data(), Context.t()) :: Result.unit()
+    @callback unsubscribe(t(), Context.t()) :: Result.unit()
   end
 end

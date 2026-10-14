@@ -45,6 +45,7 @@ defmodule Core.Es.ProjectionCase do
   alias Core.Helper
   alias Core.Helper.Savepoint
   alias Core.Helper.Transact
+  alias Core.Result
 
   @label "Es.ProjectionCase"
   @required_keys ~w(projection)a
@@ -129,7 +130,7 @@ defmodule Core.Es.ProjectionCase do
   # ===== полнота clear =====
 
   @doc false
-  @spec check_clear(module(), Path.t()) :: :ok | {:error, missing() | failed() | uncleared()}
+  @spec check_clear(module(), Path.t()) :: Result.unit(missing() | failed() | uncleared())
 
   def check_clear(projection, fixtures) when is_atom(projection) and is_binary(fixtures) do
     %{dao: dao} = declaration = projection.__es_projection__()

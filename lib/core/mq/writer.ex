@@ -22,10 +22,11 @@ defmodule Core.Mq.Writer do
 
   alias Core.Error
   alias Core.Mq.Message
+  alias Core.Result
 
   @type t :: term()
 
-  @callback put(t(), Message.t()) :: :ok | {:error, Error.t()}
+  @callback put(t(), Message.t()) :: Result.unit()
 
   @doc """
   Опубликовать список сообщений строго по порядку.

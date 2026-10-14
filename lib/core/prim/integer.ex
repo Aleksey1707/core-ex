@@ -13,6 +13,7 @@ defmodule Core.Prim.Integer do
   """
 
   alias Core.Prim
+  alias Core.Result
   alias Core.Validator
 
   use Core.Prim.Wrapper,
@@ -64,13 +65,13 @@ defmodule Core.Prim.Integer do
   end
 
   @doc false
-  @spec cast(term()) :: {:ok, integer()} | {:error, {:invalid_integer, String.t()}}
+  @spec cast(term()) :: Result.t(integer(), {:invalid_integer, String.t()})
 
   # Арность 1 — для вызова без опций (read-путь кодека): значение оттуда уже разобрано.
   def cast(value), do: cast(value, [])
 
   @doc false
-  @spec cast(term(), keyword()) :: {:ok, integer()} | {:error, {:invalid_integer, String.t()}}
+  @spec cast(term(), keyword()) :: Result.t(integer(), {:invalid_integer, String.t()})
 
   def cast(value, _opts) when is_integer(value), do: {:ok, value}
 

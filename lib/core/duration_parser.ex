@@ -91,7 +91,7 @@ defmodule Core.DurationParser do
 
   Опции: `rounding: :no | :trunc | :ceil | :round` (по умолчанию `:no`).
   """
-  @spec parse(String.t(), Unit.t(), keyword()) :: {:ok, non_neg_integer()} | {:error, Error.t()}
+  @spec parse(String.t(), Unit.t(), keyword()) :: Result.t(non_neg_integer())
 
   def parse(str, unit \\ :s, opts \\ []) when is_binary(str) and is_enum(unit, Unit) do
     rounding = rounding!(opts)
@@ -110,7 +110,7 @@ defmodule Core.DurationParser do
 
   Опции — как у `parse/3`; точность `Duration` — микросекунда.
   """
-  @spec to_duration(String.t(), keyword()) :: {:ok, Duration.t()} | {:error, Error.t()}
+  @spec to_duration(String.t(), keyword()) :: Result.t(Duration.t())
 
   def to_duration(str, opts \\ []) when is_binary(str) do
     rounding = rounding!(opts)
@@ -137,7 +137,7 @@ defmodule Core.DurationParser do
   Опции — как у `parse/3`.
   """
   @spec to_timeout(timeout_input(), keyword()) ::
-          {:ok, non_neg_integer() | :infinity} | {:error, Error.t()}
+          Result.t(non_neg_integer() | :infinity)
 
   def to_timeout(input, opts \\ []), do: timeout(input, rounding!(opts))
 

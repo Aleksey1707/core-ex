@@ -6,7 +6,6 @@ defmodule Core.PubSub.MqPublisher do
   @behaviour Core.PubSub.Publisher
 
   alias Core.Context
-  alias Core.Error
   alias Core.Helper.Transact
   alias Core.Mq.Message
   alias Core.Result
@@ -32,7 +31,7 @@ defmodule Core.PubSub.MqPublisher do
   end
 
   @doc "Опубликовать сообщение напрямую в MQ."
-  @spec publish(t(), message(), metadata(), Context.t()) :: :ok | {:error, Error.t()}
+  @spec publish(t(), message(), metadata(), Context.t()) :: Result.unit()
 
   @impl true
   def publish(%__MODULE__{} = publisher, message, metadata, %Context{}) do

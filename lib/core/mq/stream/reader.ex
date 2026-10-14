@@ -47,6 +47,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     alias Core.Mq.Message
     alias Core.Mq.Stream.Buffer
     alias Core.Mq.Stream.Codec
+    alias Core.Result
     alias Core.Telemetry
     alias RabbitMQStream.Message.Types.DeliverData
     alias RabbitMQStream.OsirisChunk
@@ -122,7 +123,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     @doc "Зафиксировать offset текущего сообщения."
-    @spec commit(t()) :: :ok | {:error, Error.t()}
+    @spec commit(t()) :: Result.unit()
 
     @impl true
     def commit(server) do

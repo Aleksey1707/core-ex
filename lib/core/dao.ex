@@ -38,14 +38,14 @@ defmodule Core.DAO do
       defoverridable transact: 1, transact: 2, transaction: 1, transaction: 2
 
       @doc false
-      @spec transact(fun() | Ecto.Multi.t(), keyword()) :: {:ok, term()} | {:error, term()}
+      @spec transact(fun() | Ecto.Multi.t(), keyword()) :: Core.Result.t(term(), term())
 
       def transact(fun_or_multi, opts \\ []) do
         Core.Helper.AfterCommit.wrap(fn -> super(fun_or_multi, opts) end)
       end
 
       @doc false
-      @spec transaction(fun() | Ecto.Multi.t(), keyword()) :: {:ok, term()} | {:error, term()}
+      @spec transaction(fun() | Ecto.Multi.t(), keyword()) :: Core.Result.t(term(), term())
 
       def transaction(fun_or_multi, opts \\ []) do
         Core.Helper.AfterCommit.wrap(fn -> super(fun_or_multi, opts) end)

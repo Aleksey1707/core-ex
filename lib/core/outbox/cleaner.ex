@@ -19,6 +19,7 @@ defmodule Core.Outbox.Cleaner do
   alias Core.Exc
   alias Core.Helper.StartOpts
   alias Core.Outbox
+  alias Core.Result
   alias Core.Telemetry
 
   require Logger
@@ -68,7 +69,7 @@ defmodule Core.Outbox.Cleaner do
   end
 
   @doc "Выполнить одну очистку (для тестов)."
-  @spec run_once(GenServer.server()) :: :ok | {:error, Error.t()}
+  @spec run_once(GenServer.server()) :: Result.unit()
 
   def run_once(server) do
     GenServer.call(server, :run_once, 60_000)

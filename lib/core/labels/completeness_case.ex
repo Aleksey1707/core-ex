@@ -55,6 +55,7 @@ defmodule Core.Labels.CompletenessCase do
   alias Core.Labels.Fields
   alias Core.Labels.ID
   alias Core.Labels.Text
+  alias Core.Result
 
   @label "Labels.CompletenessCase"
   @required_keys ~w(otp_app)a
@@ -160,7 +161,7 @@ defmodule Core.Labels.CompletenessCase do
   # ===== проверки =====
 
   @doc false
-  @spec check_found([module()]) :: :ok | {:error, :empty}
+  @spec check_found([module()]) :: Result.unit(:empty)
 
   def check_found(modules) when is_list(modules) do
     case walk(modules).events do
@@ -170,14 +171,14 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   @doc false
-  @spec check_titles([module()]) :: :ok | {:error, untitled()}
+  @spec check_titles([module()]) :: Result.unit(untitled())
 
   def check_titles(modules) when is_list(modules) do
     result(untitled: for(event <- walk(modules).events, not exports?(event, :__label_title__), do: event))
   end
 
   @doc false
-  @spec check_authors([module()]) :: :ok | {:error, unnamed()}
+  @spec check_authors([module()]) :: Result.unit(unnamed())
 
   def check_authors(modules) when is_list(modules) do
     unnamed = for event <- walk(modules).events, by = event.__es_by__(), not user?(by), do: {event, :by, by}
@@ -186,7 +187,7 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   @doc false
-  @spec check_fields([module()]) :: :ok | {:error, undecided()}
+  @spec check_fields([module()]) :: Result.unit(undecided())
 
   def check_fields(modules) when is_list(modules) do
     undecided =
@@ -198,7 +199,7 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   @doc false
-  @spec check_values([module()]) :: :ok | {:error, unlabelled()}
+  @spec check_values([module()]) :: Result.unit(unlabelled())
 
   def check_values(modules) when is_list(modules) do
     unlabelled =
@@ -210,7 +211,7 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   @doc false
-  @spec check_ids([module()]) :: :ok | {:error, unkinded()}
+  @spec check_ids([module()]) :: Result.unit(unkinded())
 
   def check_ids(modules) when is_list(modules) do
     unkinded =
@@ -220,7 +221,7 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   @doc false
-  @spec check_variants([module()]) :: :ok | {:error, variants()}
+  @spec check_variants([module()]) :: Result.unit(variants())
 
   def check_variants(modules) when is_list(modules) do
     unknown = for {:family, owner, field, family} <- walk(modules).places, do: {owner, field, family}

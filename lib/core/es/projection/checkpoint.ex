@@ -12,6 +12,7 @@ defmodule Core.Es.Projection.Checkpoint do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Projection
+  alias Core.Result
 
   require Error
 
@@ -123,7 +124,7 @@ defmodule Core.Es.Projection.Checkpoint do
   Записать строку в начале истории с версией проекции и целью `target` при условии, что строка
   равна прочитанной `checkpoint` (`nil` — строки не было); иначе — `:checkpoint_conflict`.
   """
-  @spec start(Projection.t(), t() | nil, Es.Store.position() | nil) :: :ok | {:error, Error.t()}
+  @spec start(Projection.t(), t() | nil, Es.Store.position() | nil) :: Result.unit()
 
   def start(%{name: name, version: version} = declaration, nil, target) do
     {target_xid, target_number} = columns(target)
@@ -146,7 +147,7 @@ defmodule Core.Es.Projection.Checkpoint do
   Сдвинуть позицию строки на `to` при условии, что строка равна прочитанной `checkpoint`;
   иначе — `:checkpoint_conflict`.
   """
-  @spec move(Projection.t(), t(), Es.Store.position()) :: :ok | {:error, Error.t()}
+  @spec move(Projection.t(), t(), Es.Store.position()) :: Result.unit()
 
   def move(%{name: name} = declaration, %{position: from, version: version}, {xid, number}) do
     {from_xid, from_number} = columns(from)

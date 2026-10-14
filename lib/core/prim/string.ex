@@ -14,6 +14,7 @@ defmodule Core.Prim.String do
   @behaviour Core.Mutator
 
   alias Core.Prim
+  alias Core.Result
   alias Core.Validator
 
   use Core.Prim.Wrapper,
@@ -72,7 +73,7 @@ defmodule Core.Prim.String do
   end
 
   @doc false
-  @spec cast(term(), keyword()) :: {:ok, String.t()} | {:error, {:invalid_string, String.t()}}
+  @spec cast(term(), keyword()) :: Result.t(String.t(), {:invalid_string, String.t()})
 
   # Невалидный UTF-8 иначе уезжал бы в БД и JSON: `String.trim/1` его не роняет,
   # `Regex.match?/2` просто отвечает false, а `re:` объявлен не у каждого Prim.

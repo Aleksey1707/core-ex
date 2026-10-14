@@ -51,7 +51,7 @@ defmodule Core.Context do
   def find(%__MODULE__{data: data}, key) when is_atom(key), do: Map.get(data, key)
 
   @doc "Получить значение по ключу или `{:error, %Error{}}`."
-  @spec get(t(), key()) :: {:ok, term()} | {:error, Error.t()}
+  @spec get(t(), key()) :: Result.t()
 
   # Через `Map.fetch/2`, а не `find/2`: сохранённый `nil` — это значение, и `exists?/2 == true`
   # обязан означать, что `get/2` вернёт `{:ok, _}`.

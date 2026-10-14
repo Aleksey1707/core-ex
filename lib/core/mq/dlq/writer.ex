@@ -27,6 +27,7 @@ defmodule Core.Mq.Dlq.Writer do
   alias Core.Mq
   alias Core.Mq.Dlq.Store
   alias Core.Mq.Message
+  alias Core.Result
 
   require Error
 
@@ -53,7 +54,7 @@ defmodule Core.Mq.Dlq.Writer do
   end
 
   @doc "Записать сообщение строкой DLQ."
-  @spec put(t(), Message.t()) :: :ok | {:error, Error.t()}
+  @spec put(t(), Message.t()) :: Result.unit()
 
   @impl true
   def put(server, %Message{} = message) do

@@ -250,13 +250,13 @@ use Core.Repo, only: :full | :read | :permanent | [atoms]
 
 | Метод | Возврат |
 |---|---|
-| `get` | `{:ok, item} \| {:error, Error.t()}` |
+| `get` | `Result.t(item)` |
 | `get!` | `item`; ошибка → `raise Exc` |
 | `list` / `count` | `[item]` / `non_neg_integer()` |
 | `page` | `Pagination.Result.t(item)` |
-| `insert` / `update` / `save` | `{:ok, entity} \| {:error, Error.t()}` |
-| `delete` | `:ok \| {:error, Error.t()}` |
-| `exists?` / `exists_all?` | `{:ok, boolean()} \| {:error, Error.t()}` |
+| `insert` / `update` / `save` | `Result.t(entity)` |
+| `delete` | `Result.unit()` |
+| `exists?` / `exists_all?` | `Result.t(boolean())` |
 
 Опции типов (MUST для новых behaviour — иначе `item` вырождается в `struct()`, а id в `term()`):
 
@@ -402,9 +402,9 @@ Read-репозиторий над таблицей (исключение — re
 
 | Функция | Направление | Возврат | Кто пишет |
 |---|---|---|---|
-| `to_entity/1` | DB row → domain | `{:ok, entity} \| {:error, Error.t()}` | руками |
+| `to_entity/1` | DB row → domain | `Result.t(entity)` | руками |
 | `to_entity!/1` | DB row → domain | `entity`; ошибка → `raise Exc` | `use Repo.Pg.Schema` |
-| `to_model/1` (или `/2` для children) | domain → map | `{:ok, map()} \| {:error, Error.t()}` | руками |
+| `to_model/1` (или `/2` для children) | domain → map | `Result.t(map())` | руками |
 | `to_model!/1` (или `/2`) | domain → map | `map()`; ошибка → `raise Exc` | `use Repo.Pg.Schema` |
 | `dump_id/1` | domain ID → binary_id string | `InCodec.dump(id)` | `use Repo.Pg.Schema` |
 | `changeset/2` | schema + attrs | `Ecto.Changeset.t()` | руками |
@@ -646,12 +646,12 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
 
 | Функция | Возврат | Исходы |
 |---|---|---|
-| `get(id, version, context)` | `{:ok, state} \| {:error, Error.t()}` | пустой поток при `:current` — `%Agg{id: id, version: nil}`; `%Version{}` мимо головы потока — `:version_mismatch`, у пустого `actual: nil` |
-| `get_decision(id, version, context, fun)` | `{:ok, decision} \| {:error, reason \| Error.t()}` | версия сошлась или `:current` — `fun.(state)`, у пустого потока при `:current` — от незаведённого агрегата; пустой поток при `%Version{}` — `fun.(незаведённый)`: `{:error, _}` как есть, `{:ok, _}` — `:version_mismatch` с `actual: nil`; непустой поток мимо версии — `:version_mismatch`, `fun` не вызывается |
-| `get_many(pairs, context)` | `{:ok, [state]} \| {:error, Error.t()}` | один запрос, состояния в порядке пар; все расхождения — одна `:version_mismatch`; повтор id — `ArgumentError` |
-| `append(events, context)` | `:ok \| {:error, Error.t()}` | `[]` — без запросов; пачка потоков одного типа атомарна; ключ, занятый другим агрегатом, — `code:` модуля ключа («Резервы ключей»); событие не из `tags:` кодека — `FunctionClauseError` |
-| `refresh(state, version, context)` | `{:ok, state} \| {:error, Error.t()}` | хвост потока после `state.version` → `fold/2` → сверка `version` |
-| `page_stream(id, limit, offset, context)` | `{:ok, Pagination.Result.t(Es.Event)} \| {:error, Error.t()}` | «Страница потока» |
+| `get(id, version, context)` | `Result.t(state)` | пустой поток при `:current` — `%Agg{id: id, version: nil}`; `%Version{}` мимо головы потока — `:version_mismatch`, у пустого `actual: nil` |
+| `get_decision(id, version, context, fun)` | `Result.t(decision, reason \| Error.t())` | версия сошлась или `:current` — `fun.(state)`, у пустого потока при `:current` — от незаведённого агрегата; пустой поток при `%Version{}` — `fun.(незаведённый)`: `{:error, _}` как есть, `{:ok, _}` — `:version_mismatch` с `actual: nil`; непустой поток мимо версии — `:version_mismatch`, `fun` не вызывается |
+| `get_many(pairs, context)` | `Result.t([state])` | один запрос, состояния в порядке пар; все расхождения — одна `:version_mismatch`; повтор id — `ArgumentError` |
+| `append(events, context)` | `Result.unit()` | `[]` — без запросов; пачка потоков одного типа атомарна; ключ, занятый другим агрегатом, — `code:` модуля ключа («Резервы ключей»); событие не из `tags:` кодека — `FunctionClauseError` |
+| `refresh(state, version, context)` | `Result.t(state)` | хвост потока после `state.version` → `fold/2` → сверка `version` |
+| `page_stream(id, limit, offset, context)` | `Result.t(Pagination.Result.t(Es.Event))` | «Страница потока» |
 
 - `get` / `get_decision` / `get_many` / `refresh` / `page_stream` — читающие, `append` —
   изменяющая: изменяющий usecase держит `get_decision` (`get`) → `Agg.execute/2` → `append` в
@@ -928,7 +928,7 @@ Account.Process.execute(id, version, command, context, fn events ->
 end)
 ```
 
-- `execute` — изменяющая, `{:ok, Version.t() | nil} | {:error, Error.t()}`:
+- `execute` — изменяющая, `Result.t(Version.t() | nil)`:
   `get_decision(id, version, context, &Agg.execute(&1, command))` → `append` → `fun.(events)`
   одной транзакцией `Core.Config.dao/0`; процесс на id (`enabled: true`), закэшировав заведённый
   агрегат, вместо `get_decision` дочитывает хвост `refresh(state, version, context)` от
@@ -1029,7 +1029,7 @@ end
 ## Страница потока
 
 `@repo.page_stream(id, limit, offset, context)` →
-`{:ok, Pagination.Result.t(Es.Event)} | {:error, Error.t()}` — страница потока одного агрегата: по
+`Result.t(Pagination.Result.t(Es.Event))` — страница потока одного агрегата: по
 возрастанию `aggregate_version`, `total` — весь поток. Её генерирует write-репозиторий агрегата
 любого вида: `use Core.Es.Aggregate.Repo.Pg` (колбэк `use Core.Es.Aggregate.Repo`) и
 `use Core.Repo.Pg.StateStored` (по `event_codec:`). Тип агрегата и семейство событий — из кодека

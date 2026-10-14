@@ -84,6 +84,7 @@ defmodule Core.Es.Event.Codec do
   alias Core.Es
   alias Core.Helper
   alias Core.Prim
+  alias Core.Result
   alias Core.Version
 
   require Error
@@ -218,7 +219,7 @@ defmodule Core.Es.Event.Codec do
       В варианте с семейством модуль выбирается по тегу внутри данных.
       """
       @spec load(module(), Core.Es.Event.Codec.wire(), module()) ::
-              {:ok, event()} | {:error, Core.Error.t()}
+              Core.Result.t(event())
 
       @impl true
       def load(@es_event, data, codec) when is_atom(codec) do
@@ -445,7 +446,7 @@ defmodule Core.Es.Event.Codec do
           %{optional(String.t()) => String.t()},
           module(),
           module()
-        ) :: {:ok, struct()} | {:error, Error.t()}
+        ) :: Result.t(struct())
 
   def load_by_tag(data, mod_by_tag, upcasts, module, codec)
       when is_map(data) and is_map(mod_by_tag) and is_map(upcasts) do
@@ -470,7 +471,7 @@ defmodule Core.Es.Event.Codec do
   приходит после `Jason.decode/1`, то есть со строковыми ключами. `module` — кодек агрегата:
   ошибка обязана указывать на него, а не на билдер.
   """
-  @spec load_header(wire(), module(), module(), module()) :: {:ok, header()} | {:error, Error.t()}
+  @spec load_header(wire(), module(), module(), module()) :: Result.t(header())
 
   def load_header(data, aggregate_id_mod, by_mod, module)
       when is_map(data) and is_atom(aggregate_id_mod) and is_atom(by_mod) and is_atom(module) do

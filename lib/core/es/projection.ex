@@ -26,9 +26,9 @@ defmodule Core.Es.Projection do
 
   ## Колбэки
 
-  - `project(event)` → `:ok | {:error, Error.t()}` — событие модуля из `events:` в транзакции
+  - `project(event)` → `Result.unit()` — событие модуля из `events:` в транзакции
     пачки, без `Context`; read-модель пишется через `DAO`.
-  - `clear()` → `:ok | {:error, Error.t()}` — очистить все таблицы read-модели; зовётся при
+  - `clear()` → `Result.unit()` — очистить все таблицы read-модели; зовётся при
     старте с начала истории.
 
   Оба колбэка обязательны. Полноту `project/1` проверяет сборка проекции («Полнота `project/1`»),
@@ -99,7 +99,7 @@ defmodule Core.Es.Projection do
 
   ## Ожидание
 
-  `await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `:ok | {:error, Error.t()}` модуля проекции
+  `await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `Result.unit()` модуля проекции
   после commit записи ждёт, пока проекция обработает последнее событие потока агрегата, —
   read-after-write. Агрегат — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec`:
   по раскладке потребителя (`docs/rules/app/13-repos.md`, «Раскладка») это сам агрегат любого вида.
@@ -173,6 +173,7 @@ defmodule Core.Es.Projection do
   alias Core.Es
   alias Core.Es.Projection.Batch
   alias Core.Helper
+  alias Core.Result
 
   @label "Es.Projection"
   @required_keys ~w(name events)a
@@ -197,10 +198,10 @@ defmodule Core.Es.Projection do
   @type outcome :: :processed | :idle | :locked | :outdated | {:error, Error.t()}
 
   @doc "Событие модуля из `events:` → read-модель."
-  @callback project(event :: Es.Event.t()) :: :ok | {:error, Error.t()}
+  @callback project(event :: Es.Event.t()) :: Result.unit()
 
   @doc "Очистить все таблицы read-модели."
-  @callback clear() :: :ok | {:error, Error.t()}
+  @callback clear() :: Result.unit()
 
   # ===== объявление =====
 
@@ -268,7 +269,7 @@ defmodule Core.Es.Projection do
       не дольше `timeout` мс; первый аргумент — модуль агрегата. Исходы — `Core.Es.Projection`,
       «Ожидание».
       """
-      @spec await(unquote(modules), unquote(ids), non_neg_integer()) :: :ok | {:error, Core.Error.t()}
+      @spec await(unquote(modules), unquote(ids), non_neg_integer()) :: Core.Result.unit()
 
       unquote_splicing(Enum.map(aggregates, &await_clause/1))
     end

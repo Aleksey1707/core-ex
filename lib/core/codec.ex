@@ -31,9 +31,9 @@ defmodule Core.Codec do
   """
 
   alias Core.Config
-  alias Core.Error
   alias Core.Helper
   alias Core.Prim
+  alias Core.Result
 
   @uuid_fmts ~w(full hex urn)a
   @datetime_fmts ~w(datetime iso8601)a
@@ -55,8 +55,8 @@ defmodule Core.Codec do
 
   @callback dump(struct()) :: term()
   @callback dump_kind(struct(), atom()) :: term()
-  @callback load(module(), term()) :: {:ok, term()} | {:error, Error.t()}
-  @callback load_kind(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
+  @callback load(module(), term()) :: Result.t()
+  @callback load_kind(module(), term(), atom()) :: Result.t()
   @callback load!(module(), term()) :: term()
 
   @optional_callbacks dump_kind: 2, load_kind: 3
@@ -272,14 +272,14 @@ defmodule Core.Codec do
   Кастомный `kind` обслуживается тем же `mod.new/1`: load формат-агностичен, приведение
   делает сам примитив. Профиль может переопределить `load_kind/3`.
   """
-  @spec load_builtin(module(), term(), atom()) :: {:ok, term()} | {:error, Error.t()}
+  @spec load_builtin(module(), term(), atom()) :: Result.t()
 
   def load_builtin(mod, raw, _kind) when is_atom(mod) do
     mod.new(raw)
   end
 
   @doc "Load композита: `load(base, raw)` → `mod.new(inner)`."
-  @spec load_composite(module(), term(), module()) :: {:ok, term()} | {:error, Error.t()}
+  @spec load_composite(module(), term(), module()) :: Result.t()
 
   def load_composite(mod, raw, codec) when is_atom(mod) and is_atom(codec) do
     with {:ok, inner} <- codec.load(mod.__domain_base__(), raw), do: mod.new(inner)

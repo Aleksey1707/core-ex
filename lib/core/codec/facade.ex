@@ -84,7 +84,7 @@ defmodule Core.Codec.Facade do
       end
 
       @doc "Load: entity-плагин или Prim."
-      @spec load(module(), term()) :: {:ok, term()} | {:error, Core.Error.t()}
+      @spec load(module(), term()) :: Core.Result.t()
 
       @impl true
       for plugin <- @plugins,

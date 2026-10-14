@@ -46,6 +46,7 @@ defmodule Core.Es.EventCompatCase do
   """
 
   alias Core.Helper
+  alias Core.Result
 
   @label "Es.EventCompatCase"
   @required_keys []
@@ -171,7 +172,7 @@ defmodule Core.Es.EventCompatCase do
   # ===== наличие фикстур =====
 
   @doc false
-  @spec check_tag_fixtures(module(), Path.t()) :: :ok | {:error, missing()}
+  @spec check_tag_fixtures(module(), Path.t()) :: Result.unit(missing())
 
   def check_tag_fixtures(event_codec, fixtures)
       when is_atom(event_codec) and is_binary(fixtures) do
@@ -181,7 +182,7 @@ defmodule Core.Es.EventCompatCase do
   end
 
   @doc false
-  @spec check_upcast_fixtures(module(), Path.t()) :: :ok | {:error, missing()}
+  @spec check_upcast_fixtures(module(), Path.t()) :: Result.unit(missing())
 
   def check_upcast_fixtures(event_codec, fixtures)
       when is_atom(event_codec) and is_binary(fixtures) do
@@ -203,7 +204,7 @@ defmodule Core.Es.EventCompatCase do
   # ===== загрузка фикстур =====
 
   @doc false
-  @spec check_fixtures_load(module(), Path.t(), module()) :: :ok | {:error, failed()}
+  @spec check_fixtures_load(module(), Path.t(), module()) :: Result.unit(failed())
 
   def check_fixtures_load(event_codec, fixtures, codec)
       when is_atom(event_codec) and is_binary(fixtures) and is_atom(codec) do
@@ -218,7 +219,7 @@ defmodule Core.Es.EventCompatCase do
   end
 
   @doc false
-  @spec check_upcasts_load(module(), Path.t(), module()) :: :ok | {:error, failed()}
+  @spec check_upcasts_load(module(), Path.t(), module()) :: Result.unit(failed())
 
   def check_upcasts_load(event_codec, fixtures, codec)
       when is_atom(event_codec) and is_binary(fixtures) and is_atom(codec) do

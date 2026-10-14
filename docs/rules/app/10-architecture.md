@@ -577,7 +577,7 @@ defmacro __using__(opts) do
 end
 
 @doc "Проверить доступ реализацией, которую называет конфигурация; операции — из реестра."
-@spec check([atom()], atom(), [atom()], Context.t()) :: :ok | {:error, Error.t()}
+@spec check([atom()], atom(), [atom()], Context.t()) :: Result.unit()
 
 def check(accounts, namespace, ops, %Context{} = context) do
   :ok = declared_ops!(namespace, ops)
@@ -745,13 +745,13 @@ end)
 
 | Вид | Возврат |
 |---|---|
-| Команда | `:ok \| {:error, Error.t()}` |
+| Команда | `Result.unit()` |
 | Команда-создание | MAY `{:ok, <Aggregate>.ID.t()}` — идентификатор генерирует домен |
 | Команда, создание и upsert event-sourced агрегата | `{:ok, {:projected, <ReadModel>.View.t()}} \| {:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Удаление event-sourced агрегата | `{:ok, {:projected \| :accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Команда event-sourced агрегата без read-модели | `{:ok, {:accepted, <Aggregate>.ID.t(), Version.t()}}` |
 | Пакетная команда event-sourced агрегата с пустым пакетом | `{:ok, :unchanged}` |
-| Запрос | `{:ok, <ReadModel>.View.t()} \| {:error, Error.t()}` — read-путь отдаёт представление |
+| Запрос | `Result.t(<ReadModel>.View.t())` — read-путь отдаёт представление |
 
 Идентификатор созданного агрегата и версия после записи — результат собственного выполнения
 команды, а не отступление от CQS (`deps/core/docs/rules/20-agreements.md`, «Разделение изменения и

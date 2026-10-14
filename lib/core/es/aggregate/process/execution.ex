@@ -105,7 +105,7 @@ defmodule Core.Es.Aggregate.Process.Execution do
   # ===== результат =====
 
   @doc "Результат команды для вызывающего: версия состояния после commit или её ошибка."
-  @spec result({:ok, struct()} | {:error, term()}) :: result()
+  @spec result(Result.t(struct(), term())) :: result()
 
   def result({:ok, %{version: version}}), do: {:ok, version}
   def result({:error, _reason} = error), do: error

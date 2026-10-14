@@ -21,6 +21,7 @@ defmodule Core.Codec.Plugin.Variants do
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Helper
+  alias Core.Result
 
   require Error
 
@@ -403,7 +404,7 @@ defmodule Core.Codec.Plugin.Variants do
   def resolve(_wire, {:inline, _key, _by_value}, family) when is_atom(family), do: {:error, invalid(family)}
 
   @doc false
-  @spec address_fields(term(), place(), module()) :: {:ok, map()} | {:error, Error.t()}
+  @spec address_fields(term(), place(), module()) :: Result.t(map())
 
   def address_fields(wire, {:tagged, tag, disc}, mod) when is_atom(mod) do
     with {:ok, wire_tag, fields} <- unwrap(wire, mod) do
