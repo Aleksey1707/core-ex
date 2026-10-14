@@ -972,8 +972,10 @@ end
   изменения — `CompileError`
 - `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct` — `CompileError`: иначе
   `Core.Es.ValueChanged` ниже сошёл бы за ручной struct
-- Свободная map и вложенный struct без `use Core.Labels.Fields` в виде значения — `CompileError`,
-  как у поля
+- Значение изменения — map'а или список map'ов на любой глубине `list:` — `CompileError` со своим
+  сообщением: у изменения не задаются ни `[label:, key:, value:]`, ни `:hidden`, и в сведения оно
+  не выходит
+- Вложенный struct без `use Core.Labels.Fields` в виде значения — `CompileError`, как у поля
 
 Интроспекция:
 

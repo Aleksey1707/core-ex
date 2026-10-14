@@ -399,9 +399,20 @@ defmodule Core.Labels.FieldsTest do
                    end
     end
 
-    test "свободная map — CompileError" do
-      assert_raise CompileError, ~r/MapValue: свободная map'а выходит подписями ключа и значения/, fn ->
-        compile_change(:MapValue, [:old_value, :new_value], change: "Значение", value: [type: :map])
+    test "значение-map'а и список map'ов на любой глубине — CompileError без советов" do
+      values = [MapValue: [type: :map], MapListValue: [list: [type: :map]], MapListsValue: [list: [list: [type: :map]]]]
+
+      for {name, value} <- values do
+        error =
+          assert_raise CompileError, fn ->
+            compile_change(name, [:old_value, :new_value], change: "Значение", value: value)
+          end
+
+        assert error.description =~
+                 "#{name}: значение изменения — map'а или список map'ов: в сведения не выходит, подписать его нельзя"
+
+        refute error.description =~ ":hidden"
+        refute error.description =~ "[label:, key:, value:]"
       end
     end
   end

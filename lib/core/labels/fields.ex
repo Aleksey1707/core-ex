@@ -86,7 +86,8 @@ defmodule Core.Labels.Fields do
   Сборку ломают: `labels:` или `fields:` вместе с `change:`, ручной struct изменения без `value:`,
   `value:` у `Core.Es.ValueChanged` или без `change:`, struct без `old_value` / `new_value` или с
   полями вне них под `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или
-  `defstruct`.
+  `defstruct`, значение изменения — map'а или список map'ов на любой глубине `list:` (в сведения
+  оно не выходит, и подписать его нельзя).
 
   Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
@@ -317,8 +318,7 @@ defmodule Core.Labels.Fields do
           specs(module)
 
         {_label, spec} ->
-          ensure_none!(env, @change_fields -- fields, "struct изменения без полей")
-          ensure_none!(env, fields -- @change_fields, "поля struct'а изменения вне `old_value` / `new_value`")
+          ensure_change!(env, fields, spec)
           [old_value: spec, new_value: spec]
       end
 
@@ -362,6 +362,14 @@ defmodule Core.Labels.Fields do
     ensure_none!(env, (fields -- hidden) -- specced, "видимые поля без спеки `fields:`")
     ensure_none!(env, Enum.filter(specced, &(&1 in hidden)), "спека скрытых полей")
     ensure_none!(env, specced -- fields, "спека полей вне struct'а")
+  end
+
+  defp ensure_change!(env, fields, spec) do
+    ensure_none!(env, @change_fields -- fields, "struct изменения без полей")
+    ensure_none!(env, fields -- @change_fields, "поля struct'а изменения вне `old_value` / `new_value`")
+
+    if map?(spec),
+      do: fail!(env, "значение изменения — map'а или список map'ов: в сведения не выходит, подписать его нельзя")
   end
 
   defp map?({:type, :map}), do: true
