@@ -5,11 +5,13 @@ defmodule Core.LabelsFixture do
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
-  семейства; фикстурные резолверы имён; событие страницы событий со сведениями (`Core.Web.Event`,
+  семейства, id в скрытых полях нагрузки, вложенного struct'а, варианта семейства и map'ы, изменение на
+  id; фикстурные резолверы имён; событие страницы событий со сведениями (`Core.Web.Event`,
   `labels: true`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
-  набор ратчета полноты: в кодек не входят событие с id без вида и событие другого агрегата. Кодек
+  набор ратчета полноты: в кодек не входят событие с id без вида, событие другого агрегата, событие со
+  скрытыми id (у его семейства `Core.LabelsFixture.Mark` плагина нет) и изменение на id. Кодек
   `Core.LabelsFixture.WebEvent.Codec` — события с нагрузкой, которую дампят фасады: он, плагин
   семейства, плагин вложенных struct'ов `Core.LabelsFixture.Codec` и ручной плагин нагрузки
   `Core.LabelsFixture.Event.Limited.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
@@ -285,6 +287,30 @@ defmodule Core.LabelsFixture do
         {Shape.Rect, [kind: :rect], width: [type: :pos_integer], height: [type: :pos_integer]},
         {Shape.Pin, [kind: :pin], item: [prim: Core.LabelsFixture.ItemID]}
       ]
+  end
+
+  defmodule Seal do
+    @moduledoc "Пломба — вложенный struct сведений со скрытым id."
+
+    defstruct [:item, :origin]
+
+    use Core.Labels.Fields,
+      fields: [item: [prim: Core.LabelsFixture.ItemID]],
+      labels: [item: "Позиция", origin: :hidden]
+  end
+
+  defmodule Mark do
+    @moduledoc "Отметка — семейство без плагина: вариант со скрытым id."
+
+    defmodule Signed do
+      @moduledoc "Вариант: подпись учётной записи."
+
+      defstruct [:signer, :origin, kind: :signed]
+
+      use Core.Labels.Fields,
+        fields: [signer: [prim: Core.LabelsFixture.UserID]],
+        labels: [signer: "Подписант", origin: :hidden, kind: :hidden]
+    end
   end
 
   defmodule Texts do
@@ -606,6 +632,65 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Исполнитель назначен"
+    end
+
+    defmodule Sealed do
+      @moduledoc "Событие с id в скрытых полях: нагрузки, вложенного struct'а, варианта семейства и map'ы."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка со скрытыми ссылками рядом с видимыми."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            item: [prim: LabelsFixture.ItemID],
+            origin: [prim: LabelsFixture.ItemID],
+            approver: [prim: LabelsFixture.UserID],
+            seal: [entity: LabelsFixture.Seal],
+            mark: [union: LabelsFixture.Mark],
+            limits: [type: :map],
+            extra: [type: :map]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            item: "Позиция",
+            origin: :hidden,
+            approver: :hidden,
+            seal: "Пломба",
+            mark: "Отметка",
+            limits: [label: "Лимиты", key: "Позиция", value: "Лимит"],
+            extra: :hidden
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Позиция опломбирована"
+    end
+
+    defmodule Moved do
+      @moduledoc "Событие «было → стало» на id с резолвером."
+
+      defmodule Payload do
+        @moduledoc "Изменение позиции."
+
+        use Core.Es.ValueChanged,
+          type: Core.LabelsFixture.ItemID
+
+        use Core.Labels.Fields, change: "Позиция"
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: ActorID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Позиция перенесена"
     end
 
     defmodule Unmarked do

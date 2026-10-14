@@ -17,6 +17,11 @@ defmodule Core.Labels.Refs do
   вида id, id `kind: :id` и Prim с `Core.Labels.Text` он не спускается: id там нет или он не выходит
   ссылкой. Вид модуля проверяется один раз на модуль в пределах вызова.
 
+  Скрытые поля не обходятся: у struct'а с `use Core.Labels.Fields` обход идёт по тем же полям, что и
+  сведения (`Core.Labels.Details`), — по видимым (`Core.Labels.Fields.specs/1`), у варианта семейства по
+  его полям, у struct'а изменения по `old_value` / `new_value`. Id в поле `:hidden` в сведения не
+  выходит, и резолвер его не получает. Struct без объявления полей обходится целиком.
+
   Id группируются по резолверу, и резолвер (`Core.Labels.Resolver`) вызывается один раз на группу
   пачкой уникальных id. Без id с резолвером — `{:ok, %{}}` без вызовов. Отказ резолвера — итог; у
   записи без имени — `nil`.
@@ -24,6 +29,7 @@ defmodule Core.Labels.Refs do
 
   alias Core.Context
   alias Core.Es
+  alias Core.Labels.Fields
   alias Core.Labels.ID
   alias Core.Labels.Text
   alias Core.Pagination
@@ -62,6 +68,9 @@ defmodule Core.Labels.Refs do
       {:descend, acc} ->
         collect(Map.values(Map.from_struct(struct)), acc)
 
+      {{:fields, names}, acc} ->
+        collect(Map.values(Map.take(struct, names)), acc)
+
       {{:id, resolver}, {groups, roles}} ->
         {Map.update(groups, resolver, MapSet.new([struct]), &MapSet.put(&1, struct)), roles}
     end
@@ -87,7 +96,11 @@ defmodule Core.Labels.Refs do
   defp classify(module) when module in @leaves, do: :skip
 
   defp classify(module) do
-    if Core.Prim.prim?(module), do: prim_role(module), else: :descend
+    cond do
+      Core.Prim.prim?(module) -> prim_role(module)
+      labelled?(module) -> {:fields, visible_fields(module)}
+      true -> :descend
+    end
   end
 
   # Композит без своего объявления выходит видом базы — спуск к ней.
@@ -97,6 +110,15 @@ defmodule Core.Labels.Refs do
       {%{resolver: resolver}, nil} -> {:id, resolver}
       {nil, nil} -> if Core.Prim.composed?(module), do: :descend, else: :skip
       {nil, _fun} -> :skip
+    end
+  end
+
+  defp labelled?(module), do: Code.ensure_loaded?(module) and function_exported?(module, :__label_fields__, 0)
+
+  defp visible_fields(module) do
+    case Fields.change(module) do
+      nil -> Keyword.keys(Fields.specs(module))
+      {_label, _spec} -> ~w(old_value new_value)a
     end
   end
 end

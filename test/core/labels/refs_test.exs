@@ -6,6 +6,8 @@ defmodule Core.Labels.RefsTest do
   alias Core.Es.Event.At
   alias Core.EventFixture.ActorID
   alias Core.EventFixture.AggID
+  alias Core.Labels.Details
+  alias Core.Labels.ID
   alias Core.Labels.Refs
   alias Core.LabelsFixture.Amount
   alias Core.LabelsFixture.AuthorID
@@ -15,8 +17,10 @@ defmodule Core.Labels.RefsTest do
   alias Core.LabelsFixture.Event
   alias Core.LabelsFixture.ItemID
   alias Core.LabelsFixture.ItemQuery
+  alias Core.LabelsFixture.Mark
   alias Core.LabelsFixture.Moment
   alias Core.LabelsFixture.Name
+  alias Core.LabelsFixture.Seal
   alias Core.LabelsFixture.Shape
   alias Core.LabelsFixture.SnapshotID
   alias Core.LabelsFixture.Unit
@@ -51,6 +55,39 @@ defmodule Core.Labels.RefsTest do
     names = %{by => "Автор", assignee => "Исполнитель", item => "Позиция"}
 
     assert Refs.get(assigned(by, assignee, item), context(names)) == {:ok, names}
+  end
+
+  test "id только в скрытых полях резолвер не получает: нагрузка, вложенный struct, вариант, map'а" do
+    item = ItemID.new()
+    signer = UserID.new()
+    names = %{item => "Позиция", signer => "Подписант"}
+
+    assert Refs.get(sealed(item, signer), context(names)) == {:ok, names}
+    assert_received {:get_names, ItemQuery, [^item]}
+    assert_received {:get_names, UserQuery, [^signer]}
+  end
+
+  test "каждый id с резолвером из сведений есть в словаре: struct'ы, семейство, изменение, map'а" do
+    items = for _ <- 1..8, do: ItemID.new()
+    users = for _ <- 1..5, do: UserID.new()
+    names = Map.new(items ++ users, &{&1, "Имя"})
+    [item, backup, listed, keyed, pinned, old_item, new_item, sealed_item] = items
+    [owner, valued, by, assignee, signer] = users
+    moved = Event.Moved.Payload.new(old_item, new_item)
+
+    events = [
+      linked(item, owner, backup: backup, items: [listed], limits: %{keyed => valued}),
+      assigned(by, assignee, pinned),
+      Event.Moved.new(moved, AggID.new(), Version.new(), ActorID.new(), At.now!()),
+      sealed(sealed_item, signer, limits: %{keyed => valued})
+    ]
+
+    for event <- events do
+      ids = detail_ids(Details.build(event))
+      assert ids != []
+      assert {:ok, refs} = Refs.get(event, context(names))
+      assert Enum.reject(ids, &Map.has_key?(refs, &1)) == []
+    end
   end
 
   test "резолвер — один вызов на резолвер пачкой уникальных id всей страницы" do
@@ -170,5 +207,37 @@ defmodule Core.Labels.RefsTest do
     Event.Updated.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
   end
 
+  # Скрытые поля несут id, которых нет в словаре имён.
+  defp sealed(item, signer, fields \\ []) do
+    payload =
+      struct!(
+        Event.Sealed.Payload,
+        Keyword.merge(
+          [
+            item: item,
+            origin: ItemID.new(),
+            approver: UserID.new(),
+            seal: %Seal{item: item, origin: ItemID.new()},
+            mark: %Mark.Signed{signer: signer, origin: UserID.new()},
+            limits: %{},
+            extra: %{ItemID.new() => UserID.new()}
+          ],
+          fields
+        )
+      )
+
+    Event.Sealed.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
+  end
+
   defp closed, do: Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())
+
+  # Id с резолвером в сведениях: значение-Prim с объявлением вида `:ref` / `:user`.
+  defp detail_ids(%module{} = prim) do
+    if match?(%{kind: kind} when kind in ~w(ref user)a, ID.find(module)), do: [prim], else: []
+  end
+
+  defp detail_ids(map) when is_map(map), do: Enum.flat_map(Map.values(map), &detail_ids/1)
+  defp detail_ids(list) when is_list(list), do: Enum.flat_map(list, &detail_ids/1)
+  defp detail_ids({_title, details}), do: detail_ids(details)
+  defp detail_ids(_value), do: []
 end
