@@ -22,6 +22,11 @@ defmodule Core.Labels.Refs do
   его полям, у struct'а изменения по `old_value` / `new_value`. Id в поле `:hidden` в сведения не
   выходит, и резолвер его не получает. Struct без объявления полей обходится целиком.
 
+  Значение `text:` не обходится: поле `text:` и `list: [text: …]`, у struct'а изменения со спекой значения
+  `value: [text: …]` / `[list: [text: …]]` — ни `old_value`, ни `new_value`. Оно выходит в сведения
+  текстом функции, и id в нём ссылкой не выходит. Словарь не шире сведений: каждый его id, кроме
+  автора события, есть в сведениях.
+
   Id группируются по резолверу, и резолвер (`Core.Labels.Resolver`) вызывается один раз на группу
   пачкой уникальных id. Без id с резолвером — `{:ok, %{}}` без вызовов. Отказ резолвера — итог; у
   записи без имени — `nil`.
@@ -117,8 +122,13 @@ defmodule Core.Labels.Refs do
 
   defp visible_fields(module) do
     case Fields.change(module) do
-      nil -> Keyword.keys(Fields.specs(module))
-      {_label, _spec} -> ~w(old_value new_value)a
+      nil -> for {name, spec} <- Fields.specs(module), not text?(spec), do: name
+      {_label, spec} -> if text?(spec), do: [], else: ~w(old_value new_value)a
     end
   end
+
+  # Значение `text:` выходит в сведения текстом функции, а не ссылкой.
+  defp text?({:text, _fun}), do: true
+  defp text?({:list, inner}), do: text?(inner)
+  defp text?(_spec), do: false
 end

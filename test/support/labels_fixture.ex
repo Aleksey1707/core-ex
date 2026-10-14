@@ -6,14 +6,15 @@ defmodule Core.LabelsFixture do
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие другого агрегата с id в варианте
   семейства, id в скрытых полях нагрузки, вложенного struct'а, варианта семейства и map'ы, изменение на
-  id; автор каждого события — учётная запись с резолвером; фикстурные резолверы имён; событие страницы
-  событий со сведениями (`Core.Web.Event`, `labels: true`).
+  id, id под `text:` в поле, списке и значении изменения; автор каждого события — учётная запись с
+  резолвером; фикстурные резолверы имён; событие страницы событий со сведениями (`Core.Web.Event`,
+  `labels: true`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
   набор ратчета полноты: в кодек не входят событие с id без вида, событие другого агрегата, событие со
-  скрытыми id (у его семейства `Core.LabelsFixture.Mark` плагина нет) и изменение на id. Кодек
-  `Core.LabelsFixture.WebEvent.Codec` — события с нагрузкой, которую дампят фасады: он, плагин
-  семейства, плагин вложенных struct'ов `Core.LabelsFixture.Codec` и ручной плагин нагрузки
+  скрытыми id (у его семейства `Core.LabelsFixture.Mark` плагина нет), изменение на id и события с id
+  под `text:`. Кодек `Core.LabelsFixture.WebEvent.Codec` — события с нагрузкой, которую дампят фасады:
+  он, плагин семейства, плагин вложенных struct'ов `Core.LabelsFixture.Codec` и ручной плагин нагрузки
   `Core.LabelsFixture.Event.Limited.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
   """
 
@@ -326,6 +327,11 @@ defmodule Core.LabelsFixture do
 
     def unit(%Core.LabelsFixture.Unit{value: "kg"}), do: "Килограмм"
     def unit(%Core.LabelsFixture.Unit{value: "pc"}), do: "Штука"
+
+    @doc "Позиция без имени: id выходит текстом, а не ссылкой."
+    @spec ref(Core.LabelsFixture.ItemID.t()) :: String.t()
+
+    def ref(%Core.LabelsFixture.ItemID{}), do: "Позиция"
   end
 
   defmodule Event do
@@ -690,6 +696,77 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция перенесена"
+    end
+
+    defmodule Quoted do
+      @moduledoc "Событие с id под `text:`: в поле и в списке."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка, где id выходят текстом функции."
+
+        defstruct [:origin, :origins]
+
+        use Core.Labels.Fields,
+          fields: [
+            origin: [text: &LabelsFixture.Texts.ref/1],
+            origins: [list: [text: &LabelsFixture.Texts.ref/1]]
+          ],
+          labels: [
+            origin: "Источник",
+            origins: "Источники"
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: UserID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Источник процитирован"
+    end
+
+    defmodule Requoted do
+      @moduledoc "Событие с ручным struct'ом изменения: id под `value: [text: …]`."
+
+      defmodule Payload do
+        @moduledoc "Изменение источника: значение — id, выходящий текстом."
+
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Источник",
+          value: [text: &Core.LabelsFixture.Texts.ref/1]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: UserID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Цитата изменена"
+    end
+
+    defmodule RequotedMany do
+      @moduledoc "Событие с ручным struct'ом изменения: id под `value: [list: [text: …]]`."
+
+      defmodule Payload do
+        @moduledoc "Изменение источников: значение — список id, выходящих текстом."
+
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Источники",
+          value: [list: [text: &Core.LabelsFixture.Texts.ref/1]]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: UserID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Цитаты изменены"
     end
 
     defmodule Unmarked do

@@ -68,26 +68,37 @@ defmodule Core.Labels.RefsTest do
     assert Enum.sort(users) == Enum.sort([by, signer])
   end
 
-  test "каждый id с резолвером из сведений есть в словаре: struct'ы, семейство, изменение, map'а" do
-    items = for _ <- 1..8, do: ItemID.new()
-    users = for _ <- 1..5, do: UserID.new()
-    names = Map.new(items ++ users, &{&1, "Имя"})
-    [item, backup, listed, keyed, pinned, old_item, new_item, sealed_item] = items
-    [owner, valued, by, assignee, signer] = users
-    moved = Event.Moved.Payload.new(old_item, new_item)
+  test "id только под `text:` резолвер не получает: поле, список, значение изменения и список значений" do
+    by = UserID.new()
+    names = %{by => "Автор"}
 
-    events = [
-      linked(item, owner, backup: backup, items: [listed], limits: %{keyed => valued}),
-      assigned(by, assignee, pinned),
-      Event.Moved.new(moved, AggID.new(), Version.new(), by, At.now!()),
-      sealed(by, sealed_item, signer, limits: %{keyed => valued})
-    ]
+    for event <- text_events(by, for(_ <- 1..6, do: ItemID.new())) do
+      assert Refs.get(event, context(names)) == {:ok, names}
+      refute_received {:get_names, ItemQuery, _ids}
+    end
+  end
+
+  test "каждый id с резолвером из сведений есть в словаре: struct'ы, семейство, изменение, map'а" do
+    {events, names} = detailed()
 
     for event <- events do
       ids = detail_ids(Details.build(event))
       assert ids != []
       assert {:ok, refs} = Refs.get(event, context(names))
       assert Enum.reject(ids, &Map.has_key?(refs, &1)) == []
+    end
+  end
+
+  test "каждый id словаря, кроме автора, есть в сведениях: те же фикстуры и id под `text:`" do
+    {events, names} = detailed()
+    by = UserID.new()
+    text_ids = for _ <- 1..6, do: ItemID.new()
+    names = Map.merge(names, Map.new([by | text_ids], &{&1, "Имя"}))
+
+    for event <- events ++ text_events(by, text_ids) do
+      ids = detail_ids(Details.build(event))
+      assert {:ok, refs} = Refs.get(event, context(names))
+      assert Enum.reject(Map.keys(refs) -- [event.by], &(&1 in ids)) == []
     end
   end
 
@@ -162,6 +173,38 @@ defmodule Core.Labels.RefsTest do
   # ---
 
   defp context(names), do: Context.new(%{names: names})
+
+  # События со сведениями обо всех видах обхода и словарь имён всех их id.
+  defp detailed do
+    items = for _ <- 1..8, do: ItemID.new()
+    users = for _ <- 1..5, do: UserID.new()
+    names = Map.new(items ++ users, &{&1, "Имя"})
+    [item, backup, listed, keyed, pinned, old_item, new_item, sealed_item] = items
+    [owner, valued, by, assignee, signer] = users
+    moved = Event.Moved.Payload.new(old_item, new_item)
+
+    events = [
+      linked(item, owner, backup: backup, items: [listed], limits: %{keyed => valued}),
+      assigned(by, assignee, pinned),
+      Event.Moved.new(moved, AggID.new(), Version.new(), by, At.now!()),
+      sealed(by, sealed_item, signer, limits: %{keyed => valued})
+    ]
+
+    {events, names}
+  end
+
+  # Шесть id под `text:`: поле, список, стороны изменения значения и списка значений.
+  defp text_events(by, [origin, listed, old_value, new_value, old_listed, new_listed]) do
+    quoted = %Event.Quoted.Payload{origin: origin, origins: [listed]}
+    requoted = %Event.Requoted.Payload{old_value: old_value, new_value: new_value}
+    requoted_many = %Event.RequotedMany.Payload{old_value: [old_listed], new_value: [new_listed]}
+
+    [
+      Event.Quoted.new(quoted, AggID.new(), Version.new(), by, At.now!()),
+      Event.Requoted.new(requoted, AggID.new(), Version.new(), by, At.now!()),
+      Event.RequotedMany.new(requoted_many, AggID.new(), Version.new(), by, At.now!())
+    ]
+  end
 
   defp linked(item, owner, fields \\ []) do
     payload =
