@@ -14,6 +14,15 @@
   `config/runtime.exs`; подменённая реализация `Core.Outbox.Repo` получает на время
   `mix outbox.requeue` только `Core.Config.dao/0` — без своих процессов и другого Ecto-репозитория.
 
+- **Поле `version` события страницы событий — `aggregateVersion`** (решение —
+  `docs/adr/0069-event-page-aggregate-version.md`). `to_wire/2` модуля с `use Core.Web.Event` и его
+  OpenAPI-схема называют версию агрегата после события `aggregateVersion`: рядом с `aggregateId` и
+  `type`, где живёт версия схемы события, голое `version` читалось как версия самого события.
+  Значение прежнее — целое от 1, поле обязательное. Код приложения правится, только если он читает
+  поле из результата `to_wire/2`: `wire.version` → `wire.aggregateVersion`. Ломает wire клиента
+  страницы событий — сверить с клиентом до выката: `version` → `aggregateVersion` в JSON и в схеме
+  события OpenAPI-документа.
+
 ## 0.14.0
 
 ### Ломающие изменения контракта

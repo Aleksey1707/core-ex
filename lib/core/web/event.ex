@@ -26,7 +26,7 @@ defmodule Core.Web.Event do
   | Поле | На wire |
   |---|---|
   | `id`, `aggregateId`, `type`, `at` | поля конверта дампом `codec:` |
-  | `version` | версия агрегата после события |
+  | `aggregateVersion` | версия агрегата после события |
   | `payload` | нагрузка конверта, ключи — camelCase; id в ней — строки дампа, без подмены ссылками |
   | `by` | без `user_ref:` — дамп id; с ним — результат `dump:` от дампа id и имени из словаря ссылок |
   | `title` | при `labels: true` — название события |
@@ -56,7 +56,7 @@ defmodule Core.Web.Event do
   OpenAPI-схемой события страницы событий (`schema/0`), и страница описывается
   `Core.Web.Response.Schema.page(MyAppWeb.Schemas.Event)`. Название схемы — последний сегмент имени
   модуля; объект открытый, все поля обязательны: `type` — строка без перечисления (схема одна на все
-  агрегаты), `version` — целое от 1, `payload` — схема без типа, nullable, `at` — `date-time`, `by` —
+  агрегаты), `aggregateVersion` — целое от 1, `payload` — схема без типа, nullable, `at` — `date-time`, `by` —
   строка без `user_ref:` и `schema:` из `user_ref:` с ним.
 
   При `labels: true` — ещё `title` и `details`: схема сведений — вложенный модуль `Detail` (`oneOf` по
@@ -82,7 +82,7 @@ defmodule Core.Web.Event do
   @type t :: %{
           id: String.t(),
           aggregateId: String.t(),
-          version: pos_integer(),
+          aggregateVersion: pos_integer(),
           type: String.t(),
           payload: term(),
           at: String.t(),
@@ -93,7 +93,7 @@ defmodule Core.Web.Event do
   @type labelled :: %{
           id: String.t(),
           aggregateId: String.t(),
-          version: pos_integer(),
+          aggregateVersion: pos_integer(),
           type: String.t(),
           payload: term(),
           at: String.t(),
@@ -253,9 +253,25 @@ defmodule Core.Web.Event do
 
       def to_wire(%_{payload: _} = event, refs) when is_map(refs) do
         case Core.Web.Event.to_wire(event, refs, @web_event_codec, @web_event_user_dump, false) do
-          %{id: id, aggregateId: aggregate_id, version: version, type: type, payload: payload, at: at, by: by}
-          when is_binary(type) and is_integer(version) ->
-            %{id: id, aggregateId: aggregate_id, version: version, type: type, payload: payload, at: at, by: by}
+          %{
+            id: id,
+            aggregateId: aggregate_id,
+            aggregateVersion: aggregate_version,
+            type: type,
+            payload: payload,
+            at: at,
+            by: by
+          }
+          when is_binary(type) and is_integer(aggregate_version) ->
+            %{
+              id: id,
+              aggregateId: aggregate_id,
+              aggregateVersion: aggregate_version,
+              type: type,
+              payload: payload,
+              at: at,
+              by: by
+            }
         end
       end
     end
@@ -271,7 +287,7 @@ defmodule Core.Web.Event do
           %{
             id: id,
             aggregateId: aggregate_id,
-            version: version,
+            aggregateVersion: aggregate_version,
             type: type,
             payload: payload,
             at: at,
@@ -279,11 +295,11 @@ defmodule Core.Web.Event do
             title: title,
             details: details
           }
-          when is_binary(type) and is_integer(version) and is_binary(title) and is_list(details) ->
+          when is_binary(type) and is_integer(aggregate_version) and is_binary(title) and is_list(details) ->
             %{
               id: id,
               aggregateId: aggregate_id,
-              version: version,
+              aggregateVersion: aggregate_version,
               type: type,
               payload: payload,
               at: at,
@@ -330,7 +346,7 @@ defmodule Core.Web.Event do
                                 %{
                                   id: %OpenApiSpex.Schema{type: :string, description: "Идентификатор события"},
                                   aggregateId: %OpenApiSpex.Schema{type: :string, description: "Идентификатор агрегата"},
-                                  version: %OpenApiSpex.Schema{
+                                  aggregateVersion: %OpenApiSpex.Schema{
                                     type: :integer,
                                     minimum: 1,
                                     description: "Версия агрегата после события"
@@ -353,7 +369,8 @@ defmodule Core.Web.Event do
                                 },
                                 web_event_labels
                               ),
-                            required: ~w(id aggregateId version type payload at by)a ++ Map.keys(web_event_labels)
+                            required:
+                              ~w(id aggregateId aggregateVersion type payload at by)a ++ Map.keys(web_event_labels)
                           },
                           struct?: false
                         )
@@ -495,7 +512,7 @@ defmodule Core.Web.Event do
     wire = %{
       id: fields.id,
       aggregateId: fields.aggregate_id,
-      version: fields.aggregate_version,
+      aggregateVersion: fields.aggregate_version,
       type: fields.type,
       payload: Helper.Keys.camelize(fields.payload),
       at: fields.at,

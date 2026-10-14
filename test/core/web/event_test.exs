@@ -33,7 +33,7 @@ defmodule Core.Web.EventTest do
       assert Plain.to_wire(event, %{}) == %{
                id: External.dump(id),
                aggregateId: External.dump(agg),
-               version: 3,
+               aggregateVersion: 3,
                type: "web_event.noted",
                payload: %{"firstName" => "Анна", "extraData" => %{"sourceKind" => %{"lineNo" => 2}}},
                at: External.dump(at),
@@ -89,7 +89,7 @@ defmodule Core.Web.EventTest do
 
     test "названия от последнего сегмента имени модуля, все поля обязательны, by — строка или schema:" do
       %OpenApi{components: %Components{schemas: schemas}} = spec([Plain, WithUser])
-      fields = ~w(id aggregateId version type payload at by)a
+      fields = ~w(id aggregateId aggregateVersion type payload at by)a
 
       assert %{type: :object, additionalProperties: nil, required: required, properties: properties} = schemas["Plain"]
       assert Enum.sort(required) == Enum.sort(fields)
@@ -97,7 +97,7 @@ defmodule Core.Web.EventTest do
 
       assert %{
                type: %{type: :string, enum: nil},
-               version: %{type: :integer, minimum: 1},
+               aggregateVersion: %{type: :integer, minimum: 1},
                payload: %{type: nil, nullable: true},
                at: %{type: :string, format: :"date-time"},
                by: %{type: :string}
@@ -134,7 +134,7 @@ defmodule Core.Web.EventTest do
       with_user = json(WithUser.to_wire(noted(by), %{by => "Автор"}))
 
       for {wire, title} <- [
-            {%{plain | "version" => 0}, "Plain"},
+            {%{plain | "aggregateVersion" => 0}, "Plain"},
             {%{plain | "at" => "14.10.2026"}, "Plain"},
             {Map.delete(plain, "payload"), "Plain"},
             {%{plain | "by" => %{"id" => "u1", "login" => nil}}, "Plain"},
