@@ -331,7 +331,7 @@ defmodule Core.Codec.PluginVariantsTest do
     end
 
     test "общий тег без дискриминатора — CompileError" do
-      assert_raise CompileError, ~r/тег "t" общий у .*NoDisc.T, .*NoDisc.U.*без дискриминатора/, fn ->
+      assert_raise CompileError, ~r/variants: тег "t" общий у .*NoDisc.T, .*NoDisc.U.*без дискриминатора/, fn ->
         compile(:NoDisc, quote(do: [{T, "t", a: [type: :string]}, {U, "t", b: [type: :string]}]))
       end
     end
@@ -366,7 +366,7 @@ defmodule Core.Codec.PluginVariantsTest do
     end
 
     test "дискриминатор не одна пара ключ: значение — CompileError" do
-      assert_raise CompileError, ~r/дискриминатор — одна пара ключ: значение/, fn ->
+      assert_raise CompileError, ~r/variants, вариант .*: дискриминатор — одна пара ключ: значение/, fn ->
         compile(:Pair, quote(do: [{T, {"t", k: :t, j: :t}, a: [type: :string]}]))
       end
     end

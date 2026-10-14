@@ -471,7 +471,7 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "не Prim в prim: — CompileError с именем плагина, типа и поля" do
-      message = ~r/Codec.Plugin .*NotPrim: fields:, тип .*NotPrim.T, поле b: .*Tag не Prim/
+      message = ~r/Codec.Plugin .*NotPrim: fields, тип .*NotPrim.T, поле b: .*Tag не Prim/
 
       assert_raise CompileError, message, fn ->
         compile_plugin(:NotPrim, a: [prim: Name], b: [prim: Core.Codec.PluginFieldsTest.Tag])

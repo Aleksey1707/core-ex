@@ -62,23 +62,23 @@ defmodule Core.Codec.Plugin.Fields do
 
   def fields!(plugin, fields, loadable?) when is_list(fields) do
     pairs = Enum.map(fields, &pair!(plugin, &1))
-    check_unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: fields: — типы объявлены дважды")
+    check_unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: fields: типы объявлены дважды")
 
     Enum.map(pairs, fn {type, spec} ->
-      {type, type_fields!(type, spec, [], loadable?, "#{@label} #{inspect(plugin)}: fields:, тип #{inspect(type)}")}
+      {type, type_fields!(type, spec, [], loadable?, "#{@label} #{inspect(plugin)}: fields, тип #{inspect(type)}")}
     end)
   end
 
   def fields!(plugin, other, _loadable?) do
     raise CompileError,
-      description: "#{@label} #{inspect(plugin)}: fields: — список пар {Тип, спека}, задано #{inspect(other)}"
+      description: "#{@label} #{inspect(plugin)}: fields: список пар {Тип, спека}, задано #{inspect(other)}"
   end
 
   @doc false
   @spec payload_fields!(module(), term()) :: [field()]
 
   def payload_fields!(payload, spec) when is_atom(payload) do
-    where = "Es.Event.Payload #{inspect(payload)}: fields:"
+    where = "Es.Event.Payload #{inspect(payload)}: fields"
 
     case defaults(spec) do
       [] ->
@@ -87,7 +87,7 @@ defmodule Core.Codec.Plugin.Fields do
       names ->
         raise CompileError,
           description:
-            "#{where} — default: у нагрузки события нет (поля #{inspect(names)}): " <>
+            "#{where}: default: у нагрузки события нет (поля #{inspect(names)}): " <>
               "развитие события — новый тег и апкаст"
     end
   end
@@ -137,7 +137,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   defp pair!(plugin, other) do
     raise CompileError,
-      description: "#{@label} #{inspect(plugin)}: fields: — ожидается пара {Тип, спека}, задано #{inspect(other)}"
+      description: "#{@label} #{inspect(plugin)}: fields: ожидается пара {Тип, спека}, задано #{inspect(other)}"
   end
 
   defp defaults(spec) do
@@ -155,7 +155,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   defp spec_fields!(spec, loadable?, where) do
     if not Keyword.keyword?(spec) or spec == [] do
-      raise CompileError, description: "#{where} — непустой keyword-список полей"
+      raise CompileError, description: "#{where}: непустой keyword-список полей"
     end
 
     check_unique!(Keyword.keys(spec), "#{where}: поля повторяются")
@@ -167,7 +167,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   defp field!(name, opts, loadable?, where) do
     if not Keyword.keyword?(opts) do
-      raise CompileError, description: "#{where} — keyword-спека"
+      raise CompileError, description: "#{where}: keyword-спека"
     end
 
     case Keyword.keys(opts) -- (@kind_keys ++ @extra_keys) do
@@ -228,7 +228,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   defp kind_spec!(:list, inner, where) do
     if not Keyword.keyword?(inner) do
-      raise CompileError, description: "#{where}: list: — keyword-спека элемента"
+      raise CompileError, description: "#{where}: list: keyword-спека элемента"
     end
 
     if Keyword.has_key?(inner, :optional) do
@@ -237,7 +237,7 @@ defmodule Core.Codec.Plugin.Fields do
 
     case Keyword.keys(inner) -- @kind_keys do
       [] -> {:list, spec!(inner, where)}
-      unknown -> raise CompileError, description: "#{where}: list: — неизвестные ключи #{inspect(unknown)}"
+      unknown -> raise CompileError, description: "#{where}: list: неизвестные ключи #{inspect(unknown)}"
     end
   end
 
@@ -251,7 +251,7 @@ defmodule Core.Codec.Plugin.Fields do
   defp optional!(opts, where) do
     case Keyword.get(opts, :optional, false) do
       optional? when is_boolean(optional?) -> optional?
-      other -> raise CompileError, description: "#{where}: optional: — boolean, задано #{inspect(other)}"
+      other -> raise CompileError, description: "#{where}: optional: boolean, задано #{inspect(other)}"
     end
   end
 
@@ -259,7 +259,7 @@ defmodule Core.Codec.Plugin.Fields do
     case Keyword.fetch(opts, :wire) do
       :error -> Atom.to_string(name)
       {:ok, wire} when is_binary(wire) and wire != "" -> wire
-      {:ok, other} -> raise CompileError, description: "#{where}: wire: — непустая строка, задано #{inspect(other)}"
+      {:ok, other} -> raise CompileError, description: "#{where}: wire: непустая строка, задано #{inspect(other)}"
     end
   end
 

@@ -76,7 +76,7 @@ defmodule Core.Codec.Plugin.Variants do
   def variants!(plugin, other, _union) do
     raise CompileError,
       description:
-        "#{@label} #{inspect(plugin)}: variants: — непустой список {Тип, адрес, спека}, задано #{inspect(other)}"
+        "#{@label} #{inspect(plugin)}: variants: непустой список {Тип, адрес, спека}, задано #{inspect(other)}"
   end
 
   @doc false
@@ -108,7 +108,7 @@ defmodule Core.Codec.Plugin.Variants do
   # ---
 
   defp variant!(plugin, {mod, address, spec}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@label} #{inspect(plugin)}: variants:, вариант #{inspect(mod)}"
+    where = "#{@label} #{inspect(plugin)}: variants, вариант #{inspect(mod)}"
     place = place!(address, where)
     disc = disc(place)
     Fields.struct_module!(mod, where)
@@ -121,7 +121,7 @@ defmodule Core.Codec.Plugin.Variants do
   end
 
   defp variant!(plugin, {mod, address}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@label} #{inspect(plugin)}: variants:, вариант #{inspect(mod)}"
+    where = "#{@label} #{inspect(plugin)}: variants, вариант #{inspect(mod)}"
     place = place!(address, where)
     Fields.struct_module!(mod, where)
     check_default!(mod, disc(place), where)
@@ -132,7 +132,7 @@ defmodule Core.Codec.Plugin.Variants do
   defp variant!(plugin, other) do
     raise CompileError,
       description:
-        "#{@label} #{inspect(plugin)}: variants: — ожидается {Тип, адрес, спека} или {Тип, адрес}, " <>
+        "#{@label} #{inspect(plugin)}: variants: ожидается {Тип, адрес, спека} или {Тип, адрес}, " <>
           "задано #{inspect(other)}"
   end
 
@@ -197,12 +197,12 @@ defmodule Core.Codec.Plugin.Variants do
         :ok
 
       dupes ->
-        raise CompileError, description: "#{@label} #{inspect(plugin)}: variants: — типы дважды: #{inspect(dupes)}"
+        raise CompileError, description: "#{@label} #{inspect(plugin)}: variants: типы дважды: #{inspect(dupes)}"
     end
   end
 
   defp check_places!(plugin, variants) do
-    where = "#{@label} #{inspect(plugin)}: variants:"
+    where = "#{@label} #{inspect(plugin)}: variants"
 
     forms = Enum.map(variants, &elem(elem(&1, 2), 0))
 
@@ -215,7 +215,7 @@ defmodule Core.Codec.Plugin.Variants do
 
       _mixed ->
         raise CompileError,
-          description: "#{where} — адреса одной формы: тегированная или без обёртки, варианты #{names(variants)}"
+          description: "#{where}: адреса одной формы: тегированная или без обёртки, варианты #{names(variants)}"
     end
   end
 
@@ -231,11 +231,11 @@ defmodule Core.Codec.Plugin.Variants do
     if Enum.any?(members, &is_nil(disc(elem(&1, 2)))) do
       raise CompileError,
         description:
-          "#{where} — тег #{inspect(tag)} общий у #{names(members)} " <>
+          "#{where}: тег #{inspect(tag)} общий у #{names(members)} " <>
             "без дискриминатора у каждого"
     end
 
-    check_discs!(members, "#{where} тег #{inspect(tag)}")
+    check_discs!(members, "#{where}, тег #{inspect(tag)}")
   end
 
   defp check_discs!(members, where) do
@@ -244,7 +244,7 @@ defmodule Core.Codec.Plugin.Variants do
     keys = Enum.map(discs, &elem(&1, 0))
 
     if length(Enum.uniq(keys)) > 1 do
-      raise CompileError, description: "#{where} — разные ключи дискриминатора у #{names(members)}: #{inspect(discs)}"
+      raise CompileError, description: "#{where}: разные ключи дискриминатора у #{names(members)}: #{inspect(discs)}"
     end
 
     values = Enum.map(discs, &string(elem(&1, 1)))
@@ -254,7 +254,7 @@ defmodule Core.Codec.Plugin.Variants do
         :ok
 
       dupes ->
-        raise CompileError, description: "#{where} — повтор адреса #{inspect(Enum.uniq(dupes))} у #{names(members)}"
+        raise CompileError, description: "#{where}: повтор адреса #{inspect(Enum.uniq(dupes))} у #{names(members)}"
     end
   end
 

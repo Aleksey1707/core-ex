@@ -83,7 +83,7 @@ defmodule Core.Es.ValueChanged do
   @spec fields(module(), boolean()) :: [Fields.field()]
 
   def fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
-    spec = Fields.value_spec(type, "Es.ValueChanged: type:")
+    spec = Fields.value_spec(type, "Es.ValueChanged: type")
 
     for name <- ~w(old_value new_value)a, do: {name, spec, nilable?, Atom.to_string(name), :none}
   end
