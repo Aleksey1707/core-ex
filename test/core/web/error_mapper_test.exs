@@ -23,7 +23,7 @@ defmodule Core.Web.ErrorMapperTest do
   }
 
   test "version_mismatch → 412 с доменным кодом и текстом" do
-    assert {412, body("version_mismatch", "версия не та"), nil} ==
+    assert {412, body("test/version_mismatch", "версия не та"), nil} ==
              Web.ErrorMapper.map(domain(:version_mismatch, "версия не та"))
   end
 
@@ -40,16 +40,16 @@ defmodule Core.Web.ErrorMapperTest do
   end
 
   test "access_denied → 403 с доменным кодом и текстом" do
-    assert {403, body("access_denied", "нет прав"), nil} ==
+    assert {403, body("test/access_denied", "нет прав"), nil} ==
              Web.ErrorMapper.map(domain(:access_denied, "нет прав"))
   end
 
-  test "прочая доменная ошибка → 400 со своим кодом" do
-    assert {400, body("invalid", "сообщение домена"), nil} == Web.ErrorMapper.map(domain(:invalid))
+  test "прочая доменная ошибка → 400 с кодом ns/code" do
+    assert {400, body("test/invalid", "сообщение домена"), nil} == Web.ErrorMapper.map(domain(:invalid))
   end
 
   test "доменный not_found → 400, а не 404" do
-    assert {400, body("not_found", "не найдено"), nil} ==
+    assert {400, body("test/not_found", "не найдено"), nil} ==
              Web.ErrorMapper.map(domain(:not_found, "не найдено"))
   end
 
@@ -69,9 +69,9 @@ defmodule Core.Web.ErrorMapperTest do
     test "доменный контейнер отдаёт состав в data.errors" do
       error = many([domain(:blank, "имя пусто"), domain(:past, "срок в прошлом")])
 
-      errors = [%{code: "blank", message: "имя пусто"}, %{code: "past", message: "срок в прошлом"}]
+      errors = [%{code: "test/blank", message: "имя пусто"}, %{code: "test/past", message: "срок в прошлом"}]
 
-      assert {400, body("invalid", "форма невалидна", %{errors: errors}), nil} ==
+      assert {400, body("form/invalid", "форма невалидна", %{errors: errors}), nil} ==
                Web.ErrorMapper.map(error)
     end
 
@@ -118,7 +118,7 @@ defmodule Core.Web.ErrorMapperTest do
     assert {401, body("not_authorized", "Нет"), :debug} ==
              Web.ErrorMapper.map(domain(:no_session), opts)
 
-    assert {400, %{code: "unauthorized"}, nil} = Web.ErrorMapper.map(domain(:unauthorized), opts)
+    assert {400, %{code: "test/unauthorized"}, nil} = Web.ErrorMapper.map(domain(:unauthorized), opts)
     assert {500, body("internal_error", "Ой"), :error} == Web.ErrorMapper.map(app(:boom), opts)
   end
 end

@@ -79,9 +79,10 @@ defmodule Core.Web.Response.SchemaTest do
   end
 
   describe "ErrorResponse" do
-    test "error/2,3 проходят схему" do
+    test "error/1,2,3 проходят схему" do
       assert_error(Response.error(:invalid, "нельзя"))
-      assert_error(Response.error(:invalid, "нельзя", %{errors: [%{code: "blank", message: "имя пусто"}]}))
+      assert_error(Response.error(:invalid, "нельзя", %{errors: [%{code: "prim/min_len", message: "имя пусто"}]}))
+      assert_error(Response.error(domain(:invalid)))
     end
 
     test "каждая строка ErrorMapper.map/2 проходит схему" do

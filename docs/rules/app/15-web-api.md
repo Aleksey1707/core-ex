@@ -309,6 +309,8 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 - Таблица маппера приложения — чистая функция, проверяемая тестом построчно: свои клозы `map/1`
   перед делегированием в `Core.Web.ErrorMapper.map/2` (`deps/core/docs/rules/10-architecture.md`,
   «Граница HTTP»).
+- Доменная ошибка в своей клозе — `Core.Web.Response.error(err)`
+  (`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»).
 - `%Ecto.Changeset{}` в клозах MUST NOT: репозиторий его не отдаёт (`13-repos.md`).
 - Ошибку, не дошедшую до контроллера (неизвестный маршрут, неразобранное тело, отказ плага,
   непойманное исключение), MUST отдавать той же обёрткой: клиент разбирает ответ одинаково на

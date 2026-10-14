@@ -177,10 +177,10 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 
 | Ошибка | Статус | `code` | `message` | Лог |
 |---|---|---|---|---|
-| `%Error{kind: :domain, code: :version_mismatch}` | 412 | `"version_mismatch"` | `message` | — |
-| `%Error{kind: :domain, code: :access_denied}` | 403 | `"access_denied"` | `message` | — |
+| `%Error{kind: :domain, code: :version_mismatch}` | 412 | `"<ns>/version_mismatch"` | `message` | — |
+| `%Error{kind: :domain, code: :access_denied}` | 403 | `"<ns>/access_denied"` | `message` | — |
 | `%Error{code: c}` любого `kind`, `c` в `auth_codes:` | 401 | `"not_authorized"` | константа | `:debug` |
-| `%Error{kind: :domain}` | 400 | `code` ошибки | `message` | — |
+| `%Error{kind: :domain}` | 400 | `"<ns>/<code>"` ошибки | `message` | — |
 | `%Error{kind: :app}` с любым `code` | 500 | `"internal_error"` | шаблон | `:error` |
 | прочее (не `%Error{}`) | 500 | `"internal_error"` | шаблон | `:error` |
 
@@ -200,12 +200,18 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 - Своя строка таблицы — клоза `map/1` маппера приложения. Свои клозы MUST объявляться **перед**
   делегированием в `Core.Web.ErrorMapper.map/2`: `map/2` не макрос и не behaviour, и порядок
   клоз — это приоритет строк.
-- Состав множества ошибок (`Error.many`) маппер отдаёт в `data.errors` (`[%{code, message}]`) только
-  на доменных строках: на 401 и 500 тексты элементов MUST NOT уходить наружу (`12-errors.md`,
-  «Состав на границе HTTP»).
-- `code` обёртки — код `%Error{}`, отдельного словаря кодов ответа нет: свой код ответа — код
+- Состав множества ошибок (`Error.many`) маппер отдаёт в `data.errors` (`[%{code, message}]`, `code`
+  элемента — `"<ns>/<code>"`) только на доменных строках: на 401 и 500 тексты элементов MUST NOT
+  уходить наружу (`12-errors.md`, «Состав на границе HTTP»).
+- `code` обёртки — пара `ns` и `code` доменной `%Error{}` строкой `"<ns>/<code>"`
+  (`Core.Web.Response.error/1`), отдельного словаря кодов ответа нет: свой код ответа — код
   ошибки в каталоге `<Aggregate>.Errors` или своя клоза `map/1`
-  (`{429, Core.Web.Response.error(:quota_exceeded, err.message), :debug}`).
+  (`{429, Core.Web.Response.error(err), :debug}`). Один `code` у разных `ns` — разные ошибки
+  (`not_found` есть в каждом каталоге), и без `ns` клиент их не различит; новое поле обёртки под
+  `ns` — MUST NOT, форма обёртки зафиксирована (ADR-0067).
+- Доменную ошибку обёрткой MUST собирать `Core.Web.Response.error/1`; атомная форма
+  `Response.error/2,3` — только для констант границы (`"internal_error"`, `"not_authorized"`,
+  имена статусов), они идут без `ns`.
 
 Ошибку, не дошедшую до контроллера (`ErrorJSON` потребителя), раскладывает
 `Core.Web.ErrorMapper.by_status/2` (ADR-0062):
@@ -223,7 +229,8 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 
 Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно, `:not_found` → 400 отдельным
 тестом, состав `Error.many` — describe «множество ошибок», `by_status/2` — describe «by_status/2 —
-ошибка до контроллера».
+ошибка до контроллера»; `code` доменной ошибки — `test/core/web/response_test.exs`, describe
+«error/1 — доменная ошибка».
 
 ### OpenAPI-схемы wire
 

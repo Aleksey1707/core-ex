@@ -5,30 +5,37 @@
 ### Ломающие изменения контракта
 
 - **Обёртка ответа `Core.Web.Response`: `status` и строковый `code` из `%Error{}`** (решение —
-  `docs/adr/0062-response-wrapper.md`; норма — `docs/rules/10-architecture.md`, «Граница HTTP»;
-  `docs/rules/12-errors.md`, «Состав на границе HTTP»; `docs/rules/app/15-web-api.md`). Раньше тело
-  было `{code: <int>, messages: [...], data}`, а код ответа — число из словаря
+  `docs/adr/0062-response-wrapper.md`, `code` доменной ошибки — `docs/adr/0067-error-code-with-ns.md`;
+  норма — `docs/rules/10-architecture.md`, «Граница HTTP»; `docs/rules/12-errors.md`, «Состав на
+  границе HTTP»; `docs/rules/app/12-errors.md`, «Словарь `ns`»; `docs/rules/app/15-web-api.md`).
+  Раньше тело было `{code: <int>, messages: [...], data}`, а код ответа — число из словаря
   `Core.Web.Response.Code` или `Core.Enum` потребителя, грубо дублирующее код `%Error{}`. Теперь —
   форма, которую уже читает общий фронт: успех `{status: "ok", data}` (пустой — `data: %{}`),
-  ошибка `{status: "error", data, code, message}`, где `code` — код доменной ошибки строкой,
-  `"internal_error"` на 500, `"not_authorized"` на 401 и имя статуса на 4xx ошибки, не дошедшей
-  до контроллера. HTTP-статусы и тексты маппера не менялись. Правка потребителя:
+  ошибка `{status: "error", data, code, message}`, где `code` — `"<ns>/<code>"` доменной ошибки
+  (`"account/not_found"`: `not_found` есть в каждом каталоге, и без `ns` клиент не различит, чего
+  нет; нового поля под `ns` обёртка не получает), `"internal_error"` на 500, `"not_authorized"`
+  на 401 и имя статуса на 4xx ошибки, не дошедшей до контроллера. HTTP-статусы и тексты маппера
+  не менялись. Правка потребителя:
   - `success()` → `%{status: "ok", data: %{}}`, `success(data)` → `%{status: "ok", data: data}`;
     `success(data, messages)` удалён — предупреждения кладутся в свой `data`;
   - `error(code, text | [texts])` → `error(code, text)` / `error(code, text, data)`: `code` — атом
-    кода ошибки (строка — `FunctionClauseError`), текст — одна строка;
+    константы границы (строка — `FunctionClauseError`), текст — одна строка; доменную ошибку
+    собирает новая `error(%Error{kind: :domain})` — код `"<ns>/<code>"`, текст и состав
+    `Error.many`;
   - `page_data/2` → `%{items, total}` вместо `%{count, items}`; схемы страницы в OpenApiSpex
     переименовывают `count` → `total`;
   - `Core.Web.ErrorMapper.map/2` → `{status, body, level}` вместо `{status, code, text, level}`:
     `body` — готовая обёртка, fallback-контроллер отправляет её как есть
     (`conn |> put_status(status) |> json(body)`). Своя клоза маппера:
-    `{429, :error, err.message, :debug}` →
-    `{429, Core.Web.Response.error(:quota_exceeded, err.message), :debug}`;
-  - состав `Error.many` собирает маппер: на доменных строках — `data.errors: [%{code, message}]`.
+    `{429, :error, err.message, :debug}` → `{429, Core.Web.Response.error(err), :debug}`;
+  - состав `Error.many` собирает маппер: на доменных строках — `data.errors: [%{code, message}]`,
+    `code` элемента — `"<ns>/<code>"`.
     Ветка fallback-контроллера `if code == :domain_error, do: Error.messages(error)` удаляется;
   - тесты контроллеров: `%{"code" => 2, "messages" => [m]}` →
-    `%{"status" => "error", "code" => "<код>", "message" => m}`, `%{"code" => 0, "data" => d}` →
+    `%{"status" => "error", "code" => "<ns>/<код>", "message" => m}`, `%{"code" => 0, "data" => d}` →
     `%{"status" => "ok", "data" => d}`;
+  - `ns` каталога стал частью HTTP-контракта: после первого релиза приложения его, как и коды,
+    менять нельзя (`docs/rules/app/12-errors.md`);
   - ответ 202 (`{id, version}`) — в обёртке `Response.success/1`, 204 — по-прежнему без тела.
   - `ErrorJSON` делегирует `Core.Web.ErrorMapper.by_status/2`: своя карта статусов отдавала
     `"internal_error"` на 400 и 415, а клиент читает этот код как сбой сервера. На 4xx `code` — имя

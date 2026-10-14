@@ -6,6 +6,9 @@
 опция `use Core.Web.Response, codes:` и резерв `0..9` удаляются. HTTP-статусы не меняются.
 Норма — `docs/rules/10-architecture.md`, граница HTTP; `docs/rules/app/15-web-api.md`.
 
+Уточнён ADR-0067 (`0067-error-code-with-ns.md`): `code` доменной ошибки — `"<ns>/<code>"`, форма
+обёртки прежняя.
+
 ## Контекст
 
 Факты на 2026-10-13:
