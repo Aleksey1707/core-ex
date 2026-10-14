@@ -68,16 +68,16 @@ defmodule Core.Web.EventTest do
 
   describe "схема" do
     test "дамп и страница каждой конфигурации проходят схему того же use и Response.Schema.page/1" do
-      [by, actor] = [UserID.new(), EventFixture.ActorID.new()]
+      [by, labelled_by] = [UserID.new(), LabelsFixture.UserID.new()]
       noted = noted(by)
-      labelled = LabelsFixture.Event.Closed.new(EventFixture.AggID.new(), Version.new(), actor, At.now!())
+      labelled = LabelsFixture.Event.Closed.new(EventFixture.AggID.new(), Version.new(), labelled_by, At.now!())
 
       for {module, event, refs} <- [
             {Plain, noted, %{}},
             {Plain, closed(by), %{}},
             {WithUser, noted, %{by => "Автор"}},
             {WithUser, closed(by), %{by => nil}},
-            {LabelsFixture.WebEvent, labelled, %{actor => "Автор"}}
+            {LabelsFixture.WebEvent, labelled, %{labelled_by => "Автор"}}
           ] do
         title = List.last(Module.split(module))
         page = %Pagination.Result{items: [event, event], count: 7}

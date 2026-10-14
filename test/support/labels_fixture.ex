@@ -4,10 +4,10 @@ defmodule Core.LabelsFixture do
   нагрузка с полями Enum, нагрузка с вложенными struct'ами, списками, семейством и Prim-композитом,
   нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
   ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
-  Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие от учётной записи с id в варианте
+  Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие другого агрегата с id в варианте
   семейства, id в скрытых полях нагрузки, вложенного struct'а, варианта семейства и map'ы, изменение на
-  id; фикстурные резолверы имён; событие страницы событий со сведениями (`Core.Web.Event`,
-  `labels: true`).
+  id; автор каждого события — учётная запись с резолвером; фикстурные резолверы имён; событие страницы
+  событий со сведениями (`Core.Web.Event`, `labels: true`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
   набор ратчета полноты: в кодек не входят событие с id без вида, событие другого агрегата, событие со
@@ -17,7 +17,6 @@ defmodule Core.LabelsFixture do
   `Core.LabelsFixture.Event.Limited.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
   """
 
-  alias Core.EventFixture.ActorID
   alias Core.EventFixture.AggID
 
   defmodule Name do
@@ -371,7 +370,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Запись изменена"
@@ -398,7 +397,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Статус сменён"
@@ -435,7 +434,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Заказ отправлен"
@@ -467,7 +466,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Метки расставлены"
@@ -487,7 +486,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Название изменено"
@@ -508,7 +507,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Статус переключён"
@@ -529,7 +528,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Источник изменён"
@@ -550,7 +549,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Метки изменены"
@@ -593,7 +592,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция связана"
@@ -667,7 +666,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция опломбирована"
@@ -687,7 +686,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция перенесена"
@@ -706,7 +705,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Ссылка без вида"
@@ -727,7 +726,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Payload
 
       use Core.Labels.Event, title: "Лимиты заданы"
@@ -738,7 +737,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: Core.LabelsFixture.Name
 
       use Core.Labels.Event,
@@ -751,7 +750,7 @@ defmodule Core.LabelsFixture do
 
       use Core.Es.Event,
         aggregate_id: AggID,
-        by: ActorID,
+        by: UserID,
         payload: nil
 
       use Core.Labels.Event, title: "Запись закрыта"

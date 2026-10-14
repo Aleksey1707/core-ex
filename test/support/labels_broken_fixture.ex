@@ -2,7 +2,9 @@ defmodule Core.LabelsBrokenFixture do
   @moduledoc """
   Сломанный набор ратчета полноты подписей (`Core.Labels.CompletenessCase`): событие без названия с
   нагрузкой без решения по полям, Enum без подписей, id без вида, вариант семейства без решения по
-  полям, вариант со спекой `fields:`, расходящейся со спекой плагина, и семейство без плагина.
+  полям, вариант со спекой `fields:`, расходящейся со спекой плагина, и семейство без плагина; автор
+  без вида id — у событий кодека `Event.Codec`, автор-ссылка на запись и автор только id — по событию
+  в своём кодеке.
   """
 
   alias Core.EventFixture.ActorID
@@ -124,6 +126,28 @@ defmodule Core.LabelsBrokenFixture do
 
       use Core.Labels.Event, title: "Метка поставлена"
     end
+
+    defmodule ByRef do
+      @moduledoc "Событие от записи: автор — ссылка `kind: :ref`, а не учётная запись."
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: Core.LabelsFixture.ItemID,
+        payload: nil
+
+      use Core.Labels.Event, title: "Отмечено записью"
+    end
+
+    defmodule ByID do
+      @moduledoc "Событие от автора `kind: :id`: резолвера нет, имени человеку не называют."
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: Core.LabelsFixture.SnapshotID,
+        payload: nil
+
+      use Core.Labels.Event, title: "Отмечено без имени"
+    end
   end
 
   defmodule Event.Codec do
@@ -139,6 +163,32 @@ defmodule Core.LabelsBrokenFixture do
     use Core.Es.Event.Codec,
       event: Event,
       type: "labels_broken",
+      tags: @tag_by_mod
+  end
+
+  defmodule Event.ByRef.Codec do
+    @moduledoc "Кодек события с автором-ссылкой на запись."
+
+    alias Core.LabelsBrokenFixture.Event
+
+    @tag_by_mod %{Event.ByRef => "labels_broken_by_ref.marked"}
+
+    use Core.Es.Event.Codec,
+      event: Event,
+      type: "labels_broken_by_ref",
+      tags: @tag_by_mod
+  end
+
+  defmodule Event.ByID.Codec do
+    @moduledoc "Кодек события с автором без резолвера."
+
+    alias Core.LabelsBrokenFixture.Event
+
+    @tag_by_mod %{Event.ByID => "labels_broken_by_id.marked"}
+
+    use Core.Es.Event.Codec,
+      event: Event,
+      type: "labels_broken_by_id",
       tags: @tag_by_mod
   end
 end

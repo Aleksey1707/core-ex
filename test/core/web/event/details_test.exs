@@ -5,7 +5,6 @@ defmodule Core.Web.Event.DetailsTest do
 
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
-  alias Core.EventFixture.ActorID
   alias Core.EventFixture.AggID
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Amount
@@ -338,8 +337,8 @@ defmodule Core.Web.Event.DetailsTest do
     )
   end
 
-  defp event(Event.Closed, nil), do: Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())
-  defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
+  defp event(Event.Closed, nil), do: Event.Closed.new(AggID.new(), Version.new(), UserID.new(), At.now!())
+  defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), UserID.new(), At.now!())
 
   defp day, do: Day.new!(~D[2026-10-13])
   defp moment, do: Moment.new!(~U[2026-10-13 09:30:00.000000Z])

@@ -1,7 +1,7 @@
 defmodule Core.Labels.CompletenessCase do
   @moduledoc """
-  Case-модуль полноты подписей: у каждого события приложения название, у каждого struct'а, Enum и
-  id, достижимых из нагрузки, — объявление (ADR-0063).
+  Case-модуль полноты подписей: у каждого события приложения название и автор — учётная запись, у
+  каждого struct'а, Enum и id, достижимых из нагрузки, — объявление (ADR-0063).
 
       defmodule MyApp.Labels.CompletenessTest do
         use Core.Labels.CompletenessCase,
@@ -18,21 +18,25 @@ defmodule Core.Labels.CompletenessCase do
   (`use Core.Es.Event.Codec`), семейства — плагины с `__codec_union__/0` (`use Core.Codec.Plugin,
   union:`). Перечня нет: новый кодек попадает под проверку сам, без новой строки теста. Обход идёт от
   событий кодеков по спеке нагрузки (`Core.Labels.Fields`): во вложенные struct'ы, списки и варианты
-  семейства. Автор события (`by`) в сведения не выходит и не проверяется. Ключи и значения свободной
-  map'ы (`type: :map`) спеки нет, и вид id в них ратчет не видит: его проверяет только построение
-  сведений.
+  семейства. Автор события (`by`) в сведения не выходит, но событие страницы событий с подписями
+  (`Core.Web.Event`, `labels: true` требует `user_ref:`) дампит его ссылкой на учётную запись с именем
+  из словаря ссылок, а словарь находит только id с резолвером — иначе `ArgumentError` на первом
+  событии. Ключи и значения свободной map'ы (`type: :map`) спеки нет, и вид id в них ратчет не видит:
+  его проверяет только построение сведений.
 
   ## Генерируемые тесты
 
   1. обход находит хотя бы одно событие: ратчет, который ничего не нашёл, не проходит. Числовых
      нижних границ нет — их пришлось бы двигать с каждым событием;
   2. у каждого события название (`Core.Labels.Event`);
-  3. у каждого struct'а, достижимого из нагрузки, — нагрузки, вложенного struct'а, варианта
+  3. автор каждого события (`__es_by__/0`) — Prim с `use Core.Labels.ID, kind: :user` и `resolver:`;
+     пробел — `{событие, :by, Prim автора}`;
+  4. у каждого struct'а, достижимого из нагрузки, — нагрузки, вложенного struct'а, варианта
      семейства — решение по полям (`Core.Labels.Fields`);
-  4. у каждого Enum, достижимого из нагрузки, подписи значений (`Core.Labels.Values`);
-  5. у каждого Prim-идентификатора, достижимого из нагрузки, вид (`Core.Labels.ID`) или текст
+  5. у каждого Enum, достижимого из нагрузки, подписи значений (`Core.Labels.Values`);
+  6. у каждого Prim-идентификатора, достижимого из нагрузки, вид (`Core.Labels.ID`) или текст
      (`Core.Labels.Text`) — свой или базы композита;
-  6. спека видимых полей `fields:` каждого варианта семейства с подписями совпадает со спекой его
+  7. спека видимых полей `fields:` каждого варианта семейства с подписями совпадает со спекой его
      плагина (`variants:`): иначе подписи варианта разошлись бы с его wire-формой. Поле-дискриминатор
      в спеку плагина не входит и не сверяется. Семейство поля `union:` без плагина среди модулей
      `otp_app:` — провал, даже если плагин лежит в другом приложении: его вариантов обход не знает.
@@ -61,6 +65,9 @@ defmodule Core.Labels.CompletenessCase do
 
   @typedoc "События без названия."
   @type untitled :: %{untitled: [module()]}
+
+  @typedoc "Авторы событий, которых словарь ссылок не назовёт учётной записью: `{событие, :by, Prim автора}`."
+  @type unnamed :: %{unnamed: [place()]}
 
   @typedoc "Struct'ы без решения по полям."
   @type undecided :: %{undecided: [place()]}
@@ -102,6 +109,10 @@ defmodule Core.Labels.CompletenessCase do
 
       test "у каждого события название", %{modules: modules} do
         assert :ok = Core.Labels.CompletenessCase.check_titles(modules)
+      end
+
+      test "у автора каждого события вид учётной записи с резолвером", %{modules: modules} do
+        assert :ok = Core.Labels.CompletenessCase.check_authors(modules)
       end
 
       test "у каждого struct'а нагрузки решение по полям", %{modules: modules} do
@@ -163,6 +174,15 @@ defmodule Core.Labels.CompletenessCase do
 
   def check_titles(modules) when is_list(modules) do
     result(untitled: for(event <- walk(modules).events, not exports?(event, :__label_title__), do: event))
+  end
+
+  @doc false
+  @spec check_authors([module()]) :: :ok | {:error, unnamed()}
+
+  def check_authors(modules) when is_list(modules) do
+    unnamed = for event <- walk(modules).events, by = event.__es_by__(), not user?(by), do: {event, :by, by}
+
+    result(unnamed: unnamed)
   end
 
   @doc false
@@ -284,6 +304,8 @@ defmodule Core.Labels.CompletenessCase do
       {_label, spec} -> [old_value: spec, new_value: spec]
     end
   end
+
+  defp user?(module), do: match?(%{kind: :user}, ID.find(module))
 
   defp unkinded?(module) do
     cond do

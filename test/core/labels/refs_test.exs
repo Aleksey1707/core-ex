@@ -4,7 +4,7 @@ defmodule Core.Labels.RefsTest do
   alias Core.Context
   alias Core.Error
   alias Core.Es.Event.At
-  alias Core.EventFixture.ActorID
+  alias Core.EventFixture
   alias Core.EventFixture.AggID
   alias Core.Labels.Details
   alias Core.Labels.ID
@@ -59,12 +59,13 @@ defmodule Core.Labels.RefsTest do
 
   test "id только в скрытых полях резолвер не получает: нагрузка, вложенный struct, вариант, map'а" do
     item = ItemID.new()
-    signer = UserID.new()
-    names = %{item => "Позиция", signer => "Подписант"}
+    [by, signer] = for _ <- 1..2, do: UserID.new()
+    names = %{item => "Позиция", by => "Автор", signer => "Подписант"}
 
-    assert Refs.get(sealed(item, signer), context(names)) == {:ok, names}
+    assert Refs.get(sealed(by, item, signer), context(names)) == {:ok, names}
     assert_received {:get_names, ItemQuery, [^item]}
-    assert_received {:get_names, UserQuery, [^signer]}
+    assert_received {:get_names, UserQuery, users}
+    assert Enum.sort(users) == Enum.sort([by, signer])
   end
 
   test "каждый id с резолвером из сведений есть в словаре: struct'ы, семейство, изменение, map'а" do
@@ -78,8 +79,8 @@ defmodule Core.Labels.RefsTest do
     events = [
       linked(item, owner, backup: backup, items: [listed], limits: %{keyed => valued}),
       assigned(by, assignee, pinned),
-      Event.Moved.new(moved, AggID.new(), Version.new(), ActorID.new(), At.now!()),
-      sealed(sealed_item, signer, limits: %{keyed => valued})
+      Event.Moved.new(moved, AggID.new(), Version.new(), by, At.now!()),
+      sealed(by, sealed_item, signer, limits: %{keyed => valued})
     ]
 
     for event <- events do
@@ -99,7 +100,7 @@ defmodule Core.Labels.RefsTest do
         [
           assigned(by, owner, first),
           linked(first, owner, items: [second, first]),
-          closed()
+          closed(by)
         ],
         3
       )
@@ -118,21 +119,26 @@ defmodule Core.Labels.RefsTest do
   test "список событий — тот же словарь, что и страница" do
     item = ItemID.new()
     owner = UserID.new()
-    events = [linked(item, owner), closed()]
+    events = [linked(item, owner), closed(owner)]
     names = %{item => "Позиция", owner => "Владелец"}
 
     assert Refs.get(events, context(names)) == {:ok, names}
     assert Refs.get(Pagination.Result.new(events, 2), context(names)) == {:ok, names}
   end
 
-  test "без id с резолвером — пустой словарь без вызовов резолвера" do
-    events = [
-      updated(),
-      closed(),
-      Event.Renamed.new(Name.new!("Склад"), AggID.new(), Version.new(), ActorID.new(), At.now!())
-    ]
+  test "в нагрузке без id с резолвером — словарь одних авторов: даты, decimal и Prim без вида не обходятся" do
+    by = UserID.new()
+    events = [updated(by), closed(by), Event.Renamed.new(Name.new!("Склад"), AggID.new(), Version.new(), by, At.now!())]
 
-    assert Refs.get(Pagination.Result.new(events, 3), Context.new()) == {:ok, %{}}
+    assert Refs.get(Pagination.Result.new(events, 3), context(%{by => "Автор"})) == {:ok, %{by => "Автор"}}
+    assert_received {:get_names, UserQuery, [^by]}
+    refute_received {:get_names, _resolver, _ids}
+  end
+
+  test "без id с резолвером — пустой словарь без вызовов резолвера" do
+    events = [EventFixture.created(), EventFixture.closed()]
+
+    assert Refs.get(Pagination.Result.new(events, 2), Context.new()) == {:ok, %{}}
     assert Refs.get([], Context.new()) == {:ok, %{}}
     refute_received {:get_names, _resolver, _ids}
   end
@@ -175,7 +181,7 @@ defmodule Core.Labels.RefsTest do
         )
       )
 
-    Event.Linked.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
+    Event.Linked.new(payload, AggID.new(), Version.new(), owner, At.now!())
   end
 
   defp assigned(by, assignee, item) do
@@ -190,7 +196,7 @@ defmodule Core.Labels.RefsTest do
     Event.Assigned.new(payload, ItemID.new(), Version.new(), by, At.now!())
   end
 
-  defp updated do
+  defp updated(by) do
     payload =
       Event.Updated.Payload.new(
         Name.new!("Склад"),
@@ -204,11 +210,11 @@ defmodule Core.Labels.RefsTest do
         "импорт"
       )
 
-    Event.Updated.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
+    Event.Updated.new(payload, AggID.new(), Version.new(), by, At.now!())
   end
 
   # Скрытые поля несут id, которых нет в словаре имён.
-  defp sealed(item, signer, fields \\ []) do
+  defp sealed(by, item, signer, fields \\ []) do
     payload =
       struct!(
         Event.Sealed.Payload,
@@ -226,10 +232,10 @@ defmodule Core.Labels.RefsTest do
         )
       )
 
-    Event.Sealed.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
+    Event.Sealed.new(payload, AggID.new(), Version.new(), by, At.now!())
   end
 
-  defp closed, do: Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())
+  defp closed(by), do: Event.Closed.new(AggID.new(), Version.new(), by, At.now!())
 
   # Id с резолвером в сведениях: значение-Prim с объявлением вида `:ref` / `:user`.
   defp detail_ids(%module{} = prim) do

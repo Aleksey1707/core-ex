@@ -2,7 +2,6 @@ defmodule Core.Labels.DetailsTest do
   use ExUnit.Case, async: true
 
   alias Core.Es.Event.At
-  alias Core.EventFixture.ActorID
   alias Core.EventFixture.AggID
   alias Core.Labels.Details
   alias Core.LabelsFixture.Address
@@ -320,12 +319,12 @@ defmodule Core.Labels.DetailsTest do
   end
 
   test "нагрузка nil — пустые сведения" do
-    closed = Event.Closed.new(AggID.new(), Version.new(), ActorID.new(), At.now!())
+    closed = Event.Closed.new(AggID.new(), Version.new(), UserID.new(), At.now!())
 
     assert Details.build(closed) == {"Запись закрыта", []}
   end
 
   # ---
 
-  defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), ActorID.new(), At.now!())
+  defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), UserID.new(), At.now!())
 end

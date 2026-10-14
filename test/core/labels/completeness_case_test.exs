@@ -1,8 +1,11 @@
 defmodule Core.Labels.CompletenessCaseTest do
   use ExUnit.Case, async: true
 
+  alias Core.EventFixture.ActorID
   alias Core.Labels.CompletenessCase
   alias Core.LabelsBrokenFixture
+  alias Core.LabelsBrokenFixture.Event.ByID
+  alias Core.LabelsBrokenFixture.Event.ByRef
   alias Core.LabelsBrokenFixture.Event.Marked
   alias Core.LabelsBrokenFixture.Event.Unlabelled
   alias Core.LabelsFixture
@@ -71,6 +74,29 @@ defmodule Core.Labels.CompletenessCaseTest do
     test "id без вида — владелец, поле и Prim" do
       assert {:error, %{unkinded: [{Marked.Payload, :ref, LabelsFixture.BareID}]}} =
                CompletenessCase.check_ids(@broken)
+    end
+  end
+
+  describe "check_authors/1" do
+    test "автор каждого события — учётная запись с резолвером — :ok" do
+      assert :ok = CompletenessCase.check_authors(@full)
+    end
+
+    test "автор без вида id — событие, :by и Prim автора" do
+      assert {:error, %{unnamed: unnamed}} = CompletenessCase.check_authors(@broken)
+
+      assert unnamed == [{Marked, :by, ActorID}, {Unlabelled, :by, ActorID}]
+    end
+
+    test "автор — ссылка на запись (`kind: :ref`), а не учётная запись — провал" do
+      assert {:error, %{unnamed: [{ByRef, :by, LabelsFixture.ItemID}]}} =
+               CompletenessCase.check_authors([ByRef.Codec])
+    end
+
+    # `kind: :user` без резолвера не собирается (`Core.Labels.ID`): автор без резолвера — `kind: :id`.
+    test "автор без резолвера (`kind: :id`) — провал" do
+      assert {:error, %{unnamed: [{ByID, :by, LabelsFixture.SnapshotID}]}} =
+               CompletenessCase.check_authors([ByID.Codec])
     end
   end
 
