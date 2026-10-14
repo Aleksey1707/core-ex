@@ -1,15 +1,15 @@
 defmodule Core.Web.ErrorMapper do
   @moduledoc """
-  Таблица «ошибка → HTTP-ответ» для fallback-контроллера потребителя.
+  Таблица «ошибка → HTTP-ответ» для fallback-контроллера и `ErrorJSON` потребителя.
 
   Чистая функция: статус, обёртка ответа (`Core.Web.Response.error/2,3`) и уровень
   логирования (`nil` — не логировать). Сам `Logger` вызывает потребитель — так `map/2` остаётся
   запросом (CQS) и проверяется тестом построчно.
 
   `code` обёртки — код доменной ошибки; прикладная и программиста уходят константой
-  `"internal_error"`, отказ авторизации — `"not_authorized"`. Состав множества ошибок
-  (`Error.many`) уходит в `data.errors` только на доменных строках таблицы: на 401 и 500
-  тексты элементов наружу не попадают.
+  `"internal_error"`, отказ авторизации — `"not_authorized"`, ошибка до контроллера — имя
+  статуса (`by_status/2`). Состав множества ошибок (`Error.many`) уходит в `data.errors` только
+  на доменных строках таблицы: на 401 и 500 тексты элементов наружу не попадают.
 
   На 401 наружу уходят **константы** независимо от причины: разные коды и тексты на отказ
   авторизации позволяют перебирать существующие учётки, сессии и токены. Причина остаётся
@@ -29,6 +29,7 @@ defmodule Core.Web.ErrorMapper do
 
   alias Core.Error
   alias Core.Web.Response
+  alias Plug.Conn.Status
 
   @auth_codes ~w(unauthorized auth_failed invalid_token session_not_found)a
   @unauthorized "Не авторизован"
@@ -36,6 +37,8 @@ defmodule Core.Web.ErrorMapper do
 
   @typedoc "Статус, обёртка ответа и уровень логирования (`nil` — не логировать)."
   @type result :: {100..599, Response.error(), Logger.level() | nil}
+
+  # ===== map =====
 
   @doc """
   Разложить ошибку на HTTP-ответ.
@@ -98,6 +101,35 @@ defmodule Core.Web.ErrorMapper do
   defp critical(opts), do: {500, Response.error(:internal_error, critical_message(opts)), :error}
 
   defp unauthorized_message(opts), do: Keyword.get(opts, :unauthorized_message, @unauthorized)
+
+  # ===== by_status =====
+
+  @doc """
+  Обёртка ответа на ошибку, не дошедшую до контроллера, — для `ErrorJSON` потребителя
+  (`render_errors:` у `Endpoint`): `def render(_template, %{status: status}), do: by_status(status)`.
+
+  | Статус | `code` | `message` |
+  |---|---|---|
+  | 4xx из таблицы Plug | имя статуса (`Plug.Conn.Status.reason_atom/1`) | фраза статуса |
+  | 4xx вне таблицы Plug | `"bad_request"` | фраза 400 |
+  | 5xx | `"internal_error"` | шаблон, как у `map/2` |
+
+  Статус вне таблицы Plug отдаёт чужой плаг (`Plug.Exception.status/1`), и рендер ответа на ошибку
+  не имеет права упасть вместо обёртки. Опция: `critical_message:`.
+  """
+  @spec by_status(400..599, keyword()) :: Response.error()
+
+  def by_status(status, opts \\ [])
+
+  def by_status(status, _opts) when status in 400..499 do
+    Response.error(Status.reason_atom(status), Status.reason_phrase(status))
+  rescue
+    ArgumentError -> Response.error(:bad_request, Status.reason_phrase(400))
+  end
+
+  def by_status(status, opts) when status in 500..599, do: Response.error(:internal_error, critical_message(opts))
+
+  # ===== общее =====
 
   defp critical_message(opts), do: Keyword.get(opts, :critical_message, @critical)
 end

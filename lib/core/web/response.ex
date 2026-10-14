@@ -2,8 +2,9 @@ defmodule Core.Web.Response do
   @moduledoc """
   Обёртка ответа API: `%{status: "ok", data}` / `%{status: "error", data, code, message}`.
 
-  `code` ошибки — строка: код `%Error{}` (`to_string(error.code)`) или константа
-  `Core.Web.ErrorMapper` (`"internal_error"`, `"not_authorized"`). Решение — ADR-0062.
+  `code` ошибки — строка: код `%Error{}` (`to_string(error.code)`), константа
+  `Core.Web.ErrorMapper` (`"internal_error"`, `"not_authorized"`) или имя HTTP-статуса ошибки,
+  не дошедшей до контроллера (`Core.Web.ErrorMapper.by_status/2`). Решение — ADR-0062.
 
   Обёртка не зависит ни от Plug, ни от Phoenix: это map, который контроллер отдаёт
   своим `json/2`. `page_data/2` — не обёртка, а данные под `success/1`:

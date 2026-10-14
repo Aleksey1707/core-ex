@@ -313,6 +313,18 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 - Ошибку, не дошедшую до контроллера (неизвестный маршрут, неразобранное тело, отказ плага,
   непойманное исключение), MUST отдавать той же обёрткой: клиент разбирает ответ одинаково на
   любой ошибке API, и сгенерированный фреймворком формат здесь MUST NOT.
+- `ErrorJSON` MUST делегировать `Core.Web.ErrorMapper.by_status/2`; своя карта статусов — MUST
+  NOT: на 4xx `code` — имя статуса, а своя карта уже отдавала `"internal_error"` на 400 и 415
+  (`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»).
+
+```elixir
+# плохо — всё, кроме 404, уходит кодом сбоя сервера
+def render("404.json", _assigns), do: Response.error(:not_found, "Not Found")
+def render(_template, _assigns), do: Response.error(:internal_error, "Internal Server Error")
+
+# хорошо
+def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)
+```
 
 ## Schemas
 

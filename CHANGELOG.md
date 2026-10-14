@@ -11,8 +11,8 @@
   `Core.Web.Response.Code` или `Core.Enum` потребителя, грубо дублирующее код `%Error{}`. Теперь —
   форма, которую уже читает общий фронт: успех `{status: "ok", data}` (пустой — `data: %{}`),
   ошибка `{status: "error", data, code, message}`, где `code` — код доменной ошибки строкой,
-  `"internal_error"` на 500 и `"not_authorized"` на 401. HTTP-статусы и тексты маппера не
-  менялись. Правка потребителя:
+  `"internal_error"` на 500, `"not_authorized"` на 401 и имя статуса на 4xx ошибки, не дошедшей
+  до контроллера. HTTP-статусы и тексты маппера не менялись. Правка потребителя:
   - `success()` → `%{status: "ok", data: %{}}`, `success(data)` → `%{status: "ok", data: data}`;
     `success(data, messages)` удалён — предупреждения кладутся в свой `data`;
   - `error(code, text | [texts])` → `error(code, text)` / `error(code, text, data)`: `code` — атом
@@ -30,6 +30,12 @@
     `%{"status" => "error", "code" => "<код>", "message" => m}`, `%{"code" => 0, "data" => d}` →
     `%{"status" => "ok", "data" => d}`;
   - ответ 202 (`{id, version}`) — в обёртке `Response.success/1`, 204 — по-прежнему без тела.
+  - `ErrorJSON` делегирует `Core.Web.ErrorMapper.by_status/2`: своя карта статусов отдавала
+    `"internal_error"` на 400 и 415, а клиент читает этот код как сбой сервера. На 4xx `code` — имя
+    статуса (`"bad_request"`, `"unsupported_media_type"`, …), текст — фраза статуса, статус вне
+    таблицы Plug — как 400; на 5xx — `"internal_error"` и шаблон маппера.
+    `def render("404.json", _), do: …; def render(_, _), do: Response.error(:internal_error, …)` →
+    `def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)`.
 
 ### Новое
 

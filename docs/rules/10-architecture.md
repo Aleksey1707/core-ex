@@ -159,7 +159,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `If-Match` → `Version`: `explicit_version/2` (только явная), `expected_version/2` (`*` → `:current`), `optional_version/2` (нет заголовка → `:current`) |
 | `Core.Web.Prefer` | заголовок `Prefer` (RFC 7240) → предпочтения `respond-async` / `wait`, режим ответа при серверном пределе (`mode/2`) и значение `Preference-Applied` по итоговому статусу (`applied/3`) |
 | `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
-| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` |
+| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` (`map/2`); статус ошибки, не дошедшей до контроллера, → обёртка ответа (`by_status/2`) |
 | `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы со схемой данных аргументом, `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
 | `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON, при `labels: true` — с названием и сведениями, при `open_api_spex` — и схема этого JSON (ADR-0066; `11-domain.md`, «Wire сведений») |
@@ -207,8 +207,23 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
   ошибки в каталоге `<Aggregate>.Errors` или своя клоза `map/1`
   (`{429, Core.Web.Response.error(:quota_exceeded, err.message), :debug}`).
 
+Ошибку, не дошедшую до контроллера (`ErrorJSON` потребителя), раскладывает
+`Core.Web.ErrorMapper.by_status/2` (ADR-0062):
+
+| Статус | `code` | `message` |
+|---|---|---|
+| 4xx из таблицы Plug | имя статуса (`Plug.Conn.Status.reason_atom/1`) | фраза статуса |
+| 4xx вне таблицы Plug | `"bad_request"` | фраза 400 |
+| 5xx | `"internal_error"` | шаблон, как у `map/2` (`critical_message:`) |
+
+- `code` на 4xx MUST быть именем статуса, а не `"internal_error"`: клиент читает его как сбой
+  сервера и не различает 404, 413 и 415.
+- Статус вне таблицы Plug MUST NOT ронять функцию: его отдаёт чужой плаг
+  (`Plug.Exception.status/1`), и упавший рендер ответа на ошибку оставил бы клиента без обёртки.
+
 Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно, `:not_found` → 400 отдельным
-тестом, состав `Error.many` — describe «множество ошибок».
+тестом, состав `Error.many` — describe «множество ошибок», `by_status/2` — describe «by_status/2 —
+ошибка до контроллера».
 
 ### OpenAPI-схемы wire
 

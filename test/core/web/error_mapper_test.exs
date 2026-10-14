@@ -94,6 +94,24 @@ defmodule Core.Web.ErrorMapperTest do
     end
   end
 
+  describe "by_status/2 — ошибка до контроллера" do
+    test "4xx → имя статуса кодом и фраза статуса текстом" do
+      assert body("bad_request", "Bad Request") == Web.ErrorMapper.by_status(400)
+      assert body("not_found", "Not Found") == Web.ErrorMapper.by_status(404)
+      assert body("unsupported_media_type", "Unsupported Media Type") == Web.ErrorMapper.by_status(415)
+    end
+
+    test "4xx вне таблицы Plug → как 400" do
+      assert body("bad_request", "Bad Request") == Web.ErrorMapper.by_status(499)
+    end
+
+    test "5xx → шаблон маппера, текст переопределяется опцией" do
+      assert @critical == Web.ErrorMapper.by_status(500)
+      assert @critical == Web.ErrorMapper.by_status(503)
+      assert body("internal_error", "Ой") == Web.ErrorMapper.by_status(502, critical_message: "Ой")
+    end
+  end
+
   test "auth_codes и тексты переопределяются опциями" do
     opts = [auth_codes: ~w(no_session)a, unauthorized_message: "Нет", critical_message: "Ой"]
 
