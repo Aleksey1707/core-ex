@@ -896,6 +896,8 @@ end
 - Свободная map (`type: :map`) с id в ключах выходит подписями поля, ключа и значения —
   `[label:, key:, value:]`, иначе `:hidden`; подпись строкой у map'ы, подписи map'ы у поля, которое
   не map'а, ключ вне `label:` / `key:` / `value:` и пустая подпись в них — `CompileError`
+- Список map'ов (`list: [type: :map]`) — только `:hidden`: подписи map'ы у списка нет, видимый
+  список map'ов — `CompileError`
 - Вложенный struct (`entity:`) без `use Core.Labels.Fields` — `CompileError`
 - `use` не после `use Core.Es.Event.Payload` и без `fields:` — `CompileError`
 

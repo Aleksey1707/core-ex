@@ -58,10 +58,11 @@ defmodule Core.Labels.Fields do
 
   Полнота проверяется на `@after_compile`, где уже есть struct и спека нагрузки. Сборку ломают:
   поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, свободная
-  map'а (`type: :map`) с подписью строкой, подписи map'ы у поля, которое не map'а, ключ подписи map'ы
-  вне `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у
-  нагрузки — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки,
-  спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
+  map'а (`type: :map`) с подписью строкой, видимый список map'ов (`list: [type: :map]`, решение у него
+  только `:hidden`), подписи map'ы у поля, которое не map'а, ключ подписи map'ы вне
+  `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки —
+  `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки, спека скрытого
+  поля или поля вне struct'а, `text:` не захватом функции арности 1.
 
   Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
   двух опций. Вид значения у `Core.Es.ValueChanged` берётся из его `type:`, у ручного struct'а с
@@ -319,8 +320,9 @@ defmodule Core.Labels.Fields do
       end
 
     labelled_maps = for {name, [_ | _]} <- module.__label_fields__(), do: name
-    not_maps = for {name, spec} <- visible, name in labelled_maps, spec != {:type, :map}, do: name
-    maps = for {name, spec} <- visible, map?(spec), name not in labelled_maps, do: name
+    not_maps = for {name, spec} <- visible, name in labelled_maps, not map?(spec), do: name
+    maps = for {name, {:type, :map}} <- visible, name not in labelled_maps, do: name
+    map_lists = for {name, {:list, inner}} <- visible, map?(inner), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
     ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
@@ -330,6 +332,8 @@ defmodule Core.Labels.Fields do
       maps,
       "свободная map'а выходит подписями ключа и значения — `[label:, key:, value:]` или `:hidden`"
     )
+
+    ensure_none!(env, map_lists, "список map'ов в сведения не выходит — только `:hidden`")
 
     ensure_none!(env, unlabelled, "вложенный struct без `use Core.Labels.Fields`")
   end

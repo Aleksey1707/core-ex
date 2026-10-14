@@ -216,6 +216,24 @@ defmodule Core.Labels.FieldsTest do
       end
     end
 
+    test "видимый список map'ов — CompileError: только `:hidden`" do
+      assert_raise CompileError, ~r/MapList: список map'ов в сведения не выходит — только `:hidden`: \[:zip\]/, fn ->
+        compile_struct(:MapList,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [type: :map]]],
+          labels: [city: "Город", zip: "Индекс"]
+        )
+      end
+    end
+
+    test "подписи map'ы у списка map'ов — CompileError: только `:hidden`" do
+      assert_raise CompileError, ~r/MapListLabels: список map'ов в сведения не выходит — только `:hidden`/, fn ->
+        compile_struct(:MapListLabels,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [type: :map]]],
+          labels: [city: "Город", zip: [label: "Лимиты", key: "Счёт", value: "Лимит"]]
+        )
+      end
+    end
+
     test "подписи map'ы у поля, которое не map'а — CompileError" do
       assert_raise CompileError,
                    ~r/NotMap: подписи map'ы `\[label:, key:, value:\]` у поля, которое не map'а: \[:note\]/,
