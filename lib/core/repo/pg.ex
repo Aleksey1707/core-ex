@@ -612,9 +612,9 @@ defmodule Core.Repo.Pg do
       |> then(&dao(pg).all(&1, opts))
       |> Enum.map(&put_baseline(pg, pg.to_entity.(&1), context))
 
-    count = dao(pg).aggregate(write_scope(pg, context), :count, opts)
+    total = dao(pg).aggregate(write_scope(pg, context), :count, opts)
 
-    Pagination.Result.new(items, count)
+    Pagination.Result.new(items, total)
   end
 
   @doc "Найти сущности по парам id/version (без incomplete)."

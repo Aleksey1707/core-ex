@@ -80,7 +80,7 @@ defmodule Core.Web.EventTest do
             {LabelsFixture.WebEvent, labelled, %{labelled_by => "Автор"}}
           ] do
         title = List.last(Module.split(module))
-        page = %Pagination.Result{items: [event, event], count: 7}
+        page = %Pagination.Result{items: [event, event], total: 7}
 
         assert_schema(json(module.to_wire(event, refs)), title, spec([module]))
         assert {:ok, _} = cast_page(Response.success(Response.page_data(page, &module.to_wire(&1, refs))), module)

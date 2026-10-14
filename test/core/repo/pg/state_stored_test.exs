@@ -263,7 +263,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
   end
 
   describe "page_stream/4" do
-    test "страница потока по возрастанию версии; count — весь поток" do
+    test "страница потока по возрастанию версии; total — весь поток" do
       id = AggID.new()
       created = event(EventFixture.created(), id, 2)
       closed = event(EventFixture.closed(), id, 4)
@@ -273,17 +273,17 @@ defmodule Core.Repo.Pg.StateStoredTest do
       assert {:ok, _} = @repo.update(%{entity(id, 3, []) | name: "Без события"}, Context.new())
       assert {:ok, _} = @repo.update(entity(id, 4, [closed]), Context.new())
 
-      assert {:ok, %Pagination.Result{items: items, count: 2}} = page(id, 1, 1)
+      assert {:ok, %Pagination.Result{items: items, total: 2}} = page(id, 1, 1)
 
       assert wires(items) == wires([closed])
     end
 
-    test "агрегат без событий — страница с count: 0" do
+    test "агрегат без событий — страница с total: 0" do
       id = AggID.new()
 
       assert {:ok, _} = @repo.insert(entity(id, 1, []), Context.new())
 
-      assert {:ok, %Pagination.Result{items: [], count: 0}} = page(id, 10, 0)
+      assert {:ok, %Pagination.Result{items: [], total: 0}} = page(id, 10, 0)
     end
   end
 

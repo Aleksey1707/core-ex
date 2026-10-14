@@ -23,7 +23,7 @@ defmodule Core.Web.ResponseTest do
   end
 
   test "page прогоняет элементы через presenter" do
-    page = %Pagination.Result{items: [%{id: 1}, %{id: 2}], count: 7}
+    page = %Pagination.Result{items: [%{id: 1}, %{id: 2}], total: 7}
 
     assert Response.page_data(page, &%{"id" => &1.id}) == %{
              items: [%{"id" => 1}, %{"id" => 2}],

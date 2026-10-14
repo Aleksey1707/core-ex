@@ -157,26 +157,26 @@ defmodule Core.Es.StoreTest do
   end
 
   describe "read_stream/5" do
-    test "страница по возрастанию версии; count — весь поток" do
+    test "страница по возрастанию версии; total — весь поток" do
       id = AggID.new()
       [first, second, third, fourth, fifth] = Enum.map(1..5, &event(id, &1))
       assert :ok = append([fourth, fifth])
       assert :ok = append([first, second, third])
 
-      assert {:ok, %Pagination.Result{items: items, count: 5}} = page(id, 3, 1)
+      assert {:ok, %Pagination.Result{items: items, total: 5}} = page(id, 3, 1)
 
       assert wires(items) == wires([second, third, fourth])
     end
 
-    test "offset за концом потока — пустая страница с count всего потока" do
+    test "offset за концом потока — пустая страница с total всего потока" do
       id = AggID.new()
       assert :ok = append([event(id, 1), event(id, 2)])
 
-      assert {:ok, %Pagination.Result{items: [], count: 2}} = page(id, 10, 5)
+      assert {:ok, %Pagination.Result{items: [], total: 2}} = page(id, 10, 5)
     end
 
-    test "пустой поток — страница с count: 0" do
-      assert {:ok, %Pagination.Result{items: [], count: 0}} = page(AggID.new(), 10, 0)
+    test "пустой поток — страница с total: 0" do
+      assert {:ok, %Pagination.Result{items: [], total: 0}} = page(AggID.new(), 10, 0)
     end
 
     test "поток того же aggregate_id другого типа агрегата на страницу не попадает" do
@@ -185,7 +185,7 @@ defmodule Core.Es.StoreTest do
       assert :ok = append([written])
       insert_row(id, aggregate_type: "other", tag: "other.created")
 
-      assert {:ok, %Pagination.Result{items: items, count: 1}} = page(id, 10, 0)
+      assert {:ok, %Pagination.Result{items: items, total: 1}} = page(id, 10, 0)
 
       assert wires(items) == wires([written])
     end

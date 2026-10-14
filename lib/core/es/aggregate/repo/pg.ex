@@ -40,7 +40,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `refresh(state, version, context, opts)` — события потока после `state.version`, свёрнутые
     от `state`; `version` сверяется, как у `get`.
   - `page_stream(id, limit, offset, context)` — страница потока агрегата по возрастанию версии,
-    `count` — весь поток: пустой поток — страница с `count: 0`, первая ошибка загрузки —
+    `total` — весь поток: пустой поток — страница с `total: 0`, первая ошибка загрузки —
     `{:error, _}` на всю страницу. Реализация и исходы — `Core.Es.Store`, «Страница потока».
 
   `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
@@ -236,7 +236,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
         end
       end
 
-      @doc "Страница потока агрегата по возрастанию версии; `count` — весь поток."
+      @doc "Страница потока агрегата по возрастанию версии; `total` — весь поток."
       @impl true
       def page_stream(
             %unquote(cfg.id){} = id,

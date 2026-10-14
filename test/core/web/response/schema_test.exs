@@ -43,7 +43,7 @@ defmodule Core.Web.Response.SchemaTest do
     end
 
     test "страница page_data/2 под success/1 проходит page/1" do
-      page = %Pagination.Result{items: [%{id: 1}, %{id: 2}], count: 7}
+      page = %Pagination.Result{items: [%{id: 1}, %{id: 2}], total: 7}
 
       for item <- [Item, Item.schema(), %Reference{"$ref": "#/components/schemas/Item"}] do
         body = Response.success(Response.page_data(page, &%{id: to_string(&1.id)}))

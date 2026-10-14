@@ -359,18 +359,18 @@ defmodule Core.EsAggregateRepoContract do
   defp page_stream_tests do
     quote do
       describe "контракт Es.Aggregate.Repo: page_stream" do
-        test "страница по возрастанию версии; count — весь поток" do
+        test "страница по возрастанию версии; total — весь поток" do
           id = Account.ID.new()
           write!(@repo_impl, id, [open(), rename("Отгрузка"), freeze()])
 
-          assert {:ok, %Pagination.Result{items: items, count: 3}} =
+          assert {:ok, %Pagination.Result{items: items, total: 3}} =
                    @repo_impl.page_stream(id, Pagination.Limit.new!(2), Pagination.Offset.new!(1), Context.new())
 
           assert Enum.map(items, &Account.Event.Codec.type/1) == ~w(account.renamed account.frozen)
         end
 
-        test "пустой поток — страница с count: 0" do
-          assert {:ok, %Pagination.Result{items: [], count: 0}} =
+        test "пустой поток — страница с total: 0" do
+          assert {:ok, %Pagination.Result{items: [], total: 0}} =
                    @repo_impl.page_stream(
                      Account.ID.new(),
                      Pagination.Limit.new!(10),

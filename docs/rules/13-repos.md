@@ -1030,7 +1030,7 @@ end
 
 `@repo.page_stream(id, limit, offset, context)` →
 `{:ok, Pagination.Result.t(Es.Event)} | {:error, Error.t()}` — страница потока одного агрегата: по
-возрастанию `aggregate_version`, `count` — весь поток. Её генерирует write-репозиторий агрегата
+возрастанию `aggregate_version`, `total` — весь поток. Её генерирует write-репозиторий агрегата
 любого вида: `use Core.Es.Aggregate.Repo.Pg` (колбэк `use Core.Es.Aggregate.Repo`) и
 `use Core.Repo.Pg.StateStored` (по `event_codec:`). Тип агрегата и семейство событий — из кодека
 агрегата, `context` не используется. Читающий usecase зовёт её у репозитория, мимо ReadRepo. В
@@ -1050,7 +1050,7 @@ MUST NOT: «история» — имя экрана у потребителя (
   `docs/adr/0010-event-evolution-tag-upcast.md`. Наружу событие отдаёт презентер:
   `OutCodec.dump` → `Es.Event.Codec.to_fields/1`.
 - Строки грузятся фасадом с апкастом; первая ошибка `load` (`:unknown_event_type`,
-  `:invalid_envelope`) — `{:error, _}` на всю страницу. Событие не пропускается: иначе `count`
+  `:invalid_envelope`) — `{:error, _}` на всю страницу. Событие не пропускается: иначе `total`
   разойдётся со страницей.
 - Поток нескольких агрегатов или типов на одном экране хранилище не даёт: это проекция потребителя
   и ReadRepo над её read-моделью, фильтры и построчный ACL — там же.

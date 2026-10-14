@@ -3,17 +3,17 @@ defmodule Core.Pagination.ResultTest do
 
   alias Core.Pagination.Result
 
-  test "new/2 builds result with items and count" do
-    assert %Result{items: [1, 2], count: 10} = Result.new([1, 2], 10)
+  test "new/2 builds result with items and total" do
+    assert %Result{items: [1, 2], total: 10} = Result.new([1, 2], 10)
   end
 
   test "empty/0 — пустая страница" do
-    assert %Result{items: [], count: 0} = Result.empty()
+    assert %Result{items: [], total: 0} = Result.empty()
   end
 
-  test "map/2 меняет элементы, но не count всей выборки" do
+  test "map/2 меняет элементы, но не total всей выборки" do
     page = Result.new([1, 2], 10)
 
-    assert %Result{items: [2, 4], count: 10} = Result.map(page, &(&1 * 2))
+    assert %Result{items: [2, 4], total: 10} = Result.map(page, &(&1 * 2))
   end
 end

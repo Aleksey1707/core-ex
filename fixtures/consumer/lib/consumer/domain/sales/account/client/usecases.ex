@@ -69,7 +69,7 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
 
   def history(%Account.ID{} = id, %Pagination.Limit{} = limit, %Pagination.Offset{} = offset, %Context{} = context) do
     case @repo.page_stream(id, limit, offset, context) do
-      {:ok, page} -> {page.items, page.count}
+      {:ok, page} -> {page.items, page.total}
       {:error, %Error{code: code}} -> {:error, code}
     end
   end

@@ -36,6 +36,12 @@
     таблицы Plug — как 400; на 5xx — `"internal_error"` и шаблон маппера.
     `def render("404.json", _), do: …; def render(_, _), do: Response.error(:internal_error, …)` →
     `def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)`.
+- **`Core.Pagination.Result`: поле `count` → `total`.** Страница называла размер всей выборки
+  иначе, чем ответ API (`data.total`), и `Response.page_data/2` переименовывал поле на границе.
+  Теперь имя одно от репозитория до клиента. Затрагивает всех, кто разбирает страницу: `page/4`
+  репозитория, `page_stream/4`, `Core.Es.Store`. Правка потребителя:
+  `%Pagination.Result{items: items, count: n}` → `%Pagination.Result{items: items, total: n}`,
+  `page.count` → `page.total`; `Pagination.Result.new/2` и `empty/0` — без изменений.
 
 ### Новое
 

@@ -97,7 +97,7 @@ defmodule ConsumerTest.Repo do
   # X3b — `:ok` по результату `page_stream`
   def x3b_case_page_stream_ok(%Account.ID{} = id, %Pagination.Limit{} = limit, %Context{} = context) do
     case @repo.page_stream(id, limit, Pagination.Offset.new!(0), context) do
-      {:ok, page} -> page.count
+      {:ok, page} -> page.total
       # expect: the following clause will never match
       :ok -> 0
       {:error, _error} -> 0
@@ -107,8 +107,8 @@ defmodule ConsumerTest.Repo do
   # X3c — опечатка в поле страницы из `{:ok, page}` результата `page_stream`
   def x3c_page_stream_typo(%Account.ID{} = id, %Pagination.Limit{} = limit, %Context{} = context) do
     with {:ok, page} <- @repo.page_stream(id, limit, Pagination.Offset.new!(0), context),
-         # expect: unknown key .cout
-         do: page.cout
+         # expect: unknown key .totl
+         do: page.totl
   end
 
   # E8 — `{:ok, _}` по результату `append`

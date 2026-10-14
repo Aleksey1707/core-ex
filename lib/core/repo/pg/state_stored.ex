@@ -59,7 +59,7 @@ defmodule Core.Repo.Pg.StateStored do
 
   `page_stream(id, limit, offset, context)` →
   `{:ok, Core.Pagination.Result.t(Core.Es.Event.t())} | {:error, Core.Error.t()}` — страница
-  потока агрегата по возрастанию версии, `count` — весь поток. Реализация и исходы —
+  потока агрегата по возрастанию версии, `total` — весь поток. Реализация и исходы —
   `Core.Es.Store`, «Страница потока».
 
   Колбэка у `use Core.Repo` нет: функция генерируется по `event_codec:`, вызывающий зовёт её у
@@ -270,7 +270,7 @@ defmodule Core.Repo.Pg.StateStored do
 
   defp page_stream_ast(cfg) do
     quote generated: true do
-      @doc "Страница потока агрегата по возрастанию версии; `count` — весь поток."
+      @doc "Страница потока агрегата по возрастанию версии; `total` — весь поток."
       @spec page_stream(
               unquote(cfg.id).t(),
               Core.Pagination.Limit.t(),

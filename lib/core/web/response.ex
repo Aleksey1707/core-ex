@@ -48,6 +48,6 @@ defmodule Core.Web.Response do
   @spec page_data(Pagination.Result.t(item), (item -> map())) :: %{items: [map()], total: non_neg_integer()}
         when item: var
 
-  def page_data(%Pagination.Result{items: items, count: count}, to_map) when is_function(to_map, 1),
-    do: %{items: Enum.map(items, to_map), total: count}
+  def page_data(%Pagination.Result{items: items, total: total}, to_map) when is_function(to_map, 1),
+    do: %{items: Enum.map(items, to_map), total: total}
 end
