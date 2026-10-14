@@ -314,7 +314,7 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
   непойманное исключение), MUST отдавать той же обёрткой: клиент разбирает ответ одинаково на
   любой ошибке API, и сгенерированный фреймворком формат здесь MUST NOT.
 - `ErrorJSON` MUST делегировать `Core.Web.ErrorMapper.by_status/2`; своя карта статусов — MUST
-  NOT: на 4xx `code` — имя статуса, а своя карта уже отдавала `"internal_error"` на 400 и 415
+  NOT: таблица «статус → `code`» одна на всех потребителей
   (`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»).
 
 ```elixir
