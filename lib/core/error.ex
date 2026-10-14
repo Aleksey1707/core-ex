@@ -30,10 +30,10 @@ defmodule Core.Error do
   элемент `:app` → контейнер `:app`. Состав плоский и непустой, порядок входа сохраняется.
   Контейнер не бывает причиной: `wrap/2` вторым аргументом и `parent:` его не принимают.
 
-  Литеральный keyword-список attrs проверяется на этапе компиляции (required / unknown / дубли).
-  Динамический attrs (переменная) — без compile-check; runtime через `__domain__/2` /
-  `__app__/2` / `__many__/2`: отсутствие обязательного — `KeyError`, лишний ключ —
-  `ArgumentError`.
+  Литеральный keyword-список attrs проверяется на этапе компиляции (required / unknown / дубли,
+  у `domain` — ещё литеральный `message: nil` / `""`). Динамический attrs (переменная) — без
+  compile-check; runtime через `__domain__/2` / `__app__/2` / `__many__/2`: отсутствие
+  обязательного — `KeyError`, лишний ключ и пустой `message` доменной ошибки — `ArgumentError`.
 
   Оборачивание: `wrap/2` или `parent:` в attrs.
   Обход цепочки: `unwrap/1`, `root/1`, `chain/1`, `has?/2`, `find/2`.
@@ -76,6 +76,7 @@ defmodule Core.Error do
   @many_optional ~w(detail parent)a
 
   @not_a_cause "множество ошибок не может быть причиной"
+  @empty_message "message доменной ошибки не может быть пустым"
 
   # ===== конструкторы =====
 
@@ -98,11 +99,14 @@ defmodule Core.Error do
   Обязательные attrs: `code:`, `ns:`, `message:`.
   Опциональные: `detail:`, `parent:`.
 
-  Литеральный keyword-список — проверка ключей на compile-time.
+  `message` — непустая строка: его показывают клиенту (`Core.Web.Response.error/1`).
+
+  Литеральный keyword-список — проверка ключей и литерального `message` на compile-time.
   """
   defmacro domain(module, attrs) do
     if literal_keyword_ast?(attrs) do
       validate_factory_opts!(attrs, @domain_required, @domain_optional, __CALLER__)
+      validate_literal_message!(attrs, __CALLER__)
     end
 
     quote do
@@ -161,6 +165,7 @@ defmodule Core.Error do
   Опциональные: `detail:`, `parent:`.
 
   `kind` выводится из состава: хотя бы один элемент `:app` → контейнер `:app`.
+  У доменного контейнера `message` — непустая строка, как у `domain/2`.
 
   Литеральный keyword-список — проверка ключей на compile-time.
   """
@@ -178,7 +183,11 @@ defmodule Core.Error do
   @spec __domain__(module(), keyword()) :: t()
 
   def __domain__(module, attrs) when is_atom(module) and is_list(attrs) do
-    build(:domain, module, take_attrs(attrs, @domain_required, @domain_optional))
+    fields = take_attrs(attrs, @domain_required, @domain_optional)
+
+    validate_message!(:domain, fields)
+
+    build(:domain, module, fields)
   end
 
   @doc false
@@ -196,7 +205,11 @@ defmodule Core.Error do
 
     validate_errors!(errors)
 
-    %{build(weakest_kind(errors), module, fields) | errors: errors}
+    kind = weakest_kind(errors)
+
+    validate_message!(kind, fields)
+
+    %{build(kind, module, fields) | errors: errors}
   end
 
   # ---
@@ -240,6 +253,10 @@ defmodule Core.Error do
   defp put_parent(_error, %__MODULE__{errors: [_ | _]}), do: raise(ArgumentError, @not_a_cause)
   defp put_parent(error, %__MODULE__{} = parent), do: %{error | parent: parent}
 
+  defp validate_message!(:domain, %{message: message}) when is_binary(message) and message != "", do: :ok
+  defp validate_message!(:domain, _fields), do: raise(ArgumentError, @empty_message)
+  defp validate_message!(:app, _fields), do: :ok
+
   defp validate_errors!([]), do: raise(ArgumentError, "множество ошибок не может быть пустым")
 
   defp validate_errors!([_ | _] = errors), do: Enum.each(errors, &validate_element!/1)
@@ -269,6 +286,14 @@ defmodule Core.Error do
   end
 
   defp literal_keyword_ast?(_attrs), do: false
+
+  defp validate_literal_message!(attrs, caller) do
+    if Keyword.get(attrs, :message) in [nil, ""] do
+      raise CompileError, file: caller.file, line: caller.line, description: @empty_message
+    end
+
+    :ok
+  end
 
   defp validate_factory_opts!(attrs, required, optional, caller) do
     keys =

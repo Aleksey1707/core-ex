@@ -128,8 +128,11 @@ defmodule MyAppWeb.Accepted do
   аксессора: контекст собирает фабрика (`11-domain.md`, «Context»), и ключи его владельцев web
   не пишет.
 - Отказ формируется на границе: плаг отвечает 401 сам и дальше `conn` не пускает.
-- Текст 401 — константа независимо от причины (нет заголовка, битый токен, истёкшая сессия):
-  `deps/core/docs/rules/10-architecture.md`, «Граница HTTP»; причина уходит в `Logger.debug`
+- Тело 401 MUST собирать `Core.Web.ErrorMapper.unauthorized/1` с той же опцией
+  `unauthorized_message:`, что у маппера приложения (удобнее — функцией самого маппера); свой
+  литерал кода или текста — MUST NOT: код и текст константны независимо от причины (нет заголовка,
+  битый токен, истёкшая сессия) и одни на всех путях отказа
+  (`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»). Причина уходит в `Logger.debug`
   (`12-errors.md`).
 - Существование и права пользователя плаг не проверяет — это работа usecase, иначе authz
   растечётся по двум слоям.
@@ -318,6 +321,10 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 - `ErrorJSON` MUST делегировать `Core.Web.ErrorMapper.by_status/2`; своя карта статусов — MUST
   NOT: таблица «статус → `code`» одна на всех потребителей
   (`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»).
+- Плаг `render_error:` у `OpenApiSpex.Plug.CastAndValidate` MUST отвечать через
+  `Core.Web.ErrorMapper.cast_errors/2` (`{422, обёртка ответа, nil}`); свой код, своя склейка
+  нарушений или формат ошибок OpenApiSpex по умолчанию — MUST NOT: форма 422 одна на всех
+  потребителей (ADR-0068).
 
 ```elixir
 # плохо — всё, кроме 404, уходит кодом сбоя сервера
@@ -326,6 +333,19 @@ def render(_template, _assigns), do: Response.error(:internal_error, "Internal S
 
 # хорошо
 def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)
+```
+
+```elixir
+# MyAppWeb.Plugs.CastError — render_error: у CastAndValidate; conn останавливает сам CastAndValidate
+def init(errors), do: errors
+
+def call(conn, errors) do
+  {status, body, _level} = Core.Web.ErrorMapper.cast_errors(List.wrap(errors))
+
+  conn
+  |> put_status(status)
+  |> json(body)
+end
 ```
 
 ## Schemas

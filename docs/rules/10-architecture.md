@@ -159,7 +159,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | `Core.Web.Params` | параметры запроса → значения (`find` / `get` / `get!`), `page/2`, `If-Match` → `Version`: `explicit_version/2` (только явная), `expected_version/2` (`*` → `:current`), `optional_version/2` (нет заголовка → `:current`) |
 | `Core.Web.Prefer` | заголовок `Prefer` (RFC 7240) → предпочтения `respond-async` / `wait`, режим ответа при серверном пределе (`mode/2`) и значение `Preference-Applied` по итоговому статусу (`applied/3`) |
 | `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
-| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` (`map/2`); статус ошибки, не дошедшей до контроллера, → обёртка ответа (`by_status/2`) |
+| `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` (`map/2`); обёртка 401 плага аутентификации (`unauthorized/1`); статус ошибки, не дошедшей до контроллера, → обёртка ответа (`by_status/2`); ошибки разбора запроса по OpenAPI → `{422, обёртка ответа, nil}` (`cast_errors/2`, только при `open_api_spex`) |
 | `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы со схемой данных аргументом, `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
 | `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON, при `labels: true` — с названием и сведениями, при `open_api_spex` — и схема этого JSON (ADR-0066; `11-domain.md`, «Wire сведений») |
@@ -195,8 +195,16 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
   делегированием.
 - На 401 наружу MUST уходить константные код и текст независимо от причины: разные коды и тексты
   позволяют перебирать учётки, сессии и токены. Причина — только в лог (`Error.format_chain/1`).
+- Константы 401 одни на всех путях отказа: строка `map/2`, `by_status(401)` и плаг аутентификации
+  собирают обёртку через `Core.Web.ErrorMapper.unauthorized/1` — иначе один отказ уходит клиенту
+  разными кодами (`"not_authorized"` и имя статуса `"unauthorized"`).
+- Ошибку разбора запроса по OpenAPI (`render_error:` у `OpenApiSpex.Plug.CastAndValidate`) отдаёт
+  `Core.Web.ErrorMapper.cast_errors/2`: 422, `code` — `"invalid_params"`, `message` — константа,
+  нарушения — `data.errors` (`code` элемента — `reason` нарушения без `ns`, `message` — текст
+  OpenApiSpex с путём поля). Функция собирается только при `open_api_spex` (ADR-0068).
 - Опции: `auth_codes:` (дефолт `~w(unauthorized auth_failed invalid_token session_not_found)a`),
-  `unauthorized_message:`, `critical_message:`.
+  `unauthorized_message:` (`map/2`, `unauthorized/1`, `by_status/2`), `critical_message:`
+  (`map/2`, `by_status/2`), `invalid_params_message:` (`cast_errors/2`).
 - Своя строка таблицы — клоза `map/1` маппера приложения. Свои клозы MUST объявляться **перед**
   делегированием в `Core.Web.ErrorMapper.map/2`: `map/2` не макрос и не behaviour, и порядок
   клоз — это приоритет строк.
@@ -211,13 +219,14 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
   `ns` — MUST NOT, форма обёртки зафиксирована (ADR-0067).
 - Доменную ошибку обёрткой MUST собирать `Core.Web.Response.error/1`; атомная форма
   `Response.error/2,3` — только для констант границы (`"internal_error"`, `"not_authorized"`,
-  имена статусов), они идут без `ns`.
+  `"invalid_params"`, имена статусов), они идут без `ns`.
 
 Ошибку, не дошедшую до контроллера (`ErrorJSON` потребителя), раскладывает
 `Core.Web.ErrorMapper.by_status/2` (ADR-0062):
 
 | Статус | `code` | `message` |
 |---|---|---|
+| 401 | `"not_authorized"` | константа, как у `unauthorized/1` (`unauthorized_message:`) |
 | 4xx из таблицы Plug | имя статуса (`Plug.Conn.Status.reason_atom/1`) | фраза статуса |
 | 4xx вне таблицы Plug | `"bad_request"` | фраза 400 |
 | 5xx | `"internal_error"` | шаблон, как у `map/2` (`critical_message:`) |
@@ -242,7 +251,9 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
   приложения — код в `quote` макроса, который включается, только если при раскрытии `use`
   `Code.ensure_loaded?(OpenApiSpex)` (образец — `Core.Web.Event`); модуль схемы без параметра —
   под `if Code.ensure_loaded?(OpenApiSpex)`, ссылки на него из безусловных — в
-  `elixirc_options: [no_warn_undefined: [...]]`, как у адаптеров брокеров.
+  `elixirc_options: [no_warn_undefined: [...]]`, как у адаптеров брокеров. Функция безусловного
+  модуля, чей аргумент — тип `OpenApiSpex`, — под `if Code.ensure_loaded?(...)` внутри модуля
+  вместе со своими атрибутами (образец — `Core.Web.ErrorMapper.cast_errors/2`).
 - Схема и дамп с параметром приложения (профиль кодека, ссылка на учётную запись) MUST
   порождаться одним `use` в модуле потребителя, параметр — опцией этого `use`: он задан один раз и
   в схеме, и в дампе.

@@ -8,6 +8,9 @@
 
 Уточнён ADR-0067 (`0067-error-code-with-ns.md`): `code` доменной ошибки — `"<ns>/<code>"`, форма
 обёртки прежняя.
+Уточнён ADR-0068 (`0068-boundary-responses-outside-map.md`): 401 плага аутентификации и
+`by_status(401)` — константы `map/2`, ошибка разбора по OpenAPI — 422 `"invalid_params"` с
+нарушениями в `data.errors`.
 
 ## Контекст
 

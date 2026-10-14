@@ -101,6 +101,11 @@ defmodule Core.Web.ErrorMapperTest do
       assert body("unsupported_media_type", "Unsupported Media Type") == Web.ErrorMapper.by_status(415)
     end
 
+    test "401 → константы отказа авторизации, как у map/2" do
+      assert body("not_authorized", "Не авторизован") == Web.ErrorMapper.by_status(401)
+      assert body("not_authorized", "Нет") == Web.ErrorMapper.by_status(401, unauthorized_message: "Нет")
+    end
+
     test "4xx вне таблицы Plug → как 400" do
       assert body("bad_request", "Bad Request") == Web.ErrorMapper.by_status(499)
     end
@@ -109,6 +114,54 @@ defmodule Core.Web.ErrorMapperTest do
       assert @critical == Web.ErrorMapper.by_status(500)
       assert @critical == Web.ErrorMapper.by_status(503)
       assert body("internal_error", "Ой") == Web.ErrorMapper.by_status(502, critical_message: "Ой")
+    end
+  end
+
+  describe "unauthorized/1 — 401 плага аутентификации" do
+    test "те же код и текст, что у строки 401 map/2" do
+      {401, from_map, :debug} = Web.ErrorMapper.map(domain(:invalid_token))
+
+      assert body("not_authorized", "Не авторизован") == Web.ErrorMapper.unauthorized()
+      assert from_map == Web.ErrorMapper.unauthorized()
+    end
+
+    test "текст переопределяется опцией" do
+      assert body("not_authorized", "Нет") == Web.ErrorMapper.unauthorized(unauthorized_message: "Нет")
+    end
+  end
+
+  describe "cast_errors/2 — 422 разбора по OpenAPI" do
+    alias OpenApiSpex.Schema
+
+    @schema %Schema{
+      type: :object,
+      properties: %{name: %Schema{type: :string}, age: %Schema{type: :integer}},
+      required: [:age]
+    }
+
+    defp cast_errors(value) do
+      {:error, errors} = OpenApiSpex.Cast.cast(@schema, value)
+      errors
+    end
+
+    test "422 с константой и нарушениями в data.errors" do
+      errors = [
+        %{code: "invalid_type", message: "#/name: Invalid string. Got: integer"},
+        %{code: "invalid_type", message: "#/age: Invalid integer. Got: string"}
+      ]
+
+      assert {422, body("invalid_params", "Некорректные параметры запроса", %{errors: errors}), nil} ==
+               Web.ErrorMapper.cast_errors(cast_errors(%{"name" => 1, "age" => "x"}))
+    end
+
+    test "нет обязательного поля → missing_field" do
+      assert {422, %{data: %{errors: [%{code: "missing_field", message: "#/age: Missing field: age"}]}}, nil} =
+               Web.ErrorMapper.cast_errors(cast_errors(%{}))
+    end
+
+    test "текст переопределяется опцией" do
+      assert {422, %{code: "invalid_params", message: "Плохо"}, nil} =
+               Web.ErrorMapper.cast_errors(cast_errors(%{}), invalid_params_message: "Плохо")
     end
   end
 

@@ -34,11 +34,31 @@ defmodule Core.ErrorTest do
       assert to_string(err) == "test/fail"
     end
 
-    test "пустой message → fallback ns/code" do
-      err = Error.domain(__MODULE__, code: :bad, ns: :test, message: "")
+    test "пустой message у app → fallback ns/code" do
+      err = Error.app(__MODULE__, code: :bad, ns: :test, message: "")
 
       assert to_string(err) == "test/bad"
       assert Error.format_chain(err) == "test/bad"
+    end
+
+    test "domain с пустым message в литерале → CompileError" do
+      assert_raise CompileError, ~r/message доменной ошибки не может быть пустым/, fn ->
+        compile_error_factory("code: :x, ns: :test, message: \"\"")
+      end
+
+      assert_raise CompileError, ~r/message доменной ошибки не может быть пустым/, fn ->
+        compile_error_factory("code: :x, ns: :test, message: nil")
+      end
+    end
+
+    test "domain с пустым message в динамических attrs → ArgumentError" do
+      for message <- [nil, ""] do
+        opts = [code: :x, ns: :test, message: message]
+
+        assert_raise ArgumentError, ~r/message доменной ошибки не может быть пустым/, fn ->
+          Error.domain(__MODULE__, opts)
+        end
+      end
     end
 
     test "domain/1 и app/1 берут module из __CALLER__" do
@@ -357,6 +377,21 @@ defmodule Core.ErrorTest do
                parent: nil,
                errors: [^first, ^second]
              } = err
+    end
+
+    test "доменный контейнер с пустым message → ArgumentError", %{first: first} do
+      opts = [code: :invalid, ns: :form, message: "", errors: [first]]
+
+      assert_raise ArgumentError, ~r/message доменной ошибки не может быть пустым/, fn ->
+        Error.many(__MODULE__, opts)
+      end
+    end
+
+    test "прикладной контейнер с пустым message собирается", %{first: first} do
+      failed = Error.app(__MODULE__, code: :write_failed, ns: :form)
+
+      assert %Error{kind: :app, message: ""} =
+               Error.many(__MODULE__, code: :invalid, ns: :form, message: "", errors: [first, failed])
     end
 
     test "many/1 берёт module из __CALLER__", %{first: first} do

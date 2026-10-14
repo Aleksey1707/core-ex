@@ -38,11 +38,30 @@
     менять нельзя (`docs/rules/app/12-errors.md`);
   - ответ 202 (`{id, version}`) — в обёртке `Response.success/1`, 204 — по-прежнему без тела.
   - `ErrorJSON` делегирует `Core.Web.ErrorMapper.by_status/2`: своя карта статусов отдавала
-    `"internal_error"` на 400 и 415, а клиент читает этот код как сбой сервера. На 4xx `code` — имя
-    статуса (`"bad_request"`, `"unsupported_media_type"`, …), текст — фраза статуса, статус вне
-    таблицы Plug — как 400; на 5xx — `"internal_error"` и шаблон маппера.
+    `"internal_error"` на 400 и 415, а клиент читает этот код как сбой сервера. На 4xx, кроме 401
+    (подпункт ниже), `code` — имя статуса (`"bad_request"`, `"unsupported_media_type"`, …), текст —
+    фраза статуса, статус вне таблицы Plug — как 400; на 5xx — `"internal_error"` и шаблон маппера.
     `def render("404.json", _), do: …; def render(_, _), do: Response.error(:internal_error, …)` →
     `def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)`.
+  - 401 уходит одной константой на всех путях отказа (`docs/adr/0068-boundary-responses-outside-map.md`):
+    `by_status(401)` отдаёт `"not_authorized"` и текст маппера (а не `"unauthorized"` /
+    «Unauthorized»), опция `unauthorized_message:` есть и у `by_status/2`; тело 401 плага
+    аутентификации собирает новая `Core.Web.ErrorMapper.unauthorized/1`.
+    `json(conn, Response.error(:not_authorized, "Не авторизован"))` в плаге →
+    `json(conn, Core.Web.ErrorMapper.unauthorized())` (своя константа — с той же
+    `unauthorized_message:`, что у маппера приложения);
+  - `Response.error/2,3` не принимает кодом `nil`, `true` и `false` — `FunctionClauseError`, а не
+    `"nil"` / `"true"` / `"false"` в `code`;
+  - `Response.error/1` берёт текст из `message` доменной ошибки, а не fallback `"<ns>/<code>"`:
+    пустой `message` у доменной ошибки больше не собирается (пункт про `Core.Error` ниже).
+- **`Core.Error`: `message` доменной ошибки не может быть пустым** (норма —
+  `docs/rules/12-errors.md`, поле `message`). Норма и раньше требовала `message` у `:domain`, но
+  сборка проверяла только наличие ключа, и `nil` / `""` уходили клиенту в обёртке текстом
+  `"<ns>/<code>"` — тем же, что в `code`. Теперь `Error.domain(..., message: "")` с литералом —
+  `CompileError`, с динамическим attrs (и у доменного контейнера `Error.many`) — `ArgumentError`.
+  `Error.app` и прикладной контейнер по-прежнему принимают пустой `message`. Правка потребителя:
+  `Error.domain(code: :x, ns: :y, message: nil)` → осмысленный текст для клиента; если текста нет,
+  ошибка, вероятно, прикладная — `Error.app`.
 - **`Core.Pagination.Result`: поле `count` → `total`.** Страница называла размер всей выборки
   иначе, чем ответ API (`data.total`), и `Response.page_data/2` переименовывал поле на границе.
   Теперь имя одно от репозитория до клиента. Затрагивает всех, кто разбирает страницу: `page/4`
@@ -51,6 +70,19 @@
   `page.count` → `page.total`; `Pagination.Result.new/2` и `empty/0` — без изменений.
 
 ### Новое
+
+- **Ответ 422 на ошибку разбора запроса по OpenAPI — `Core.Web.ErrorMapper.cast_errors/2`**
+  (решение — `docs/adr/0068-boundary-responses-outside-map.md`; норма —
+  `docs/rules/10-architecture.md`, «Граница HTTP»; `docs/rules/app/15-web-api.md`,
+  «FallbackController»). Раньше 422 от `OpenApiSpex.Plug.CastAndValidate` уходил форматом
+  OpenApiSpex мимо обёртки или через `by_status(422)` кодом `"unprocessable_entity"` без нарушений,
+  и приложения придумывали свой код и склейку текстов. Теперь `cast_errors(errors)` →
+  `{422, обёртка, nil}`: `code` — `"invalid_params"`, `message` — константа (опция
+  `invalid_params_message:`), `data.errors` — `[%{code: "<reason>", message: <текст с путём поля>}]`
+  (`"missing_field"`, `"invalid_type"`, …). Функция есть, только если `open_api_spex` был у
+  приложения при сборке `core`. Правка потребителя: плаг `render_error:` →
+  `{status, body, _} = Core.Web.ErrorMapper.cast_errors(List.wrap(errors))` и
+  `conn |> put_status(status) |> json(body)`; свой код и склейка `"; "` удаляются.
 
 - **Подписи событий `Core.Labels.*`: название и сведения события для человека** (решение —
   `docs/adr/0063-labels-subsystem.md`; механизм — `docs/rules/11-domain.md`, «Подписи»; нормы

@@ -8,8 +8,9 @@ defmodule Core.Web.ErrorMapper do
 
   `code` обёртки — `"<ns>/<code>"` доменной ошибки (`Core.Web.Response.error/1`): один `code`
   у разных `ns` — разные ошибки (ADR-0067). Константы — без `ns`: прикладная ошибка и ошибка
-  программиста уходят `"internal_error"`, отказ авторизации — `"not_authorized"`, ошибка до
-  контроллера — имя статуса (`by_status/2`). Состав множества ошибок (`Error.many`) уходит
+  программиста уходят `"internal_error"`, отказ авторизации — `"not_authorized"` (`unauthorized/1`
+  для плага аутентификации), ошибка до контроллера — имя статуса (`by_status/2`), ошибка разбора
+  запроса по OpenAPI — `"invalid_params"` (`cast_errors/2`). Состав множества ошибок (`Error.many`) уходит
   в `data.errors` только на доменных строках таблицы: на 401 и 500 тексты элементов наружу
   не попадают.
 
@@ -31,6 +32,7 @@ defmodule Core.Web.ErrorMapper do
 
   alias Core.Error
   alias Core.Web.Response
+  alias OpenApiSpex.Cast
   alias Plug.Conn.Status
 
   @auth_codes ~w(unauthorized auth_failed invalid_token session_not_found)a
@@ -81,7 +83,7 @@ defmodule Core.Web.ErrorMapper do
 
   def map(%Error{code: code} = error, opts) do
     if code in Keyword.get(opts, :auth_codes, @auth_codes),
-      do: {401, Response.error(:not_authorized, unauthorized_message(opts)), :debug},
+      do: {401, unauthorized(opts), :debug},
       else: by_kind(error, opts)
   end
 
@@ -95,7 +97,18 @@ defmodule Core.Web.ErrorMapper do
 
   defp critical(opts), do: {500, Response.error(:internal_error, critical_message(opts)), :error}
 
-  defp unauthorized_message(opts), do: Keyword.get(opts, :unauthorized_message, @unauthorized)
+  # ===== unauthorized =====
+
+  @doc """
+  Обёртка ответа 401 для плага аутентификации: те же `"not_authorized"` и текст, что у строки 401
+  `map/2` и у `by_status(401)`, — отказ уходит клиенту одной константой, где бы он ни случился.
+
+  Опция: `unauthorized_message:`.
+  """
+  @spec unauthorized(keyword()) :: Response.error()
+
+  def unauthorized(opts \\ []),
+    do: Response.error(:not_authorized, Keyword.get(opts, :unauthorized_message, @unauthorized))
 
   # ===== by_status =====
 
@@ -105,16 +118,19 @@ defmodule Core.Web.ErrorMapper do
 
   | Статус | `code` | `message` |
   |---|---|---|
+  | 401 | `"not_authorized"` | константа, как у `unauthorized/1` |
   | 4xx из таблицы Plug | имя статуса (`Plug.Conn.Status.reason_atom/1`) | фраза статуса |
   | 4xx вне таблицы Plug | `"bad_request"` | фраза 400 |
   | 5xx | `"internal_error"` | шаблон, как у `map/2` |
 
   Статус вне таблицы Plug отдаёт чужой плаг (`Plug.Exception.status/1`), и рендер ответа на ошибку
-  не имеет права упасть вместо обёртки. Опция: `critical_message:`.
+  не имеет права упасть вместо обёртки. Опции: `unauthorized_message:`, `critical_message:`.
   """
   @spec by_status(400..599, keyword()) :: Response.error()
 
   def by_status(status, opts \\ [])
+
+  def by_status(401, opts), do: unauthorized(opts)
 
   def by_status(status, _opts) when status in 400..499 do
     Response.error(Status.reason_atom(status), Status.reason_phrase(status))
@@ -123,6 +139,36 @@ defmodule Core.Web.ErrorMapper do
   end
 
   def by_status(status, opts) when status in 500..599, do: Response.error(:internal_error, critical_message(opts))
+
+  # ===== cast_errors =====
+
+  if Code.ensure_loaded?(Cast.Error) do
+    @invalid_params "Некорректные параметры запроса"
+
+    @doc """
+    Ответ на ошибку разбора запроса по OpenAPI — для плага `render_error:` у
+    `OpenApiSpex.Plug.CastAndValidate` потребителя: `{422, обёртка, nil}`, как строка `map/2`.
+
+    `code` — `"invalid_params"`, `message` — константа, нарушения — `data.errors`: у элемента
+    `code` — `reason` нарушения (`"missing_field"`, `"invalid_type"`, …), `message` — текст
+    OpenApiSpex с путём поля. Решение — ADR-0068.
+
+    Функция есть, только если `open_api_spex` был у приложения при сборке `core` (ADR-0064).
+    Опция: `invalid_params_message:`.
+    """
+    @spec cast_errors([Cast.Error.t(), ...], keyword()) :: result()
+
+    def cast_errors([_ | _] = errors, opts \\ []) do
+      message = Keyword.get(opts, :invalid_params_message, @invalid_params)
+
+      violations =
+        Enum.map(errors, fn %Cast.Error{reason: reason} = error ->
+          %{code: Atom.to_string(reason), message: Cast.Error.message_with_path(error)}
+        end)
+
+      {422, Response.error(:invalid_params, message, %{errors: violations}), nil}
+    end
+  end
 
   # ===== общее =====
 

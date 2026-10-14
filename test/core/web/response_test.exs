@@ -25,6 +25,12 @@ defmodule Core.Web.ResponseTest do
              %{status: "error", data: %{errors: []}, code: "invalid", message: "нельзя"}
   end
 
+  test "error не принимает nil и boolean кодом" do
+    for code <- [nil, true, false] do
+      assert_raise FunctionClauseError, fn -> Response.error(code, "нельзя") end
+    end
+  end
+
   describe "error/1 — доменная ошибка" do
     test "код — ns/code, текст — message, пустой data" do
       error = Error.domain(code: :not_found, ns: :account, message: "Счёт не найден")
