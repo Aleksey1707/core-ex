@@ -22,8 +22,9 @@
     константы границы (строка — `FunctionClauseError`), текст — одна строка; доменную ошибку
     собирает новая `error(%Error{kind: :domain})` — код `"<ns>/<code>"`, текст и состав
     `Error.many`;
-  - `page_data/2` → `%{items, total}` вместо `%{count, items}`; схемы страницы в OpenApiSpex
-    переименовывают `count` → `total`;
+  - `page_data/2` → `%{items, total}` вместо `%{count, items}`; своя схема страницы в OpenApiSpex
+    удаляется, страница описывается `Core.Web.Response.Schema.page/1` (пункт о
+    `Core.Web.Response.Schema` ниже);
   - `Core.Web.ErrorMapper.map/2` → `{status, body, level}` вместо `{status, code, text, level}`:
     `body` — готовая обёртка, fallback-контроллер отправляет её как есть
     (`conn |> put_status(status) |> json(body)`). Своя клоза маппера:
@@ -54,6 +55,10 @@
     `"nil"` / `"true"` / `"false"` в `code`;
   - `Response.error/1` берёт текст из `message` доменной ошибки, а не fallback `"<ns>/<code>"`:
     пустой `message` у доменной ошибки больше не собирается (пункт про `Core.Error` ниже).
+
+  В `app/00-index.md` — строки устаревших форм: тело `{code, messages, data}` и словарь кодов
+  ответа, `success/2`, четвёрка `ErrorMapper.map/2`, страница `{count, items}`, свой литерал 401 в
+  плаге аутентификации.
 - **`Core.Error`: `message` доменной ошибки не может быть пустым** (норма —
   `docs/rules/12-errors.md`, поле `message`). Норма и раньше требовала `message` у `:domain`, но
   сборка проверяла только наличие ключа, и `nil` / `""` уходили клиенту в обёртке текстом
@@ -67,7 +72,8 @@
   Теперь имя одно от репозитория до клиента. Затрагивает всех, кто разбирает страницу: `page/4`
   репозитория, `page_stream/4`, `Core.Es.Store`. Правка потребителя:
   `%Pagination.Result{items: items, count: n}` → `%Pagination.Result{items: items, total: n}`,
-  `page.count` → `page.total`; `Pagination.Result.new/2` и `empty/0` — без изменений.
+  `page.count` → `page.total`; `Pagination.Result.new/2` и `empty/0` — без изменений. В
+  `app/00-index.md` — строка устаревшей формы вместе со страницей `{count, items}`.
 
 ### Новое
 
@@ -82,7 +88,8 @@
   (`"missing_field"`, `"invalid_type"`, …). Функция есть, только если `open_api_spex` был у
   приложения при сборке `core`. Правка потребителя: плаг `render_error:` →
   `{status, body, _} = Core.Web.ErrorMapper.cast_errors(List.wrap(errors))` и
-  `conn |> put_status(status) |> json(body)`; свой код и склейка `"; "` удаляются.
+  `conn |> put_status(status) |> json(body)`; свой код и склейка `"; "` удаляются. В
+  `app/00-index.md` — строка устаревшей формы.
 
 - **Подписи событий `Core.Labels.*`: название и сведения события для человека** (решение —
   `docs/adr/0063-labels-subsystem.md`; механизм — `docs/rules/11-domain.md`, «Подписи»; нормы
@@ -160,7 +167,10 @@
   `Core.Labels.Refs.get/2` и `@behaviour Core.Labels.Resolver` с колбэком `get_names/2`; вид записи
   — атомом вместо camelCase-строки (`entity: "stockItem"` → `entity: :stock_item`); ошибки сборки
   объявлений — `CompileError` вместо `ArgumentError`; свой дамп сведений в презентере события — см.
-  переход в пункте о `Core.Web.Event`. Новый раздел яруса потребителя
+  переход в пункте о `Core.Web.Event`. Старую подсистему сборка снять не вынуждает: подписи
+  проверяются только у модуля, где `use Core.Labels.*` уже поставлен, и `MyApp.Labels.*` собирается
+  рядом с `Core.Labels.*` молча — её модули и вызовы удаляются вручную (строка устаревшей формы в
+  `app/00-index.md`). Новый раздел яруса потребителя
   `app/11-domain.md`, «Подписи», действует только на приложение, отдающее сведения событий; ручные `label/1` / `labels/0` у Enum в нём — MUST NOT,
   строка таблицы `@moduledoc` подписью не служит, вид объявлен у каждого Prim-идентификатора,
   достижимого из сведений, автор событий — учётная запись (`kind: :user` с резолвером). В
@@ -209,18 +219,30 @@
   без `user_ref:`; автор ссылкой `{id, login}` → `user_ref: [dump:]`, у типа id автора —
   `use Core.Labels.ID, kind: :user, resolver:`; функция `dump:` получает имя `nil`, если у записи
   его нет. Своё правило у отдельного
-  события — правкой результата: `%{Event.to_wire(event, refs) | payload: nil}`. Подмена строк-id
-  учётных записей в нагрузке пропадает: имена — в сведениях события. Свой дамп сведений в презентере
-  события (`dump_detail/2` над `Details.build/1` и `Map.merge(машинные_поля, %{title, details})`) →
-  `labels: true` у того же модуля; wire `title` / `details` не меняется. Своя схема события и страницы
-  событий → `user_ref: [dump:, schema:]` у того же модуля и `Response.Schema.page(MyAppWeb.Schemas.Event)`
-  в `operation/2`; своя схема сведений с модулями видов и отдельная схема ссылки на запись
-  `{entity, id, name}` удаляются — названия схем видов в OpenAPI-документе меняются
-  (`KindText` → `EventDetailText`), JSON ответа — нет. В `app/15-web-api.md` — новый
+  события — правкой результата: `%{Event.to_wire(event, refs) | payload: nil}`. Свой дамп сведений
+  в презентере события (`dump_detail/2` над `Details.build/1` и
+  `Map.merge(машинные_поля, %{title, details})`) → `labels: true` у того же модуля. Своя схема
+  события и страницы событий → `user_ref: [dump:, schema:]` у того же модуля и
+  `Response.Schema.page(MyAppWeb.Schemas.Event)` в `operation/2`; своя схема сведений с модулями
+  видов и отдельная схема ссылки на запись `{entity, id, name}` удаляются.
+
+  Переход ломает wire клиента страницы событий — сверить с клиентом до выката:
+  - событие получает обязательное поле `version` — версию агрегата после события;
+  - строки-id учётных записей в `payload` больше не подменяются ссылками, и опции для подмены нет:
+    имена — в сведениях события (ADR-0066, «Решение»);
+  - из OpenAPI-документа уходят свои компоненты страницы событий (`EventPage`) и ссылки на запись
+    (`EntityRef`): страница — анонимная `Response.Schema.page/1`, ссылка на запись — внутри
+    `<Имя>DetailRef`;
+  - схемы видов сведений называются `<Имя>Detail<Вид>` (`EventDetailText`, …): своё название другой
+    формы в OpenAPI-документе меняется. JSON `title` / `details` не меняется.
+
+  В `app/15-web-api.md` — новый
   раздел «Событие страницы событий»: событие уходит на wire только через модуль с
   `use Core.Web.Event`, свой презентер события, своя схема события и страницы событий — MUST NOT; в
   разделе «Сведения событий» — сведения уходят на wire только через тот же модуль с `labels: true`,
-  свой обход сведений в презентере и своя схема сведений — MUST NOT.
+  свой обход сведений в презентере и своя схема сведений — MUST NOT; в «Presenters» строка событий —
+  `to_wire/2` модуля с `use Core.Web.Event` вместо `OutCodec.dump(event)`; в `app/00-index.md` —
+  строка устаревшей формы.
 
 - **OpenAPI-схема обёртки ответа `Core.Web.Response.Schema`** (решение —
   `docs/adr/0065-response-wrapper-schema-functions.md`; норма — `docs/rules/10-architecture.md`,
@@ -273,7 +295,8 @@
   `<Aggregate>.Errors`. Правка потребителя: модули `MyAppWeb.Response` и `MyAppWeb.Response.Code`
   удаляются, вызовы `MyAppWeb.Response.*` → `Core.Web.Response.*` (`alias Core.Web.Response`); свой
   код ответа — код ошибки в каталоге агрегата или своя клоза `map/1` маппера. `boundary_lint
-  --consumer` больше не считает `Response` частью корня `MyAppWeb`.
+  --consumer` больше не считает `Response` частью корня `MyAppWeb`. В `app/00-index.md` — строка
+  устаревшей формы вместе с телом `{code, messages, data}`.
 - **`use Core.Es.ValueChanged` занимает в модуле имя `@es_value_changed`**: по нему
   `use Core.Labels.Fields, change:` ниже берёт вид значения изменения из `type:`. Свой атрибут
   `@es_value_changed` в модуле нагрузки переименовывается.

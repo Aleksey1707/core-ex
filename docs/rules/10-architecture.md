@@ -152,7 +152,9 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 ## Граница HTTP
 
 `Core.Web.*` — то, что на границе HTTP одинаково у всех потребителей и **не** зависит
-ни от Phoenix, ни от OpenApiSpex (схемы — «OpenAPI-схемы wire» ниже):
+ни от Phoenix, ни от OpenApiSpex. Исключение — условная зависимость от OpenApiSpex (ADR-0064): то,
+что в таблице помечено «при `open_api_spex`», собирается, только если он есть у приложения
+(«OpenAPI-схемы wire» ниже):
 
 | Модуль | Роль |
 |---|---|

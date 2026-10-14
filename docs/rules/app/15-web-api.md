@@ -371,7 +371,7 @@ end
 | Ключи | camelCase (`Core.Helper.Keys.camelize/1,2`) |
 | Представление | `OutCodec.dump(view)` — формат задаёт `<Aggregate>.View.Codec` |
 | Агрегат | `OutCodec.dump(agg)` либо ручной маппинг полей под форму API |
-| События | `OutCodec.dump(event)` → конверт целиком; нагрузка — `camelize` |
+| События | презентера нет: `to_wire/2` модуля с `use Core.Web.Event` («Событие страницы событий») |
 | Страница | презентер отдаёт **один** элемент; `%{items, total}` собирает `Response.page_data/2` |
 
 - Query-usecases отдают **представление**, а не агрегат: на read-пути презентер агрегаты не
@@ -429,8 +429,13 @@ json(conn, Response.success(Response.page_data(page, &Event.to_wire(&1, refs))))
 # в operation/2
 responses: [ok: {"События", "application/json", Response.Schema.page(MyAppWeb.Schemas.Event)}]
 
-# точечная правка
-def to_map(%Order.Event.FileStored{} = event, refs), do: %{Event.to_wire(event, refs) | payload: nil}
+# точечная правка — приватный хелпер экшена, а не презентер
+json(conn, Response.success(Response.page_data(page, &event_to_wire(&1, refs))))
+
+defp event_to_wire(%Order.Event.FileStored{} = event, refs),
+  do: %{Event.to_wire(event, refs) | payload: nil}
+
+defp event_to_wire(event, refs), do: Event.to_wire(event, refs)
 ```
 
 ### Сведения событий
