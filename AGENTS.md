@@ -176,3 +176,8 @@ Single-context: `CONTEXT.md` и `docs/adr/` в корне. См. `docs/agents/do
 
 Проверка незапушенных изменений на приложении-потребителе (`path:`-зависимость, симлинк
 `deps/core`, PLT dialyzer). См. `docs/agents/release-check.md`.
+
+### Parallel implement
+
+Несколько тикетов параллельно — субагенты в worktree с инструкциями `implement` в промпте (сам skill агенту
+недоступен). См. `docs/agents/parallel-implement.md`.
