@@ -57,5 +57,6 @@ defmodule Core.Web.Event.Details do
   # Число — строкой с десятичной точкой, как `Decimal` на wire: без потери точности.
   defp number(number) when is_binary(number), do: number
   defp number(number) when is_integer(number), do: Integer.to_string(number)
+  defp number(number) when is_float(number), do: number(Decimal.from_float(number))
   defp number(%Decimal{} = number), do: Decimal.to_string(number, :normal)
 end

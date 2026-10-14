@@ -35,7 +35,7 @@ defmodule Core.Web.Event do
   | Сведение | На wire |
   |---|---|
   | вид | строкой: `"text"`, `"number"`, `"date"`, `"datetime"`, `"user"`, `"ref"`, `"group"`, `"list"`, `"change"` |
-  | `:number` | строкой с десятичной точкой: integer — `Integer.to_string/1`, decimal — нормальная запись |
+  | `:number` | строкой с десятичной точкой: integer — `Integer.to_string/1`, decimal и float — нормальная запись |
   | `:text`, `:date`, `:datetime` | Prim — дампом `codec:`, строка — как есть |
   | `:ref` | `%{entity, id, name}`: вид записи — camelCase атома, id — дампом `codec:`, имя — из словаря ссылок |
   | `:user` | результат `dump:` от дампа id и имени из словаря ссылок — той же формы, что `by` |

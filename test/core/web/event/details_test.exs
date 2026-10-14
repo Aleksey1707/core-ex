@@ -111,6 +111,35 @@ defmodule Core.Web.Event.DetailsTest do
              web_event.to_wire(event, %{by => "Автор"})
   end
 
+  test "float в значении map'ы — нормальная запись строкой, без экспоненты" do
+    item = ItemID.new()
+    [owner, author] = for _ <- 1..2, do: UserID.new()
+
+    payload =
+      Event.Linked.Payload.new(
+        item,
+        nil,
+        [],
+        owner,
+        AuthorID.new!(author),
+        SnapshotID.new(),
+        Unit.new!("kg"),
+        BaseUnit.new!("kg"),
+        %{"большое" => 1.0e20, "дробное" => 2.5, "малое" => 1.0e-7}
+      )
+
+    refs = %{item => "Позиция 1", owner => "Владелец", author => "Автор"}
+
+    assert %{"details" => [_ | _] = details} = wire(event(Event.Linked, payload), refs)
+
+    assert List.last(details) ==
+             list("Лимиты", [
+               %{"kind" => "group", "value" => [text("Позиция", "большое"), number("Лимит", "100000000000000000000")]},
+               %{"kind" => "group", "value" => [text("Позиция", "дробное"), number("Лимит", "2.5")]},
+               %{"kind" => "group", "value" => [text("Позиция", "малое"), number("Лимит", "0.0000001")]}
+             ])
+  end
+
   test "title и details — рядом с полями события, автор — ссылкой на учётную запись" do
     %Event.Closed{by: by} = closed = event(Event.Closed, nil)
 
