@@ -13,9 +13,11 @@ defmodule Mix.Tasks.Mq.Dlq.Requeue do
   `--all`, `--topic` и `--id` взаимоисключающи; `--id` повторяется. Порядок относительно уже
   обработанных сообщений исходного топика не восстанавливается.
 
-  Репозиторий — `--repo`, по умолчанию `Core.Config.dao/0`; задача поднимает приложение
-  потребителя (`app.start`), поэтому запускается из его корня. В релизе без Mix —
-  `Core.Mq.Dlq.Release.requeue/2`.
+  Репозиторий — `--repo`, по умолчанию `Core.Config.dao/0`. Задача загружает конфигурацию
+  потребителя (`app.config`), поэтому запускается из его корня, но приложение не стартует:
+  на время команды поднимается только репозиторий (`Ecto.Migrator.with_repo/2`), и команда
+  работает рядом с запущенным сервером — без его портов, читателей и поллеров. Записи
+  перечитывает уже работающий узел. В релизе без Mix — `Core.Mq.Dlq.Release.requeue/2`.
   """
 
   use Mix.Task
@@ -30,9 +32,9 @@ defmodule Mix.Tasks.Mq.Dlq.Requeue do
   @impl Mix.Task
   def run(argv) when is_list(argv) do
     {target, repo} = parse!(argv)
-    Mix.Task.run("app.start")
+    Mix.Task.run("app.config")
 
-    count = Dlq.requeue(resolve_repo!(repo), target)
+    {:ok, count, _apps} = Ecto.Migrator.with_repo(resolve_repo!(repo), &Dlq.requeue(&1, target))
 
     Mix.shell().info("Возвращено в обработку: #{count}")
   end
@@ -74,7 +76,8 @@ defmodule Mix.Tasks.Mq.Dlq.Requeue do
     end
   end
 
-  # Модуль репозитория загружен только после `app.start`: до него атома имени может не быть.
+  # Модуль репозитория известен только после `app.config`: до загрузки приложения атома имени
+  # может не быть.
   defp resolve_repo!(nil), do: Config.dao()
 
   defp resolve_repo!(raw) do

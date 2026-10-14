@@ -1,8 +1,36 @@
 defmodule Mix.Tasks.Mq.Dlq.RequeueTest do
-  use ExUnit.Case, async: true
+  use Core.DataCase, async: true
+
+  import ExUnit.CaptureIO
 
   alias Core.Mq
+  alias Core.Mq.Dlq.Store
   alias Mix.Tasks.Mq.Dlq.Requeue
+
+  test "run возвращает записи в обработку и сообщает их число" do
+    for body <- ~w(a b) do
+      Store.insert(TestRepo, %{
+        subscriber: "task",
+        topic: "orders",
+        key: nil,
+        header_names: [],
+        header_values: [],
+        body: body,
+        partition: nil,
+        offset: nil,
+        reason: nil,
+        error: nil,
+        attempts: nil
+      })
+    end
+
+    assert capture_io(fn -> Requeue.run(["--all"]) end) == "Возвращено в обработку: 2\n"
+  end
+
+  test "run резолвит --repo в модуль репозитория" do
+    assert capture_io(fn -> Requeue.run(["--id", "1", "--repo", "Core.TestRepo"]) end) ==
+             "Возвращено в обработку: 0\n"
+  end
 
   test "--all → :all" do
     assert Requeue.parse!(["--all"]) == {:all, nil}

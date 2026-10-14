@@ -13,8 +13,11 @@ defmodule Mix.Tasks.Outbox.Requeue do
   Порядок доставки для возвращённых записей не восстанавливается: сообщения, шедшие за
   ними, уже опубликованы.
 
-  Репозиторий берётся из `Core.Config.outbox_repo/0`; задача поднимает приложение
-  потребителя (`app.start`), поэтому запускается из его корня.
+  Репозиторий берётся из `Core.Config.outbox_repo/0`. Задача загружает конфигурацию потребителя
+  (`app.config`), поэтому запускается из его корня, но приложение не стартует: на время команды
+  поднимается только `Core.Config.dao/0` (`Ecto.Migrator.with_repo/2`), и команда работает рядом
+  с запущенным сервером — без его портов, читателей и поллеров. Записи забирает уже работающий
+  поллер.
   """
 
   use Mix.Task
@@ -29,10 +32,12 @@ defmodule Mix.Tasks.Outbox.Requeue do
   @impl Mix.Task
   def run(argv) when is_list(argv) do
     target = parse_target!(argv)
-    Mix.Task.run("app.start")
+    Mix.Task.run("app.config")
 
     repo = Config.outbox_repo()
-    count = repo.requeue_failed(target, Context.new())
+
+    {:ok, count, _apps} =
+      Ecto.Migrator.with_repo(Config.dao(), fn _dao -> repo.requeue_failed(target, Context.new()) end)
 
     Mix.shell().info("Возвращено в очередь: #{count}")
   end
