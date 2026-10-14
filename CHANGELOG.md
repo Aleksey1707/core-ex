@@ -85,7 +85,11 @@
   и приложения придумывали свой код и склейку текстов. Теперь `cast_errors(errors)` →
   `{422, обёртка, nil}`: `code` — `"invalid_params"`, `message` — константа (опция
   `invalid_params_message:`), `data.errors` — `[%{code: "<reason>", message: <текст с путём поля>}]`
-  (`"missing_field"`, `"invalid_type"`, …). Функция есть, только если `open_api_spex` был у
+  (`"missing_field"`, `"invalid_type"`, …). Неудавшаяся составная схема (`anyOf` / `oneOf`) —
+  один элемент `"any_of"` / `"one_of"` на её путь, без названий схем и без нарушений её ветвей:
+  без discriminator библиотека не знает, какая ветвь своя, и нарушения чужих ветвей клиент принял
+  бы за настоящие. Точную раскладку даёт discriminator на объекте с полем, которое выбирает ветвь
+  (`docs/rules/app/15-web-api.md`, «Schemas», SHOULD). Функция есть, только если `open_api_spex` был у
   приложения при сборке `core`. Правка потребителя: плаг `render_error:` →
   `{status, body, _} = Core.Web.ErrorMapper.cast_errors(List.wrap(errors))` и
   `conn |> put_status(status) |> json(body)`; свой код и склейка `"; "` удаляются. В

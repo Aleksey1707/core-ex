@@ -144,6 +144,9 @@ defmodule Core.Web.ErrorMapper do
 
   if Code.ensure_loaded?(Cast.Error) do
     @invalid_params "Некорректные параметры запроса"
+    @composite ~w(any_of one_of)a
+    @no_schema_match "Value matches none of the allowed schemas"
+    @many_schemas_match "Value matches more than one of the allowed schemas"
 
     @doc """
     Ответ на ошибку разбора запроса по OpenAPI — для плага `render_error:` у
@@ -151,7 +154,9 @@ defmodule Core.Web.ErrorMapper do
 
     `code` — `"invalid_params"`, `message` — константа, нарушения — `data.errors`: у элемента
     `code` — `reason` нарушения (`"missing_field"`, `"invalid_type"`, …), `message` — текст
-    OpenApiSpex с путём поля. Решение — ADR-0068.
+    OpenApiSpex с путём поля. Неудавшаяся составная схема (`anyOf` / `oneOf`) — один элемент
+    `"any_of"` / `"one_of"` на её путь, без названий схем и без нарушений её ветвей: какая ветвь
+    своя, без discriminator неизвестно. Решение — ADR-0068.
 
     Функция есть, только если `open_api_spex` был у приложения при сборке `core` (ADR-0064).
     Опция: `invalid_params_message:`.
@@ -161,13 +166,44 @@ defmodule Core.Web.ErrorMapper do
     def cast_errors([_ | _] = errors, opts \\ []) do
       message = Keyword.get(opts, :invalid_params_message, @invalid_params)
 
-      violations =
-        Enum.map(errors, fn %Cast.Error{reason: reason} = error ->
-          %{code: Atom.to_string(reason), message: Cast.Error.message_with_path(error)}
-        end)
+      violations = Enum.map(drop_branches(errors), &violation/1)
 
       {422, Response.error(:invalid_params, message, %{errors: violations}), nil}
     end
+
+    # ---
+
+    defp drop_branches(errors) do
+      composite_paths =
+        for %Cast.Error{reason: reason, path: path} when reason in @composite <- errors, uniq: true, do: path
+
+      {kept, _owners} = Enum.flat_map_reduce(errors, [], &keep(&1, &2, composite_paths))
+      kept
+    end
+
+    defp keep(%Cast.Error{reason: reason, path: path} = error, owners, composite_paths) when reason in @composite do
+      if path in owners or Enum.any?(composite_paths, &under?(path, &1)),
+        do: {[], owners},
+        else: {[error], [path | owners]}
+    end
+
+    defp keep(%Cast.Error{path: path} = error, owners, composite_paths) do
+      if Enum.any?(composite_paths, &List.starts_with?(path, &1)), do: {[], owners}, else: {[error], owners}
+    end
+
+    defp under?(path, prefix), do: path != prefix and List.starts_with?(path, prefix)
+
+    defp violation(%Cast.Error{reason: :one_of, meta: %{valid_schemas: [_ | _]}} = error),
+      do: %{code: "one_of", message: with_path(error, @many_schemas_match)}
+
+    defp violation(%Cast.Error{reason: reason} = error) when reason in @composite,
+      do: %{code: Atom.to_string(reason), message: with_path(error, @no_schema_match)}
+
+    defp violation(%Cast.Error{reason: reason} = error),
+      do: %{code: Atom.to_string(reason), message: Cast.Error.message_with_path(error)}
+
+    defp with_path(%Cast.Error{path: []}, message), do: "#: " <> message
+    defp with_path(error, message), do: "#" <> Cast.Error.path_to_string(error) <> ": " <> message
   end
 
   # ===== общее =====

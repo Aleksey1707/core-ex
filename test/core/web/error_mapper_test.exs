@@ -163,6 +163,84 @@ defmodule Core.Web.ErrorMapperTest do
       assert {422, %{code: "invalid_params", message: "Плохо"}, nil} =
                Web.ErrorMapper.cast_errors(cast_errors(%{}), invalid_params_message: "Плохо")
     end
+
+    defp branch(field, type),
+      do: %Schema{title: "Branch#{field}", type: :object, properties: %{field => %Schema{type: type}}}
+
+    defp closed(schema), do: %{schema | additionalProperties: false}
+
+    defp composite_errors(composite, value) do
+      schema = %Schema{
+        type: :object,
+        properties: %{name: %Schema{type: :string}, payload: composite}
+      }
+
+      {:error, errors} = OpenApiSpex.Cast.cast(schema, value)
+      Web.ErrorMapper.cast_errors(errors)
+    end
+
+    test "anyOf: один элемент на путь без нарушений ветвей и названий схем" do
+      composite = %Schema{anyOf: [closed(branch(:a, :boolean)), closed(branch(:b, :string))]}
+
+      assert {422, %{data: %{errors: errors}}, nil} =
+               composite_errors(composite, %{"name" => 1, "payload" => %{"a" => true, "x" => 1}})
+
+      assert Enum.sort(errors) == [
+               %{code: "any_of", message: "#/payload: Value matches none of the allowed schemas"},
+               %{code: "invalid_type", message: "#/name: Invalid string. Got: integer"}
+             ]
+    end
+
+    test "составная схема в корне — путь #" do
+      {:error, errors} = OpenApiSpex.Cast.cast(%Schema{anyOf: [branch(:a, :boolean)]}, "x")
+
+      assert {422, %{data: %{errors: [error]}}, nil} = Web.ErrorMapper.cast_errors(errors)
+      assert error == %{code: "any_of", message: "#: Value matches none of the allowed schemas"}
+    end
+
+    test "одинаковые нарушения вне составной схемы не схлопываются" do
+      error = %OpenApiSpex.Cast.Error{reason: :invalid_type, type: :string, value: 1, path: [:name]}
+
+      assert {422, %{data: %{errors: [same, same]}}, nil} = Web.ErrorMapper.cast_errors([error, error])
+      assert same == %{code: "invalid_type", message: "#/name: Invalid string. Got: integer"}
+    end
+
+    test "oneOf: ни одна ветвь не подошла — нарушения ветвей на том же пути отброшены" do
+      composite = %Schema{oneOf: [branch(:a, :boolean), branch(:b, :string)]}
+
+      assert {422, %{data: %{errors: [error]}}, nil} = composite_errors(composite, %{"payload" => "x"})
+      assert error == %{code: "one_of", message: "#/payload: Value matches none of the allowed schemas"}
+    end
+
+    test "oneOf: подошли несколько ветвей" do
+      composite = %Schema{oneOf: [branch(:a, :boolean), branch(:b, :string)]}
+
+      assert {422, %{data: %{errors: [error]}}, nil} = composite_errors(composite, %{"payload" => %{"a" => true}})
+      assert error == %{code: "one_of", message: "#/payload: Value matches more than one of the allowed schemas"}
+    end
+
+    test "составная внутри ветви составной на том же пути — один внешний элемент" do
+      inner = %Schema{oneOf: [closed(branch(:a, :boolean)), closed(branch(:b, :string))]}
+      composite = %Schema{anyOf: [inner, closed(branch(:c, :integer))]}
+
+      assert {422, %{data: %{errors: [error]}}, nil} = composite_errors(composite, %{"payload" => %{"x" => 1}})
+      assert error == %{code: "any_of", message: "#/payload: Value matches none of the allowed schemas"}
+    end
+
+    test "элементы массива разбираются независимо" do
+      composite = %Schema{
+        type: :array,
+        items: %Schema{anyOf: [closed(branch(:a, :boolean)), closed(branch(:b, :string))]}
+      }
+
+      assert {422, %{data: %{errors: errors}}, nil} =
+               composite_errors(composite, %{"payload" => [%{"a" => true}, %{"x" => 1}, %{"y" => 1}]})
+
+      assert Enum.sort(errors) == [
+               %{code: "any_of", message: "#/payload/1: Value matches none of the allowed schemas"},
+               %{code: "any_of", message: "#/payload/2: Value matches none of the allowed schemas"}
+             ]
+    end
   end
 
   test "auth_codes и тексты переопределяются опциями" do

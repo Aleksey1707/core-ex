@@ -203,7 +203,9 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 - Ошибку разбора запроса по OpenAPI (`render_error:` у `OpenApiSpex.Plug.CastAndValidate`) отдаёт
   `Core.Web.ErrorMapper.cast_errors/2`: 422, `code` — `"invalid_params"`, `message` — константа,
   нарушения — `data.errors` (`code` элемента — `reason` нарушения без `ns`, `message` — текст
-  OpenApiSpex с путём поля). Функция собирается только при `open_api_spex` (ADR-0068).
+  OpenApiSpex с путём поля). Неудавшаяся составная схема (`anyOf` / `oneOf`) даёт один элемент
+  `"any_of"` / `"one_of"` на свой путь: нарушения её ветвей и названия схем наружу не уходят.
+  Функция собирается только при `open_api_spex` (ADR-0068).
 - Опции: `auth_codes:` (дефолт `~w(unauthorized auth_failed invalid_token session_not_found)a`),
   `unauthorized_message:` (`map/2`, `unauthorized/1`, `by_status/2`), `critical_message:`
   (`map/2`, `by_status/2`), `invalid_params_message:` (`cast_errors/2`).

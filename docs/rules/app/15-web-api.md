@@ -357,6 +357,31 @@ end
   пишет `Core.Web.Response`, молча (`deps/core/docs/rules/10-architecture.md`,
   «OpenAPI-схемы wire»).
 - Схема события страницы событий и его сведений — «Событие страницы событий», «Сведения событий».
+- Составная схема (`anyOf` / `oneOf`), ветвь которой выбирает поле значения, SHOULD подниматься на
+  объект с этим полем и нести `discriminator`: `propertyName` — поле, `mapping` — его значение →
+  схема объекта. Без discriminator OpenApiSpex проверяет все ветви, и
+  `Core.Web.ErrorMapper.cast_errors/2` отдаёт на путь составной схемы один элемент `"any_of"` /
+  `"one_of"` без нарушений внутри: какая ветвь своя, библиотека не знает (ADR-0068). Составная
+  схема без discriminator MAY там, где ветвь задаёт сама форма значения (`integer | "*"`).
+
+  ```elixir
+  # плохо — ветвь выбирает соседний `code`, а 422 знает только, что `payload` не подошёл
+  %Schema{
+    type: :object,
+    properties: %{code: %Schema{type: :string}, payload: %Schema{anyOf: payloads}}
+  }
+
+  # хорошо — по схеме элемента на код, discriminator по `code`: нарушения — из своей нагрузки
+  %Schema{
+    type: :object,
+    oneOf: [ItemA, ItemB],
+    discriminator: %OpenApiSpex.Discriminator{
+      propertyName: "code",
+      mapping: %{"a" => "ItemA", "b" => "ItemB"}
+    }
+  }
+  ```
+
 - Значения справочников берутся из самого enum (`Enum.map(Status.values(), …)`), а не
   выписываются строками: иначе список разойдётся с доменом.
 - Форма, повторяющаяся в нескольких ответах, объявляется отдельной схемой и подключается

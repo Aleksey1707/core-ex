@@ -188,12 +188,20 @@ defmodule LayoutLint do
   defp last_line(_node), do: 0
 
   defp check_unit(unit, code, mode, path) do
-    indent = def_indent(unit)
-    form = Enum.flat_map(unit.markers, &check_form(&1, unit, code, indent, path))
+    form = Enum.flat_map(unit.markers, &check_form(&1, unit, code, marker_indent(&1, unit), path))
 
     if mode == :form,
       do: form,
       else: form ++ check_transitions(unit, path) ++ check_blocks(unit, path)
+  end
+
+  # Отступ маркера — как у определений модуля либо как у определения под ним: определения
+  # условной сборки (`if Code.ensure_loaded?(…)`) стоят глубже остальных.
+  defp marker_indent(%{indent: indent} = marker, unit) do
+    case Enum.find(unit.defs, &(&1.line > marker.line)) do
+      %{column: column} when column - 1 == indent -> indent
+      _below -> def_indent(unit)
+    end
   end
 
   defp def_indent(%{defs: [], module: module}), do: module.column + 1
