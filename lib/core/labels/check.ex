@@ -4,8 +4,10 @@ defmodule Core.Labels.Check do
   решений без повторов, захват функции и Prim — хост объявления вида значения.
 
   Общие для всех `use Core.Labels.*`: опции `use` проверяет `Core.Helper.Opts.validate!/4`, а
-  значения опций — эти функции. `where` — префикс текста ошибки, по которому видно объявление и
-  опцию (`"Labels.Fields MyApp.Payload: labels:"`); текст после него начинается с ` — `.
+  значения опций — эти функции. `where` — префикс текста ошибки, по которому видно место отказа;
+  текст ошибки — `"<where>: <текст>"`. `where` — объявление (`"Labels.ID MyApp.ID"`), за ним через
+  `: ` опция без двоеточия и через `, ` элемент (`"Labels.Fields MyApp.Payload: labels, поле note"`):
+  двоеточие после `where` ставит сама проверка.
   """
 
   @doc "Проверить текст подписи: непустая строка; строка из одних пробелов — пустая."
@@ -15,7 +17,7 @@ defmodule Core.Labels.Check do
     if is_binary(text) and String.trim(text) != "" do
       text
     else
-      raise CompileError, description: "#{where} — непустая строка, задано #{inspect(text)}"
+      raise CompileError, description: "#{where}: непустая строка, задано #{inspect(text)}"
     end
   end
 
@@ -30,7 +32,7 @@ defmodule Core.Labels.Check do
       fun
     else
       raise CompileError,
-        description: "#{where} — захват функции арности #{arity} (`&Mod.fun/#{arity}`), задано #{inspect(fun)}"
+        description: "#{where}: захват функции арности #{arity} (`&Mod.fun/#{arity}`), задано #{inspect(fun)}"
     end
   end
 
@@ -61,14 +63,14 @@ defmodule Core.Labels.Check do
 
   def keyword!(list, where) when is_binary(where) do
     if not (is_list(list) and list != [] and Keyword.keyword?(list)) do
-      raise CompileError, description: "#{where} — непустой keyword-список, задано #{inspect(list)}"
+      raise CompileError, description: "#{where}: непустой keyword-список, задано #{inspect(list)}"
     end
 
     keys = Keyword.keys(list)
 
     case keys -- Enum.uniq(keys) do
       [] -> list
-      repeated -> raise CompileError, description: "#{where} — ключи повторяются #{inspect(Enum.uniq(repeated))}"
+      repeated -> raise CompileError, description: "#{where}: ключи повторяются #{inspect(Enum.uniq(repeated))}"
     end
   end
 end

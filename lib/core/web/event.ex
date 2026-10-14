@@ -184,7 +184,7 @@ defmodule Core.Web.Event do
       end
 
     Helper.Opts.validate!(user_ref, required, optional, where)
-    Check.capture!(Keyword.fetch!(user_ref, :dump), 2, "#{where}: dump:")
+    Check.capture!(Keyword.fetch!(user_ref, :dump), 2, "#{where}: dump")
   end
 
   @doc false

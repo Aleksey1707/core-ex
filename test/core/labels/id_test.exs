@@ -22,7 +22,7 @@ defmodule Core.Labels.IDTest do
 
   describe "отказ сборки" do
     test "kind: вне ~w(ref user id)a — CompileError" do
-      assert_raise CompileError, ~r/Labels.ID .*Other: kind: — один из \[:ref, :user, :id\], задано :link/, fn ->
+      assert_raise CompileError, ~r/Labels.ID .*Other: kind: один из \[:ref, :user, :id\], задано :link/, fn ->
         compile_id(:Other, kind: :link)
       end
     end
@@ -40,7 +40,7 @@ defmodule Core.Labels.IDTest do
     end
 
     test ":ref с entity: не атомом — CompileError" do
-      assert_raise CompileError, ~r/StringEntity: entity: — атом вида записи, задано "stockItem"/, fn ->
+      assert_raise CompileError, ~r/StringEntity: entity: атом вида записи, задано "stockItem"/, fn ->
         compile_id(:StringEntity, kind: :ref, entity: "stockItem", resolver: ItemQuery)
       end
     end
@@ -58,7 +58,7 @@ defmodule Core.Labels.IDTest do
     end
 
     test "resolver: не модулем — CompileError" do
-      assert_raise CompileError, ~r/AtomResolver: resolver: — модуль, задано :names/, fn ->
+      assert_raise CompileError, ~r/AtomResolver: resolver: модуль, задано :names/, fn ->
         compile_id(:AtomResolver, kind: :user, resolver: :names)
       end
     end

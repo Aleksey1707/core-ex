@@ -17,13 +17,13 @@ defmodule Core.Labels.TextTest do
 
   describe "отказ сборки" do
     test "with: не захват — CompileError" do
-      assert_raise CompileError, ~r/NotCapture: with: — захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/NotCapture: with: захват функции арности 1/, fn ->
         compile_text(:NotCapture, with: "Текст")
       end
     end
 
     test "захват другой арности — CompileError" do
-      assert_raise CompileError, ~r/Arity: with: — захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/Arity: with: захват функции арности 1/, fn ->
         compile_text(:Arity, with: &Kernel.max/2)
       end
     end

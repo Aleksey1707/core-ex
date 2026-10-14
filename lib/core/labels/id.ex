@@ -102,18 +102,18 @@ defmodule Core.Labels.ID do
   end
 
   defp kind!(module, kind, _entity, _resolver),
-    do: reject!(module, "kind: — один из #{inspect(@kinds)}, задано #{inspect(kind)}")
+    do: reject!(module, "kind: один из #{inspect(@kinds)}, задано #{inspect(kind)}")
 
   defp entity!(module, nil), do: reject!(module, "`kind: :ref` без `entity:` — вид записи атомом")
   defp entity!(_module, entity) when is_atom(entity) and not is_boolean(entity), do: entity
-  defp entity!(module, entity), do: reject!(module, "entity: — атом вида записи, задано #{inspect(entity)}")
+  defp entity!(module, entity), do: reject!(module, "entity: атом вида записи, задано #{inspect(entity)}")
 
   defp resolver!(module, nil), do: reject!(module, "вид id со ссылкой без `resolver:` — модуль резолвера имён")
 
   defp resolver!(module, resolver) do
     if is_atom(resolver) and String.starts_with?(Atom.to_string(resolver), "Elixir."),
       do: resolver,
-      else: reject!(module, "resolver: — модуль, задано #{inspect(resolver)}")
+      else: reject!(module, "resolver: модуль, задано #{inspect(resolver)}")
   end
 
   defp forbid!(_module, _kind, _key, nil), do: :ok

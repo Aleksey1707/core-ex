@@ -67,7 +67,7 @@ defmodule Core.Labels.Text do
 
   def declare!(module, fun) when is_atom(module) do
     Check.prim!(module, "Core.Labels.Text", where(module))
-    Check.capture!(fun, 1, "#{where(module)}: with:")
+    Check.capture!(fun, 1, "#{where(module)}: with")
   end
 
   # ---

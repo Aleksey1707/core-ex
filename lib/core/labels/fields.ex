@@ -198,7 +198,7 @@ defmodule Core.Labels.Fields do
       {nil, nil} ->
         raise CompileError,
           description:
-            "#{where(module)} — не нагрузка: `use Core.Labels.Fields` подключается после " <>
+            "#{where(module)}: не нагрузка: `use Core.Labels.Fields` подключается после " <>
               "`use Core.Es.Event.Payload` или объявляет спеку видимых полей `fields:`"
 
       {payload, nil} ->
@@ -216,15 +216,15 @@ defmodule Core.Labels.Fields do
   end
 
   defp labels!(module, labels) do
-    where = "#{where(module)}: labels:"
+    where = "#{where(module)}: labels"
 
-    for {field, label} <- Check.keyword!(labels, where), do: {field, label!(label, "#{where} поле #{field}")}
+    for {field, label} <- Check.keyword!(labels, where), do: {field, label!(label, "#{where}, поле #{field}")}
   end
 
   # Вид значения `Core.Es.ValueChanged` известен при раскрытии `use`: его `use` выше положил `type:` в атрибут.
   # Struct нужен уже здесь: без него `use` выше `use Core.Es.ValueChanged` сошёл бы за ручной struct.
   defp change!(module, label, value) do
-    label = Check.text!(label, "#{where(module)}: change:")
+    label = Check.text!(label, "#{where(module)}: change")
 
     if not Module.defines?(module, {:__struct__, 0}),
       do:
@@ -238,11 +238,11 @@ defmodule Core.Labels.Fields do
         reject!(module, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
 
       {nil, value} ->
-        [value: spec] = parse!([value: value], "#{where(module)}: value:")
+        [value: spec] = parse!([value: value], "#{where(module)}: value")
         {label, spec}
 
       {changed, nil} ->
-        {label, Plugin.Fields.value_spec(Keyword.fetch!(changed, :type), "#{where(module)}: change:")}
+        {label, Plugin.Fields.value_spec(Keyword.fetch!(changed, :type), "#{where(module)}: change")}
 
       {_changed, _value} ->
         reject!(module, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
@@ -252,7 +252,7 @@ defmodule Core.Labels.Fields do
   defp reject!(module, message), do: raise(CompileError, description: "#{where(module)}: #{message}")
 
   defp fields!(module, fields) do
-    where = "#{where(module)}: fields:"
+    where = "#{where(module)}: fields"
 
     parse!(Check.keyword!(fields, where), where)
   end
@@ -269,15 +269,15 @@ defmodule Core.Labels.Fields do
 
   defp text_list?(inner), do: Keyword.keyword?(inner) and Keyword.has_key?(inner, :text)
 
-  defp text_spec!([text: fun], where), do: {:text, Check.capture!(fun, 1, "#{where}: text:")}
+  defp text_spec!([text: fun], where), do: {:text, Check.capture!(fun, 1, "#{where}: text")}
 
   defp text_spec!([list: [text: fun]], where),
-    do: {:list, {:text, Check.capture!(fun, 1, "#{where}: list: text:")}}
+    do: {:list, {:text, Check.capture!(fun, 1, "#{where}: list: text")}}
 
   defp text_spec!(opts, where) do
     raise CompileError,
       description:
-        "#{where} — `text:` без других ключей: [text: &f/1] или [list: [text: &f/1]], " <>
+        "#{where}: `text:` без других ключей: [text: &f/1] или [list: [text: &f/1]], " <>
           "задано #{inspect(opts)}"
   end
 
@@ -292,7 +292,7 @@ defmodule Core.Labels.Fields do
   defp label!([_ | _] = map, where) do
     Core.Helper.Opts.validate!(map, @map_keys, [], where)
 
-    for key <- @map_keys, do: {key, Check.text!(Keyword.fetch!(map, key), "#{where} #{key}:")}
+    for key <- @map_keys, do: {key, Check.text!(Keyword.fetch!(map, key), "#{where}: #{key}")}
   end
 
   defp label!(text, where), do: Check.text!(text, where)

@@ -75,10 +75,10 @@ defmodule Core.Labels.Values do
 
   def labels!(module, labels) when is_atom(module) do
     values = values!(module)
-    where = "#{where(module)}: labels:"
+    where = "#{where(module)}: labels"
 
     labels =
-      for {value, text} <- Check.keyword!(labels, where), do: {value, Check.text!(text, "#{where} значение #{value}")}
+      for {value, text} <- Check.keyword!(labels, where), do: {value, Check.text!(text, "#{where}, значение #{value}")}
 
     labelled = Keyword.keys(labels)
 
@@ -97,7 +97,7 @@ defmodule Core.Labels.Values do
 
       _none ->
         raise CompileError,
-          description: "#{where(module)} — не Enum: `use Core.Labels.Values` подключается после `use Core.Enum`"
+          description: "#{where(module)}: не Enum: `use Core.Labels.Values` подключается после `use Core.Enum`"
     end
   end
 

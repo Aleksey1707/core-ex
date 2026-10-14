@@ -31,25 +31,25 @@ defmodule Core.Labels.ValuesTest do
     end
 
     test "повтор значения — CompileError" do
-      assert_raise CompileError, ~r/Twice: labels: — ключи повторяются \[:new\]/, fn ->
+      assert_raise CompileError, ~r/Twice: labels: ключи повторяются \[:new\]/, fn ->
         compile_enum(:Twice, labels: [new: "Новый", new: "Свежий", done: "Готов"])
       end
     end
 
     test "пустая подпись — CompileError" do
-      assert_raise CompileError, ~r/Blank: labels: значение done — непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/Blank: labels, значение done: непустая строка, задано ""/, fn ->
         compile_enum(:Blank, labels: [new: "Новый", done: ""])
       end
     end
 
     test "не строковая подпись — CompileError" do
-      assert_raise CompileError, ~r/NotText: labels: значение done — непустая строка, задано :hidden/, fn ->
+      assert_raise CompileError, ~r/NotText: labels, значение done: непустая строка, задано :hidden/, fn ->
         compile_enum(:NotText, labels: [new: "Новый", done: :hidden])
       end
     end
 
     test "labels: не keyword-список — CompileError" do
-      assert_raise CompileError, ~r/List: labels: — непустой keyword-список, задано \["Новый"\]/, fn ->
+      assert_raise CompileError, ~r/List: labels: непустой keyword-список, задано \["Новый"\]/, fn ->
         compile_enum(:List, labels: ["Новый"])
       end
     end
@@ -61,7 +61,7 @@ defmodule Core.Labels.ValuesTest do
     end
 
     test "модуль без use Core.Enum — CompileError" do
-      assert_raise CompileError, ~r/NotEnum — не Enum: `use Core.Labels.Values` подключается после/, fn ->
+      assert_raise CompileError, ~r/NotEnum: не Enum: `use Core.Labels.Values` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.ValuesTest.NotEnum do

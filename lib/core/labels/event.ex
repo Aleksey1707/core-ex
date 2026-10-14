@@ -83,13 +83,13 @@ defmodule Core.Labels.Event do
   def declaration!(module, opts) when is_atom(module) and is_list(opts) do
     if not Module.defines?(module, {:__es_payload__, 0}) do
       raise CompileError,
-        description: "#{where(module)} — не событие: `use Core.Labels.Event` подключается после `use Core.Es.Event`"
+        description: "#{where(module)}: не событие: `use Core.Labels.Event` подключается после `use Core.Es.Event`"
     end
 
-    title = Check.text!(Keyword.fetch!(opts, :title), "#{where(module)}: title:")
+    title = Check.text!(Keyword.fetch!(opts, :title), "#{where(module)}: title")
 
     case Keyword.fetch(opts, :payload) do
-      {:ok, payload} -> {title, Check.text!(payload, "#{where(module)}: payload:")}
+      {:ok, payload} -> {title, Check.text!(payload, "#{where(module)}: payload")}
       :error -> {title, nil}
     end
   end

@@ -81,7 +81,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "спека разбирается нормализатором плагина по полям — его отказ" do
-      assert_raise CompileError, ~r/NotPrim: fields:, поле city: Core.LabelsFixture.Count.*не Core.Enum/, fn ->
+      assert_raise CompileError, ~r/NotPrim: fields, поле city: Core.LabelsFixture.Count.*не Core.Enum/, fn ->
         compile_struct(:NotPrim,
           fields: [city: [enum: Core.LabelsFixture.Count], zip: [type: :string]],
           labels: [city: "Город", zip: "Индекс"]
@@ -121,7 +121,7 @@ defmodule Core.Labels.FieldsTest do
 
   describe "text:" do
     test "не захват — CompileError" do
-      assert_raise CompileError, ~r/NotCapture: fields:, поле zip: text: — захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/NotCapture: fields, поле zip: text: захват функции арности 1/, fn ->
         compile_struct(:NotCapture,
           fields: [city: [prim: Core.LabelsFixture.Name], zip: [text: "почтовый"]],
           labels: [city: "Город", zip: "Индекс"]
@@ -130,7 +130,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "захват другой арности — CompileError" do
-      assert_raise CompileError, ~r/Arity2: fields:, поле zip: list: text: — захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/Arity2: fields, поле zip: list: text: захват функции арности 1/, fn ->
         compile_struct(:Arity2,
           fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [text: &Map.get/2]]],
           labels: [city: "Город", zip: "Индекс"]
@@ -139,7 +139,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "анонимная функция — CompileError" do
-      assert_raise CompileError, ~r/Anon: fields:, поле zip: text: — захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/Anon: fields, поле zip: text: захват функции арности 1/, fn ->
         compile_struct(
           :Anon,
           quote(
@@ -153,7 +153,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "с другими ключами — CompileError" do
-      assert_raise CompileError, ~r/Mixed: fields:, поле zip — `text:` без других ключей/, fn ->
+      assert_raise CompileError, ~r/Mixed: fields, поле zip: `text:` без других ключей/, fn ->
         compile_struct(
           :Mixed,
           quote(
@@ -181,25 +181,25 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "повтор поля — CompileError" do
-      assert_raise CompileError, ~r/Twice: labels: — ключи повторяются \[:name\]/, fn ->
+      assert_raise CompileError, ~r/Twice: labels: ключи повторяются \[:name\]/, fn ->
         compile_payload(:Twice, labels: [name: "Название", name: "Имя", note: :hidden])
       end
     end
 
     test "пустая подпись — CompileError" do
-      assert_raise CompileError, ~r/Blank: labels: поле name — непустая строка, задано " "/, fn ->
+      assert_raise CompileError, ~r/Blank: labels, поле name: непустая строка, задано " "/, fn ->
         compile_payload(:Blank, labels: [name: " ", note: :hidden])
       end
     end
 
     test "не строковая подпись — CompileError" do
-      assert_raise CompileError, ~r/NotText: labels: поле note — непустая строка, задано :shown/, fn ->
+      assert_raise CompileError, ~r/NotText: labels, поле note: непустая строка, задано :shown/, fn ->
         compile_payload(:NotText, labels: [name: "Название", note: :shown])
       end
     end
 
     test "labels: не keyword-список — CompileError" do
-      assert_raise CompileError, ~r/Empty: labels: — непустой keyword-список, задано \[\]/, fn ->
+      assert_raise CompileError, ~r/Empty: labels: непустой keyword-список, задано \[\]/, fn ->
         compile_payload(:Empty, labels: [])
       end
     end
@@ -245,7 +245,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "неизвестный ключ подписей map'ы — CompileError" do
-      assert_raise CompileError, ~r/UnknownKey: labels: поле note: неизвестные опции: \[:hint\]/, fn ->
+      assert_raise CompileError, ~r/UnknownKey: labels, поле note: неизвестные опции: \[:hint\]/, fn ->
         compile_payload(
           :UnknownKey,
           [labels: [name: "Название", note: [label: "Данные", key: "Ключ", value: "Значение", hint: "?"]]],
@@ -255,13 +255,13 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "подписи map'ы без ключа — CompileError" do
-      assert_raise CompileError, ~r/NoKey: labels: поле note: нет обязательных опций: \[:key\]/, fn ->
+      assert_raise CompileError, ~r/NoKey: labels, поле note: нет обязательных опций: \[:key\]/, fn ->
         compile_payload(:NoKey, [labels: [name: "Название", note: [label: "Данные", value: "Значение"]]], :map)
       end
     end
 
     test "пустая подпись ключа map'ы — CompileError" do
-      assert_raise CompileError, ~r/BlankKey: labels: поле note key: — непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/BlankKey: labels, поле note: key: непустая строка, задано ""/, fn ->
         compile_payload(
           :BlankKey,
           [labels: [name: "Название", note: [label: "Данные", key: "", value: "Значение"]]],
@@ -271,7 +271,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "use до Core.Es.Event.Payload — CompileError" do
-      assert_raise CompileError, ~r/Early — не нагрузка: `use Core.Labels.Fields` подключается после/, fn ->
+      assert_raise CompileError, ~r/Early: не нагрузка: `use Core.Labels.Fields` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.FieldsTest.Early do
@@ -285,7 +285,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "struct без Core.Es.Event.Payload — CompileError" do
-      assert_raise CompileError, ~r/Plain — не нагрузка: `use Core.Labels.Fields` подключается после/, fn ->
+      assert_raise CompileError, ~r/Plain: не нагрузка: `use Core.Labels.Fields` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.FieldsTest.Plain do
@@ -326,7 +326,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "пустая подпись изменения — CompileError" do
-      assert_raise CompileError, ~r/BlankChange: change: — непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/BlankChange: change: непустая строка, задано ""/, fn ->
         compile_value_changed(:BlankChange, change: "")
       end
     end
@@ -380,13 +380,13 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "value: разбирается нормализатором плагина по полям — его отказ" do
-      assert_raise CompileError, ~r/NotEnum: value:.*Core.LabelsFixture.Count.*не Core.Enum/, fn ->
+      assert_raise CompileError, ~r/NotEnum: value, .*Core.LabelsFixture.Count.*не Core.Enum/, fn ->
         compile_change(:NotEnum, [:old_value, :new_value], change: "Значение", value: [enum: Core.LabelsFixture.Count])
       end
     end
 
     test "value: text: не захватом — CompileError" do
-      assert_raise CompileError, ~r/NotCaptureValue: value:.*text: — захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/NotCaptureValue: value, .*text: захват функции арности 1/, fn ->
         compile_change(:NotCaptureValue, [:old_value, :new_value], change: "Значение", value: [text: "текст"])
       end
     end

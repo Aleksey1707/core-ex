@@ -193,7 +193,7 @@ defmodule Core.Web.EventTest do
     end
 
     test "dump: не захват функции арности 2 — CompileError" do
-      assert_raise CompileError, ~r/Arity: user_ref: dump: — захват функции арности 2/, fn ->
+      assert_raise CompileError, ~r/Arity: user_ref: dump: захват функции арности 2/, fn ->
         compile_event(:Arity, codec: External, user_ref: [dump: &Kernel.inspect/1, schema: UserRef])
       end
     end

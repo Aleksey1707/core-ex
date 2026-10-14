@@ -11,13 +11,13 @@ defmodule Core.Labels.EventTest do
     end
 
     test "пустое название — CompileError" do
-      assert_raise CompileError, ~r/NoText: title: — непустая строка, задано " "/, fn ->
+      assert_raise CompileError, ~r/NoText: title: непустая строка, задано " "/, fn ->
         compile_event(:NoText, Updated.Payload, title: " ")
       end
     end
 
     test "не строковое название — CompileError" do
-      assert_raise CompileError, ~r/AtomTitle: title: — непустая строка, задано :closed/, fn ->
+      assert_raise CompileError, ~r/AtomTitle: title: непустая строка, задано :closed/, fn ->
         compile_event(:AtomTitle, Updated.Payload, title: :closed)
       end
     end
@@ -29,7 +29,7 @@ defmodule Core.Labels.EventTest do
     end
 
     test "модуль без use Core.Es.Event — CompileError" do
-      assert_raise CompileError, ~r/NotEvent — не событие: `use Core.Labels.Event` подключается после/, fn ->
+      assert_raise CompileError, ~r/NotEvent: не событие: `use Core.Labels.Event` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.EventTest.NotEvent do
@@ -47,7 +47,7 @@ defmodule Core.Labels.EventTest do
     end
 
     test "пустая подпись нагрузки-Prim — CompileError" do
-      assert_raise CompileError, ~r/PrimEmpty: payload: — непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/PrimEmpty: payload: непустая строка, задано ""/, fn ->
         compile_event(:PrimEmpty, Core.LabelsFixture.Name, title: "Событие", payload: "")
       end
     end
