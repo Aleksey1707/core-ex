@@ -368,6 +368,17 @@ defmodule Core.Labels.FieldsTest do
       end
     end
 
+    test "лишнее поле struct'а изменения — CompileError" do
+      assert_raise CompileError,
+                   ~r/Reason: поля struct'а изменения вне `old_value` \/ `new_value`: \[:reason\]/,
+                   fn ->
+                     compile_change(:Reason, [:old_value, :new_value, :reason],
+                       change: "Значение",
+                       value: [type: :string]
+                     )
+                   end
+    end
+
     test "value: разбирается нормализатором плагина по полям — его отказ" do
       assert_raise CompileError, ~r/NotEnum: value:.*Core.LabelsFixture.Count.*не Core.Enum/, fn ->
         compile_change(:NotEnum, [:old_value, :new_value], change: "Значение", value: [enum: Core.LabelsFixture.Count])

@@ -953,7 +953,8 @@ end
 - `labels:` вместе с `change:`, `fields:` вместе с `change:` — `CompileError`
 - Ручной struct изменения без `value:`, `value:` у `Core.Es.ValueChanged` (у вида значения один
   источник — `type:`), `value:` без `change:` — `CompileError`
-- Struct без `old_value` / `new_value` под `change:`, пустая подпись изменения — `CompileError`
+- Struct без `old_value` / `new_value` или с полями вне них под `change:`, пустая подпись
+  изменения — `CompileError`
 - `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct` — `CompileError`: иначе
   `Core.Es.ValueChanged` ниже сошёл бы за ручной struct
 - Свободная map и вложенный struct без `use Core.Labels.Fields` в виде значения — `CompileError`,

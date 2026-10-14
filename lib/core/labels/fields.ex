@@ -84,8 +84,9 @@ defmodule Core.Labels.Fields do
       end
 
   Сборку ломают: `labels:` или `fields:` вместе с `change:`, ручной struct изменения без `value:`,
-  `value:` у `Core.Es.ValueChanged` или без `change:`, struct без `old_value` / `new_value` под
-  `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct`.
+  `value:` у `Core.Es.ValueChanged` или без `change:`, struct без `old_value` / `new_value` или с
+  полями вне них под `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или
+  `defstruct`.
 
   Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
@@ -109,6 +110,7 @@ defmodule Core.Labels.Fields do
   @required_keys []
   @optional_keys ~w(labels change fields value)a
   @map_keys ~w(label key value)a
+  @change_fields ~w(old_value new_value)a
 
   # ===== объявление =====
 
@@ -315,7 +317,8 @@ defmodule Core.Labels.Fields do
           specs(module)
 
         {_label, spec} ->
-          ensure_none!(env, ~w(old_value new_value)a -- fields, "struct изменения без полей")
+          ensure_none!(env, @change_fields -- fields, "struct изменения без полей")
+          ensure_none!(env, fields -- @change_fields, "поля struct'а изменения вне `old_value` / `new_value`")
           [old_value: spec, new_value: spec]
       end
 

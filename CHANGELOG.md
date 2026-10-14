@@ -62,7 +62,8 @@
     `%{label, kind: :change, old, new}` со сторонами `%{kind, value}` без подписи. Вид значения у
     `Core.Es.ValueChanged` — из его `type:`, у ручного struct'а с полями `old_value` / `new_value` —
     из `value:` на языке спеки `fields:`; `labels:` вместе с `change:`, ручной struct без `value:`,
-    `value:` у `Core.Es.ValueChanged` или без `change:` — `CompileError`;
+    `value:` у `Core.Es.ValueChanged` или без `change:`, поле struct'а изменения вне `old_value` /
+    `new_value` (в сведения оно не выходит) — `CompileError`;
   - `use Core.Labels.ID, kind:` в Prim-идентификаторе после `use Core.Prim.*` — вид id в сведениях:
     `:ref` (`entity:` — вид записи атомом, `resolver:`) — `%{kind: :ref, entity, value: id}`, `:user`
     (`resolver:`) — `%{kind: :user, value: id}`, `:id` — `:text` с id; опция не своего вида и
