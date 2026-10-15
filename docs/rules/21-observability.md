@@ -187,8 +187,8 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
   конфигурация SDK и подключение у потребителя — `deps/core/docs/rules/app/21-observability.md`.
 
 `contexts.trace` события SDK заполняет из текущего OTel-спана сам, только если при сборке `:sentry`
-у приложения есть `opentelemetry`, `opentelemetry_api`, `opentelemetry_exporter` и
-`opentelemetry_semantic_conventions`; иначе связь с трейсом — по времени и логам.
+у приложения есть `opentelemetry` ≥ 1.5, `opentelemetry_api` ≥ 1.4, `opentelemetry_exporter` ≥ 1.0 и
+`opentelemetry_semantic_conventions` ≥ 1.27; иначе связь с трейсом — по времени и логам.
 
 Проверяется: `test/core/web/critical_error_test.exs` — форма события, идентификатор в событии и в
 отправленном конверте, `nil` без записи, скрытие `sensitive`.

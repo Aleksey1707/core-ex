@@ -39,6 +39,27 @@
   `get_last_event_id_and_source/0`: `Sentry.capture_exception(e, stacktrace: st)` + id из процесса →
   `error_id = Core.Web.CriticalError.report(e, st)`.
 
+  Подключение у потребителя — норма свода потребителя: две точки ответа 500
+  (`deps/core/docs/rules/app/15-web-api.md`, «FallbackController»), конфигурация SDK
+  (`deps/core/docs/rules/app/21-observability.md`, «Служба учёта ошибок») и тест на тестовом режиме
+  SDK (`deps/core/docs/rules/app/19-testing.md`, «Внешние зависимости»). Раньше каждый потребитель
+  решал сам, что уходит в службу; теперь туда уходят только ответ 500 и падение процесса, а
+  `Logger.error`, 503, доменные отказы и неудачная попытка задачи Oban, у которой попытки ещё есть, —
+  нет. Потребитель, подключавший Sentry сам, правит:
+  - `FallbackController` на уровне `:error` — `report(reason, nil)` и `critical(error_id: id)`;
+    `ErrorJSON` на 500 — `by_status(500, error_id: report(reason, stack))`;
+  - пустые ключи `SENTRY_*` — незаданные (пустой `SENTRY_DSN` иначе роняет старт), умолчания `SENTRY_ENVIRONMENT` — `config_env()`, `SENTRY_RELEASE` —
+    версия из `mix.exs`;
+  - было: `plug Sentry.PlugContext` / `use Sentry.PlugCapture` → стало:
+    `plug Sentry.PlugContext, body_scrubber: nil`, без `PlugCapture`; контекст пользователя — только
+    `id`;
+  - было: `logs: [capture_log_messages: true, …]` → стало: `logs: [capture_log_messages: false,
+    capture_excluded_domains: [:cowboy, :bandit]]`, без `level:`;
+  - было: `oban: [capture_errors: true]` → стало: с `should_report_error_callback:` «только последняя
+    попытка» в `config/runtime.exs`;
+  - трейсинг Sentry (`traces_sample_rate`, `SpanProcessor`) снимается; для `trace_id` в событии —
+    `opentelemetry_semantic_conventions` рядом с SDK трассировки.
+
 ## 0.15.0
 
 ### Ломающие изменения контракта

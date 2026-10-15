@@ -321,6 +321,20 @@ def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 - `ErrorJSON` MUST делегировать `Core.Web.ErrorMapper.by_status/2`; своя карта статусов — MUST
   NOT: таблица «статус → `code`» одна на всех потребителей
   (`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»).
+- На уровне `:error` из маппера — критическая ошибка — `FallbackController` приложения со службой
+  учёта ошибок MUST звать `Core.Web.CriticalError.report(reason, nil)` и отправлять вместо
+  обёртки таблицы `Core.Web.ErrorMapper.critical(error_id: id)`: запись в службу из `map/2`
+  нарушила бы CQS, а обёртка 500 с идентификатором собирается в одном месте (ADR-0071). Лог —
+  прежний, на уровне таблицы; прочие уровни отправляют обёртку таблицы как есть.
+- `ErrorJSON` приложения со службой на статусе 500 MUST звать `report/2` по `reason` и `stack` из
+  assigns и отдавать `by_status(500, error_id: id)`; прочие статусы, 503 в том числе, — прежний
+  `by_status(status)` без записи: это не критическая ошибка.
+- Опция `critical_message:`, которую маппер приложения передаёт в `map/2`, MUST передаваться и в
+  `critical/1` и `by_status/2`: иначе текст 500 расходится между точками ответа. В примерах ниже
+  маппер шаблон не меняет.
+- Забытая точка — ответ 500 без записи и без идентификатора; приложение без службы (`:sentry` не
+  подключён) обе точки не меняет. Конфигурация SDK —
+  `21-observability.md`, «Служба учёта ошибок».
 - Плаг `render_error:` у `OpenApiSpex.Plug.CastAndValidate` MUST отвечать через
   `Core.Web.ErrorMapper.cast_errors/2` (`{422, обёртка ответа, nil}`); свой код, своя склейка
   нарушений или формат ошибок OpenApiSpex по умолчанию — MUST NOT: форма 422 одна на всех
@@ -332,6 +346,32 @@ def render("404.json", _assigns), do: Response.error(:not_found, "Not Found")
 def render(_template, _assigns), do: Response.error(:internal_error, "Internal Server Error")
 
 # хорошо
+def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)
+```
+
+```elixir
+# плохо — свой отчёт: при асинхронной отправке id берётся из процесса, а там id прошлого запроса
+# keep-alive соединения
+Sentry.capture_message("ошибка API: #{inspect(reason)}", result: :none)
+error_id = with {id, _source} <- Sentry.get_last_event_id_and_source(), do: id
+
+# хорошо — MyAppWeb.FallbackController со службой учёта ошибок
+def call(conn, {:error, reason}) do
+  {status, body, level} = MyAppWeb.ErrorMapper.map(reason)
+  log(level, reason)
+  error_id = if level == :error, do: Core.Web.CriticalError.report(reason, nil)
+
+  conn
+  |> put_status(status)
+  |> json(if(error_id, do: Core.Web.ErrorMapper.critical(error_id: error_id), else: body))
+end
+```
+
+```elixir
+# хорошо — MyAppWeb.ErrorJSON со службой учёта ошибок
+def render(_template, %{status: 500, reason: reason, stack: stack}),
+  do: Core.Web.ErrorMapper.by_status(500, error_id: Core.Web.CriticalError.report(reason, stack))
+
 def render(_template, %{status: status}), do: Core.Web.ErrorMapper.by_status(status)
 ```
 
@@ -497,3 +537,5 @@ end
 - Ошибки на границе — `12-errors.md`
 - Представления read-пути — `13-repos.md`
 - Тесты контроллеров и примеров спецификации — `19-testing.md`
+- Служба учёта ошибок — `21-observability.md`; отчёт о критической ошибке —
+  `deps/core/docs/rules/21-observability.md`

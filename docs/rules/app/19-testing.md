@@ -228,6 +228,43 @@ read-модели».
   `Oban.Testing.assert_enqueued/1`. Воркер с внешним эффектом MUST иметь тест на ключ
   идемпотентности: две постановки с одинаковыми `unique`-полями дают одну джобу
   (`14-events-outbox.md`, «Идемпотентность потребителей»).
+- Служба учёта ошибок — тестовый режим SDK: `config :sentry, test_mode: true` в
+  `config/test.exs`, `Sentry.Test.setup_sentry/1` в `setup`, пойманные события —
+  `Sentry.Test.pop_sentry_reports/0`. `setup_sentry/1` без `{:bypass, "~> 2.0", only: :test}` в
+  зависимостях не работает. Заглушка `Core.Web.CriticalError` или SDK — MUST NOT: она не
+  проверяет ни форму события, ни то, что идентификатор принадлежит записи этого запроса. `async:` и
+  дедупликация SDK — `deps/core/docs/rules/21-observability.md`, «Тесты».
+- Обе точки ответа 500 (`15-web-api.md`, «FallbackController») MUST иметь тест, который сверяет
+  `data.errorId` ответа с `event_id` пойманного события, а не только наличие поля. Исключение из
+  экшена `Phoenix.ConnTest` выбрасывает заново: ответ `ErrorJSON` берётся `assert_error_sent/2`.
+
+```elixir
+# плохо — заглушка отчёта: идентификатор не связан с записью
+stub(CriticalErrorMock, :report, fn _reason, _stacktrace -> "id" end)
+assert %{"data" => %{"errorId" => "id"}} = json_response(conn, 500)
+
+# хорошо — MyAppTest.ConnCase, тестовый режим SDK
+setup do
+  Sentry.Test.setup_sentry(dedup_events: false)
+end
+
+# FallbackController: usecase отказал прикладной ошибкой
+test "критическая ошибка записана, ответ несёт её идентификатор", %{conn: conn, order: order} do
+  body = conn |> post(~p"/api/v1/orders/#{order.id}/cancel") |> json_response(500)
+
+  assert [%Sentry.Event{event_id: error_id}] = Sentry.Test.pop_sentry_reports()
+  assert %{"code" => "internal_error", "data" => %{"errorId" => ^error_id}} = body
+end
+
+# ErrorJSON: экшен упал исключением
+test "падение экшена записано, ответ несёт его идентификатор", %{conn: conn, order: order} do
+  {500, _headers, body} =
+    assert_error_sent(500, fn -> post(conn, ~p"/api/v1/orders/#{order.id}/cancel") end)
+
+  assert [%Sentry.Event{event_id: error_id}] = Sentry.Test.pop_sentry_reports()
+  assert %{"data" => %{"errorId" => ^error_id}} = Jason.decode!(body)
+end
+```
 
 ## Пробелы
 
@@ -246,3 +283,4 @@ read-модели».
 - Процессы — `17-otp-concurrency.md`
 - Ратчет миграций — `18-migrations.md`
 - Контракты тестов библиотеки — `deps/core/docs/rules/19-testing.md`
+- Служба учёта ошибок — `21-observability.md`

@@ -1,9 +1,10 @@
 # Наблюдаемость приложения
 
 - **Область.** `lib/my_app_app/prom_ex*`, `lib/my_app_app/metrics_server.ex`,
-  `deploy/monitoring/**`: дашборды, правила алертов, списки наблюдаемых сущностей.
+  `deploy/monitoring/**`, ключ `:sentry` в `config/*.exs`: дашборды, правила алертов, списки
+  наблюдаемых сущностей, конфигурация службы учёта ошибок.
 - **Читать перед.** Новой метрикой, дашбордом или правилом алерта; правкой списков процессов и
-  кешей под наблюдением; подключением трассировки.
+  кешей под наблюдением; подключением трассировки или службы учёта ошибок.
 - **Словарь.** Плейсхолдеры и модальность — `deps/core/docs/rules/00-index.md`.
 
 Нормы самих сигналов — предметная нейтральность `Core.Otel`, словари semconv, где ставить span,
@@ -17,6 +18,7 @@
 | Метрики | `:telemetry` + PromEx-плагины (`Core.*.PromEx`, `PromEx.Plugins.*`) | Prometheus |
 | Трейсы | `opentelemetry_api` через `Core.Otel` | OTLP-коллектор |
 | Логи | `Logger` в stdout | агент-сборщик, связь по `trace_id` |
+| Критические ошибки | `Core.Web.CriticalError` и LoggerHandler SDK Sentry | служба учёта ошибок |
 
 Новый показатель — это `:telemetry`-событие плюс строка в PromEx-плагине. Вводить для того же
 числа вторую систему счёта MUST NOT: два несходящихся значения и два места починки.
@@ -129,6 +131,140 @@ SDK и экспортёр подключает приложение. Пока о
 - Неподключённый SDK — осознанное состояние, а не забытая задача: оно MUST быть записано в
   `DEBT.md` вместе с ценой.
 
+## Служба учёта ошибок
+
+Службу учёта ошибок (Sentry) подключает приложение, которому она нужна: `{:sentry, "~> 14.0"}` в
+своих зависимостях. Что пишет отчёт о критической ошибке и когда его звать —
+`deps/core/docs/rules/21-observability.md`, «Отчёт о критической ошибке»; две точки ответа 500 —
+`15-web-api.md`, «FallbackController». Здесь — конфигурация SDK: кроме критической ошибки API в
+службу уходят только падение процесса и задача Oban, исчерпавшая попытки. HTTP-клиент SDK по
+умолчанию — `:finch`: без него `:sentry` не стартует (у приложения он есть транзитивно от
+`prom_ex`).
+
+### Ключи окружения
+
+| Ключ | Что задаёт | Не задан |
+|---|---|---|
+| `SENTRY_DSN` | адрес проекта в службе | отправка выключена, старт не падает |
+| `SENTRY_ENVIRONMENT` | окружение события | имя окружения сборки (`config_env/0`) |
+| `SENTRY_RELEASE` | версия релиза события | версия приложения из `mix.exs` |
+
+- Пустой ключ MUST читаться как незаданный: SDK разбирает пустой `SENTRY_DSN` как DSN и роняет
+  старт, пустые окружение и релиз ушли бы в событие `""`, а стенд без службы задаёт ключи пустыми.
+- Умолчания `SENTRY_ENVIRONMENT` и `SENTRY_RELEASE` задаёт приложение: у SDK окружение по
+  умолчанию — `"production"`, а релиза нет. Значение из `config/config.exs` SDK ключом окружения
+  не перекрывает — перекрывает `config/runtime.exs`.
+- В `config/test.exs` — тестовый режим SDK (`test_mode: true`, `19-testing.md`, «Внешние
+  зависимости»).
+
+```elixir
+# плохо — пустой SENTRY_DSN роняет старт; окружение стенда уходит "production"
+config :sentry, dsn: System.get_env("SENTRY_DSN")
+
+# хорошо — config/config.exs: версия приложения фиксируется при сборке
+config :sentry, release: Mix.Project.config()[:version]
+
+# хорошо — config/runtime.exs
+env = fn key -> with "" <- System.get_env(key), do: nil end
+
+config :sentry,
+  dsn: env.("SENTRY_DSN"),
+  environment_name: env.("SENTRY_ENVIRONMENT") || to_string(config_env())
+
+if release = env.("SENTRY_RELEASE"), do: config(:sentry, release: release)
+```
+
+### Контекст запроса
+
+- `plug Sentry.PlugContext, body_scrubber: nil` в эндпоинте — MUST: тело запроса в службу не
+  уходит вовсе, персональные данные не покидают систему. Метод, путь и query-параметры событие
+  несёт — по ним запрос воспроизводится.
+- Свой список заголовков к скраберу по умолчанию (`header_scrubber:` поверх
+  `Sentry.PlugContext.default_header_scrubber/1`) — MAY: заголовок с секретом, которого нет в
+  списке SDK (`authorization`, `authentication`, `cookie`), иначе уходит в событие открытым.
+- `Sentry.PlugCapture` — MUST NOT: падение запроса записывает точка ответа 500 `ErrorJSON`
+  (`15-web-api.md`), и `PlugCapture` дал бы вторую запись того же падения.
+- Контекст пользователя события — только id пользователя:
+  `Sentry.Context.set_user_context(%{id: …})` в плаге аутентификации. Логин, телефон, почта и
+  роли — MUST NOT.
+- Значения Prim с `sensitive: true` в доп. данных события скрыты их `Inspect`, как в логах
+  (`deps/core/docs/rules/12-errors.md`, «Чувствительные данные»).
+
+```elixir
+# плохо — тело запроса и логин уходят в службу; падение запроса пишется дважды
+use Sentry.PlugCapture
+plug Sentry.PlugContext
+Sentry.Context.set_user_context(%{id: user_id, username: login})
+
+# хорошо
+plug Sentry.PlugContext, body_scrubber: nil
+Sentry.Context.set_user_context(%{id: InCodec.dump(user_id)})
+```
+
+### Падения процессов
+
+Падение процесса пишет в службу LoggerHandler SDK: его подключает ключ `logs:` конфигурации.
+
+- `capture_log_messages: false` — MUST: `Logger.error` в службу не уходит, падение процесса
+  уходит и без этой опции.
+- `capture_excluded_domains: [:cowboy, :bandit]` — MUST: падение обработки HTTP-запроса
+  записывает точка ответа 500, лог веб-сервера дал бы вторую запись. Умолчание SDK — только
+  `[:cowboy]`.
+- `level:` у `logs:` — MUST NOT: он включает отправку structured logs в службу, а логи живут в
+  агенте-сборщике («Разделение труда»).
+
+```elixir
+# плохо — каждый Logger.error становится записью; падение запроса под Bandit — вторая запись
+config :sentry, logs: [level: :info, capture_log_messages: true]
+
+# хорошо
+config :sentry, logs: [capture_log_messages: false, capture_excluded_domains: [:cowboy, :bandit]]
+```
+
+### Oban
+
+Задача Oban MUST уходить в службу, только исчерпав попытки: неудачная попытка, за которой
+следует повтор, — штатная, и запись на каждую плодит дубли. Колбэк — функция, поэтому живёт в
+`config/runtime.exs`: в `config/config.exs` релиз её не сериализует.
+
+```elixir
+# плохо — запись на каждую неудачную попытку
+config :sentry, integrations: [oban: [capture_errors: true]]
+
+# хорошо — config/runtime.exs
+config :sentry,
+  integrations: [
+    oban: [
+      capture_errors: true,
+      should_report_error_callback: fn _worker, job -> job.attempt >= job.max_attempts end
+    ]
+  ]
+```
+
+### Трейсинг
+
+- Трейсинг Sentry — MUST NOT: ни `traces_sample_rate` / `traces_sampler`, ни
+  `Sentry.OpenTelemetry.SpanProcessor` у `:opentelemetry`. Трассы уходят через `Core.Otel` в
+  OTLP-коллектор («Трассировка»), второй экспорт вытеснил бы его сэмплер.
+- `trace_id` событие берёт из текущего OTel-спана, только если при сборке `:sentry` у приложения
+  есть четыре OTel-приложения (`deps/core/docs/rules/21-observability.md`, «Отчёт о критической
+  ошибке»). Приложение с подключённым SDK трассировки MUST держать в зависимостях все четыре;
+  добавленные позже требуют пересборки `:sentry` (`mix deps.compile sentry --force`). Без SDK
+  трассировки связь записи с трейсом — по времени и логам.
+- Source context (`enable_source_code_context:`) — MAY, на усмотрение приложения.
+
+```elixir
+# плохо — второй экспорт трасс в обход Core.Otel; без semconv trace_id в событие не попадёт
+config :sentry, traces_sample_rate: 0.1
+config :opentelemetry, span_processor: {Sentry.OpenTelemetry.SpanProcessor, []}
+
+# хорошо — mix.exs приложения с SDK трассировки: trace_id события из текущего спана
+{:opentelemetry, "~> 1.5"},
+{:opentelemetry_exporter, "~> 1.0"},
+{:opentelemetry_semantic_conventions, "~> 1.27"},
+{:sentry, "~> 14.0"}
+```
+
 ## Видимость потерь
 
 Прогон, который пропускает строки или объекты, MUST делать это видимым:
@@ -151,3 +287,6 @@ SDK и экспортёр подключает приложение. Пока о
 - Процессы под наблюдением — `17-otp-concurrency.md`
 - Метрики кеша — `16-caching.md`
 - Уровни и формат логов — `20-agreements.md`
+- Точки ответа 500 — `15-web-api.md`
+- Тест записи в службу — `19-testing.md`
+- Отчёт о критической ошибке — `deps/core/docs/rules/21-observability.md`
