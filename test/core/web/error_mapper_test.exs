@@ -117,6 +117,62 @@ defmodule Core.Web.ErrorMapperTest do
     end
   end
 
+  describe "critical/1 — обёртка 500" do
+    @error_id "0123456789abcdef0123456789abcdef"
+
+    test "без идентификатора — шаблон маппера и пустой data" do
+      assert @critical == Web.ErrorMapper.critical()
+      assert @critical == Web.ErrorMapper.critical(error_id: nil)
+    end
+
+    test "с идентификатором — data.errorId и второе предложение message" do
+      assert body(
+               "internal_error",
+               "Произошла непредвиденная ошибка. Идентификатор ошибки: 0123456789abcdef0123456789abcdef",
+               %{errorId: @error_id}
+             ) == Web.ErrorMapper.critical(error_id: @error_id)
+    end
+
+    test "идентификатор дописывается к critical_message" do
+      assert body("internal_error", "Ой. Идентификатор ошибки: 0123456789abcdef0123456789abcdef", %{errorId: @error_id}) ==
+               Web.ErrorMapper.critical(critical_message: "Ой", error_id: @error_id)
+    end
+
+    test "строки 500 map/2 и by_status(500) — та же обёртка" do
+      opts = [critical_message: "Ой", error_id: @error_id]
+      critical = Web.ErrorMapper.critical(opts)
+
+      assert {500, critical, :error} == Web.ErrorMapper.map(app(:write_failed), opts)
+      assert {500, critical, :error} == Web.ErrorMapper.map(:timeout, opts)
+      assert critical == Web.ErrorMapper.by_status(500, opts)
+    end
+
+    test "map/2 и by_status(500) с error_id: nil — прежняя обёртка" do
+      assert {500, @critical, :error} == Web.ErrorMapper.map(:timeout, error_id: nil)
+      assert @critical == Web.ErrorMapper.by_status(500, error_id: nil)
+    end
+
+    test "строки кроме 500 идентификатор игнорируют" do
+      opts = [error_id: @error_id]
+
+      assert {412, body("test/version_mismatch", "сообщение домена"), nil} ==
+               Web.ErrorMapper.map(domain(:version_mismatch), opts)
+
+      assert {403, body("test/access_denied", "сообщение домена"), nil} ==
+               Web.ErrorMapper.map(domain(:access_denied), opts)
+
+      assert {401, body("not_authorized", "Не авторизован"), :debug} == Web.ErrorMapper.map(domain(:unauthorized), opts)
+      assert {400, body("test/invalid", "сообщение домена"), nil} == Web.ErrorMapper.map(domain(:invalid), opts)
+
+      assert body("not_authorized", "Не авторизован") == Web.ErrorMapper.by_status(401, opts)
+      assert body("not_found", "Not Found") == Web.ErrorMapper.by_status(404, opts)
+      assert body("precondition_failed", "Precondition Failed") == Web.ErrorMapper.by_status(412, opts)
+      assert body("unprocessable_content", "Unprocessable Content") == Web.ErrorMapper.by_status(422, opts)
+      assert @critical == Web.ErrorMapper.by_status(503, opts)
+      assert @critical == Web.ErrorMapper.by_status(502, opts)
+    end
+  end
+
   describe "unauthorized/1 — 401 плага аутентификации" do
     test "те же код и текст, что у строки 401 map/2" do
       {401, from_map, :debug} = Web.ErrorMapper.map(domain(:invalid_token))

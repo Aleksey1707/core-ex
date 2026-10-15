@@ -53,8 +53,8 @@ defmodule Core.Web.ErrorMapper do
   | `%Error{kind: :domain, code: :access_denied}` | 403 | `"<ns>/access_denied"` | `message` | — |
   | `%Error{code: c}`, `c` в `auth_codes:` | 401 | `"not_authorized"` | константа | `:debug` |
   | `%Error{kind: :domain}` | 400 | `"<ns>/<code>"` ошибки | `message` | — |
-  | `%Error{kind: :app}` | 500 | `"internal_error"` | шаблон | `:error` |
-  | прочее | 500 | `"internal_error"` | шаблон | `:error` |
+  | `%Error{kind: :app}` | 500 | `"internal_error"` | шаблон, как у `critical/1` | `:error` |
+  | прочее | 500 | `"internal_error"` | шаблон, как у `critical/1` | `:error` |
 
   Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту
   показывать нельзя, и она обязана попасть в лог (`12-errors.md`), поэтому `kind: :app`
@@ -68,7 +68,7 @@ defmodule Core.Web.ErrorMapper do
   «ссылка не найдена», может отдать 404 своей клозой `map/1` перед делегированием.
 
   Опции: `auth_codes:` (дефолт `#{inspect(@auth_codes)}`), `unauthorized_message:`,
-  `critical_message:`.
+  `critical_message:`, `error_id:` — только строки 500 (`critical/1`).
 
   Последняя clause принимает произвольный term намеренно: в `action_fallback` приходит
   `{:error, reason}` любой формы, и необработанный reason обязан стать 500, а не крашем.
@@ -87,15 +87,13 @@ defmodule Core.Web.ErrorMapper do
       else: by_kind(error, opts)
   end
 
-  def map(_reason, opts), do: critical(opts)
+  def map(_reason, opts), do: {500, critical(opts), :error}
 
   # ---
 
   defp by_kind(%Error{kind: :domain} = error, _opts), do: {400, Response.error(error), nil}
 
-  defp by_kind(%Error{kind: :app}, opts), do: critical(opts)
-
-  defp critical(opts), do: {500, Response.error(:internal_error, critical_message(opts)), :error}
+  defp by_kind(%Error{kind: :app}, opts), do: {500, critical(opts), :error}
 
   # ===== unauthorized =====
 
@@ -110,6 +108,30 @@ defmodule Core.Web.ErrorMapper do
   def unauthorized(opts \\ []),
     do: Response.error(:not_authorized, Keyword.get(opts, :unauthorized_message, @unauthorized))
 
+  # ===== critical =====
+
+  @doc """
+  Обёртка ответа 500 на критическую ошибку: её собирают строки 500 `map/2` и `by_status(500)`.
+
+  `code` — `"internal_error"`, `message` — шаблон (`critical_message:` без точки в конце, дефолт —
+  константа маппера). С `error_id:` — идентификатор ошибки из службы учёта ошибок дважды: полем
+  `data.errorId` и вторым предложением `message` («<шаблон>. Идентификатор ошибки: <id>»).
+  Без `error_id:` (или с `nil`) `data` пуст. Решение — ADR-0071.
+  """
+  @spec critical(keyword()) :: Response.error()
+
+  def critical(opts \\ []) do
+    message = Keyword.get(opts, :critical_message, @critical)
+
+    case Keyword.get(opts, :error_id) do
+      nil ->
+        Response.error(:internal_error, message)
+
+      error_id when is_binary(error_id) ->
+        Response.error(:internal_error, message <> ". Идентификатор ошибки: " <> error_id, %{errorId: error_id})
+    end
+  end
+
   # ===== by_status =====
 
   @doc """
@@ -121,10 +143,12 @@ defmodule Core.Web.ErrorMapper do
   | 401 | `"not_authorized"` | константа, как у `unauthorized/1` |
   | 4xx из таблицы Plug | имя статуса (`Plug.Conn.Status.reason_atom/1`) | фраза статуса |
   | 4xx вне таблицы Plug | `"bad_request"` | фраза 400 |
-  | 5xx | `"internal_error"` | шаблон, как у `map/2` |
+  | 500 | `"internal_error"` | шаблон, как у `critical/1` |
+  | 5xx кроме 500 | `"internal_error"` | шаблон без идентификатора ошибки |
 
   Статус вне таблицы Plug отдаёт чужой плаг (`Plug.Exception.status/1`), и рендер ответа на ошибку
-  не имеет права упасть вместо обёртки. Опции: `unauthorized_message:`, `critical_message:`.
+  не имеет права упасть вместо обёртки. Опции: `unauthorized_message:`, `critical_message:`,
+  `error_id:` — только статус 500.
   """
   @spec by_status(400..599, keyword()) :: Response.error()
 
@@ -138,7 +162,9 @@ defmodule Core.Web.ErrorMapper do
     ArgumentError -> Response.error(:bad_request, Status.reason_phrase(400))
   end
 
-  def by_status(status, opts) when status in 500..599, do: Response.error(:internal_error, critical_message(opts))
+  def by_status(500, opts), do: critical(opts)
+
+  def by_status(status, opts) when status in 501..599, do: critical(Keyword.delete(opts, :error_id))
 
   # ===== cast_errors =====
 
@@ -205,8 +231,4 @@ defmodule Core.Web.ErrorMapper do
     defp with_path(%Cast.Error{path: []}, message), do: "#: " <> message
     defp with_path(error, message), do: "#" <> Cast.Error.path_to_string(error) <> ": " <> message
   end
-
-  # ===== общее =====
-
-  defp critical_message(opts), do: Keyword.get(opts, :critical_message, @critical)
 end

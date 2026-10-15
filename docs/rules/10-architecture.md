@@ -208,7 +208,13 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
   Функция собирается только при `open_api_spex` (ADR-0068).
 - Опции: `auth_codes:` (дефолт `~w(unauthorized auth_failed invalid_token session_not_found)a`),
   `unauthorized_message:` (`map/2`, `unauthorized/1`, `by_status/2`), `critical_message:`
-  (`map/2`, `by_status/2`), `invalid_params_message:` (`cast_errors/2`).
+  (`map/2`, `by_status/2`, `critical/1`), `error_id:` (`map/2`, `by_status/2`, `critical/1` —
+  только статус 500), `invalid_params_message:` (`cast_errors/2`).
+- Обёртку 500 MUST собирать `Core.Web.ErrorMapper.critical/1` — так её собирают строка 500 `map/2`
+  и `by_status(500)`, — а не `Response.error(:internal_error, …)`. С `error_id:` она несёт
+  идентификатор ошибки из службы учёта ошибок дважды — `data.errorId` и вторым предложением
+  `message` («<шаблон>. Идентификатор ошибки: <id>»); без него — прежний шаблон и пустой `data`
+  (ADR-0071).
 - Своя строка таблицы — клоза `map/1` маппера приложения. Свои клозы MUST объявляться **перед**
   делегированием в `Core.Web.ErrorMapper.map/2`: `map/2` не макрос и не behaviour, и порядок
   клоз — это приоритет строк.
@@ -233,7 +239,8 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | 401 | `"not_authorized"` | константа, как у `unauthorized/1` (`unauthorized_message:`) |
 | 4xx из таблицы Plug | имя статуса (`Plug.Conn.Status.reason_atom/1`) | фраза статуса |
 | 4xx вне таблицы Plug | `"bad_request"` | фраза 400 |
-| 5xx | `"internal_error"` | шаблон, как у `map/2` (`critical_message:`) |
+| 500 | `"internal_error"` | шаблон, как у `critical/1` (`critical_message:`, `error_id:`) |
+| 5xx кроме 500 | `"internal_error"` | шаблон без идентификатора ошибки (`critical_message:`) |
 
 - `code` на 4xx MUST быть именем статуса, а не `"internal_error"`: клиент читает его как сбой
   сервера и не различает 404, 413 и 415.
@@ -242,8 +249,8 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 
 Проверяется: `test/core/web/error_mapper_test.exs` — таблица построчно, `:not_found` → 400 отдельным
 тестом, состав `Error.many` — describe «множество ошибок», `by_status/2` — describe «by_status/2 —
-ошибка до контроллера»; `code` доменной ошибки — `test/core/web/response_test.exs`, describe
-«error/1 — доменная ошибка».
+ошибка до контроллера», обёртка 500 и `error_id:` — describe «critical/1 — обёртка 500»; `code`
+доменной ошибки — `test/core/web/response_test.exs`, describe «error/1 — доменная ошибка».
 
 ### OpenAPI-схемы wire
 

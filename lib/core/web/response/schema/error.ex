@@ -6,7 +6,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
     Одна схема на все статусы ошибки (ADR-0065): `code` — строка без перечисления (у доменной
     ошибки — `"<ns>/<code>"`, ADR-0067), `data` — открытый объект, состав множества ошибок —
-    необязательный `data.errors` (`Core.Web.ErrorMapper`).
+    необязательный `data.errors`, идентификатор ошибки ответа 500 — необязательный `data.errorId`
+    (`Core.Web.ErrorMapper`, ADR-0071).
     Не через `OpenApiSpex.schema/2` (`10-architecture.md`, «OpenAPI-схемы wire»).
     """
 
@@ -21,8 +22,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
                   status: %OpenApiSpex.Schema{type: :string, enum: ["error"]},
                   data: %OpenApiSpex.Schema{
                     type: :object,
-                    description: "Данные ошибки; у множества ошибок — его состав в `errors`",
+                    description:
+                      "Данные ошибки; у множества ошибок — его состав в `errors`, " <>
+                        "у критической — идентификатор ошибки в `errorId`",
                     properties: %{
+                      errorId: %OpenApiSpex.Schema{
+                        type: :string,
+                        description: "Идентификатор ошибки в службе учёта ошибок; только у ответа 500"
+                      },
                       errors: %OpenApiSpex.Schema{
                         type: :array,
                         items: %OpenApiSpex.Schema{

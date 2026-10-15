@@ -108,6 +108,16 @@ defmodule Core.Web.Response.SchemaTest do
       end
     end
 
+    test "идентификатор ошибки — необязательная строка data.errorId" do
+      assert_error(ErrorMapper.critical(error_id: "0123456789abcdef0123456789abcdef"))
+      assert_error(ErrorMapper.critical())
+
+      %OpenApi{components: %Components{schemas: %{"ErrorResponse" => schema}}} = spec = spec()
+      body = %{"status" => "error", "data" => %{"errorId" => 42}, "code" => "internal_error", "message" => "сбой"}
+
+      assert {:error, _} = OpenApiSpex.cast_value(body, schema, spec)
+    end
+
     test "пример проходит свою схему" do
       %{example: example} = Response.Schema.error().schema()
 
