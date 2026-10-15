@@ -21,6 +21,24 @@
   - стало: `map(reason, error_id: id)` — тот же `message` и вдобавок `data.errorId`; обёртку 500
     вне `map/2` — `critical(error_id: id)`, в `ErrorJSON` — `by_status(500, error_id: id)`.
 
+- **Отчёт о критической ошибке — `Core.Web.CriticalError.report(reason, stacktrace)`** (решение —
+  `docs/adr/0071-error-id-in-500-wrapper.md`; норма — `docs/rules/21-observability.md`, «Отчёт о
+  критической ошибке»). Раньше потребитель с Sentry писал отчёт сам: форму события по виду причины,
+  группировку `%Error{}` и идентификатор ошибки, причём `Sentry.get_last_event_id_and_source/0` в
+  keep-alive процессе отдавал id прошлого запроса. Теперь один вызов записывает событие асинхронно
+  (`result: :none`) и возвращает идентификатор ошибки — `event_id` события этого вызова, 32 hex, —
+  либо `nil`, если записи нет (пустой DSN, событие отброшено SDK). Исключение уходит событием
+  исключения со stacktrace; `%Error{}` — сообщением «Прикладная ошибка API: <текст>» с fingerprint
+  `"<ns>/<code>"` и `inspect/1` ошибки в доп. данных; прочий term — сообщением «Необработанная
+  ошибка API» с `inspect/1` причины.
+
+  `:sentry` — новая optional-зависимость `~> 14.0`: модуль собирается, только если SDK есть у
+  приложения, потребитель без него собирает библиотеку как раньше. Потребитель на `:sentry` 13.x
+  обновляет SDK до 14 вместе с библиотекой — иначе `mix deps.get` не сведёт версии. Свой отчёт
+  потребителя обновление не ломает; переход на библиотечный — замена своего вызова SDK и разбора
+  `get_last_event_id_and_source/0`: `Sentry.capture_exception(e, stacktrace: st)` + id из процесса →
+  `error_id = Core.Web.CriticalError.report(e, st)`.
+
 ## 0.15.0
 
 ### Ломающие изменения контракта

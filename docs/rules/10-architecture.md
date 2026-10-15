@@ -152,9 +152,9 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 ## Граница HTTP
 
 `Core.Web.*` — то, что на границе HTTP одинаково у всех потребителей и **не** зависит
-ни от Phoenix, ни от OpenApiSpex. Исключение — условная зависимость от OpenApiSpex (ADR-0064): то,
-что в таблице помечено «при `open_api_spex`», собирается, только если он есть у приложения
-(«OpenAPI-схемы wire» ниже):
+ни от Phoenix, ни от OpenApiSpex. Исключения — условные зависимости от OpenApiSpex (ADR-0064) и
+Sentry (ADR-0071): то, что в таблице помечено «при `open_api_spex`» или «при `:sentry`», собирается,
+только если зависимость есть у приложения («OpenAPI-схемы wire» и «Служба учёта ошибок» ниже):
 
 | Модуль | Роль |
 |---|---|
@@ -163,6 +163,7 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 | `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` (`map/2`); обёртка 401 плага аутентификации (`unauthorized/1`); статус ошибки, не дошедшей до контроллера, → обёртка ответа (`by_status/2`); ошибки разбора запроса по OpenAPI → `{422, обёртка ответа, nil}` (`cast_errors/2`, только при `open_api_spex`) |
 | `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы со схемой данных аргументом, `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
+| `Core.Web.CriticalError` | отчёт о критической ошибке в службу учёта ошибок и идентификатор ошибки для обёртки 500 (`report/2`), только при `:sentry` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
 | `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON, при `labels: true` — с названием и сведениями, при `open_api_spex` — и схема этого JSON (ADR-0066; `11-domain.md`, «Wire сведений») |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
@@ -283,6 +284,22 @@ handle `Mq.Kafka.Writer` и `client:` у `Mq.Kafka.Reader`), их supervision, r
 фикстура-потребитель без `open_api_spex` собирает модули с `use Core.Web.Event` без
 предупреждений; сверка дампа со схемой — `test/core/web/event_test.exs`,
 `test/core/web/event/details_test.exs`, `test/core/web/response/schema_test.exs`.
+
+### Служба учёта ошибок
+
+`:sentry` объявлен `optional: true` (`~> 14.0`): службу учёта ошибок подключает потребитель,
+которому она нужна (ADR-0071).
+
+- `Core.Web.CriticalError` — единственный модуль библиотеки, который зовёт SDK; он MUST оставаться
+  под `if Code.ensure_loaded?(Sentry)`, ссылки на него из безусловных модулей MUST NOT.
+- Обёртка 500 с идентификатором ошибки (`Core.Web.ErrorMapper`, опция `error_id:`) от `:sentry`
+  MUST NOT зависеть: идентификатор приходит строкой.
+- Конфигурацию SDK (DSN, окружение, релиз, LoggerHandler) библиотека MUST NOT задавать — она у
+  потребителя.
+
+Что пишет отчёт и когда его звать — `21-observability.md`, «Отчёт о критической ошибке».
+
+Проверяется: `make compile-no-optional` — сборка без `:sentry`.
 
 ## Связанные правила
 

@@ -48,12 +48,16 @@ defmodule Core.MixProject do
       {:opentelemetry_api, "~> 1.4"},
       # SDK — только тестам библиотеки: у потребителя он свой (см. README).
       {:opentelemetry, "~> 1.5", only: :test},
+      # HTTP-приёмник тестового режима Sentry (`Sentry.Test.setup_sentry/1`)
+      {:bypass, "~> 2.1", only: :test},
       # Брокеры: клиенты опциональны — адаптер компилируется только у тех
       # потребителей, кто объявил соответствующий клиент у себя (см. README).
       {:rabbitmq_stream, "~> 0.4.2", optional: true},
       {:brod, "~> 4.7", optional: true},
       # OpenAPI-схемы wire: порождаются у потребителя, у которого зависимость есть (ADR-0064)
       {:open_api_spex, "~> 3.21", optional: true},
+      # Служба учёта ошибок: отчёт о критической ошибке собирается у потребителя с Sentry (ADR-0071)
+      {:sentry, "~> 14.0", optional: true},
       # Криптография
       {:argon2_elixir, "~> 4.1"},
       {:fernetex, "~> 0.5"},

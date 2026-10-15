@@ -120,6 +120,19 @@ behaviour — менять библиотеку для этого не нужн�
 падает `UndefinedFunctionError`. Решение — `docs/adr/0064-openapi-schemas-optional.md`,
 `docs/adr/0065-response-wrapper-schema-functions.md`.
 
+## Опциональные зависимости: служба учёта ошибок
+
+`sentry` объявлен `optional: true`: службу учёта ошибок подключает приложение, которому она нужна.
+
+| Нужно | Объявите у себя | Появится |
+|---|---|---|
+| отчёт о критической ошибке | `{:sentry, "~> 14.0"}` | `Core.Web.CriticalError.report/2`: запись в службу и идентификатор ошибки для обёртки 500 |
+
+`Core.Web.CriticalError` собирается вместе с `core`: добавленный позже `sentry` требует пересборки
+`core` (`mix deps.compile core --force`). Конфигурация SDK — у приложения
+(`docs/rules/21-observability.md`, «Отчёт о критической ошибке»). Решение —
+`docs/adr/0071-error-id-in-500-wrapper.md`.
+
 ## Конфигурация
 
 Всё, что читает библиотека, лежит под её собственным приложением `:core`.

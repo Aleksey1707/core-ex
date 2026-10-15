@@ -43,3 +43,6 @@ config :opentelemetry,
 config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
 
 config :logger, level: :warning
+
+# Тестовый режим SDK службы учёта ошибок: конфигурация и пойманные события — на тест (`Sentry.Test`).
+config :sentry, test_mode: true
