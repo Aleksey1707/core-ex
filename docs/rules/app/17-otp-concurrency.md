@@ -443,6 +443,22 @@ children = [MyApp.Infra.DAO | Enum.map(processes(), &{&1, process_opts(&1)})]
 команда идёт тем же путём, но без процесса на id: выключенное дерево не ломает команды, а
 только снимает процесс на id.
 
+Предельный возраст состояния процесса на id — опция `state_max_age:` в мс, как `idle_timeout:`.
+У агрегата с ПДн в событиях по умолчанию 300 000, `:infinity` — `ArgumentError` на старте: кеш
+держал бы ПДн уничтоженного субъекта, пока идут команды
+(`deps/core/docs/rules/23-personal-data.md`, «Состояние в памяти»). У агрегата без ПДн — по
+умолчанию `:infinity`. Предел — срок, на который память ноды отстаёт от уничтожения ключа:
+поднимать его SHOULD NOT дальше, чем допускает акт уничтожения; длительность из env — через
+`Core.DurationParser`.
+
+```elixir
+# config/runtime.exs
+config :my_app, MyApp.Domain.<BC>.Account.Process,
+  enabled: System.get_env("ES_ACCOUNT_PROCESS_ENABLED", "true") == "true",
+  state_max_age:
+    Core.DurationParser.to_timeout!(System.get_env("ES_ACCOUNT_PROCESS_STATE_MAX_AGE", "5m"))
+```
+
 ## Очередь outbox
 
 Очередь поднимает только дерево библиотеки `Core.Outbox.Supervisor` — соединение, writer'ы,

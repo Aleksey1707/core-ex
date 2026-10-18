@@ -64,15 +64,16 @@ defmodule Core.Es.Aggregate.Process.Execution do
 
   # Незаведённый агрегат перечитывается `get_decision`: явная версия на пустом потоке сверяется
   # после решения, а `refresh` отказал бы до него.
-  defp decided(cfg, call, %{version: %Version{}} = cached) do
+  defp decided(cfg, call, cached) do
+    if refreshes?(cached),
+      do: refreshed(cfg, call, cached),
+      else: cfg.repo.get_decision(call.id, call.version, call.context, &cfg.aggregate.execute(&1, call.command))
+  end
+
+  defp refreshed(cfg, call, cached) do
     cached
     |> cfg.repo.refresh(call.version, call.context)
     |> Result.and_then(&cfg.aggregate.execute(&1, call.command))
-  end
-
-  defp decided(cfg, call, _uncached_or_unborn) do
-    decide = &cfg.aggregate.execute(&1, call.command)
-    cfg.repo.get_decision(call.id, call.version, call.context, decide)
   end
 
   defp callback(nil, _events), do: :ok
@@ -101,6 +102,17 @@ defmodule Core.Es.Aggregate.Process.Execution do
   # `{:error, :expired}` из него неотличимо от служебного.
   defp outcome({:error, {__MODULE__, :expired}}), do: :expired
   defp outcome(result), do: result
+
+  # ===== вид чтения =====
+
+  @doc """
+  Команда от состояния `cached` дочитает его `refresh`: заведённый агрегат. Иначе — полное чтение
+  `get_decision`.
+  """
+  @spec refreshes?(struct() | nil) :: boolean()
+
+  def refreshes?(%{version: %Version{}}), do: true
+  def refreshes?(cached) when is_struct(cached) or is_nil(cached), do: false
 
   # ===== результат =====
 

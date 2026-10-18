@@ -11,6 +11,9 @@ defmodule Core.Es.Aggregate.Process.Server do
 
   Команда идёт целиком в одном `handle_call/3`: процесс ставит `trap_exit`, и остановка
   супервизором ждёт её конца в пределах `:shutdown` дочерней спецификации.
+
+  Состояние хранится с отметкой последнего полного чтения (`get_decision`): старше
+  `state_max_age:` — `stale?/3` — оно выбрасывается до команды.
   """
 
   use GenServer
@@ -28,15 +31,16 @@ defmodule Core.Es.Aggregate.Process.Server do
   # транзакцию, и дольше команда процесс не держит.
   @shutdown_ms 10_000
 
-  @enforce_keys ~w(cfg id aggregate_id idle_timeout)a
-  defstruct @enforce_keys ++ [:state]
+  @enforce_keys ~w(cfg id aggregate_id idle_timeout state_max_age)a
+  defstruct @enforce_keys ++ [:state, :read_at]
 
-  @typedoc "Аргументы старта: объявление `use`, адрес агрегата и простой до ухода."
+  @typedoc "Аргументы старта: объявление `use`, адрес агрегата, простой до ухода и предел возраста состояния."
   @type args :: %{
           cfg: Core.Es.Aggregate.Process.cfg(),
           id: struct(),
           aggregate_id: String.t(),
-          idle_timeout: pos_integer()
+          idle_timeout: pos_integer(),
+          state_max_age: pos_integer() | :infinity
         }
 
   @typedoc "Запрос команды: вызов, адрес и дедлайн, момент постановки в очередь и окружение."
@@ -56,7 +60,9 @@ defmodule Core.Es.Aggregate.Process.Server do
           id: struct(),
           aggregate_id: String.t(),
           idle_timeout: pos_integer(),
-          state: struct() | nil
+          state_max_age: pos_integer() | :infinity,
+          state: struct() | nil,
+          read_at: integer() | nil
         }
 
   # ===== вызов =====
@@ -115,7 +121,8 @@ defmodule Core.Es.Aggregate.Process.Server do
       cfg: cfg,
       id: id,
       aggregate_id: target.aggregate_id,
-      idle_timeout: options.idle_timeout
+      idle_timeout: options.idle_timeout,
+      state_max_age: options.state_max_age
     }
 
     case DynamicSupervisor.start_child(cfg.supervisor, {__MODULE__, args}) do
@@ -195,9 +202,14 @@ defmodule Core.Es.Aggregate.Process.Server do
   end
 
   defp run_command(server, request, queue) do
+    now = System.monotonic_time(:millisecond)
+    server = drop_stale(server, now)
+    read_at = next_read_at(server, now)
+
     case in_caller_env(server, request) do
       {{:ok, state} = executed, retries} ->
-        {:reply, {Execution.result(executed), retries, queue}, %{server | state: state}, server.idle_timeout}
+        {:reply, {Execution.result(executed), retries, queue}, %{server | state: state, read_at: read_at},
+         server.idle_timeout}
 
       {:expired, _retries} ->
         dropped(server)
@@ -205,6 +217,31 @@ defmodule Core.Es.Aggregate.Process.Server do
       {{:error, _reason} = error, retries} ->
         {:reply, {error, retries, queue}, server, server.idle_timeout}
     end
+  end
+
+  # Состояние старше предела выбрасывается до команды при любом её исходе: команда пойдёт полным
+  # чтением, и устаревшая копия в процессе не остаётся.
+  defp drop_stale(%__MODULE__{read_at: nil} = server, _now), do: server
+
+  defp drop_stale(server, now) do
+    if stale?(server.read_at, now, server.state_max_age) do
+      Logger.debug(
+        "процесс агрегата: состояние устарело: type=#{server.cfg.type} " <>
+          "aggregate_id=#{server.aggregate_id} state_max_age=#{server.state_max_age}"
+      )
+
+      %{server | state: nil, read_at: nil}
+    else
+      server
+    end
+  end
+
+  # Отметка полного чтения — момент до команды: возраст состояния не занижается. `refresh` её не
+  # обновляет: дочитанный хвост не перечитывает ПДн, свёрнутые раньше.
+  defp next_read_at(server, now) do
+    if Execution.refreshes?(server.state),
+      do: server.read_at,
+      else: now
   end
 
   # Окружение вызывающего — только на время команды: OTel-контекст, `Logger.metadata()` и
@@ -240,6 +277,19 @@ defmodule Core.Es.Aggregate.Process.Server do
     end
   end
 
+  # ===== возраст состояния =====
+
+  @doc """
+  Состояние устарело: от полного чтения `read_at` до `now` (мс монотонного времени) прошло больше
+  `max_age`; при `:infinity` — никогда.
+  """
+  @spec stale?(integer(), integer(), pos_integer() | :infinity) :: boolean()
+
+  def stale?(read_at, now, :infinity) when is_integer(read_at) and is_integer(now), do: false
+
+  def stale?(read_at, now, max_age) when is_integer(read_at) and is_integer(now) and is_integer(max_age),
+    do: now - read_at > max_age
+
   # ===== остановка =====
 
   @doc false
@@ -268,6 +318,31 @@ defmodule Core.Es.Aggregate.Process.Server do
 
   # Исключение в команде: транзакция откатилась, вызывающий получает exit.
   def terminate(_reason, server), do: emit(server, :stop, %{reason: :error})
+
+  # ===== отчёт о падении =====
+
+  @doc false
+  @spec format_status(:gen_server.format_status()) :: :gen_server.format_status()
+
+  # Отчёт о падении и `:sys.get_status/1` агрегата с ПДн в событиях: состояние и команда несут ПДн,
+  # а извлечённое из Prim значение `Inspect` не скрывает.
+  @impl true
+  def format_status(%{state: %__MODULE__{cfg: %{personal: true}} = server} = status) do
+    status
+    |> Map.put(:state, %{type: server.cfg.type, aggregate_id: server.aggregate_id, version: version(server.state)})
+    |> Map.replace_lazy(:message, &command_module/1)
+  end
+
+  def format_status(status), do: status
+
+  # ---
+
+  defp version(%{version: version}), do: version
+  defp version(nil), do: nil
+
+  defp command_module({:execute, %{call: %{command: %{__struct__: command}}}}), do: command
+
+  defp command_module(message), do: message
 
   # ===== общее =====
 

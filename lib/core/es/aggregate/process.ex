@@ -81,6 +81,14 @@ defmodule Core.Es.Aggregate.Process do
   - Исключение в `decide`, `evolve` или колбэке роняет процесс: транзакция откатывается,
     вызывающему — exit. Процессы `restart: :temporary` — следующая команда стартует новый.
   - Простой `idle_timeout:` — уход `{:stop, :normal}`; снапшот при уходе не пишется.
+  - Состояние старше `state_max_age:` выбрасывается перед командой при любом её исходе, и команда
+    идёт полным `get_decision`, `debug` «состояние устарело». Возраст считается от последнего
+    полного чтения (`get_decision`), `refresh` его не обновляет. Так состояние с ПДн субъекта,
+    ключ которого уничтожен, не служит командам дольше предела, без извещения процессов, а из
+    процесса уходит с первой командой после предела или с уходом по простою.
+  - Отчёт о падении и `:sys.get_status/1` процесса агрегата с ПДн в событиях (`format_status/1`):
+    вместо состояния — тип, `aggregate_id` и версия, вместо последнего сообщения — модуль команды,
+    `reason` — как есть. У агрегата без ПДн — как у любого `GenServer`.
   - Остановка дерева ждёт команду, которую процесс исполняет, до 10 000 мс: процесс ставит
     `trap_exit`, и команда не обрывается посреди транзакции.
 
@@ -95,6 +103,10 @@ defmodule Core.Es.Aggregate.Process do
     отметка: `execute` исполняет команду в вызывающем процессе.
   - `retries:` — повторов после отказа записи, по умолчанию 3
   - `idle_timeout:` — мс простоя процесса на id до ухода, по умолчанию 60 000
+  - `state_max_age:` — мс предельного возраста состояния процесса на id. У агрегата с ПДн в
+    событиях (поле с `subject:` у кодека, `__es_subjects__/0`) — по умолчанию 300 000,
+    `:infinity` — `ArgumentError`; у агрегата без ПДн — по умолчанию `:infinity`. При
+    `enabled: false` не действует: кеша нет.
 
   Числа — положительные целые.
 
@@ -149,15 +161,25 @@ defmodule Core.Es.Aggregate.Process do
   @optional_keys []
   @execute_defaults [timeout: 5_000]
   @start_defaults [retries: 3, idle_timeout: 60_000]
+  @personal_state_max_age 300_000
 
   @typedoc "Проверенные опции старта — они же отметка."
-  @type options :: %{enabled: boolean(), retries: pos_integer(), idle_timeout: pos_integer()}
+  @type options :: %{
+          enabled: boolean(),
+          retries: pos_integer(),
+          idle_timeout: pos_integer(),
+          state_max_age: pos_integer() | :infinity
+        }
 
-  @typedoc "Объявление `use`: реализация репозитория, агрегат, его тип и имена процессов дерева."
+  @typedoc """
+  Объявление `use`: реализация репозитория, агрегат, его тип, ПДн в событиях (поля с `subject:` у
+  кодека) и имена процессов дерева.
+  """
   @type cfg :: %{
           repo: module(),
           aggregate: module(),
           type: String.t(),
+          personal: boolean(),
           registry: atom(),
           supervisor: atom()
         }
@@ -182,7 +204,7 @@ defmodule Core.Es.Aggregate.Process do
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
     behaviour = Helper.Opts.module!(lit, :repo, @label, exports: [__es_aggregate_repo__: 0])
     %{aggregate: aggregate, id: id} = behaviour.__es_aggregate_repo__()
-    type = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label).__es_type__()
+    event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
     process = __CALLER__.module
 
     quote generated: true do
@@ -193,7 +215,8 @@ defmodule Core.Es.Aggregate.Process do
       @es_aggregate_process %{
         repo: Core.Config.repo!(unquote(behaviour)),
         aggregate: unquote(aggregate),
-        type: unquote(type),
+        type: unquote(event_codec.__es_type__()),
+        personal: unquote(event_codec.__es_subjects__() != %{}),
         registry: unquote(child_name(process, "Registry")),
         supervisor: unquote(child_name(process, "Supervisor"))
       }
@@ -370,13 +393,13 @@ defmodule Core.Es.Aggregate.Process do
   @spec start_link(module(), cfg(), keyword()) :: Supervisor.on_start()
 
   def start_link(process, cfg, opts) when is_atom(process) and is_list(opts),
-    do: start(process, cfg, options!(opts))
+    do: start(process, cfg, options!(cfg, opts))
 
   @doc false
   @spec watch_list(module(), cfg(), keyword()) :: [watch_item()]
 
   def watch_list(process, cfg, opts) when is_atom(process) and is_list(opts) do
-    case options!(opts) do
+    case options!(cfg, opts) do
       %{enabled: false} -> []
       %{enabled: true} -> [%{component: "es_aggregate_process:#{cfg.type}", name: process}]
     end
@@ -389,12 +412,30 @@ defmodule Core.Es.Aggregate.Process do
 
   # ---
 
-  defp options!(opts) do
+  defp options!(cfg, opts) do
     enabled = StartOpts.boolean!(@label, opts, :enabled)
 
     @start_defaults
     |> Map.new(fn {key, default} -> {key, StartOpts.pos_integer!(@label, opts, key, default)} end)
     |> Map.put(:enabled, enabled)
+    |> Map.put(:state_max_age, state_max_age!(cfg.personal, opts))
+  end
+
+  # Кеш состояния агрегата с ПДн в событиях держит ПДн субъекта и после уничтожения его ключа:
+  # без предела возраста он жил бы, пока идут команды.
+  defp state_max_age!(true, opts) do
+    case Keyword.get(opts, :state_max_age, @personal_state_max_age) do
+      value when is_integer(value) and value > 0 -> value
+      other -> StartOpts.raise_invalid!(@label, :state_max_age, "положительное целое (в событиях агрегата ПДн)", other)
+    end
+  end
+
+  defp state_max_age!(false, opts) do
+    case Keyword.get(opts, :state_max_age, :infinity) do
+      :infinity -> :infinity
+      value when is_integer(value) and value > 0 -> value
+      other -> StartOpts.raise_invalid!(@label, :state_max_age, "положительное целое или :infinity", other)
+    end
   end
 
   defp start(process, cfg, %{enabled: false} = options) do

@@ -203,6 +203,13 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 
 `%Error{}`, состояние процесса и аргументы, напечатанные через `inspect/1`, значения не несут.
 
+Отчёт о падении и `:sys.get_status/1` процесса на id агрегата с ПДн в событиях идут через
+`format_status/1` `Core.Es.Aggregate.Process.Server`: вместо состояния — тип, `aggregate_id` и
+версия, вместо последнего сообщения — модуль команды, `reason` — как есть. Состояние и команда
+несут ПДн, в том числе вне Prim. Аргументы кадра исключения в `decide` / `evolve` уходят в
+`reason` со стеком, и ПДн в них скрывает только `Inspect` Prim с `personal: true`. Процесс
+агрегата без ПДн печатается как любой `GenServer`.
+
 - Граница гарантии — извлечённое значение (`Prim.value/1`, строка в `raise`): его библиотека не
   скрывает, норма — `deps/core/docs/rules/app/23-personal-data.md`, «Вывод».
 - Атрибут span'а с ПДн-значением MUST NOT — тот же запрет, что для чувствительных данных
@@ -218,7 +225,10 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 
 Проверяется: `test/core/prim/personal_test.exs` — `refute inspect(...) =~` для Prim и `detail`
 отказа; `test/core/es/event/codec_personal_test.exs` — `inspect/1` нагрузки и маркера, `detail`
-ошибки `load` под полем с `subject:`, `Jason.Encoder` маркера.
+ошибки `load` под полем с `subject:`, `Jason.Encoder` маркера;
+`test/core/es/aggregate/process/server_test.exs`, describe «format_status/1», и
+`test/core/es/aggregate/process_test.exs`, тест «raise в decide роняет процесс» — отчёт о падении и
+`:sys.get_status/1` процесса агрегата с ПДн.
 
 ## Тесты
 

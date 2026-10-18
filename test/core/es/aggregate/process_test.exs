@@ -67,7 +67,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert log =~ "процесс агрегата: отключён: type=account"
 
       assert Es.Aggregate.Process.mark(Account.Process) ==
-               %{enabled: false, retries: 3, idle_timeout: 60_000}
+               %{enabled: false, retries: 3, idle_timeout: 60_000, state_max_age: 300_000}
 
       assert Es.Aggregate.Process.mark(Account.RacyProcess) == nil
     end
@@ -96,6 +96,36 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
       assert Es.Aggregate.Process.mark(Account.Process) == nil
     end
+
+    test "state_max_age: у агрегата с ПДн — мс, :infinity — ArgumentError без отметки" do
+      :ignore = start(Account.Process, enabled: false, state_max_age: 1_000)
+      assert %{state_max_age: 1_000} = Es.Aggregate.Process.mark(Account.Process)
+      erase_mark(Account.Process)
+
+      assert_raise ArgumentError,
+                   ~r/:state_max_age — ожидается положительное целое \(в событиях агрегата ПДн\), получено :infinity/,
+                   fn -> start(Account.Process, enabled: false, state_max_age: :infinity) end
+
+      assert_raise ArgumentError,
+                   ~r/:state_max_age — ожидается положительное целое \(в событиях агрегата ПДн\), получено 0/,
+                   fn -> Account.Process.watch_list(enabled: true, state_max_age: 0) end
+
+      assert Es.Aggregate.Process.mark(Account.Process) == nil
+    end
+
+    test "state_max_age: у агрегата без ПДн — :infinity по умолчанию, мс допустимы" do
+      cfg = %{Account.Process.__es_aggregate_process__() | personal: false}
+
+      :ignore = Es.Aggregate.Process.start_link(Account.RacyProcess, cfg, enabled: false)
+      assert %{state_max_age: :infinity} = Es.Aggregate.Process.mark(Account.RacyProcess)
+
+      :ignore = Es.Aggregate.Process.start_link(Account.RacyProcess, cfg, enabled: false, state_max_age: 1_000)
+      assert %{state_max_age: 1_000} = Es.Aggregate.Process.mark(Account.RacyProcess)
+
+      assert_raise ArgumentError,
+                   ~r/:state_max_age — ожидается положительное целое или :infinity, получено 0/,
+                   fn -> Es.Aggregate.Process.start_link(Account.RacyProcess, cfg, enabled: false, state_max_age: 0) end
+    end
   end
 
   describe "процесс на id" do
@@ -109,7 +139,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert log =~ "процесс агрегата: запущен: type=account"
 
       assert Es.Aggregate.Process.mark(Account.Process) ==
-               %{enabled: true, retries: 3, idle_timeout: 60_000}
+               %{enabled: true, retries: 3, idle_timeout: 60_000, state_max_age: 300_000}
 
       mods = for {_id, _pid, _type, [mod]} <- Supervisor.which_children(Account.Process), do: mod
       assert Enum.sort(mods) == [DynamicSupervisor, Registry]
@@ -224,6 +254,43 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:execute, %{mode: :process, result: :ok}, %{retries: 0}}
       assert_received {:execute, %{mode: :process, result: :ok}, %{retries: 2}}
       assert {:ok, _version} = Account.RacyProcess.execute(id, Version.new!(2), freeze(), Context.new())
+    end
+
+    test "состояние старше state_max_age: выбрасывается — полный get_decision; refresh возраст не обновляет" do
+      start_tree!(Account.Process)
+      id = Account.ID.new()
+      :ok = attach_load()
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
+      assert_received {:ran_in, server}
+      assert_received {:load, %{op: :get_decision}}
+      %{read_at: read_at} = :sys.get_state(server)
+      assert is_integer(read_at)
+
+      {:ok, _version} = Account.Process.execute(id, :current, rename("Отгрузка"), Context.new())
+      assert_received {:load, %{op: :refresh}}
+      assert %{read_at: ^read_at} = :sys.get_state(server)
+
+      # Отметка полного чтения сдвигается за предел по умолчанию (300 000 мс) — без ожидания.
+      :sys.replace_state(server, &%{&1 | read_at: read_at - 300_001})
+
+      log =
+        capture_at(:debug, fn ->
+          assert {:error, %Error{code: :already_exists}} =
+                   Account.Process.execute(id, :current, open("Счёт"), Context.new())
+        end)
+
+      assert log =~
+               "процесс агрегата: состояние устарело: type=account aggregate_id=#{dump(id)} " <>
+                 "state_max_age=300000"
+
+      assert_received {:load, %{op: :get_decision}}
+      assert %{state: nil, read_at: nil} = :sys.get_state(server)
+
+      assert {:ok, %Version{}} = Account.Process.execute(id, :current, freeze(), Context.new())
+      assert_received {:load, %{op: :get_decision}}
+      refute_received {:load, _metadata}
+      assert %{state: %Account{}, read_at: refreshed} = :sys.get_state(server)
+      assert refreshed > read_at - 300_001
     end
 
     test "watch_list — верхний супервизор при enabled: true, пусто при enabled: false" do
@@ -376,7 +443,15 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:ran_in, server}
       ref = Process.monitor(server)
 
-      _log =
+      {:status, ^server, _module, [_pdict, _sys, _parent, _debug, misc]} = status = :sys.get_status(server)
+      aggregate_id = dump(id)
+
+      assert [%{type: "account", aggregate_id: ^aggregate_id, version: %Version{value: 1}}] =
+               for({:data, [{~c"State", state}]} <- misc, do: state)
+
+      refute inspect(status) =~ "Счёт"
+
+      log =
         capture_log(fn ->
           assert {{:function_clause, [{Account, :decide, _args, _location} | _stack]}, _call} =
                    catch_exit(
@@ -390,6 +465,10 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
           assert_receive {:DOWN, ^ref, :process, ^server, {:function_clause, _stacktrace}}
         end)
+
+      # Отчёт о падении агрегата с ПДн — без запроса команды: вместо него модуль команды.
+      assert log =~ ~r/Last message \(from #PID<[\d.]+>\): Core.Es.Aggregate.ProcessTest.Unknown$/m
+      refute log =~ "enqueued_at"
 
       assert_received {:stop, %{type: "account", reason: :error}}
       assert_received {:execute, %{mode: :process, result: :exit}, %{queue: 0, retries: 0}}
