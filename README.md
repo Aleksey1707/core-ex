@@ -182,6 +182,10 @@ config :core, Core.Es.Personal.KeyStore.Pg,
 `Core.Es.Personal.KeyStore.Pg` не нужен. Нормы — `docs/rules/23-personal-data.md`, «Хранилище
 ключей».
 
+KEK ротирует `mix es.personal.rewrap`: перевёртка ключей субъектов на `current_kek` пачками со
+статусом по версиям до и после. Порядок шагов — `deps/core/docs/rules/app/23-personal-data.md`,
+«Ротация KEK».
+
 Настройки outbox (поллеры, интервалы, размер батча, TTL) библиотека из конфигурации не читает:
 они приходят опциями в дерево очереди `Core.Outbox.Supervisor` («Supervision» ниже). Где их
 держать и из каких env читать — конвенция приложения,

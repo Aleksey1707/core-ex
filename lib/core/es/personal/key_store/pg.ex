@@ -38,6 +38,13 @@ defmodule Core.Es.Personal.KeyStore.Pg do
   | `open/1` | один запрос на пачку; след — `:destroyed` при любой версии KEK; неизвестный ключ, несошедшийся тег, неизвестная версия схемы — `:unreadable`; версии KEK строки нет в конфигурации — `:kek_unknown` на всю пачку |
   | `destroy/1` | `INSERT … ON CONFLICT (subject) DO UPDATE`: обёрнутый ключ стирается, первая дата уничтожения сохраняется, субъект без ключа получает след |
 
+  ## Ротация KEK
+
+  `rewrap/1` перевёртывает обёртки живых ключей под нетекущими версиями на `current_kek:` пачками
+  в своих транзакциях, `status/0` считает живые ключи по версиям KEK; версию удаляют из `keks:`,
+  когда под ней ноль. Оператор зовёт обе через `mix es.personal.rewrap`. Это не операция порта:
+  KEK — дело встроенной реализации (ADR-0075).
+
   Ошибки — `%Core.Error{ns: :key_store}`: `:subject_destroyed` (`:domain`,
   `Core.Es.Personal.KeyStore.subject_destroyed/1`); `:app` — `:kek_unknown` (версии KEK строки нет в
   конфигурации), `:key_unresolved` (ключ субъекта не получен) и `:unavailable` (запрос к базе не
@@ -50,6 +57,7 @@ defmodule Core.Es.Personal.KeyStore.Pg do
   alias Core.Error
   alias Core.Es.Personal
   alias Core.Es.Personal.KeyStore
+  alias Core.Helper.Transact
   alias Core.Result
 
   require Error
@@ -73,6 +81,22 @@ defmodule Core.Es.Personal.KeyStore.Pg do
   FROM unnest($1::uuid[], $2::text[], $3::bytea[]) AS k(id, subject, wrapped_key)
   ON CONFLICT (subject) DO NOTHING
   """
+
+  @rewrap_batch_size 500
+
+  @select_stale """
+  SELECT id, subject, wrapped_key, kek_version FROM es_subject_keys
+  WHERE wrapped_key IS NOT NULL AND kek_version <> $1
+  ORDER BY id LIMIT $2 FOR UPDATE
+  """
+
+  @rewrap """
+  UPDATE es_subject_keys AS s SET wrapped_key = k.wrapped_key, kek_version = $3
+  FROM unnest($1::uuid[], $2::bytea[]) AS k(id, wrapped_key)
+  WHERE s.id = k.id
+  """
+
+  @status "SELECT kek_version, count(*) FROM es_subject_keys WHERE wrapped_key IS NOT NULL GROUP BY kek_version"
 
   @select_by_id "SELECT id, wrapped_key, kek_version FROM es_subject_keys WHERE id = ANY($1)"
 
@@ -162,17 +186,6 @@ defmodule Core.Es.Personal.KeyStore.Pg do
     {ct, tag} = :crypto.crypto_one_time_aead(@aead, key, nonce, plaintext, header <> aad, @tag_size, true)
 
     header <> nonce <> ct <> tag
-  end
-
-  defp wrap(id, key, kek, version) do
-    nonce = :crypto.strong_rand_bytes(@nonce_size)
-    {ct, tag} = :crypto.crypto_one_time_aead(@aead, kek, nonce, key, wrap_aad(id, version), @tag_size, true)
-
-    nonce <> ct <> tag
-  end
-
-  defp key_unresolved(subjects) do
-    Error.app(code: :key_unresolved, ns: :key_store, message: "Ключ субъекта не получен", detail: %{subjects: subjects})
   end
 
   # ===== open =====
@@ -269,6 +282,104 @@ defmodule Core.Es.Personal.KeyStore.Pg do
     with {:ok, _rows} <- query(@destroy, [Ecto.UUID.bingenerate(), subject, now]), do: :ok
   end
 
+  # ===== перевёртка =====
+
+  @doc """
+  Перевернуть обёртки живых ключей под нетекущими версиями KEK на `current_kek:` — шаг ротации KEK.
+
+  Пачка — до `batch_size:` (по умолчанию #{@rewrap_batch_size}) живых ключей под нетекущей
+  версией, в своей транзакции, `FOR UPDATE` в порядке идентификатора, без `SKIP LOCKED`: запись
+  и уничтожение субъектов пачки ждут её commit. Каждый ключ оборачивается текущим KEK с новым
+  nonce, AAD — идентификатор ключа и новая версия. Цикл идёт до пустой пачки, повторный запуск
+  продолжает с места остановки.
+
+  `on_batch:` — функция от числа ключей, перевёрнутых с начала прогона; зовётся после commit
+  каждой непустой пачки (прогресс оператору).
+
+  Возвращает число перевёрнутых ключей. Обрыв пачки — `{:error, _}` без повтора: пачка
+  откатывается, закоммиченные остаются; ключ под версией вне `keks:` — `:kek_unknown`, обёртка,
+  которая не разворачивается, — `:key_unresolved`. Внутри транзакции — `ArgumentError`: пачки
+  стали бы точками сохранения, и блокировки держались бы до чужого commit.
+  """
+  @spec rewrap(keyword()) :: Result.t(non_neg_integer())
+
+  def rewrap(opts) when is_list(opts) do
+    opts = Keyword.validate!(opts, batch_size: @rewrap_batch_size, on_batch: fn _count -> :ok end)
+    ensure_outside_transaction!(Config.dao().in_transaction?())
+
+    rewrap_batches(config!(), Keyword.fetch!(opts, :batch_size), Keyword.fetch!(opts, :on_batch), 0)
+  end
+
+  # ---
+
+  defp ensure_outside_transaction!(false), do: :ok
+
+  defp ensure_outside_transaction!(true) do
+    raise ArgumentError,
+          "Core.Es.Personal.KeyStore.Pg.rewrap/1 вызван внутри транзакции — блокировки всех пачек " <>
+            "держались бы до её commit"
+  end
+
+  defp rewrap_batches(config, batch_size, on_batch, total)
+       when is_integer(batch_size) and batch_size > 0 and is_function(on_batch, 1) do
+    case Transact.run(Config.dao(), fn -> rewrap_batch(config, batch_size) end) do
+      {:ok, 0} ->
+        {:ok, total}
+
+      {:ok, count} ->
+        on_batch.(total + count)
+        rewrap_batches(config, batch_size, on_batch, total + count)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp rewrap_batch(config, batch_size) do
+    kek = Map.fetch!(config.keks, config.current)
+
+    with {:ok, rows} <- query(@select_stale, [config.current, batch_size]),
+         {:ok, rewrapped} <- Result.traverse(rows, &rewrap_key(&1, kek, config)),
+         :ok <- update_wrapped(rewrapped, config.current) do
+      {:ok, length(rewrapped)}
+    end
+  end
+
+  defp rewrap_key([id, subject, wrapped, version], kek, config) do
+    case unwrap(id, wrapped, version, config) do
+      {:ok, key} -> {:ok, {id, wrap(id, key, kek, config.current)}}
+      :error -> {:error, key_unresolved([subject])}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp update_wrapped([], _version), do: :ok
+
+  defp update_wrapped(rewrapped, version) do
+    {ids, wrapped} = Enum.unzip(rewrapped)
+
+    with {:ok, _rows} <- query(@rewrap, [ids, wrapped, version]), do: :ok
+  end
+
+  # ===== статус =====
+
+  @doc """
+  Число живых ключей по версиям KEK: версия из `keks:` без ключей — `0`, строки-следы не в счёт.
+
+  Старую версию удаляют из `keks:`, когда под ней ноль (`rewrap/1`).
+  """
+  @spec status() :: Result.t(%{pos_integer() => non_neg_integer()})
+
+  def status do
+    config = config!()
+
+    with {:ok, rows} <- query(@status, []) do
+      configured = Map.new(config.keks, fn {version, _kek} -> {version, 0} end)
+
+      {:ok, Map.merge(configured, Map.new(rows, fn [version, count] -> {version, count} end))}
+    end
+  end
+
   # ===== общее =====
 
   defp config! do
@@ -312,6 +423,17 @@ defmodule Core.Es.Personal.KeyStore.Pg do
     raise ArgumentError,
           "Core.Es.Personal.KeyStore.Pg: config :core, Core.Es.Personal.KeyStore.Pg — #{reason} " <>
             "(форма — moduledoc Core.Es.Personal.KeyStore.Pg)"
+  end
+
+  defp wrap(id, key, kek, version) do
+    nonce = :crypto.strong_rand_bytes(@nonce_size)
+    {ct, tag} = :crypto.crypto_one_time_aead(@aead, kek, nonce, key, wrap_aad(id, version), @tag_size, true)
+
+    nonce <> ct <> tag
+  end
+
+  defp key_unresolved(subjects) do
+    Error.app(code: :key_unresolved, ns: :key_store, message: "Ключ субъекта не получен", detail: %{subjects: subjects})
   end
 
   defp unwrap(id, wrapped, version, config) do
