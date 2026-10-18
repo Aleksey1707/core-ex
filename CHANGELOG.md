@@ -91,6 +91,19 @@
   - стало: `Transact.run(DAO, fn -> with :ok <- Core.Es.Personal.destroy_key(id, by, context),
     do: write_act(id, by, context) end)` с `by` из `CurrentUser.get(context)` до транзакции.
 
+  Тестовая поддержка без БД и хранилища ключей — `Core.Es.Personal.Test` (норма —
+  `docs/rules/19-testing.md`, «Event-sourced агрегат»; `docs/rules/14-events-outbox.md`,
+  «Golden-фикстуры»). Раньше событие с уничтоженным значением в тесте было не собрать: `new/N`
+  нагрузки отвергает `%Destroyed{}`, а тело golden-фикстуры не получить из дампа — маркер
+  ПДн-значения JSON не кодирует. Теперь `destroyed(payload | event, fields \\ :all)` ставит
+  `%Destroyed{}` в поля с `subject:` (поле без него — `ArgumentError`), а `fixtures(event)` отдаёт
+  тела фикстур `%{open: map(), destroyed: map() | nil}` — открытой и уничтоженного варианта, дамп
+  через фасад. Правка нужна только агрегатам с ПДн-полями — тест `evolve` через `fold/2` на
+  уничтоженном значении:
+  - было: теста нет, `evolve` над `Holder.value(payload.holder)` падает после уничтожения ключа;
+  - стало: `Account.fold(state, [Core.Es.Personal.Test.destroyed(event)])` и `evolve`, принимающий
+    `%Destroyed{}`.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,
@@ -121,6 +134,22 @@
   кодек потребителя с `type: "core.subject"` в том же фасаде — `CompileError` «тип агрегата
   объявлен дважды», с ПДн и без. Правка нужна только кодеку с этим типом: было
   `type: "core.subject"`, стало — свой тип агрегата.
+
+  Новые проверки `use Core.Es.EventCompatCase` (норма — `docs/rules/14-events-outbox.md`,
+  «Golden-фикстуры»; ADR-0078) — три новых теста в каждом тест-модуле совместимости:
+  - персональный Prim в загруженной фикстуре текущего тега — только в поле верхнего уровня с
+    `subject:`: ПДн во вложенной сущности поля без `subject:` сборка не видит, а case — провал;
+  - у текущего тега с полем `subject:` есть уничтоженный вариант `destroyed/<тег>.json` — та же
+    фикстура с `{"$pd": null}` на месте каждого ПДн-значения; было: одна фикстура
+    `account.holder_set.json`, стало: рядом `destroyed/account.holder_set.json` — тело
+    `Core.Es.Personal.Test.fixtures(event).destroyed`;
+  - уничтоженный вариант грузится: у текущего тега — с `%Destroyed{}` в каждом поле `subject:`, у
+    источника `upcasts:` — апкастом; вариант тега вне кодека или текущего тега без `subject:` —
+    провал.
+
+  Фикстура с ПДн — после расшифровки, шифротекст `{"$pd": "<строка>"}` в ней — провал с кодом
+  `:sealed_personal_value`. Кодек событий в `event_codec:` / `aggregate:` должен экспортировать
+  `__es_subjects__/0` — его порождает `use Core.Es.Event.Codec`.
 
 ## 0.15.1
 

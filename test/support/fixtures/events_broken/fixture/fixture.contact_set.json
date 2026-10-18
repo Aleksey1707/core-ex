@@ -5,7 +5,9 @@
   "by": "01a09d51-ada0-76db-881b-1fa7beacf3f2",
   "event_id": "01a09d51-adb4-7e2f-8c1d-3a4b5c6d7e8f",
   "payload": {
-    "contact": "+7 900 000-00-00",
+    "contact": {
+      "$pd": "AQIDBA=="
+    },
     "note": "Звонить после обеда",
     "person_id": "01a09d51-adae-7a10-9b2c-6d7e8f9a0b1c"
   },

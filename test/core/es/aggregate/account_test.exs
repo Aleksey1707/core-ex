@@ -5,6 +5,8 @@ defmodule Core.Es.Aggregate.AccountTest do
 
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal
+  alias Core.Es.Personal.Destroyed
   alias Core.EsFixture.Account
   alias Core.EsFixture.Account.Cmd
   alias Core.EsFixture.Account.Event
@@ -80,6 +82,21 @@ defmodule Core.Es.Aggregate.AccountTest do
       assert {:ok, [Event.Closed]} = Account.decide(%Cmd.Close{by: ctx.by, at: @at}, state)
     end
 
+    test "указать того же владельца — без событий", ctx do
+      holder = holder("Иван Петров")
+      state = given(opened(ctx), [Event.HolderSet.draft(Event.HolderSet.Payload.new(holder))], by: ctx.by, at: @at)
+
+      assert {:ok, []} = Account.decide(%Cmd.SetHolder{holder: holder, by: ctx.by, at: @at}, state)
+    end
+
+    test "указать владельца после уничтожения ключа счёта — holder_destroyed", ctx do
+      payload = Personal.Test.destroyed(Event.HolderSet.Payload.new(holder("Иван Петров")))
+      state = given(opened(ctx), [Event.HolderSet.draft(payload)], by: ctx.by, at: @at)
+
+      assert {:error, %Error{kind: :domain, code: :holder_destroyed}} =
+               Account.decide(%Cmd.SetHolder{holder: holder("Пётр Иванов"), by: ctx.by, at: @at}, state)
+    end
+
     test "закрыть закрытый счёт — invalid_status", ctx do
       state = given(opened(ctx), [Event.Frozen, Event.Closed], by: ctx.by, at: @at)
 
@@ -114,6 +131,14 @@ defmodule Core.Es.Aggregate.AccountTest do
       assert %Account{status: :closed} = Account.fold(opened(ctx), [frozen, closed])
     end
 
+    test "HolderSet — владелец; уничтоженное значение — как есть", ctx do
+      holder = holder("Иван Петров")
+      event = Event.HolderSet.new(Event.HolderSet.Payload.new(holder), ctx.id, Version.new!(2), ctx.by, @at)
+
+      assert %Account{holder: ^holder} = Account.fold(opened(ctx), [event])
+      assert %Account{holder: %Destroyed{}} = Account.fold(opened(ctx), [Personal.Test.destroyed(event)])
+    end
+
     test "Verified — удалённый тип: состояние как есть", ctx do
       state = opened(ctx)
       event = Event.Verified.new(ctx.id, Version.new!(2), ctx.by, @at)
@@ -130,4 +155,6 @@ defmodule Core.Es.Aggregate.AccountTest do
   end
 
   defp name(value), do: Account.Name.new!(value)
+
+  defp holder(value), do: Account.Holder.new!(value)
 end

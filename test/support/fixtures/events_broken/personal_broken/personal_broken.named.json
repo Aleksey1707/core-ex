@@ -1,0 +1,11 @@
+{
+  "aggregate_id": "01a09d51-ad99-773b-b084-909caa85367d",
+  "aggregate_version": 2,
+  "at": "2026-10-18T09:12:30Z",
+  "by": "01a09d51-ada0-76db-881b-1fa7beacf3f2",
+  "event_id": "01a09d51-adc8-7b1c-8d2e-3f4a5b6c7d8e",
+  "payload": {
+    "name": "Иван Петров"
+  },
+  "type": "personal_broken.named"
+}

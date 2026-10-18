@@ -207,6 +207,35 @@ Given из команд через `execute/2` SHOULD NOT: команда не �
 Применение событий — отдельные тесты `evolve` через `Agg.fold/2`; полноту `evolve` проверяет
 сборка репозитория агрегата (`11-domain.md`, «Event-sourced»).
 
+Событие с полем `subject:` после уничтожения ключа несёт `%Core.Es.Personal.Destroyed{}`, а `new/N`
+нагрузки его не принимает. Построитель — `Core.Es.Personal.Test.destroyed/2`: нагрузка или событие
+из `new/N` с уничтоженным значением во всех полях с `subject:` (или в перечисленных; поле без
+`subject:` — `ArgumentError`), без БД и хранилища ключей.
+
+- тест `evolve` через `Agg.fold/2` на событии из `destroyed/2` — MUST для каждого события с
+  `subject:`: упавший `evolve` делает агрегат нечитаемым после уничтожения ключа, а сборка и
+  `EventCompatCase` этого не видят;
+- тест `decide/2` команды, которой нужно уничтоженное значение, с доменной ошибкой — SHOULD;
+  состояние — `given` с черновиком от нагрузки из `destroyed/2`.
+
+```elixir
+# плохо — уничтоженное значение руками: встаёт и в поле без subject:, чего в хранилище не бывает
+event = %{event | payload: %{event.payload | recipient_id: %Destroyed{}}}
+
+# хорошо
+event = Core.Es.Personal.Test.destroyed(holder_set)
+assert %Account{holder: %Destroyed{}} = Account.fold(state, [event])
+
+payload = Core.Es.Personal.Test.destroyed(Event.HolderSet.Payload.new(holder))
+state = given(opened, [Event.HolderSet.draft(payload)], by: by, at: at)
+
+assert {:error, %Error{kind: :domain, code: :holder_destroyed}} =
+         Account.decide(%Cmd.SetHolder{holder: other, by: by, at: at}, state)
+```
+
+Проверяется: `test/core/es/personal/test_test.exs`; образец —
+`test/core/es/aggregate/account_test.exs`.
+
 ```elixir
 # плохо — given командами: тест закрытия зависит от decide открытия и заморозки
 {:ok, {_events, state}} = Account.execute(%Account{id: id}, %Cmd.Open{name: name, by: by, at: at})

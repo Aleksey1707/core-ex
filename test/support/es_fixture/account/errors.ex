@@ -34,6 +34,10 @@ defmodule Core.EsFixture.Account.Errors do
     Error.domain(module, code: code, ns: ns(), message: "Название счёта занято", detail: detail)
   end
 
+  def domain(module, :holder_destroyed = code, detail) do
+    Error.domain(module, code: code, ns: ns(), message: "ПДн владельца счёта уничтожены", detail: detail)
+  end
+
   def domain(module, :invalid_status = code, detail) do
     Error.domain(module,
       code: code,

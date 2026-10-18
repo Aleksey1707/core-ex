@@ -12,10 +12,12 @@ defmodule Core.EsFixture.Account do
   - `Opened` — записанные `account.opened.v1` и `account.opened.v2` грузятся апкастом;
   - `Verified` — удалённый тип: тег остаётся в `tags:`, событие больше не пишется, `evolve`
     возвращает состояние как есть;
-  - `HolderSet` — ПДн-поле `holder` (`Holder`, `personal: true`) с `subject: :aggregate_id`.
+  - `HolderSet` — ПДн-поле `holder` (`Holder`, `personal: true`) с `subject: :aggregate_id`;
+    тот же владелец — `{:ok, []}`, владелец после уничтожения ключа счёта — `holder_destroyed`.
   """
 
   alias Core.Es
+  alias Core.Es.Personal.Destroyed
   alias Core.EsFixture.Account.Cmd
   alias Core.EsFixture.Account.Errors
   alias Core.EsFixture.Account.Event
@@ -59,7 +61,7 @@ defmodule Core.EsFixture.Account do
           version: Version.t() | nil,
           name: Name.t() | nil,
           status: :open | :frozen | :closed | nil,
-          holder: Holder.t() | Core.Es.Personal.Destroyed.t() | nil
+          holder: Holder.t() | Destroyed.t() | nil
         }
 
   @on_existing [Cmd.Rename, Cmd.SetHolder, Cmd.Freeze, Cmd.Close]
@@ -86,6 +88,13 @@ defmodule Core.EsFixture.Account do
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
     do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
+
+  def decide(%Cmd.SetHolder{holder: holder}, %__MODULE__{holder: holder}), do: {:ok, []}
+
+  # Тот ли владелец — по уничтоженному значению не решить; его субъект — сам счёт, и ПДн счёта
+  # после уничтожения ключа не записать.
+  def decide(%Cmd.SetHolder{}, %__MODULE__{status: :open, holder: %Destroyed{}}),
+    do: {:error, Errors.domain(__MODULE__, :holder_destroyed, nil)}
 
   def decide(%Cmd.SetHolder{holder: holder}, %__MODULE__{status: :open}),
     do: {:ok, [Event.HolderSet.draft(Event.HolderSet.Payload.new(holder))]}

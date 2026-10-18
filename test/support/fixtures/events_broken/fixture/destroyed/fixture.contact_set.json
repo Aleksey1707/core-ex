@@ -1,0 +1,15 @@
+{
+  "aggregate_id": "01a09d51-ad99-773b-b084-909caa85367d",
+  "aggregate_version": 2,
+  "at": "2026-10-18T09:12:30Z",
+  "by": "01a09d51-ada0-76db-881b-1fa7beacf3f2",
+  "event_id": "01a09d51-adb4-7e2f-8c1d-3a4b5c6d7e8f",
+  "payload": {
+    "contact": {
+      "$pd": null
+    },
+    "note": "Звонить после обеда",
+    "person_id": "01a09d51-adae-7a10-9b2c-6d7e8f9a0b1c"
+  },
+  "type": "fixture.contact_set"
+}

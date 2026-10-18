@@ -6,10 +6,13 @@ defmodule Core.Es.EventCompatCaseTest do
   alias Core.Es.EventCompatCase
   alias Core.EsFixture.Account
   alias Core.EventFixture
+  alias Core.PersonalBrokenFixture
 
   # Сломанный каталог фикстур того же кодека: у тега `fixture.closed` и источника
   # `fixture.opened` фикстур нет, остальные не грузятся или несут тег не из имени файла.
   @broken "test/support/fixtures/events_broken/fixture"
+  # Сломанный агрегат проверок ПДн: персональный Prim вне `subject:`, нет уничтоженного варианта.
+  @personal "test/support/fixtures/events_broken/personal_broken"
 
   describe "check_tag_fixtures/2" do
     test "тег без фикстуры — путь к недостающей" do
@@ -21,15 +24,19 @@ defmodule Core.Es.EventCompatCaseTest do
   end
 
   describe "check_fixtures_load/3" do
-    test "фикстура, которая не грузится, и фикстура тега вне кодека — путь и причина" do
+    test "шифротекст, фикстура, которая не грузится, и фикстура тега вне кодека — путь и причина" do
+      contact_set = Path.join(@broken, "fixture.contact_set.json")
       created = Path.join(@broken, "fixture.created.json")
       gone = Path.join(@broken, "fixture.gone.json")
 
       assert {:error, %{failed: failed}} =
                EventCompatCase.check_fixtures_load(EventFixture.Event.Codec, @broken, InCodec)
 
-      assert [{^created, %Error{kind: :domain}}, {^gone, %Error{code: :unknown_event_type}}] =
-               failed
+      assert [
+               {^contact_set, %Error{code: :sealed_personal_value}},
+               {^created, %Error{kind: :domain}},
+               {^gone, %Error{code: :unknown_event_type}}
+             ] = failed
     end
   end
 
@@ -51,6 +58,48 @@ defmodule Core.Es.EventCompatCaseTest do
                EventCompatCase.check_upcasts_load(EventFixture.Event.Codec, @broken, InCodec)
 
       assert [{^v1, %{type: "fixture.created"}}, {^v2, %Error{kind: :domain}}] = failed
+    end
+  end
+
+  describe "check_personal_fields/3" do
+    test "персональный Prim во вложенной сущности поля без subject: — путь к значению" do
+      path = Path.join(@personal, "personal_broken.contact_added.json")
+
+      assert {:error, %{failed: [{^path, %{personal: [[:payload, :contact, :phone]]}}]}} =
+               EventCompatCase.check_personal_fields(PersonalBrokenFixture.Event.Codec, @personal, InCodec)
+    end
+  end
+
+  describe "check_destroyed_fixtures/2" do
+    test "текущий тег с subject: без уничтоженного варианта — путь к недостающему" do
+      path = Path.join([@personal, "destroyed", "personal_broken.named.json"])
+
+      assert {:error, %{missing: [^path]}} =
+               EventCompatCase.check_destroyed_fixtures(PersonalBrokenFixture.Event.Codec, @personal)
+    end
+  end
+
+  describe "check_destroyed_load/3" do
+    test "открытое значение в поле с subject:, тег без subject:, апкаст и тег вне кодека — путь и причина" do
+      [contact_set, created, v2, gone] =
+        Enum.map(
+          ~w(fixture.contact_set fixture.created fixture.created.v2 fixture.gone),
+          &Path.join([@broken, "destroyed", &1 <> ".json"])
+        )
+
+      assert {:error, %{failed: failed}} =
+               EventCompatCase.check_destroyed_load(EventFixture.Event.Codec, @broken, InCodec)
+
+      assert [
+               {^contact_set, %{open: [:note]}},
+               {^created, %{subjects: []}},
+               {^v2, %Error{code: :invalid_value}},
+               {^gone, %Error{code: :unknown_event_type}}
+             ] = failed
+    end
+
+    test "вариант источника upcasts: — загрузка апкастом без требования уничтоженного значения" do
+      assert :ok = EventCompatCase.check_destroyed_load(PersonalBrokenFixture.Event.Codec, @personal, InCodec)
     end
   end
 

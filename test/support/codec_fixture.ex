@@ -9,7 +9,8 @@ defmodule Core.CodecFixture do
   агрегатов тестов: `Core.EventFixture.Event.Codec`, `Core.EsFixture.Account.Event.Codec`,
   `Core.DerivedFixture.Event.Codec`, `Core.WebEventFixture.Event.Codec` и `Core.LabelsFixture.WebEvent.Codec`
   с плагинами нагрузки `Core.LabelsFixture.Shape.Codec`, `Core.LabelsFixture.Codec` и
-  `Core.LabelsFixture.Event.Limited.Codec`.
+  `Core.LabelsFixture.Event.Limited.Codec`, сломанный агрегат проверок ПДн `Core.PersonalBrokenFixture.Event.Codec`
+  с плагином `Core.PersonalBrokenFixture.Contact.Codec`.
   """
 
   defmodule Prim.Internal do
@@ -45,7 +46,9 @@ defmodule Core.CodecFixture do
     Core.LabelsFixture.WebEvent.Codec,
     Core.LabelsFixture.Shape.Codec,
     Core.LabelsFixture.Codec,
-    Core.LabelsFixture.Event.Limited.Codec
+    Core.LabelsFixture.Event.Limited.Codec,
+    Core.PersonalBrokenFixture.Contact.Codec,
+    Core.PersonalBrokenFixture.Event.Codec
   ]
 
   @doc "Плагины entity-фасадов."
