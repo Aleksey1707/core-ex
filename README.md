@@ -533,6 +533,8 @@ Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_
 | `es_aggregate_fold_events` | `type`, `snapshot` | длина свёрнутого хвоста потока; `snapshot`: `hit` / `miss` / `rejected` / `off` — по ней выбирается `every:` |
 | `es_snapshot_write_total`, `es_snapshot_write_duration_milliseconds` | `type`, `result` | запись снапшотов после commit; `result`: `ok` / `error` |
 | `es_snapshot_write_rows_total` | `type` | записанные строки снапшотов |
+| `es_personal_call_total`, `es_personal_call_duration_milliseconds` | `op`, `result` | вызовы хранилища ключей субъекта через фасад `Core.Es.Personal` — и своей реализации порта; `op`: `seal` / `open` / `index` / `destroy`; `result`: `ok` / `refused` (`:subject_destroyed`) / `error` |
+| `es_personal_open_total` | `outcome` | исходы расшифровки ПДн-значений: `opened` / `destroyed` / `unreadable`; меток с идентификаторами субъекта, ключа и агрегата нет |
 | `es_projection_cycles_total`, `es_projection_duration_milliseconds` | `projection`, `result` | циклы читателя, включая холостые; `result`: `processed` / `idle` / `locked` / `retry` / `outdated` |
 | `es_projection_events_total` | `projection` | события, прочитанные пачками |
 | `es_projection_retry_total` | `projection`, `error` | отказы пачки с повтором; `error` — `ns/code` ошибки или модуль исключения |
@@ -555,7 +557,9 @@ Gauge `outbox_queue_count{status}` выставляется для `:new`, `:in_
 пересборке отставание убывает и служит её прогрессом. Опрос — запрос на тип каждой проекции раз в
 `poll_rate` на каждой ноде. `es_projection_outdated` и `es_aggregate_processes` — признаки ноды.
 Серия `es_checkpoint_orphan` удалённой строки держит последнее значение до рестарта ноды.
-Рекомендованные алерты — `docs/rules/22-projections.md`, «Эксплуатация».
+Рекомендованные алерты — `docs/rules/22-projections.md`, «Эксплуатация»; на хранилище ключей
+(`EsPersonalUnreadable`, `EsKeyStoreErrors`) — `docs/rules/21-observability.md`, «Рекомендованные
+алерты».
 
 ## Трассировка
 

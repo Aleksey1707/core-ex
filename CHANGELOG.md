@@ -140,6 +140,19 @@
   - было: замена `index_secret:`;
   - стало: прежний `index_secret:`, новая область ключа с `personal: true` и перевод резервов.
 
+  Метрики хранилища ключей (`docs/rules/21-observability.md`, «Рекомендованные алерты»).
+  Раньше вызовы порта и исходы расшифровки были видны только в telemetry фасада
+  `Core.Es.Personal`. Теперь `Core.Es.PromEx` в группе `:es_aggregate_event_metrics` строит
+  `es_personal_call_total{op, result}`, гистограмму `es_personal_call_duration_<unit>{op, result}`
+  и `es_personal_open_total{outcome}`; метрики эмитит фасад, поэтому своя реализация порта
+  получает их без правок. Меток с идентификаторами субъекта, ключа и агрегата нет. Своды
+  рекомендуют алерты `EsPersonalUnreadable` (рост `outcome="unreadable"`) и `EsKeyStoreErrors`
+  (рост `result="error"`) с PromQL и действием оператора. Правка нужна только приложению с ПДн
+  в событиях:
+  - было: алертов на хранилище ключей нет;
+  - стало: оба алерта из `deps/core/docs/rules/21-observability.md` с действием из
+    `deps/core/docs/rules/app/21-observability.md`, «Алерты event sourcing».
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,

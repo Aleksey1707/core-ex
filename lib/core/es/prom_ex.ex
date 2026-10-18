@@ -10,6 +10,7 @@ defmodule Core.Es.PromEx do
 
   Event-метрики строятся всегда — по telemetry `[:es, :aggregate, :load]`,
   `[:es, :aggregate, :fold]`, `[:es, :snapshot, :write]`, `[:es, :key_reservation]`,
+  `[:es, :personal, :call | :open]`,
   `[:es, :projection, :cycle]`, `[:es, :projection, :await]`,
   `[:es, :projection, :signal, :sent | :received]` и
   `[:es, :aggregate, :process, :execute | :start | :stop]` (`Core.Telemetry.event/1`).
@@ -17,6 +18,13 @@ defmodule Core.Es.PromEx do
   Исход резерва ключа — `key_reservation.total{scope, result}` (`Core.Es.KeyReservation`,
   «Telemetry»): `scope` — область модуля ключа, `result` — `reserved` / `taken` / `unresolved`.
   Значения ключа и `aggregate_id` в тегах нет: растущая кардинальность и ПДн.
+
+  Хранилище ключей субъекта — `personal.call.total{op, result}` и
+  `personal.call.duration.<unit>{op, result}`: вызовы порта по операции (`seal` / `open` / `index` /
+  `destroy`) и исходу (`ok` / `refused` / `error`); `personal.open.total{outcome}` — `sum` по `count`
+  исходов расшифровки (`opened` / `destroyed` / `unreadable`). Эмитит фасад `Core.Es.Personal`
+  («Telemetry»), и своя реализация порта получает метрики без правок. Идентификаторов субъекта,
+  ключа и агрегата в тегах нет.
 
   Сигнал чекпоинта — `projection.signal.sent.total{repo}` и `projection.signal.received.total{repo}`:
   `sum` по `count`, а не `counter` — слушатель засевает обе серии нулём, `counter` прибавил бы 1 на
@@ -97,6 +105,8 @@ defmodule Core.Es.PromEx do
     fold_tags = ~w(type snapshot)a
     write_tags = ~w(type result)a
     reservation_tags = ~w(scope result)a
+    personal_call = Telemetry.event([:es, :personal, :call])
+    personal_call_tags = ~w(op result)a
 
     Event.build(:es_aggregate_event_metrics, [
       counter(
@@ -155,6 +165,31 @@ defmodule Core.Es.PromEx do
         description: "Число исходов резерва ключа event-sourced агрегата",
         tags: reservation_tags,
         tag_values: tag_values(reservation_tags)
+      ),
+      counter(
+        prefix ++ [:personal, :call, :total],
+        event_name: personal_call,
+        description: "Число вызовов хранилища ключей субъекта",
+        tags: personal_call_tags,
+        tag_values: tag_values(personal_call_tags)
+      ),
+      distribution(
+        prefix ++ [:personal, :call, :duration, plural(unit)],
+        event_name: personal_call,
+        measurement: :duration,
+        description: "Длительность вызова хранилища ключей субъекта",
+        reporter_options: [buckets: @duration_buckets],
+        tags: personal_call_tags,
+        tag_values: tag_values(personal_call_tags),
+        unit: {:native, unit}
+      ),
+      sum(
+        prefix ++ [:personal, :open, :total],
+        event_name: Telemetry.event([:es, :personal, :open]),
+        measurement: :count,
+        description: "Число исходов расшифровки ПДн-значений",
+        tags: [:outcome],
+        tag_values: tag_values([:outcome])
       )
     ])
   end

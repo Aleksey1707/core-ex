@@ -108,6 +108,11 @@ Span на периодический опрос (тик поллера, цикл
 
 Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span».
 
+У вызова порта хранилища ключей (`Core.Es.Personal`) и у уничтожения ключа субъекта span'а нет,
+словаря `Core.Otel.Personal` нет: длительность и исход вызова по операции считает
+`Core.Es.PromEx` (`personal.call.*`). Своя реализация порта с внешним KMS MAY открыть свой span на
+сетевом вызове; его атрибуты — «Персональные данные в выводе».
+
 Контекст трейса в `es_events` MUST NOT храниться: хранилище вечное, baggage пропагатора лёг бы в
 него навсегда, а пересборка ссылалась бы на истёкшие трейсы. Обработку события с командой
 связывает `event_id` — атрибут `core.es.event.id` на отказе пачки.
@@ -272,6 +277,8 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 | `CacheStoreErrors` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="store_error"}[5m])) > 0 or sum by (cache) (my_app_prom_ex_cache_requests_total{result="store_error"} unless last_over_time(my_app_prom_ex_cache_requests_total{result="store_error"}[5m] offset 5m)) > 0` | отказывает store за кешем, а не кеш: сброс кеша не поможет |
 | `PromExCollectFailing` | `sum by (instance, collector) (increase({__name__=~"my_app_prom_ex_.+_collect_errors_total"}[5m])) > 0`, `for: <порог>` | сбор polling-группы `collector` отказывает (`Core.PromEx.Safe`): её gauge'и застыли на последнем значении, и алерты на них недостоверны |
 | `EsKeyReservationUnresolved` | `sum by (scope) (increase(my_app_prom_ex_es_key_reservation_total{result="unresolved"}[5m])) > 0 or sum by (scope) (my_app_prom_ex_es_key_reservation_total{result="unresolved"} unless last_over_time(my_app_prom_ex_es_key_reservation_total{result="unresolved"}[5m] offset 5m)) > 0` | резерв ключа области `scope` не разрешился после повтора (`:reservation_unresolved`): конкурентная запись в области сверх ожидаемой (`13-repos.md`, «Резервы ключей») |
+| `EsPersonalUnreadable` | `sum(increase(my_app_prom_ex_es_personal_open_total{outcome="unreadable"}[5m])) > 0 or sum(my_app_prom_ex_es_personal_open_total{outcome="unreadable"} unless last_over_time(my_app_prom_ex_es_personal_open_total{outcome="unreadable"}[5m] offset 5m)) > 0` | ПДн-значение не открылось, событие нечитаемо (`:unreadable_personal_value`): потеряно хранилище ключей, база восстановлена из старой копии без поздних ключей или KEK не тот, которым обёрнуты ключи. Уничтожение так не выглядит — уничтоженное значение идёт в `outcome="destroyed"` |
+| `EsKeyStoreErrors` | `sum by (op) (increase(my_app_prom_ex_es_personal_call_total{result="error"}[5m])) > 0 or sum by (op) (my_app_prom_ex_es_personal_call_total{result="error"} unless last_over_time(my_app_prom_ex_es_personal_call_total{result="error"}[5m] offset 5m)) > 0` | хранилище ключей отказало на всю пачку операции `op` (`seal` / `open` / `index` / `destroy`): база ключей недоступна (`:unavailable`) или отказывает KMS своей реализации, версии KEK строки нет в `keks:` (`:kek_unknown`), ключ не создан после перечитывания (`:key_unresolved`) (`23-personal-data.md`, «Встроенная реализация») |
 
 - Условие MUST брать имя метрики с префиксом PromEx: серии без префикса не существует, и алерт
   на неё молчит всегда, не выдавая ошибки.
@@ -285,6 +292,17 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
   подряд.
 - `EsKeyReservationUnresolved`: засеять серию нулём некому — у резервов нет процесса-владельца.
   Отказ `:taken` — доменный исход, алерта на него нет.
+- Метрики хранилища ключей (`es_personal_call_*`, `es_personal_open_total`) метку с
+  идентификатором субъекта, ключа или агрегата MUST NOT нести: кардинальность растёт с числом
+  субъектов, а идентификатор субъекта в серии Prometheus связывает метрику с человеком и
+  переживает уничтожение его ключа. Конкретное событие ищется по `event_id` в `detail` ошибки, а
+  не по метке.
+- `EsPersonalUnreadable` и `EsKeyStoreErrors`: засеять серию нулём некому — у вызовов порта нет
+  процесса-владельца. `result="refused"` — запись ПДн уничтоженного субъекта
+  (`:subject_destroyed`), доменный исход; `outcome="destroyed"` — штатное чтение после уничтожения
+  ключа: алерта на них нет.
+
+Проверяется для меток хранилища ключей: `test/core/es/prom_ex_test.exs`, describe «группы метрик».
 
 ```yaml
 # плохо — имя без префикса PromEx: такой серии нет, алерт не сработает никогда

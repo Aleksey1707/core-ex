@@ -6,22 +6,22 @@
 
 **Blocked by:** [20: Хранилище ключей: порт и встроенная реализация](20-key-store.md)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Spec:** [Crypto-shredding: ПДн в событиях под ключом субъекта](../spec.md) — «Наблюдаемость»
 
-- [ ] `Core.Es.PromEx`, группа `:es_aggregate_event_metrics`, рядом с `key_reservation`:
+- [x] `Core.Es.PromEx`, группа `:es_aggregate_event_metrics`, рядом с `key_reservation`:
       - `…_es_personal_call_total{op,result}`;
       - гистограмма `…_es_personal_call_duration_<unit>`;
       - `…_es_personal_open_total{outcome}`.
 
       Меток с идентификаторами субъекта, ключа и агрегата нет.
-- [ ] Тест — как тест группы `key_reservation`.
-- [ ] `21-observability.md`:
+- [x] Тест — как тест группы `key_reservation`.
+- [x] `21-observability.md`:
       - «Рекомендованные алерты» — `EsPersonalUnreadable` (рост `outcome="unreadable"`: потеряно хранилище ключей,
         восстановлен старый бэкап или чужой KEK) и `EsKeyStoreErrors` (рост `result="error"`) с PromQL; метка с
         идентификатором субъекта, ключа или агрегата — MUST NOT;
       - «Где ставить span» — у порта и уничтожения ключа span'а нет.
-- [ ] app/21 «Алерты event sourcing» — оба алерта SHOULD, с действием оператора.
-- [ ] README, «Имена метрик». `CHANGELOG.md`, сквозной пункт: метрики.
-- [ ] `make` зелёный.
+- [x] app/21 «Алерты event sourcing» — оба алерта SHOULD, с действием оператора.
+- [x] README, «Имена метрик». `CHANGELOG.md`, сквозной пункт: метрики.
+- [x] `make` зелёный.

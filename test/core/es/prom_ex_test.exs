@@ -82,6 +82,9 @@ defmodule Core.Es.PromExTest do
             snapshot.write.duration.milliseconds
             snapshot.write.rows.total
             key_reservation.total
+            personal.call.total
+            personal.call.duration.milliseconds
+            personal.open.total
             projection.cycles.total
             projection.duration.milliseconds
             projection.events.total
@@ -138,6 +141,32 @@ defmodule Core.Es.PromExTest do
         assert metric.event_name == Core.Telemetry.event([:es, :projection, :signal, event])
         assert metric.tag_values.(%{repo: Core.TestRepo}) == %{repo: "Core.TestRepo"}
       end
+    end
+
+    test "personal.call.total и personal.call.duration — по op и result, без идентификаторов" do
+      groups = PromEx.event_metrics(otp_app: :core)
+      event = Core.Telemetry.event([:es, :personal, :call])
+
+      for name <- ["personal.call.total", "personal.call.duration.milliseconds"] do
+        metric = metric!(groups, name)
+
+        assert metric.event_name == event
+        assert metric.tags == [:op, :result]
+        assert metric.tag_values.(%{op: :open, result: :refused}) == %{op: "open", result: "refused"}
+      end
+
+      duration = metric!(groups, "personal.call.duration.milliseconds")
+
+      assert %Telemetry.Metrics.Distribution{unit: :millisecond} = duration
+      assert duration.measurement.(%{duration: System.convert_time_unit(5, :millisecond, :native)}) == 5
+    end
+
+    test "personal.open.total — sum по count с меткой outcome" do
+      metric = metric!(PromEx.event_metrics(otp_app: :core), "personal.open.total")
+
+      assert %Telemetry.Metrics.Sum{measurement: :count, tags: [:outcome]} = metric
+      assert metric.event_name == Core.Telemetry.event([:es, :personal, :open])
+      assert metric.tag_values.(%{outcome: :unreadable}) == %{outcome: "unreadable"}
     end
   end
 
