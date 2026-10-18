@@ -3,7 +3,7 @@ defmodule Core.Prim.Decimal do
   Билдер decimal-Prim поверх `Decimal`.
 
   Опции: `name:` (обязательна), `kind:`, `min:`, `max:`, `scale:`, `sec_max_len:`,
-  `mutate:` / `validate:`, `sensitive:`. Не-финитные значения (`NaN`, `Infinity`)
+  `mutate:` / `validate:`, `sensitive:`, `personal:`. Не-финитные значения (`NaN`, `Infinity`)
   отбраковываются на `cast`: сравнения над ними поднимают `Decimal.Error` мимо
   контракта `new/1`.
 
@@ -22,7 +22,7 @@ defmodule Core.Prim.Decimal do
     label: "Prim.Decimal",
     native_kind: :decimal,
     required: ~w(name)a,
-    optional: ~w(kind min max scale sec_max_len mutate validate sensitive)a
+    optional: ~w(kind min max scale sec_max_len mutate validate sensitive personal)a
 
   # запас на знак, точку, ведущие нули и экспоненциальную запись
   @sec_max_len_slack 8
@@ -46,6 +46,7 @@ defmodule Core.Prim.Decimal do
         type_opts: type_opts,
         pipeline_opts: pipeline_opts,
         sensitive: Keyword.get(opts, :sensitive, false),
+        personal: Keyword.get(opts, :personal, false),
         value_type: Decimal.t()
     end
   end
@@ -56,7 +57,7 @@ defmodule Core.Prim.Decimal do
   def validate_opts!(opts) do
     Prim.Opts.decimal_bounds!(opts, :min, :max, label())
     Prim.Opts.non_neg_integer!(opts, ~w(scale sec_max_len)a, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     fits_bounds!(opts)
   end
 

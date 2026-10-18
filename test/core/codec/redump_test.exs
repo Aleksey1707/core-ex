@@ -249,6 +249,18 @@ defmodule Core.Codec.RedumpTest do
       end
     end
 
+    test "принимает personal-Prim и переводит его значение" do
+      spec = Redump.validate!({:map, %{phone: {:prim, Core.PrimFixture.Personal}}})
+
+      assert Redump.run(%{"phone" => "+79991234567"}, spec, Profile) == %{"phone" => "+79991234567"}
+    end
+
+    test "отвергает Prim с personal и sensitive" do
+      assert_raise ArgumentError, ~r/объявлен sensitive/, fn ->
+        Redump.validate!({:map, %{document: {:prim, Core.PrimFixture.PersonalSensitive}}})
+      end
+    end
+
     test "отвергает sensitive-Prim — как и Core.View" do
       assert_raise ArgumentError, ~r/объявлен sensitive/, fn ->
         Redump.validate!({:map, %{token: {:prim, Core.PrimFixture.Sensitive}}})

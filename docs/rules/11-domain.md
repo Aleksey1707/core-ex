@@ -18,8 +18,8 @@
 ## Prim (value object)
 
 `Core.Prim` — макрос value object: `%Mod{value:}`, `new/1`, `new!/1`, `value/1`, `name/0`,
-`__domain_kind__/0`, `__domain_type_opts__/0`, `__domain_sensitive__/0`; на модуле —
-`prim?/1`, `composed?/1`, `unwrap/1`.
+`__domain_kind__/0`, `__domain_type_opts__/0`, `__domain_sensitive__/0`, `__domain_personal__/0`;
+на модуле — `prim?/1`, `composed?/1`, `unwrap/1`.
 
 ```elixir
 use Core.Prim,
@@ -32,7 +32,8 @@ use Core.Prim,
   custom_validate: ...,
   type_opts: ...,
   pipeline_opts: ...,
-  sensitive: ...
+  sensitive: ...,
+  personal: ...
 ```
 
 `cast:`, `name:` и `kind:` обязательны (без любой из них — `CompileError`). Конвейер:
@@ -48,20 +49,22 @@ use Core.Prim,
 `Core.Mutator` (`@callback mutate/2`) и `Core.Validator` (`@callback validate/2`) —
 зеркальные behaviour, мутатор меняет значение, валидатор только проверяет его.
 
-`sensitive: true` (default `false`) — значение Prim не попадает ни в `inspect/1`, ни в
-`Error.detail`:
+`sensitive: true` и `personal: true` (оба default `false`, флаги независимы) — значение Prim не
+попадает ни в `inspect/1`, ни в `Error.detail`; `sensitive: true` вдобавок закрывает ему read-путь:
 
-| Эффект | Как |
-|---|---|
-| `inspect/1` не печатает значение | `@derive {Inspect, except: [:value]}` → `#Password<...>` |
-| `Error.detail` не содержит raw | `{:redacted, byte_size}` для binary, `:redacted` для остального |
-| флаг доступен коду | `__domain_sensitive__/0` |
+| Эффект | `sensitive: true` | `personal: true` |
+|---|---|---|
+| `inspect/1` не печатает значение | `@derive {Inspect, except: [:value]}` → `#Password<...>` | то же |
+| `Error.detail` не содержит raw | `{:redacted, byte_size}` для binary, `:redacted` для остального | то же |
+| `Core.View`, Redump | `CompileError` / поле вырезается | значение проходит |
+| флаг доступен коду | `__domain_sensitive__/0` | `__domain_personal__/0` |
 
-Опция есть у всех обёрток (`Prim.String` / `Integer` / `UUID` / `Decimal` / `Date` / `DateTime` /
-`Compose`). `Prim.Compose` наследует её от базового Prim, явный `sensitive: true` перебивает
-наследование, а понижение (`sensitive: false` поверх чувствительной базы) — `CompileError`:
-композит строит внешнюю ошибку сам, и без флага raw ушёл бы в её `detail` целым. Какие значения
-MUST помечаться и чек-лист секрета — `12-errors.md`, «Чувствительные данные».
+Опции есть у всех обёрток (`Prim.String` / `Integer` / `UUID` / `Decimal` / `Date` / `DateTime` /
+`Compose`). `Prim.Compose` наследует каждую от базового Prim, явный `true` перебивает
+наследование, а понижение (`sensitive: false` поверх чувствительной базы, `personal: false` поверх
+персональной) — `CompileError`: композит строит внешнюю ошибку сам, и без флага raw ушёл бы в её
+`detail` целым. Какие значения MUST помечаться и чек-лист секрета — `12-errors.md`,
+«Чувствительные данные»; ПДн — `23-personal-data.md`.
 
 | Функция | Возврат |
 |---|---|
@@ -71,6 +74,7 @@ MUST помечаться и чек-лист секрета — `12-errors.md`, 
 | `__domain_kind__/0` | атом kind для Codec |
 | `__domain_type_opts__/0` | опции типа (`precision`, `tz`, границы) — их читает `Codec.coerce/2` на read-пути |
 | `__domain_sensitive__/0` | Prim объявлен `sensitive: true` (наследуется `Prim.Compose`) |
+| `__domain_personal__/0` | Prim объявлен `personal: true` (наследуется `Prim.Compose`) |
 | `name/0` | имя Prim из `name:` — уходит в message доменной ошибки |
 | `Prim.prim?/1` | модуль объявлен через `use Prim` (`__domain_kind__/0` + `value/1`); при необходимости загружает модуль |
 | `Prim.composed?/1` | Prim объявлен через `Prim.Compose` (есть `__domain_base__/0`) |

@@ -89,6 +89,21 @@ use Core.Prim.String,
 MUST помечать: пароли (plaintext и хеши), токены и ключи, коды подтверждения, ПДн, платёжные
 реквизиты.
 
+### Prim: `personal: true`
+
+Значение `personal: true` скрывается в `inspect/1` и `Error.detail` (`{:redacted, n}` /
+`:redacted` по всей cause-цепочке) так же, как у `sensitive: true`, но read-путь (`Core.View`,
+Redump) ему открыт. Флаги независимы; что делает опция — `11-domain.md`, «Prim (value object)»,
+какие значения так помечаются — `23-personal-data.md`, «Разметка».
+
+ПДн, которые показываются клиенту, MAY помечаться `personal: true` вместо `sensitive: true`.
+
+Ошибку базового Prim `Core.Codec.load_composite/3` отдаёт вместо ошибки композита, поэтому её
+`detail` редактирует флаг композита, а не базы.
+
+Проверяется: `test/core/prim/personal_test.exs`, `test/core/codec_test.exs`, describe
+«load_composite/3».
+
 ### Структуры и колонки
 
 - Секрет MUST лежать внутри `sensitive`-Prim или `Core.Security.Secret` — тогда любая обёртка

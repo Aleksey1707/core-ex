@@ -3,7 +3,7 @@ defmodule Core.Prim.String do
   Билдер string-Prim: `cast` (байтовый лимит + UTF-8) → `mutate` (trim) → `Validator.String`.
 
   Опции: `name:` (обязательна), `kind:`, `min_len:`, `max_len:`, `sec_max_len:`, `re:`,
-  `trim:` (default `true`), `mutate:` / `validate:` (кастомные шаги), `sensitive:`.
+  `trim:` (default `true`), `mutate:` / `validate:` (кастомные шаги), `sensitive:`, `personal:`.
 
   `sec_max_len` — граница **в байтах**, отсекающая заведомо огромный ввод до любой
   посимвольной работы; default — `max_len * 4 + 50` (4 байта на кодовую точку UTF-8 +
@@ -21,7 +21,7 @@ defmodule Core.Prim.String do
     label: "Prim.String",
     native_kind: :string,
     required: ~w(name)a,
-    optional: ~w(kind min_len max_len sec_max_len re trim mutate validate sensitive)a
+    optional: ~w(kind min_len max_len sec_max_len re trim mutate validate sensitive personal)a
 
   @sec_max_len_slack 50
   @max_utf8_bytes_per_char 4
@@ -49,6 +49,7 @@ defmodule Core.Prim.String do
         type_opts: type_opts,
         pipeline_opts: pipeline_opts,
         sensitive: Keyword.get(opts, :sensitive, false),
+        personal: Keyword.get(opts, :personal, false),
         value_type: String.t()
     end
   end
@@ -60,7 +61,7 @@ defmodule Core.Prim.String do
     Prim.Opts.non_neg_integer!(opts, ~w(min_len max_len sec_max_len)a, label())
     Prim.Opts.int_bounds!(opts, :min_len, :max_len, label())
     Prim.Opts.regex!(opts, :re, label())
-    Prim.Opts.boolean!(opts, ~w(trim sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(trim sensitive personal)a, label())
     require_byte_limit!(opts)
   end
 

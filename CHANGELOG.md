@@ -1,5 +1,55 @@
 # Changelog
 
+## Не выпущено
+
+### Ломающие изменения контракта
+
+- **Новая тема свода — `23-personal-data.md`, в обоих ярусах** (норма — `docs/rules/00-index.md`,
+  «Карта свода»; `docs/rules/app/00-index.md`, «Нумерация»). Свод персональных данных приезжает к
+  потребителю файлами `deps/core/docs/rules/23-personal-data.md` и
+  `deps/core/docs/rules/app/23-personal-data.md`; локального файла этой темы у приложения нет,
+  поэтому `deps/core/scripts/rules_lint.exs --consumer` требует её доставку и без неё падает.
+  Правка потребителя:
+  - строка таблицы карты свода в `AGENTS.md` с путём `deps/core/docs/rules/23-personal-data.md` и
+    скиллом `personal-data`;
+  - скилл `.claude/skills/personal-data/SKILL.md` с содержательным `description:` и ссылками на
+    оба файла — `deps/core/docs/rules/23-personal-data.md` и
+    `deps/core/docs/rules/app/23-personal-data.md`.
+
+- **`Core.Codec.load_composite/3` редактирует `detail` по флагу композита.** Раньше ошибку базы
+  load композита отдавал как есть, и `sensitive`-композит над обычной базой выдавал сырое
+  значение в `detail` — в логи и службу учёта ошибок через `inspect/1`. Теперь у композита с
+  `sensitive: true` или `personal: true` `detail` всей cause-цепочки ошибки базы —
+  `{:redacted, n}` / `:redacted`; у обычного композита ошибка прежняя. Правка нужна только коду,
+  который читал сырое значение из `detail` такой ошибки:
+  - было: `{:error, %Error{detail: raw}} = InCodec.load(Agg.SecretRef, raw)`;
+  - стало: `{:error, %Error{detail: {:redacted, _}}}`; значение — у вызывающего, в `raw`.
+
+### Новое
+
+- **ПДн в событиях: шифрование под ключом субъекта и уничтожение ключа** (решения —
+  `docs/adr/0072-key-per-data-subject.md` … `docs/adr/0079-key-destruction-event-for-projections.md`;
+  норма — `docs/rules/23-personal-data.md`, `docs/rules/app/23-personal-data.md`). Первая часть —
+  разметка ПДн у Prim. Раньше ПДн можно было скрыть в выводе только `sensitive: true`, а он
+  закрывает значению read-путь: `Core.View` даёт `CompileError`, Redump вырезает поле, и ПДн не
+  показать клиенту. Теперь `personal: true` скрывает значение, как `sensitive:` — `inspect/1` без
+  значения, `detail` отказа `new` и всей cause-цепочки `{:redacted, n}` / `:redacted`, — но
+  `Core.View` и Redump его пропускают. Флаги независимы, оба вместе допустимы (тогда read-путь
+  закрыт). Новая функция — `__domain_personal__/0` у каждого Prim. Извлечённое значение (`Prim.value/1`, строка в `raise`) библиотека
+  не скрывает: норма приложения — `deps/core/docs/rules/app/23-personal-data.md`, «Вывод».
+  Правка нужна только Prim с ПДн, которые показываются клиенту:
+  - было: `use Core.Prim.String, name: …, max_len: 32` — без флага, значение печатается в логах;
+  - стало: `use Core.Prim.String, name: …, max_len: 32, personal: true`.
+
+### Изменения контракта макросов
+
+- **Опция `personal:` у Prim** (норма — `docs/rules/11-domain.md`, «Prim (value object)»).
+  `use Core.Prim` и все обёртки (`Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` /
+  `Date` / `Compose`) принимают `personal:` — булеву, по умолчанию `false`; не-булево значение —
+  `CompileError`. `Prim.Compose` наследует признак от базы, `personal: false` поверх персональной
+  базы — `CompileError`, как у `sensitive:`. `use Core.Prim` занимает в модуле имя
+  `__domain_personal__/0`: своя функция с этим именем в Prim-модуле переименовывается.
+
 ## 0.15.1
 
 ### Новое

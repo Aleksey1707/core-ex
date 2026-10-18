@@ -6,8 +6,9 @@ defmodule Core.Prim.Compose do
   Prim. `new/1` принимает raw базы, `%Base{}` или `%Mod{}` (идемпотентно), вложенная
   композиция допустима. Дополнительно: `__domain_base__/0`, `raw/1`.
 
-  Чувствительность наследуется от базового Prim, если не задана явно; понизить её
-  (`sensitive: false` поверх чувствительной базы) нельзя — `CompileError`.
+  Флаги `sensitive:` и `personal:` наследуются от базового Prim, если не заданы явно; понизить
+  флаг (`sensitive: false` поверх чувствительной базы, `personal: false` поверх персональной)
+  нельзя — `CompileError`.
   """
 
   alias Core.Prim
@@ -17,7 +18,7 @@ defmodule Core.Prim.Compose do
     label: "Prim.Compose",
     native_kind: :composite,
     required: ~w(name of)a,
-    optional: ~w(kind mutate validate sensitive)a
+    optional: ~w(kind mutate validate sensitive personal)a
 
   @doc "Объявить Compose-Prim поверх базового (`of:` / `name:`)."
   defmacro __using__(opts) do
@@ -42,6 +43,7 @@ defmodule Core.Prim.Compose do
         name: Keyword.fetch!(opts, :name),
         kind: kind,
         sensitive: Core.Prim.Compose.sensitive?(opts, unquote(base)),
+        personal: Core.Prim.Compose.personal?(opts, unquote(base)),
         value_type: unquote(base).t()
 
       @doc "Модуль базового Prim."
@@ -60,7 +62,7 @@ defmodule Core.Prim.Compose do
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
-    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     ensure_base!(Keyword.fetch!(opts, :of))
   end
 
@@ -83,11 +85,19 @@ defmodule Core.Prim.Compose do
   @spec sensitive?(keyword(), module()) :: boolean()
 
   def sensitive?(opts, base) when is_list(opts) and is_atom(base) do
-    case Keyword.fetch(opts, :sensitive) do
-      {:ok, false} -> refuse_downgrade!(base)
-      {:ok, sensitive} -> sensitive
-      :error -> base_sensitive?(base)
-    end
+    inherit(opts, base, :sensitive, "чувствительного")
+  end
+
+  @doc """
+  Персональность композита: явная опция или наследование от базового Prim.
+
+  Понижение запрещено по той же причине, что у `sensitive?/2`: `personal: false` поверх
+  персональной базы открыл бы raw базы в `Error.detail` композита.
+  """
+  @spec personal?(keyword(), module()) :: boolean()
+
+  def personal?(opts, base) when is_list(opts) and is_atom(base) do
+    inherit(opts, base, :personal, "персонального")
   end
 
   # ---
@@ -103,20 +113,33 @@ defmodule Core.Prim.Compose do
     :ok
   end
 
-  defp refuse_downgrade!(base) do
-    if base_sensitive?(base) do
+  defp inherit(opts, base, flag, adjective) do
+    case Keyword.fetch(opts, flag) do
+      {:ok, false} -> refuse_downgrade!(base, flag, adjective)
+      {:ok, value} -> value
+      :error -> base_flag?(base, flag)
+    end
+  end
+
+  defp refuse_downgrade!(base, flag, adjective) do
+    if base_flag?(base, flag) do
       raise CompileError,
         description:
-          "#{label()}: sensitive: false поверх чувствительного #{inspect(base)} — " <>
+          "#{label()}: #{flag}: false поверх #{adjective} #{inspect(base)} — " <>
             "композит открыл бы raw базы в Error.detail; уберите опцию"
     end
 
     false
   end
 
-  defp base_sensitive?(base) do
+  defp base_flag?(base, flag) do
+    getter = getter(flag)
+
     (:erlang.module_loaded(base) or Code.ensure_loaded?(base)) and
-      function_exported?(base, :__domain_sensitive__, 0) and
-      base.__domain_sensitive__()
+      function_exported?(base, getter, 0) and
+      apply(base, getter, [])
   end
+
+  defp getter(:sensitive), do: :__domain_sensitive__
+  defp getter(:personal), do: :__domain_personal__
 end

@@ -4,13 +4,14 @@ defmodule Core.Prim do
   validate → custom_validate`.
 
   Опции `use`: обязательные `cast:`, `name:`, `kind:`; необязательные `mutate:`, `validate:`,
-  `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `sensitive:`.
+  `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `sensitive:`, `personal:`.
   Типизированные обёртки — `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` /
   `Date` / `Compose`.
 
   Генерирует `new/1`, `new!/1`, `value/1`, `name/0`, `__domain_kind__/0`,
-  `__domain_type_opts__/0`, `__domain_sensitive__/0`. `sensitive: true` скрывает значение
-  от `inspect/1` и редактирует его в `Error.detail`.
+  `__domain_type_opts__/0`, `__domain_sensitive__/0`, `__domain_personal__/0`. `sensitive: true`
+  и `personal: true` скрывают значение от `inspect/1` и редактируют его в `Error.detail`; флаги
+  независимы, `personal: true` read-путь (`Core.View`, Redump) не запрещает.
 
   Формы шагов конвейера:
 
@@ -53,10 +54,12 @@ defmodule Core.Prim do
       @type_opts Keyword.get(opts, :type_opts, [])
       @pipeline_opts Keyword.get(opts, :pipeline_opts, @type_opts)
       @sensitive Keyword.get(opts, :sensitive, false)
+      @personal Keyword.get(opts, :personal, false)
+      @redacted @sensitive or @personal
 
       @enforce_keys ~w(value)a
 
-      if @sensitive do
+      if @redacted do
         @derive {Inspect, except: ~w(value)a}
       end
 
@@ -86,11 +89,11 @@ defmodule Core.Prim do
                @name,
                code,
                detail,
-               Core.Prim.redact(raw, @sensitive)
+               Core.Prim.redact(raw, @redacted)
              )}
 
           {:error, %Error{} = parent} ->
-            {:error, Core.Prim.wrap_parent(__MODULE__, @name, parent, raw, @sensitive)}
+            {:error, Core.Prim.wrap_parent(__MODULE__, @name, parent, raw, @redacted)}
         end
       end
 
@@ -127,6 +130,11 @@ defmodule Core.Prim do
       @spec __domain_sensitive__() :: boolean()
 
       def __domain_sensitive__, do: @sensitive
+
+      @doc "Prim объявлен персональным (`personal: true`)."
+      @spec __domain_personal__() :: boolean()
+
+      def __domain_personal__, do: @personal
 
       @doc """
       Опции типа, с которыми объявлен Prim (`precision`, `tz`, границы).
@@ -218,10 +226,10 @@ defmodule Core.Prim do
   end
 
   @doc """
-  Скрыть сырое значение чувствительного Prim перед записью в `Error.detail`.
+  Скрыть сырое значение чувствительного или персонального Prim перед записью в `Error.detail`.
 
-  При `sensitive == false` возвращает `raw` как есть. Смысл — не пустить plaintext
-  пароля / токена в логи и Sentry через `inspect(%Error{})`.
+  При `redacted == false` возвращает `raw` как есть. Смысл — не пустить plaintext
+  пароля / токена / ПДн в логи и Sentry через `inspect(%Error{})`.
   """
   @spec redact(term(), boolean()) :: term()
 
@@ -245,24 +253,33 @@ defmodule Core.Prim do
   @doc """
   Обернуть ошибку базового Prim: cause-цепочка + склейка message.
 
-  При `sensitive == true` редактируется `detail` **всей** цепочки: базовый Prim может
-  быть несенситивным и положить plaintext в свой `detail`, а `inspect(%Error{})` в логах
+  При `redacted == true` редактируется `detail` **всей** цепочки: базовый Prim может
+  быть обычным и положить plaintext в свой `detail`, а `inspect(%Error{})` в логах
   и Sentry печатает цепочку целиком.
   """
   @spec wrap_parent(module(), String.t(), Error.t(), term(), boolean()) :: Error.t()
 
-  def wrap_parent(module, name, %Error{} = parent, raw, sensitive)
-      when is_binary(name) and is_boolean(sensitive) do
-    parent = redact_chain(parent, sensitive)
+  def wrap_parent(module, name, %Error{} = parent, raw, redacted)
+      when is_binary(name) and is_boolean(redacted) do
+    parent = redact_chain(parent, redacted)
     parent_message = to_string(parent)
 
     Error.domain(module,
       code: parent.code,
       ns: :prim,
       message: "#{name}: #{parent_message}",
-      detail: redact(raw, sensitive),
+      detail: redact(raw, redacted),
       parent: parent
     )
+  end
+
+  @doc false
+  @spec redact_for(module(), Error.t()) :: Error.t()
+
+  # `detail` всей cause-цепочки по флагам Prim `mod` (`sensitive:` или `personal:`): ошибку базы
+  # `Core.Codec.load_composite/3` отдаёт вместо ошибки композита, и редактирует флаг композита.
+  def redact_for(mod, %Error{} = error) when is_atom(mod) do
+    redact_chain(error, mod.__domain_sensitive__() or mod.__domain_personal__())
   end
 
   # ---

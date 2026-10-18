@@ -31,6 +31,7 @@ defmodule Core.Codec do
   """
 
   alias Core.Config
+  alias Core.Error
   alias Core.Helper
   alias Core.Prim
   alias Core.Result
@@ -278,11 +279,20 @@ defmodule Core.Codec do
     mod.new(raw)
   end
 
-  @doc "Load композита: `load(base, raw)` → `mod.new(inner)`."
+  @doc """
+  Load композита: `load(base, raw)` → `mod.new(inner)`.
+
+  Ошибку базы отдаёт вместо ошибки композита, поэтому её `detail` по всей цепочке редактирует
+  флаг композита (`sensitive:` или `personal:`), а не базы: иначе композит над обычной базой
+  отдал бы сырое значение.
+  """
   @spec load_composite(module(), term(), module()) :: Result.t()
 
   def load_composite(mod, raw, codec) when is_atom(mod) and is_atom(codec) do
-    with {:ok, inner} <- codec.load(mod.__domain_base__(), raw), do: mod.new(inner)
+    case codec.load(mod.__domain_base__(), raw) do
+      {:ok, inner} -> mod.new(inner)
+      {:error, %Error{} = error} -> {:error, Prim.redact_for(mod, error)}
+    end
   end
 
   # ===== coerce =====

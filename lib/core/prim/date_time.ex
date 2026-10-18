@@ -4,7 +4,7 @@ defmodule Core.Prim.DateTime do
 
   Опции: `name:` (обязательна), `kind:`, `after:` / `before:`, `precision:`
   (`:second` — default, `:millisecond`, `:microsecond`), `tz:`, `mutate:` / `validate:`,
-  `sensitive:`. Дополнительно генерирует `now/0`, `now!/0` и `from/1`, `from!/1`
+  `sensitive:`, `personal:`. Дополнительно генерирует `now/0`, `now!/0` и `from/1`, `from!/1`
   (конверсия из другого datetime-Prim).
   """
 
@@ -20,7 +20,7 @@ defmodule Core.Prim.DateTime do
     label: "Prim.DateTime",
     native_kind: :datetime,
     required: ~w(name)a,
-    optional: ~w(kind after before tz precision mutate validate sensitive)a
+    optional: ~w(kind after before tz precision mutate validate sensitive personal)a
 
   @precisions ~w(second millisecond microsecond)a
 
@@ -41,6 +41,7 @@ defmodule Core.Prim.DateTime do
         kind: kind,
         type_opts: type_opts,
         sensitive: Keyword.get(opts, :sensitive, false),
+        personal: Keyword.get(opts, :personal, false),
         value_type: DateTime.t()
 
       @tz Keyword.get(type_opts, :tz)
@@ -116,7 +117,7 @@ defmodule Core.Prim.DateTime do
   def validate_opts!(opts) do
     Prim.Opts.struct_bounds!(opts, :after, :before, DateTime, label())
     Prim.Opts.tz!(opts, :tz, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     validate_precision!(Keyword.get(opts, :precision, :second))
   end
 

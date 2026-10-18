@@ -67,6 +67,7 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 | `docs/rules/20-agreements.md` | — (всегда) | CQS, логирование, `@spec` / `@doc`, guards, алиасы, safe vs bang |
 | `docs/rules/21-observability.md` | `observability` | метрики / трейсы / логи, `Core.Otel`, где ставить span |
 | `docs/rules/22-projections.md` | `projections` | `use Core.Es.Projection`, read-модель, дерево, чекпоинт, `await`, пересборка |
+| `docs/rules/23-personal-data.md` | `personal-data` | персональные данные: `personal: true` у Prim, редакция вывода |
 | `docs/rules/00-index.md` | — | карта свода, словари плейсхолдеров и модальности, стандарт оформления правил |
 | `docs/rules/DEBT.md` | — | осознанные отступления от сводов: что не чинится сейчас и почему |
 

@@ -3,6 +3,7 @@ defmodule Core.Codec.PluginRedumpTest do
 
   alias Core.Codec.Redump
   alias Core.Prim
+  alias Core.PrimFixture.Personal
   alias Core.PrimFixture.Sensitive
 
   defmodule ID do
@@ -72,6 +73,10 @@ defmodule Core.Codec.PluginRedumpTest do
     defstruct [:label, :name]
   end
 
+  defmodule Contact do
+    defstruct [:phone, :phones]
+  end
+
   defmodule Item do
     defstruct [:id, :name, :note, :secret, :secrets, :status, :count, :flags, :at, :weights, :tag, :tags, :shape, :pet]
   end
@@ -82,6 +87,7 @@ defmodule Core.Codec.PluginRedumpTest do
       fields: [
         {Tag, id: [prim: ID], at: [prim: At]},
         {Labelled, label: [prim: Label], name: [prim: Name]},
+        {Contact, phone: [prim: Personal], phones: [list: [prim: Personal]]},
         {Item,
          id: [prim: ID],
          name: [prim: Name, wire: "title"],
@@ -248,6 +254,11 @@ defmodule Core.Codec.PluginRedumpTest do
                 }}
 
       assert Redump.validate!(Plugin.__codec_redump__(Item))
+    end
+
+    test "personal-Prim входит в спеку как обычный" do
+      assert Plugin.__codec_redump__(Contact) ==
+               {:map, %{phone: {:prim, Personal}, phones: {:list, {:prim, Personal}}}}
     end
 
     test "Prim с кастомным kind в спеку не входит" do

@@ -3,7 +3,7 @@ defmodule Core.Prim.Date do
   Билдер date-Prim поверх `Date` (дата без времени).
 
   Опции: `name:` (обязательна), `kind:`, `after:` / `before:`, `tz:`, `mutate:` /
-  `validate:`, `sensitive:`. Дополнительно генерирует `today/0`, `today!/0` и
+  `validate:`, `sensitive:`, `personal:`. Дополнительно генерирует `today/0`, `today!/0` и
   `from/1`, `from!/1` (из date- или datetime-Prim, с приведением в `tz:`).
   """
 
@@ -15,7 +15,7 @@ defmodule Core.Prim.Date do
     label: "Prim.Date",
     native_kind: :date,
     required: ~w(name)a,
-    optional: ~w(kind after before tz mutate validate sensitive)a
+    optional: ~w(kind after before tz mutate validate sensitive personal)a
 
   @doc "Объявить date-Prim (`name:` + опции tz/bounds)."
   defmacro __using__(opts) do
@@ -34,6 +34,7 @@ defmodule Core.Prim.Date do
         kind: kind,
         type_opts: type_opts,
         sensitive: Keyword.get(opts, :sensitive, false),
+        personal: Keyword.get(opts, :personal, false),
         value_type: Date.t()
 
       @tz Keyword.get(opts, :tz)
@@ -99,7 +100,7 @@ defmodule Core.Prim.Date do
   def validate_opts!(opts) do
     Prim.Opts.struct_bounds!(opts, :after, :before, Date, label())
     Prim.Opts.tz!(opts, :tz, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
   end
 
   @doc false

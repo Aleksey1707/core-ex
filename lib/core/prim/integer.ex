@@ -3,7 +3,7 @@ defmodule Core.Prim.Integer do
   Билдер integer-Prim: `min:` / `max:` через `Validator.Integer`.
 
   Опции: `name:` (обязательна), `kind:`, `min:`, `max:`, `sec_max_len:`,
-  `mutate:` / `validate:`, `sensitive:`.
+  `mutate:` / `validate:`, `sensitive:`, `personal:`.
 
   `sec_max_len` — граница **в байтах** для строкового ввода, отсекающая его до
   `Integer.parse/1`: разбор строит bignum по всей длине строки, а с ~2 млн цифр
@@ -20,7 +20,7 @@ defmodule Core.Prim.Integer do
     label: "Prim.Integer",
     native_kind: :integer,
     required: ~w(name)a,
-    optional: ~w(kind min max sec_max_len mutate validate sensitive)a
+    optional: ~w(kind min max sec_max_len mutate validate sensitive personal)a
 
   @sec_max_len_slack 4
   @default_sec_max_len 40
@@ -43,6 +43,7 @@ defmodule Core.Prim.Integer do
         type_opts: type_opts,
         pipeline_opts: pipeline_opts,
         sensitive: Keyword.get(opts, :sensitive, false),
+        personal: Keyword.get(opts, :personal, false),
         value_type: integer()
     end
   end
@@ -53,7 +54,7 @@ defmodule Core.Prim.Integer do
   def validate_opts!(opts) do
     Prim.Opts.int_bounds!(opts, :min, :max, label())
     Prim.Opts.non_neg_integer!(opts, ~w(sec_max_len)a, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     fits_bounds!(opts)
   end
 

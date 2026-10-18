@@ -182,7 +182,8 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 - Идентификатор MUST браться из события этого вызова, собранного до отправки;
   `Sentry.get_last_event_id_and_source/0` — MUST NOT: в keep-alive процессе он вернёт id прошлого
   запроса.
-- Секрет в доп. данных скрывает `Inspect` Prim с `sensitive: true` (`12-errors.md`), как и в логах.
+- Секрет и ПДн в доп. данных скрывает `Inspect` Prim с `sensitive: true` или `personal: true`
+  (`12-errors.md`), как и в логах.
 - Модуль собирается только при `:sentry` у приложения (`10-architecture.md`, «Служба учёта ошибок»);
   конфигурация SDK и подключение у потребителя — `deps/core/docs/rules/app/21-observability.md`.
 
@@ -192,6 +193,30 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 
 Проверяется: `test/core/web/critical_error_test.exs` — форма события, идентификатор в событии и в
 отправленном конверте, `nil` без записи, скрытие `sensitive`.
+
+## Персональные данные в выводе
+
+Библиотека не выводит ПДн-значение в своей форме ни в лог, ни в span, ни в `%Error{}.detail`, ни в
+отчёт о падении, ни в событие службы учёта ошибок. Своя форма — Prim с `personal: true`: его
+`inspect/1` — `#Phone<...>`, `detail` отказа `new` и всей cause-цепочки — `{:redacted, n}` /
+`:redacted` (`23-personal-data.md`, «Разметка»). `%Error{}`, состояние процесса и аргументы,
+напечатанные через `inspect/1`, значения не несут.
+
+- Граница гарантии — извлечённое значение (`Prim.value/1`, строка в `raise`): его библиотека не
+  скрывает, норма — `deps/core/docs/rules/app/23-personal-data.md`, «Вывод».
+- Атрибут span'а с ПДн-значением MUST NOT — тот же запрет, что для чувствительных данных
+  («Атрибуты»).
+
+```elixir
+# плохо — значение извлечено и ушло в атрибут: span уходит во внешний коллектор целиком
+Core.Otel.set_attributes(%{"client.phone" => Phone.value(phone)})
+
+# хорошо — идентификатор вместо значения
+Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
+```
+
+Проверяется: `test/core/prim/personal_test.exs` — `refute inspect(...) =~` для Prim и `detail`
+отказа.
 
 ## Тесты
 
@@ -436,4 +461,5 @@ tests:
 - Уровни и формат логов — `20-agreements.md`
 - Тесты — `19-testing.md`
 - Алерты проекций — `22-projections.md`
+- Персональные данные — `23-personal-data.md`
 - Разбор записей `:failed` по алертам очереди — `deps/core/docs/rules/app/14-events-outbox.md`

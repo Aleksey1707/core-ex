@@ -276,6 +276,20 @@ defmodule Core.ViewTest do
       end
     end
 
+    test "personal Prim допускается и показывается" do
+      {{:module, mod, _, _}, _} = define(fields: [phone: [prim: Core.PrimFixture.Personal]])
+
+      codec = Module.concat(mod, Codec)
+
+      assert codec.dump(mod.new(phone: "+79991234567"), OutCodec) == %{phone: "+79991234567"}
+    end
+
+    test "Prim с personal и sensitive не допускается" do
+      assert_raise CompileError, ~r/sensitive/, fn ->
+        define(fields: [document: [prim: Core.PrimFixture.PersonalSensitive]])
+      end
+    end
+
     test "не-Enum в enum: не допускается" do
       assert_raise CompileError, ~r/не Core.Enum/, fn ->
         define(fields: [status: [enum: DateTime]])

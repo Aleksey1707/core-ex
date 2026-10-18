@@ -3,6 +3,7 @@ defmodule Core.CodecTest do
 
   alias Core.Codec
   alias Core.Codec.Helper
+  alias Core.Error
   alias Core.Exc
   alias Core.Prim
 
@@ -592,6 +593,21 @@ defmodule Core.CodecTest do
              BuiltinProfile.load(ApproverID, "not-a-uuid")
 
     assert_raise Exc, fn -> BuiltinProfile.load!(ApproverID, "not-a-uuid") end
+  end
+
+  describe "load_composite/3 — ошибка базы по флагу композита" do
+    test "sensitive- и personal-композит над обычной базой не отдают сырое значение в detail" do
+      for composite <- [Core.PrimFixture.SensitiveOverPlain, Core.PrimFixture.PersonalOverPlain] do
+        assert {:error, %Error{} = error} = BuiltinProfile.load(composite, "ab")
+
+        assert Enum.all?(Error.chain(error), &(&1.detail in [{:redacted, 2}, :redacted]))
+        refute inspect(error) =~ "\"ab\""
+      end
+    end
+
+    test "обычный композит отдаёт ошибку базы как есть" do
+      assert {:error, %Error{detail: "not-a-uuid"}} = BuiltinProfile.load(ApproverID, "not-a-uuid")
+    end
   end
 
   test "compose custom kind dump_kind and module dump priority" do

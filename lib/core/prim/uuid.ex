@@ -5,7 +5,7 @@ defmodule Core.Prim.UUID do
 
   Опции: `name:` (обязательна), `kind:`, `version:` (1 / 4 / 5 / 7 / `:external`; default 4),
   `check_version:` (default `true`), `namespace:` / `scope:` (только и обязательно при
-  `version: 5`), `mutate:` / `validate:`, `sensitive:`. Wire-форму (`:full` / `:hex` / `:urn`)
+  `version: 5`), `mutate:` / `validate:`, `sensitive:`, `personal:`. Wire-форму (`:full` / `:hex` / `:urn`)
   задаёт профиль кодека, не Prim.
 
   `version:` задаёт версию для `new/0` и ожидаемую версию для `new/1`; `check_version:
@@ -32,7 +32,7 @@ defmodule Core.Prim.UUID do
     label: "Prim.UUID",
     native_kind: :uuid,
     required: ~w(name)a,
-    optional: ~w(kind version check_version namespace scope mutate validate sensitive)a
+    optional: ~w(kind version check_version namespace scope mutate validate sensitive personal)a
 
   @versions [1, 4, 5, 7]
   @key_opts ~w(namespace scope)a
@@ -64,6 +64,7 @@ defmodule Core.Prim.UUID do
         kind: kind,
         type_opts: type_opts,
         sensitive: Keyword.get(opts, :sensitive, false),
+        personal: Keyword.get(opts, :personal, false),
         value_type: String.t()
 
       case version do
@@ -110,7 +111,7 @@ defmodule Core.Prim.UUID do
 
   def validate_opts!(opts) do
     Prim.Opts.allowed!(opts, :version, [nil, :external | @versions], label())
-    Prim.Opts.boolean!(opts, ~w(check_version sensitive)a, label())
+    Prim.Opts.boolean!(opts, ~w(check_version sensitive personal)a, label())
     version = Keyword.get(opts, :version, 4)
     check_version_opt!(opts, version)
     key_opts!(opts, version)
