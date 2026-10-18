@@ -11,6 +11,10 @@ defmodule Core.Es.Personal.KeyStore.RaceTest do
 
   @timeout 5_000
 
+  # Последовательное чтение отдаёт строки в порядке кучи — такой план планировщик может выбрать и сам.
+  @seq_scan_only "SELECT set_config('enable_indexscan', 'off', true), " <>
+                   "set_config('enable_bitmapscan', 'off', true)"
+
   setup do
     subject = Ecto.UUID.generate()
 
@@ -77,7 +81,54 @@ defmodule Core.Es.Personal.KeyStore.RaceTest do
     assert {:ok, :ok} = commit(writer)
   end
 
+  test "запись пачки и уничтожение её субъектов в порядке дампа не ловят взаимную блокировку" do
+    {lo, hi} = keys_in_heap_order_against_sort(3)
+    destroyer = participant()
+    writer = participant()
+
+    assert :ok = step(destroyer, fn -> Pg.destroy(lo) end)
+    backend = backend(writer)
+    assert %Postgrex.Result{} = step(writer, fn -> TestRepo.query!(@seq_scan_only) end)
+
+    send_step(writer, fn -> Pg.seal([{hi, "aad", "Иван"}, {lo, "aad", "Пётр"}]) end)
+    await_lock_wait(backend)
+
+    assert :ok = step(destroyer, fn -> Pg.destroy(hi) end)
+    assert {:ok, :ok} = commit(destroyer)
+
+    assert {:error, %Error{code: :subject_destroyed}} = await_step(writer)
+    assert {:ok, :ok} = commit(writer)
+  end
+
   # ---
+
+  # Ключи двух субъектов, у которых порядок строк в куче обратен порядку дампа: без сортировки
+  # последовательное чтение блокировало бы их в порядке кучи.
+  defp keys_in_heap_order_against_sort(attempts) when attempts > 0 do
+    lo = "0" <> binary_part(Ecto.UUID.generate(), 1, 35)
+    hi = "f" <> binary_part(Ecto.UUID.generate(), 1, 35)
+    on_exit(fn -> delete_keys([lo, hi]) end)
+
+    case unboxed(fn -> create_keys([hi, lo]) end) do
+      [^hi, ^lo] -> {lo, hi}
+      _other -> keys_in_heap_order_against_sort(attempts - 1)
+    end
+  end
+
+  defp create_keys(subjects) do
+    {:ok, rows} =
+      Transact.run(TestRepo, fn ->
+        Enum.each(subjects, &({:ok, [_sealed]} = Pg.seal([{&1, "aad", "Иван"}])))
+        sql = "SELECT subject FROM es_subject_keys WHERE subject = ANY($1) ORDER BY ctid"
+
+        {:ok, TestRepo.query!(sql, [subjects]).rows}
+      end)
+
+    List.flatten(rows)
+  end
+
+  defp delete_keys(subjects),
+    do: unboxed(fn -> TestRepo.query!("DELETE FROM es_subject_keys WHERE subject = ANY($1)", [subjects]) end)
 
   defp participant do
     test = self()

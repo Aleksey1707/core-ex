@@ -34,7 +34,7 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
   | Операция | Исход |
   |---|---|
-  | `seal/1` | строки ключей пачки читаются `FOR SHARE`; недостающие ключи вставляются пачкой в порядке субъектов с `on_conflict: :nothing`, затем перечитывание и один повтор; не вышло — `:key_unresolved`; след ключа — `:subject_destroyed` |
+  | `seal/1` | строки ключей пачки читаются `FOR SHARE` в порядке субъектов (`COLLATE "C"`, как `Enum.sort/1`); недостающие ключи вставляются пачкой в порядке субъектов с `on_conflict: :nothing`, затем перечитывание и один повтор; не вышло — `:key_unresolved`; след ключа — `:subject_destroyed` |
   | `open/1` | один запрос на пачку; след — `:destroyed` при любой версии KEK; неизвестный ключ, несошедшийся тег, неизвестная версия схемы — `:unreadable`; версии KEK строки нет в конфигурации — `:kek_unknown` на всю пачку |
   | `destroy/1` | `INSERT … ON CONFLICT (subject) DO UPDATE`: обёрнутый ключ стирается, первая дата уничтожения сохраняется, субъект без ключа получает след |
 
@@ -72,7 +72,7 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
   @select_by_subject """
   SELECT id, subject, wrapped_key, kek_version FROM es_subject_keys
-  WHERE subject = ANY($1) FOR SHARE
+  WHERE subject = ANY($1) ORDER BY subject COLLATE "C" FOR SHARE
   """
 
   @insert """
