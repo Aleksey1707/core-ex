@@ -37,11 +37,19 @@ defmodule Core.Config do
 
   ```elixir
   config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
+
+  config :core, Core.Es.Personal.KeyStore.Pg,
+    keks: %{1 => "<base64 32 байт>"},
+    current_kek: 1,
+    index_secret: "<base64 32 байт>"
   ```
+
+  Хранилище ключей субъектов (`Core.Es.Personal.KeyStore.Pg`) нужно только приложению с ПДн в
+  событиях; форму его конфигурации проверяет `Core.Es.Personal.KeyStore.Pg.ensure_configured!/0`.
 
   ## DI репозиториев
 
-  Реализация резолвится по конвенции `<Behaviour>.Pg` (`repo!/1`, `outbox_repo/0`);
+  Реализация резолвится по конвенции `<Behaviour>.Pg` (`repo!/1`, `outbox_repo/0`, `key_store/0`);
   ключ в конфигурации нужен только тому, кто подменяет реализацию. Решение и его
   цена — `docs/adr/0006-repo-impl-resolved-by-convention.md`.
   """
@@ -120,6 +128,17 @@ defmodule Core.Config do
 
   def outbox_repo, do: Application.get_env(@app, Core.Outbox.Repo, default_repo(Core.Outbox.Repo))
 
+  @doc """
+  Реализация порта хранилища ключей субъектов: по той же конвенции — `Core.Es.Personal.KeyStore.Pg`;
+  подмена — `config :core, Core.Es.Personal.KeyStore, MyImpl`.
+
+  Резолвится в рантайме, на каждом вызове фасада `Core.Es.Personal`: сборке ни реализация, ни её
+  конфигурация не нужны.
+  """
+  @spec key_store() :: module()
+
+  def key_store, do: Application.get_env(@app, Core.Es.Personal.KeyStore, default_repo(Core.Es.Personal.KeyStore))
+
   @doc "Часовой пояс приложения по умолчанию."
   @spec tz() :: String.t()
 
@@ -139,7 +158,8 @@ defmodule Core.Config do
   Проверить конфигурацию целиком, до первого обращения к ней из рабочего кода.
 
   Звать из `start/2` приложения-потребителя: обязательные ключи заданы, `dao`
-  и `codec` загружаются и экспортируют нужные функции, `tz` известен системе.
+  и `codec` загружаются и экспортируют нужные функции, реализации `Core.Outbox.Repo` и
+  `Core.Es.Personal.KeyStore` экспортируют колбэки, `tz` известен системе.
   """
   @spec validate!() :: :ok
 
@@ -153,6 +173,12 @@ defmodule Core.Config do
       outbox_repo(),
       "config :core, Core.Outbox.Repo,",
       Core.Outbox.Repo.behaviour_info(:callbacks)
+    )
+
+    ensure_exports!(
+      key_store(),
+      "config :core, Core.Es.Personal.KeyStore,",
+      Core.Es.Personal.KeyStore.behaviour_info(:callbacks)
     )
 
     ensure_tz!(tz())

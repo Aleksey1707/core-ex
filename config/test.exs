@@ -24,6 +24,13 @@ config :core, Core.TestRepo,
 
 config :core, Core.Security.Secret, secret_key: "qI1uzVjrHlMCym8sO62o9uoRdqmqGQf_QmEo4o5uzmE="
 
+# Встроенное хранилище ключей субъектов — тестовые литералы, как у потребителя: KEK версии 1 и
+# секрет индекса. На них же записаны golden схемы `1` (`test/core/es/personal/key_store/pg_test.exs`).
+config :core, Core.Es.Personal.KeyStore.Pg,
+  keks: %{1 => "toBZD0txTVtnaXXScEYxpdHILiq3IK2kxPlelg6aMKo="},
+  current_kek: 1,
+  index_secret: "/mQmZtBq+tA+/lBbAnlGZw4Mhqjtm2D6lpZQT4kMSec="
+
 config :core, Core.Mq.Stream,
   host: "localhost",
   port: String.to_integer(System.get_env("RABBIT_STREAM_PORT", "5553")),

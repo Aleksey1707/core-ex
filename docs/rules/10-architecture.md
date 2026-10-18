@@ -22,8 +22,8 @@
 
 | Что | Как получает зависимость |
 |---|---|
-| Инфра-синглтоны (`dao`, `codec`, `tz`, ключ шифрования, реализация `Outbox.Repo`) | `Core.Config` — `config :core, ...` |
-| Реализации репозиториев (доменных и `Outbox.Repo`) | конвенция `<Behaviour>.Pg`; ключ конфигурации — только при подмене |
+| Инфра-синглтоны (`dao`, `codec`, `tz`, ключ шифрования, KEK хранилища ключей, реализации `Outbox.Repo` и `Es.Personal.KeyStore`) | `Core.Config` — `config :core, ...` |
+| Реализации репозиториев и портов (доменных, `Outbox.Repo`, `Es.Personal.KeyStore`) | конвенция `<Behaviour>.Pg`; ключ конфигурации — только при подмене |
 | OTP-процессы и деревья (`Outbox.Supervisor`, `Mq.Stream.*`, `PubSub.MqSubscriberReliable`) | `opts` от supervisor'а потребителя |
 | Макросы (`Repo.Pg`, `Repo.Pg.Schema`, `Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`, `Es.Outbox`, `Es.Projection`, `Prim.DateTime`, `Prim.Date`) | `use`-опция (`repo:`, `codec:`, `tz:`), без неё — `Core.Config` в рантайме |
 | PromEx-плагины | списки процессов / размеров — MFA-провайдер в `opts` плагина |
@@ -80,11 +80,21 @@ config :core,
   telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]; префикс имён telemetry-событий
 
 config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
+
+# только приложению с ПДн в событиях на встроенном хранилище ключей
+config :core, Core.Es.Personal.KeyStore.Pg,
+  keks: %{1 => "<base64 32 байт>"},
+  current_kek: 1,
+  index_secret: "<base64 32 байт>"
 ```
 
-Реализации репозиториев в контракт не входят: `Core.Config.repo!/1` и
-`Core.Config.outbox_repo/0` выводят их из имени behaviour по конвенции `<Behaviour>.Pg`,
-и ключ нужен только при подмене (`13-repos.md`, «DI»; ADR-0006).
+Реализации репозиториев и порта хранилища ключей в контракт не входят: `Core.Config.repo!/1`,
+`Core.Config.outbox_repo/0` и `Core.Config.key_store/0` выводят их из имени behaviour по
+конвенции `<Behaviour>.Pg`, и ключ нужен только при подмене (`13-repos.md`, «DI»; ADR-0006;
+`config :core, Core.Es.Personal.KeyStore, MyImpl` — ADR-0075). `key_store/0` резолвит реализацию
+в рантайме, а конфигурацию встроенной реализации она читает при обращении: сборка KEK не требует.
+Форму KEK и секрета индекса проверяет `Core.Es.Personal.KeyStore.Pg.ensure_configured!/0`
+(`23-personal-data.md`, «KEK и секрет индекса»).
 
 Полное описание, включая обязанности потребителя, — в `README.md`.
 `Core.Config.validate!/0` проверяет контракт на старте приложения.

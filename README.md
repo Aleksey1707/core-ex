@@ -165,7 +165,22 @@ config :core,
 # Ключ шифрования секретов (Fernet, 32 байта в base64). Обязателен, если используется
 # `Core.Security.Secret`. Проверяется на старте — `Core.Security.Secret.ensure_configured!/0`.
 config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYPTION_KEY")
+
+# Встроенное хранилище ключей субъектов — только приложению с ПДн в событиях. KEK — набор версий
+# (положительные целые, ключи по 32 байта в base64) с явной текущей; секрет индекса — 32 байта,
+# отдельно от KEK и без версии. Проверяется на старте —
+# `Core.Es.Personal.KeyStore.Pg.ensure_configured!/0`.
+config :core, Core.Es.Personal.KeyStore.Pg,
+  keks: %{1 => System.fetch_env!("PD_KEK_1")},
+  current_kek: 1,
+  index_secret: System.fetch_env!("PD_INDEX_SECRET")
 ```
+
+Сборке ни KEK, ни секрет индекса не нужны: конфигурация читается при обращении к хранилищу.
+Свою реализацию порта (`Core.Es.Personal.KeyStore`: Vault, KMS, СКЗИ) подключает
+`config :core, Core.Es.Personal.KeyStore, MyApp.KeyStore` — тогда ключ
+`Core.Es.Personal.KeyStore.Pg` не нужен. Нормы — `docs/rules/23-personal-data.md`, «Хранилище
+ключей».
 
 Настройки outbox (поллеры, интервалы, размер батча, TTL) библиотека из конфигурации не читает:
 они приходят опциями в дерево очереди `Core.Outbox.Supervisor` («Supervision» ниже). Где их
@@ -175,8 +190,9 @@ config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYP
 ### Реализации репозиториев
 
 Ключа не требуют: реализация выводится из имени behaviour по конвенции `<Behaviour>.Pg`
-(`Core.Config.repo!/1`, `Core.Config.outbox_repo/0`). `config :core, Core.Outbox.Repo`
-и `config :my_app, <Behaviour>` нужны только при подмене реализации — например тестовой
+(`Core.Config.repo!/1`, `Core.Config.outbox_repo/0`, `Core.Config.key_store/0`).
+`config :core, Core.Outbox.Repo`, `config :core, Core.Es.Personal.KeyStore` и
+`config :my_app, <Behaviour>` нужны только при подмене реализации — например тестовой
 или in-memory. Решение и его цена — `docs/adr/0006-repo-impl-resolved-by-convention.md`.
 
 ### Проверка конфигурации на старте
@@ -185,6 +201,8 @@ config :core, Core.Security.Secret, secret_key: System.fetch_env!("SECRET_ENCRYP
 def start(_type, _args) do
   Core.Config.validate!()
   Core.Security.Secret.ensure_configured!()
+  # только приложению с ПДн в событиях на встроенном хранилище ключей:
+  Core.Es.Personal.KeyStore.Pg.ensure_configured!()
   # опционально — только если приложение действительно поднимает адаптер:
   Core.Mq.Stream.ensure_available!()
   Core.Mq.Kafka.ensure_available!()
@@ -197,7 +215,12 @@ end
 кластере и непересечение фильтров поллеров — делает её дерево `Core.Outbox.Supervisor` при старте.
 
 `validate!/0` проверяет, что обязательные ключи заданы, `dao` и `codec` загружаются
-и экспортируют нужные функции, а `tz` известен базе часовых поясов.
+и экспортируют нужные функции, реализации `Core.Outbox.Repo` и `Core.Es.Personal.KeyStore`
+экспортируют колбэки, а `tz` известен базе часовых поясов.
+
+`Core.Es.Personal.KeyStore.Pg.ensure_configured!/0` проверяет только форму конфигурации
+хранилища ключей — `current_kek` в наборе, длины, уникальность версий, наличие секрета индекса — и
+к базе не обращается. Без конфигурации первая операция хранилища поднимает `ArgumentError`.
 
 `Core.Mq.Stream.ensure_available!/0` / `Core.Mq.Kafka.ensure_available!/0` — опциональные
 проверки для тех, кто использует соответствующий адаптер. Различают два случая и дают
@@ -271,6 +294,19 @@ end
 
      defdelegate up, to: Core.Es.KeyReservation.Migration
      defdelegate down, to: Core.Es.KeyReservation.Migration
+   end
+   ```
+
+   Ключи субъектов встроенного хранилища ключей `es_subject_keys` — приложению с ПДн в событиях,
+   отдельной миграцией в той же базе, что `es_events`; DDL живёт в
+   `Core.Es.Personal.KeyStore.Migration`:
+
+   ```elixir
+   defmodule MyApp.Infra.DAO.Migrations.CreateEsSubjectKeys do
+     use Ecto.Migration
+
+     defdelegate up, to: Core.Es.Personal.KeyStore.Migration
+     defdelegate down, to: Core.Es.Personal.KeyStore.Migration
    end
    ```
 

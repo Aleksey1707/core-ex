@@ -124,6 +124,20 @@ defmodule Core.ConfigTest do
     end
   end
 
+  describe "key_store/0" do
+    test "без ключа — Core.Es.Personal.KeyStore.Pg" do
+      Application.delete_env(:core, Core.Es.Personal.KeyStore)
+
+      assert Config.key_store() == Core.Es.Personal.KeyStore.Pg
+    end
+
+    test "ключ переопределяет дефолт" do
+      Application.put_env(:core, Core.Es.Personal.KeyStore, Custom)
+
+      assert Config.key_store() == Custom
+    end
+  end
+
   describe "validate!/0" do
     test "на рабочем конфиге проходит" do
       assert :ok = Config.validate!()
@@ -149,6 +163,14 @@ defmodule Core.ConfigTest do
       Application.put_env(:core, :tz, "Mars/Olympus")
 
       assert_raise ArgumentError, ~r/tz: "Mars\/Olympus"/, fn ->
+        Config.validate!()
+      end
+    end
+
+    test "ловит подмену хранилища ключей модулем без колбэков" do
+      Application.put_env(:core, Core.Es.Personal.KeyStore, Core.Version)
+
+      assert_raise ArgumentError, ~r/Core\.Es\.Personal\.KeyStore,` — Core\.Version не экспортирует/, fn ->
         Config.validate!()
       end
     end

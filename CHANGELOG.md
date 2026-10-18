@@ -58,6 +58,22 @@
   - стало: `fields: [recipient_id: [prim: Order.RecipientID], phone: [prim: Order.Phone,
     subject: :recipient_id]]`.
 
+  Третья часть — хранилище ключей субъектов (`docs/rules/23-personal-data.md`, «Хранилище
+  ключей»; ADR-0075). Порт `Core.Es.Personal.KeyStore` шифрует, расшифровывает, считает индекс и
+  уничтожает ключ субъекта пачками; ключ его не покидает. Встроенная реализация по умолчанию —
+  `Core.Es.Personal.KeyStore.Pg`: таблица `es_subject_keys` в базе событий, ключ субъекта под KEK
+  из конфигурации, AES-256-GCM из `:crypto`, без кеша. Реализацию резолвит
+  `Core.Config.key_store/0`, `Core.Config.validate!/0` проверяет её колбэки. Контрактный набор своей
+  реализации — `use Core.Es.Personal.KeyStoreCase, impl: …`. Записи событий порт пока не касается.
+  Правка нужна только приложению с ПДн в событиях:
+  - миграция — было: таблицы нет; стало: делегирующая миграция
+    `defdelegate up, to: Core.Es.Personal.KeyStore.Migration` (и `down`);
+  - конфигурация — было: нет; стало: `config :core, Core.Es.Personal.KeyStore.Pg, keks: %{1 =>
+    "<base64 32 байт>"}, current_kek: 1, index_secret: "<base64 32 байт>"` — набор версий KEK с
+    явной текущей и секрет индекса отдельно от KEK; литералы теста — в `config/test.exs`;
+  - старт — `Core.Es.Personal.KeyStore.Pg.ensure_configured!()` в `start/2`;
+  - своя реализация порта (СКЗИ, Vault, KMS) — `config :core, Core.Es.Personal.KeyStore, MyImpl`.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,

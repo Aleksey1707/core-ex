@@ -471,6 +471,35 @@ defmodule MyAppTest.ReadRepoContract do
 end
 ```
 
+### Хранилище ключей
+
+Порт хранилища ключей `Core.Es.Personal.KeyStore` несёт свой контрактный набор в `lib/` —
+`use Core.Es.Personal.KeyStoreCase, impl: …`; библиотека гоняет его на встроенной
+`Core.Es.Personal.KeyStore.Pg`. Своя реализация порта (`23-personal-data.md`, «Своя реализация
+порта») MUST:
+
+- иметь тест-модуль `use Core.Es.Personal.KeyStoreCase, impl: MyApp.KeyStore`;
+- иметь golden своей схемы: шифротекст и материал ключа, записанные литералом, открываются в
+  известный текст, индекс фиксированных области и частей — фиксированная строка. Набор схему
+  реализации не видит, а смена схемы делает записанное нечитаемым.
+
+Сбой хранилища и откат ключа вместе с транзакцией проверяют тесты самой реализации.
+
+```elixir
+# плохо — golden нет: правка формата шифротекста пройдёт набор и сломает чтение истории
+defmodule MyApp.Infra.KeyStoreTest do
+  use Core.Es.Personal.KeyStoreCase, impl: MyApp.Infra.KeyStore, async: true
+end
+
+# хорошо — test/my_app/infra/key_store_golden_test.exs
+test "шифротекст схемы 1 открывается в известный текст" do
+  assert {:ok, [{:ok, "\"Иван\""}]} = MyApp.Infra.KeyStore.open([{@golden_ct, @golden_aad}])
+end
+```
+
+Проверяется: `test/core/es/personal/key_store/contract_test.exs`,
+`test/core/es/personal/key_store/pg_test.exs`, describe «golden схемы 1».
+
 ## `constraint_errors`
 
 Маппинг DB-ограничения в доменный код — декларация, которая при расхождении с `changeset/2`

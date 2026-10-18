@@ -374,6 +374,8 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
 | `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |
+| `Core.Es.Personal.KeyStore` (порт; своя реализация отказывает тем же кодом) | `:key_store` | `:domain` | `:subject_destroyed` |
+| `Core.Es.Personal.KeyStore.Pg` | `:key_store` | `:app` | `:kek_unknown`, `:key_unresolved`, `:unavailable` |
 | `Core.Es.Projection` (`Batch`, `Checkpoint`, `Await`) | `:es` | `:app` | `:projection_raised`, `:checkpoint_conflict`, `:projection_timeout`, `:projection_rebuilding` |
 
 ## Связанные правила

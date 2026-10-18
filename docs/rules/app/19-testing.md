@@ -234,6 +234,13 @@ read-модели».
   зависимостях не работает. Заглушка `Core.Web.CriticalError` или SDK — MUST NOT: она не
   проверяет ни форму события, ни то, что идентификатор принадлежит записи этого запроса. `async:` и
   дедупликация SDK — `deps/core/docs/rules/21-observability.md`, «Тесты».
+- Хранилище ключей субъектов в тестах — встроенное `Core.Es.Personal.KeyStore.Pg` с тестовыми
+  литералами KEK (набор версий с `current_kek:`) и секрета индекса в `config/test.exs`, на той же
+  миграции `es_subject_keys`, что в проде; дублёр порта MUST NOT. Приложение со своей реализацией
+  порта MAY подменять её в тестах встроенной (`config :core, Core.Es.Personal.KeyStore,
+  Core.Es.Personal.KeyStore.Pg` в `config/test.exs`): свою реализацию держит её контрактный набор и
+  golden (`deps/core/docs/rules/19-testing.md`, «Хранилище ключей»). Литералы теста в
+  `config/runtime.exs` и в прод-конфигурации MUST NOT.
 - Обе точки ответа 500 (`15-web-api.md`, «FallbackController») MUST иметь тест, который сверяет
   `data.errorId` ответа с `event_id` пойманного события, а не только наличие поля. Исключение из
   экшена `Phoenix.ConnTest` выбрасывает заново: ответ `ErrorJSON` берётся `assert_error_sent/2`.

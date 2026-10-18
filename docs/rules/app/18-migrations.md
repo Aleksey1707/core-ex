@@ -108,8 +108,10 @@ MUST NOT в одной миграции: `rename` колонки, `remove` ко�
 ## Таблицы библиотеки
 
 DDL очереди (`outbox`) и event sourcing (`es_events`, `es_snapshots`, `es_checkpoints`; резервы
-ключей `es_key_reservations`) живёт в библиотеке — `Core.Outbox.Migration`, `Core.Es.Migration` и
-`Core.Es.KeyReservation.Migration`; миграция приложения только делегирует:
+ключей `es_key_reservations`; ключи субъектов встроенного хранилища ключей `es_subject_keys`)
+живёт в библиотеке — `Core.Outbox.Migration`, `Core.Es.Migration`,
+`Core.Es.KeyReservation.Migration` и `Core.Es.Personal.KeyStore.Migration`; миграция приложения
+только делегирует:
 
 ```elixir
 defmodule MyApp.Infra.DAO.Migrations.CreateOutbox do
@@ -121,6 +123,10 @@ end
 ```
 
 - Своей копии колонок и индексов у приложения нет: править их у себя MUST NOT.
+- `es_subject_keys` MUST лежать в той же базе, что `es_events`, и восстанавливаться вместе с ней:
+  своей процедуры восстановления у таблицы нет, а ключ, потерянный при раздельном восстановлении,
+  делает его события нечитаемыми. Уничтожение, потерянное при восстановлении копии, повторяется по
+  актам (`23-personal-data.md`, «Эксплуатация»).
 - Делегирующая миграция выполняется один раз, по своему timestamp: `up/0` / `down/0` библиотеки
   версий не несут, и новое DDL библиотеки само не накатится. Изменение DDL библиотеки приходит
   пунктом `CHANGELOG.md` библиотеки с указанием, какую миграцию завести у себя.

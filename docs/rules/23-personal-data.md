@@ -2,11 +2,12 @@
 
 - **Область.** `lib/core/prim.ex`, `lib/core/prim/**` (опция `personal:`), `lib/core/codec.ex`
   (`load_composite/3`), `lib/core/es/event/payload.ex` и `lib/core/codec/plugin/fields.ex`
-  (`subject:`), `lib/core/es/personal/**`; у потребителя — Prim с персональными данными (ПДн) и
-  события с ними.
+  (`subject:`), `lib/core/es/personal.ex`, `lib/core/es/personal/**`; у потребителя — Prim с
+  персональными данными (ПДн), события с ними и своя реализация хранилища ключей.
 - **Читать перед.** Новым Prim, значение которого — ПДн; полем нагрузки события с ПДн;
   переводом Prim с ПДн с `sensitive:` на `personal:`; правкой редакции значения Prim в выводе;
-  апкастером и `evolve/2` / `project/1` события с полем `subject:`.
+  апкастером и `evolve/2` / `project/1` события с полем `subject:`; конфигурацией KEK, своей
+  реализацией или правкой хранилища ключей.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`; термины («ПДн-значение», «Субъект
   данных», «Уничтожение ключа субъекта») — `CONTEXT.md`, «Персональные данные».
 
@@ -171,6 +172,117 @@ def upcast("order.created.v1", %{"payload" => %{"full_name" => %{"$pd" => nil} =
 | открытое значение | грузится как раньше |
 
 Проверяется: `test/core/es/event/codec_personal_test.exs`, describe «load».
+
+## Хранилище ключей
+
+Порт `Core.Es.Personal.KeyStore` шифрует, расшифровывает, считает индекс и уничтожает ключ
+субъекта сам: ключ субъекта порт не покидает (ADR-0075). Операции — пачками, ответ — в порядке
+пачки, сбой хранилища — `{:error, %Error{kind: :app}}` на всю пачку; формы и исходы — moduledoc
+`Core.Es.Personal.KeyStore`. Библиотека зовёт порт только через фасад `Core.Es.Personal`: он
+резолвит реализацию `Core.Config.key_store/0` и эмитит telemetry `[:es, :personal, :call]` и
+`[:es, :personal, :open]` (moduledoc `Core.Es.Personal`).
+
+### Своя реализация порта
+
+Встроенная реализация `Core.Es.Personal.KeyStore.Pg` работает по умолчанию; потребитель с
+требованием СКЗИ, Vault или KMS подменяет порт целиком —
+`config :core, Core.Es.Personal.KeyStore, MyApp.KeyStore`. Её тесты — контрактный набор и
+golden своей схемы (`19-testing.md`, «Хранилище ключей»). Своя реализация MUST:
+
+- отвечать на запись ПДн уничтоженного субъекта `Core.Es.Personal.KeyStore.subject_destroyed/1`;
+- отдавать неизвестный ключ как `:unreadable`, а не `:destroyed`: потеря хранилища или откат на
+  старую копию не выглядят уничтожением;
+- начинать шифротекст своей версией схемы: шифротекст открывает только записавшая его
+  реализация, и смена реализации на живых данных MUST NOT.
+
+Реализация мимо транзакции вызывающего MAY оставлять ключ-сироту после отката: уничтожает она
+необратимо.
+
+```elixir
+# плохо — ключа нет в хранилище, а ответ — «уничтожен»: потеря хранилища выглядит уничтожением
+defp outcome(nil = _key), do: :destroyed
+
+# хорошо
+defp outcome(nil = _key), do: :unreadable
+defp outcome(%{destroyed?: true}), do: :destroyed
+```
+
+Проверяется: `test/core/es/personal/key_store/contract_test.exs` — набор на встроенной
+реализации; `test/core/config_test.exs`, describe «key_store/0» и «validate!/0».
+
+### Встроенная реализация
+
+- Таблица `es_subject_keys` — в базе `Core.Config.dao()` рядом с `es_events`, DDL —
+  `Core.Es.Personal.KeyStore.Migration`; миграция и восстановление —
+  `deps/core/docs/rules/app/18-migrations.md`, «Таблицы библиотеки».
+- Ключ субъекта создаётся в транзакции вызывающего: откат убирает его вместе с событиями. Гонку
+  создания решают уникальный индекс по субъекту, вставка в порядке субъектов и одно
+  перечитывание; не вышло — `:key_unresolved`.
+- Строки ключей пачки `seal/1` читает `FOR SHARE`: уничтожение ждёт commit записи, запись после
+  commit уничтожения получает `:subject_destroyed`.
+- Уничтожение стирает обёрнутый ключ и оставляет строку следом: субъект без ключа получает след,
+  повтор — `:ok` без перезаписи первой даты.
+- Кеша ключей нет: запрос — на пачку, развёртка — на каждое обращение; уничтожение действует на
+  всех нодах с commit.
+- Оценка встроенного шифра по модели угроз — `deps/core/docs/rules/app/23-personal-data.md`,
+  «Эксплуатация».
+
+Проверяется: `test/core/es/personal/key_store/pg_test.exs` — сбой хранилища, `:kek_unknown`,
+откат ключа, golden схемы `1`; `test/core/es/personal/key_store/race_test.exs` — гонки создания
+ключа и уничтожения с записью.
+
+### KEK и секрет индекса
+
+```elixir
+config :core, Core.Es.Personal.KeyStore.Pg,
+  keks: %{1 => "<base64 32 байт>", 2 => "<base64 32 байт>"},
+  current_kek: 2,
+  index_secret: "<base64 32 байт>"
+```
+
+- `keks:` — набор версий KEK: уникальные положительные целые, ключи по 32 байта. Новые ключи
+  субъектов оборачивает `current_kek:`, остальные версии только разворачивают.
+- KEK MUST NOT совпадать с `secret_key` `Core.Security.Secret` и MUST NOT лежать в базе.
+- Версия KEK строки, которой нет в `keks:`, — `:kek_unknown` (`:app`) на всю пачку расшифровки, с
+  повтором: ошибка конфигурации не выглядит уничтожением. Удалять версию из `keks:`, пока под
+  ней есть живые ключи, MUST NOT.
+- `index_secret:` — 32 байта, отдельно от KEK и без версии; не ротируется. Хранится и копируется
+  наравне с KEK.
+- Сборка конфигурацию не требует. Приложение с ПДн на встроенной реализации MUST звать
+  `Core.Es.Personal.KeyStore.Pg.ensure_configured!/0` в `start/2`: без конфигурации первая
+  операция поднимает `ArgumentError` уже под трафиком.
+
+```elixir
+# плохо — форма конфигурации всплывёт на первой записи ПДн
+def start(_type, _args), do: Supervisor.start_link(children(), strategy: :rest_for_one)
+
+# хорошо
+def start(_type, _args) do
+  Core.Es.Personal.KeyStore.Pg.ensure_configured!()
+  Supervisor.start_link(children(), strategy: :rest_for_one)
+end
+```
+
+Проверяется: `test/core/es/personal/key_store/config_test.exs`.
+
+### Физический след
+
+Обёрнутый ключ уничтоженного субъекта остаётся в мёртвом кортеже `es_subject_keys`, WAL,
+WAL-архиве, репликах и копиях и читается, пока жив KEK его версии (ADR-0075, «Цена»). Запросы с
+обёрнутым ключом встроенная реализация шлёт с `log: false`, но telemetry Ecto (`[..., :repo,
+:query]`) получает их параметры и строки. Обработчик telemetry Ecto MUST NOT печатать параметры
+и результат запросов к `es_subject_keys`. Восстановление из копии — повтор уничтожения по актам
+(`deps/core/docs/rules/app/23-personal-data.md`, «Эксплуатация»).
+
+```elixir
+# плохо — обработчик печатает параметры: обёрнутый ключ уходит в лог
+def handle_event(_event, _measurements, %{query: query, params: params}, _config),
+  do: Logger.debug("sql: #{query} params=#{inspect(params)}")
+
+# хорошо — запрос и длительность без параметров
+def handle_event(_event, %{total_time: time}, %{query: query}, _config),
+  do: Logger.debug("sql: #{query} time=#{time}")
+```
 
 ## Связанные правила
 
