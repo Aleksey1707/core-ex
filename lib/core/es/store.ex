@@ -71,6 +71,16 @@ defmodule Core.Es.Store do
   Позиция последнего события потока — цель ожидания проекции (`await/3` модуля проекции) —
   берётся без условия видимости: ожидание идёт после commit, и событие, которое пачка ещё не
   видит, чекпоинт догонит позже.
+
+  ## Загрузка пачки
+
+  Прочитанные строки в события переводит один пакетный шаг — на всех путях чтения: свёртка и хвост
+  со снапшотом репозитория event-sourced агрегата, страница потока, пачка проекции и
+  `Core.Es.Store.Test.events!/2`. Шаг принимает пачку строк целиком и проходит её стадиями: все
+  строки → конверты, затем каждый конверт → апкаст и загрузка фасадом. `load_batch/2` — строки с
+  кодеком событий у каждой, исход по строке, строку `:skip` не грузит (пачка проекции); `load_rows/3`
+  — строки одного кодека, первая ошибка загрузки на всю пачку; `load_rows!/3` — она же как
+  `Core.Exc`.
   """
 
   import Ecto.Query
@@ -103,14 +113,23 @@ defmodule Core.Es.Store do
   @typedoc "Глобальная позиция события: `xid` транзакции записи и номер."
   @type position :: {non_neg_integer(), pos_integer()}
 
-  @typedoc "Событие, прочитанное по глобальной позиции: позиция, тип агрегата, тег, id и конверт."
+  @typedoc "Событие, прочитанное по глобальной позиции: позиция, тип агрегата, тег, id и строка `es_events`."
   @type positioned :: %{
           position: position(),
           type: String.t(),
           tag: String.t(),
           event_id: String.t(),
-          wire: Es.Event.Codec.wire()
+          stored: Schema.t()
         }
+
+  @typedoc """
+  Строка пачки к загрузке (`load_batch/2`): кодек событий её потока и строка; `:skip` — строка не
+  грузится.
+  """
+  @type entry :: {module(), Schema.t()} | :skip
+
+  @typedoc "Исход строки пачки: событие, ошибка загрузки или пропуск."
+  @type loaded :: Result.t(Es.Event.t()) | :skip
 
   @typedoc """
   Источник отказа `:version_mismatch`: `:expected` — сверка ожидаемой версии, вызывающий назвал
@@ -355,7 +374,7 @@ defmodule Core.Es.Store do
       )
       |> Config.dao().all()
 
-    with {:ok, events} <- Result.traverse(rows, &load(&1, event_codec, codec)) do
+    with {:ok, events} <- load_rows(rows, event_codec, codec) do
       {:ok, Pagination.Result.new(events, Config.dao().aggregate(scope, :count))}
     end
   end
@@ -364,9 +383,6 @@ defmodule Core.Es.Store do
 
   defp stream_scope(type, db_id),
     do: from(e in Schema, where: e.aggregate_type == ^type and e.aggregate_id == ^db_id)
-
-  defp load(row, event_codec, codec),
-    do: codec.load(event_codec.__codec_union__(), Schema.to_wire(row))
 
   # ===== чтение по позиции =====
 
@@ -448,7 +464,7 @@ defmodule Core.Es.Store do
       type: row.aggregate_type,
       tag: row.tag,
       event_id: row.event_id,
-      wire: Schema.to_wire(struct(Schema, row))
+      stored: struct(Schema, row)
     }
   end
 
@@ -474,4 +490,38 @@ defmodule Core.Es.Store do
     |> after_position(position)
     |> dao.one()
   end
+
+  # ===== загрузка пачки =====
+
+  @doc false
+  @spec load_rows([Schema.t()], module(), module()) :: Result.t([Es.Event.t()])
+
+  def load_rows(rows, event_codec, codec) when is_list(rows) and is_atom(event_codec) and is_atom(codec) do
+    rows
+    |> Enum.map(&{event_codec, &1})
+    |> load_batch(codec)
+    |> Result.traverse(& &1)
+  end
+
+  @doc false
+  @spec load_rows!([Schema.t()], module(), module()) :: [Es.Event.t()]
+
+  def load_rows!(rows, event_codec, codec) when is_list(rows) and is_atom(event_codec) and is_atom(codec),
+    do: Result.unwrap!(load_rows(rows, event_codec, codec))
+
+  @doc false
+  @spec load_batch([entry()], module()) :: [loaded()]
+
+  def load_batch(entries, codec) when is_list(entries) and is_atom(codec) do
+    wires = Enum.map(entries, &to_wire/1)
+    Enum.map(wires, &load_wire(&1, codec))
+  end
+
+  # ---
+
+  defp to_wire(:skip), do: :skip
+  defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec), do: {event_codec, Schema.to_wire(row)}
+
+  defp load_wire(:skip, _codec), do: :skip
+  defp load_wire({event_codec, wire}, codec), do: codec.load(event_codec.__codec_union__(), wire)
 end

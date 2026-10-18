@@ -28,6 +28,6 @@ defmodule Core.Es.Store.Test do
       order_by: [asc: e.aggregate_version]
     )
     |> Config.dao().all()
-    |> Enum.map(&codec.load!(event_codec.__codec_union__(), Schema.to_wire(&1)))
+    |> Es.Store.load_rows!(event_codec, codec)
   end
 end

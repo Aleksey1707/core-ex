@@ -143,7 +143,9 @@ defmodule Core.Es.Projection.Batch do
   defp project_rows(projection, declaration, checkpoint, rows) do
     to = List.last(rows).position
 
-    with :ok <- project_each(projection, declaration, rows),
+    loaded = Es.Store.load_batch(Enum.map(rows, &load_entry(declaration, &1)), declaration.codec)
+
+    with :ok <- project_each(projection, declaration, Enum.zip(rows, loaded)),
          :ok <- Checkpoint.move(declaration, checkpoint, to) do
       :ok = Listener.notify(declaration)
       if reached?(checkpoint, to), do: log_reached(declaration)
@@ -167,24 +169,15 @@ defmodule Core.Es.Projection.Batch do
     )
   end
 
-  defp project_each(_projection, _declaration, []), do: :ok
-
-  defp project_each(projection, declaration, [row | rows]) do
-    case project_row(projection, declaration, row) do
-      :ok -> project_each(projection, declaration, rows)
-      {:error, error} -> {:error, error, row.event_id}
-    end
-  end
-
   # Тег сверяется после цепочки `upcasts:`, без загрузки: необъявленный, но известный кодеку тег
   # пропускается, а неизвестный грузится — и загрузка отдаёт ошибку, а не пропуск.
-  defp project_row(projection, declaration, row) do
+  defp load_entry(declaration, row) do
     %{codec: event_codec, tags: declared} = Map.fetch!(declaration.streams, row.type)
     tag = current_tag(row.tag, event_codec.__es_upcasts__())
 
     if skipped?(tag, declared, event_codec),
-      do: :ok,
-      else: load_and_project(projection, declaration, event_codec, row)
+      do: :skip,
+      else: {event_codec, row.stored}
   end
 
   defp current_tag(tag, upcasts) do
@@ -197,11 +190,21 @@ defmodule Core.Es.Projection.Batch do
   defp skipped?(tag, declared, event_codec),
     do: not MapSet.member?(declared, tag) and MapSet.member?(event_codec.types(), tag)
 
-  defp load_and_project(projection, declaration, event_codec, row) do
-    with {:ok, event} <- declaration.codec.load(event_codec.__codec_union__(), row.wire) do
-      callback(declaration, :project, row.event_id, fn -> projection.project(event) end)
+  defp project_each(_projection, _declaration, []), do: :ok
+
+  defp project_each(projection, declaration, [{row, loaded} | rows]) do
+    case project_row(projection, declaration, row, loaded) do
+      :ok -> project_each(projection, declaration, rows)
+      {:error, error} -> {:error, error, row.event_id}
     end
   end
+
+  defp project_row(_projection, _declaration, _row, :skip), do: :ok
+
+  defp project_row(projection, declaration, row, {:ok, event}),
+    do: callback(declaration, :project, row.event_id, fn -> projection.project(event) end)
+
+  defp project_row(_projection, _declaration, _row, {:error, _reason} = error), do: error
 
   # Исключение колбэка откатывает пачку так же, как `{:error, _}`. Текст исключения уходит только
   # в лог внутри span'а пачки: ошибка несёт модуль исключения, текст мог бы нести данные.

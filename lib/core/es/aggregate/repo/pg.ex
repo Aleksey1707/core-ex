@@ -473,13 +473,18 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     )
     |> cfg.dao.all(opts)
     |> Enum.chunk_by(&elem(&1, 0))
-    |> Enum.map(&tail(cfg, &1))
+    |> tails(cfg)
   end
 
-  defp tail(cfg, [{_index, version, state, _row} | _] = rows) do
-    events = for {_index, _version, _state, %Schema{} = row} <- rows, do: load_event(cfg, row)
-    {stored_snapshot(version, state), events}
+  # У потока без событий после снапшота или состояния одна строка, и событие в ней — `nil`
+  # (`left_join`).
+  defp tails(streams, cfg) do
+    Enum.zip_with(streams, load_streams(cfg, Enum.map(streams, &event_rows/1)), fn
+      [{_index, version, state, _row} | _], events -> {stored_snapshot(version, state), events}
+    end)
   end
+
+  defp event_rows(stream), do: for({_index, _version, _state, %Schema{} = row} <- stream, do: row)
 
   defp stored_snapshot(nil, nil), do: nil
 
@@ -489,7 +494,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp read_streams(_cfg, [], _opts), do: []
 
   defp read_streams(cfg, states, opts) do
-    events =
+    rows =
       from(e in Schema,
         join: s in values(streams(cfg, states), @stream_types),
         on: e.aggregate_id == s.aggregate_id and e.aggregate_version > s.after_version,
@@ -498,9 +503,16 @@ defmodule Core.Es.Aggregate.Repo.Pg do
         select: {s.index, e}
       )
       |> cfg.dao.all(opts)
-      |> Enum.group_by(&elem(&1, 0), &load_event(cfg, elem(&1, 1)))
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
-    for index <- 0..(length(states) - 1)//1, do: Map.get(events, index, [])
+    load_streams(cfg, for(index <- 0..(length(states) - 1)//1, do: Map.get(rows, index, [])))
+  end
+
+  # Строки всех потоков запроса — одной пачкой; события раскладываются обратно по потокам.
+  defp load_streams(cfg, streams) do
+    events = Es.Store.load_rows!(Enum.concat(streams), cfg.event_codec, cfg.codec)
+    {loaded, []} = Enum.map_reduce(streams, events, &Enum.split(&2, length(&1)))
+    loaded
   end
 
   defp streams(cfg, states) do
@@ -513,9 +525,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp after_version(%{version: nil}), do: 0
   defp after_version(%{version: %Version{} = version}), do: Version.value(version)
-
-  defp load_event(cfg, row),
-    do: cfg.codec.load!(cfg.event_codec.__codec_union__(), Schema.to_wire(row))
 
   defp fold_tail(%{snapshot: nil} = cfg, state, {nil, events}),
     do: restored(:off, cfg.aggregate.fold(state, events), events)
