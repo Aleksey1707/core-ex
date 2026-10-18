@@ -1,0 +1,9 @@
+{
+  "aggregate_id": "4f1c2b7e-8d3a-4e6f-9b21-7a5c0d9e3f12",
+  "aggregate_version": 1,
+  "at": "2026-10-18T09:30:00Z",
+  "by": "01a14f4c-4b55-7858-b948-7576d2fe56cc",
+  "event_id": "01a14f4c-61f5-76b5-9096-0c738522cc48",
+  "payload": null,
+  "type": "core.subject.key_destroyed"
+}

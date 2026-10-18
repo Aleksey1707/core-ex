@@ -996,9 +996,14 @@ event-sourced и state-stored агрегатов. Поток — тип агре
 | `continuous?: true` (`Es.Aggregate.Repo.Pg`) | первая версия потока в пачке не равна наибольшей версии потока + 1 (у пустого — не 1) |
 
 - `Core.Es.Store.append` MUST NOT вызываться вне write-builder'ов библиотеки
-  (`use Core.Repo.Pg.StateStored`, `use Core.Es.Aggregate.Repo.Pg`) и тестов самого
-  `Core.Es.Store`; MAY — тестовые дублёры в `test/support`. Usecase читает поток только через
-  `page_stream/4` репозитория агрегата («Страница потока»).
+  (`use Core.Repo.Pg.StateStored`, `use Core.Es.Aggregate.Repo.Pg`), уничтожения ключа субъекта
+  `Core.Es.Personal.destroy_key/3` и тестов самого `Core.Es.Store`; MAY — тестовые дублёры в
+  `test/support`. Usecase читает поток только через `page_stream/4` репозитория агрегата
+  («Страница потока»).
+- Тип агрегата `"core.subject"` зарезервирован библиотекой: поток субъекта с событием уничтожения
+  ключа пишет `destroy_key/3`, кодек `Core.Es.Personal.Event.Codec` фасад подключает сам, и кодек
+  потребителя с этим `type:` — `CompileError` (`23-personal-data.md`, «Уничтожение ключа
+  субъекта»).
 - Любой отказ — `{:error, mismatch.(detail)}` с detail
   `%{aggregate_id, expected, actual, source: :storage}`: ns и код ошибки задаёт вызывающий
   write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`), а не хранилище. `source:`

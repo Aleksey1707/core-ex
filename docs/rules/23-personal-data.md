@@ -284,6 +284,62 @@ def handle_event(_event, %{total_time: time}, %{query: query}, _config),
   do: Logger.debug("sql: #{query} time=#{time}")
 ```
 
+## Уничтожение ключа субъекта
+
+`Core.Es.Personal.destroy_key(subject_id, by, context)` → `Result.unit()` — один шаг, окончательный
+(ADR-0076). `subject_id` и `by` — UUID-Prim (`Prim.UUID` или `Prim.Compose` над ним); `by` и права —
+забота usecase (`deps/core/docs/rules/app/23-personal-data.md`, «Usecase уничтожения»). Транзакция —
+вызывающего, если открыта, иначе своя; ключ уничтожен в момент её commit.
+
+В транзакции операция:
+
+1. зовёт `destroy` порта: обёрнутый ключ стирается, строка остаётся следом, субъект без ключа
+   получает след — поздняя запись его ПДн получает `:subject_destroyed`;
+2. пишет событие уничтожения ключа, если его нет в потоке субъекта, — независимо от ответа порта
+   (ADR-0079).
+
+| Ситуация | Исход |
+|---|---|
+| первый вызов | `:ok`, след и событие |
+| повтор, событие уже в потоке | `:ok` без записи; первая дата уничтожения не меняется |
+| субъект без ключа | `:ok`, след и событие |
+| сбой хранилища | `{:error, %Error{kind: :app}}` вызывающему без лога, событие не пишется |
+| откат транзакции вызывающего | ни следа, ни события; своя реализация порта мимо транзакции — ключ уничтожен необратимо, повтор идемпотентен |
+
+Событие уничтожения ключа — `Core.Es.Personal.Event.KeyDestroyed` кодека
+`Core.Es.Personal.Event.Codec`:
+
+- поток субъекта: тип агрегата `"core.subject"`, тег `"core.subject.key_destroyed"`, `aggregate_id`
+  — `Core.Es.Personal.SubjectID`, версия `1`, нагрузки нет;
+- `by` — `Core.Es.Personal.ActorID`, `at` — момент вызова;
+- пишет его `Core.Es.Store.append`; в outbox оно не идёт, страница потока его не отдаёт.
+
+Тип `"core.subject"` зарезервирован: кодек библиотека подключает к каждому фасаду сама, и кодек
+потребителя с этим `type:` MUST NOT — `CompileError` проверки уникальности типа агрегата фасада.
+Строки потока субъекта остаются в `es_events` навсегда — контракт хранения.
+
+Гонку уничтожения с записью ПДн того же субъекта решает блокировка строки ключа: событие либо
+записано раньше и уничтожено, либо получает `:subject_destroyed` («Встроенная реализация»).
+Несколько субъектов одной транзакцией SHOULD уничтожаться в порядке сортировки их дампа — так же,
+как запись ПДн создаёт ключи пачки: произвольный порядок против конкурентного `append` с
+несколькими субъектами даёт взаимную блокировку, и Postgres обрывает одну из транзакций
+исключением.
+
+```elixir
+# плохо — порядок субъектов из ввода: встречный append ловит взаимную блокировку
+Enum.reduce_while(subject_ids, :ok, &destroy_next(&1, &2, by, context))
+
+# хорошо
+subject_ids
+|> Enum.sort_by(&InCodec.dump/1)
+|> Enum.reduce_while(:ok, &destroy_next(&1, &2, by, context))
+```
+
+Проверяется: `test/core/es/personal/destroy_key_test.exs` — след, событие, повтор, откат;
+`test/core/es/personal/destroy_key_failure_test.exs` — сбой порта; `test/core/codec/facade_test.exs`
+— `CompileError` на `type: "core.subject"`; golden события —
+`test/core/es/personal/event_compat_test.exs`.
+
 ## Связанные правила
 
 - Prim и его опции — `11-domain.md`

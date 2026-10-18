@@ -104,8 +104,9 @@ Logger.debug(
 
 Возвраты usecases — `deps/core/docs/rules/app/10-architecture.md`, «Usecases».
 
-Внутри `Transact.run` допустимы только запросы через `DAO` и постановка фоновой задачи. HTTP,
-publish в брокер, кеш, `sleep`, ожидание проекции `Projection.await/3` и команда процесса агрегата
+Внутри `Transact.run` допустимы только запросы через `DAO`, постановка фоновой задачи и уничтожение
+ключа субъекта `Core.Es.Personal.destroy_key/3` (`23-personal-data.md`). HTTP, publish в брокер,
+кеш, `sleep`, ожидание проекции `Projection.await/3` и команда процесса агрегата
 `Agg.Process.execute` — MUST NOT: незакоммиченную запись проекция не увидит вовсе, а команда идёт
 своей транзакцией, и откат её попытки отменил бы внешнюю. Таблица допустимого, её обоснование и
 куда выносить побочный эффект — `deps/core/docs/rules/app/10-architecture.md`, «Что можно внутри

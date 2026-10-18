@@ -74,6 +74,23 @@
   - старт — `Core.Es.Personal.KeyStore.Pg.ensure_configured!()` в `start/2`;
   - своя реализация порта (СКЗИ, Vault, KMS) — `config :core, Core.Es.Personal.KeyStore, MyImpl`.
 
+  Четвёртая часть — уничтожение ключа субъекта (`docs/rules/23-personal-data.md`, «Уничтожение
+  ключа субъекта»; `docs/rules/app/23-personal-data.md`, «Usecase уничтожения»; ADR-0076,
+  ADR-0079). Раньше операции уничтожения ключа субъекта не было: порт закрыт внутренним фасадом
+  `Core.Es.Personal`, а сигнала read-моделям нет. Теперь
+  `Core.Es.Personal.destroy_key(subject_id, by, context)` → `Result.unit()`:
+  `subject_id` и `by` — UUID-Prim, транзакция вызывающего, если открыта, иначе своя; ключ уничтожен
+  в момент commit, повтор — `:ok`, субъект без ключа получает след, сбой хранилища —
+  `{:error, %Error{kind: :app}}`. В той же транзакции операция пишет в `es_events` событие
+  уничтожения ключа `Core.Es.Personal.Event.KeyDestroyed` (кодек `Core.Es.Personal.Event.Codec`,
+  Prim `Core.Es.Personal.SubjectID` и `Core.Es.Personal.ActorID`), если его нет в потоке субъекта.
+  Контракт хранения: тип агрегата `"core.subject"` зарезервирован, поток субъекта — тег
+  `"core.subject.key_destroyed"`, версия `1`, нагрузки нет; строки остаются в `es_events` навсегда,
+  в outbox событие не идёт. Правка нужна только приложению с ПДн — usecase уничтожения:
+  - было: ключ не уничтожался;
+  - стало: `Transact.run(DAO, fn -> with :ok <- Core.Es.Personal.destroy_key(id, by, context),
+    do: write_act(id, by, context) end)` с `by` из `CurrentUser.get(context)` до транзакции.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,
@@ -97,6 +114,13 @@
   ключи». `use Core.Es.Event.Payload` с полями `subject:` выводит `Inspect` без них — свой
   `@derive Inspect` в такой нагрузке снимается. `use Core.Es.Event.Codec` занимает в модуле имена
   `__es_subjects__/0` и `@es_subjects`.
+
+  Зарезервированный тип агрегата `"core.subject"` (норма — `docs/rules/13-repos.md`, «Хранилище
+  событий»; `docs/rules/23-personal-data.md`, «Уничтожение ключа субъекта»): `use Core.Codec.Facade`
+  сам добавляет к `plugins:` кодек события уничтожения ключа `Core.Es.Personal.Event.Codec`, поэтому
+  кодек потребителя с `type: "core.subject"` в том же фасаде — `CompileError` «тип агрегата
+  объявлен дважды», с ПДн и без. Правка нужна только кодеку с этим типом: было
+  `type: "core.subject"`, стало — свой тип агрегата.
 
 ## 0.15.1
 

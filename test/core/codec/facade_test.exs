@@ -254,6 +254,36 @@ defmodule Core.Codec.FacadeTest do
     end
   end
 
+  test "зарезервированный тип агрегата \"core.subject\" у кодека потребителя — CompileError" do
+    assert_raise CompileError, ~r/тип агрегата "core.subject" объявлен дважды.*Personal.Event.Codec/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.ReservedTypeEvent do
+            defmodule Opened do
+              use Core.Es.Event,
+                aggregate_id: Core.EventFixture.AggID,
+                by: Core.EventFixture.ActorID,
+                payload: nil
+            end
+          end
+
+          defmodule Core.Codec.FacadeTest.ReservedTypeCodec do
+            use Core.Es.Event.Codec,
+              event: Core.Codec.FacadeTest.ReservedTypeEvent,
+              type: "core.subject",
+              tags: %{Core.Codec.FacadeTest.ReservedTypeEvent.Opened => "core.subject.opened"}
+          end
+
+          defmodule Core.Codec.FacadeTest.ReservedTypeFacade do
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: [Core.Codec.FacadeTest.ReservedTypeCodec]
+          end
+        end
+      )
+    end
+  end
+
   test "нагрузка-сущность события без плагина в фасаде — CompileError с типом и кодеком" do
     assert_raise CompileError, ~r/нагрузку .*DerivedFixture.Place события .*Event.Located .*не обслуживает/, fn ->
       Code.eval_quoted(

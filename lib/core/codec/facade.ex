@@ -26,6 +26,10 @@ defmodule Core.Codec.Facade do
   проверяется на компиляции. Так же уникален между кодеками событий тип агрегата (`type:`), а
   нагрузку-сущность события обязан обслуживать плагин того же фасада.
 
+  К `plugins:` фасад сам добавляет кодек события уничтожения ключа
+  `Core.Es.Personal.Event.Codec`: тип агрегата `"core.subject"` зарезервирован, и кодек
+  потребителя с ним — `CompileError` той же проверки уникальности типа.
+
   ## Сужение результата
 
   Клоузы плагинов сужают его результат паттерном, и компилятор у вызывающего знает тип значения:
@@ -54,11 +58,7 @@ defmodule Core.Codec.Facade do
       @behaviour Core.Codec.Facade.Behaviour
 
       @prim Helper.Opts.module!(opts, :prim, "Codec.Facade", exports: [dump: 1, load: 2, load!: 2])
-      @plugins Keyword.get(opts, :plugins, [])
-
-      if not is_list(@plugins) do
-        raise CompileError, description: "plugins: ожидается список модулей"
-      end
+      @plugins Core.Codec.Facade.plugins!(Keyword.get(opts, :plugins, []))
 
       Core.Codec.Facade.validate_mods!(@plugins)
       Core.Codec.Facade.validate_es_types!(@plugins)
@@ -157,6 +157,16 @@ defmodule Core.Codec.Facade do
       end
     end
   end
+
+  @doc """
+  Плагины фасада: `plugins:` потребителя и кодек зарезервированного типа агрегата
+  `Core.Es.Personal.Event.Codec` (ADR-0079), который библиотека подключает сама.
+  """
+  @spec plugins!(term()) :: [module()]
+
+  def plugins!(plugins) when is_list(plugins), do: plugins ++ [Core.Es.Personal.Event.Codec]
+
+  def plugins!(_plugins), do: raise(CompileError, description: "plugins: ожидается список модулей")
 
   @doc """
   Есть ли у плагинов фасада хоть один тип со спекой пере-дампа.
