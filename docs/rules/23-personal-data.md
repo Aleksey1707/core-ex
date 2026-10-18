@@ -2,12 +2,14 @@
 
 - **Область.** `lib/core/prim.ex`, `lib/core/prim/**` (опция `personal:`), `lib/core/codec.ex`
   (`load_composite/3`), `lib/core/es/event/payload.ex` и `lib/core/codec/plugin/fields.ex`
-  (`subject:`), `lib/core/es/personal.ex`, `lib/core/es/personal/**`; у потребителя — Prim с
-  персональными данными (ПДн), события с ними и своя реализация хранилища ключей.
+  (`subject:`), `lib/core/es/personal.ex`, `lib/core/es/personal/**`, шифрование и расшифровка в
+  `lib/core/es/store.ex` и flush write-репозиториев; у потребителя — Prim с персональными данными
+  (ПДн), события с ними и своя реализация хранилища ключей.
 - **Читать перед.** Новым Prim, значение которого — ПДн; полем нагрузки события с ПДн;
   переводом Prim с ПДн с `sensitive:` на `personal:`; правкой редакции значения Prim в выводе;
   апкастером, `evolve/2` / `project/1`, golden-фикстурой и тестом события с полем `subject:`;
-  конфигурацией KEK, своей реализацией или правкой хранилища ключей.
+  правкой записи или чтения событий и outbox; конфигурацией KEK, своей реализацией или правкой
+  хранилища ключей.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`; термины («ПДн-значение», «Субъект
   данных», «Уничтожение ключа субъекта») — `CONTEXT.md`, «Персональные данные».
 
@@ -17,7 +19,7 @@
 
 ## Разметка
 
-Prim, значение которого — ПДн, MAY объявляться `personal: true` (default `false`) вместо
+Prim, значение которого — ПДн, MUST объявляться `personal: true` (default `false`), а не
 `sensitive: true`: значение скрыто в выводе так же, а read-путь открыт. Опция есть у всех
 обёрток (`Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose`),
 интроспекция — `__domain_personal__/0`.
@@ -119,6 +121,57 @@ fields: [recipient_id: [prim: Order.RecipientID], address: [entity: Order.Addres
 Проверяется: `test/core/es/event/payload_personal_test.exs` — `CompileError` разметки;
 `test/core/es/event/codec_personal_test.exs`, describe «dump» и «нагрузка».
 
+## Форма в хранении и доставке
+
+ПДн-значение поля с `subject:` лежит в `es_events` и outbox шифротекстом под ключом субъекта —
+`{"$pd": "<base64>"}` на месте значения поля (ADR-0073). Кодек событий чист и отдаёт маркер,
+шифруют писатели wire-формы в транзакции записи тем же портом хранилища ключей.
+
+| Где | Форма | Шифрует |
+|---|---|---|
+| `es_events.payload` | `{"$pd": …}` | `Core.Es.Store.append` — маркеры всех строк пачки одним вызовом `seal` |
+| `outbox.payload`, тело сообщения | `{"$pd": …}` | flush write-репозитория — отдельный проход `seal` по записям после `Store.append` и резервов, до `outbox_repo().append` |
+| интеграционное событие | открыто | никто: разметки `subject:` в нём нет |
+| строка state-stored агрегата | открыто | никто: её стирает `update` / `delete` |
+
+Заголовки и ключ сообщения (`name`, `aggr_id`, `event_id`) открыты. Шифротекст привязан к месту:
+AAD — `event_id` и wire-ключ поля, открытый текст — JSON wire-значения поля.
+
+- Ключ субъекта создаётся в транзакции записи: откат убирает его вместе с событиями.
+- Отказ `seal` — `:subject_destroyed` или сбой хранилища — уходит вызывающему, транзакция
+  откатывается; `Es.Transact` не повторяет ни то, ни другое.
+- Маркер уничтоженного значения на записи — `ArgumentError` с полем и `event_id`, без значения:
+  `%Destroyed{}` в новое событие не попадает («Уничтоженное ПДн-значение»).
+- `<Aggregate>.Outbox.from_event/1` чиста и отдаёт запись с маркером; писать такую запись мимо
+  flush MUST NOT — `Jason.Encoder` маркера поднимает исключение без значения
+  (`14-events-outbox.md`, «Aggregate → Outbox.Record»).
+- Строки, записанные открытыми до разметки поля, остаются открытыми и читаются как раньше:
+  инструмента переписывания нет.
+
+Расшифровка — шаг пакетной загрузки `Core.Es.Store` до апкаста и `load`: все `$pd` пачки уходят
+одним вызовом `open`, открытое значение встаёт на место `$pd`, уничтоженный ключ даёт
+`{"$pd": null}`. Шаг проходят свёртка и хвост со снапшотом, `page_stream`, пачка проекции и
+`Core.Es.Store.Test.events!/2`; тег, не объявленный проекцией, пропускается без расшифровки.
+
+| Исход | Свёртка (`get`, `get_decision`, …) | `page_stream` | Пачка проекции |
+|---|---|---|---|
+| ключ уничтожен | `%Destroyed{}` | `%Destroyed{}` | `%Destroyed{}` |
+| сбой хранилища ключей | `{:error, %Error{kind: :app}}` | `{:error, _}` на страницу | повтор |
+| значение не открылось — `:unreadable_personal_value` (`ns: :es`, `:domain`) | `Core.Exc` | `{:error, _}` на страницу | повтор |
+| исключение апкаста или `load` на строке с расшифрованным `$pd` — `:upcast_raised` (`ns: :es`, `:app`) | `Core.Exc` | `{:error, _}` на страницу | повтор |
+
+Из-за уничтожения ключа не становится нечитаемым ни одно событие. `:unreadable_personal_value`
+— неизвестный ключ, изменённый шифротекст или AAD: потеряно хранилище ключей, восстановлена старая
+копия или чужой KEK; `detail` — `event_id` и wire-ключ поля. Что несёт `:upcast_raised` —
+`21-observability.md`, «Персональные данные в выводе».
+
+Проверяется: `test/core/es/personal/events_test.exs` — `$pd` в строке `es_events` и записи outbox,
+открытое и уничтоженное значение на путях чтения обоих видов агрегатов, два субъекта в событии,
+`:subject_destroyed` без повтора, открытые строки до разметки, `:unreadable_personal_value`,
+`:upcast_raised`; `test/core/es/personal/events_projection_test.exs` — пачка проекции,
+`:upcast_raised` страницы и пачки, сбой хранилища на записи и чтении;
+`test/core/es/personal/events_race_test.exs` — гонка записи с уничтожением ключа.
+
 ## Уничтоженное ПДн-значение
 
 Уничтожение ключа субъекта не делает событие нечитаемым: на месте значения поля с `subject:`
@@ -200,9 +253,9 @@ def upcast("order.created.v1", %{"payload" => %{"full_name" => %{"$pd" => nil} =
 Порт `Core.Es.Personal.KeyStore` шифрует, расшифровывает, считает индекс и уничтожает ключ
 субъекта сам: ключ субъекта порт не покидает (ADR-0075). Операции — пачками, ответ — в порядке
 пачки, сбой хранилища — `{:error, %Error{kind: :app}}` на всю пачку; формы и исходы — moduledoc
-`Core.Es.Personal.KeyStore`. Библиотека зовёт порт только через фасад `Core.Es.Personal`: он
+`Core.Es.Personal.KeyStore`. Библиотека зовёт порт только через фасад `Core.Es.Personal.Port`: он
 резолвит реализацию `Core.Config.key_store/0` и эмитит telemetry `[:es, :personal, :call]` и
-`[:es, :personal, :open]` (moduledoc `Core.Es.Personal`).
+`[:es, :personal, :open]` (moduledoc `Core.Es.Personal.Port`).
 
 ### Своя реализация порта
 

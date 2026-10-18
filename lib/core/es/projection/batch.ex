@@ -143,9 +143,8 @@ defmodule Core.Es.Projection.Batch do
   defp project_rows(projection, declaration, checkpoint, rows) do
     to = List.last(rows).position
 
-    loaded = Es.Store.load_batch(Enum.map(rows, &load_entry(declaration, &1)), declaration.codec)
-
-    with :ok <- project_each(projection, declaration, Enum.zip(rows, loaded)),
+    with {:ok, loaded} <- Es.Store.load_batch(Enum.map(rows, &load_entry(declaration, &1)), declaration.codec),
+         :ok <- project_each(projection, declaration, Enum.zip(rows, loaded)),
          :ok <- Checkpoint.move(declaration, checkpoint, to) do
       :ok = Listener.notify(declaration)
       if reached?(checkpoint, to), do: log_reached(declaration)

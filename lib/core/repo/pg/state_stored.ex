@@ -26,8 +26,9 @@ defmodule Core.Repo.Pg.StateStored do
   `Repo.Pg.StateStored`.
 
   Каждая запись идёт одной транзакцией: строка агрегата → дочерние строки →
-  `outbox.from_events` → `Core.Es.Store.append` → `Core.Config.outbox_repo().append`.
-  Дочерние строки пишет `Core.Repo.Pg.Children` — точечно, а не перезаписью всей коллекции:
+  `outbox.from_events` → `Core.Es.Store.append` → шифрование ПДн-значений записей outbox →
+  `Core.Config.outbox_repo().append`. Дочерние строки пишет `Core.Repo.Pg.Children` — точечно,
+  а не перезаписью всей коллекции:
 
   | Путь | Запросов на дочернюю таблицу |
   |---|---|
@@ -219,7 +220,8 @@ defmodule Core.Repo.Pg.StateStored do
 
       defp do_flush_events(events, context, opts) do
         with {:ok, records} <- @es_outbox.from_events(events),
-             :ok <- Core.Es.Store.append(@es_event_codec, events, context, &version_mismatch/1) do
+             :ok <- Core.Es.Store.append(@es_event_codec, events, context, &version_mismatch/1),
+             {:ok, records} <- Core.Es.Personal.Wire.seal_records(records) do
           Core.Config.outbox_repo().append(records, context, opts)
         end
       end

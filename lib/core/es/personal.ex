@@ -1,23 +1,10 @@
 defmodule Core.Es.Personal do
   @moduledoc """
-  ПДн в событиях под ключом субъекта (ADR-0072…0079): фасад библиотеки над портом хранилища ключей
-  `Core.Es.Personal.KeyStore`. Термины — `CONTEXT.md`, «Персональные данные».
+  ПДн в событиях под ключом субъекта (ADR-0072…0079): уничтожение ключа субъекта. Термины —
+  `CONTEXT.md`, «Персональные данные».
 
-  Функции порта библиотека зовёт только через фасад: реализацию он резолвит
-  `Core.Config.key_store/0` на каждом вызове, а telemetry эмитит сам — своя реализация порта
-  получает метрики даром.
-
-  ## Telemetry
-
-  Имена — через `Core.Telemetry.event/1`; меток с идентификаторами субъекта, ключа и агрегата нет.
-
-  | Событие | Измерения | Метаданные |
-  |---|---|---|
-  | `[:es, :personal, :call]` — на каждый вызов порта | `duration` (native) | `op` (`:seal`, `:open`, `:index`, `:destroy`), `result` (`:ok`, `:refused` — `:subject_destroyed`, `:error`) |
-  | `[:es, :personal, :open]` — на исход расшифровки пачки | `count` | `outcome` (`:opened`, `:destroyed`, `:unreadable`) |
-
-  `[:es, :personal, :open]` эмитится на каждый исход, встреченный в пачке, — нулевых счётчиков
-  нет.
+  Порт хранилища ключей `Core.Es.Personal.KeyStore` библиотека зовёт через фасад
+  `Core.Es.Personal.Port`: он резолвит реализацию и эмитит telemetry.
   """
 
   import Core.Guard, only: [is_prim: 1]
@@ -28,19 +15,16 @@ defmodule Core.Es.Personal do
   alias Core.Es
   alias Core.Es.Personal.ActorID
   alias Core.Es.Personal.Event
-  alias Core.Es.Personal.KeyStore
+  alias Core.Es.Personal.Port
   alias Core.Es.Personal.SubjectID
   alias Core.Helper.AfterCommit
   alias Core.Helper.Transact
   alias Core.Prim
   alias Core.Result
-  alias Core.Telemetry
   alias Core.Version
 
   require Error
   require Logger
-
-  # ===== уничтожение ключа =====
 
   @doc """
   Уничтожить ключ субъекта (ADR-0076, ADR-0079): окончательно, повтор — `:ok`.
@@ -78,7 +62,7 @@ defmodule Core.Es.Personal do
 
   # Субъект для порта — дамп его Prim фасадом, как у маркера ПДн-значения кодека событий.
   defp destroy_and_append(subject_id, %Event.KeyDestroyed{} = event, context) do
-    with :ok <- destroy(Config.codec().dump(subject_id)) do
+    with :ok <- Port.destroy(Config.codec().dump(subject_id)) do
       written? =
         case Es.Store.append(Event.Codec, [event], context, &already_written/1) do
           :ok -> true
@@ -97,89 +81,4 @@ defmodule Core.Es.Personal do
   # наружу не уходит.
   defp already_written(detail),
     do: Error.app(__MODULE__, code: :already_written, ns: :es, message: "Событие уже записано", detail: detail)
-
-  # ===== порт =====
-
-  @doc false
-  @spec seal([{KeyStore.subject(), binary(), binary()}]) :: Result.t([binary()])
-
-  def seal(items) when is_list(items), do: call(:seal, fn store -> store.seal(items) end)
-
-  @doc false
-  @spec open([{binary(), binary()}]) :: Result.t([KeyStore.opened()])
-
-  def open(items) when is_list(items) do
-    result = call(:open, fn store -> store.open(items) end)
-
-    with {:ok, outcomes} <- result, do: emit_outcomes(outcomes)
-
-    result
-  end
-
-  @doc false
-  @spec index([{String.t(), [String.t()]}]) :: Result.t([String.t()])
-
-  def index(items) when is_list(items), do: call(:index, fn store -> store.index(items) end)
-
-  @doc false
-  @spec destroy(KeyStore.subject()) :: Result.unit()
-
-  def destroy(subject) when is_binary(subject), do: call(:destroy, fn store -> store.destroy(subject) end)
-
-  # ---
-
-  # Исключение реализации (конфигурация не задана, `raise` своей реализации) — тоже вызов с
-  # `result: :error`.
-  defp call(op, fun) do
-    started = System.monotonic_time()
-    result = run(op, started, fun)
-    emit_call(op, started, result_label(result))
-
-    result
-  end
-
-  defp run(op, started, fun) do
-    fun.(Config.key_store())
-  rescue
-    exception ->
-      emit_call(op, started, :error)
-      reraise exception, __STACKTRACE__
-  end
-
-  defp emit_call(op, started, result) do
-    :telemetry.execute(
-      Telemetry.event([:es, :personal, :call]),
-      %{duration: System.monotonic_time() - started},
-      %{op: op, result: result}
-    )
-  end
-
-  defp result_label(:ok), do: :ok
-  defp result_label({:ok, _value}), do: :ok
-  defp result_label({:error, %Error{kind: :domain, ns: :key_store, code: :subject_destroyed}}), do: :refused
-  defp result_label({:error, _reason}), do: :error
-
-  defp emit_outcomes(outcomes) do
-    outcomes
-    |> Enum.frequencies_by(&outcome/1)
-    |> Enum.each(fn {outcome, count} ->
-      :telemetry.execute(Telemetry.event([:es, :personal, :open]), %{count: count}, %{outcome: outcome})
-    end)
-  end
-
-  defp outcome({:ok, _plaintext}), do: :opened
-  defp outcome(:destroyed), do: :destroyed
-  defp outcome(:unreadable), do: :unreadable
-
-  # ===== адрес =====
-
-  @doc """
-  Адрес для AAD и индекса в однозначной кодировке: каждая часть — длина (32 бита) и байты.
-
-  Перестановка и склейка частей дают другой адрес: `["ab", "c"]` и `["a", "bc"]` различны.
-  """
-  @spec address([binary()]) :: binary()
-
-  def address(parts) when is_list(parts),
-    do: for(part <- parts, into: <<>>, do: <<byte_size(part)::32, part::binary>>)
 end

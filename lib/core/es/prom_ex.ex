@@ -22,8 +22,8 @@ defmodule Core.Es.PromEx do
   Хранилище ключей субъекта — `personal.call.total{op, result}` и
   `personal.call.duration.<unit>{op, result}`: вызовы порта по операции (`seal` / `open` / `index` /
   `destroy`) и исходу (`ok` / `refused` / `error`); `personal.open.total{outcome}` — `sum` по `count`
-  исходов расшифровки (`opened` / `destroyed` / `unreadable`). Эмитит фасад `Core.Es.Personal`
-  («Telemetry»), и своя реализация порта получает метрики без правок. Идентификаторов субъекта,
+  исходов расшифровки (`opened` / `destroyed` / `unreadable`). Эмитит фасад порта
+  `Core.Es.Personal.Port`, и своя реализация порта получает метрики без правок. Идентификаторов субъекта,
   ключа и агрегата в тегах нет.
 
   Сигнал чекпоинта — `projection.signal.sent.total{repo}` и `projection.signal.received.total{repo}`:

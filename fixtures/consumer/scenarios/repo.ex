@@ -45,11 +45,11 @@ defmodule ConsumerTest.Repo do
     end
   end
 
-  # E4b — ошибка чтения с кодом, которого `get` не отдаёт
+  # E4b — ошибка чтения с кодом, которого `get` не отдаёт: молчит — сбой хранилища ключей отдаётся
+  # кодом реализации порта, и код ошибки `get` не сужен
   def e4b_case_get_not_found(%Account.ID{} = id, %Context{} = context) do
     case @repo.get(id, :current, context) do
       {:ok, state} -> state
-      # expect: the following clause will never match
       {:error, %Core.Error{code: :not_found}} -> nil
       {:error, _error} -> nil
     end

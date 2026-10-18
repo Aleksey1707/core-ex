@@ -16,6 +16,18 @@
     оба файла — `deps/core/docs/rules/23-personal-data.md` и
     `deps/core/docs/rules/app/23-personal-data.md`.
 
+- **ПДн помечаются `personal: true`, поле нагрузки события с ними — `subject:`** (норма —
+  `docs/rules/12-errors.md`, «Prim: `personal: true`»; `docs/rules/23-personal-data.md`,
+  «Разметка»). Раньше свод требовал помечать ПДн `sensitive: true`, и в `es_events` и outbox они
+  лежали открытыми навсегда. Теперь ПДн — `personal: true` (MUST): шифрование под ключом субъекта
+  и его уничтожение действуют по разметке поля нагрузки, а `sensitive:` закрыл бы значению
+  read-путь. Перемаркировка тянет `subject:` на поля нагрузки событий с этим Prim — тег прежний,
+  записанные открытыми строки читаются как раньше, — миграцию хранилища ключей и KEK. Правка
+  потребителя:
+  - было: `use Core.Prim.String, name: "ФИО", sensitive: true`, поле `holder: [prim: Holder]`;
+  - стало: `personal: true`, поле `holder: [prim: Holder, subject: :aggregate_id]`, делегирующая
+    миграция `Core.Es.Personal.KeyStore.Migration` и конфигурация `Core.Es.Personal.KeyStore.Pg`.
+
 - **`Core.Codec.load_composite/3` редактирует `detail` по флагу композита.** Раньше ошибку базы
   load композита отдавал как есть, и `sensitive`-композит над обычной базой выдавал сырое
   значение в `detail` — в логи и службу учёта ошибок через `inspect/1`. Теперь у композита с
@@ -46,8 +58,7 @@
   ПДн-значение»). Поле нагрузки `Core.Es.Event.Payload` объявляет `subject:` — `:aggregate_id`
   или UUID-поле той же нагрузки, под чьим ключом лежит значение. Кодек событий на `dump` кладёт на
   место значения такого поля маркер `%Core.Es.Personal.Marker{}` (идентификатор субъекта и
-  wire-значение), который JSON не кодирует: запись события с ПДн в хранилище и outbox до
-  шифрования писателями wire-формы падает на маркере — шифрование подключит следующий срез. На
+  wire-значение), который JSON не кодирует: шифрует его писатель wire-формы (пятая часть). На
   `load` `{"$pd": null}` в поле с `subject:` даёт `%Core.Es.Personal.Destroyed{}` на месте поля, в
   поле без `subject:` — `:invalid_value`, а `{"$pd": "<строка>"}` — `:sealed_personal_value`
   (`ns: :codec`). В `@type t` нагрузки поле с `subject:` получает `| Destroyed.t()`, `new/N` его
@@ -64,7 +75,7 @@
   `Core.Es.Personal.KeyStore.Pg`: таблица `es_subject_keys` в базе событий, ключ субъекта под KEK
   из конфигурации, AES-256-GCM из `:crypto`, без кеша. Реализацию резолвит
   `Core.Config.key_store/0`, `Core.Config.validate!/0` проверяет её колбэки. Контрактный набор своей
-  реализации — `use Core.Es.Personal.KeyStoreCase, impl: …`. Записи событий порт пока не касается.
+  реализации — `use Core.Es.Personal.KeyStoreCase, impl: …`.
   Правка нужна только приложению с ПДн в событиях:
   - миграция — было: таблицы нет; стало: делегирующая миграция
     `defdelegate up, to: Core.Es.Personal.KeyStore.Migration` (и `down`);
@@ -77,7 +88,7 @@
   Четвёртая часть — уничтожение ключа субъекта (`docs/rules/23-personal-data.md`, «Уничтожение
   ключа субъекта»; `docs/rules/app/23-personal-data.md`, «Usecase уничтожения»; ADR-0076,
   ADR-0079). Раньше операции уничтожения ключа субъекта не было: порт закрыт внутренним фасадом
-  `Core.Es.Personal`, а сигнала read-моделям нет. Теперь
+  `Core.Es.Personal.Port`, а сигнала read-моделям нет. Теперь
   `Core.Es.Personal.destroy_key(subject_id, by, context)` → `Result.unit()`:
   `subject_id` и `by` — UUID-Prim, транзакция вызывающего, если открыта, иначе своя; ключ уничтожен
   в момент commit, повтор — `:ok`, субъект без ключа получает след, сбой хранилища —
@@ -90,6 +101,23 @@
   - было: ключ не уничтожался;
   - стало: `Transact.run(DAO, fn -> with :ok <- Core.Es.Personal.destroy_key(id, by, context),
     do: write_act(id, by, context) end)` с `by` из `CurrentUser.get(context)` до транзакции.
+
+  Пятая часть — ПДн-значение в `es_events` и outbox (`docs/rules/23-personal-data.md`, «Форма в
+  хранении и доставке»; ADR-0073, ADR-0074). Раньше событие с полем `subject:` не записывалось:
+  маркер падал в `Jason.Encoder`. Теперь `append` репозитория обоих видов шифрует значение под
+  ключом субъекта в той же транзакции: `Core.Es.Store.append` — маркеры пачки одним вызовом `seal`,
+  flush — записи outbox отдельным проходом перед `outbox_repo().append`; в строке и теле сообщения —
+  `{"$pd": "<base64>"}`, ключ субъекта создаётся транзакцией записи. Запись ПДн уничтоженного
+  субъекта — `{:error, %Error{ns: :key_store, code: :subject_destroyed}}` с откатом; его и сбой
+  хранилища `Es.Transact` не повторяет; `%Destroyed{}` в новом событии — `ArgumentError`. Все пути
+  чтения — свёртка и хвост со снапшотом, `page_stream`, пачка проекции,
+  `Core.Es.Store.Test.events!/2` — расшифровывают `$pd` пачкой до апкаста: после `destroy_key/3` то
+  же событие читается с `%Destroyed{}`. Исходы чтения: сбой хранилища ключей — `{:error, _}` у
+  `get` / `get_decision` / `get_many` / `refresh` и страницы, повтор у проекции; нечитаемое
+  значение — `:unreadable_personal_value` (`ns: :es`), как нечитаемое событие; исключение апкаста
+  или `load` на строке с расшифрованным `$pd` — ошибка `:upcast_raised` (`ns: :es`, `:app`) с
+  `event_id` и модулем исключения, без текста и аргументов кадров. Правки нет: событие с полем
+  `subject:` раньше не записывалось, а строки без `$pd` читаются и падают как раньше.
 
   Тестовая поддержка без БД и хранилища ключей — `Core.Es.Personal.Test` (норма —
   `docs/rules/19-testing.md`, «Event-sourced агрегат»; `docs/rules/14-events-outbox.md`,
@@ -152,7 +180,7 @@
 
   Метрики хранилища ключей (`docs/rules/21-observability.md`, «Рекомендованные алерты»).
   Раньше вызовы порта и исходы расшифровки были видны только в telemetry фасада
-  `Core.Es.Personal`. Теперь `Core.Es.PromEx` в группе `:es_aggregate_event_metrics` строит
+  `Core.Es.Personal.Port`. Теперь `Core.Es.PromEx` в группе `:es_aggregate_event_metrics` строит
   `es_personal_call_total{op, result}`, гистограмму `es_personal_call_duration_<unit>{op, result}`
   и `es_personal_open_total{outcome}`; метрики эмитит фасад, поэтому своя реализация порта
   получает их без правок. Меток с идентификаторами субъекта, ключа и агрегата нет. Своды

@@ -78,7 +78,7 @@ defmodule Core.Es.Personal.KeyStore.ConfigTest do
     on_exit(fn -> :telemetry.detach(id) end)
     Application.delete_env(:core, Pg)
 
-    assert_raise ArgumentError, fn -> Core.Es.Personal.index([{"scope", ["key"]}]) end
+    assert_raise ArgumentError, fn -> Core.Es.Personal.Port.index([{"scope", ["key"]}]) end
     assert_receive {:call, %{op: :index, result: :error}}
   end
 

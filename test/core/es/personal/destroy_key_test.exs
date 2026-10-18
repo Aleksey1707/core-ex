@@ -10,6 +10,7 @@ defmodule Core.Es.Personal.DestroyKeyTest do
   alias Core.Es.Personal.ActorID
   alias Core.Es.Personal.Event.Codec
   alias Core.Es.Personal.Event.KeyDestroyed
+  alias Core.Es.Personal.Port
   alias Core.Es.Personal.SubjectID
   alias Core.Es.Store
   alias Core.EsFixture.Account
@@ -22,11 +23,11 @@ defmodule Core.Es.Personal.DestroyKeyTest do
       subject = Account.ID.new()
       by = UserID.new()
       dumped = Config.codec().dump(subject)
-      {:ok, [_sealed]} = Personal.seal([{dumped, "aad", "Иван"}])
+      {:ok, [_sealed]} = Port.seal([{dumped, "aad", "Иван"}])
 
       assert :ok = Personal.destroy_key(subject, by, Context.new())
 
-      assert {:error, %Error{code: :subject_destroyed}} = Personal.seal([{dumped, "aad", "Пётр"}])
+      assert {:error, %Error{code: :subject_destroyed}} = Port.seal([{dumped, "aad", "Пётр"}])
       subject_id = subject_id(subject)
       actor_id = ActorID.new!(UserID.value(by))
 
@@ -60,7 +61,7 @@ defmodule Core.Es.Personal.DestroyKeyTest do
       log = capture_debug(fn -> assert :ok = Personal.destroy_key(subject, by, Context.new()) end)
 
       assert {:error, %Error{kind: :domain, ns: :key_store, code: :subject_destroyed}} =
-               Personal.seal([{Config.codec().dump(subject), "aad", "Иван"}])
+               Port.seal([{Config.codec().dump(subject), "aad", "Иван"}])
 
       assert [%KeyDestroyed{}] = Store.Test.events!(Codec, subject_id(subject))
       assert log =~ "ключ субъекта уничтожен: subject_id=#{Account.ID.value(subject)} event_written=true"
@@ -81,7 +82,7 @@ defmodule Core.Es.Personal.DestroyKeyTest do
 
       refute log =~ Account.ID.value(subject)
 
-      assert {:ok, [_sealed]} = Personal.seal([{Config.codec().dump(subject), "aad", "Иван"}])
+      assert {:ok, [_sealed]} = Port.seal([{Config.codec().dump(subject), "aad", "Иван"}])
       assert Store.Test.events!(Codec, subject_id(subject)) == []
     end
   end

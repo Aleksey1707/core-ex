@@ -34,7 +34,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `{:ok, []}` без запросов; повтор id — `ArgumentError`.
   - `append(events, context, opts)` — `[]` — `:ok` без запросов; иначе в
     `Core.Helper.Transact.run/3`: `outbox.from_events` → `Core.Es.Store.append/5` с
-    непрерывностью потока → резервы ключей `key_reservations:` → `Core.Config.outbox_repo().append`.
+    непрерывностью потока → резервы ключей `key_reservations:` → шифрование ПДн-значений записей
+    outbox → `Core.Config.outbox_repo().append`.
     События нескольких потоков одного типа пишутся пачкой, отказ в любом потоке откатывает всю;
     событие не из `tags:` кодека — `FunctionClauseError`.
   - `refresh(state, version, context, opts)` — события потока после `state.version`, свёрнутые
@@ -42,6 +43,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `page_stream(id, limit, offset, context)` — страница потока агрегата по возрастанию версии,
     `total` — весь поток: пустой поток — страница с `total: 0`, первая ошибка загрузки —
     `{:error, _}` на всю страницу. Реализация и исходы — `Core.Es.Store`, «Страница потока».
+
+  ПДн-значения событий чтение расшифровывает пакетом (`Core.Es.Store`, «Загрузка пачки»): сбой
+  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` отдают `{:error, _}` без замера
+  `[:es, :aggregate, :load]`, нечитаемое событие — `Core.Exc`.
 
   `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
 
@@ -414,39 +419,40 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   # Восстановление и сверка версий — один замер `[:es, :aggregate, :load]`; снапшоты пишутся
   # после него: вне транзакции upsert идёт сразу и в длительность чтения не входит.
+  # Сбой хранилища ключей отдаётся вызывающему без замера: потоки не восстановлены.
   defp load(cfg, op, states, opts, verify) do
     start = System.monotonic_time()
-    restored = restore(cfg, states, opts)
-    result = verify.(Enum.map(restored, & &1.state))
 
-    :telemetry.execute(
-      Telemetry.event([:es, :aggregate, :load]),
-      load_measurements(restored, System.monotonic_time() - start),
-      %{type: cfg.type, op: op, result: result_tag(result)}
-    )
+    with {:ok, restored} <- restore(cfg, states, opts) do
+      result = verify.(Enum.map(restored, & &1.state))
 
-    write_snapshots(cfg, restored)
-    result
+      :telemetry.execute(
+        Telemetry.event([:es, :aggregate, :load]),
+        load_measurements(restored, System.monotonic_time() - start),
+        %{type: cfg.type, op: op, result: result_tag(result)}
+      )
+
+      write_snapshots(cfg, restored)
+      result
+    end
   end
 
   # Все потоки — одним запросом, от снапшота там, где он есть; потоки отвергнутых снапшотов —
   # вторым запросом целиком. Поток — `%{snapshot, state, events}`: как свёрнут, во что и сколько
   # событий свёрнуто.
-  defp restore(_cfg, [], _opts), do: []
+  defp restore(_cfg, [], _opts), do: {:ok, []}
 
   defp restore(cfg, states, opts) do
-    restored =
-      cfg
-      |> read_tails(states, opts)
-      |> Enum.zip_with(states, &fold_tail(cfg, &2, &1))
-      |> refold_rejected(cfg, opts)
-
-    Enum.each(restored, &emit_fold(cfg, &1))
-    restored
+    with {:ok, tails} <- read_tails(cfg, states, opts),
+         {:ok, restored} <- refold_rejected(Enum.zip_with(tails, states, &fold_tail(cfg, &2, &1)), cfg, opts) do
+      Enum.each(restored, &emit_fold(cfg, &1))
+      {:ok, restored}
+    end
   end
 
-  defp read_tails(%{snapshot: nil} = cfg, states, opts),
-    do: Enum.map(read_streams(cfg, states, opts), &{nil, &1})
+  defp read_tails(%{snapshot: nil} = cfg, states, opts) do
+    with {:ok, streams} <- read_streams(cfg, states, opts), do: {:ok, Enum.map(streams, &{nil, &1})}
+  end
 
   defp read_tails(%{type: type} = cfg, states, opts) do
     marker = Snapshot.marker(cfg)
@@ -479,9 +485,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # У потока без событий после снапшота или состояния одна строка, и событие в ней — `nil`
   # (`left_join`).
   defp tails(streams, cfg) do
-    Enum.zip_with(streams, load_streams(cfg, Enum.map(streams, &event_rows/1)), fn
-      [{_index, version, state, _row} | _], events -> {stored_snapshot(version, state), events}
-    end)
+    with {:ok, loaded} <- load_streams(cfg, Enum.map(streams, &event_rows/1)) do
+      {:ok,
+       Enum.zip_with(streams, loaded, fn
+         [{_index, version, state, _row} | _], events -> {stored_snapshot(version, state), events}
+       end)}
+    end
   end
 
   defp event_rows(stream), do: for({_index, _version, _state, %Schema{} = row} <- stream, do: row)
@@ -491,7 +500,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp stored_snapshot(version, state) when is_integer(version) and is_binary(state),
     do: {version, state}
 
-  defp read_streams(_cfg, [], _opts), do: []
+  defp read_streams(_cfg, [], _opts), do: {:ok, []}
 
   defp read_streams(cfg, states, opts) do
     rows =
@@ -510,9 +519,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   # Строки всех потоков запроса — одной пачкой; события раскладываются обратно по потокам.
   defp load_streams(cfg, streams) do
-    events = Es.Store.load_rows!(Enum.concat(streams), cfg.event_codec, cfg.codec)
-    {loaded, []} = Enum.map_reduce(streams, events, &Enum.split(&2, length(&1)))
-    loaded
+    with {:ok, events} <- Es.Store.load_fold_rows(Enum.concat(streams), cfg.event_codec, cfg.codec) do
+      {loaded, []} = Enum.map_reduce(streams, events, &Enum.split(&2, length(&1)))
+      {:ok, loaded}
+    end
   end
 
   defp streams(cfg, states) do
@@ -545,12 +555,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp refold_rejected(restored, cfg, opts) do
     rejected = for {:rejected, state} <- restored, do: state
 
-    refolded =
-      cfg
-      |> read_streams(rejected, opts)
-      |> Enum.zip_with(rejected, &restored(:rejected, cfg.aggregate.fold(&2, &1), &1))
-
-    merge_refolded(restored, refolded)
+    with {:ok, streams} <- read_streams(cfg, rejected, opts) do
+      refolded = Enum.zip_with(streams, rejected, &restored(:rejected, cfg.aggregate.fold(&2, &1), &1))
+      {:ok, merge_refolded(restored, refolded)}
+    end
   end
 
   defp merge_refolded([{:rejected, _state} | restored], [stream | refolded]),
@@ -632,7 +640,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
     with {:ok, records} <- cfg.outbox.from_events(events),
          :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true),
-         :ok <- Es.KeyReservation.append(cfg.key_reservations, events, context, taken) do
+         :ok <- Es.KeyReservation.append(cfg.key_reservations, events, context, taken),
+         {:ok, records} <- Es.Personal.Wire.seal_records(records) do
       Config.outbox_repo().append(records, context, opts)
     end
   end

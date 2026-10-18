@@ -47,7 +47,7 @@ defmodule Core.Es.Personal.KeyStoreCase do
       use ExUnit.Case, async: unquote(async)
 
       alias Core.Error
-      alias Core.Es.Personal
+      alias Core.Es.Personal.Port
 
       @store unquote(impl)
 
@@ -112,11 +112,11 @@ defmodule Core.Es.Personal.KeyStoreCase do
       test "изменённый адрес — :unreadable" do
         [subject] = subjects(1)
         event_id = Ecto.UUID.generate()
-        aad = Personal.address([event_id, "name"])
+        aad = Port.address([event_id, "name"])
         {:ok, [sealed]} = @store.seal([{subject, aad, "Иван"}])
 
-        other_event = Personal.address([Ecto.UUID.generate(), "name"])
-        other_field = Personal.address([event_id, "title"])
+        other_event = Port.address([Ecto.UUID.generate(), "name"])
+        other_field = Port.address([event_id, "title"])
 
         assert {:ok, [{:ok, "Иван"}, :unreadable, :unreadable]} =
                  @store.open([{sealed, aad}, {sealed, other_event}, {sealed, other_field}])
@@ -168,7 +168,7 @@ defmodule Core.Es.Personal.KeyStoreCase do
 
       defp subjects(count), do: for(_ <- 1..count, do: Ecto.UUID.generate())
 
-      defp address(wire), do: Personal.address([Ecto.UUID.generate(), wire])
+      defp address(wire), do: Port.address([Ecto.UUID.generate(), wire])
 
       defp tamper(ciphertext) do
         size = byte_size(ciphertext) - 1

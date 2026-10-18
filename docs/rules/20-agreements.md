@@ -639,10 +639,10 @@ bang-mappers (`to_entity!` / `to_model!`) на call site своих строк /
 реконструкция события `InCodec.load!` в тестах (`Core.Es.Store.Test.events!`); аксессор текущего
 пользователя (`use Core.Context.Accessor`) `get!/1` в ACL-фильтре; compile-time константы
 (Prim-константа в атрибуте модуля (`new!`) и т.п.); OTP/config init; загрузка потока
-`Core.Es.Store.load_rows!/3` при свёртке в `Core.Es.Aggregate.Repo.Pg` (нечитаемый поток —
-исключение, `13-repos.md`); `codec.load!` id владельца в `find/2` модуля ключа
-(`use Core.Es.KeyReservation`) — строку резерва пишет `append` репозитория, и нечитаемый id —
-исключение; любая чистая операция над событием и константами кода
+`Core.Es.Store.load_fold_rows/3` при свёртке в `Core.Es.Aggregate.Repo.Pg` (нечитаемое событие
+— исключение, сбой хранилища ключей — `{:error, _}`, `13-repos.md`); `codec.load!` id владельца
+в `find/2` модуля ключа (`use Core.Es.KeyReservation`) — строку резерва пишет `append`
+репозитория, и нечитаемый id — исключение; любая чистая операция над событием и константами кода
 (Prim, реестр, заданный литералом в коде) в `evolve/2` event-sourced агрегата — колбэк
 возвращает голое состояние (`@callback evolve(state, event) :: struct()`), вернуть `{:error, _}`
 ему некуда, а отказ такой операции — нечитаемое событие или ошибка программиста, и он исключение,

@@ -24,6 +24,11 @@ defmodule Core.Es.Store do
   Страж и непрерывность видят только закоммиченные события. Без `continuous?:` порядок версий
   по позиции держится, пока вызывающий выводит версию из закоммиченного состояния агрегата.
 
+  ПДн-значения пачки (маркеры `Core.Es.Personal.Marker` в дампе) шифруются до вставки одним
+  вызовом `seal` хранилища ключей и ложатся в строку как `{"$pd": base64}`; адрес — `event_id` и
+  wire-ключ поля. Отказ `seal` (`:subject_destroyed`, сбой хранилища) — `{:error, _}` как есть,
+  без `mismatch`. Маркер уничтоженного значения — `ArgumentError` с полем и `event_id`.
+
   Записанная пачка после commit транзакции будит читателей проекций типа агрегата
   (`Core.Es.Projection.Registry`); дерево проекций не запущено — будить некого.
 
@@ -77,9 +82,19 @@ defmodule Core.Es.Store do
   Прочитанные строки в события переводит один пакетный шаг — на всех путях чтения: свёртка и хвост
   со снапшотом репозитория event-sourced агрегата, страница потока, пачка проекции и
   `Core.Es.Store.Test.events!/2`. Шаг принимает пачку строк целиком и проходит её стадиями: все
-  строки → конверты, затем каждый конверт → апкаст и загрузка фасадом. `load_batch/2` — строки с
-  кодеком событий у каждой, исход по строке, строку `:skip` не грузит (пачка проекции); `load_rows/3`
-  — строки одного кодека, первая ошибка загрузки на всю пачку; `load_rows!/3` — она же как
+  строки → конверты, все `{"$pd": …}` пачки → один вызов `open` хранилища ключей, затем каждый
+  конверт → апкаст и загрузка фасадом. Открытое значение встаёт на место `$pd` wire-значением
+  поля, уничтоженный ключ — `{"$pd": null}`; строку `:skip` шаг не расшифровывает и не грузит.
+
+  Исходы расшифровки: сбой хранилища — `{:error, _}` на всю пачку; значение не открылось —
+  `:unreadable_personal_value` (`ns: :es`, `detail` — `event_id` и wire-ключ) у строки.
+  Исключение апкаста или загрузки на строке с расшифрованным `$pd` заменяется ошибкой строки
+  `:upcast_raised` (`ns: :es`, `:app`): в `detail` — `event_id`, модуль исключения, модуль
+  верхнего кадра и стек без аргументов кадров; строки без `$pd` падают как раньше.
+
+  `load_batch/2` — строки с кодеком событий у каждой, исход по строке (пачка проекции);
+  `load_rows/3` — строки одного кодека, первая ошибка на всю пачку; `load_fold_rows/3` — свёртка:
+  сбой хранилища — `{:error, _}`, ошибка строки — `Core.Exc`; `load_rows!/3` — любая ошибка как
   `Core.Exc`.
   """
 
@@ -89,10 +104,13 @@ defmodule Core.Es.Store do
   alias Core.Context
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal
   alias Core.Es.Store.Schema
   alias Core.Helper.AfterCommit
   alias Core.Pagination
   alias Core.Result
+
+  require Error
 
   @chunk_size 500
 
@@ -178,13 +196,17 @@ defmodule Core.Es.Store do
     rows = to_rows(events, event_codec)
     ensure_ordered!(rows, continuous?)
 
+    with {:ok, rows} <- seal_rows(rows), do: write(rows, type, continuous?, mismatch)
+  end
+
+  # ---
+
+  defp write(rows, type, continuous?, mismatch) do
     case write_chunks(Enum.chunk_every(rows, @chunk_size), type, continuous?) do
       :ok -> AfterCommit.register(fn -> Es.Projection.Registry.wake(type) end)
       {:refused, aggregate_id} -> {:error, mismatch.(mismatch_detail(type, aggregate_id, rows))}
     end
   end
-
-  # ---
 
   defp to_rows(events, event_codec) do
     codec = Config.codec()
@@ -209,6 +231,12 @@ defmodule Core.Es.Store do
       by_id: fields.by,
       at: fields.at
     }
+  end
+
+  # Маркеры ПДн-значений всех строк пачки — одним вызовом `seal`, в транзакции записи.
+  defp seal_rows(rows) do
+    with {:ok, payloads} <- Personal.Wire.seal_payloads(Enum.map(rows, &{&1.event_id, &1.payload})),
+         do: {:ok, Enum.zip_with(rows, payloads, &%{&1 | payload: &2})}
   end
 
   defp ensure_ordered!(rows, continuous?) do
@@ -497,10 +525,16 @@ defmodule Core.Es.Store do
   @spec load_rows([Schema.t()], module(), module()) :: Result.t([Es.Event.t()])
 
   def load_rows(rows, event_codec, codec) when is_list(rows) and is_atom(event_codec) and is_atom(codec) do
-    rows
-    |> Enum.map(&{event_codec, &1})
-    |> load_batch(codec)
-    |> Result.traverse(& &1)
+    with {:ok, loaded} <- load_batch(Enum.map(rows, &{event_codec, &1}), codec),
+         do: Result.traverse(loaded, & &1)
+  end
+
+  @doc false
+  @spec load_fold_rows([Schema.t()], module(), module()) :: Result.t([Es.Event.t()])
+
+  def load_fold_rows(rows, event_codec, codec) when is_list(rows) and is_atom(event_codec) and is_atom(codec) do
+    with {:ok, loaded} <- load_batch(Enum.map(rows, &{event_codec, &1}), codec),
+         do: {:ok, Enum.map(loaded, &Result.unwrap!/1)}
   end
 
   @doc false
@@ -510,11 +544,13 @@ defmodule Core.Es.Store do
     do: Result.unwrap!(load_rows(rows, event_codec, codec))
 
   @doc false
-  @spec load_batch([entry()], module()) :: [loaded()]
+  @spec load_batch([entry()], module()) :: Result.t([loaded()])
 
   def load_batch(entries, codec) when is_list(entries) and is_atom(codec) do
     wires = Enum.map(entries, &to_wire/1)
-    Enum.map(wires, &load_wire(&1, codec))
+
+    with {:ok, opened} <- Personal.Wire.open_wires(Enum.map(wires, &wire/1)),
+         do: {:ok, Enum.zip_with(wires, opened, &load_wire(&1, &2, codec))}
   end
 
   # ---
@@ -522,6 +558,50 @@ defmodule Core.Es.Store do
   defp to_wire(:skip), do: :skip
   defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec), do: {event_codec, Schema.to_wire(row)}
 
-  defp load_wire(:skip, _codec), do: :skip
-  defp load_wire({event_codec, wire}, codec), do: codec.load(event_codec.__codec_union__(), wire)
+  defp wire(:skip), do: :skip
+  defp wire({_event_codec, wire}), do: wire
+
+  defp load_wire(:skip, :skip, _codec), do: :skip
+  defp load_wire(_entry, {:unreadable, event_id, field}, _codec), do: {:error, unreadable(event_id, field)}
+  defp load_wire({event_codec, _wire}, {:ok, {wire, false}}, codec), do: load_wire(event_codec, wire, codec)
+
+  defp load_wire({event_codec, _wire}, {:ok, {wire, true}}, codec) do
+    load_wire(event_codec, wire, codec)
+  rescue
+    exception -> {:error, upcast_raised(wire, exception, __STACKTRACE__)}
+  end
+
+  defp load_wire(event_codec, wire, codec) when is_atom(event_codec),
+    do: codec.load(event_codec.__codec_union__(), wire)
+
+  defp unreadable(event_id, field) do
+    Error.domain(__MODULE__,
+      code: :unreadable_personal_value,
+      ns: :es,
+      message: "ПДн-значение события не читается",
+      detail: %{event_id: event_id, field: field}
+    )
+  end
+
+  # Строка с расшифрованным ПДн-значением: текст исключения и аргументы кадров несли бы открытые
+  # строки wire-карты — остаются только модуль исключения, место и стек без аргументов.
+  defp upcast_raised(wire, %exception{}, stacktrace) do
+    Error.app(__MODULE__,
+      code: :upcast_raised,
+      ns: :es,
+      message: "Исключение апкаста или загрузки события с ПДн-значением",
+      detail: %{
+        event_id: Es.Event.Codec.to_fields(wire).id,
+        exception: exception,
+        module: raised_in(stacktrace),
+        stacktrace: Enum.map(stacktrace, &without_args/1)
+      }
+    )
+  end
+
+  defp raised_in([{module, _fun, _arity, _location} | _stacktrace]), do: module
+  defp raised_in(_stacktrace), do: nil
+
+  defp without_args({module, fun, args, location}) when is_list(args), do: {module, fun, length(args), location}
+  defp without_args(frame), do: frame
 end

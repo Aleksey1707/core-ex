@@ -483,8 +483,11 @@ Map: [Crypto-shredding персональных данных в событиях
 - **Резолв** — `Core.Config.key_store/0` в рантайме, как `outbox_repo/0`:
   - подмена — `config :core, Core.Es.Personal.KeyStore, MyImpl`, по умолчанию — `Core.Es.Personal.KeyStore.Pg`;
   - `Core.Config.validate!/0` проверяет экспорт колбэков.
-- **Фасад над портом** — внутренние функции `Core.Es.Personal`. Они эмитят telemetry на каждый вызов, и своя
-  реализация получает метрики даром.
+- **Фасад над портом** — модуль `Core.Es.Personal.Port`: внутренние `seal/1`, `open/1`, `index/1`,
+  `destroy/1` и `address/1`. Они эмитят telemetry на каждый вызов, и своя реализация получает метрики
+  даром. Из `Core.Es.Personal` фасад вынесен тикетом 23: `Core.Es.Store` шифрует через фасад, а
+  `destroy_key/3` пишет через `Store.append`, и в одном модуле они давали цикл `mix xref`; в модуле порта
+  — цикл с `Core.Config.validate!/0`. Согласовано с пользователем.
 
 ### Встроенная реализация (`Core.Es.Personal.KeyStore.Pg`)
 

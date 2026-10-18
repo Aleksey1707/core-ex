@@ -558,7 +558,8 @@ use Repo.Pg.StateStored,
 0. `written` — входной агрегат с очищенными `events`
 1. `Repo.Pg.insert`/`update` — строка агрегата (эталоном в `Repo.Sc` уходит `written`)
 2. дочерние строки через `Repo.Pg.Children` — точечно, а не перезаписью коллекции
-3. flush: `<Aggregate>.Outbox.from_events` → `Core.Es.Store.append` → `Outbox.Repo.append`
+3. flush: `<Aggregate>.Outbox.from_events` → `Core.Es.Store.append` → шифрование ПДн-значений
+   записей outbox → `Outbox.Repo.append` (`23-personal-data.md`, «Форма в хранении и доставке»)
 4. возврат `written`
 
 Очистка событий идёт **до** записи, а не после: эталоном `Repo.Pg.insert/4` кладёт то, что ему
@@ -673,7 +674,7 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
   оно уже учитывает записываемые события.
 - `append` сам открывает `Transact.run(dao)`: `<Aggregate>.Outbox.from_events` →
   `Core.Es.Store.append` с непрерывностью потока → резервы ключей («Резервы ключей») →
-  `Outbox.Repo.append`. Отказ записи событий —
+  шифрование ПДн-значений записей outbox → `Outbox.Repo.append`. Отказ записи событий —
   `errors.domain(behaviour, :version_mismatch, detail)` с detail
   `%{aggregate_id, expected, actual, source: :storage}`; у `get` / `get_decision` / `refresh`
   detail той же формы с `source: :expected`, у `get_many` — их список в порядке пар. Реакцию
@@ -1014,10 +1015,13 @@ event-sourced и state-stored агрегатов. Поток — тип агре
   ключа пишет `destroy_key/3`, кодек `Core.Es.Personal.Event.Codec` фасад подключает сам, и кодек
   потребителя с этим `type:` — `CompileError` (`23-personal-data.md`, «Уничтожение ключа
   субъекта»).
-- Любой отказ — `{:error, mismatch.(detail)}` с detail
+- Любой отказ проверки — `{:error, mismatch.(detail)}` с detail
   `%{aggregate_id, expected, actual, source: :storage}`: ns и код ошибки задаёт вызывающий
   write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`), а не хранилище. `source:`
   ставится здесь и только здесь — это единственная точка `:storage` в библиотеке.
+- ПДн-значения пачки `append` шифрует перед вставкой одним вызовом `seal` хранилища ключей. Его
+  отказ (`:subject_destroyed`, сбой хранилища) уходит вызывающему как есть, без `mismatch`, и
+  `Es.Transact` его не повторяет (`23-personal-data.md`, «Форма в хранении и доставке»).
 - Отказ не переводит транзакцию в aborted, но события, прошедшие проверки, к нему уже записаны:
   write-builder MUST возвращать `{:error, _}` от `append` из `Transact.run`, откатывая транзакцию.
 - Версии потока в пачке не по возрастанию (с `continuous?: true` — не подряд) и событие не из
@@ -1067,6 +1071,9 @@ MUST NOT: «история» — имя экрана у потребителя (
 - Строки грузятся фасадом с апкастом; первая ошибка `load` (`:unknown_event_type`,
   `:invalid_envelope`) — `{:error, _}` на всю страницу. Событие не пропускается: иначе `total`
   разойдётся со страницей.
+- ПДн-значения страницы расшифровываются до апкаста; сбой хранилища ключей,
+  `:unreadable_personal_value` и `:upcast_raised` — тоже `{:error, _}` на всю страницу
+  (`23-personal-data.md`, «Форма в хранении и доставке»).
 - Поток нескольких агрегатов или типов на одном экране хранилище не даёт: это проекция потребителя
   и ReadRepo над её read-моделью, фильтры и построчный ACL — там же.
 

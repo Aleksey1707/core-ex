@@ -2,8 +2,8 @@ defmodule Core.Es.Personal.KeyStore.PgTest do
   use Core.DataCase, async: true
 
   alias Core.Error
-  alias Core.Es.Personal
   alias Core.Es.Personal.KeyStore.Pg
+  alias Core.Es.Personal.Port
   alias Core.TestRepo
 
   # Golden схемы `1`: строка ключа и `$pd` записаны под KEK версии 1 из `config/test.exs` вне
@@ -23,7 +23,7 @@ defmodule Core.Es.Personal.KeyStore.PgTest do
         [key_id, Ecto.UUID.generate(), Base.decode64!(@golden_wrapped), NaiveDateTime.utc_now()]
       )
 
-      aad = Personal.address([@golden_event_id, "holder"])
+      aad = Port.address([@golden_event_id, "holder"])
 
       assert {:ok, [{:ok, ~s("Иван Петров")}]} = Pg.open([{Base.decode64!(@golden_pd), aad}])
     end

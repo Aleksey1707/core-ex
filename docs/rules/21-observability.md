@@ -208,6 +208,13 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 
 `%Error{}`, состояние процесса и аргументы, напечатанные через `inspect/1`, значения не несут.
 
+Wire-карта между расшифровкой и `load` несёт ПДн открытыми строками, вне Prim. Исключение апкаста
+или `load` на строке, где расшифрован хоть один `$pd`, `Core.Es.Store` заменяет ошибкой
+`:upcast_raised` (`ns: :es`, `:app`): в `detail` — `event_id`, модуль исключения, модуль верхнего
+кадра и стек без аргументов кадров; текста исключения нет. Свёртка поднимает её `Core.Exc`,
+страница потока отдаёт `{:error, _}`, пачка проекции уходит в повтор. Воспроизведение — по
+`event_id` и golden-фикстуре. Строки без `$pd` падают как раньше.
+
 Отчёт о падении и `:sys.get_status/1` процесса на id агрегата с ПДн в событиях идут через
 `format_status/1` `Core.Es.Aggregate.Process.Server`: вместо состояния — тип, `aggregate_id` и
 версия, вместо последнего сообщения — модуль команды. Состояние и команда несут ПДн, в том числе
@@ -237,7 +244,8 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 ошибки `load` под полем с `subject:`, `Jason.Encoder` маркера;
 `test/core/es/aggregate/process/server_test.exs`, describe «format_status/1», и
 `test/core/es/aggregate/process_test.exs`, тест «raise в decide роняет процесс» — отчёт о падении и
-`:sys.get_status/1` процесса агрегата с ПДн.
+`:sys.get_status/1` процесса агрегата с ПДн; `test/core/es/personal/events_test.exs`, describe
+«счёт: исключение загрузки» — `:upcast_raised`.
 
 ## Тесты
 

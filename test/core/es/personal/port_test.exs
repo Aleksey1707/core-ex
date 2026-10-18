@@ -1,7 +1,7 @@
-defmodule Core.Es.PersonalTest do
+defmodule Core.Es.Personal.PortTest do
   use Core.DataCase, async: true
 
-  alias Core.Es.Personal
+  alias Core.Es.Personal.Port
   alias Core.Telemetry
 
   setup do
@@ -25,26 +25,26 @@ defmodule Core.Es.PersonalTest do
     test "op и result на каждый вызов, длительность — измерение" do
       subject = Ecto.UUID.generate()
 
-      {:ok, [sealed]} = Personal.seal([{subject, "aad", "Иван"}])
-      {:ok, [_index]} = Personal.index([{"scope", ["key"]}])
-      :ok = Personal.destroy(subject)
+      {:ok, [sealed]} = Port.seal([{subject, "aad", "Иван"}])
+      {:ok, [_index]} = Port.index([{"scope", ["key"]}])
+      :ok = Port.destroy(subject)
 
       assert_receive {:telemetry, :call, %{duration: duration}, %{op: :seal, result: :ok}} when is_integer(duration)
       assert_receive {:telemetry, :call, _measurements, %{op: :index, result: :ok}}
       assert_receive {:telemetry, :call, _measurements, %{op: :destroy, result: :ok}}
 
-      {:error, _reason} = Personal.seal([{subject, "aad", "Пётр"}])
+      {:error, _reason} = Port.seal([{subject, "aad", "Пётр"}])
       assert_receive {:telemetry, :call, _measurements, %{op: :seal, result: :refused} = metadata}
       assert Map.keys(metadata) == [:op, :result]
 
-      {:ok, [:destroyed]} = Personal.open([{sealed, "aad"}])
+      {:ok, [:destroyed]} = Port.open([{sealed, "aad"}])
       assert_receive {:telemetry, :call, _measurements, %{op: :open, result: :ok}}
     end
 
     test "сбой хранилища — result: :error" do
       TestRepo.query!("SET LOCAL search_path TO no_such_schema")
 
-      {:error, _reason} = Personal.seal([{Ecto.UUID.generate(), "aad", "Иван"}])
+      {:error, _reason} = Port.seal([{Ecto.UUID.generate(), "aad", "Иван"}])
 
       assert_receive {:telemetry, :call, _measurements, %{op: :seal, result: :error}}
     end
@@ -53,11 +53,11 @@ defmodule Core.Es.PersonalTest do
   describe "telemetry исходов расшифровки" do
     test "count по outcome в пачке" do
       [live, gone] = [Ecto.UUID.generate(), Ecto.UUID.generate()]
-      {:ok, [sealed_live, sealed_gone]} = Personal.seal([{live, "aad", "Иван"}, {gone, "aad", "Пётр"}])
-      :ok = Personal.destroy(gone)
+      {:ok, [sealed_live, sealed_gone]} = Port.seal([{live, "aad", "Иван"}, {gone, "aad", "Пётр"}])
+      :ok = Port.destroy(gone)
 
       {:ok, _outcomes} =
-        Personal.open([{sealed_live, "aad"}, {sealed_live, "aad"}, {sealed_gone, "aad"}, {"мусор", "aad"}])
+        Port.open([{sealed_live, "aad"}, {sealed_live, "aad"}, {sealed_gone, "aad"}, {"мусор", "aad"}])
 
       assert_receive {:telemetry, :open, %{count: 2}, %{outcome: :opened}}
       assert_receive {:telemetry, :open, %{count: 1}, %{outcome: :destroyed}}
@@ -67,9 +67,9 @@ defmodule Core.Es.PersonalTest do
 
   describe "address/1" do
     test "склейка и перестановка частей дают другой адрес" do
-      assert Personal.address(["ab", "c"]) != Personal.address(["a", "bc"])
-      assert Personal.address(["a", "b"]) != Personal.address(["b", "a"])
-      assert Personal.address(["a", ""]) != Personal.address(["a"])
+      assert Port.address(["ab", "c"]) != Port.address(["a", "bc"])
+      assert Port.address(["a", "b"]) != Port.address(["b", "a"])
+      assert Port.address(["a", ""]) != Port.address(["a"])
     end
   end
 end

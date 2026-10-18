@@ -22,7 +22,8 @@ Dump/load события — только через фасад (`11-domain.md`,
 - Flush — задача Repo, **в одной DB-транзакции** со state.
 - Flush руками не пишется: его генерирует `use Core.Repo.Pg.StateStored` по опциям `event_codec:`
   и `outbox:` (см. `13-repos.md`). Порядок внутри транзакции:
-  `Outbox.from_events` → `Core.Es.Store.append` → `Outbox.Repo.append`, затем `events` очищаются.
+  `Outbox.from_events` → `Core.Es.Store.append` → шифрование ПДн-значений записей →
+  `Outbox.Repo.append`, затем `events` очищаются.
 - Кодек событий агрегата — `use Core.Es.Event.Codec` (`event:` + `type:` + `tags:`, необязательный
   `upcasts:`; колбэк — только `upcast/2`); конверт, выбор типа по тегу, клаузы нагрузки и сборку
   события генерирует билдер, наружу кодек виден только через фасад. Формат нагрузки задаёт её
@@ -107,6 +108,14 @@ Wire-payload — конверт события целиком:
 
 - `event_id`, `type`, `aggregate_id`, `aggregate_version`, `at`, `by`
 - плюс payload события (`payload`; у событий без нагрузки — `nil`)
+
+ПДн-значение поля с `subject:` `from_event/1` отдаёт маркером `%Core.Es.Personal.Marker{}`:
+функция чиста и не шифрует. Маркер заменяет шифротекстом `{"$pd": …}` flush write-репозитория в
+транзакции записи, после `Core.Es.Store.append` и резервов, до `Outbox.Repo.append`; `Core.Outbox` и
+своя `outbox_repo` получают шифротекст и о ПДн не знают. Запись с маркером мимо flush MUST NOT: она
+падает на маркере, а не пишет открытый текст. Интеграционное событие — запись, которую собирает
+usecase, — не шифруется: разметки `subject:` в нём нет (`23-personal-data.md`, «Форма в хранении и
+доставке»).
 
 Обе стороны формата — в `Core.Es.Event.Codec`: конверт собирает `dump/2` кодека агрегата
 (его зовёт `<Aggregate>.Outbox` при постановке события в очередь), разбирает — `load/3`,

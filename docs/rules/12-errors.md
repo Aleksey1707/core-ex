@@ -86,8 +86,8 @@ use Core.Prim.String,
   sensitive: true
 ```
 
-MUST помечать: пароли (plaintext и хеши), токены и ключи, коды подтверждения, ПДн, платёжные
-реквизиты.
+MUST помечать: пароли (plaintext и хеши), токены и ключи, коды подтверждения, платёжные
+реквизиты. ПДн помечаются `personal: true` («Prim: `personal: true`»).
 
 ### Prim: `personal: true`
 
@@ -96,7 +96,9 @@ MUST помечать: пароли (plaintext и хеши), токены и к�
 Redump) ему открыт. Флаги независимы; что делает опция — `11-domain.md`, «Prim (value object)»,
 какие значения так помечаются — `23-personal-data.md`, «Разметка».
 
-ПДн, которые показываются клиенту, MAY помечаться `personal: true` вместо `sensitive: true`.
+ПДн MUST помечаться `personal: true`, а не `sensitive: true`: уничтожение ключа субъекта и форма
+`{"$pd": …}` в событиях работают по разметке поля нагрузки `subject:`, а `sensitive:` закрыл бы
+значению read-путь. Значение, которое к тому же не показывается клиенту, MAY нести оба флага.
 
 Ошибку базового Prim `Core.Codec.load_composite/3` отдаёт вместо ошибки композита, поэтому её
 `detail` редактирует флаг композита, а не базы.
@@ -330,6 +332,11 @@ Fallback-контроллер состав сам не собирает: он о
   репозитория, когда `%Version{}` не равна голове потока, detail той же формы, у `get_many` — их
   список. `source:` — источник отказа (`:storage` у хранилища, `:expected` у сверки): по нему
   решается повтор команды, и вкладывать в `detail` свой ключ с этим именем MUST NOT.
+- Чтение событий (`Core.Es.Store`, пакетный шаг загрузки): ПДн-значение, которое хранилище ключей
+  не открыло, → `%Error{kind: :domain}` (`ns: :es`, `code: :unreadable_personal_value`,
+  `detail: %{event_id, field}`); исключение апкаста или `load` на строке с расшифрованным `$pd` →
+  `%Error{kind: :app}` (`ns: :es`, `code: :upcast_raised`) — `23-personal-data.md`, «Форма в
+  хранении и доставке».
 - Резерв ключа (`append` репозитория с `key_reservations:`): ключ, занятый другим агрегатом, →
   `errors_mod.domain(behaviour, code, %{scope: scope})`, код — `code:` модуля ключа, значения
   ключа в detail нет — см. `13-repos.md`, «Резервы ключей». Отказ вставки, который не снял повтор,
@@ -372,6 +379,8 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Repo.Pg` | `:repo` | `:app` | `:write_failed` |
 | `Core.Codec.Plugin.Fields` (модуль ошибки — тип плагина по полям или модуль нагрузки события) | `:codec` | `:domain` | `:invalid_value`, `:sealed_personal_value` |
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
+| `Core.Es.Store` | `:es` | `:domain` | `:unreadable_personal_value` |
+| `Core.Es.Store` | `:es` | `:app` | `:upcast_raised` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
 | `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |
 | `Core.Es.Personal.KeyStore` (порт; своя реализация отказывает тем же кодом) | `:key_store` | `:domain` | `:subject_destroyed` |

@@ -28,7 +28,7 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
   Шифротекст — `1 ‖ идентификатор ключа (16 байт) ‖ nonce (12 байт) ‖ ct ‖ tag (16 байт)`,
   AES-256-GCM; AAD — заголовок (`1 ‖ идентификатор ключа`) и адрес. Индекс — HMAC-SHA256 секретом
-  индекса над `Core.Es.Personal.address([область | части])`, hex. Схема неизменяема.
+  индекса над `Core.Es.Personal.Port.address([область | части])`, hex. Схема неизменяема.
 
   ## Исходы
 
@@ -55,8 +55,8 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
   alias Core.Config
   alias Core.Error
-  alias Core.Es.Personal
   alias Core.Es.Personal.KeyStore
+  alias Core.Es.Personal.Port
   alias Core.Helper.Transact
   alias Core.Result
 
@@ -265,7 +265,7 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
     {:ok,
      Enum.map(items, fn {scope, parts} when is_binary(scope) and is_list(parts) ->
-       Base.encode16(:crypto.mac(:hmac, :sha256, secret, Personal.address([scope | parts])), case: :lower)
+       Base.encode16(:crypto.mac(:hmac, :sha256, secret, Port.address([scope | parts])), case: :lower)
      end)}
   end
 
