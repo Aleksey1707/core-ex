@@ -13,7 +13,8 @@ defmodule Core.Es.Aggregate.Process.Server do
   супервизором ждёт её конца в пределах `:shutdown` дочерней спецификации.
 
   Состояние хранится с отметкой последнего полного чтения (`get_decision`): старше
-  `state_max_age:` — `stale?/3` — оно выбрасывается до команды.
+  `state_max_age:` — `stale?/3` — оно выбрасывается до команды, а без команд процесс уходит по
+  таймауту, как только оно устарело, — `stale_in/3`.
   """
 
   use GenServer
@@ -158,7 +159,7 @@ defmodule Core.Es.Aggregate.Process.Server do
     do: GenServer.start_link(__MODULE__, args, name: {:via, Registry, {cfg.registry, id}})
 
   @doc false
-  @spec init(args()) :: {:ok, t(), pos_integer()}
+  @spec init(args()) :: {:ok, t(), timeout()}
 
   @impl true
   def init(args) do
@@ -175,7 +176,7 @@ defmodule Core.Es.Aggregate.Process.Server do
 
   @doc false
   @spec handle_call({:execute, request()}, GenServer.from(), t()) ::
-          {:reply, reply(), t(), pos_integer()} | {:noreply, t(), pos_integer()}
+          {:reply, reply(), t(), timeout()} | {:noreply, t(), timeout()}
 
   @impl true
   def handle_call({:execute, request}, _from, %__MODULE__{} = server) do
@@ -198,7 +199,7 @@ defmodule Core.Es.Aggregate.Process.Server do
         "aggregate_id=#{server.aggregate_id}"
     )
 
-    {:noreply, server, server.idle_timeout}
+    {:noreply, server, timeout(server)}
   end
 
   defp run_command(server, request, queue) do
@@ -208,23 +209,21 @@ defmodule Core.Es.Aggregate.Process.Server do
 
     case in_caller_env(server, request) do
       {{:ok, state} = executed, retries} ->
-        {:reply, {Execution.result(executed), retries, queue}, %{server | state: state, read_at: read_at},
-         server.idle_timeout}
+        server = %{server | state: state, read_at: read_at}
+        {:reply, {Execution.result(executed), retries, queue}, server, timeout(server)}
 
       {:expired, _retries} ->
         dropped(server)
 
       {{:error, _reason} = error, retries} ->
-        {:reply, {error, retries, queue}, server, server.idle_timeout}
+        {:reply, {error, retries, queue}, server, timeout(server)}
     end
   end
 
   # Состояние старше предела выбрасывается до команды при любом её исходе: команда пойдёт полным
   # чтением, и устаревшая копия в процессе не остаётся.
-  defp drop_stale(%__MODULE__{read_at: nil} = server, _now), do: server
-
   defp drop_stale(server, now) do
-    if stale?(server.read_at, now, server.state_max_age) do
+    if stale_state?(server, now) do
       Logger.debug(
         "процесс агрегата: состояние устарело: type=#{server.cfg.type} " <>
           "aggregate_id=#{server.aggregate_id} state_max_age=#{server.state_max_age}"
@@ -290,24 +289,33 @@ defmodule Core.Es.Aggregate.Process.Server do
   def stale?(read_at, now, max_age) when is_integer(read_at) and is_integer(now) and is_integer(max_age),
     do: now - read_at > max_age
 
+  @doc """
+  Остаток до устаревания: через сколько мс от `now` состояние, полно прочитанное в `read_at`,
+  станет устаревшим по `stale?/3`; уже устаревшее — 0, при `:infinity` — `:infinity`.
+  """
+  @spec stale_in(integer(), integer(), pos_integer() | :infinity) :: non_neg_integer() | :infinity
+
+  def stale_in(read_at, now, :infinity) when is_integer(read_at) and is_integer(now), do: :infinity
+
+  def stale_in(read_at, now, max_age) when is_integer(read_at) and is_integer(now) and is_integer(max_age),
+    do: max(read_at + max_age + 1 - now, 0)
+
   # ===== остановка =====
 
   @doc false
-  @spec handle_info(term(), t()) :: {:noreply, t(), pos_integer()} | {:stop, :normal, t()}
+  @spec handle_info(term(), t()) :: {:noreply, t(), timeout()} | {:stop, :normal, t()}
 
+  # Таймаут без команд — простой или устаревшее состояние: уход один и тот же, разнится лог.
   @impl true
   def handle_info(:timeout, %__MODULE__{} = server) do
     :ok = emit(server, :stop, %{reason: :idle})
 
-    Logger.debug(
-      "процесс агрегата: ушёл по простою: type=#{server.cfg.type} " <>
-        "aggregate_id=#{server.aggregate_id} idle_timeout=#{server.idle_timeout}"
-    )
+    log_stop(server, stale_state?(server, System.monotonic_time(:millisecond)))
 
     {:stop, :normal, server}
   end
 
-  def handle_info(_message, server), do: {:noreply, server, server.idle_timeout}
+  def handle_info(_message, server), do: {:noreply, server, timeout(server)}
 
   @doc false
   @spec terminate(term(), t()) :: :ok
@@ -318,6 +326,22 @@ defmodule Core.Es.Aggregate.Process.Server do
 
   # Исключение в команде: транзакция откатилась, вызывающий получает exit.
   def terminate(_reason, server), do: emit(server, :stop, %{reason: :error})
+
+  # ---
+
+  defp log_stop(server, true = _stale) do
+    Logger.debug(
+      "процесс агрегата: ушёл, состояние устарело: type=#{server.cfg.type} " <>
+        "aggregate_id=#{server.aggregate_id} state_max_age=#{server.state_max_age}"
+    )
+  end
+
+  defp log_stop(server, false = _stale) do
+    Logger.debug(
+      "процесс агрегата: ушёл по простою: type=#{server.cfg.type} " <>
+        "aggregate_id=#{server.aggregate_id} idle_timeout=#{server.idle_timeout}"
+    )
+  end
 
   # ===== отчёт о падении =====
 
@@ -353,4 +377,18 @@ defmodule Core.Es.Aggregate.Process.Server do
       Map.put(metadata, :type, server.cfg.type)
     )
   end
+
+  # Без команд процесс уходит, как только состояние устарело: таймаут — меньшее из простоя и
+  # остатка до предела, и ПДн не живут в памяти дольше `state_max_age:`.
+  defp timeout(%__MODULE__{read_at: nil} = server), do: server.idle_timeout
+
+  defp timeout(server) do
+    case stale_in(server.read_at, System.monotonic_time(:millisecond), server.state_max_age) do
+      :infinity -> server.idle_timeout
+      left -> min(server.idle_timeout, left)
+    end
+  end
+
+  defp stale_state?(%__MODULE__{read_at: nil}, _now), do: false
+  defp stale_state?(server, now), do: stale?(server.read_at, now, server.state_max_age)
 end

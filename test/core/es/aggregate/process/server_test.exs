@@ -24,6 +24,24 @@ defmodule Core.Es.Aggregate.Process.ServerTest do
     end
   end
 
+  describe "stale_in/3" do
+    test "остаток до устаревания — мс, после которых stale?/3 станет true; устаревшее — 0" do
+      cases = [
+        {1_000, 1_000, 300_000, 300_001},
+        {1_000, 300_999, 300_000, 2},
+        {1_000, 301_000, 300_000, 1},
+        {1_000, 301_001, 300_000, 0},
+        {-5_000, 400_000, 300_000, 0},
+        {1_000, 1_000_000_000, :infinity, :infinity}
+      ]
+
+      for {read_at, now, max_age, left} <- cases do
+        assert Server.stale_in(read_at, now, max_age) == left,
+               "read_at=#{read_at} now=#{now} max_age=#{inspect(max_age)}"
+      end
+    end
+  end
+
   describe "format_status/1" do
     test "агрегат с ПДн: состояние — тип, aggregate_id и версия; сообщение — модуль команды; reason как есть" do
       server = server(personal: true)

@@ -62,6 +62,10 @@ end
 - Извлечённое ПДн-значение MUST NOT попадать в текст `raise`, в `Logger.*` и в атрибут span'а.
 - Вместо значения выводится идентификатор агрегата или субъекта, длина или признак наличия.
 - Prim с ПДн целиком в `Logger.*` и в `inspect/1` MAY: значение скрывает его `Inspect`.
+- Отчёт о падении любого процесса — процесса агрегата, usecase в Plug, `Task`, подписчика —
+  печатает аргументы верхнего кадра стека: Prim в них скрыт, извлечённое значение — открыто.
+  Приватные helper'ы `decide` / `evolve` / `project` SHOULD принимать ПДн Prim'ом, а не
+  извлечённым значением: значение извлекается в выражении, где оно нужно.
 
 ```elixir
 # плохо — телефон уходит в лог и в службу учёта ошибок открытым
@@ -71,6 +75,14 @@ raise ArgumentError, "неверный телефон #{Phone.value(phone)}"
 # хорошо
 Logger.warning("контакт не принят: client_id=#{InCodec.dump(client.id)}")
 raise ArgumentError, "неверный телефон: client_id=#{InCodec.dump(client.id)}"
+
+# плохо — FunctionClauseError helper'а evolve печатает извлечённый телефон аргументом кадра
+defp put_phone(state, phone) when byte_size(phone) == 12, do: %{state | phone: phone}
+put_phone(state, Phone.value(payload.phone))
+
+# хорошо — аргумент кадра — Prim, значение скрывает его Inspect
+defp put_phone(state, %Phone{} = phone), do: %{state | phone: phone}
+put_phone(state, payload.phone)
 ```
 
 ## Эксплуатация

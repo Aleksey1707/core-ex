@@ -341,6 +341,35 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert stream_tags(id) == ["account.opened", "account.frozen"]
     end
 
+    test "без команд процесс уходит, как только состояние устарело, — раньше idle_timeout; refresh уход не откладывает" do
+      start_tree!(Account.Process, idle_timeout: 30_000)
+      id = Account.ID.new()
+      :ok = attach_load()
+      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
+      assert_received {:ran_in, server}
+      assert_received {:load, %{op: :get_decision}}
+      ref = Process.monitor(server)
+
+      # До предела по умолчанию (300 000 мс) остаётся секунда — без ожидания пяти минут.
+      %{read_at: read_at} = :sys.replace_state(server, &%{&1 | read_at: &1.read_at - 299_000})
+
+      log =
+        capture_at(:debug, fn ->
+          {:ok, _version} = Account.Process.execute(id, :current, rename("Отгрузка"), Context.new())
+          assert_received {:load, %{op: :refresh}}
+          assert %{read_at: ^read_at} = :sys.get_state(server)
+          assert_receive {:DOWN, ^ref, :process, ^server, :normal}, 10_000
+        end)
+
+      assert log =~
+               "процесс агрегата: ушёл, состояние устарело: type=account aggregate_id=#{dump(id)} " <>
+                 "state_max_age=300000"
+
+      refute log =~ "ушёл по простою"
+      assert_received {:stop, %{type: "account", reason: :idle}}
+      assert Registry.lookup(Account.Process.Registry, id) == []
+    end
+
     test "команда, простоявшая в очереди до дедлайна, отбрасывается до транзакции" do
       start_tree!(Account.Process)
       id = Account.ID.new()
