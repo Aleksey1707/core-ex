@@ -282,6 +282,13 @@ defmodule Core.Prim do
     redact_chain(error, mod.__domain_sensitive__() or mod.__domain_personal__())
   end
 
+  @doc false
+  @spec redact_error(Error.t()) :: Error.t()
+
+  # `detail` всей cause-цепочки без оглядки на флаги Prim: ошибка загрузки ПДн-поля нагрузки события
+  # (`subject:`) редактируется, какого бы вида ни было поле.
+  def redact_error(%Error{} = error), do: redact_chain(error, true)
+
   # ---
 
   defp redact_chain(%Error{} = error, false), do: error

@@ -80,6 +80,13 @@ defmodule Core.PrimFixture do
       personal: true
   end
 
+  # Субъект поля нагрузки — композит над UUID, как роль поверх идентификатора лица.
+  defmodule SubjectRef do
+    @moduledoc false
+
+    use Core.Prim.Compose, name: "Ссылка на лицо", of: Core.EsFixture.UserID
+  end
+
   defmodule PersonalSensitive do
     @moduledoc false
 

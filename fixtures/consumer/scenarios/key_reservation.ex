@@ -13,6 +13,7 @@ defmodule ConsumerTest.BadKey do
   @impl true
   def reservation(%Event.Opened{payload: payload}), do: {:reserve, payload.name}
   def reservation(%Event.Renamed{payload: payload}), do: {:reserve, payload.name}
+  def reservation(%Event.HolderSet{}), do: :keep
   def reservation(%Event.Frozen{}), do: :keep
 
   @impl true
@@ -50,6 +51,7 @@ defmodule ConsumerTest.BadKeyPayload do
   @impl true
   def reservation(%Event.Opened{payload: payload}), do: {:reserve, payload.name}
   def reservation(%Event.Renamed{payload: payload}), do: {:reserve, payload.nmae}
+  def reservation(%Event.HolderSet{}), do: :keep
   def reservation(%Event.Frozen{}), do: :keep
   def reservation(%Event.Closed{}), do: :release
 

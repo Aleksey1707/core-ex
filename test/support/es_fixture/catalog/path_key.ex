@@ -20,6 +20,7 @@ defmodule Core.EsFixture.Catalog.PathKey do
   @impl true
   def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.name}
   def reservation(%Event.Closed{}), do: :release
+  def reservation(%Event.ContactSet{}), do: :keep
 
   @doc "Ключ — части пути."
   @spec to_key(Name.t()) :: [String.t(), ...]

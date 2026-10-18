@@ -7,6 +7,7 @@ defmodule Core.EsFixture.Account.Event.Codec do
   @tag_by_mod %{
     Event.Opened => "account.opened",
     Event.Renamed => "account.renamed",
+    Event.HolderSet => "account.holder_set",
     Event.Frozen => "account.frozen",
     Event.Closed => "account.closed",
     Event.Verified => "account.verified"

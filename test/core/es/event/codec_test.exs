@@ -241,7 +241,7 @@ defmodule Core.Es.Event.CodecTest do
 
     test "интроспекция: модули из tags: и карта upcasts: как объявлена" do
       assert Enum.sort(EventFixture.Event.Codec.__es_mods__()) ==
-               Enum.sort([EventFixture.Event.Closed, EventFixture.Event.Created])
+               Enum.sort([EventFixture.Event.Closed, EventFixture.Event.Created, EventFixture.Event.ContactSet])
 
       assert EventFixture.Event.Codec.__es_upcasts__() == %{
                "fixture.created.v1" => "fixture.created.v2",
@@ -251,7 +251,9 @@ defmodule Core.Es.Event.CodecTest do
     end
 
     test "источники upcasts: не входят в types/0 и mod_by_tag/1" do
-      assert EventFixture.Event.Codec.types() == MapSet.new(["fixture.created", "fixture.closed"])
+      assert EventFixture.Event.Codec.types() ==
+               MapSet.new(["fixture.created", "fixture.closed", "fixture.contact_set"])
+
       assert EventFixture.Event.Codec.mod_by_tag("fixture.opened") == :error
     end
 

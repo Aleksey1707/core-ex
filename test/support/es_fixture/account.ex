@@ -11,7 +11,8 @@ defmodule Core.EsFixture.Account do
   - `Frozen` / `Closed` — события без нагрузки;
   - `Opened` — записанные `account.opened.v1` и `account.opened.v2` грузятся апкастом;
   - `Verified` — удалённый тип: тег остаётся в `tags:`, событие больше не пишется, `evolve`
-    возвращает состояние как есть.
+    возвращает состояние как есть;
+  - `HolderSet` — ПДн-поле `holder` (`Holder`, `personal: true`) с `subject: :aggregate_id`.
   """
 
   alias Core.Es
@@ -41,16 +42,27 @@ defmodule Core.EsFixture.Account do
       max_len: 50
   end
 
-  defstruct id: nil, version: nil, name: nil, status: nil
+  defmodule Holder do
+    @moduledoc "Владелец счёта — ПДн."
+
+    use Core.Prim.String,
+      name: "Владелец счёта",
+      min_len: 1,
+      max_len: 100,
+      personal: true
+  end
+
+  defstruct id: nil, version: nil, name: nil, status: nil, holder: nil
 
   @type t :: %__MODULE__{
           id: ID.t() | nil,
           version: Version.t() | nil,
           name: Name.t() | nil,
-          status: :open | :frozen | :closed | nil
+          status: :open | :frozen | :closed | nil,
+          holder: Holder.t() | Core.Es.Personal.Destroyed.t() | nil
         }
 
-  @on_existing [Cmd.Rename, Cmd.Freeze, Cmd.Close]
+  @on_existing [Cmd.Rename, Cmd.SetHolder, Cmd.Freeze, Cmd.Close]
 
   # ===== decide =====
 
@@ -74,6 +86,9 @@ defmodule Core.EsFixture.Account do
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
     do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
+
+  def decide(%Cmd.SetHolder{holder: holder}, %__MODULE__{status: :open}),
+    do: {:ok, [Event.HolderSet.draft(Event.HolderSet.Payload.new(holder))]}
 
   def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
 
@@ -104,6 +119,8 @@ defmodule Core.EsFixture.Account do
     do: %{state | name: payload.name, status: :open}
 
   def evolve(state, %Event.Renamed{payload: payload}), do: %{state | name: payload.name}
+
+  def evolve(state, %Event.HolderSet{payload: payload}), do: %{state | holder: payload.holder}
 
   def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 

@@ -20,6 +20,8 @@ defmodule ConsumerTest.BadEvolve do
   def evolve(state, %Event.Renamed{payload: %Event.Renamed.Payload{} = payload}),
     # expect: unknown key .nmae
     do: %{state | name: payload.nmae}
+
+  def evolve(state, %Event.HolderSet{}), do: state
 end
 
 defmodule ConsumerTest.BadEvolve.Repo do
@@ -50,6 +52,7 @@ defmodule ConsumerTest.BadEvolvePayload do
   @impl true
   def evolve(state, %Event.Opened{payload: payload}), do: %{state | name: payload.name}
   def evolve(state, %Event.Renamed{payload: payload}), do: %{state | name: payload.nmae}
+  def evolve(state, %Event.HolderSet{}), do: state
   def evolve(state, %Event.Frozen{}), do: state
   def evolve(state, %Event.Closed{}), do: state
 end
@@ -83,6 +86,7 @@ defmodule ConsumerTest.BadEvolveState do
     do: %{state | nmae: payload.name}
 
   def evolve(state, %Event.Opened{}), do: state
+  def evolve(state, %Event.HolderSet{}), do: state
   def evolve(state, %Event.Frozen{}), do: state
   def evolve(state, %Event.Closed{}), do: state
 end

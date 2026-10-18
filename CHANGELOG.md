@@ -41,14 +41,46 @@
   - было: `use Core.Prim.String, name: …, max_len: 32` — без флага, значение печатается в логах;
   - стало: `use Core.Prim.String, name: …, max_len: 32, personal: true`.
 
+  Вторая часть — разметка ПДн-поля нагрузки события и уничтоженное ПДн-значение в кодеке
+  (`docs/rules/23-personal-data.md`, «Поле нагрузки события (`subject:`)» и «Уничтоженное
+  ПДн-значение»). Поле нагрузки `Core.Es.Event.Payload` объявляет `subject:` — `:aggregate_id`
+  или UUID-поле той же нагрузки, под чьим ключом лежит значение. Кодек событий на `dump` кладёт на
+  место значения такого поля маркер `%Core.Es.Personal.Marker{}` (идентификатор субъекта и
+  wire-значение), который JSON не кодирует: запись события с ПДн в хранилище и outbox до
+  шифрования писателями wire-формы падает на маркере — шифрование подключит следующий срез. На
+  `load` `{"$pd": null}` в поле с `subject:` даёт `%Core.Es.Personal.Destroyed{}` на месте поля, в
+  поле без `subject:` — `:invalid_value`, а `{"$pd": "<строка>"}` — `:sealed_personal_value`
+  (`ns: :codec`). В `@type t` нагрузки поле с `subject:` получает `| Destroyed.t()`, `new/N` его
+  не принимает, `Inspect` нагрузки поле не выводит, `detail` ошибки `load` под ним
+  отредактирован. Кодек событий отдаёт поля с `subject:` по событиям — `__es_subjects__/0`.
+  Правка нужна только событиям с ПДн:
+  - было: `fields: [phone: [prim: Order.Phone]]`;
+  - стало: `fields: [recipient_id: [prim: Order.RecipientID], phone: [prim: Order.Phone,
+    subject: :recipient_id]]`.
+
 ### Изменения контракта макросов
 
-- **Опция `personal:` у Prim** (норма — `docs/rules/11-domain.md`, «Prim (value object)»).
-  `use Core.Prim` и все обёртки (`Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` /
-  `Date` / `Compose`) принимают `personal:` — булеву, по умолчанию `false`; не-булево значение —
+- **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,
+  «Prim (value object)»; `docs/rules/23-personal-data.md`). `use Core.Prim` и все обёртки
+  (`Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose`) принимают `personal:` — булеву, по умолчанию `false`; не-булево значение —
   `CompileError`. `Prim.Compose` наследует признак от базы, `personal: false` поверх персональной
   базы — `CompileError`, как у `sensitive:`. `use Core.Prim` занимает в модуле имя
   `__domain_personal__/0`: своя функция с этим именем в Prim-модуле переименовывается.
+
+  `subject:` у поля `Core.Es.Event.Payload` (норма — `docs/rules/23-personal-data.md`, «Поле
+  нагрузки события (`subject:`)»): `:aggregate_id` или имя поля той же нагрузки. `CompileError`:
+  - у любой нагрузки, с ПДн и без, — wire-ключ поля, начинающийся с `$` (форма `{"$pd": …}`
+    зарезервирована): было `name: [prim: …, wire: "$name"]`, стало — ключ без `$`;
+  - только при ПДн — персональный Prim на поле `prim:` / `list: [prim:]` без `subject:` (было
+    `phone: [prim: Phone]` с `Phone` `personal: true`, стало `phone: [prim: Phone, subject: …]`);
+    субъект — не `Prim.UUID` и не `Prim.Compose` над ним (у `:aggregate_id` проверяет
+    `use Core.Es.Event` по `aggregate_id:`); поле с `subject:` в роли субъекта; `subject:` на
+    несуществующее поле или на само себя; обязательное ПДн-поле при необязательном субъекте.
+
+  `subject:` у плагина сущности (`use Core.Codec.Plugin, fields:`) — `CompileError` «неизвестные
+  ключи». `use Core.Es.Event.Payload` с полями `subject:` выводит `Inspect` без них — свой
+  `@derive Inspect` в такой нагрузке снимается. `use Core.Es.Event.Codec` занимает в модуле имена
+  `__es_subjects__/0` и `@es_subjects`.
 
 ## 0.15.1
 

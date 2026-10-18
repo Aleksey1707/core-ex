@@ -42,11 +42,19 @@ defmodule Consumer.Domain.Sales.Account do
     def title(%__MODULE__{} = currency), do: value(currency)
   end
 
-  defstruct id: nil, version: nil, name: nil, status: nil
+  defmodule Holder do
+    use Core.Prim.String,
+      name: "Владелец счёта",
+      min_len: 1,
+      max_len: 100,
+      personal: true
+  end
+
+  defstruct id: nil, version: nil, name: nil, status: nil, holder: nil
 
   @type t :: %__MODULE__{}
 
-  @on_existing [Cmd.Rename, Cmd.Freeze, Cmd.Close]
+  @on_existing [Cmd.Rename, Cmd.SetHolder, Cmd.Freeze, Cmd.Close]
 
   @impl true
   def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),
@@ -62,6 +70,9 @@ defmodule Consumer.Domain.Sales.Account do
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
     do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
+
+  def decide(%Cmd.SetHolder{holder: holder}, %__MODULE__{status: :open}),
+    do: {:ok, [Event.HolderSet.draft(Event.HolderSet.Payload.new(holder))]}
 
   def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
 
@@ -84,6 +95,9 @@ defmodule Consumer.Domain.Sales.Account do
     do: %{state | name: payload.name, status: :open}
 
   def evolve(state, %Event.Renamed{payload: payload}), do: %{state | name: payload.name}
+
+  def evolve(state, %Event.HolderSet{payload: %Event.HolderSet.Payload{} = payload}),
+    do: %{state | holder: payload.holder}
 
   def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 

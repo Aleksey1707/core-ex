@@ -185,7 +185,7 @@ defmodule Core.Codec.Plugin.Variants do
   defp check_clash!(fields, {key, _value}, where) do
     wire = Atom.to_string(key)
 
-    if Enum.any?(fields, fn {_name, _spec, _optional?, field_wire, _default} -> field_wire == wire end) do
+    if Enum.any?(fields, fn {_name, _spec, _optional?, field_wire, _default, _subject} -> field_wire == wire end) do
       raise CompileError, description: "#{where}: wire-ключ #{inspect(wire)} занят дискриминатором"
     end
   end

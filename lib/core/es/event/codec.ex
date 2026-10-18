@@ -26,6 +26,19 @@ defmodule Core.Es.Event.Codec do
 
   События без нагрузки (`payload: nil` у `use Es.Event`) в конверте несут `nil`.
 
+  ## ПДн-поля нагрузки
+
+  У поля нагрузки по полям с `subject:` (ADR-0073, ADR-0074):
+
+  - `dump` кладёт на место значения `%Core.Es.Personal.Marker{}` — дамп субъекта и wire-значение
+    поля; `nil` необязательного поля остаётся `nil`, `%Core.Es.Personal.Destroyed{}` — маркер
+    уничтоженного значения. Непустое значение при `nil` в поле-субъекте голова не пропускает;
+  - `load` превращает `{"$pd": null}` в `%Core.Es.Personal.Destroyed{}` и редактирует `detail`
+    ошибки поля. `{"$pd": null}` в поле без `subject:` — `:invalid_value`, `{"$pd": "<строка>"}`
+    в любом поле — `:sealed_personal_value` (`ns: :codec`).
+
+  Поля с `subject:` по событиям — `__es_subjects__/0`.
+
   `dump_payload/2` или `load_payload/3` в модуле кодека — `CompileError`: нестандартная
   wire-форма нагрузки живёт в плагине её типа, а не в кодеке событий (ADR-0060).
 
@@ -75,7 +88,7 @@ defmodule Core.Es.Event.Codec do
   кодека — `CompileError`. Выведенный Prim агрегата кодек отдаёт тем же `__es_aggregate_id__/0`.
 
   Макрос занимает в вызывающем модуле имена `@es_event`, `@es_type`, `@es_aggregate_id`, `@es_by`,
-  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless` и приватные
+  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless`, `@es_subjects` и приватные
   `es_dump_payload/2`, `es_load_payload/3`.
   """
 
@@ -237,6 +250,15 @@ defmodule Core.Es.Event.Codec do
 
       @es_derived Core.Es.Event.Codec.derived(@es_tag_by_mod)
       @es_payloadless Core.Es.Event.Codec.payloadless(@es_tag_by_mod)
+      @es_subjects Core.Es.Event.Codec.subjects(@es_derived)
+
+      @doc """
+      Поля нагрузки с `subject:` по модулю события: `[{поле, субъект}]`, субъект — `:aggregate_id`
+      или поле той же нагрузки. События без таких полей в карте нет.
+      """
+      @spec __es_subjects__() :: %{optional(module()) => [{atom(), atom()}, ...]}
+
+      def __es_subjects__, do: @es_subjects
 
       unquote(derived_clauses())
 
@@ -350,6 +372,17 @@ defmodule Core.Es.Event.Codec do
   end
 
   @doc false
+  @spec subjects([{module(), module(), derivation()}]) :: %{optional(module()) => [{atom(), atom()}, ...]}
+
+  def subjects(derived) when is_list(derived) do
+    for {event, _payload, {:fields, fields}} <- derived,
+        pairs = Fields.subjects(fields),
+        pairs != [],
+        into: %{},
+        do: {event, pairs}
+  end
+
+  @doc false
   @spec payloadless(%{optional(module()) => String.t()}) :: [module()]
 
   def payloadless(tags) when is_map(tags),
@@ -374,12 +407,10 @@ defmodule Core.Es.Event.Codec do
   @doc false
   @spec dump_payload_clause(module(), module(), derivation()) :: {[Macro.t()], Macro.t(), Macro.t()}
 
-  def dump_payload_clause(event, payload, {:fields, fields}) do
-    [pattern, codec] = Fields.dump_args(payload, fields)
-
-    {[quote(generated: true, do: %unquote(event){payload: unquote(pattern)}), codec], Fields.dump_guard(fields),
-     Fields.dump_body(fields)}
-  end
+  def dump_payload_clause(event, payload, {:fields, fields}),
+    do:
+      {Fields.payload_dump_args(event, payload, fields), Fields.payload_dump_guard(fields),
+       Fields.payload_dump_body(fields)}
 
   def dump_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, codec} = {var(:payload), var(:codec)}
@@ -393,7 +424,7 @@ defmodule Core.Es.Event.Codec do
   @spec load_payload_clause(module(), module(), derivation()) :: {[Macro.t()], Macro.t(), Macro.t()}
 
   def load_payload_clause(event, payload, {:fields, fields}),
-    do: {Fields.load_args(event), Fields.load_guard(), Fields.load_body(payload, fields)}
+    do: {Fields.load_args(event), Fields.load_guard(), Fields.payload_load_body(payload, fields)}
 
   def load_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, wire, codec} = {var(:payload), var(:wire), var(:codec)}

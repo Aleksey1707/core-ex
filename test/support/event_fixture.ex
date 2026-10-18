@@ -32,13 +32,45 @@ defmodule Core.EventFixture do
       max_len: 50
   end
 
+  defmodule PersonID do
+    @moduledoc "Идентификатор лица — субъект ПДн-поля нагрузки."
+
+    use Core.Prim.UUID,
+      name: "Идентификатор лица",
+      version: 7
+  end
+
+  defmodule Contact do
+    @moduledoc "Контакт лица — ПДн."
+
+    use Core.Prim.String,
+      name: "Контакт",
+      min_len: 3,
+      max_len: 100,
+      personal: true
+  end
+
+  # Не персональный Prim под `subject:`: единица шифротекста — поле, а не флаг Prim.
+  defmodule Note do
+    @moduledoc "Заметка о лице."
+
+    use Core.Prim.String,
+      name: "Заметка",
+      min_len: 1,
+      max_len: 200
+  end
+
   defmodule Event do
-    @moduledoc "События фейкового агрегата: с нагрузкой (`Created`) и без неё (`Closed`)."
+    @moduledoc """
+    События фейкового агрегата: с нагрузкой (`Created`), без неё (`Closed`) и с ПДн двух субъектов
+    (`ContactSet`).
+    """
 
     alias Core.EventFixture.Event.Closed
+    alias Core.EventFixture.Event.ContactSet
     alias Core.EventFixture.Event.Created
 
-    @type t :: Created.t() | Closed.t()
+    @type t :: Created.t() | Closed.t() | ContactSet.t()
 
     @doc "Wire-имя события."
     @spec name(t()) :: String.t()
@@ -100,7 +132,11 @@ defmodule Core.EventFixture do
 
     # Тег квалифицирован именем агрегата: он виден в брокере и в event store рядом
     # с чужими, хотя модуль выбирает внутри этого кодека.
-    @tag_by_mod %{Event.Created => "fixture.created", Event.Closed => "fixture.closed"}
+    @tag_by_mod %{
+      Event.Created => "fixture.created",
+      Event.Closed => "fixture.closed",
+      Event.ContactSet => "fixture.contact_set"
+    }
     @upcasts %{
       "fixture.created.v1" => "fixture.created.v2",
       "fixture.created.v2" => "fixture.created",
@@ -135,6 +171,20 @@ defmodule Core.EventFixture do
   def created(name \\ "Приёмка") when is_binary(name) do
     Event.Created.new(
       Event.Created.Payload.new(Name.new!(name)),
+      AggID.new(),
+      Version.new(),
+      ActorID.new(),
+      Es.Event.At.now!(),
+      Es.Event.ID.new()
+    )
+  end
+
+  @doc "Событие с ПДн двух субъектов: контакт лица `person_id` и заметка об агрегате."
+  @spec contact_set(PersonID.t() | nil, String.t() | nil, String.t()) :: Event.ContactSet.t()
+
+  def contact_set(person_id, contact, note) when is_binary(note) do
+    Event.ContactSet.new(
+      Event.ContactSet.Payload.new(person_id, contact && Contact.new!(contact), Note.new!(note)),
       AggID.new(),
       Version.new(),
       ActorID.new(),

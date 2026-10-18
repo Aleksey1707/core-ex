@@ -317,6 +317,8 @@ Fallback-контроллер состав сам не собирает: он о
 - Плагин по полям (`use Core.Codec.Plugin, fields:`): поле `list:` не списком при загрузке →
   `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`, `module` — тип плагина); ошибки
   Prim и `cast` enum — как есть (`11-domain.md`, «Плагин по полям»).
+- Нагрузка события по полям: `{"$pd": …}` на месте значения поля — `ns: :codec`, исходы —
+  `23-personal-data.md`, «Уничтоженное ПДн-значение».
 - Варианты семейства (`use Core.Codec.Plugin, variants:`): повреждённая форма →
   `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`); адрес вне семейства или не этого
   варианта → `code: :unknown_tag`, `detail: %{tag:, discriminator:}`; `module` — семейство или тип
@@ -368,7 +370,7 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Outbox.Delivery.Mq` | `:outbox` | `:app` | `:encode_payload_failed` |
 | `Core.Security.Secret` | `:secret` | `:app` | `:encrypt_failed`, `:decrypt_failed` |
 | `Core.Repo.Pg` | `:repo` | `:app` | `:write_failed` |
-| `Core.Codec.Plugin.Fields` (модуль ошибки — тип плагина по полям) | `:codec` | `:domain` | `:invalid_value` |
+| `Core.Codec.Plugin.Fields` (модуль ошибки — тип плагина по полям или модуль нагрузки события) | `:codec` | `:domain` | `:invalid_value`, `:sealed_personal_value` |
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
 | `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |

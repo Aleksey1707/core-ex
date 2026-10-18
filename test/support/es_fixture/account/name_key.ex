@@ -19,6 +19,7 @@ defmodule Core.EsFixture.Account.NameKey do
   @impl true
   def reservation(%Event.Opened{payload: payload}), do: {:reserve, payload.name}
   def reservation(%Event.Renamed{payload: payload}), do: {:reserve, payload.name}
+  def reservation(%Event.HolderSet{}), do: :keep
   def reservation(%Event.Frozen{}), do: :keep
   def reservation(%Event.Closed{}), do: :release
   def reservation(%Event.Verified{}), do: :keep

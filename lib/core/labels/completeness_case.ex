@@ -317,7 +317,7 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   defp diverged(variant, disc, fields) do
-    plugin = Map.new(fields, fn {name, spec, _optional?, _wire, _default} -> {name, spec} end)
+    plugin = Map.new(fields, fn {name, spec, _optional?, _wire, _default, _subject} -> {name, spec} end)
     labelled = Map.new(Fields.specs(variant))
     hidden = for {name, :hidden} <- variant.__label_fields__(), do: name
 

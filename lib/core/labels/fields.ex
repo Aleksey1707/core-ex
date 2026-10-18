@@ -285,7 +285,7 @@ defmodule Core.Labels.Fields do
 
   defp normalize!(fields, where), do: Map.new(pairs(Plugin.Fields.normalize!(fields, where)))
 
-  defp pairs(fields), do: for({name, spec, _optional?, _wire, _default} <- fields, do: {name, spec})
+  defp pairs(fields), do: for({name, spec, _optional?, _wire, _default, _subject} <- fields, do: {name, spec})
 
   defp label!(:hidden, _where), do: :hidden
 

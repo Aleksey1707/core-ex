@@ -161,7 +161,7 @@ defmodule Core.Codec.Plugin.Redump do
 
   def fields_spec(fields) do
     specs =
-      for {_name, spec, _optional?, wire, _default} <- fields,
+      for {_name, spec, _optional?, wire, _default, _subject} <- fields,
           redump = field_spec(spec),
           redump != nil,
           into: %{},

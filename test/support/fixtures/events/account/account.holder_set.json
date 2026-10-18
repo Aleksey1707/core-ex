@@ -1,0 +1,11 @@
+{
+  "aggregate_id": "01a09d85-3b0d-7db9-b527-fbb1a72396e0",
+  "aggregate_version": 4,
+  "at": "2026-10-18T09:12:30Z",
+  "by": "01a09d85-3b14-79b0-8727-d5268c8ddea0",
+  "event_id": "01a09d85-3b21-7c4e-9d3a-5f1e2b7c8a90",
+  "payload": {
+    "holder": "Иван Петров"
+  },
+  "type": "account.holder_set"
+}

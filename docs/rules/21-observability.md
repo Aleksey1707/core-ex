@@ -197,10 +197,11 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 ## Персональные данные в выводе
 
 Библиотека не выводит ПДн-значение в своей форме ни в лог, ни в span, ни в `%Error{}.detail`, ни в
-отчёт о падении, ни в событие службы учёта ошибок. Своя форма — Prim с `personal: true`: его
-`inspect/1` — `#Phone<...>`, `detail` отказа `new` и всей cause-цепочки — `{:redacted, n}` /
-`:redacted` (`23-personal-data.md`, «Разметка»). `%Error{}`, состояние процесса и аргументы,
-напечатанные через `inspect/1`, значения не несут.
+отчёт о падении, ни в событие службы учёта ошибок. Своя форма — Prim с `personal: true`, поле
+нагрузки события с `subject:` и маркер ПДн-значения; что скрыто у каждой —
+`23-personal-data.md`, «Разметка» и «Поле нагрузки события (`subject:`)».
+
+`%Error{}`, состояние процесса и аргументы, напечатанные через `inspect/1`, значения не несут.
 
 - Граница гарантии — извлечённое значение (`Prim.value/1`, строка в `raise`): его библиотека не
   скрывает, норма — `deps/core/docs/rules/app/23-personal-data.md`, «Вывод».
@@ -216,7 +217,8 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 ```
 
 Проверяется: `test/core/prim/personal_test.exs` — `refute inspect(...) =~` для Prim и `detail`
-отказа.
+отказа; `test/core/es/event/codec_personal_test.exs` — `inspect/1` нагрузки и маркера, `detail`
+ошибки `load` под полем с `subject:`, `Jason.Encoder` маркера.
 
 ## Тесты
 

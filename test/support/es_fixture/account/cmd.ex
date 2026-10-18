@@ -6,6 +6,7 @@ defmodule Core.EsFixture.Account.Cmd do
   alias Core.EsFixture.Account.Cmd.Freeze
   alias Core.EsFixture.Account.Cmd.Open
   alias Core.EsFixture.Account.Cmd.Rename
+  alias Core.EsFixture.Account.Cmd.SetHolder
 
-  @type t :: Open.t() | Rename.t() | Freeze.t() | Close.t() | Check.t()
+  @type t :: Open.t() | Rename.t() | SetHolder.t() | Freeze.t() | Close.t() | Check.t()
 end

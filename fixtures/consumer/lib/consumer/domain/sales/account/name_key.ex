@@ -11,6 +11,7 @@ defmodule Consumer.Domain.Sales.Account.NameKey do
   @impl true
   def reservation(%Event.Opened{payload: %Event.Opened.Payload{} = payload}), do: {:reserve, payload.name}
   def reservation(%Event.Renamed{payload: payload}), do: {:reserve, payload.name}
+  def reservation(%Event.HolderSet{}), do: :keep
   def reservation(%Event.Frozen{}), do: :keep
   def reservation(%Event.Closed{}), do: :release
 

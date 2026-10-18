@@ -29,6 +29,7 @@ defmodule Core.Es.Event do
 
   import Core.Helper.String, only: [first_line: 1]
 
+  alias Core.Codec.Plugin.Fields
   alias Core.Helper
   alias Core.Version
 
@@ -86,6 +87,8 @@ defmodule Core.Es.Event do
       unless is_nil(payload_mod) or is_atom(payload_mod) do
         raise CompileError, description: "Es.Event: :payload должен быть модулем или nil"
       end
+
+      Core.Es.Event.check_subject!(payload_mod, aggregate_id_mod)
 
       @enforce_keys ~w(id payload aggregate_id aggregate_version at by)a
       defstruct @enforce_keys
@@ -210,4 +213,30 @@ defmodule Core.Es.Event do
   @spec optional_keys() :: [atom()]
 
   def optional_keys, do: @optional_keys
+
+  # `subject: :aggregate_id` у поля нагрузки по полям требует UUID-Prim агрегата: идентификатор
+  # субъекта — UUID (ADR-0073). Нагрузку другого вида проверять нечем — `:ok`.
+  @doc false
+  @spec check_subject!(module() | nil, module()) :: :ok
+
+  def check_subject!(nil, _aggregate_id), do: :ok
+
+  def check_subject!(payload, aggregate_id) when is_atom(payload) and is_atom(aggregate_id) do
+    with {:module, _payload} <- Code.ensure_compiled(payload),
+         true <- function_exported?(payload, :__es_payload_fields__, 0),
+         [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
+         false <- Fields.uuid_prim?(aggregate_id) do
+      raise CompileError,
+        description:
+          "Es.Event: поле #{name} нагрузки #{inspect(payload)} объявлено с subject: :aggregate_id, " <>
+            "а aggregate_id: #{inspect(aggregate_id)} — не Prim.UUID и не Prim.Compose над ним"
+    end
+
+    :ok
+  end
+
+  # ---
+
+  defp aggregate_subjects(payload),
+    do: Enum.filter(Fields.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))
 end

@@ -275,7 +275,7 @@ defmodule Core.Codec.PluginVariantsTest do
     test "__codec_variants__/0 — адрес и спека, у ручного — :manual" do
       variants = ShapePlugin.__codec_variants__()
 
-      assert {Shape.Rect, {"polygon", [kind: :rect]}, [{:width, {:type, :pos_integer}, false, "width", :none} | _]} =
+      assert {Shape.Rect, {"polygon", [kind: :rect]}, [{:width, {:type, :pos_integer}, false, "width", :none, nil} | _]} =
                List.keyfind(variants, Shape.Rect, 0)
 
       assert {Shape.Blob, "blob", :manual} = List.keyfind(variants, Shape.Blob, 0)
@@ -283,7 +283,7 @@ defmodule Core.Codec.PluginVariantsTest do
     end
 
     test "поле union: в спеке — {:union, Family}" do
-      assert [{Frame.Box, "box", [{:shape, {:union, Shape}, false, "shape", :none}]}] =
+      assert [{Frame.Box, "box", [{:shape, {:union, Shape}, false, "shape", :none, nil}]}] =
                DrawingPlugin.__codec_variants__()
     end
 

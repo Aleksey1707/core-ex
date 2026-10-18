@@ -66,4 +66,14 @@ defmodule ConsumerTest.EventNew do
     # expect: unknown key .aggregat_id
     event.aggregat_id
   end
+
+  # D6 — уничтоженное ПДн-значение в нагрузку: тип чтения шире типа записи
+  def d6_destroyed_payload,
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Event.HolderSet.Payload.new/1
+    do: Account.Event.HolderSet.Payload.new(%Core.Es.Personal.Destroyed{})
+
+  # D6b — ПДн-значение из уничтоженного поля загруженной нагрузки: тип поля — объединение
+  def d6b_destroyed_read(%Account.Event.HolderSet.Payload{holder: %Core.Es.Personal.Destroyed{} = holder}),
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Event.HolderSet.Payload.new/1
+    do: Account.Event.HolderSet.Payload.new(holder)
 end
