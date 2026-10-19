@@ -87,6 +87,22 @@ defmodule Core.Es.Personal.DestroyKeyTest do
     end
   end
 
+  describe "Test.key_destroyed/2" do
+    test "событие в той форме, в какой его пишет операция" do
+      subject = Account.ID.new()
+      by = UserID.new()
+      :ok = Personal.destroy_key(subject, by, Context.new())
+      [written] = Store.Test.events!(Codec, subject_id(subject))
+
+      assert %KeyDestroyed{} = built = Personal.Test.key_destroyed(subject, by: by, at: written.at)
+      assert %{built | id: written.id} == written
+    end
+
+    test "нет by: или at: — KeyError" do
+      assert_raise KeyError, fn -> Personal.Test.key_destroyed(Account.ID.new(), by: UserID.new()) end
+    end
+  end
+
   defp subject_id(subject), do: SubjectID.new!(Account.ID.value(subject))
 
   # Уровень модуля глобален, но другие тесты логов `Core.Es.Personal` не проверяют, а субъекты

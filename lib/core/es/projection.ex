@@ -56,6 +56,19 @@ defmodule Core.Es.Projection do
   - тег, неизвестный кодеку, — ошибка загрузки `:unknown_event_type`
     (`docs/adr/0010-event-evolution-tag-upcast.md`).
 
+  ## Персональные данные
+
+  Событие из `events:` с полем нагрузки `subject:` несёт ПДн (ADR-0079). Проекция с таким событием
+  объявляет одно из двух:
+
+  - событие уничтожения ключа `Core.Es.Personal.Event.KeyDestroyed` в `events:` — read-модель по
+    нему перестаёт держать ПДн субъекта; clause `project/1` на него проверяет сборка, как у любого
+    модуля `events:`, пачка читает поток субъекта `"core.subject"`, а `await/3` получает clause
+    `await(Core.Es.Personal, %Core.Es.Personal.SubjectID{}, timeout)`;
+  - `personal: false` — read-модель ПДн не держит.
+
+  Проверку read-модели после события уничтожения ключа делает `Core.Es.ProjectionCase`.
+
   ## Пачка
 
   `run_once/2` — одна транзакция `repo:` на пачку до `batch_size:` событий:
@@ -156,6 +169,7 @@ defmodule Core.Es.Projection do
   - `name:` — имя проекции, непустая строка; неизменяемо: другое имя — другая проекция
   - `events:` — непустой список модулей событий (`use Core.Es.Event`) без повторов
   - `version:` — версия проекции, целое ≥ 1, по умолчанию 1
+  - `personal:` — только `false`: read-модель ПДн не держит («Персональные данные»)
   - `repo:` — Ecto-репозиторий транзакции пачки; по умолчанию `Core.Config.dao/0` в рантайме
   - `codec:` — фасад загрузки событий; по умолчанию `Core.Config.codec/0` в рантайме
 
@@ -163,7 +177,8 @@ defmodule Core.Es.Projection do
   `version:` не целое ≥ 1; `events:` пустой, с повтором, с модулем, который не событие, с
   семейством `<Aggregate>.Event`, с событием вне семейства `<Aggregate>.Event`, с событием без
   кодека `<Aggregate>.Event.Codec`, с кодеком без `type:` или не объявившим событие в `tags:`, с
-  двумя кодеками одного типа агрегата.
+  двумя кодеками одного типа агрегата; событие с полем `subject:` без события уничтожения ключа и
+  без `personal: false` или с обоими; `personal:` не `false` или без событий с полями `subject:`.
 
   Макрос занимает в вызывающем модуле имена `@es_projection`, `@es_use_line`, `await/3` и
   функций-проверок, по одному на модуль `events:`.
@@ -171,13 +186,14 @@ defmodule Core.Es.Projection do
 
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal.Event.KeyDestroyed
   alias Core.Es.Projection.Batch
   alias Core.Helper
   alias Core.Result
 
   @label "Es.Projection"
   @required_keys ~w(name events)a
-  @optional_keys ~w(version repo codec)a
+  @optional_keys ~w(version personal repo codec)a
   @default_version 1
   @default_batch_size 100
 
@@ -217,6 +233,7 @@ defmodule Core.Es.Projection do
     name = Keyword.fetch!(opts, :name)
     events = Keyword.fetch!(opts, :events)
     version = Keyword.get(opts, :version, @default_version)
+    personal = Keyword.get(opts, :personal)
 
     quote do
       @behaviour Core.Es.Projection
@@ -226,7 +243,8 @@ defmodule Core.Es.Projection do
       @es_projection Core.Es.Projection.declaration!(
                        unquote(name),
                        unquote(events),
-                       unquote(version)
+                       unquote(version),
+                       unquote(personal)
                      )
 
       @doc false
@@ -313,16 +331,17 @@ defmodule Core.Es.Projection do
   # ===== проверка опций =====
 
   @doc false
-  @spec declaration!(term(), term(), term()) :: %{
+  @spec declaration!(term(), term(), term(), term()) :: %{
           name: String.t(),
           version: pos_integer(),
           events: [module()],
           streams: %{optional(String.t()) => stream()}
         }
 
-  def declaration!(name, events, version) do
+  def declaration!(name, events, version, personal) do
     name = name!(name)
     pairs = events!(events)
+    :ok = personal!(pairs, personal)
 
     %{
       name: name,
@@ -446,6 +465,39 @@ defmodule Core.Es.Projection do
   defp codec_name(parts), do: Module.concat(parts ++ ["Codec"])
 
   defp compiled?(mod), do: match?({:module, _}, Code.ensure_compiled(mod))
+
+  # Событие с полем `subject:` несёт ПДн: read-модель либо чистит их по событию уничтожения ключа,
+  # либо объявляет, что ПДн не держит (ADR-0079).
+  defp personal!(pairs, personal) when personal in [nil, false] do
+    subject_events = for {mod, codec} <- pairs, Map.has_key?(codec.__es_subjects__(), mod), do: mod
+    personal!(subject_events, List.keymember?(pairs, KeyDestroyed, 0), personal)
+  end
+
+  defp personal!(_pairs, personal) do
+    raise CompileError,
+      description: "#{@label}: personal: допускается только false, получено #{inspect(personal)}"
+  end
+
+  defp personal!([], _destroyed?, nil), do: :ok
+  defp personal!([_ | _], true, nil), do: :ok
+  defp personal!([_ | _], false, false), do: :ok
+
+  defp personal!([], _destroyed?, false) do
+    raise CompileError,
+      description: "#{@label}: personal: false не нужна — у событий events: нет полей subject:"
+  end
+
+  defp personal!(subject_events, false, nil) do
+    raise CompileError,
+      description:
+        "#{@label}: events: #{inspect(subject_events)} несут поля subject: — объяви #{inspect(KeyDestroyed)} " <>
+          "в events: (read-модель чистит ПДн субъекта) или personal: false (read-модель ПДн не держит)"
+  end
+
+  defp personal!(_subject_events, true, false) do
+    raise CompileError,
+      description: "#{@label}: personal: false вместе с #{inspect(KeyDestroyed)} в events: — объявляется одно"
+  end
 
   defp streams!(pairs) do
     pairs

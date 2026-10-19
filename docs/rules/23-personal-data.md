@@ -433,7 +433,9 @@ def handle_event(_event, %{total_time: time}, %{query: query}, _config),
 - поток субъекта: тип агрегата `"core.subject"`, тег `"core.subject.key_destroyed"`, `aggregate_id`
   — `Core.Es.Personal.SubjectID`, версия `1`, нагрузки нет;
 - `by` — `Core.Es.Personal.ActorID`, `at` — момент вызова;
-- пишет его `Core.Es.Store.append`; в outbox оно не идёт, страница потока его не отдаёт.
+- пишет его `Core.Es.Store.append`; в outbox оно не идёт, страница потока его не отдаёт;
+- проекция с ПДн объявляет его в `events:` и по нему чистит read-модель — `22-projections.md`,
+  «Персональные данные».
 
 Тип `"core.subject"` зарезервирован: кодек библиотека подключает к каждому фасаду сама, и кодек
 потребителя с этим `type:` MUST NOT — `CompileError` проверки уникальности типа агрегата фасада.
@@ -515,10 +517,15 @@ describe «from_message: подписчика» — повтор и DLQ на `Co
    на событии из `Core.Es.Personal.Test.destroyed/2` — `19-testing.md`, «Event-sourced агрегат».
 5. Тест `refute inspect(...) =~ value` — Prim объявлен в `lib` или `test/support`, не в тест-файле
    (`19-testing.md`, «Чувствительные данные»).
+6. Каждая проекция с событием этого поля в `events:` — событие уничтожения ключа в `events:` и
+   чистка ПДн субъекта по нему или `personal: false`; таблица с ПДн хранит идентификатор субъекта,
+   на `%Destroyed{}` пишется не ПДн (`22-projections.md`, «Персональные данные»); проверки —
+   `use Core.Es.ProjectionCase` (`19-testing.md`, «Проекции»).
 
 ## Связанные правила
 
 - Prim и его опции — `11-domain.md`
+- Проекции и read-модель с ПДн — `22-projections.md`
 - Чувствительные данные и `detail` — `12-errors.md`
 - Вывод в логи и span'ы — `21-observability.md`
 - Тест «значение не утекает в `inspect/1`» — `19-testing.md`

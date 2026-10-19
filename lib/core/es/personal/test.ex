@@ -8,16 +8,24 @@ defmodule Core.Es.Personal.Test do
     в хранилище не бывает.
   - `fixtures/1` — тела golden-фикстур события: открытой `<тег>.json` и уничтоженного варианта
     `destroyed/<тег>.json`. Файлы пишет автор.
+  - `key_destroyed/2` — событие уничтожения ключа субъекта (ADR-0079): вход прямого `project/1`
+    проекции, которая его объявила.
 
       event = Core.Es.Personal.Test.destroyed(holder_set)
       assert %Account{holder: %Destroyed{}} = Account.fold(state, [event])
   """
 
+  import Core.Guard, only: [is_prim: 1]
+
   alias Core.Codec.Plugin.Fields
   alias Core.Config
+  alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal
   alias Core.Es.Personal.Destroyed
+  alias Core.Es.Personal.Event.KeyDestroyed
   alias Core.Es.Personal.Marker
+  alias Core.Exc
 
   @typedoc "Тела golden-фикстур события; `destroyed` — `nil` у события без полей с `subject:`."
   @type fixtures :: %{open: map(), destroyed: map() | nil}
@@ -97,6 +105,26 @@ defmodule Core.Es.Personal.Test do
 
   defp destroyed_value(%Marker{}), do: %{"$pd" => nil}
   defp destroyed_value(value), do: value
+
+  # ===== событие уничтожения ключа =====
+
+  @doc """
+  Событие уничтожения ключа субъекта `subject_id` — в той форме, в какой его пишет
+  `Core.Es.Personal.destroy_key/3`: поток `"core.subject"`, версия `1`, без нагрузки, `id` — новый.
+
+  `subject_id` и `by:` — UUID-Prim (`Prim.UUID` или `Prim.Compose` над ним), `at:` —
+  `Core.Es.Event.At`; обе опции обязательны, нет опции — `KeyError`.
+  """
+  @spec key_destroyed(struct(), keyword()) :: KeyDestroyed.t()
+
+  def key_destroyed(subject_id, opts) when is_prim(subject_id) and is_list(opts) do
+    opts = Keyword.validate!(opts, [:by, :at])
+
+    case Personal.key_destroyed(subject_id, Keyword.fetch!(opts, :by), Keyword.fetch!(opts, :at)) do
+      {:ok, %KeyDestroyed{} = event} -> event
+      {:error, %Error{} = error} -> raise Exc, error
+    end
+  end
 
   # ===== общее =====
 

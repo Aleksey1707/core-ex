@@ -3,8 +3,8 @@
 - **Область.** `lib/core/es/projection.ex`, `lib/core/es/projection/**`; у потребителя — модули
   `use Core.Es.Projection`, таблицы их read-моделей, ReadRepo над ними и алерты проекций.
 - **Читать перед.** Новой проекцией; правкой `project/1`, `clear/0`, `events:`, `version:` или
-  таблиц read-модели; деревом проекций в приложении; удалением проекции; выбором между проекцией
-  и подписчиком брокера; алертами проекций.
+  таблиц read-модели; ПДн в read-модели; деревом проекций в приложении; удалением проекции;
+  выбором между проекцией и подписчиком брокера; алертами проекций.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Объявление
@@ -27,10 +27,13 @@
   и откатывает пачку, а catch-all пропустил бы его молча, сдвинув чекпоинт.
 - `clear/0` MUST очищать каждую таблицу, которую пишет `project/1`: пачка зовёт его при старте с
   начала истории, и забытая таблица сохранит строки прошлого прогона.
+- Событие с полем нагрузки `subject:` в `events:` MUST сопровождаться событием уничтожения ключа
+  в `events:` или опцией `personal: false` — «Персональные данные».
 
 Проверяется: `CompileError` в `use Core.Es.Projection` — нет `project/1` или `clear/0`; в
 `events:` семейство, не событие, событие вне семейства `<Aggregate>.Event` или вне `tags:` кодека
-`<Aggregate>.Event.Codec`; предупреждение при сборке на строке `use Core.Es.Projection` — у
+`<Aggregate>.Event.Codec`; событие с полем `subject:` без события уничтожения ключа и без
+`personal: false` или с обоими; предупреждение при сборке на строке `use Core.Es.Projection` — у
 `project/1` нет clause модуля `events:` или опечатка в поле нагрузки без паттерна `%Payload{}`
 (`make consumer-check`); `use Core.Es.ProjectionCase` — `clear/0` очищает каждую таблицу, которую
 `project/1` пишет на golden-фикстурах.
@@ -96,6 +99,62 @@ def project(%Account.Event.Opened{} = event),
 
 # хорошо — проекция пишет только свою таблицу в DAO, уведомление шлёт подписчик брокера
 def project(%Account.Event.Closed{} = event), do: close_row(event)
+```
+
+## Персональные данные
+
+Событие с полем нагрузки `subject:` несёт ПДн субъекта (`23-personal-data.md`). После уничтожения
+ключа события грузятся с `%Core.Es.Personal.Destroyed{}`, но строку, записанную раньше, проекция
+сама не перечитывает: об уничтожении она узнаёт из события уничтожения ключа
+`Core.Es.Personal.Event.KeyDestroyed`, которое операция уничтожения пишет в поток субъекта
+`"core.subject"` (ADR-0079).
+
+- Проекция, у события из `events:` которой есть поле `subject:`, MUST объявить
+  `Core.Es.Personal.Event.KeyDestroyed` в `events:` или указать `personal: false`; ни того, ни
+  другого или оба сразу — `CompileError`. Пачка тогда читает и поток субъекта, а `await/3`
+  получает clause на него (moduledoc `Core.Es.Projection`, «Персональные данные»).
+- `personal: false` MUST NOT стоять у read-модели, которая пишет ПДн-значение как есть или
+  производным от него: событие уничтожения ключа до неё не дойдёт, а поиск `ProjectionCase`
+  производное значение не видит.
+- Таблица с ПДн MUST хранить рядом с ними идентификатор субъекта: событие уничтожения ключа
+  называет только субъекта (`aggregate_id` — `Core.Es.Personal.SubjectID`), и без него строку не
+  найти.
+- По событию уничтожения ключа в read-модели MUST NOT оставаться открытого ПДн-значения субъекта;
+  удалить строку или занулить колонки — решает автор проекции.
+- На `%Destroyed{}` в `project/1`, в том числе при пересборке, MUST писаться не ПДн-значение.
+  Заглушка, неотличимая от настоящего значения («Скрыто» в колонке имени), — SHOULD NOT: читатель
+  read-модели примет её за данные.
+
+Отставание read-модели от уничтожения ключа равно отставанию проекции: застрявшую пачку ловит
+алерт `EsProjectionRetrying` («Эксплуатация»). Пересборка ПДн не открывает: события до уничтожения
+грузятся с `%Destroyed{}`, а событие уничтожения ключа стоит в истории на своём месте.
+
+Проверяется: `CompileError` в `use Core.Es.Projection`; `use Core.Es.ProjectionCase` — `project/1`
+на уничтоженном значении и открытые ПДн после события уничтожения ключа (`19-testing.md`,
+«Проекции»).
+
+```elixir
+# плохо — строка без идентификатора субъекта: по событию уничтожения ключа её не найти
+def project(%Delivery.Event.Registered{payload: payload} = event),
+  do: insert_row(event.aggregate_id, InCodec.dump(payload.recipient))
+
+# плохо — заглушка на уничтоженном значении: читатель примет её за имя получателя
+defp recipient(%Core.Es.Personal.Destroyed{}), do: "Скрыто"
+
+# хорошо — субъект рядом с ПДн, на %Destroyed{} — NULL, чистка по событию уничтожения ключа
+use Core.Es.Projection,
+  name: "delivery_list",
+  events: [Delivery.Event.Registered, Core.Es.Personal.Event.KeyDestroyed]
+
+@impl true
+def project(%Delivery.Event.Registered{payload: payload} = event),
+  do: insert_row(event.aggregate_id, payload.recipient_id, recipient(payload.recipient))
+
+def project(%Core.Es.Personal.Event.KeyDestroyed{aggregate_id: subject}),
+  do: clear_recipient(InCodec.dump(subject))
+
+defp recipient(%Core.Es.Personal.Destroyed{}), do: nil
+defp recipient(%Delivery.Recipient{} = recipient), do: InCodec.dump(recipient)
 ```
 
 ## Дерево
@@ -424,3 +483,4 @@ tests:
 - Раскладка проекций и read-модели — `deps/core/docs/rules/app/13-repos.md`
 - Тесты проекций — `19-testing.md`
 - Span пачки проекции — `21-observability.md`
+- Персональные данные и событие уничтожения ключа — `23-personal-data.md`

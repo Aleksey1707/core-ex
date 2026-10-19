@@ -17,6 +17,11 @@ defmodule ConsumerTest.Await do
     # expect: incompatible types given to Consumer.Domain.Sales.Activity.Projection.await/3
     do: Projection.await(Ping, id, 100)
 
+  # G4s — поток субъекта ждётся по `Core.Es.Personal.SubjectID`, а не по ID агрегата-субъекта
+  def g4s_subject_by_aggregate_id(%Account.ID{} = id),
+    # expect: incompatible types given to Consumer.Domain.Sales.Activity.Projection.await/3
+    do: Projection.await(Core.Es.Personal, id, 100)
+
   # G4o — прежняя форма: реализация ожидания в библиотеке вместо `await/3` модуля проекции
   # expect: Core.Es.Projection.await/4 is undefined or private
   def g4o_library_await(%Account.ID{} = id), do: Core.Es.Projection.await(Projection, Account, id, 100)

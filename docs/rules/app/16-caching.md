@@ -49,6 +49,20 @@
    провайдер размера добавлен в PromEx приложения (`21-observability.md`).
 5. Процессы кеша и подписчика попали в `watch_list/0` (`17-otp-concurrency.md`).
 6. Контрактный тест behaviour прогоняется и на `.Pg`, и на `.Cached` (`19-testing.md`).
+7. У View с ПДн задан TTL: кеш View с ПДн без TTL MUST NOT. Событие уничтожения ключа в брокер не
+   идёт и называет субъекта, а не id строки, поэтому инвалидатор его не видит, и кеш отстаёт от
+   уничтожения ключа до TTL (`deps/core/docs/rules/22-projections.md`, «Персональные данные»).
+
+```elixir
+# плохо — View с ПДн без ttl_ms: после уничтожения ключа кеш отдаёт ПДн бессрочно
+config :my_app, MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Cached,
+  store: MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Pg
+
+# хорошо
+config :my_app, MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Cached,
+  store: MyApp.Domain.<BC>.<ReadModel>.ReadRepo.Pg,
+  ttl_ms: :timer.minutes(10)
+```
 
 ## Фасад `<ReadRepo>.Cached`
 

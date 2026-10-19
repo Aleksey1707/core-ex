@@ -29,7 +29,10 @@
   - чистка строк state-stored агрегатов и таблиц, которые не принадлежат проекциям, — обычным
     `update` / `delete`.
 
-  Таблицы read-модели usecase не трогает: их чистит проекция по событию уничтожения ключа.
+  Таблицы read-модели usecase MUST NOT трогать: их чистит проекция по событию уничтожения ключа, и
+  строка, стёртая мимо неё, разошлась бы с пересборкой. Ждать проекцию (`await/3`) usecase
+  уничтожения SHOULD NOT: читать ему нечего, а read-модель отстаёт от уничтожения на отставание
+  проекции (`deps/core/docs/rules/22-projections.md`, «Персональные данные»).
 - Отказ `:subject_destroyed` (`ns: :key_store`, `:domain`) на записи ПДн уничтоженного субъекта
   usecase записи MUST отображать сам — доменным ответом клиенту; повторять команду по нему MUST
   NOT: отказ окончательный.
@@ -43,6 +46,13 @@ def forget(%<Aggregate>.ID{} = id, %Context{} = context) do
        :ok <- Personal.destroy_key(id, by, context),
        do: write_act(id, by, context)
 end
+
+# плохо — usecase чистит таблицу read-модели: пересборка проекции с ней разойдётся
+Transact.run(DAO, fn ->
+  with :ok <- Personal.destroy_key(id, by, context),
+       {_count, nil} <- DAO.delete_all(<ReadModel>.ReadRepo.Pg.Schema.by_id(id)),
+       do: write_act(id, by, context)
+end)
 
 # хорошо
 def forget(%<Aggregate>.ID{} = id, %Context{} = context) do

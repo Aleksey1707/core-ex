@@ -42,7 +42,7 @@
   четвёртое — нагрузку по полям с вариантами семейств `union:`; клаузы нагрузки кодек выводит сам),
   `NeverFails` и `AlwaysFails` (`decide` никогда не ошибается / только ошибается), события `Parcel` без
   агрегата (кодек вне фасада), идентификаторы из ключа (`DeliveryID`, составной ключ —
-  `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов, dump-only плагин
+  `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов и событие уничтожения ключа, dump-only плагин
   фасада `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (с полями `union:`), нагрузка по полям
   `Account.Event.Renamed.Payload`, ручной плагин нагрузки `Account.Event.Opened.Payload` (`Account.Codec`) и представление `Account.View` с `jsonb:` по типу `Account.Profile` и
   семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Подписи событий

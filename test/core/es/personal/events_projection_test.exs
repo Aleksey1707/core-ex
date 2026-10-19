@@ -24,7 +24,8 @@ defmodule Core.Es.Personal.EventsProjectionTest do
     # Проекция без таблицы: загруженное событие уходит процессу пачки — процессу теста.
     use Core.Es.Projection,
       name: "personal_events_holders",
-      events: [Core.EsFixture.Account.Event.HolderSet]
+      events: [Core.EsFixture.Account.Event.HolderSet],
+      personal: false
 
     @impl true
     def project(event) do
@@ -66,6 +67,7 @@ defmodule Core.Es.Personal.EventsProjectionTest do
     use Core.Es.Projection,
       name: "personal_events_raising_holders",
       events: [Core.EsFixture.Account.Event.HolderSet],
+      personal: false,
       codec: Core.Es.Personal.EventsProjectionTest.RaisingCodec
 
     @impl true

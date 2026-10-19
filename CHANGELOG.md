@@ -223,6 +223,22 @@
   - стало: `from_message: &Core.Es.Event.Message.load(Order.Event, &1)`, а `on_message` на
     `%Destroyed{}`, когда реакции нужно само ПДн, — `{:skip, reason}`.
 
+  Read-модель проекций после уничтожения ключа (`docs/rules/22-projections.md`, «Персональные
+  данные»; `docs/rules/19-testing.md`, «Проекции»; ADR-0079). Раньше строку read-модели,
+  записанную до уничтожения, проекция не перечитывала, и ПДн в ней оставались открытыми бессрочно.
+  Теперь проекция объявляет событие уничтожения ключа `Core.Es.Personal.Event.KeyDestroyed` в
+  `events:` и по нему чистит ПДн субъекта: пачка читает поток `"core.subject"`, а `await/3` получает
+  clause `await(Core.Es.Personal, %Core.Es.Personal.SubjectID{}, timeout)`. Для прямого `project/1`
+  в тесте — `Core.Es.Personal.Test.key_destroyed(subject_id, by:, at:)`: событие в той форме, в
+  какой его пишет `destroy_key/3`. Кеш View с ПДн без TTL и чистка таблиц read-модели в usecase
+  уничтожения — MUST NOT (`docs/rules/app/16-caching.md`, `docs/rules/app/23-personal-data.md`).
+  Правка нужна каждой проекции с событием, у которого есть поле `subject:`:
+  - было: `events: [Account.Event.HolderSet]`, строка владельца остаётся после уничтожения ключа;
+  - стало: `events: [Account.Event.HolderSet, Core.Es.Personal.Event.KeyDestroyed]`, clause
+    `project(%Core.Es.Personal.Event.KeyDestroyed{aggregate_id: subject})` удаляет строку субъекта
+    или зануляет её ПДн-колонки, а на `%Destroyed{}` пишется не ПДн; у read-модели без ПДн —
+    `personal: false`.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,
@@ -275,6 +291,26 @@
   нагрузки, а не `:aggregate_id`, — `CompileError` с перечнем полей: снапшот держал бы под одним
   ключом ПДн нескольких субъектов. Правка нужна только такому репозиторию: было
   `snapshot: [every: 100]`, стало — без `snapshot:`.
+
+  Опция `personal:` у `use Core.Es.Projection` (норма — `docs/rules/22-projections.md`,
+  «Персональные данные»; ADR-0079) — только `false`: read-модель ПДн не держит. `CompileError`:
+  - событие из `events:` с полем `subject:`, а в `events:` нет `Core.Es.Personal.Event.KeyDestroyed`
+    и нет `personal: false`, — было `events: [Account.Event.HolderSet]`, стало — событие
+    уничтожения ключа в `events:` с clause `project/1` или `personal: false`;
+  - событие уничтожения ключа вместе с `personal: false`;
+  - `personal:` не `false` или `personal: false` у проекции без событий с полями `subject:`.
+
+  Новые проверки `use Core.Es.ProjectionCase` (норма — `docs/rules/19-testing.md`, «Проекции») —
+  два новых теста в каждом тест-модуле проекции, на фикстурах событий с полями `subject:`:
+  - `project/1` на уничтоженном варианте (`Core.Es.Personal.Test.destroyed/2`) в savepoint с
+    откатом перед открытым: открытый прошёл, а уничтоженный дал исключение или `{:error, _}` —
+    провал;
+  - `project/1` на фикстуре, затем на событии уничтожения ключа каждого её субъекта, затем поиск
+    открытых строковых wire-значений ПДн-полей в строках таблиц, которые изменил прогон; находка —
+    провал с таблицей, колонкой и полем; у `personal: false` поиск идёт сразу после фикстуры.
+
+  Фикстуры события уничтожения ключа case не ищет — строит событие сам. Поиск видит только
+  неизменённое строковое значение: склейку, нижний регистр и хеш перед записью он пропускает.
 
 ## 0.15.1
 

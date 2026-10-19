@@ -47,18 +47,21 @@ defmodule Core.Es.Personal do
   @spec destroy_key(struct(), struct(), Context.t()) :: Result.unit()
 
   def destroy_key(subject_id, by, %Context{} = context) when is_prim(subject_id) and is_prim(by) do
-    with {:ok, event} <- key_destroyed(subject_id, by),
+    with {:ok, at} <- Es.Event.At.now(),
+         {:ok, event} <- key_destroyed(subject_id, by, at),
          do: Transact.run(Config.dao(), fn -> destroy_and_append(subject_id, event, context) end)
   end
 
-  # ---
+  @doc false
+  @spec key_destroyed(struct(), struct(), Es.Event.At.t()) :: Result.t(Event.KeyDestroyed.t())
 
-  defp key_destroyed(subject_id, by) do
+  def key_destroyed(subject_id, by, %Es.Event.At{} = at) when is_prim(subject_id) and is_prim(by) do
     with {:ok, subject} <- SubjectID.new(Prim.unwrap(subject_id)),
          {:ok, actor} <- ActorID.new(Prim.unwrap(by)),
-         {:ok, at} <- Es.Event.At.now(),
          do: {:ok, Event.KeyDestroyed.new(subject, Version.new(), actor, at)}
   end
+
+  # ---
 
   # Субъект для порта — дамп его Prim фасадом, как у маркера ПДн-значения кодека событий.
   defp destroy_and_append(subject_id, %Event.KeyDestroyed{} = event, context) do

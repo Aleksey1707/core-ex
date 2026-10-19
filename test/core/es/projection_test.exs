@@ -10,6 +10,7 @@ defmodule Core.Es.ProjectionTest do
   alias Core.Context
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal
   alias Core.EsFixture
   alias Core.EsFixture.Account
   alias Core.EventFixture
@@ -198,18 +199,24 @@ defmodule Core.Es.ProjectionTest do
       assert declaration.events == [
                Account.Event.Opened,
                Account.Event.Closed,
+               Account.Event.HolderSet,
                EventFixture.Event.Created,
-               EventFixture.Event.Closed
+               EventFixture.Event.Closed,
+               Personal.Event.KeyDestroyed
              ]
 
       assert declaration.streams == %{
                "account" => %{
                  codec: Account.Event.Codec,
-                 tags: MapSet.new(["account.opened", "account.closed"])
+                 tags: MapSet.new(["account.opened", "account.closed", "account.holder_set"])
                },
                "fixture" => %{
                  codec: EventFixture.Event.Codec,
                  tags: MapSet.new(["fixture.created", "fixture.closed"])
+               },
+               "core.subject" => %{
+                 codec: Personal.Event.Codec,
+                 tags: MapSet.new(["core.subject.key_destroyed"])
                }
              }
     end
@@ -296,6 +303,42 @@ defmodule Core.Es.ProjectionTest do
       for name <- ["", :es_fixture] do
         assert_raise CompileError, ~r/name: ожидается непустая строка/, fn ->
           compile!(BadName, name: name)
+        end
+      end
+    end
+
+    test "событие с полем subject: — событие уничтожения ключа или personal: false" do
+      {{:module, signed, _binary, _term}, _binding} =
+        compile!(Signed, events: [Account.Event.HolderSet, Personal.Event.KeyDestroyed])
+
+      assert %{"core.subject" => %{codec: Personal.Event.Codec, tags: tags}} = signed.__es_projection__().streams
+      assert tags == MapSet.new(["core.subject.key_destroyed"])
+
+      compile!(Unpersonal, events: [Account.Event.HolderSet], personal: false)
+    end
+
+    test "событие с полем subject: без события уничтожения ключа и personal: false — CompileError" do
+      assert_raise CompileError, ~r/HolderSet.*subject:.*KeyDestroyed.*personal: false/s, fn ->
+        compile!(Unsigned, events: [Account.Event.Opened, Account.Event.HolderSet])
+      end
+    end
+
+    test "событие уничтожения ключа вместе с personal: false — CompileError" do
+      assert_raise CompileError, ~r/personal: false вместе с Core\.Es\.Personal\.Event\.KeyDestroyed/, fn ->
+        compile!(Both, events: [Account.Event.HolderSet, Personal.Event.KeyDestroyed], personal: false)
+      end
+    end
+
+    test "personal: false без событий с полями subject: — CompileError" do
+      assert_raise CompileError, ~r/personal: false не нужна/, fn ->
+        compile!(NeedlessPersonal, personal: false)
+      end
+    end
+
+    test "personal: не false — CompileError" do
+      for personal <- [true, :no] do
+        assert_raise CompileError, ~r/personal: допускается только false/, fn ->
+          compile!(BadPersonal, events: [Account.Event.HolderSet], personal: personal)
         end
       end
     end

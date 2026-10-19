@@ -326,6 +326,45 @@ defmodule MyApp.Domain.<BC>.Account.ProjectionCaseTest do
 end
 ```
 
+Тот же тест-модуль проверяет нормы ПДн read-модели (`22-projections.md`, «Персональные данные») на
+каждой фикстуре события с полем `subject:`:
+
+- `project/1` на уничтоженном варианте (`Core.Es.Personal.Test.destroyed/2`) — в savepoint с
+  откатом перед открытым: открытый прошёл, а уничтоженный дал исключение или `{:error, _}` — провал;
+- `project/1` на фикстуре, затем на событии уничтожения ключа каждого её субъекта, затем поиск
+  открытых строковых wire-значений ПДн-полей в строках таблиц, которые изменил прогон: находка —
+  провал с таблицей, колонкой и полем; у `personal: false` поиск идёт сразу после фикстуры.
+
+Событие уничтожения ключа case строит сам, фикстуры у него нет. Поиск видит только строки и только
+неизменённое значение: нижний регистр, склейку частей или хеш перед записью он пропустит. Проекцию,
+которая так пишет ПДн, SHOULD проверять прямым `project/1` на событии
+`Core.Es.Personal.Test.key_destroyed(subject_id, by:, at:)` — оно в той форме, в какой его пишет
+`destroy_key/3`.
+
+Путь уничтожения целиком SHOULD проверяться так же, как запись: `Core.Es.Personal.destroy_key/3` →
+`run_until_idle` → ReadRepo без ПДн субъекта, на `MyAppTest.DataCase, async: false`. Хелпера
+уничтожения в тесте нет: строку ключа и событие откатывает sandbox.
+
+```elixir
+# плохо — ПДн склеены перед записью, а прямого теста нет: поиск ProjectionCase склейку не видит
+def project(%Delivery.Event.Registered{payload: payload} = event),
+  do: insert_row(event, full_name(payload.first_name, payload.last_name))
+
+# хорошо — прямой project/1 на событии уничтожения ключа
+:ok = Projection.project(registered)
+:ok = Projection.project(Core.Es.Personal.Test.key_destroyed(recipient_id, by: by, at: at))
+assert {:ok, %DeliveryList.View{recipient: nil}} = DeliveryList.ReadRepo.get(id, :current, context)
+
+# хорошо — test/my_app/domain/<bc>/account/client/usecases_test.exs: путь уничтожения целиком
+:ok = Account.Client.Usecases.forget(id, context)
+assert :ok = Core.Es.Projection.Test.run_until_idle(MyApp.Domain.<BC>.AccountList.Projection)
+assert {:error, %Error{code: :not_found}} = AccountList.ReadRepo.get(id, :current, context)
+```
+
+Проверяется: `test/core/es/projection_case_test.exs` — проекция-фикстура, чистящая ПДн, и её
+сломанная пара; `test/core/es/personal/projection_test.exs` — путь `destroy_key/3` →
+`run_until_idle` и пересборка.
+
 Проекцию SHOULD проверять записью через репозиторий агрегата → прогоном
 `Core.Es.Projection.Test.run_until_idle/2` → чтением ReadRepo: так тест видит порядок событий
 разных агрегатов, пропуск необъявленных тегов и апкаст. Прогон MUST идти в
