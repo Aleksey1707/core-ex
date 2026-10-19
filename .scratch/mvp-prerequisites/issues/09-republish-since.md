@@ -8,20 +8,20 @@ outbox. Топики находятся по приложению сами. Пе
 
 **Blocked by:** 02, 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Core.Outbox.Release.republish_since(app, since)`.
-- [ ] Outbox-модули (`use Core.Es.Outbox`) находятся среди модулей приложения. Тип агрегата берётся через кодек.
+- [x] `Core.Outbox.Release.republish_since(app, since)`.
+- [x] Outbox-модули (`use Core.Es.Outbox`) находятся среди модулей приложения. Тип агрегата берётся через кодек.
       Агрегаты без outbox пропускаются.
-- [ ] Строки `es_events` с `at >= since` идут в порядке commit (`xid`, `number`).
-- [ ] Запись outbox собирается без декодирования:
+- [x] Строки `es_events` с `at >= since` идут в порядке commit (`xid`, `number`).
+- [x] Запись outbox собирается без декодирования:
       - конверт из колонок, с ключами операции;
       - ключ — `aggregate_id`, имя — тег;
       - заголовки `name`, `aggr_id`, `event_id`, `operation_id`, без `traceparent`;
       - статус `:new`.
-- [ ] Одна транзакция, итог — число записей по топикам.
-- [ ] Тест: запись фикстурных агрегатов → очистка outbox → `republish_since`. Записи равны исходным с точностью до id,
+- [x] Одна транзакция, итог — число записей по топикам.
+- [x] Тест: запись фикстурных агрегатов → очистка outbox → `republish_since`. Записи равны исходным с точностью до id,
       статуса, `created_at` и `traceparent`, в том числе с запечатанными ПДн. Отдельно проверяются граница окна,
       пропуск агрегата без outbox и итог.
-- [ ] Свод `14-events-outbox.md` (runbook после восстановления) и app-ярус. CHANGELOG «Новое».
-- [ ] `make` зелёный.
+- [x] Свод `14-events-outbox.md` (runbook после восстановления) и app-ярус. CHANGELOG «Новое».
+- [x] `make` зелёный.

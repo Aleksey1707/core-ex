@@ -63,18 +63,24 @@
   - стало: `plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]` в `MyAppWeb.Endpoint` до
     `Plug.Telemetry`; liveness-проба — `/health`, healthcheck compose и балансировщик — `/ready`.
 
-- **Задачи релиза `Core.Release.migrate/1`, `Core.Release.rollback/3` и
-  `Core.Outbox.Release.requeue/1`** (норма — `docs/rules/app/10-architecture.md`, «Задачи релиза»).
-  Раньше миграции на релизе приложение прогоняло своим обходом `Ecto.Migrator`, а `:failed` записи
-  outbox возвращались в очередь только `mix outbox.requeue`, которого в релизе нет. Теперь
-  `migrate(:my_app)` накатывает невыполненные миграции каждого репозитория из `:ecto_repos`,
-  `rollback(:my_app, repo, version)` откатывает репозиторий до `version` включительно, а
-  `Core.Outbox.Release.requeue(:all | ids)` зовёт `requeue_failed/2` репозитория outbox. Задачи
-  поднимают только репозиторий и печатают оператору число миграций или записей. Правка потребителя:
+- **Задачи релиза `Core.Release.migrate/1`, `Core.Release.rollback/3`,
+  `Core.Outbox.Release.requeue/1` и `Core.Outbox.Release.republish_since/2`** (норма —
+  `docs/rules/app/10-architecture.md`, «Задачи релиза»; `docs/rules/app/14-events-outbox.md`,
+  «Runbook: восстановление базы»). Раньше миграции на релизе приложение прогоняло своим обходом
+  `Ecto.Migrator`, `:failed` записи outbox возвращались в очередь только `mix outbox.requeue`,
+  которого в релизе нет, а после восстановления базы события окна в пересозданные топики вернуть
+  было нечем. Теперь `migrate(:my_app)` накатывает невыполненные миграции каждого репозитория из
+  `:ecto_repos`, `rollback(:my_app, repo, version)` откатывает репозиторий до `version` включительно,
+  `Core.Outbox.Release.requeue(:all | ids)` зовёт `requeue_failed/2` репозитория outbox, а
+  `republish_since(:my_app, since)` одной транзакцией пишет в outbox записи `:new` из строк
+  `es_events` с `at` не раньше `since`: топики находит по outbox-модулям приложения, запись собирает
+  как путь записи, без `traceparent`. Задачи поднимают только репозиторий и печатают оператору число
+  миграций или записей, у переопубликации — по каждому найденному топику. Правка потребителя:
   - было: `Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))` по
     `:ecto_repos` в `MyAppApp.Release`;
   - стало: `def migrate, do: Core.Release.migrate(:my_app)`, возврат outbox —
-    `Application.load(:my_app)` и `Core.Outbox.Release.requeue(target)`.
+    `Application.load(:my_app)` и `Core.Outbox.Release.requeue(target)`, переопубликация —
+    `def outbox_republish_since(since), do: Core.Outbox.Release.republish_since(:my_app, since)`.
 
 - **Операция, сеанс инициатора и основание в конверте события** (решение —
   `docs/adr/0081-operation-envelope.md`; норма — `docs/rules/14-events-outbox.md`, «Операция, сеанс

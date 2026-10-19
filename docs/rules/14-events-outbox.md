@@ -365,6 +365,16 @@ ADR-0002.
 шедшие за ними, уже опубликованы. Разбор записей в `:failed` —
 `deps/core/docs/rules/app/14-events-outbox.md`, «Runbook: записи в `:failed`».
 
+Переопубликация окна после восстановления базы — `Core.Outbox.Release.republish_since/2`: строки
+`es_events` с `at` не раньше `since` у типов, чей outbox-модуль есть среди модулей приложения, в
+порядке commit (`xid`, `number`) снова становятся записями `:new`, одной транзакцией. Запись из
+колонок собирает тот же `Core.Es.Outbox.record/2`, что и `from_event/1`, без декодирования события:
+шифротекст ПДн переносится как есть, `traceparent` нет. Второй сборщик записи события MUST NOT:
+пересобранная запись разошлась бы с записанной. Порядок действий —
+`deps/core/docs/rules/app/14-events-outbox.md`, «Runbook: восстановление базы».
+
+Проверяется: `test/core/outbox/release_test.exs`, describe «republish_since».
+
 ### Запросы очереди — только по индексу
 
 - `fetch_and_reserve` MUST брать кандидатов **двумя** индексными запросами (`:new` и

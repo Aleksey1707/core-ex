@@ -430,28 +430,27 @@ defmodule Core.Es.Store do
 
   def list_after(dao, types, position, limit)
       when is_atom(dao) and is_list(types) and is_integer(limit) and limit > 0 do
-    from(e in visible(types),
-      order_by: [asc: e.xid, asc: e.number],
-      limit: ^limit,
-      select: %{
-        xid: e.xid,
-        number: e.number,
-        aggregate_type: e.aggregate_type,
-        aggregate_id: type(e.aggregate_id, :binary_id),
-        aggregate_version: e.aggregate_version,
-        event_id: type(e.event_id, :binary_id),
-        tag: e.tag,
-        payload: e.payload,
-        by_id: type(e.by_id, :binary_id),
-        at: type(e.at, :utc_datetime),
-        operation_id: type(e.operation_id, :binary_id),
-        session_id: type(e.session_id, :binary_id),
-        basis_id: type(e.basis_id, :binary_id)
-      }
-    )
+    from(e in visible(types), order_by: [asc: e.xid, asc: e.number], limit: ^limit)
+    |> select_row()
     |> after_position(position)
     |> dao.all()
     |> Enum.map(&positioned/1)
+  end
+
+  @doc """
+  Строки типов `types` с `at` не раньше `since` в порядке commit (`xid`, `number`) — поток для
+  переопубликации окна (`Core.Outbox.Release.republish_since/2`). Читается внутри транзакции `dao`.
+  """
+  @spec stream_since(Ecto.Repo.t(), [String.t()], DateTime.t()) :: Enumerable.t(Schema.t())
+
+  def stream_since(dao, types, %DateTime{} = since) when is_atom(dao) and is_list(types) do
+    from(e in "es_events",
+      where: e.aggregate_type in type(^types, {:array, :string}) and e.at >= type(^since, :utc_datetime),
+      order_by: [asc: e.xid, asc: e.number]
+    )
+    |> select_row()
+    |> dao.stream()
+    |> Stream.map(&struct(Schema, &1))
   end
 
   @doc false
@@ -507,6 +506,24 @@ defmodule Core.Es.Store do
   end
 
   # ---
+
+  defp select_row(query) do
+    select(query, [e], %{
+      xid: e.xid,
+      number: e.number,
+      aggregate_type: e.aggregate_type,
+      aggregate_id: type(e.aggregate_id, :binary_id),
+      aggregate_version: e.aggregate_version,
+      event_id: type(e.event_id, :binary_id),
+      tag: e.tag,
+      payload: e.payload,
+      by_id: type(e.by_id, :binary_id),
+      at: type(e.at, :utc_datetime),
+      operation_id: type(e.operation_id, :binary_id),
+      session_id: type(e.session_id, :binary_id),
+      basis_id: type(e.basis_id, :binary_id)
+    })
+  end
 
   defp after_position(query, nil), do: query
 

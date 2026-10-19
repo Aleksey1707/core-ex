@@ -68,6 +68,7 @@ MUST делегировать им, а не собирать свой обход
 | `Core.Release.migrate(:my_app)` | накатывает невыполненные миграции каждого репозитория из `:ecto_repos` | сама |
 | `Core.Release.rollback(:my_app, repo, version)` | откатывает миграции репозитория до `version` включительно | сама |
 | `Core.Outbox.Release.requeue(:all \| ids)` | возвращает `:failed` записи outbox в очередь (`14-events-outbox.md`, «Runbook: записи в `:failed`») | вызывающий — `Application.load(:my_app)` |
+| `Core.Outbox.Release.republish_since(:my_app, since)` | переопубликует события окна из хранилища событий в outbox (`14-events-outbox.md`, «Runbook: восстановление базы») | сама |
 | `Core.Mq.Dlq.Release.requeue(repo, target)` | возвращает записи DLQ в обработку (`14-events-outbox.md`, «DLQ в Postgres») | вызывающий — `Application.load(:my_app)` |
 
 Задача приложение не стартует: на время команды поднимается только репозиторий, и она работает
@@ -85,6 +86,8 @@ defmodule MyAppApp.Release do
     Application.load(@app)
     Core.Outbox.Release.requeue(target)
   end
+
+  def outbox_republish_since(since), do: Core.Outbox.Release.republish_since(@app, since)
 end
 ```
 
@@ -92,6 +95,7 @@ end
 bin/my_app eval 'MyAppApp.Release.migrate()'
 bin/my_app eval 'MyAppApp.Release.rollback(20260902110000)'
 bin/my_app eval 'MyAppApp.Release.outbox_requeue(:all)'
+bin/my_app eval 'MyAppApp.Release.outbox_republish_since(~U[2026-10-19 09:00:00Z])'
 ```
 
 ## Раскладка

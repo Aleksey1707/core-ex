@@ -26,16 +26,22 @@ defmodule Core.Es.Outbox do
   - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
     через `Core.Config.codec()`
 
-  Макрос занимает в вызывающем модуле имена `@es_topic`, `@es_event` и приватные
-  `es_codec/0`, `headers/1`, `event_headers/1`.
+  Запись из конверта без `traceparent` собирает `record/2` — её же зовёт переопубликация окна
+  (`Core.Outbox.Release.republish_since/2`), поэтому пересобранная запись совпадает с записанной.
+
+  Макрос занимает в вызывающем модуле имена `@es_topic`, `@es_event` и приватную `es_codec/0`.
   """
 
+  alias Core.Es
   alias Core.Helper
   alias Core.Outbox
+  alias Core.Result
 
   @label "Es.Outbox"
   @required_keys ~w(topic event)a
   @optional_keys ~w(codec)a
+
+  # ===== билдер =====
 
   @doc "Объявить маппер событий агрегата в записи outbox."
   defmacro __using__(opts) do
@@ -73,31 +79,18 @@ defmodule Core.Es.Outbox do
       @spec from_event(event()) ::
               Core.Result.t(Core.Outbox.Record.t())
 
-      def from_event(event) do
-        payload = es_codec().dump(event)
-        fields = Core.Es.Event.Codec.to_fields(payload)
-
-        with {:ok, key} <- Core.Outbox.Key.new(fields.aggregate_id),
-             {:ok, name} <- Core.Outbox.Name.new(fields.type),
-             {:ok, created_at} <- Core.Outbox.CreatedAt.new(DateTime.utc_now()) do
-          Core.Outbox.Record.new(@es_topic, key, name, payload, headers(fields), created_at)
+      unquote(
+        quote generated: true do
+          def from_event(event) do
+            case Core.Es.Outbox.record(@es_topic, es_codec().dump(event)) do
+              {:ok, %Core.Outbox.Record{} = record} -> {:ok, %{record | headers: Core.Otel.inject(record.headers)}}
+              {:error, reason} -> {:error, reason}
+            end
+          end
         end
-      end
+      )
 
       defp es_codec, do: unquote(codec)
-
-      defp headers(%{operation_id: nil} = fields), do: Core.Otel.inject(event_headers(fields))
-
-      defp headers(fields),
-        do: Core.Otel.inject(Map.put(event_headers(fields), "operation_id", fields.operation_id))
-
-      defp event_headers(fields) do
-        %{
-          "name" => fields.type,
-          "aggr_id" => fields.aggregate_id,
-          "event_id" => fields.id
-        }
-      end
     end
   end
 
@@ -131,4 +124,24 @@ defmodule Core.Es.Outbox do
       {:error, error} -> raise CompileError, description: "#{@label}: topic: #{error}"
     end
   end
+
+  # ===== запись =====
+
+  @doc false
+  @spec record(Outbox.Topic.t(), Es.Event.Codec.wire()) :: Result.t(Outbox.Record.t())
+
+  def record(%Outbox.Topic{} = topic, envelope) when is_map(envelope) do
+    fields = Es.Event.Codec.to_fields(envelope)
+
+    with {:ok, key} <- Outbox.Key.new(fields.aggregate_id),
+         {:ok, name} <- Outbox.Name.new(fields.type),
+         do: Outbox.Record.new(topic, key, name, envelope, headers(fields))
+  end
+
+  # ---
+
+  defp headers(%{operation_id: nil} = fields), do: event_headers(fields)
+  defp headers(fields), do: Map.put(event_headers(fields), "operation_id", fields.operation_id)
+
+  defp event_headers(fields), do: %{"name" => fields.type, "aggr_id" => fields.aggregate_id, "event_id" => fields.id}
 end
