@@ -46,14 +46,13 @@ defmodule Core.PubSub.MqSubscriberReliable do
   alias Core.Mq.Message
   alias Core.Otel
   alias Core.PubSub
-  alias Core.Repo
+  alias Core.PubSub.MqSubscriberReliable.Step
   alias Core.Result
   alias Core.Telemetry
 
   require Logger
   require Error
 
-  @attr_attempt "core.pubsub.attempt"
   @attr_dlq_topic "core.pubsub.dlq_topic"
   @attr_dlq_reason "core.pubsub.dlq_reason"
 
@@ -73,10 +72,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   defstruct [
     :reader_module,
     :reader,
-    :filter,
-    :from_message,
-    :on_message,
-    :context_factory,
+    :step,
     :poll_interval_ms,
     :retry_max_ms,
     :retry_ms,
@@ -85,7 +81,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
     :dlq_handle,
     :dlq_topic,
     :topic,
-    :data,
     :timer_ref,
     :pending_raw,
     attempts: 0,
@@ -181,25 +176,21 @@ defmodule Core.PubSub.MqSubscriberReliable do
     Process.flag(:trap_exit, true)
     StartOpts.keys!(@label, opts, @keys)
     poll_interval_ms = StartOpts.pos_integer!(@label, opts, :poll_interval_ms, @default_poll_interval_ms)
-    topic = StartOpts.binary!(@label, opts, :topic, "unknown")
+    step = Step.new!(@label, opts)
     dlq_writer = StartOpts.module!(@label, opts, :dlq_writer, nil)
 
     state = %__MODULE__{
       reader_module: StartOpts.module!(@label, opts, :reader_module),
       reader: StartOpts.term!(@label, opts, :reader),
-      filter: StartOpts.fun!(@label, opts, :filter, 1, &accept_all/1),
-      from_message: StartOpts.fun!(@label, opts, :from_message, 1),
-      on_message: StartOpts.fun!(@label, opts, :on_message, 3),
-      context_factory: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0),
+      step: step,
       poll_interval_ms: poll_interval_ms,
       retry_max_ms: retry_max_ms(opts, poll_interval_ms),
       retry_ms: poll_interval_ms,
       max_attempts: StartOpts.pos_integer!(@label, opts, :max_attempts, @default_max_attempts),
       dlq_writer: dlq_writer,
       dlq_handle: dlq_handle!(opts, dlq_writer),
-      dlq_topic: StartOpts.binary!(@label, opts, :dlq_topic, topic <> ".dlq"),
-      topic: topic,
-      data: nil,
+      dlq_topic: StartOpts.binary!(@label, opts, :dlq_topic, step.topic <> ".dlq"),
+      topic: step.topic,
       timer_ref: nil,
       pending_raw: nil,
       attempts: 0,
@@ -224,7 +215,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   def handle_call(:unsubscribe, _from, state) do
     state = cancel_timer(state)
-    {:reply, :ok, %{state | subscribed?: false, data: nil, pending_raw: nil, attempts: 0}}
+    {:reply, :ok, %{state | subscribed?: false, step: %{state.step | data: nil}, pending_raw: nil, attempts: 0}}
   end
 
   def handle_call(:run_once, _from, %__MODULE__{subscribed?: false} = state) do
@@ -261,7 +252,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
         {:idle, state}
 
       {:ok, raw} ->
-        filter_raw(count_attempt(state, raw), raw)
+        state = count_attempt(state, raw)
+        Step.run(raw, state.step, state.attempts, &settle(state, raw, &1))
 
       {:error, %Error{} = error} ->
         Logger.warning("pubsub reliable get: #{error.message}")
@@ -297,125 +289,18 @@ defmodule Core.PubSub.MqSubscriberReliable do
     %{state | pending_raw: raw, attempts: 1, retry_ms: state.poll_interval_ms}
   end
 
-  # Фильтр стоит до span'а: у внешнего топика без `traceparent` каждое отвергнутое сообщение
-  # открывало бы свой корневой трейс.
-  defp filter_raw(state, raw) do
-    case safe_filter(state, raw) do
-      true ->
-        handle_raw(state, raw)
+  # Исход шага разбирается внутри его span'а обработки (у исхода фильтра span'а нет): уход в DLQ
+  # отмечается на этом span'е.
+  defp settle(state, _raw, :processed), do: succeed(state)
 
-      false ->
-        commit(state)
-        {:filtered, clear_pending(state)}
-
-      {:error, %Error{} = error} ->
-        Logger.warning("pubsub reliable filter: #{error.message}")
-        fail_attempt(state, raw, error)
-
-      other ->
-        Logger.warning("pubsub reliable filter: неожиданный результат #{inspect(other)}")
-        fail_attempt(state, raw, unexpected_result_error(:filter, other))
-    end
+  defp settle(state, _raw, :filtered) do
+    commit(state)
+    {:filtered, clear_pending(state)}
   end
 
-  defp safe_filter(state, raw) do
-    state.filter.(raw)
-  rescue
-    exception -> {:error, handler_crash_error(:filter, exception, __STACKTRACE__)}
-  end
+  defp settle(state, raw, {:retry, error}), do: fail_attempt(state, raw, error)
 
-  # Span покрывает и декод, и обработчик: родитель берётся из заголовков сообщения
-  # (контекст создания записи outbox), поэтому обработка продолжает трейс команды,
-  # а не начинает свой. Номер попытки — собственный атрибут подписчика: в semconv
-  # его нет, а в пространство `messaging.*` чужие имена класть нельзя.
-  defp handle_raw(state, raw) do
-    opts = [attributes: %{@attr_attempt => state.attempts}]
-
-    Otel.Messaging.process(raw.headers, state.topic, message_id(raw), opts, fn ->
-      consume_raw(state, raw)
-    end)
-  end
-
-  # Ключ чужого топика — байты (ADR-0032): не-UTF-8 атрибутом span'а экспортёр не отдаст.
-  defp message_id(%Message{key: nil}), do: nil
-
-  defp message_id(%Message{key: key}) do
-    value = Mq.Key.value(key)
-
-    if String.valid?(value), do: value
-  end
-
-  defp consume_raw(state, raw) do
-    case safe_from_message(state, raw) do
-      {:ok, message} ->
-        dispatch(state, raw, message)
-
-      {:error, %Error{} = error} ->
-        Logger.warning("pubsub reliable from_message: #{error.message}")
-        Otel.record_error(error)
-        fail_attempt(state, raw, error)
-
-      {:reject, %Error{} = error} ->
-        Otel.record_error(error)
-        reject(state, raw, error)
-
-      other ->
-        Logger.warning("pubsub reliable from_message: неожиданный результат #{inspect(other)}")
-        error = unexpected_result_error(:from_message, other)
-        Otel.record_error(error)
-        fail_attempt(state, raw, error)
-    end
-  end
-
-  defp safe_from_message(state, raw) do
-    state.from_message.(raw)
-  rescue
-    exception -> {:error, handler_crash_error(:from_message, exception, __STACKTRACE__)}
-  end
-
-  # Контекст создаётся на сообщение и уничтожается после него: `Repo.Sc` держит эталоны
-  # в ETS, и один контекст на весь uptime подписчика рос бы неограниченно, отдавая
-  # write-репозиториям устаревшие эталоны.
-  defp dispatch(%__MODULE__{} = state, raw, message) do
-    context = state.context_factory.()
-
-    try do
-      do_dispatch(state, raw, message, context)
-    after
-      Repo.Sc.delete(context)
-    end
-  end
-
-  defp do_dispatch(%__MODULE__{} = state, raw, message, context) do
-    case safe_on_message(state, message, context) do
-      :ok ->
-        succeed(state)
-
-      {:skip, _reason} ->
-        succeed(state)
-
-      {:error, %Error{} = error} ->
-        Logger.warning("pubsub reliable on_message: #{error.message}")
-        Otel.record_error(error)
-        fail_attempt(state, raw, error)
-
-      {:reject, %Error{} = error} ->
-        Otel.record_error(error)
-        reject(state, raw, error)
-
-      other ->
-        Logger.warning("pubsub reliable on_message: неожиданный результат #{inspect(other)}")
-        error = unexpected_result_error(:on_message, other)
-        Otel.record_error(error)
-        fail_attempt(state, raw, error)
-    end
-  end
-
-  defp safe_on_message(state, message, context) do
-    state.on_message.(message, state.data, context)
-  rescue
-    exception -> {:error, handler_crash_error(:on_message, exception, __STACKTRACE__)}
-  end
+  defp settle(state, raw, {:reject, error}), do: reject(state, raw, error)
 
   defp succeed(state) do
     commit(state)
@@ -521,24 +406,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
     %{state | pending_raw: nil, attempts: 0, retry_ms: state.poll_interval_ms}
   end
 
-  defp handler_crash_error(handler, exception, stacktrace) do
-    Error.app(
-      code: :handler_crashed,
-      ns: :pubsub,
-      message: "#{handler} завершился исключением",
-      detail: %{exception: exception, stacktrace: stacktrace}
-    )
-  end
-
-  defp unexpected_result_error(handler, other) do
-    Error.app(
-      code: :unexpected_handler_result,
-      ns: :pubsub,
-      message: "#{handler} вернул неожиданный результат",
-      detail: other
-    )
-  end
-
   defp commit(state) do
     case safe_commit(state) do
       :ok ->
@@ -556,7 +423,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp mark_subscribed(state, data) do
-    schedule(%{state | data: data, subscribed?: true}, state.poll_interval_ms)
+    schedule(%{state | step: %{state.step | data: data}, subscribed?: true}, state.poll_interval_ms)
   end
 
   defp reschedule(state, result) when result in ~w(processed filtered dlq)a do
@@ -599,8 +466,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
       %{topic: state.topic, dlq_topic: state.dlq_topic, reason: reason}
     )
   end
-
-  defp accept_all(%Message{}), do: true
 
   defp retry_max_ms(opts, poll_interval_ms) do
     max(StartOpts.pos_integer!(@label, opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)
