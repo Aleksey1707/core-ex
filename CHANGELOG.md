@@ -63,6 +63,22 @@
   - стало: `plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]` в `MyAppWeb.Endpoint` до
     `Plug.Telemetry`; liveness-проба — `/health`, healthcheck compose и балансировщик — `/ready`.
 
+- **Дублёр доставки outbox `Core.Outbox.Test.drain/2`** (решение —
+  `docs/adr/0082-outbox-delivery-test-double.md`). Раньше цепочку «команда → outbox → подписчик
+  другого контекста» тест приложения без брокера проверить не мог: подписчик читает только брокер,
+  а `Core.MqFake.*` к потребителю не приезжают. Теперь `drain(subscribers)` в процессе теста и в его
+  sandbox резервирует записи outbox тем же `Core.Outbox.Repo`, отмечает их `:published`, переводит в
+  сообщение той же функцией, что доставка в брокер, и ведёт подписчиков по журналам топиков тем же
+  шагом обработки, что `Core.PubSub.MqSubscriberReliable`: `filter`, `{:skip, _}`, `{:reject, _}` и
+  исключения ведут себя одинаково. Подписчики — тот же keyword, что получает подписчик дерева:
+  `name` — имя курсора, `subscribe_data` — данные `on_message`, сетевые ключи игнорируются. Вызов —
+  один проход: записи, сделанные обработчиками, уходят следующим. Ошибка с повтором держит
+  подписчика на сообщении до следующего вызова, исчерпание `max_attempts` и отказ без повторов
+  кладут сообщение в мёртвые письма — `Core.Outbox.Test.dead_letters/1`. Правка потребителя:
+  - было: сквозной тест цепочки реакций только под тегом брокера;
+  - стало: `:ok = Core.Outbox.Test.drain(MyApp.Notify.subscribers())` после записи — по вызову на
+    звено цепочки, проверки — после них.
+
 - **Задачи релиза `Core.Release.migrate/1`, `Core.Release.rollback/3`,
   `Core.Outbox.Release.requeue/1` и `Core.Outbox.Release.republish_since/2`** (норма —
   `docs/rules/app/10-architecture.md`, «Задачи релиза»; `docs/rules/app/14-events-outbox.md`,

@@ -1,0 +1,229 @@
+defmodule Core.Outbox.TestTest do
+  use Core.DataCase, async: true
+
+  import Core.EsAggregateRepoContract, only: [open: 0, rename: 1, write!: 3]
+  import ExUnit.CaptureLog
+
+  alias Core.Config
+  alias Core.Context
+  alias Core.Error
+  alias Core.Es
+  alias Core.EsFixture.Account
+  alias Core.Mq
+  alias Core.Outbox
+
+  require Error
+
+  describe "drain/2" do
+    test "доставляет запись подписчику топика и отмечает её :published" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open()])
+
+      :ok = Outbox.Test.drain([subscriber(notify(:a))])
+
+      assert_received {:a, %Account.Event.Opened{aggregate_id: ^id}}
+      assert statuses(id) == [:published]
+    end
+
+    test "filter отсекает сообщение до обработчика, {:skip, _} сдвигает курсор" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open(), rename("Другое")])
+      test = self()
+
+      skip = fn event, _data, _context ->
+        send(test, {:skipped, event})
+        {:skip, :not_mine}
+      end
+
+      subscribers = [
+        subscriber(notify(:renamed), name: :renamed, filter: &(header(&1, "name") == "account.renamed")),
+        subscriber(skip, name: :skipping)
+      ]
+
+      :ok = Outbox.Test.drain(subscribers)
+
+      assert_received {:renamed, %Account.Event.Renamed{}}
+      refute_received {:renamed, %Account.Event.Opened{}}
+      assert_received {:skipped, %Account.Event.Opened{}}
+      assert_received {:skipped, %Account.Event.Renamed{}}
+      refute_received {:skipped, _event}
+      assert Outbox.Test.dead_letters(self()) == []
+    end
+
+    test "ошибка держит подписчика до следующего вызова, соседи по топику и другие топики идут дальше" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open(), rename("Другое")])
+      append_other!("other.first")
+      failing = fail_times(1, notify(:flaky))
+
+      subscribers = [
+        subscriber(failing, name: :flaky),
+        subscriber(notify(:steady), name: :steady),
+        other_subscriber(notify(:other))
+      ]
+
+      capture_log(fn -> :ok = Outbox.Test.drain(subscribers) end)
+
+      assert_received {:steady, %Account.Event.Opened{}}
+      assert_received {:steady, %Account.Event.Renamed{}}
+      assert_received {:other, %Mq.Message{}}
+      refute_received {:flaky, _event}
+
+      append_other!("other.second")
+      :ok = Outbox.Test.drain(subscribers)
+
+      assert_received {:flaky, %Account.Event.Opened{}}
+      assert_received {:flaky, %Account.Event.Renamed{}}
+      assert_received {:other, %Mq.Message{}}
+      refute_received {:steady, _event}
+      assert Outbox.Test.dead_letters(self()) == []
+    end
+
+    test "исчерпание max_attempts — мёртвое письмо, курсор дальше" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open(), rename("Другое")])
+      failing = fail_times(2, notify(:a))
+      subscribers = [subscriber(failing, max_attempts: 2)]
+
+      capture_log(fn ->
+        :ok = Outbox.Test.drain(subscribers)
+        :ok = Outbox.Test.drain(subscribers)
+      end)
+
+      assert_received {:a, %Account.Event.Renamed{}}
+      refute_received {:a, %Account.Event.Opened{}}
+
+      assert [%Outbox.Test.DeadLetter{reason: :exhausted, attempts: 2, topic: "accounts"} = dead] =
+               Outbox.Test.dead_letters(self())
+
+      assert dead.subscriber == :accounts_subscriber
+      assert %Error{code: :boom} = dead.error
+      assert header(dead.message, "name") == "account.opened"
+    end
+
+    test "{:reject, _} — мёртвое письмо сразу" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open()])
+      reject = fn _event, _data, _context -> {:reject, boom()} end
+
+      capture_log(fn -> :ok = Outbox.Test.drain([subscriber(reject, max_attempts: 5)]) end)
+
+      assert [%Outbox.Test.DeadLetter{reason: :rejected, attempts: 1}] = Outbox.Test.dead_letters(self())
+    end
+
+    test "топик без подписчиков публикуется" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open()])
+
+      :ok = Outbox.Test.drain([])
+
+      assert statuses(id) == [:published]
+    end
+
+    test "запись, сделанная обработчиком, уходит следующим вызовом" do
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open()])
+      test = self()
+
+      react = fn
+        %Account.Event.Opened{aggregate_id: opened}, _data, _context ->
+          write!(Account.Repo.Pg, opened, [rename("Реакция")])
+          :ok
+
+        event, _data, _context ->
+          send(test, {:reacted, event})
+          :ok
+      end
+
+      :ok = Outbox.Test.drain([subscriber(react)])
+
+      refute_received {:reacted, _event}
+      assert statuses(id) == [:published, :new]
+
+      :ok = Outbox.Test.drain([subscriber(react)])
+
+      assert_received {:reacted, %Account.Event.Renamed{aggregate_id: ^id}}
+      assert statuses(id) == [:published, :published]
+    end
+
+    test "subscribe_data — данные on_message" do
+      write!(Account.Repo.Pg, Account.ID.new(), [open()])
+      test = self()
+
+      on_message = fn _event, data, _context ->
+        send(test, {:data, data})
+        :ok
+      end
+
+      :ok = Outbox.Test.drain([subscriber(on_message, subscribe_data: :tenant)])
+
+      assert_received {:data, :tenant}
+    end
+
+    test "неизвестный ключ, подписчик без name и повтор name — ArgumentError" do
+      assert_raise ArgumentError, ~r/filtr/, fn -> Outbox.Test.drain([subscriber(notify(:a), filtr: & &1)]) end
+
+      assert_raise ArgumentError, ~r/:name/, fn ->
+        Outbox.Test.drain([Keyword.delete(subscriber(notify(:a)), :name)])
+      end
+
+      assert_raise ArgumentError, ~r/:name/, fn ->
+        Outbox.Test.drain([subscriber(notify(:a)), subscriber(notify(:b))])
+      end
+    end
+  end
+
+  # ---
+
+  defp subscriber(on_message, opts \\ []) do
+    Keyword.merge(
+      [
+        name: :accounts_subscriber,
+        topic: Account.Outbox.topic(),
+        from_message: &Es.Event.Message.load(Account.Event, &1),
+        on_message: on_message
+      ],
+      opts
+    )
+  end
+
+  defp other_subscriber(on_message) do
+    [name: :other_subscriber, topic: "other", from_message: &{:ok, &1}, on_message: on_message]
+  end
+
+  defp append_other!(name) do
+    {:ok, record} =
+      Outbox.Record.new(Outbox.Topic.new!("other"), Outbox.Key.new!("other"), Outbox.Name.new!(name), %{})
+
+    :ok = Outbox.Repo.Pg.append([record], Context.new())
+  end
+
+  defp notify(tag) do
+    test = self()
+
+    fn event, _data, _context ->
+      send(test, {tag, event})
+      :ok
+    end
+  end
+
+  defp fail_times(times, on_message) do
+    counter = :counters.new(1, [])
+
+    fn event, data, context ->
+      :counters.add(counter, 1, 1)
+
+      if :counters.get(counter, 1) <= times, do: {:error, boom()}, else: on_message.(event, data, context)
+    end
+  end
+
+  defp boom, do: Error.app(code: :boom, ns: :test, message: "сбой обработчика")
+
+  defp header(message, name), do: Mq.Message.find_header(message, Mq.HeaderKey.new!(name))
+
+  defp statuses(id) do
+    key = Config.codec().dump(id)
+
+    TestRepo.all(from(r in Outbox.Repo.Pg.Schema, where: r.key == ^key, order_by: r.created_at, select: r.status))
+  end
+end
