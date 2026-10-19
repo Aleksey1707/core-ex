@@ -202,7 +202,7 @@ notifications: [hostname: System.fetch_env!("DB_DIRECT_HOST"), port: 5432]
 `events:`, ID другого агрегата и невозможная clause по результату — предупреждение при сборке.
 Исходы, опрос и режим `:inline` тестового дерева — moduledoc `Core.Es.Projection`, «Ожидание»;
 место вызова — после commit, вне `Transact.run` (`20-agreements.md`, CQS); тест —
-`19-testing.md`, «Проекции». Реализацию `Core.Es.Projection.Await.run/5` (`@doc false`) звать
+`19-testing.md`, «Проекции». Реализацию `Core.Es.Projection.Await.run/6` (`@doc false`) звать
 MUST NOT: модуль проекции и тип агрегата в ней — параметры, и сборка не сверяет ни агрегат, ни ID.
 
 Готовность ждать задаёт вызывающий, а ждёт usecase: проекция — внутреннее устройство контекста и
@@ -214,6 +214,14 @@ event-sourced агрегата принимает `wait: :none | pos_integer()` 
 проекции»; почему ждёт usecase — ADR-0039. Вызывающий, который после записи читает read-модель,
 передаёт `wait:`, а который не читает — не передаёт; вида вызывающего (web, воркер, подписчик,
 mix-таска) правило не различает.
+
+Ответить итогом реакции другого контекста MAY только тот usecase, который знает версию её события
+по модели агрегата: следующее событие после его записи пишет только реакция. Такой usecase ждёт
+событие этой версии — `Projection.await(Agg, %Agg.ID{} = id, %Core.Version{} = version, timeout)`,
+в том числе ещё не записанное. Условия — те же, что у `await/3`: только по `wait:`, после commit,
+литеральный вызов, ID сужен. Реакция не успела — тот же `:projection_timeout` и исход
+`:accepted`: отличить медленную реакцию от упавшей ожидание не может, это показывает трейс
+(ADR-0080).
 
 Тот же `wait:` MAY принимать запрос `Query`, который зовёт другой контекст: реакция на событие
 агрегата читает его read-модель только через экспортированный запрос, и ждать проекцию до чтения
@@ -236,8 +244,8 @@ mix-таска) правило не различает.
   сборка не проверяет ни агрегат, ни ID.
 
 Проверяется: предупреждение при сборке вызывающего — агрегат не из `events:`, ID другого агрегата,
-невозможная clause по результату `await/3`, в том числе в хелпере ожидания usecase
-(`make consumer-check`).
+невозможная clause по результату `await/3` и `await/4`, версия не `%Core.Version{}`, в том числе в
+хелпере ожидания usecase (`make consumer-check`).
 
 Сломанный быстрый путь ожидания — `LISTEN` через пулер, `notifications: false` на одной из
 нескольких нод — ошибкой не виден: ожидание доходит шагами страховки (ADR-0013). Слушатель ноды,
@@ -275,7 +283,7 @@ with {:error, %Error{code: :projection_timeout}} <- open_and_await(id, params, c
      do: open_and_await(id, params, context)
 
 # плохо — реализация ожидания мимо await/3: ID другого агрегата сборка не видит
-Core.Es.Projection.Await.run(projection, projection.__es_projection__(), "account", order_id, 5_000)
+Core.Es.Projection.Await.run(projection, projection.__es_projection__(), "account", order_id, :current, 5_000)
 
 # плохо — ожидание без `wait:`: вызывающий, которому read-модель не нужна, платит ожиданием
 with {:ok, version} <- write(id, expected, context),

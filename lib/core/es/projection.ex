@@ -117,14 +117,22 @@ defmodule Core.Es.Projection do
   read-after-write. Агрегат — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec`:
   по раскладке потребителя (`docs/rules/app/13-repos.md`, «Раскладка») это сам агрегат любого вида.
 
-  Функцию генерирует `use` — clause на каждый агрегат, чьи события есть в `events:`: голова —
-  литерал агрегата и закрытый struct его ID (`__es_aggregate_id__/0` кодека), результат сужен до
-  `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`, ID другого агрегата и невозможная
-  clause по результату — предупреждение при сборке вызывающего.
+  `await(Agg, %Agg.ID{} = aggregate_id, %Core.Version{} = version, timeout)` ждёт событие этой
+  версии потока, в том числе ещё не записанное: следующее событие, которое запишет реакция другого
+  контекста, когда его версия известна по модели агрегата (ADR-0080).
 
-  Цель — позиция последнего события потока на момент вызова:
+  Функции генерирует `use` — clause на каждый агрегат, чьи события есть в `events:`: голова —
+  литерал агрегата и закрытый struct его ID (`__es_aggregate_id__/0` кодека), у `await/4` — и
+  `%Core.Version{}`, результат сужен до `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`,
+  ID другого агрегата и невозможная clause по результату — предупреждение при сборке вызывающего.
 
-  - поток пуст — `:ok`;
+  Цель `await/3` — позиция последнего события потока на момент вызова, `await/4` — позиция
+  события версии `version`, даже если поток ушёл дальше:
+
+  - поток пуст — у `await/3` `:ok`;
+  - события версии нет — у `await/4` цель перечитывается на каждом сигнале и шаге, а исходы —
+    прежние: пересборка — сразу `:projection_rebuilding`, событие не появилось за `timeout` —
+    `:projection_timeout`;
   - чекпоинт не ниже цели — `:ok`, при любой версии строки и во время пересборки;
   - строки чекпоинта нет, её версия ниже `version:` или чекпоинт ниже цели пересборки — сразу
     прикладная `:projection_rebuilding`;
@@ -153,14 +161,16 @@ defmodule Core.Es.Projection do
   последнем отрезке перед таймаутом чекпоинт перечитывает только сигнал.
 
   Режим — опция `await:` дерева `Core.Es.Projection.Supervisor` из его отметки. При `:inline`
-  (тестовое дерево) `await/3` прогоняет проекцию до `:idle` в вызывающем процессе с `batch_size`
-  дерева и сверяет чекпоинт с целью; иной исход — `RuntimeError` с исходом и именем проекции.
+  (тестовое дерево) `await/3` и `await/4` прогоняют проекцию до `:idle` в вызывающем процессе с
+  `batch_size` дерева и сверяют чекпоинт с целью; иной исход — `RuntimeError` с исходом и именем
+  проекции. События версии у `await/4` после `:idle` нет — сразу `:projection_timeout`: записать
+  его в тесте некому.
 
   Ошибки программиста: агрегат вне `events:` или ID другого агрегата — `FunctionClauseError`;
   вызов внутри транзакции `repo:` — `ArgumentError`; дерево проекций на ноде не стартовало —
   `RuntimeError`; проекция не из `projections:` дерева — `ArgumentError`.
 
-  Ожидание идёт в span'е `Core.Otel.Es.await/4` внутри трейса вызывающего. Telemetry
+  Ожидание идёт в span'е `Core.Otel.Es.await/5` внутри трейса вызывающего. Telemetry
   `[:es, :projection, :await]` (`Core.Telemetry.event/1`): измерение `duration` (native),
   метаданные `projection` — имя и `result: :ok | :timeout | :rebuilding`; `raise` её не шлёт.
 
@@ -290,6 +300,16 @@ defmodule Core.Es.Projection do
       @spec await(unquote(modules), unquote(ids), non_neg_integer()) :: Core.Result.unit()
 
       unquote_splicing(Enum.map(aggregates, &await_clause/1))
+
+      @doc """
+      Дождаться, пока проекция обработает событие версии `version` потока агрегата
+      `aggregate_id`, в том числе ещё не записанное, — не дольше `timeout` мс; первый аргумент —
+      модуль агрегата. Исходы — `Core.Es.Projection`, «Ожидание».
+      """
+      @spec await(unquote(modules), unquote(ids), Core.Version.t(), non_neg_integer()) ::
+              Core.Result.unit()
+
+      unquote_splicing(Enum.map(aggregates, &await_version_clause/1))
     end
   end
 
@@ -311,7 +331,33 @@ defmodule Core.Es.Projection do
     quote generated: true do
       def await(unquote(aggregate), %unquote(id){} = aggregate_id, timeout)
           when is_integer(timeout) and timeout >= 0 do
-        case Core.Es.Projection.Await.run(__MODULE__, __es_projection__(), unquote(type), aggregate_id, timeout) do
+        case Core.Es.Projection.Await.run(
+               __MODULE__,
+               __es_projection__(),
+               unquote(type),
+               aggregate_id,
+               :current,
+               timeout
+             ) do
+          :ok -> :ok
+          {:error, %Core.Error{} = error} -> {:error, error}
+        end
+      end
+    end
+  end
+
+  defp await_version_clause({aggregate, id, type}) do
+    quote generated: true do
+      def await(unquote(aggregate), %unquote(id){} = aggregate_id, %Core.Version{} = version, timeout)
+          when is_integer(timeout) and timeout >= 0 do
+        case Core.Es.Projection.Await.run(
+               __MODULE__,
+               __es_projection__(),
+               unquote(type),
+               aggregate_id,
+               version,
+               timeout
+             ) do
           :ok -> :ok
           {:error, %Core.Error{} = error} -> {:error, error}
         end

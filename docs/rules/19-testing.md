@@ -395,7 +395,9 @@ assert {:ok, %Account.View{status: :open}} = Account.ReadRepo.get(id, :current, 
 Usecase с `Projection.await/3` тест MUST гонять на тестовом дереве `enabled: false`,
 `await: :inline` из `config/test.exs`: без него читателей нет, чекпоинт стоит и `await` не
 дождётся ничего, а с ним `await` прогоняет проекцию до `:idle` в процессе теста, как
-`run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. Такой тест —
+`run_until_idle`, и падает `RuntimeError` на `:locked`, `:outdated` и ошибке пачки. `await/4`
+без события версии после `:idle` отдаёт `:projection_timeout`: реакцию другого контекста тест
+не исполняет (ADR-0080). Такой тест —
 тоже `MyAppTest.DataCase, async: false`. Ждать на живом дереве — подняв его своим `start_link`,
 правкой отметки или env приложения — потребитель MUST NOT: к ветке неготовой read-модели ведёт
 только хелпер библиотеки (ниже). Живое дерево (`await: :poll`) MAY только у тестов самого

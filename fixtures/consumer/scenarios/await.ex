@@ -1,11 +1,12 @@
 defmodule ConsumerTest.Await do
-  @moduledoc "`Projection.await/3`: агрегат, ID, результат; ожидание в usecase с `wait:`."
+  @moduledoc "`Projection.await/3` и `await/4`: агрегат, ID, версия, результат; ожидание в usecase с `wait:`."
 
   alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.Order
   alias Consumer.Domain.Sales.Ping
   alias Consumer.Domain.Sales.Activity.Projection
   alias Core.Error
+  alias Core.Version
 
   # G4 — ID другого агрегата
   def g4_foreign_id(%Order.ID{} = id),
@@ -35,6 +36,16 @@ defmodule ConsumerTest.Await do
       {:error, _error} -> :error
     end
   end
+
+  # G4v — ожидание события версии: ID другого агрегата
+  def g4v_foreign_id(%Order.ID{} = id, %Version{} = version),
+    # expect: incompatible types given to Consumer.Domain.Sales.Activity.Projection.await/4
+    do: Projection.await(Account, id, version, 100)
+
+  # G4vi — версия голым целым, а не `%Core.Version{}`
+  def g4vi_integer_version(%Account.ID{} = id),
+    # expect: incompatible types given to Consumer.Domain.Sales.Activity.Projection.await/4
+    do: Projection.await(Account, id, 2, 100)
 
   # G4w — usecase заказа с `wait:`: хелпер ожидания скопирован у счёта, и агрегат в `await` — счёт
   def g4w_wait_foreign_aggregate(%Order.ID{} = id, opts),

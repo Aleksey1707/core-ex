@@ -39,6 +39,20 @@
 
 ### Новое
 
+- **Ожидание проекции до события заданной версии — `await/4` модуля проекции** (решение —
+  `docs/adr/0080-await-event-of-version.md`; норма — `docs/rules/22-projections.md`,
+  «Read-after-write»). Раньше `await/3` брал цель на момент вызова: событие, которое после commit
+  запишет реакция другого контекста, ещё не записано, и ожидание отдавало `:ok` по своей записи —
+  итог реакции чтение не видело. Теперь `use Core.Es.Projection` генерирует ещё и
+  `await(Agg, %Agg.ID{} = id, %Core.Version{} = version, timeout)`: цель — событие этой версии,
+  даже если поток ушёл дальше; пока его нет, цель перечитывается на каждом сигнале и шаге. Исходы
+  прежние — `:projection_timeout`, если событие не появилось за `timeout`, `:projection_rebuilding`
+  в пересборке; в `await: :inline` без события после `:idle` — сразу `:projection_timeout`. Span
+  `await <имя>` у `await/4` несёт `core.es.aggregate.version`. `await/3` не меняется; правка нужна
+  только usecase, который отвечает итогом реакции:
+  - было: свой цикл опроса read-модели или сразу `{:accepted, id, version}`;
+  - стало: `Order.Projection.await(Order, id, Version.next(version), timeout)` по `wait:`.
+
 - **ПДн в событиях: шифрование под ключом субъекта и уничтожение ключа** (решения —
   `docs/adr/0072-key-per-data-subject.md` … `docs/adr/0079-key-destruction-event-for-projections.md`;
   норма — `docs/rules/23-personal-data.md`, `docs/rules/app/23-personal-data.md`). Первая часть —

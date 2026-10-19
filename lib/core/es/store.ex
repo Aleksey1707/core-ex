@@ -468,6 +468,20 @@ defmodule Core.Es.Store do
     |> dao.one()
   end
 
+  @doc false
+  @spec stream_position(Ecto.Repo.t(), String.t(), String.t(), pos_integer()) :: position() | nil
+
+  def stream_position(dao, type, aggregate_id, version)
+      when is_atom(dao) and is_binary(type) and is_binary(aggregate_id) and is_integer(version) do
+    from(e in "es_events",
+      where:
+        e.aggregate_type == ^type and e.aggregate_id == type(^aggregate_id, :binary_id) and
+          e.aggregate_version == ^version,
+      select: {e.xid, e.number}
+    )
+    |> dao.one()
+  end
+
   # Условия видимости пачки нет: закоммиченное событие, которое пачка ждёт за долгой транзакцией,
   # тоже не обработано.
   @doc false

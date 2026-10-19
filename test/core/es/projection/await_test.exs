@@ -372,6 +372,80 @@ defmodule Core.Es.Projection.AwaitTest do
     end
   end
 
+  describe "await/4: :inline" do
+    test "событие версии есть — прогон в процессе теста, :ok; нет — :projection_timeout без raise" do
+      mark!([@projection], await: :inline)
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+
+      assert :ok = @projection.await(Account, account, Version.new!(1), 1_000)
+      assert rows() == [{"account", dump(account), "Счёт", false}]
+
+      assert {:error, %Error{code: :projection_timeout} = error} =
+               @projection.await(Account, account, Version.new!(2), 1_000)
+
+      assert error.detail == %{projection: "es_fixture", timeout: 1_000}
+    end
+  end
+
+  describe "await/4: :poll" do
+    test "событие версии записано после вызова — цель перечитывается на сигнале чекпоинта, :ok" do
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      start_tree!([@projection], @distant_steps)
+
+      # Запись — после первого чтения чекпоинта: ожидание уже застало цель отсутствующей.
+      written = after_checkpoint_read(fn -> write!(@account_repo, account, [close()]) end)
+
+      assert :ok = @projection.await(Account, account, Version.new!(2), 5_000)
+      Task.await(written)
+      assert [{"account", _id, "Счёт", true}] = rows()
+      assert leftovers() == []
+    end
+
+    test "поток ушёл дальше версии — цель событие версии, а не последнее: :ok" do
+      mark!([@projection])
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      write!(@account_repo, account, [close()])
+
+      assert :ok = @projection.await(Account, account, Version.new!(1), 30_000)
+
+      assert {:error, %Error{code: :projection_timeout}} =
+               @projection.await(Account, account, Version.new!(2), 10)
+    end
+
+    test "события версии нет до таймаута — :projection_timeout, а не :ok" do
+      mark!([@projection])
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+
+      assert {:error, %Error{code: :projection_timeout} = error} =
+               @projection.await(Account, account, Version.new!(2), 50)
+
+      assert error.detail == %{projection: "es_fixture", timeout: 50}
+      assert_receive {:await, %{projection: "es_fixture", result: :timeout}, _measurements}
+    end
+
+    test "события версии нет, проекция в пересборке — сразу :projection_rebuilding" do
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      mark!([@projection])
+
+      assert {:error, %Error{code: :projection_rebuilding}} =
+               @projection.await(Account, account, Version.new!(2), 30_000)
+
+      assert :ok = Es.Projection.Test.run_until_idle(@projection)
+      mark!([Bumped])
+
+      assert {:error, %Error{code: :projection_rebuilding}} =
+               Bumped.await(Account, account, Version.new!(2), 30_000)
+    end
+  end
+
   describe "ошибки программиста" do
     test "агрегат, на который проекция не подписана, и ID другого агрегата — FunctionClauseError" do
       mark!([AccountOnly])
@@ -439,6 +513,24 @@ defmodule Core.Es.Projection.AwaitTest do
                "core.es.projection.name" => "es_fixture",
                "core.es.aggregate.type" => "account",
                "core.es.aggregate.id" => dump(account)
+             }
+    end
+
+    test "await/4 — span с версией ожидаемого события" do
+      mark!([@projection], await: :inline)
+      account = Account.ID.new()
+      write!(@account_repo, account, [open("Счёт")])
+      _spans = OtelFixture.drain(0)
+
+      assert :ok = @projection.await(Account, account, Version.new!(1), 1_000)
+
+      await = OtelFixture.drain() |> OtelFixture.find("await es_fixture")
+
+      assert await.attributes == %{
+               "core.es.projection.name" => "es_fixture",
+               "core.es.aggregate.type" => "account",
+               "core.es.aggregate.id" => dump(account),
+               "core.es.aggregate.version" => 1
              }
     end
 

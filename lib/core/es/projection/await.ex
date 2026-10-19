@@ -5,9 +5,12 @@ defmodule Core.Es.Projection.Await do
   в вызывающем процессе (`await: :inline`). Исходы — в `@moduledoc` `Core.Es.Projection`,
   «Ожидание».
 
-  `run/5` зовёт только `await/3`, которую генерирует `use Core.Es.Projection`: модуль проекции и
-  тип агрегата в ней — параметры, сборка их не сверяет, и потребитель ждёт у модуля проекции.
+  `run/6` зовут только `await/3` и `await/4`, которые генерирует `use Core.Es.Projection`: модуль
+  проекции и тип агрегата в ней — параметры, сборка их не сверяет, и потребитель ждёт у модуля
+  проекции.
   """
+
+  import Core.Version, only: [is_version: 1]
 
   alias Core.Error
   alias Core.Es
@@ -17,21 +20,23 @@ defmodule Core.Es.Projection.Await do
   alias Core.Otel
   alias Core.Result
   alias Core.Telemetry
+  alias Core.Version
 
   require Error
 
   @doc false
-  @spec run(module(), Projection.t(), String.t(), struct(), non_neg_integer()) ::
+  @spec run(module(), Projection.t(), String.t(), struct(), Version.expected(), non_neg_integer()) ::
           Result.unit()
 
-  def run(projection, declaration, type, %_{} = aggregate_id, timeout)
-      when is_atom(projection) and is_binary(type) and is_integer(timeout) and timeout >= 0 do
+  def run(projection, declaration, type, %_{} = aggregate_id, version, timeout)
+      when is_atom(projection) and is_binary(type) and is_version(version) and is_integer(timeout) and
+             timeout >= 0 do
     ensure_outside_transaction!(declaration.dao.in_transaction?(), declaration)
     mark = Projection.Supervisor.Mark.fetch!("Es.Projection.await", projection, declaration.name)
     id = declaration.codec.dump(aggregate_id)
 
-    Otel.Es.await(declaration.name, type, id, fn ->
-      measured(declaration, fn -> awaited(mark, projection, declaration, {type, id}, timeout) end)
+    Otel.Es.await(declaration.name, type, id, version, fn ->
+      measured(declaration, fn -> awaited(mark, projection, declaration, {type, id, version}, timeout) end)
     end)
   end
 
@@ -62,10 +67,10 @@ defmodule Core.Es.Projection.Await do
   defp telemetry_result({:error, %Error{code: :projection_timeout}}), do: :timeout
   defp telemetry_result({:error, %Error{code: :projection_rebuilding}}), do: :rebuilding
 
-  defp awaited(%{await: :inline} = mark, projection, declaration, stream, _timeout) do
-    case target(declaration, stream) do
-      nil -> :ok
-      target -> inline(projection, declaration, mark.batch_size, target)
+  defp awaited(%{await: :inline} = mark, projection, declaration, stream, timeout) do
+    case {target(declaration, stream), stream} do
+      {nil, {_type, _id, :current}} -> :ok
+      {target, _stream} -> inline(projection, declaration, mark.batch_size, target, timeout)
     end
   end
 
@@ -80,13 +85,18 @@ defmodule Core.Es.Projection.Await do
     end
   end
 
-  defp target(declaration, {type, id}),
+  defp target(declaration, {type, id, :current}),
     do: Es.Store.last_stream_position(declaration.dao, type, id)
 
+  defp target(declaration, {type, id, %Version{value: version}}),
+    do: Es.Store.stream_position(declaration.dao, type, id, version)
+
   # Тестовое дерево: пачки идут в процессе и транзакции вызывающего до `:idle`, затем чекпоинт
-  # сверяется с целью. Иной исход — дефект теста или проекции, а не ожидание.
-  defp inline(projection, declaration, batch_size, target) do
+  # сверяется с целью. Иной исход — дефект теста или проекции, а не ожидание. События заданной
+  # версии нет — записать его в тесте некому, и ждать незачем.
+  defp inline(projection, declaration, batch_size, target, timeout) do
     case until_idle(projection, declaration, batch_size) do
+      :idle when target == nil -> {:error, timed_out(declaration, timeout)}
       :idle -> verified(declaration, target)
       {:error, %Error{} = error, _failure} -> raise_inline!(declaration, {:error, error})
       outcome -> raise_inline!(declaration, outcome)
@@ -118,6 +128,7 @@ defmodule Core.Es.Projection.Await do
 
     awaiting = %{
       declaration: declaration,
+      stream: stream,
       target: target(declaration, stream),
       subscription: subscription,
       timeout: timeout,
@@ -128,7 +139,7 @@ defmodule Core.Es.Projection.Await do
     poll(awaiting, {started + mark.await_min_ms, mark.await_min_ms})
   end
 
-  defp poll(%{target: nil}, _step), do: :ok
+  defp poll(%{target: nil, stream: {_type, _id, :current}}, _step), do: :ok
 
   defp poll(%{declaration: declaration} = awaiting, step) do
     case progress(Checkpoint.find(declaration), declaration, awaiting.target) do
@@ -152,7 +163,7 @@ defmodule Core.Es.Projection.Await do
 
   defp signaled(awaiting, step, timeout) do
     case Projection.Registry.receive_checkpoint(awaiting.subscription, timeout) do
-      :signal -> poll(awaiting, step)
+      :signal -> poll(retargeted(awaiting), step)
       :timeout -> wait(awaiting, step)
     end
   end
@@ -162,8 +173,15 @@ defmodule Core.Es.Projection.Await do
   defp stepped(awaiting, {step_at, interval}) do
     :ok = Projection.Registry.wake_projection(awaiting.declaration.name)
     next = min(interval * 2, awaiting.max_ms)
-    poll(awaiting, {step_at + next, next})
+    poll(retargeted(awaiting), {step_at + next, next})
   end
+
+  # Событие заданной версии может записать реакция после вызова: пока его нет, цель перечитывается на
+  # каждом сигнале и шаге.
+  defp retargeted(%{target: nil} = awaiting),
+    do: %{awaiting | target: target(awaiting.declaration, awaiting.stream)}
+
+  defp retargeted(awaiting), do: awaiting
 
   # Чекпоинт не ниже цели — событие потока строка уже обработала, при любой её версии и во время
   # пересборки. Ниже цели строка старой версии или чекпоинт ниже цели пересборки — read-модель
@@ -179,6 +197,7 @@ defmodule Core.Es.Projection.Await do
   end
 
   defp reached?(nil, _target), do: false
+  defp reached?(_position, nil), do: false
   defp reached?(position, target), do: position >= target
 
   defp timed_out(declaration, timeout) do

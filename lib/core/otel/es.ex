@@ -5,7 +5,7 @@ defmodule Core.Otel.Es do
   | Функция | Span | Родитель |
   |---|---|---|
   | `project/3` | `project <имя проекции>`, `:internal` | нет — корневой |
-  | `await/4` | `await <имя проекции>`, `:internal` | span вызывающего |
+  | `await/5` | `await <имя проекции>`, `:internal` | span вызывающего |
   | `execute/4` | `execute <тип агрегата>`, `:internal` | span вызывающего |
 
   `project/3` открывает span только пачке проекции с работой — старт с начала истории или
@@ -16,8 +16,9 @@ defmodule Core.Otel.Es do
   Атрибуты пачки ставятся внутри `project/3`: `batch/3` — в начале, `checkpoint/1` — после
   сдвига чекпоинта, `failed/2` — на отказе. Позиция в атрибуте — `"<xid>/<номер>"`.
 
-  `await/4` — ожидание проекции после записи (`await/3` модуля проекции) в процессе
-  вызывающего: часть его запроса, поэтому span дочерний. Ошибка ожидания — `record_error/1`.
+  `await/5` — ожидание проекции после записи (`await/3` и `await/4` модуля проекции) в процессе
+  вызывающего: часть его запроса, поэтому span дочерний. Версию ожидаемого события span несёт
+  только у `await/4`. Ошибка ожидания — `record_error/1`.
 
   `execute/4` — команда процесса агрегата (`Core.Es.Aggregate.Process`) на call site
   `Agg.Process.execute` в процессе вызывающего; режим и число повторов ставит `executed/2`, выход
@@ -25,6 +26,8 @@ defmodule Core.Otel.Es do
   Прикладная ошибка — `record_error/1`; доменный отказ, в том числе `:version_mismatch` после
   повторов, — исход команды, а не сбой: статус span'а не меняется.
   """
+
+  import Core.Version, only: [is_version: 1]
 
   alias Core.Error
   alias Core.Es
@@ -41,6 +44,7 @@ defmodule Core.Otel.Es do
   @attr_event_id "core.es.event.id"
   @attr_aggregate_type "core.es.aggregate.type"
   @attr_aggregate_id "core.es.aggregate.id"
+  @attr_aggregate_version "core.es.aggregate.version"
   @attr_command "core.es.command"
   @attr_execute_mode "core.es.execute.mode"
   @attr_retries "core.es.retries"
@@ -111,22 +115,31 @@ defmodule Core.Otel.Es do
   Выполнить `fun` — ожидание проекции после записи — в span'е `await <имя проекции>` внутри
   трейса вызывающего; `{:error, _}` результата отмечается `Core.Otel.record_error/1`.
   """
-  @spec await(String.t(), String.t(), String.t(), (-> Result.unit())) ::
+  @spec await(String.t(), String.t(), String.t(), Version.expected(), (-> Result.unit())) ::
           Result.unit()
 
-  def await(projection_name, type, aggregate_id, fun)
+  def await(projection_name, type, aggregate_id, version, fun)
       when is_binary(projection_name) and is_binary(type) and is_binary(aggregate_id) and
-             is_function(fun, 0) do
-    attributes = %{
-      @attr_projection_name => projection_name,
-      @attr_aggregate_type => type,
-      @attr_aggregate_id => aggregate_id
-    }
+             is_version(version) and is_function(fun, 0) do
+    attributes =
+      put_version(
+        %{
+          @attr_projection_name => projection_name,
+          @attr_aggregate_type => type,
+          @attr_aggregate_id => aggregate_id
+        },
+        version
+      )
 
     Otel.span("await #{projection_name}", [attributes: attributes], fn -> recorded(fun.()) end)
   end
 
   # ---
+
+  defp put_version(attributes, :current), do: attributes
+
+  defp put_version(attributes, %Version{value: version}),
+    do: Map.put(attributes, @attr_aggregate_version, version)
 
   defp recorded(:ok), do: :ok
 
