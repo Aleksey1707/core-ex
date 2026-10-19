@@ -25,6 +25,20 @@ defmodule Core.Outbox.TestTest do
       assert statuses(id) == [:published]
     end
 
+    test "время публикации реальное при остановленных часах" do
+      :ok = Core.Clock.Test.freeze(~U[2000-01-01 00:00:00Z])
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open()])
+
+      :ok = Outbox.Test.drain([])
+
+      key = Config.codec().dump(id)
+      query = from(r in Outbox.Repo.Pg.Schema, where: r.key == ^key, select: [r.updated_at, r.published_at])
+      times = TestRepo.one!(query)
+
+      for at <- times, do: assert_in_delta(DateTime.to_unix(at), System.os_time(:second), 5)
+    end
+
     test "filter отсекает сообщение до обработчика, {:skip, _} сдвигает курсор" do
       id = Account.ID.new()
       write!(Account.Repo.Pg, id, [open(), rename("Другое")])
@@ -160,8 +174,12 @@ defmodule Core.Outbox.TestTest do
       assert_received {:data, :tenant}
     end
 
-    test "неизвестный ключ, подписчик без name и повтор name — ArgumentError" do
+    test "неизвестный ключ, подписчик без name или topic и повтор name — ArgumentError" do
       assert_raise ArgumentError, ~r/filtr/, fn -> Outbox.Test.drain([subscriber(notify(:a), filtr: & &1)]) end
+
+      assert_raise ArgumentError, ~r/:topic/, fn ->
+        Outbox.Test.drain([Keyword.delete(subscriber(notify(:a)), :topic)])
+      end
 
       assert_raise ArgumentError, ~r/:name/, fn ->
         Outbox.Test.drain([Keyword.delete(subscriber(notify(:a)), :name)])
@@ -227,6 +245,25 @@ defmodule Core.Outbox.TestTest do
       assert message =~ "subscriber=:stuck"
       assert message =~ ~r/attempts=[1-9]/
       assert message =~ "сбой обработчика"
+    end
+
+    test "упавший проход валит settle текстом исключения, лог — одной строкой" do
+      crashing = subscriber(notify(:a), context_factory: fn -> raise "сбой контекста" end)
+      reactor = start_supervised!({Outbox.Test.Reactor, subscribers: [crashing]})
+
+      log =
+        capture_log(fn ->
+          write!(Account.Repo.Pg, Account.ID.new(), [open()])
+
+          error = assert_raise Outbox.Test.NotSettled, fn -> Outbox.Test.settle(reactor) end
+          assert Exception.message(error) =~ "сбой контекста"
+          assert Exception.message(error) =~ "test_test.exs"
+        end)
+
+      assert log =~
+               ~s{Outbox.Test.Reactor: проход доставки упал, опрос остановлен: error="** (RuntimeError) сбой контекста"}
+
+      refute log =~ "test_test.exs"
     end
 
     test "мёртвое письмо валит settle, с dead_letters: :allow — проходит" do

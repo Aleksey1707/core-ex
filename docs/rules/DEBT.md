@@ -113,11 +113,11 @@ backoff растянул бы цепочку реакций, которую жд
 
 `20-agreements.md`, «Генерируемые функции», выполнено для `Core.Es.Aggregate`,
 `Core.Es.Aggregate.Repo.Pg`, `Core.Es.Aggregate.Process`, `new!/1` Prim, `now!/0`
-`Prim.DateTime`, `Core.Version.new/0` и клоуз плагинов `Codec.Facade`. Открытые головы,
-несуженный результат и bang через `Core.Result.unwrap!/1` остаются у `Core.Repo.Pg`,
+`Prim.DateTime`, `today!/0` `Prim.Date`, `Core.Version.new/0` и клоуз плагинов `Codec.Facade`.
+Открытые головы, несуженный результат и bang через `Core.Result.unwrap!/1` остаются у `Core.Repo.Pg`,
 `Repo.Pg.StateStored`, `Repo.Pg.Schema`, `Core.View`, `Core.Enum`, `Core.Context.Accessor`,
 `Core.Codec`, Prim-фолбэка `load/2` / `load!/2` у `Codec.Facade`, `Codec.Plugin`,
-`Core.Es.Outbox`, `Core.Es.ValueChanged`, `today!/0` / `from!/1` у `Prim.Date` и `Prim.DateTime`.
+`Core.Es.Outbox`, `Core.Es.ValueChanged`, `from!/1` у `Prim.Date` и `Prim.DateTime`.
 
 Почему остаётся: граница ставится срезами спеки `.scratch/es-type-safety/` (тикеты 09–11), и
 правка без сценария фикстуры-потребителя, который она делает видимым, не вносится.

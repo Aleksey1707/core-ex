@@ -168,8 +168,9 @@ defmodule Core.Outbox.Test do
   end
 
   defp mark_published(records) do
-    published_at = Outbox.PublishedAt.now!()
-    at = Outbox.UpdatedAt.now!()
+    now = DateTime.utc_now()
+    published_at = Outbox.PublishedAt.new!(now)
+    at = Outbox.UpdatedAt.new!(now)
     Enum.map(records, &Record.mark_published(&1, published_at, at))
   end
 
@@ -223,7 +224,7 @@ defmodule Core.Outbox.Test do
   defp dead_letter(subscriber, message, reason, attempts, error) do
     Logger.warning(
       "#{@label}: сообщение в мёртвые письма: topic=#{subscriber.topic} " <>
-        "subscriber=#{inspect(subscriber.name)} reason=#{reason} attempts=#{attempts} ошибка=#{error.message}"
+        "subscriber=#{inspect(subscriber.name)} reason=#{reason} attempts=#{attempts} error=#{error.message}"
     )
 
     %DeadLetter{
@@ -282,7 +283,7 @@ defmodule Core.Outbox.Test do
   # ---
 
   defp await_settled(reactor, dead_letters, timeout, deadline) do
-    case report(reactor, timeout, deadline) do
+    case request_report(reactor, timeout, deadline) do
       {:ok, report} ->
         check_settled(report, reactor, dead_letters, timeout, deadline)
 
@@ -293,7 +294,7 @@ defmodule Core.Outbox.Test do
 
   # Реактор отвечает между проходами: долгий обработчик или транзакция теста держат ответ.
   # Предел вызова — остаток ожидания с запасом, чтобы провал был `NotSettled`, а не exit.
-  defp report(reactor, timeout, deadline) do
+  defp request_report(reactor, timeout, deadline) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
     GenServer.call(reactor, :report, remaining + @report_grace_ms)
   catch
@@ -336,7 +337,7 @@ defmodule Core.Outbox.Test do
   defp line(topic, %Message{} = message, subscriber, attempts, error) do
     "  topic=#{topic} tag=#{Message.find_header(message, @tag_header)} " <>
       "event_id=#{Message.find_header(message, @event_id_header)} subscriber=#{inspect(subscriber)} " <>
-      "attempts=#{attempts} ошибка=#{error_text(error)}"
+      "attempts=#{attempts} error=#{error_text(error)}"
   end
 
   defp error_text(nil), do: "—"
@@ -398,11 +399,12 @@ defmodule Core.Outbox.Test do
 
   defp parse_subscriber!(opts) when is_list(opts) do
     StartOpts.keys!(@label, opts, @subscriber_keys)
+    if not Keyword.has_key?(opts, :topic), do: StartOpts.raise_invalid!(@label, :topic, "непустую строку", nil)
     step = Step.new!(@label, opts)
 
     %{
       name: StartOpts.atom!(@label, opts, :name),
-      topic: StartOpts.binary!(@label, opts, :topic),
+      topic: step.topic,
       step: %{step | data: Keyword.get(opts, :subscribe_data)},
       max_attempts: StartOpts.pos_integer!(@label, opts, :max_attempts, @default_max_attempts)
     }

@@ -107,11 +107,10 @@ defmodule Core.Outbox.Release do
   end
 
   defp app_modules(app) do
-    _loaded = Application.load(app)
-
-    case Application.spec(app, :modules) do
-      nil -> raise ArgumentError, "#{@label}: приложение #{inspect(app)} не найдено"
-      modules -> modules
+    case Application.load(app) do
+      :ok -> Application.spec(app, :modules)
+      {:error, {:already_loaded, ^app}} -> Application.spec(app, :modules)
+      {:error, reason} -> raise ArgumentError, "#{@label}: приложение #{inspect(app)} не загружено: #{inspect(reason)}"
     end
   end
 

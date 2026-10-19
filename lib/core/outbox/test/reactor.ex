@@ -29,15 +29,20 @@ defmodule Core.Outbox.Test.Reactor do
 
   @label "Outbox.Test.Reactor"
   @interval_ms 10
+  @shutdown_ms 30_000
 
-  @doc "Спецификация ребёнка; `owner:` по умолчанию — вызывающий процесс."
+  @doc """
+  Спецификация ребёнка; `owner:` по умолчанию — вызывающий процесс. Остановка ждёт конца прохода
+  до #{@shutdown_ms} мс.
+  """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts) do
     %{
       id: __MODULE__,
       start: {__MODULE__, :start_link, [Keyword.put_new(opts, :owner, self())]},
-      restart: :temporary
+      restart: :temporary,
+      shutdown: @shutdown_ms
     }
   end
 
@@ -67,8 +72,8 @@ defmodule Core.Outbox.Test.Reactor do
       :ok ->
         {:noreply, schedule(state, @interval_ms)}
 
-      {:crashed, text} ->
-        crashed(state, text)
+      {:crashed, banner, text} ->
+        crashed(state, banner, text)
     end
   end
 
@@ -97,15 +102,18 @@ defmodule Core.Outbox.Test.Reactor do
   defp safe_drain(subscribers) do
     Outbox.Test.drain(subscribers)
   rescue
-    exception -> {:crashed, Exception.format(:error, exception, __STACKTRACE__)}
+    exception -> crash(:error, exception, __STACKTRACE__)
   catch
-    :exit, reason -> {:crashed, Exception.format(:exit, reason, __STACKTRACE__)}
+    :exit, reason -> crash(:exit, reason, __STACKTRACE__)
   end
 
+  defp crash(kind, reason, stacktrace),
+    do: {:crashed, Exception.format_banner(kind, reason, stacktrace), Exception.format(kind, reason, stacktrace)}
+
   # Проход, упавший после выхода владельца, — закрытый sandbox, а не сбой доставки.
-  defp crashed(state, text) do
+  defp crashed(state, banner, text) do
     if Process.alive?(state.owner) do
-      Logger.error("#{@label}: проход доставки упал, опрос остановлен: #{text}")
+      Logger.error("#{@label}: проход доставки упал, опрос остановлен: error=#{inspect(banner)}")
       {:noreply, %{state | crash: text}}
     else
       {:stop, :normal, state}

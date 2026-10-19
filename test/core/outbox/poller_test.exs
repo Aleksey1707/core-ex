@@ -232,6 +232,7 @@ defmodule Core.Outbox.PollerTest do
 
   test "время публикации реальное при остановленных часах", %{writer: writer, context: context} do
     :ok = Core.Clock.Test.global()
+    on_exit(&Core.Clock.Test.private/0)
     :ok = Core.Clock.Test.freeze(~U[2000-01-01 00:00:00Z])
     record = append_record(context, "frozen")
     poller = start_poller(Delivery.Mq.new(MqFake.Writer, writer))

@@ -437,10 +437,9 @@ defmodule Core.Es.Store do
     |> Enum.map(&positioned/1)
   end
 
-  @doc """
-  Строки типов `types` с `at` не раньше `since` в порядке commit (`xid`, `number`) — поток для
-  переопубликации окна (`Core.Outbox.Release.republish_since/2`). Читается внутри транзакции `dao`.
-  """
+  # Строки типов с `at` не раньше `since` в порядке commit — поток окна
+  # `Core.Outbox.Release.republish_since/2`; читается внутри транзакции `dao`.
+  @doc false
   @spec stream_since(Ecto.Repo.t(), [String.t()], DateTime.t()) :: Enumerable.t(Schema.t())
 
   def stream_since(dao, types, %DateTime{} = since) when is_atom(dao) and is_list(types) do

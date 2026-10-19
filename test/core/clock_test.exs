@@ -149,6 +149,7 @@ defmodule Core.ClockGlobalTest do
 
   test "глобальный режим — время владельца видят все процессы" do
     :ok = Clock.Test.global()
+    on_exit(&Clock.Test.private/0)
     :ok = Clock.Test.freeze(@at)
     parent = self()
 
@@ -157,7 +158,22 @@ defmodule Core.ClockGlobalTest do
     assert_receive {:now, @at}
   end
 
+  test "private/0 возвращает частный режим: другие процессы видят реальное время" do
+    :ok = Clock.Test.global()
+    on_exit(&Clock.Test.private/0)
+    :ok = Clock.Test.freeze(@at)
+    parent = self()
+
+    :ok = Clock.Test.private()
+    spawn(fn -> send(parent, {:now, Clock.now()}) end)
+
+    assert_receive {:now, now}
+    refute now == @at
+    assert Clock.now() == @at
+  end
+
   test "выход владельца глобального режима возвращает частный" do
+    on_exit(&Clock.Test.private/0)
     parent = self()
 
     owner =

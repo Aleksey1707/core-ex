@@ -78,6 +78,12 @@ defmodule Core.Outbox.ReleaseTest do
 
       assert outbox_rows([derived]) == []
     end
+
+    test "приложение, которое не загружается, — ArgumentError с причиной до записи" do
+      assert_raise ArgumentError, ~r/приложение :no_such_app не загружено: .*no_such_app\.app/, fn ->
+        Release.republish_since(:no_such_app, @since)
+      end
+    end
   end
 
   # ---

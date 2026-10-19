@@ -295,14 +295,18 @@ Status: ready-for-agent
   `Core.Es.Store.Test`.
 - **Подписчики.**
   - Список keyword в той же форме, что приложение отдаёт `MqSubscriberReliable`.
-  - Работают `topic`, `filter`, `from_message`, `on_message`, `context_factory`, `max_attempts`.
-  - Сетевые ключи (`reader_module`, `reader`, `dlq_*`, `subscribe*`, `name`, `shutdown`,
-    `poll_interval_ms`, `retry_max_ms`) игнорируются.
+  - Работают `topic`, `filter`, `from_message`, `on_message`, `context_factory`, `max_attempts`;
+    `subscribe_data` передаётся в `on_message`, как у подписчика дерева.
+  - `name` обязательна и различна у подписчиков: это ключ курсора.
+  - Сетевые ключи (`reader_module`, `reader`, `dlq_*`, `subscribe`, `shutdown`, `poll_interval_ms`,
+    `retry_max_ms`) игнорируются.
 - **`drain/2`.**
   - Синхронный проход в вызывающем процессе.
   - Записи outbox резервируются и сохраняются тем же `Core.Outbox.Repo`, что у поллера.
   - Запись превращается в `Mq.Message` той же функцией, что у `Delivery.Mq`, поэтому wire, заголовки
     и запечатанные ПДн совпадают.
+  - `traceparent` сообщения — из записи outbox: span создания, который доставка в брокер добавляет
+    перед отправкой, дублёр не создаёт.
   - Сообщение попадает в журнал своего топика; у каждого подписчика свой курсор.
   - Состояние журналов, курсоров и мёртвых писем живёт в процессе, который зовёт `drain`.
 - **Доставка.**
