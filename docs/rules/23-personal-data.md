@@ -3,14 +3,15 @@
 - **Область.** `lib/core/prim.ex`, `lib/core/prim/**` (опция `personal:`), `lib/core/codec.ex`
   (`load_composite/3`), `lib/core/es/event/payload.ex` и `lib/core/codec/plugin/fields.ex`
   (`subject:`), `lib/core/es/personal.ex`, `lib/core/es/personal/**`, шифрование и расшифровка в
-  `lib/core/es/store.ex`, flush write-репозиториев и снапшоты
-  (`lib/core/es/aggregate/repo/pg/snapshot.ex`); у потребителя — Prim с персональными данными
-  (ПДн), события с ними и своя реализация хранилища ключей.
+  `lib/core/es/store.ex`, flush write-репозиториев, снапшоты
+  (`lib/core/es/aggregate/repo/pg/snapshot.ex`), `lib/core/es/event/message.ex`; у потребителя —
+  Prim с персональными данными (ПДн), события с ними, подписчик на топик своего приложения и своя
+  реализация хранилища ключей.
 - **Читать перед.** Новым Prim, значение которого — ПДн; полем нагрузки события с ПДн;
   переводом Prim с ПДн с `sensitive:` на `personal:`; правкой редакции значения Prim в выводе;
   апкастером, `evolve/2` / `project/1`, golden-фикстурой и тестом события с полем `subject:`;
-  правкой записи или чтения событий и outbox; конфигурацией KEK, своей реализацией или правкой
-  хранилища ключей.
+  правкой записи или чтения событий и outbox; `from_message:` подписчика на события своего
+  приложения; конфигурацией KEK, своей реализацией или правкой хранилища ключей.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`; термины («ПДн-значение», «Субъект
   данных», «Уничтожение ключа субъекта») — `CONTEXT.md`, «Персональные данные».
 
@@ -152,8 +153,9 @@ AAD — `event_id` и wire-ключ поля, открытый текст — JS
 
 Расшифровка — шаг пакетной загрузки `Core.Es.Store` до апкаста и `load`: все `$pd` пачки уходят
 одним вызовом `open`, открытое значение встаёт на место `$pd`, уничтоженный ключ даёт
-`{"$pd": null}`. Шаг проходят свёртка и хвост со снапшотом, `page_stream`, пачка проекции и
-`Core.Es.Store.Test.events!/2`; тег, не объявленный проекцией, пропускается без расшифровки.
+`{"$pd": null}`. Шаг проходят свёртка и хвост со снапшотом, `page_stream`, пачка проекции,
+`Core.Es.Store.Test.events!/2` и сообщение брокера («Подписчик того же приложения»); тег, не
+объявленный проекцией, пропускается без расшифровки.
 
 | Исход | Свёртка (`get`, `get_decision`, …) | `page_stream` | Пачка проекции |
 |---|---|---|---|
@@ -459,6 +461,46 @@ subject_ids
 `test/core/es/personal/destroy_key_failure_test.exs` — сбой порта; `test/core/codec/facade_test.exs`
 — `CompileError` на `type: "core.subject"`; golden события —
 `test/core/es/personal/event_compat_test.exs`.
+
+## Подписчик того же приложения
+
+Тело сообщения о событии агрегата своего приложения несёт ПДн-значения тем же `{"$pd": …}`, что
+запись outbox. Подписчик на такой топик MUST разбирать его в `from_message:` функцией
+`Core.Es.Event.Message.load(family, message)`: семейство событий `<Aggregate>.Event` и
+`%Core.Mq.Message{}` → `Core.PubSub.decode_result(Es.Event.t())`. Свой `Jason.decode` +
+`codec.load` MUST NOT: `{"$pd": "<строка>"}`, дошедший до `load`, — `:sealed_personal_value`
+(`ns: :codec`), а апкастер видит шифротекст.
+
+Шаги — `Jason.decode` тела, шаг расшифровки (все `$pd` сообщения одним вызовом `open`) и
+`Core.Config.codec().load(family, wire)` с апкастом. Исходы ложатся в контракт подписчика
+(`14-events-outbox.md`, «Идемпотентность потребителей»):
+
+| Исход | Ответ | Подписчик |
+|---|---|---|
+| ключ субъекта уничтожен | `{:ok, event}` с `%Destroyed{}` на месте поля | `on_message` |
+| сбой хранилища ключей | `{:error, %Error{kind: :app}}` | повтор |
+| тело не JSON или tombstone — `:invalid_body` (`ns: :es`, `:domain`) | `{:reject, _}` | DLQ |
+| значение не открылось — `:unreadable_personal_value` | `{:reject, _}` | DLQ |
+| ошибка `load` — `:invalid_envelope`, `:unknown_event_type`, … | `{:reject, _}` | DLQ |
+| исключение апкаста или `load` на конверте с расшифрованным `$pd` — `:upcast_raised` | `{:reject, _}` | DLQ |
+
+Перечитывание `Core.Mq.Dlq.Reader` и возврат из `:failed` идут тем же `from_message` и правок не
+требуют. Реакция на уничтоженное значение, перекладывание ПДн в свой агрегат и интеграционные
+события — `deps/core/docs/rules/app/23-personal-data.md`, «Интеграция».
+
+```elixir
+# плохо — разбор мимо шага расшифровки: ПДн-поле приходит шифротекстом, load — :sealed_personal_value
+from_message: fn message ->
+  with {:ok, wire} <- Jason.decode(message.body), do: InCodec.load(Order.Event, wire)
+end
+
+# хорошо
+from_message: &Core.Es.Event.Message.load(Order.Event, &1)
+```
+
+Проверяется: `test/core/es/event/message_test.exs` — открытое и уничтоженное значение на теле
+записи outbox, апкаст, нечитаемое, сбой порта, `:upcast_raised` без значения, `:invalid_body`;
+describe «from_message: подписчика» — повтор и DLQ на `Core.PubSub.MqSubscriberReliable`.
 
 ## Чек-лист: добавляю ПДн
 

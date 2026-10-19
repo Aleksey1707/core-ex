@@ -209,6 +209,20 @@
   - стало: оба алерта из `deps/core/docs/rules/21-observability.md` с действием из
     `deps/core/docs/rules/app/21-observability.md`, «Алерты event sourcing».
 
+  Подписчик того же приложения — `Core.Es.Event.Message.load/2` (`docs/rules/23-personal-data.md`,
+  «Подписчик того же приложения»; `docs/rules/app/23-personal-data.md`, «Интеграция»). Раньше
+  подписчик на топик `<Aggregate>.Outbox` разбирал тело сам — `Jason.decode` и `codec.load`, — а на
+  теле с ПДн-полем `{"$pd": "<строка>"}` такой разбор даёт `:sealed_personal_value`. Теперь
+  `Core.Es.Event.Message.load(family, %Core.Mq.Message{})` → `Core.PubSub.decode_result(Es.Event.t())`
+  разбирает тело, расшифровывает все `$pd` сообщения одним вызовом `open` и грузит событие с
+  апкастом: уничтоженный ключ — событие с `%Destroyed{}`, сбой хранилища ключей — `{:error, _}`
+  (повтор), тело не JSON или tombstone (`:invalid_body`, `ns: :es`), нечитаемое значение, ошибка
+  `load` и `:upcast_raised` — `{:reject, _}` (DLQ). `Core.Mq.Dlq.Reader` и возврат из `:failed`
+  идут тем же `from_message`. Правка нужна подписчику на события своего приложения с ПДн:
+  - было: в `from_message` свой `Jason.decode(message.body)` и `InCodec.load(Order.Event, wire)`;
+  - стало: `from_message: &Core.Es.Event.Message.load(Order.Event, &1)`, а `on_message` на
+    `%Destroyed{}`, когда реакции нужно само ПДн, — `{:skip, reason}`.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,

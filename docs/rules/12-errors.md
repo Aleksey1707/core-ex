@@ -337,6 +337,9 @@ Fallback-контроллер состав сам не собирает: он о
   `detail: %{event_id, field}`); исключение апкаста или `load` на строке с расшифрованным `$pd` →
   `%Error{kind: :app}` (`ns: :es`, `code: :upcast_raised`) — `23-personal-data.md`, «Форма в
   хранении и доставке».
+- Сообщение брокера → событие (`Core.Es.Event.Message.load/2`): тело не JSON или tombstone →
+  `%Error{kind: :domain}` (`ns: :es`, `code: :invalid_body`, тела в `detail` нет) в
+  `{:reject, _}` — `23-personal-data.md`, «Подписчик того же приложения».
 - Резерв ключа (`append` репозитория с `key_reservations:`): ключ, занятый другим агрегатом, →
   `errors_mod.domain(behaviour, code, %{scope: scope})`, код — `code:` модуля ключа, значения
   ключа в detail нет — см. `13-repos.md`, «Резервы ключей». Отказ вставки, который не снял повтор,
@@ -381,6 +384,7 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
 | `Core.Es.Store` | `:es` | `:domain` | `:unreadable_personal_value` |
 | `Core.Es.Store` | `:es` | `:app` | `:upcast_raised` |
+| `Core.Es.Event.Message` | `:es` | `:domain` | `:invalid_body` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
 | `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |
 | `Core.Es.Personal.KeyStore` (порт; своя реализация отказывает тем же кодом) | `:key_store` | `:domain` | `:subject_destroyed` |

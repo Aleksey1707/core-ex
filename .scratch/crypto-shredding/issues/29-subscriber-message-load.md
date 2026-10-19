@@ -10,20 +10,20 @@
 **Blocked by:**
 - [23: ПДн-значение в `es_events` и outbox: шифрование и расшифровка](23-personal-value-in-events-and-outbox.md)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Spec:** [Crypto-shredding: ПДн в событиях под ключом субъекта](../spec.md) — «Outbox, брокер и подписчик»;
 ADR-0073
 
-- [ ] `Core.Es.Event.Message.load(family, %Core.Mq.Message{})` → `Core.PubSub.decode_result(Es.Event.t())`. Шаги:
+- [x] `Core.Es.Event.Message.load(family, %Core.Mq.Message{})` → `Core.PubSub.decode_result(Es.Event.t())`. Шаги:
       1. `Jason.decode` тела;
       2. шаг расшифровки — все `$pd` сообщения одним `open`;
       3. `Core.Config.codec().load(family, wire)` с апкастом.
-- [ ] Исходы:
+- [x] Исходы:
       - сбой хранилища — `{:error, _}`;
       - невалидный JSON, нечитаемое значение, ошибка `load`, замена исключения апкастера — `{:reject, _}`;
       - ключ уничтожен — `{:ok, event}` с `%Destroyed{}`.
-- [ ] Тесты на теле записи outbox, которую записал `append` (`Core.DataCase`):
+- [x] Тесты на теле записи outbox, которую записал `append` (`Core.DataCase`):
       - открытое значение;
       - уничтоженное после `destroy_key/3`;
       - нечитаемое;
@@ -32,8 +32,8 @@ ADR-0073
 
       Отдельно — связка с `Core.PubSub.MqSubscriberReliable` на фейковом читателе: `{:error, _}` даёт повтор,
       `{:reject, _}` — DLQ.
-- [ ] `Core.Mq.Dlq.Reader` и возврат из `:failed` идут тем же `from_message` и кода не меняют.
-- [ ] Свод:
+- [x] `Core.Mq.Dlq.Reader` и возврат из `:failed` идут тем же `from_message` и кода не меняют.
+- [x] Свод:
       - 23 «Подписчик того же приложения» — функция и её исходы;
       - app/23 «Интеграция»:
         - тот же идентификатор субъекта у перекладываемого ПДн — MUST, свой идентификатор того же лица — MUST NOT;
@@ -41,5 +41,5 @@ ADR-0073
         - ПДн в интеграционном событии — SHOULD NOT, это передача третьему лицу;
         - другое приложение на `:core` — тоже интеграция;
       - app/14 «Подписчики» и «Топики и запись в очередь» — ссылки на «Интеграцию».
-- [ ] `CHANGELOG.md`, сквозной пункт: `Core.Es.Event.Message.load/2`.
-- [ ] `make` зелёный.
+- [x] `CHANGELOG.md`, сквозной пункт: `Core.Es.Event.Message.load/2`.
+- [x] `make` зелёный.

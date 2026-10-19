@@ -80,11 +80,12 @@ defmodule Core.Es.Store do
   ## Загрузка пачки
 
   Прочитанные строки в события переводит один пакетный шаг — на всех путях чтения: свёртка и хвост
-  со снапшотом репозитория event-sourced агрегата, страница потока, пачка проекции и
-  `Core.Es.Store.Test.events!/2`. Шаг принимает пачку строк целиком и проходит её стадиями: все
-  строки → конверты, все `{"$pd": …}` пачки → один вызов `open` хранилища ключей, затем каждый
-  конверт → апкаст и загрузка фасадом. Открытое значение встаёт на место `$pd` wire-значением
-  поля, уничтоженный ключ — `{"$pd": null}`; строку `:skip` шаг не расшифровывает и не грузит.
+  со снапшотом репозитория event-sourced агрегата, страница потока, пачка проекции,
+  `Core.Es.Store.Test.events!/2` и сообщение брокера (`Core.Es.Event.Message.load/2`). Шаг
+  принимает пачку строк целиком и проходит её стадиями: все строки → конверты, все `{"$pd": …}`
+  пачки → один вызов `open` хранилища ключей, затем каждый конверт → апкаст и загрузка фасадом.
+  Открытое значение встаёт на место `$pd` wire-значением поля, уничтоженный ключ — `{"$pd": null}`;
+  строку `:skip` шаг не расшифровывает и не грузит.
 
   Исходы расшифровки: сбой хранилища — `{:error, _}` на всю пачку; значение не открылось —
   `:unreadable_personal_value` (`ns: :es`, `detail` — `event_id` и wire-ключ) у строки.
@@ -92,6 +93,7 @@ defmodule Core.Es.Store do
   `:upcast_raised` (`ns: :es`, `:app`): в `detail` — `event_id`, модуль исключения, модуль
   верхнего кадра и стек без аргументов кадров; строки без `$pd` падают как раньше.
 
+  `load_wires/2` — конверты с семейством событий у каждого, исход по конверту (сообщение брокера);
   `load_batch/2` — строки с кодеком событий у каждой, исход по строке (пачка проекции);
   `load_rows/3` — строки одного кодека, первая ошибка на всю пачку; `load_fold_rows/4` — свёртка:
   сбой хранилища — `{:error, _}`, ошибка строки — `Core.Exc`, шифротексты снапшотов идут в тот же
@@ -535,7 +537,7 @@ defmodule Core.Es.Store do
 
   def load_fold_rows(rows, event_codec, codec, sealed)
       when is_list(rows) and is_atom(event_codec) and is_atom(codec) and is_list(sealed) do
-    with {:ok, {loaded, opened}} <- load_entries(Enum.map(rows, &{event_codec, &1}), codec, sealed),
+    with {:ok, {loaded, opened}} <- load_entries(Enum.map(rows, &to_wire({event_codec, &1})), codec, sealed),
          do: {:ok, {Enum.map(loaded, &Result.unwrap!/1), opened}}
   end
 
@@ -548,37 +550,40 @@ defmodule Core.Es.Store do
   @doc false
   @spec load_batch([entry()], module()) :: Result.t([loaded()])
 
-  def load_batch(entries, codec) when is_list(entries) and is_atom(codec) do
+  def load_batch(entries, codec) when is_list(entries) and is_atom(codec),
+    do: load_wires(Enum.map(entries, &to_wire/1), codec)
+
+  @doc false
+  @spec load_wires([{module(), Es.Event.Codec.wire()} | :skip], module()) :: Result.t([loaded()])
+
+  def load_wires(entries, codec) when is_list(entries) and is_atom(codec) do
     with {:ok, {loaded, []}} <- load_entries(entries, codec, []), do: {:ok, loaded}
   end
 
   # ---
 
   defp load_entries(entries, codec, sealed) do
-    wires = Enum.map(entries, &to_wire/1)
-
-    with {:ok, {opened, opened_sealed}} <- Personal.Wire.open_wires(Enum.map(wires, &wire/1), sealed),
-         do: {:ok, {Enum.zip_with(wires, opened, &load_wire(&1, &2, codec)), opened_sealed}}
+    with {:ok, {opened, opened_sealed}} <- Personal.Wire.open_wires(Enum.map(entries, &wire/1), sealed),
+         do: {:ok, {Enum.zip_with(entries, opened, &load_wire(&1, &2, codec)), opened_sealed}}
   end
 
   defp to_wire(:skip), do: :skip
-  defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec), do: {event_codec, Schema.to_wire(row)}
+
+  defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec),
+    do: {event_codec.__codec_union__(), Schema.to_wire(row)}
 
   defp wire(:skip), do: :skip
-  defp wire({_event_codec, wire}), do: wire
+  defp wire({_family, wire}), do: wire
 
   defp load_wire(:skip, :skip, _codec), do: :skip
   defp load_wire(_entry, {:unreadable, event_id, field}, _codec), do: {:error, unreadable(event_id, field)}
-  defp load_wire({event_codec, _wire}, {:ok, {wire, false}}, codec), do: load_wire(event_codec, wire, codec)
+  defp load_wire({family, _wire}, {:ok, {wire, false}}, codec), do: codec.load(family, wire)
 
-  defp load_wire({event_codec, _wire}, {:ok, {wire, true}}, codec) do
-    load_wire(event_codec, wire, codec)
+  defp load_wire({family, _wire}, {:ok, {wire, true}}, codec) do
+    codec.load(family, wire)
   rescue
     exception -> {:error, upcast_raised(wire, exception, __STACKTRACE__)}
   end
-
-  defp load_wire(event_codec, wire, codec) when is_atom(event_codec),
-    do: codec.load(event_codec.__codec_union__(), wire)
 
   defp unreadable(event_id, field) do
     Error.domain(__MODULE__,
