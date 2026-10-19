@@ -51,6 +51,18 @@
 
 ### Новое
 
+- **Проверки живости и готовности — `Core.Web.HealthPlug`** (норма —
+  `docs/rules/10-architecture.md`, «Граница HTTP»; `docs/rules/app/15-web-api.md`, «Проверки
+  живости и готовности»). Раньше `/health` приложение писало само, и проверка базы без таймаута
+  либо отсутствовала, либо висла вместе с пулом. Теперь плаг отвечает на `health_path:`
+  (`/health`) `200` `ok` без проверок, а на `ready_path:` (`/ready`) — `SELECT 1` по каждому из
+  `repos:` с пределом `timeout:` (1000 мс): `200` `ok` либо `503` `unavailable` и `warning` в лог;
+  после ответа `halt`, прочие пути проходят дальше. Неверные опции — `ArgumentError` на `init/1`.
+  Правка потребителя:
+  - было: `get "/health", HealthController, :show` в роутере;
+  - стало: `plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]` в `MyAppWeb.Endpoint` до
+    `Plug.Telemetry`; liveness-проба — `/health`, healthcheck compose и балансировщик — `/ready`.
+
 - **Задачи релиза `Core.Release.migrate/1`, `Core.Release.rollback/3` и
   `Core.Outbox.Release.requeue/1`** (норма — `docs/rules/app/10-architecture.md`, «Задачи релиза»).
   Раньше миграции на релизе приложение прогоняло своим обходом `Ecto.Migrator`, а `:failed` записи

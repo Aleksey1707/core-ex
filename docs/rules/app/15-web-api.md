@@ -9,7 +9,8 @@
 Общую часть границы даёт библиотека: обёртка ответа и её схема (`Core.Web.Response`,
 `Core.Web.Response.Schema`), разбор параметров (`Core.Web.Params`), таблица `%Error{}` → статус
 (`Core.Web.ErrorMapper`), camelCase (`Core.Helper.Keys`), сервер метрик (`Core.Web.MetricsPlug`),
-событие страницы событий на wire с названием и сведениями (`Core.Web.Event`) —
+проверки живости и готовности (`Core.Web.HealthPlug`), событие страницы событий на wire с названием
+и сведениями (`Core.Web.Event`) —
 `deps/core/docs/rules/10-architecture.md`, «Граница HTTP». Приложение её конфигурирует, а не
 повторяет: своих копий этих модулей быть не должно.
 
@@ -538,6 +539,38 @@ defmodule MyAppWeb.Schemas.Event do
     ],
     labels: true
 end
+```
+
+## Проверки живости и готовности
+
+Liveness и readiness отдаёт `Core.Web.HealthPlug` в эндпоинте приложения: `/health` — `200` без
+проверок, `/ready` — `SELECT 1` по каждому репозиторию с таймаутом, `200` либо `503`
+(`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»).
+
+- Плаг MUST стоять в `MyAppWeb.Endpoint` до `Plug.Telemetry` и `Plug.Parsers`: проба раз в
+  несколько секунд не идёт в request-лог и не проходит пайплайны роутера с аутентификацией.
+- `repos:` MUST перечислять все репозитории из `:ecto_repos` приложения: без одного из них
+  readiness пустит трафик к приложению, которое не может писать.
+- Проба, которая перезапускает контейнер (liveness), — `/health`; проба, по которой пускают трафик
+  и ждут готовности соседи (`depends_on: condition: service_healthy` у compose, балансировщик), —
+  `/ready`. Liveness на `/ready` MUST NOT: недоступная база перезапускала бы здоровое приложение
+  по кругу.
+- Свой контроллер или маршрут роутера с запросом в базу ради проверки — MUST NOT: без таймаута
+  проба виснет вместе с пулом, а ответ расходится с плагом библиотеки.
+
+```elixir
+# плохо — проверка в роутере: за аутентификацией и Plug.Telemetry, запрос без таймаута
+get "/health", HealthController, :show
+
+# хорошо — lib/my_app_web/endpoint.ex
+plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]
+plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+```
+
+```yaml
+# хорошо — compose.yml: сервис готов, когда отвечает база
+healthcheck:
+  test: ["CMD", "wget", "-qO-", "http://localhost:4000/ready"]
 ```
 
 ## Связанные правила

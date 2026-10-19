@@ -175,11 +175,13 @@ Sentry (ADR-0071): то, что в таблице помечено «при `ope
 | `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы со схемой данных аргументом, `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
 | `Core.Web.CriticalError` | отчёт о критической ошибке в службу учёта ошибок и идентификатор ошибки для обёртки 500 (`report/2`), только при `:sentry` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
+| `Core.Web.HealthPlug` | liveness (`/health`, `200` без проверок) и readiness (`/ready`, `SELECT 1` по каждому из `repos:` с пределом `timeout:`, `200` либо `503` с `warning` в лог) в эндпоинте приложения |
 | `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON, при `labels: true` — с названием и сведениями, при `open_api_spex` — и схема этого JSON (ADR-0066; `11-domain.md`, «Wire сведений») |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
 
 `Core.Web.*` возвращает **данные**: map обёртки и кортеж ответа. Ни `Plug.Conn`, ни
-`Phoenix.Controller` в них не участвуют (исключение — `MetricsPlug`, он и есть плаг).
+`Phoenix.Controller` в них не участвуют (исключения — `MetricsPlug` и `HealthPlug`, они и есть
+плаги).
 
 Что остаётся у потребителя (роутер, эндпоинт, контроллеры, `FallbackController`, схемы, плаги,
 презентеры) — `deps/core/docs/rules/app/15-web-api.md`.
