@@ -85,6 +85,21 @@ defmodule Core.Mq.Stream.ReaderTest do
     assert FakeConn.credits() == []
   end
 
+  test "pending хранит timestamp своего чанка до commit", %{reader: reader, topic: topic} do
+    assert Stream.Reader.info(reader).pending_ts == nil
+
+    deliver(reader, 0, encoded_many(topic, 0, 1), 1_000)
+    deliver(reader, 1, encoded_many(topic, 1, 1), 2_000)
+
+    assert {:ok, %Mq.Message{body: "body-0"}} = Stream.Reader.get(reader, 0)
+    assert Stream.Reader.info(reader).pending_ts == 1_000
+    assert :ok = Stream.Reader.commit(reader)
+    assert Stream.Reader.info(reader).pending_ts == nil
+
+    assert {:ok, %Mq.Message{body: "body-1"}} = Stream.Reader.get(reader, 0)
+    assert Stream.Reader.info(reader).pending_ts == 2_000
+  end
+
   test "credit только по исчерпании чанка", %{reader: reader, topic: topic} do
     deliver(reader, 0, encoded_many(topic, 0, 50))
     deliver(reader, 50, encoded_many(topic, 50, 50))
@@ -449,14 +464,14 @@ defmodule Core.Mq.Stream.ReaderTest do
     :ok
   end
 
-  defp deliver(reader, chunk_id, entries) do
+  defp deliver(reader, chunk_id, entries, timestamp \\ 0) do
     n = length(entries)
 
     chunk = %OsirisChunk{
       chunk_type: :chunk_user,
       num_entries: n,
       num_records: n,
-      timestamp: 0,
+      timestamp: timestamp,
       epoch: 1,
       chunk_id: chunk_id,
       chunk_crc: 0,

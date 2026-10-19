@@ -82,18 +82,9 @@ defmodule Core.Mq.PromExTest do
   end
 
   test "повтор component и topic: subscribed — минимум, buffer_len — сумма, error в лог" do
-    on_exit(fn ->
-      for {{Core.PromEx.Labels, _source} = key, _value} <- :persistent_term.get(), do: :persistent_term.erase(key)
-    end)
+    on_exit(&reset_labels/0)
 
-    info = %{
-      buffer_len: 2,
-      chunk_remaining: 1,
-      dropped_offset: nil,
-      pending?: false,
-      subscribed?: true,
-      topic: "orders"
-    }
+    info = %{reader_info() | buffer_len: 2, chunk_remaining: 1}
 
     start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
 
@@ -124,14 +115,7 @@ defmodule Core.Mq.PromExTest do
   end
 
   test "отказ одного reader'а — отказ сбора группы readers, а не component; остальные собраны" do
-    info = %{
-      buffer_len: 1,
-      chunk_remaining: 0,
-      dropped_offset: nil,
-      pending?: false,
-      subscribed?: true,
-      topic: "orders"
-    }
+    info = %{reader_info() | buffer_len: 1}
 
     start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
     down = spawn(fn -> receive do: (_call -> exit(:down)) end)
@@ -156,14 +140,7 @@ defmodule Core.Mq.PromExTest do
   end
 
   test "одна component с разными topic — не повтор" do
-    info = %{
-      buffer_len: 0,
-      chunk_remaining: 0,
-      dropped_offset: nil,
-      pending?: false,
-      subscribed?: true,
-      topic: "orders"
-    }
+    info = reader_info()
 
     start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
 
@@ -173,6 +150,49 @@ defmodule Core.Mq.PromExTest do
     })
 
     assert capture_log(fn -> PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end) == ""
+  end
+
+  describe "возраст pending stream reader" do
+    @pending_age [:prom_ex, :plugin, :mq, :reader, :pending_age_seconds]
+
+    test "gauge с метками component и topic" do
+      assert [%{metrics: metrics}] = PromEx.polling_metrics(otp_app: :core, stream_readers: @readers)
+      age = Enum.find(metrics, &(&1.name == [:core, :prom_ex, :mq, :reader, :pending_age_seconds]))
+
+      assert %Telemetry.Metrics.LastValue{tags: [:component, :topic]} = age
+    end
+
+    test "сейчас минус время сообщения в pending; при повторе — максимум" do
+      on_exit(&reset_labels/0)
+
+      now = System.os_time(:millisecond)
+      info = %{reader_info() | pending?: true, pending_ts: now - 5_000}
+
+      start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
+
+      start_supervised!(%{
+        id: :second,
+        start: {StubReader, :start_link, [[name: :mq_promex_second, info: %{info | pending_ts: now - 1_000}]]}
+      })
+
+      attach([@pending_age])
+      capture_log(fn -> assert :ok = PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end)
+
+      assert_receive {:telemetry, @pending_age, %{value: seconds}, %{component: "orders", topic: "orders"}}
+      assert seconds >= 5 and seconds < 60
+    end
+
+    test "пустой pending — 0" do
+      start_supervised!(%{
+        id: :first,
+        start: {StubReader, :start_link, [[name: :mq_promex_first, info: reader_info()]]}
+      })
+
+      attach([@pending_age])
+      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :single, []})
+
+      assert_receive {:telemetry, @pending_age, %{value: 0}, %{component: "orders", topic: "orders"}}
+    end
   end
 
   describe "чтение Kafka" do
@@ -264,7 +284,26 @@ defmodule Core.Mq.PromExTest do
   end
 
   @doc false
+  def single, do: [%{component: "orders", name: :mq_promex_first}]
+
+  @doc false
   def kafka_readers, do: [%{component: "orders", name: :mq_promex_kafka}]
+
+  defp reset_labels do
+    for {{Core.PromEx.Labels, _source} = key, _value} <- :persistent_term.get(), do: :persistent_term.erase(key)
+  end
+
+  defp reader_info do
+    %{
+      buffer_len: 0,
+      chunk_remaining: 0,
+      dropped_offset: nil,
+      pending?: false,
+      pending_ts: nil,
+      subscribed?: true,
+      topic: "orders"
+    }
+  end
 
   defp start_kafka_reader!(info) do
     start_supervised!(%{id: :kafka, start: {StubReader, :start_link, [[name: :mq_promex_kafka, info: info]]}})

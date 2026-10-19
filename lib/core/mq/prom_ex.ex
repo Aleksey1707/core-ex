@@ -4,7 +4,7 @@ defmodule Core.Mq.PromEx do
 
   Event-метрики: publish в RabbitMQ Stream и в Kafka, deliver и decode_drop stream
   reader'а, циклы и выбросы в DLQ reliable-подписчика. Polling-метрики: длина буфера,
-  остаток текущего чанка, pending и наличие подписки у наблюдаемых reader'ов.
+  остаток текущего чанка, pending, его возраст и наличие подписки у наблюдаемых reader'ов.
 
   Опция `stream_readers:` — MFA-провайдер списка наблюдаемых stream reader'ов
   (`{MyAppApp.PromEx.Mq, :stream_readers, []}` → `[%{component: String.t(), name: atom()}]`),
@@ -12,10 +12,18 @@ defmodule Core.Mq.PromEx do
   потребителя, а не моменту сборки метрик (`10-architecture.md`). Без опции
   polling-группа не строится.
 
+  `reader_pending_age_seconds` — сейчас минус timestamp чанка, из которого пришло сообщение в
+  `pending` (прочитано, но не подтверждено `commit`); пустой `pending` — 0, поэтому на тихом топике
+  gauge не растёт. Timestamp ставит брокер при записи чанка: gauge меряет возраст сообщения, а не
+  время обработки, и отставший подписчик даёт тот же рост, что и застрявший. Расхождение часов
+  брокера и ноды в минус обрезается до 0 (`21-observability.md`, «Возраст неподтверждённого
+  сообщения Stream»).
+
   Reader'ы с одной парой `component` и `topic` сводятся в одно значение: `subscribed` — минимум,
-  `pending` — максимум, `buffer_len` и `chunk_remaining` — сумма; повтор — `error` в лог
-  (`Core.PromEx.Labels`). Топик reader'а известен только живому процессу, поэтому сводятся только
-  живые: упавший reader этими метриками не виден — его видит `up` плагина `Core.Workers.PromEx`.
+  `pending` и `pending_age_seconds` — максимум, `buffer_len` и `chunk_remaining` — сумма; повтор —
+  `error` в лог (`Core.PromEx.Labels`). Топик reader'а известен только живому процессу, поэтому
+  сводятся только живые: упавший reader этими метриками не виден — его видит `up` плагина
+  `Core.Workers.PromEx`.
 
   Чтение Kafka (`Core.Mq.Kafka.Reader`): event-счётчики `kafka_offset_reset_total{topic}`,
   `kafka_decode_drop_total{topic}`, `kafka_read_errors_total{topic, reason}` и
@@ -49,6 +57,7 @@ defmodule Core.Mq.PromEx do
   @buffer_len_event [:prom_ex, :plugin, :mq, :reader, :buffer_len]
   @chunk_remaining_event [:prom_ex, :plugin, :mq, :reader, :chunk_remaining]
   @pending_event [:prom_ex, :plugin, :mq, :reader, :pending]
+  @pending_age_event [:prom_ex, :plugin, :mq, :reader, :pending_age_seconds]
   @subscribed_event [:prom_ex, :plugin, :mq, :reader, :subscribed]
   @dlq_count_event [:prom_ex, :plugin, :mq, :dlq, :count]
   @kafka_lease_event [:prom_ex, :plugin, :mq, :kafka_reader, :lease]
@@ -189,10 +198,12 @@ defmodule Core.Mq.PromEx do
 
   def execute_reader_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
     Safe.execute(:mq, :readers, "mq readers", fn ->
+      now = System.os_time(:millisecond)
+
       groups =
         mod
         |> apply(fun, args)
-        |> Enum.flat_map(&reader_sample/1)
+        |> Enum.flat_map(&reader_sample(&1, now))
         |> Labels.group(&{&1.component, &1.topic})
 
       Labels.report("mq_readers mfa=#{inspect({mod, fun, args})}", groups)
@@ -271,6 +282,16 @@ defmodule Core.Mq.PromEx do
           tag_values: &reader_tag_values/1
         ),
         last_value(
+          metric_prefix ++ [:reader, :pending_age_seconds],
+          event_name: @pending_age_event,
+          description:
+            "Возраст pending-сообщения stream reader: сейчас минус timestamp его чанка; " <>
+              "без pending — 0",
+          measurement: :value,
+          tags: [:component, :topic],
+          tag_values: &reader_tag_values/1
+        ),
+        last_value(
           metric_prefix ++ [:reader, :subscribed],
           event_name: @subscribed_event,
           description: "Установлена ли подписка stream reader (0|1)",
@@ -283,16 +304,16 @@ defmodule Core.Mq.PromEx do
     )
   end
 
-  defp reader_sample(%{component: component, name: name}) do
+  defp reader_sample(%{component: component, name: name}, now) do
     Safe.collect(:mq, :readers, "mq reader #{component}", fn ->
       case Process.whereis(name) do
-        pid when is_pid(pid) -> [sample(component, name, Reader.info(pid))]
+        pid when is_pid(pid) -> [sample(component, name, Reader.info(pid), now)]
         nil -> []
       end
     end)
   end
 
-  defp sample(component, name, info) do
+  defp sample(component, name, info, now) do
     %{
       component: component,
       name: name,
@@ -300,9 +321,13 @@ defmodule Core.Mq.PromEx do
       buffer_len: info.buffer_len,
       chunk_remaining: info.chunk_remaining,
       pending: flag(info.pending?),
+      pending_age_seconds: pending_age_seconds(info.pending_ts, now),
       subscribed: flag(info.subscribed?)
     }
   end
+
+  defp pending_age_seconds(nil, _now), do: 0
+  defp pending_age_seconds(ts, now) when is_integer(ts), do: max(now - ts, 0) / 1_000
 
   defp flag(true), do: 1
   defp flag(false), do: 0
@@ -313,6 +338,7 @@ defmodule Core.Mq.PromEx do
     :telemetry.execute(@buffer_len_event, %{value: Enum.sum(values(samples, :buffer_len))}, meta)
     :telemetry.execute(@chunk_remaining_event, %{value: Enum.sum(values(samples, :chunk_remaining))}, meta)
     :telemetry.execute(@pending_event, %{value: Enum.max(values(samples, :pending))}, meta)
+    :telemetry.execute(@pending_age_event, %{value: Enum.max(values(samples, :pending_age_seconds))}, meta)
     :telemetry.execute(@subscribed_event, %{value: Enum.min(values(samples, :subscribed))}, meta)
   end
 

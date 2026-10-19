@@ -303,6 +303,18 @@
   - стало: та же опция с `personal: true` на новой области и событие-акт уничтожения с
     `def reservation(%Event.Forgotten{}), do: :release` в транзакции `destroy_key/3`.
 
+- **Возраст неподтверждённого сообщения Stream — gauge `mq_reader_pending_age_seconds`** (норма —
+  `docs/rules/21-observability.md`, «Возраст неподтверждённого сообщения Stream»). Раньше
+  застрявшего подписчика Stream было видно только по `mq_reader_pending` (0|1): флаг не говорит,
+  сколько сообщение ждёт, а алерт на нём горел бы и на штатной обработке. Теперь polling-группа
+  `stream_readers:` у `Core.Mq.PromEx` отдаёт ещё и `<prefix>_mq_reader_pending_age_seconds{component,
+  topic}` — сейчас минус timestamp чанка, который брокер ставит при записи; пустой `pending` — 0, и
+  на тихом топике gauge не растёт. `Core.Mq.Stream.Reader.info/1` отдаёт `pending_ts` — timestamp
+  чанка сообщения в `pending` (мс Unix-времени) или `nil`. В своде — рекомендованный алерт
+  `MqStreamReaderPendingOld`. Правка нужна только приложению, которое заводит алерт:
+  - было: алерта на застрявшего подписчика Stream нет;
+  - стало: `max by (component, topic) (my_app_prom_ex_mq_reader_pending_age_seconds) > <порог>`.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,

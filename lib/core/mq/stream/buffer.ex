@@ -7,12 +7,13 @@ defmodule Core.Mq.Stream.Buffer do
   чанка, сколько их осталось, размеры пришедших следом), поэтому живёт отдельно от
   процесса: здесь его видно и проверяется он без соединения, подписки и GenServer.
 
-  Записи хранятся сырыми — декодирует их `Mq.Stream.Reader` при выдаче.
+  Записи хранятся сырыми — декодирует их `Mq.Stream.Reader` при выдаче. Рядом с записью —
+  timestamp её чанка: из него reader считает возраст неподтверждённого сообщения.
   """
 
   defstruct entries: :queue.new(), remaining: 0, next_chunks: :queue.new()
 
-  @type entry :: {non_neg_integer(), binary()}
+  @type entry :: {offset :: non_neg_integer(), chunk_ts :: integer(), data :: binary()}
   @type credits :: non_neg_integer()
   # Поля не раскрываются в типе: `:queue.new/0` даёт dialyzer'у конкретный `{[], []}`,
   # и любой спек с `:queue.queue()` он считает нарушением opaque-типа очереди.

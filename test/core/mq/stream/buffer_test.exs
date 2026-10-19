@@ -10,8 +10,8 @@ defmodule Core.Mq.Stream.BufferTest do
     assert Buffer.len(buffer) == 2
     assert Buffer.remaining(buffer) == 2
 
-    assert {:ok, {0, "e0"}, buffer, 0} = Buffer.take(buffer)
-    assert {:ok, {1, "e1"}, buffer, 1} = Buffer.take(buffer)
+    assert {:ok, {0, 0, "e0"}, buffer, 0} = Buffer.take(buffer)
+    assert {:ok, {1, 0, "e1"}, buffer, 1} = Buffer.take(buffer)
     assert Buffer.len(buffer) == 0
     assert Buffer.remaining(buffer) == 0
   end
@@ -37,7 +37,7 @@ defmodule Core.Mq.Stream.BufferTest do
     {:ok, _entry, buffer, 0} = Buffer.take(buffer)
     {:ok, _entry, buffer, 0} = Buffer.take(buffer)
 
-    assert {:ok, {4, "e4"}, buffer, 1} = Buffer.take(buffer)
+    assert {:ok, {4, 0, "e4"}, buffer, 1} = Buffer.take(buffer)
     assert Buffer.remaining(buffer) == 0
   end
 
@@ -54,12 +54,12 @@ defmodule Core.Mq.Stream.BufferTest do
 
     {buffer, 0} = Buffer.put_chunk(buffer, entries(1, 1))
 
-    assert {:ok, {1, "e1"}, _buffer, 1} = Buffer.take(buffer)
+    assert {:ok, {1, 0, "e1"}, _buffer, 1} = Buffer.take(buffer)
   end
 
   # ---
 
   defp entries(from, count) do
-    Enum.map(from..(from + count - 1), &{&1, "e#{&1}"})
+    Enum.map(from..(from + count - 1), &{&1, 0, "e#{&1}"})
   end
 end

@@ -96,4 +96,27 @@ defmodule Core.Mq.StreamTest do
     assert max_len <= 100
     GenServer.stop(reader)
   end
+
+  test "pending несёт timestamp чанка брокера в мс Unix-времени", %{writer: writer, topic: topic} do
+    {:ok, msg} = Message.new(topic, %{"name" => "n"}, "aged", Mq.Key.new!("agg-1"))
+    before = System.os_time(:millisecond)
+    assert :ok = Writer.put(writer, msg)
+
+    {:ok, reader} =
+      Reader.start_link(
+        connection: Connection,
+        topic: topic,
+        subscriber_name: Mq.SubscriberName.new!("sub_age"),
+        reliable?: true,
+        initial_offset: :first
+      )
+
+    assert {:ok, %Message{body: "aged"}} = Reader.get(reader, 2_000)
+    ts = Reader.info(reader).pending_ts
+    assert_in_delta ts, before, 5_000
+
+    assert :ok = Reader.commit(reader)
+    assert Reader.info(reader).pending_ts == nil
+    GenServer.stop(reader)
+  end
 end

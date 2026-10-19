@@ -130,12 +130,18 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       GenServer.call(server, :commit, @call_timeout)
     end
 
-    @doc "Состояние буфера и курсора reader (для метрик и разбора)."
+    @doc """
+    Состояние буфера и курсора reader (для метрик и разбора).
+
+    `pending_ts` — timestamp чанка сообщения в `pending`: мс Unix-времени по часам ноды брокера на
+    момент записи чанка; `nil` без `pending`.
+    """
     @spec info(t()) :: %{
             buffer_len: non_neg_integer(),
             chunk_remaining: non_neg_integer(),
             dropped_offset: non_neg_integer() | nil,
             pending?: boolean(),
+            pending_ts: integer() | nil,
             subscribed?: boolean(),
             topic: String.t()
           }
@@ -179,6 +185,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
         chunk_remaining: Buffer.remaining(state.buffer),
         dropped_offset: state.dropped_offset,
         pending?: not is_nil(state.pending),
+        pending_ts: pending_ts(state.pending),
         subscribed?: not is_nil(state.subscription_id),
         topic: state.topic_name
       }
@@ -209,7 +216,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     # `store_offset` в клиенте — `GenServer.cast`: подтверждения сохранения нет, и обрыв
     # соединения виден только как exit по таймауту. Потеря offset безопасна (сообщение
     # переедет повторно), а вот падение reader'а на ней — нет.
-    def handle_call(:commit, _from, %{pending: {offset, _message}} = state) do
+    def handle_call(:commit, _from, %{pending: {offset, _ts, _message}} = state) do
       case store_offset(state, offset) do
         :ok -> {:reply, :ok, %{state | pending: nil, dropped_offset: nil}}
         {:error, %Error{} = error} -> {:reply, {:error, error}, state}
@@ -238,7 +245,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       entries =
         chunk.data_entries
         |> List.wrap()
-        |> Enum.with_index(fn entry, idx -> {chunk.chunk_id + idx, entry} end)
+        |> Enum.with_index(fn entry, idx -> {chunk.chunk_id + idx, chunk.timestamp, entry} end)
 
       {:noreply, put_chunk(state, entries)}
     end
@@ -368,6 +375,9 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       end
     end
 
+    defp pending_ts(nil), do: nil
+    defp pending_ts({_offset, ts, _message}), do: ts
+
     defp store_offset(state, offset) do
       state.connection.store_offset(state.topic_name, state.subscriber, offset)
       :ok
@@ -431,7 +441,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       grant_credits(%{state | buffer: buffer}, credits)
     end
 
-    defp pop_message(%{reliable?: true, pending: {_, message}} = state) do
+    defp pop_message(%{reliable?: true, pending: {_, _, message}} = state) do
       {:ok, message, state}
     end
 
@@ -440,15 +450,15 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
         :empty ->
           {:empty, state}
 
-        {:ok, {offset, data}, state} ->
-          yield_or_skip(state, offset, data)
+        {:ok, {offset, ts, data}, state} ->
+          yield_or_skip(state, offset, ts, data)
       end
     end
 
-    defp yield_or_skip(state, offset, data) do
+    defp yield_or_skip(state, offset, ts, data) do
       case decode_entry(state, data) do
         {:ok, message} ->
-          hold_if_reliable(state, offset, %{message | position: %Mq.Position{partition: nil, offset: offset}})
+          hold_if_reliable(state, offset, ts, %{message | position: %Mq.Position{partition: nil, offset: offset}})
 
         {:drop, state} ->
           state
@@ -479,11 +489,11 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     defp flush_dropped(state), do: state
 
-    defp hold_if_reliable(%{reliable?: true} = state, offset, message) do
-      {:ok, message, %{state | pending: {offset, message}}}
+    defp hold_if_reliable(%{reliable?: true} = state, offset, ts, message) do
+      {:ok, message, %{state | pending: {offset, ts, message}}}
     end
 
-    defp hold_if_reliable(state, _offset, message) do
+    defp hold_if_reliable(state, _offset, _ts, message) do
       {:ok, message, state}
     end
 

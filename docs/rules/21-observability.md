@@ -278,6 +278,7 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 | `MqDecodeDrops` | `sum by (topic) (increase(my_app_prom_ex_mq_decode_drop_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_decode_drop_total unless last_over_time(my_app_prom_ex_mq_decode_drop_total[5m] offset 5m)) > 0` | reader пропустил запись без обработки: конверт не разобран, в конверте чужой топик или чанк с sub-entry batching; у Kafka — то же условие по `my_app_prom_ex_mq_kafka_decode_drop_total`: запись не принимает `Mq.Message` |
 | `MqSubscriberDlq` | `sum by (topic, dlq_topic) (increase(my_app_prom_ex_mq_subscriber_dlq_total[5m])) > 0 or sum by (topic, dlq_topic) (my_app_prom_ex_mq_subscriber_dlq_total unless last_over_time(my_app_prom_ex_mq_subscriber_dlq_total[5m] offset 5m)) > 0` | подписчик отправил «ядовитое» сообщение в DLQ; метка `reason`: `rejected` — отказ обработчика, `exhausted` — исчерпание попыток (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
 | `MqDlqRequeuedStuck` | `max by (subscriber, topic) (my_app_prom_ex_mq_dlq_count{status="requeued"}) > 0`, `for: <порог>` | записи DLQ в Postgres возвращены оператором, но не перечитываются: подписчика над `Core.Mq.Dlq.Reader` этого топика нет на ноде или обработчик раз за разом отвечает `{:error, _}` (`14-events-outbox.md`, «Runbook: сообщения в DLQ») |
+| `MqStreamReaderPendingOld` | `max by (component, topic) (my_app_prom_ex_mq_reader_pending_age_seconds) > <порог>`, `for: <порог>` | сообщение Stream прочитано, но не подтверждено дольше порога: обработчик раз за разом отвечает `{:error, _}` или подписчик отстал на столько же; на тихом топике `pending` пуст и gauge — 0 |
 | `MqKafkaReaderLagging` | `max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_seconds) > <порог> and on (component, topic, partition) max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_messages) > 0`, `for: <порог>` | чтение Kafka отстаёт от записи: подписчик не успевает или повторяет сообщение, которое держит весь топик (head-of-line) |
 | `MqKafkaReaderBacklog` | `max by (component, topic, partition) (my_app_prom_ex_mq_kafka_reader_lag_messages) > <порог>`, `for: <порог>` | непрочитанных сообщений в партиции больше порога |
 | `MqKafkaReaderNoLease` | `max by (component, topic) (my_app_prom_ex_mq_kafka_reader_lease) == 0`, `for: <порог>` | топик не читает ни одна нода с читателем: аренда не берётся, а нули `lag_*` у нод без аренды отставания не покажут |
@@ -395,6 +396,25 @@ tests:
         exp_alerts:
           - exp_labels: {component: c, topic: orders, partition: "0"}
 ```
+
+### Возраст неподтверждённого сообщения Stream
+
+Gauge `mq_reader_pending_age_seconds` (`Core.Mq.PromEx`, опция `stream_readers:`) — сейчас минус
+timestamp чанка, из которого пришло сообщение в `pending` reader'а: прочитанное подписчиком, но не
+подтверждённое `commit`. Пустой `pending` — 0.
+
+- Timestamp чанка ставит брокер при записи, поэтому gauge меряет возраст сообщения, а не время
+  обработки: отставший подписчик держит в `pending` старое сообщение, даже если обрабатывает его
+  быстро. Различает их `for:`: у застрявшего `pending` не пустеет и возраст растёт ровно со
+  временем, а опрос отставшего попадает и в окно между `commit` и следующим `get`, где gauge — 0, и
+  `for:` начинается заново.
+- Часы ноды брокера и ноды приложения расходятся: `<порог>` SHOULD быть на порядок больше их
+  расхождения, отрицательный возраст плагин обрезает до 0.
+- Агрегировать SHOULD через `max` по `(component, topic)`: так же сводит плагин повтор пары на
+  ноде.
+- Kafka-читатель этого gauge'а не отдаёт: застревание видно по `MqKafkaReaderLagging`.
+
+Проверяется: `test/core/mq/prom_ex_test.exs`, describe «возраст pending stream reader».
 
 ### Первое событие серии счётчика
 
