@@ -138,7 +138,12 @@
           {Credo.Check.Refactor.FunctionArity, []},
           # Logger вместо IO.puts (20-agreements.md, «Логирование (`Logger`)»); вывод mix-задачи —
           # через `Mix.shell()`, команды релиза, где Mix нет, — `IO.puts`.
-          {Credo.Check.Refactor.IoPuts, [files: %{excluded: ["test/", "lib/core/mq/dlq/release.ex"]}]},
+          {Credo.Check.Refactor.IoPuts,
+           [
+             files: %{
+               excluded: ["test/", "lib/core/release.ex", "lib/core/outbox/release.ex", "lib/core/mq/dlq/release.ex"]
+             }
+           ]},
           {Credo.Check.Refactor.LongQuoteBlocks, []},
           {Credo.Check.Refactor.MapJoin, []},
           {Credo.Check.Refactor.MapMap, []},

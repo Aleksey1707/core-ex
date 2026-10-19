@@ -316,7 +316,8 @@ end
 
    Вместе с ней приезжает `mix outbox.requeue --all` / `--id <uuid>` — возврат записей из
    `:failed` в очередь (runbook в `deps/core/docs/rules/app/14-events-outbox.md`). Задача поднимает
-   приложение потребителя и берёт репозиторий из `Core.Config.outbox_repo/0`.
+   приложение потребителя и берёт репозиторий из `Core.Config.outbox_repo/0`. В релизе —
+   `Core.Outbox.Release.requeue/1`.
 
    Смещения и аренда `Core.Mq.Kafka.Reader` — таблицы `mq_kafka_offsets` и `mq_kafka_leases`,
    DDL живёт в `Core.Mq.Kafka.Migration` и собирается без клиента `:brod`:

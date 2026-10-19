@@ -39,6 +39,19 @@
 
 ### Новое
 
+- **Задачи релиза `Core.Release.migrate/1`, `Core.Release.rollback/3` и
+  `Core.Outbox.Release.requeue/1`** (норма — `docs/rules/app/10-architecture.md`, «Задачи релиза»).
+  Раньше миграции на релизе приложение прогоняло своим обходом `Ecto.Migrator`, а `:failed` записи
+  outbox возвращались в очередь только `mix outbox.requeue`, которого в релизе нет. Теперь
+  `migrate(:my_app)` накатывает невыполненные миграции каждого репозитория из `:ecto_repos`,
+  `rollback(:my_app, repo, version)` откатывает репозиторий до `version` включительно, а
+  `Core.Outbox.Release.requeue(:all | ids)` зовёт `requeue_failed/2` репозитория outbox. Задачи
+  поднимают только репозиторий и печатают оператору число миграций или записей. Правка потребителя:
+  - было: `Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))` по
+    `:ecto_repos` в `MyAppApp.Release`;
+  - стало: `def migrate, do: Core.Release.migrate(:my_app)`, возврат outbox —
+    `Application.load(:my_app)` и `Core.Outbox.Release.requeue(target)`.
+
 - **Ожидание проекции до события заданной версии — `await/4` модуля проекции** (решение —
   `docs/adr/0080-await-event-of-version.md`; норма — `docs/rules/22-projections.md`,
   «Read-after-write»). Раньше `await/3` брал цель на момент вызова: событие, которое после commit

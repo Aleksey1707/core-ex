@@ -56,6 +56,44 @@
 | `MyApp.Infra.DAO` | `lib/my_app/infra/dao.ex` | единственный `Ecto.Repo` |
 | `MyApp.Infra.StreamID` | `lib/my_app/infra/stream_id.ex` | namespace UUIDv5 идентификаторов из ключа (`13-repos.md`) |
 
+### Задачи релиза
+
+Mix в релизе нет: миграции и команды оператора над таблицами библиотеки зовутся через
+`bin/my_app eval` из `MyAppApp.Release`. Библиотека даёт задачи готовыми, и `MyAppApp.Release`
+MUST делегировать им, а не собирать свой обход `Ecto.Migrator` или свой `UPDATE`: состав
+репозиториев, статус и захват записи — контракт библиотеки.
+
+| Задача библиотеки | Что делает | Приложение загружает |
+|---|---|---|
+| `Core.Release.migrate(:my_app)` | накатывает невыполненные миграции каждого репозитория из `:ecto_repos` | сама |
+| `Core.Release.rollback(:my_app, repo, version)` | откатывает миграции репозитория до `version` включительно | сама |
+| `Core.Outbox.Release.requeue(:all \| ids)` | возвращает `:failed` записи outbox в очередь (`14-events-outbox.md`, «Runbook: записи в `:failed`») | вызывающий — `Application.load(:my_app)` |
+| `Core.Mq.Dlq.Release.requeue(repo, target)` | возвращает записи DLQ в обработку (`14-events-outbox.md`, «DLQ в Postgres») | вызывающий — `Application.load(:my_app)` |
+
+Задача приложение не стартует: на время команды поднимается только репозиторий, и она работает
+рядом с запущенным сервером. Ответ оператору — число записей или миграций, печатает его сама задача.
+
+```elixir
+defmodule MyAppApp.Release do
+  @app :my_app
+
+  def migrate, do: Core.Release.migrate(@app)
+
+  def rollback(version), do: Core.Release.rollback(@app, MyApp.Infra.DAO, version)
+
+  def outbox_requeue(target) do
+    Application.load(@app)
+    Core.Outbox.Release.requeue(target)
+  end
+end
+```
+
+```bash
+bin/my_app eval 'MyAppApp.Release.migrate()'
+bin/my_app eval 'MyAppApp.Release.rollback(20260902110000)'
+bin/my_app eval 'MyAppApp.Release.outbox_requeue(:all)'
+```
+
 ## Раскладка
 
 Путь файла от `lib/` MUST совпадать с именем модуля в snake_case:
