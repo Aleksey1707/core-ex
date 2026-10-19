@@ -100,6 +100,14 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `Logger.warning`, успех — `Logger.debug`. `append` снапшоты не пишет.
   - Правку кода, от которого `evolve` зависит вне этих модулей, маркер не видит — поднять
     `version:`.
+  - Агрегат с ПДн в событиях (`__es_subjects__/0` кодека не пуст): `snapshot:` — только если у
+    всех ПДн-полей `subject: :aggregate_id`. Снапшот шифруется всегда — `term_to_binary` состояния
+    одним ПДн-значением субъекта `aggregate_id` через порт хранилища ключей, AAD — тип, id, версия
+    и маркер; признак входит в маркер. Шифротексты снапшотов расшифровываются тем же вызовом
+    `open`, что и ПДн-значения хвоста: ключ уничтожен — отказ на `debug` и полная свёртка,
+    шифротекст не открылся — отказ на `warning` и полная свёртка, сбой хранилища — `{:error, _}`.
+    Запись шифрует одним `seal` после commit; `:subject_destroyed` — снапшот не пишется, лог
+    `debug`. Чтение, видевшее уничтоженный снапшот или ПДн-значение, снапшот потока не пишет.
 
   ## Telemetry
 
@@ -140,9 +148,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   `Core.Es.Aggregate.Repo`, `aggregate:` — не event-sourced агрегат, и на сверках
   `Core.Es.Store.Opts`: кодек агрегата без `type:`, его Prim агрегата не равен `id:`, событие
   `outbox:` не равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
-  не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля или `version:` не
-  целое; `key_reservations:` — не список модулей ключа, у модуля ключа событие не равно семейству
-  кодека или `id:` — `id:` репозитория, в `errors:` нет clause его `code:`, область повторяется.
+  не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля, `version:` не
+  целое или у ПДн-поля события субъект — поле нагрузки, а не `:aggregate_id`; `key_reservations:`
+  — не список модулей ключа, у модуля ключа событие не равно семейству кодека или `id:` — `id:`
+  репозитория, в `errors:` нет clause его `code:`, область повторяется.
 
   Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0` и,
   с `key_reservations:`, имена функций-проверок `"reservation/1 принимает <Event>"/1`.
@@ -156,6 +165,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
+  alias Core.Es.Personal.Destroyed
   alias Core.Es.Store.Schema
   alias Core.Helper
   alias Core.Helper.Transact
@@ -298,7 +308,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       type: event_codec.__es_type__(),
       errors: errors,
       outbox: outbox,
-      snapshot: snapshot!(opts),
+      snapshot: snapshot!(opts, event_codec),
       key_reservations:
         Es.KeyReservation.declarations!(Keyword.get(opts, :key_reservations, []), event_codec, id, errors, @label)
     }
@@ -319,9 +329,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     end
   end
 
-  defp snapshot!(opts) do
+  defp snapshot!(opts, event_codec) do
     case Keyword.fetch(opts, :snapshot) do
-      {:ok, snapshot} -> Snapshot.opts!(snapshot, @label)
+      {:ok, snapshot} -> Snapshot.opts!(snapshot, event_codec.__es_subjects__(), @label)
       :error -> nil
     end
   end
@@ -451,7 +461,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   end
 
   defp read_tails(%{snapshot: nil} = cfg, states, opts) do
-    with {:ok, streams} <- read_streams(cfg, states, opts), do: {:ok, Enum.map(streams, &{nil, &1})}
+    with {:ok, streams} <- read_streams(cfg, states, opts), do: {:ok, Enum.map(streams, &{nil, &1, false})}
   end
 
   defp read_tails(%{type: type} = cfg, states, opts) do
@@ -479,25 +489,25 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     )
     |> cfg.dao.all(opts)
     |> Enum.chunk_by(&elem(&1, 0))
-    |> tails(cfg)
+    |> tails(cfg, states, marker)
   end
 
   # У потока без событий после снапшота или состояния одна строка, и событие в ней — `nil`
-  # (`left_join`).
-  defp tails(streams, cfg) do
-    with {:ok, loaded} <- load_streams(cfg, Enum.map(streams, &event_rows/1)) do
-      {:ok,
-       Enum.zip_with(streams, loaded, fn
-         [{_index, version, state, _row} | _], events -> {stored_snapshot(version, state), events}
-       end)}
+  # (`left_join`). Шифротексты снапшотов расшифровываются тем же вызовом `open`, что и хвост.
+  defp tails(streams, cfg, states, marker) do
+    snapshots = Enum.map(streams, &stored_snapshot/1)
+    sealed = Snapshot.sealed(cfg, marker, states, snapshots)
+
+    with {:ok, {loaded, opened}} <- load_streams(cfg, Enum.map(streams, &event_rows/1), sealed) do
+      {:ok, Enum.zip_with(Snapshot.put_opened(cfg, snapshots, opened), loaded, &{&1, &2, destroyed_value?(cfg, &2)})}
     end
   end
 
   defp event_rows(stream), do: for({_index, _version, _state, %Schema{} = row} <- stream, do: row)
 
-  defp stored_snapshot(nil, nil), do: nil
+  defp stored_snapshot([{_index, nil, nil, _row} | _rows]), do: nil
 
-  defp stored_snapshot(version, state) when is_integer(version) and is_binary(state),
+  defp stored_snapshot([{_index, version, state, _row} | _rows]) when is_integer(version) and is_binary(state),
     do: {version, state}
 
   defp read_streams(_cfg, [], _opts), do: {:ok, []}
@@ -514,14 +524,17 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       |> cfg.dao.all(opts)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
-    load_streams(cfg, for(index <- 0..(length(states) - 1)//1, do: Map.get(rows, index, [])))
+    streams = for index <- 0..(length(states) - 1)//1, do: Map.get(rows, index, [])
+
+    with {:ok, {loaded, []}} <- load_streams(cfg, streams, []), do: {:ok, loaded}
   end
 
   # Строки всех потоков запроса — одной пачкой; события раскладываются обратно по потокам.
-  defp load_streams(cfg, streams) do
-    with {:ok, events} <- Es.Store.load_fold_rows(Enum.concat(streams), cfg.event_codec, cfg.codec) do
+  defp load_streams(cfg, streams, sealed) do
+    with {:ok, {events, opened}} <-
+           Es.Store.load_fold_rows(Enum.concat(streams), cfg.event_codec, cfg.codec, sealed) do
       {loaded, []} = Enum.map_reduce(streams, events, &Enum.split(&2, length(&1)))
-      {:ok, loaded}
+      {:ok, {loaded, opened}}
     end
   end
 
@@ -536,32 +549,48 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp after_version(%{version: nil}), do: 0
   defp after_version(%{version: %Version{} = version}), do: Version.value(version)
 
-  defp fold_tail(%{snapshot: nil} = cfg, state, {nil, events}),
-    do: restored(:off, cfg.aggregate.fold(state, events), events)
+  defp fold_tail(%{snapshot: nil} = cfg, state, {nil, events, _destroyed?}),
+    do: restored(:off, cfg.aggregate.fold(state, events), events, false)
 
-  defp fold_tail(cfg, state, {nil, events}),
-    do: restored(:miss, cfg.aggregate.fold(state, events), events)
+  defp fold_tail(cfg, state, {nil, events, destroyed?}),
+    do: restored(:miss, cfg.aggregate.fold(state, events), events, destroyed?)
 
-  defp fold_tail(cfg, state, {snapshot, events}) do
+  defp fold_tail(cfg, state, {snapshot, events, destroyed?}) do
     case Snapshot.fold(cfg, state, snapshot, events) do
-      {:ok, folded} -> restored(:hit, folded, events)
-      :rejected -> {:rejected, state}
+      {:ok, folded} -> restored(:hit, folded, events, destroyed?)
+      :rejected -> {:rejected, state, false}
+      :destroyed -> {:rejected, state, true}
     end
   end
 
-  defp restored(snapshot, state, events),
-    do: %{snapshot: snapshot, state: state, events: length(events)}
+  # `destroyed?` — чтение видело уничтоженный снапшот или ПДн-значение: снапшот потока не пишется.
+  defp restored(snapshot, state, events, destroyed?),
+    do: %{snapshot: snapshot, state: state, events: length(events), destroyed?: destroyed?}
 
   defp refold_rejected(restored, cfg, opts) do
-    rejected = for {:rejected, state} <- restored, do: state
+    rejected = for {:rejected, state, destroyed?} <- restored, do: {state, destroyed?}
 
-    with {:ok, streams} <- read_streams(cfg, rejected, opts) do
-      refolded = Enum.zip_with(streams, rejected, &restored(:rejected, cfg.aggregate.fold(&2, &1), &1))
+    with {:ok, streams} <- read_streams(cfg, Enum.map(rejected, &elem(&1, 0)), opts) do
+      refolded =
+        Enum.zip_with(streams, rejected, fn events, {state, destroyed?} ->
+          restored(:rejected, cfg.aggregate.fold(state, events), events, destroyed? or destroyed_value?(cfg, events))
+        end)
+
       {:ok, merge_refolded(restored, refolded)}
     end
   end
 
-  defp merge_refolded([{:rejected, _state} | restored], [stream | refolded]),
+  # Поле с `subject:` — только на верхнем уровне нагрузки.
+  defp destroyed_value?(%{snapshot: %{sealed: false}}, _events), do: false
+
+  defp destroyed_value?(_cfg, events) do
+    Enum.any?(events, fn
+      %{payload: %_{} = payload} -> Enum.any?(Map.from_struct(payload), &match?({_field, %Destroyed{}}, &1))
+      _event -> false
+    end)
+  end
+
+  defp merge_refolded([{:rejected, _state, _destroyed?} | restored], [stream | refolded]),
     do: [stream | merge_refolded(restored, refolded)]
 
   defp merge_refolded([stream | restored], refolded),
@@ -593,7 +622,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp write_snapshots(%{snapshot: nil}, _restored), do: :ok
 
   defp write_snapshots(%{snapshot: %{every: every}} = cfg, restored) do
-    states = for %{state: state, events: events} <- restored, events >= every, do: state
+    states = for %{state: state, events: events, destroyed?: false} <- restored, events >= every, do: state
     Snapshot.write(cfg, states)
   end
 

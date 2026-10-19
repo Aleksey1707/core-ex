@@ -7,6 +7,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
   alias Core.Config
   alias Core.Context
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
+  alias Core.Es.Personal.Port
   alias Core.EsFixture.Account
   alias Core.Helper.Transact
   alias Core.Telemetry
@@ -188,7 +189,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       id = Account.ID.new()
       state = write!(@repo, id, [open(), freeze()])
       assert {:ok, _state} = @repo.get(id, :current, Context.new())
-      update_snapshot!(id, state: <<131, 0, 1>>)
+      update_snapshot!(id, state: seal!(id, <<131, 0, 1>>))
       attach_telemetry()
 
       log =
@@ -209,7 +210,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       id = Account.ID.new()
       state = write!(@repo, id, [open(), freeze()])
       assert {:ok, _state} = @repo.get(id, :current, Context.new())
-      update_snapshot!(id, state: :erlang.term_to_binary(Map.put(state, :owner, nil)))
+      update_snapshot!(id, state: seal!(id, :erlang.term_to_binary(Map.put(state, :owner, nil))))
 
       log =
         capture_log(fn ->
@@ -226,7 +227,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       rejected_state = write!(@repo, rejected, [open("Второй"), rename("Третий")])
       pairs = [{rejected, :current}, {empty, :current}, {hit, :current}]
       assert {:ok, _states} = @repo.get_many(pairs, Context.new())
-      update_snapshot!(rejected, state: <<131, 0, 1>>)
+      update_snapshot!(rejected, state: <<1, 0>>)
       attach_telemetry()
 
       capture_log(fn ->
@@ -258,6 +259,14 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
   defp snapshot(id),
     do: Config.dao().get_by(Snapshot.Schema, aggregate_type: "account", aggregate_id: dump(id))
+
+  # Снапшот счёта шифруется под ключом счёта; AAD — тип, id, версия и маркер строки.
+  defp seal!(id, plaintext) do
+    %Snapshot.Schema{aggregate_version: version, marker: marker} = snapshot(id)
+    aad = Port.address(["account", dump(id), Integer.to_string(version), marker])
+    {:ok, [sealed]} = Port.seal([{dump(id), aad, plaintext}])
+    sealed
+  end
 
   defp update_snapshot!(id, set) do
     {1, nil} =

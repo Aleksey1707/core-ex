@@ -3,7 +3,8 @@
 - **Область.** `lib/core/prim.ex`, `lib/core/prim/**` (опция `personal:`), `lib/core/codec.ex`
   (`load_composite/3`), `lib/core/es/event/payload.ex` и `lib/core/codec/plugin/fields.ex`
   (`subject:`), `lib/core/es/personal.ex`, `lib/core/es/personal/**`, шифрование и расшифровка в
-  `lib/core/es/store.ex` и flush write-репозиториев; у потребителя — Prim с персональными данными
+  `lib/core/es/store.ex`, flush write-репозиториев и снапшоты
+  (`lib/core/es/aggregate/repo/pg/snapshot.ex`); у потребителя — Prim с персональными данными
   (ПДн), события с ними и своя реализация хранилища ключей.
 - **Читать перед.** Новым Prim, значение которого — ПДн; полем нагрузки события с ПДн;
   переводом Prim с ПДн с `sensitive:` на `personal:`; правкой редакции значения Prim в выводе;
@@ -131,6 +132,7 @@ fields: [recipient_id: [prim: Order.RecipientID], address: [entity: Order.Addres
 |---|---|---|
 | `es_events.payload` | `{"$pd": …}` | `Core.Es.Store.append` — маркеры всех строк пачки одним вызовом `seal` |
 | `outbox.payload`, тело сообщения | `{"$pd": …}` | flush write-репозитория — отдельный проход `seal` по записям после `Store.append` и резервов, до `outbox_repo().append` |
+| `es_snapshots.state` | шифротекст состояния целиком под ключом субъекта `aggregate_id` | запись снапшота после commit — одним `seal` (`13-repos.md`, «Снапшоты») |
 | интеграционное событие | открыто | никто: разметки `subject:` в нём нет |
 | строка state-stored агрегата | открыто | никто: её стирает `update` / `delete` |
 

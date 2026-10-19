@@ -500,7 +500,8 @@ defmodule Core.EsAggregateRepoContract do
   @doc """
   Результат `fun` и число SQL-запросов, которые процесс теста сделал за время `fun`.
 
-  `kind` — какие запросы считать: `:all`, `:select` или `:insert`.
+  `kind` — какие запросы считать: `:all`, `:select` или `:insert`. Запросы хранилища ключей
+  (`es_subject_keys`) не считаются: их число — дело порта, а не репозитория.
   """
   @spec count_queries((-> result), :all | :select | :insert) :: {result, non_neg_integer()}
         when result: var
@@ -521,7 +522,9 @@ defmodule Core.EsAggregateRepoContract do
   @spec count_query([atom()], map(), map(), {pid(), term(), atom()}) :: :ok
 
   def count_query(_event, _measurements, %{query: query}, {test, handler, kind}) do
-    if self() == test and counted?(kind, query), do: send(test, {handler, :query})
+    if self() == test and counted?(kind, query) and not String.contains?(query, "es_subject_keys"),
+      do: send(test, {handler, :query})
+
     :ok
   end
 

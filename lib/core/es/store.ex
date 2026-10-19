@@ -93,9 +93,9 @@ defmodule Core.Es.Store do
   верхнего кадра и стек без аргументов кадров; строки без `$pd` падают как раньше.
 
   `load_batch/2` — строки с кодеком событий у каждой, исход по строке (пачка проекции);
-  `load_rows/3` — строки одного кодека, первая ошибка на всю пачку; `load_fold_rows/3` — свёртка:
-  сбой хранилища — `{:error, _}`, ошибка строки — `Core.Exc`; `load_rows!/3` — любая ошибка как
-  `Core.Exc`.
+  `load_rows/3` — строки одного кодека, первая ошибка на всю пачку; `load_fold_rows/4` — свёртка:
+  сбой хранилища — `{:error, _}`, ошибка строки — `Core.Exc`, шифротексты снапшотов идут в тот же
+  вызов `open`; `load_rows!/3` — любая ошибка как `Core.Exc`.
   """
 
   import Ecto.Query
@@ -530,11 +530,13 @@ defmodule Core.Es.Store do
   end
 
   @doc false
-  @spec load_fold_rows([Schema.t()], module(), module()) :: Result.t([Es.Event.t()])
+  @spec load_fold_rows([Schema.t()], module(), module(), [{binary(), binary()}]) ::
+          Result.t({[Es.Event.t()], [Personal.KeyStore.opened()]})
 
-  def load_fold_rows(rows, event_codec, codec) when is_list(rows) and is_atom(event_codec) and is_atom(codec) do
-    with {:ok, loaded} <- load_batch(Enum.map(rows, &{event_codec, &1}), codec),
-         do: {:ok, Enum.map(loaded, &Result.unwrap!/1)}
+  def load_fold_rows(rows, event_codec, codec, sealed)
+      when is_list(rows) and is_atom(event_codec) and is_atom(codec) and is_list(sealed) do
+    with {:ok, {loaded, opened}} <- load_entries(Enum.map(rows, &{event_codec, &1}), codec, sealed),
+         do: {:ok, {Enum.map(loaded, &Result.unwrap!/1), opened}}
   end
 
   @doc false
@@ -547,13 +549,17 @@ defmodule Core.Es.Store do
   @spec load_batch([entry()], module()) :: Result.t([loaded()])
 
   def load_batch(entries, codec) when is_list(entries) and is_atom(codec) do
-    wires = Enum.map(entries, &to_wire/1)
-
-    with {:ok, opened} <- Personal.Wire.open_wires(Enum.map(wires, &wire/1)),
-         do: {:ok, Enum.zip_with(wires, opened, &load_wire(&1, &2, codec))}
+    with {:ok, {loaded, []}} <- load_entries(entries, codec, []), do: {:ok, loaded}
   end
 
   # ---
+
+  defp load_entries(entries, codec, sealed) do
+    wires = Enum.map(entries, &to_wire/1)
+
+    with {:ok, {opened, opened_sealed}} <- Personal.Wire.open_wires(Enum.map(wires, &wire/1), sealed),
+         do: {:ok, {Enum.zip_with(wires, opened, &load_wire(&1, &2, codec)), opened_sealed}}
+  end
 
   defp to_wire(:skip), do: :skip
   defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec), do: {event_codec, Schema.to_wire(row)}

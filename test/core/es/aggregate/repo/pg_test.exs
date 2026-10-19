@@ -204,6 +204,31 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
                    fn -> compile!(StringVersion, snapshot: [every: 2, version: "2"]) end
     end
 
+    test "snapshot: — у агрегата с ПДн только при subject: :aggregate_id у всех ПДн-полей" do
+      message =
+        ~r/snapshot: субъект ПДн-поля — поле нагрузки, а не :aggregate_id: .*Event\.ContactSet\.contact$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(PayloadSubjectSnapshot,
+          behaviour: Core.EsFixture.Catalog.Repo,
+          aggregate: Core.EsFixture.Catalog,
+          id: Core.EventFixture.AggID,
+          errors: Core.EventFixture.Errors,
+          outbox: :none,
+          snapshot: [every: 2]
+        )
+      end
+
+      assert {{:module, _module, _binary, _}, []} =
+               compile!(PayloadSubjectNoSnapshot,
+                 behaviour: Core.EsFixture.Catalog.Repo,
+                 aggregate: Core.EsFixture.Catalog,
+                 id: Core.EventFixture.AggID,
+                 errors: Core.EventFixture.Errors,
+                 outbox: :none
+               )
+    end
+
     test "behaviour объявляет колбэки Es.Aggregate.Repo" do
       message = ~r/должен объявлять \[get_decision: 5, get_many: 3, append: 3, refresh: 4, page_stream: 4\]/
 

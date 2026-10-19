@@ -6,6 +6,7 @@ defmodule Core.Es.Personal.Wire do
   # уровня: только там стоит поле с `subject:`. Адрес AAD — `event_id` и wire-ключ поля.
 
   alias Core.Es
+  alias Core.Es.Personal.KeyStore
   alias Core.Es.Personal.Marker
   alias Core.Es.Personal.Port
   alias Core.Outbox
@@ -77,10 +78,12 @@ defmodule Core.Es.Personal.Wire do
 
   # ===== чтение =====
 
+  # Конверты и шифротексты `extra` (`{шифротекст, адрес}`, снапшоты) — одним вызовом `open`:
+  # исходы конвертов и исходы `extra` в их порядке.
   @doc false
-  @spec open_wires([map() | :skip]) :: Result.t([opened()])
+  @spec open_wires([map() | :skip], [{binary(), binary()}]) :: Result.t({[opened()], [KeyStore.opened()]})
 
-  def open_wires(wires) when is_list(wires) do
+  def open_wires(wires, extra) when is_list(wires) and is_list(extra) do
     indexed = Enum.with_index(wires)
 
     items =
@@ -88,24 +91,23 @@ defmodule Core.Es.Personal.Wire do
           {key, sealed} <- sealed_fields(wire),
           do: {index, event_id(wire), key, sealed}
 
-    with {:ok, outcomes} <- open_items(items) do
+    with {:ok, {outcomes, opened_extra}} <- open_items(items, extra) do
       by_index = Enum.group_by(outcomes, &elem(&1, 0), &Tuple.delete_at(&1, 0))
-      {:ok, Enum.map(indexed, fn {wire, index} -> opened(wire, Map.get(by_index, index, [])) end)}
+      {:ok, {Enum.map(indexed, fn {wire, index} -> opened(wire, Map.get(by_index, index, [])) end), opened_extra}}
     end
   end
 
   # ---
 
   # Шифротекст, который не декодируется base64, хранилище не прочтёт: он нечитаем без вызова порта.
-  defp open_items([]), do: {:ok, []}
-
-  defp open_items(items) do
+  defp open_items(items, extra) do
     decoded = Enum.map(items, fn {index, event_id, key, sealed} -> {index, event_id, key, Base.decode64(sealed)} end)
     port_items = for {_index, event_id, key, {:ok, ciphertext}} <- decoded, do: {ciphertext, address(event_id, key)}
 
-    with {:ok, opened} <- open_port(port_items) do
+    with {:ok, opened} <- open_port(port_items ++ extra) do
+      {opened, opened_extra} = Enum.split(opened, length(port_items))
       {outcomes, []} = Enum.map_reduce(decoded, opened, &outcome/2)
-      {:ok, outcomes}
+      {:ok, {outcomes, opened_extra}}
     end
   end
 
