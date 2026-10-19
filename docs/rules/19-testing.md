@@ -2,7 +2,7 @@
 
 - **Область.** `test/**` библиотеки; у потребителя — его case-модули, фикстуры и тесты.
 - **Читать перед.** Новым тестом или case-модулем; тестом кодека, репозитория, агрегата,
-  процесса, Enum или события; правкой тестовой обвязки в `test/support`.
+  процесса, Enum, события или цепочки доставки outbox; правкой тестовой обвязки в `test/support`.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Case-модули
@@ -686,6 +686,47 @@ Ecto.Adapters.SQL.Sandbox.allow(DAO, self(), tree)
 # хорошо — async: false: MyAppTest.DataCase ставит shared mode, соединение теста видят все процессы
 use MyAppTest.DataCase, async: false
 {:ok, _tree} = start_supervised({Account.Process, enabled: true})
+```
+
+## Доставка outbox
+
+Цепочку «команда → outbox → подписчик» тест MUST проверять дублёром доставки `Core.Outbox.Test`,
+а не вызовом `on_message` своим кодом: дублёр ведёт сообщение тем же шагом обработки, что
+`Core.PubSub.MqSubscriberReliable`, и `filter`, `{:skip, _}`, `{:reject, _}`, декод тела и
+перехват исключения ведут себя как в проде. Сетевой путь — поллер, reader, `commit`, backoff —
+дублёр не проходит: его держат тесты под тегом брокера («Внешние зависимости»). Почему дублёр, а не
+брокер в памяти, — ADR-0082 (`docs/adr/0082-outbox-delivery-test-double.md`).
+
+- Подписчики дублёра — тот же список keyword, что получает дерево подписчиков приложения
+  (`deps/core/docs/rules/app/19-testing.md`, «Доставка outbox»).
+- Детерминированный тест — `drain/2`: один проход на вызов, звено цепочки реакций — вызов.
+- Тест через HTTP, где запрос ждёт проекцию реакции, — реактор `Core.Outbox.Test.Reactor` через
+  `start_supervised`, и перед проверками MUST `settle/2`: без него проверка читает состояние
+  посреди цепочки. Реактор видит sandbox теста по `$callers`, `allow` не нужен, тест остаётся
+  `async: true`.
+- Мёртвое письмо валит `settle/2`. `dead_letters: :allow` MAY только в тесте выброса в DLQ —
+  отказа без повторов или исчерпания попыток, и письма тогда MUST проверяться `dead_letters/1`:
+  иначе потеря сообщения проходит тихо.
+
+```elixir
+# плохо — обработчик вызван своим кодом: filter, декод тела и перехват исключения — мимо
+:ok = MyApp.<Component>.on_message(event, nil, Core.Context.new())
+
+# хорошо — запись через usecase, доставка тем же списком подписчиков, что у дерева
+{:accepted, id, _version} = <Aggregate>.Client.Usecases.open(attrs, context)
+:ok = Core.Outbox.Test.drain(MyApp.<Component>.subscribers())
+
+# хорошо — тест через HTTP: реактор гонит цепочку, пока запрос ждёт проекцию реакции
+reactor = start_supervised!({Core.Outbox.Test.Reactor, subscribers: MyApp.<Component>.subscribers()})
+conn = post(conn, ~p"/api/v1/orders", attrs)
+:ok = Core.Outbox.Test.settle(reactor)
+
+# плохо — письма разрешены, но не проверены: отказ любого подписчика проходит тихо
+:ok = Core.Outbox.Test.settle(reactor, dead_letters: :allow)
+
+# хорошо — тест отказа без повторов проверяет само письмо
+:ok = Core.Outbox.Test.settle(reactor, dead_letters: :allow)
+assert [%Core.Outbox.Test.DeadLetter{reason: :rejected}] = Core.Outbox.Test.dead_letters(reactor)
 ```
 
 ## Чувствительные данные

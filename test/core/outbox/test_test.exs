@@ -1,7 +1,7 @@
 defmodule Core.Outbox.TestTest do
   use Core.DataCase, async: true
 
-  import Core.EsAggregateRepoContract, only: [open: 0, rename: 1, write!: 3]
+  import Core.EsAggregateRepoContract, only: [freeze: 0, open: 0, rename: 1, write!: 3]
   import ExUnit.CaptureLog
 
   alias Core.Config
@@ -170,6 +170,79 @@ defmodule Core.Outbox.TestTest do
       assert_raise ArgumentError, ~r/:name/, fn ->
         Outbox.Test.drain([subscriber(notify(:a)), subscriber(notify(:b))])
       end
+    end
+  end
+
+  describe "реактор и settle/2" do
+    test "реактор доставляет запись, сделанную после его старта" do
+      start_supervised!({Outbox.Test.Reactor, subscribers: [subscriber(notify(:a))]})
+      id = Account.ID.new()
+
+      write!(Account.Repo.Pg, id, [open()])
+
+      assert_receive {:a, %Account.Event.Opened{aggregate_id: ^id}}, 1_000
+    end
+
+    test "settle проходит после цепочки из двух реакций" do
+      test = self()
+
+      react = fn
+        %Account.Event.Opened{aggregate_id: id}, _data, _context ->
+          write!(Account.Repo.Pg, id, [rename("Реакция")])
+          :ok
+
+        %Account.Event.Renamed{aggregate_id: id}, _data, _context ->
+          write!(Account.Repo.Pg, id, [freeze()])
+          :ok
+
+        event, _data, _context ->
+          send(test, {:reacted, event})
+          :ok
+      end
+
+      reactor = start_supervised!({Outbox.Test.Reactor, subscribers: [subscriber(react)]})
+      id = Account.ID.new()
+      write!(Account.Repo.Pg, id, [open()])
+
+      :ok = Outbox.Test.settle(reactor)
+
+      assert_received {:reacted, %Account.Event.Frozen{aggregate_id: ^id}}
+      assert statuses(id) == [:published, :published, :published]
+    end
+
+    @tag :capture_log
+    test "settle по пределу валит тест списком застрявших" do
+      failing = fn _event, _data, _context -> {:error, boom()} end
+      subscribers = [subscriber(failing, name: :stuck, max_attempts: 1_000_000)]
+      reactor = start_supervised!({Outbox.Test.Reactor, subscribers: subscribers})
+      write!(Account.Repo.Pg, Account.ID.new(), [open()])
+      %{"event_id" => event_id} = TestRepo.one!(from(r in Outbox.Repo.Pg.Schema, select: r.headers))
+
+      error = assert_raise Outbox.Test.NotSettled, fn -> Outbox.Test.settle(reactor, timeout: 200) end
+
+      message = Exception.message(error)
+      assert message =~ "topic=accounts"
+      assert message =~ "tag=account.opened"
+      assert message =~ "event_id=#{event_id}"
+      assert message =~ "subscriber=:stuck"
+      assert message =~ ~r/attempts=[1-9]/
+      assert message =~ "сбой обработчика"
+    end
+
+    test "мёртвое письмо валит settle, с dead_letters: :allow — проходит" do
+      reject = fn _event, _data, _context -> {:reject, boom()} end
+      reactor = start_supervised!({Outbox.Test.Reactor, subscribers: [subscriber(reject, name: :rejecting)]})
+
+      capture_log(fn ->
+        write!(Account.Repo.Pg, Account.ID.new(), [open()])
+
+        error = assert_raise Outbox.Test.NotSettled, fn -> Outbox.Test.settle(reactor) end
+        assert Exception.message(error) =~ "reason=rejected"
+
+        assert :ok = Outbox.Test.settle(reactor, dead_letters: :allow)
+      end)
+
+      assert [%Outbox.Test.DeadLetter{reason: :rejected, subscriber: :rejecting}] = Outbox.Test.dead_letters(reactor)
     end
   end
 

@@ -1,0 +1,119 @@
+defmodule Core.Outbox.Test.Reactor do
+  @moduledoc """
+  Реактор дублёра доставки: `Core.Outbox.Test.drain/2` в фоне, раз в 10 мс.
+
+  Нужен приёмочному тесту через HTTP: запрос ждёт проекцию события реакции, и гнать цепочку
+  реакций, пока тест заблокирован, некому. Перед проверками тест зовёт
+  `Core.Outbox.Test.settle/2`, мёртвые письма читает `Core.Outbox.Test.dead_letters/1` с реактором.
+
+      reactor = start_supervised!({Core.Outbox.Test.Reactor, subscribers: MyApp.Notify.subscribers()})
+
+  Опции: `subscribers:` — обязательна, список подписчиков в форме `Core.Outbox.Test`; `owner:` —
+  владелец, по умолчанию процесс, который строит спецификацию ребёнка: тест, если он зовёт
+  `start_supervised` сам; из `setup_all` или чужого процесса `owner:` MUST передаваться явно.
+  Реактор ставит себе `$callers = [владелец]`: sandbox Ecto и прочие владения по `$callers` видят
+  его без `allow`, и тест остаётся `async: true`. Подписки на commit нет — только опрос.
+  Недопустимая опция или подписчик — `ArgumentError` при старте.
+
+  Реактор не перезапускается (`restart: :temporary`): журналы, курсоры и мёртвые письма живут в
+  нём. Исключение прохода останавливает опрос, и `settle/2` валит тест с его текстом. С выходом
+  владельца реактор останавливается сам: sandbox теста ему больше не доступен.
+  """
+
+  use GenServer
+
+  alias Core.Helper.StartOpts
+  alias Core.Outbox
+
+  require Logger
+
+  @label "Outbox.Test.Reactor"
+  @interval_ms 10
+
+  @doc "Спецификация ребёнка; `owner:` по умолчанию — вызывающий процесс."
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+
+  def child_spec(opts) when is_list(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [Keyword.put_new(opts, :owner, self())]},
+      restart: :temporary
+    }
+  end
+
+  @doc "Запустить реактор."
+  @spec start_link(keyword()) :: GenServer.on_start()
+
+  def start_link(opts) when is_list(opts), do: GenServer.start_link(__MODULE__, opts)
+
+  @doc false
+  @impl true
+  def init(opts) do
+    # Остановка ждёт конца прохода: убитый посреди запроса реактор рвёт соединение sandbox теста.
+    Process.flag(:trap_exit, true)
+    StartOpts.keys!(@label, opts, ~w(subscribers owner)a)
+    subscribers = StartOpts.list!(@label, opts, :subscribers)
+    :ok = Outbox.Test.check_subscribers!(subscribers)
+    owner = owner!(opts)
+    Process.put(:"$callers", [owner])
+    _ref = Process.monitor(owner)
+    {:ok, schedule(%{subscribers: subscribers, owner: owner, crash: nil}, 0)}
+  end
+
+  @doc false
+  @impl true
+  def handle_info(:tick, state) do
+    case safe_drain(state.subscribers) do
+      :ok ->
+        {:noreply, schedule(state, @interval_ms)}
+
+      {:crashed, text} ->
+        crashed(state, text)
+    end
+  end
+
+  def handle_info({:DOWN, _ref, :process, owner, _reason}, %{owner: owner} = state), do: {:stop, :normal, state}
+
+  def handle_info(_other, state), do: {:noreply, state}
+
+  @doc false
+  @impl true
+  def handle_call(:report, _from, %{crash: nil} = state),
+    do: {:reply, {:ok, Outbox.Test.report(state.subscribers)}, state}
+
+  def handle_call(:report, _from, state), do: {:reply, {:crashed, state.crash}, state}
+
+  def handle_call(:dead_letters, _from, state), do: {:reply, Outbox.Test.dead_letters(self()), state}
+
+  # ---
+
+  defp owner!(opts) do
+    case StartOpts.term!(@label, opts, :owner) do
+      owner when is_pid(owner) -> owner
+      other -> StartOpts.raise_invalid!(@label, :owner, "pid", other)
+    end
+  end
+
+  defp safe_drain(subscribers) do
+    Outbox.Test.drain(subscribers)
+  rescue
+    exception -> {:crashed, Exception.format(:error, exception, __STACKTRACE__)}
+  catch
+    :exit, reason -> {:crashed, Exception.format(:exit, reason, __STACKTRACE__)}
+  end
+
+  # Проход, упавший после выхода владельца, — закрытый sandbox, а не сбой доставки.
+  defp crashed(state, text) do
+    if Process.alive?(state.owner) do
+      Logger.error("#{@label}: проход доставки упал, опрос остановлен: #{text}")
+      {:noreply, %{state | crash: text}}
+    else
+      {:stop, :normal, state}
+    end
+  end
+
+  defp schedule(state, ms) do
+    _ref = Process.send_after(self(), :tick, ms)
+    state
+  end
+end
