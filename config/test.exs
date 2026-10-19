@@ -6,7 +6,8 @@ config :core,
   dao: Core.TestRepo,
   codec: Core.CodecFixture.Internal,
   # Не UTC: иначе тесты сдвига зон в Prim.Date* и Codec ничего не проверяют.
-  tz: "Asia/Vladivostok"
+  tz: "Asia/Vladivostok",
+  clock: Core.Clock.Test
 
 config :core, ecto_repos: [Core.TestRepo]
 

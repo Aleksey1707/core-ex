@@ -656,7 +656,8 @@ Schema-мапперы (dual API `to_entity` / `to_entity!`) — какой вы�
 без обёрток вроде `event_at/1` — на call site сразу `Es.Event.At.from(at)`.
 
 Текущее время в Result-flow: `now` + `with` (`CreatedAt.now()`, …); bang-границы / OTP / тесты —
-`now!`.
+`now!`. Это доменное время; инфраструктура библиотеки берёт реальное через `new` (`11-domain.md`,
+«Доменное время (`Core.Clock`)»).
 
 Repo Specs / ACL-фильтры, которым по контракту **обязан** быть current user в `Context` (например
 `get!/1` аксессора текущего пользователя (`use Core.Context.Accessor`) в ACL-фильтре): отсутствие

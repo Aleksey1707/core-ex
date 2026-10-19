@@ -32,6 +32,14 @@ defmodule Core.Outbox.RecordTest do
     assert Outbox.Topic.value(record.topic) == "products"
   end
 
+  test "new без created_at берёт реальное время при остановленных часах" do
+    :ok = Core.Clock.Test.freeze(~U[2000-01-01 00:00:00Z])
+
+    record = sample_record()
+
+    assert_in_delta DateTime.to_unix(Outbox.CreatedAt.value(record.created_at)), System.os_time(:second), 5
+  end
+
   test "reserve переводит в :in_work и увеличивает attempts" do
     record = sample_record()
     locked_until = Outbox.LockedUntil.now!()

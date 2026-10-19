@@ -22,7 +22,7 @@
 
 | Что | Как получает зависимость |
 |---|---|
-| Инфра-синглтоны (`dao`, `codec`, `tz`, ключ шифрования, KEK хранилища ключей, реализации `Outbox.Repo` и `Es.Personal.KeyStore`) | `Core.Config` — `config :core, ...` |
+| Инфра-синглтоны (`dao`, `codec`, `tz`, `clock`, ключ шифрования, KEK хранилища ключей, реализации `Outbox.Repo` и `Es.Personal.KeyStore`) | `Core.Config` — `config :core, ...` |
 | Реализации репозиториев и портов (доменных, `Outbox.Repo`, `Es.Personal.KeyStore`) | конвенция `<Behaviour>.Pg`; ключ конфигурации — только при подмене |
 | OTP-процессы и деревья (`Outbox.Supervisor`, `Mq.Stream.*`, `PubSub.MqSubscriberReliable`) | `opts` от supervisor'а потребителя |
 | Макросы (`Repo.Pg`, `Repo.Pg.Schema`, `Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`, `Es.Outbox`, `Es.Projection`, `Prim.DateTime`, `Prim.Date`) | `use`-опция (`repo:`, `codec:`, `tz:`), без неё — `Core.Config` в рантайме |
@@ -60,6 +60,8 @@ AST `lib/**/*.ex` и проверяет три правила:
   (`Repo.Pg.StateStored`, `Es.Aggregate.Repo.Pg`), а не опция макроса;
 - `tz` у `Prim.DateTime` / `Prim.Date` без опции `tz:` — вызов `Core.Config.tz()` в теле
   функции (`now/0`, `today/0`);
+- реализация доменного времени — вызов `Core.Config.clock()` на каждый `Core.Clock.now/0`
+  (`11-domain.md`, «Доменное время (`Core.Clock`)»);
 - имена telemetry-событий строятся вызовом `Core.Telemetry.event/1`, а не атрибутом:
   префикс задаёт потребитель (`config :core, telemetry_prefix: [...]`).
 
@@ -77,7 +79,8 @@ config :core,
   dao: MyApp.Infra.DAO,      # обязателен
   codec: MyApp.Codec.Internal, # обязателен
   tz: "Etc/UTC",             # опционален, дефолт "Etc/UTC"
-  telemetry_prefix: [:my_app]  # опционален, дефолт [otp_app()]; префикс имён telemetry-событий
+  telemetry_prefix: [:my_app], # опционален, дефолт [otp_app()]; префикс имён telemetry-событий
+  clock: Core.Clock.System   # опционален, дефолт; в config/test.exs — Core.Clock.Test
 
 config :core, Core.Security.Secret, secret_key: "<base64 fernet key>"
 

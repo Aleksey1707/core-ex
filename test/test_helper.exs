@@ -3,6 +3,8 @@
 
 {:ok, _pid} = Core.TestRepo.start_link()
 
+:ok = Core.Clock.Test.start()
+
 Ecto.Adapters.SQL.Sandbox.mode(Core.TestRepo, :manual)
 
 # `lazy: true` — коннект откладывается до первого `Connection.connect/0`, поэтому

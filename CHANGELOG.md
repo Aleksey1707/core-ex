@@ -101,6 +101,23 @@
   - было: `from(x in ..., where: ^filter, limit: ..., offset: ...)` и отдельный `count`;
   - стало: `Repo.Pg.page_by(@pg, Specs.by_title(title), limit, offset, context)`.
 
+- **Доменное время — `Core.Clock` и тестовые часы `Core.Clock.Test`** (решение —
+  `docs/adr/0083-domain-time-seam.md`; норма — `docs/rules/11-domain.md`, «Доменное время
+  (`Core.Clock`)», `docs/rules/19-testing.md`, «Время», `docs/rules/app/19-testing.md`, «Доменное
+  время»). Раньше `now/0` у Prim даты и времени звал системные часы, и историю с истечением срока
+  через usecase или HTTP тест мог проверить только ожиданием. Теперь `now/0` / `now!/0` у
+  `use Core.Prim.DateTime`, `today/0` / `today!/0` у `use Core.Prim.Date` и новый `Core.Clock.now/0`
+  берут время у реализации из `config :core, clock:` (читается на каждый вызов, по умолчанию
+  `Core.Clock.System`). `Core.Clock.Test` на новой обязательной зависимости `nimble_ownership`
+  останавливает (`freeze/1`) и сдвигает (`advance/1`) время процесса теста; его видят процессы с
+  тестом в `$callers`, процессы после `allow/2` и, в глобальном режиме `global/0`, все процессы VM.
+  Время записей outbox, поллер, аренды, уборка, хранилище ключей субъектов, читатель проекции и
+  метрики идут по реальному времени; время события уничтожения ключа субъекта — доменное. Правка
+  потребителя — только тестовая обвязка:
+  - было: `config/test.exs` и `test/test_helper.exs` без часов;
+  - стало: `config :core, clock: Core.Clock.Test` и `:ok = Core.Clock.Test.start()` до
+    `ExUnit.start/1`.
+
 - **Ожидание проекции до события заданной версии — `await/4` модуля проекции** (решение —
   `docs/adr/0080-await-event-of-version.md`; норма — `docs/rules/22-projections.md`,
   «Read-after-write»). Раньше `await/3` брал цель на момент вызова: событие, которое после commit
@@ -382,6 +399,15 @@
     outcome: &Gateway.outcome/1)` и `Core.External.PromEx` в `MyAppApp.PromEx.plugins/0`.
 
 ### Изменения контракта макросов
+
+- **`today!/0` у `use Core.Prim.Date` сужает результат до struct Prim** (норма —
+  `docs/rules/20-agreements.md`, «Генерируемые функции»). Раньше `today!/0` шёл через
+  `Core.Result.unwrap!/1`, и компилятор потребителя видел результат `dynamic()`. Теперь он, как
+  `now!/0` у `use Core.Prim.DateTime`, разбирает `today/0` сам и поднимает `Core.Exc`: опечатка в
+  поле результата — предупреждение сборки потребителя. Правка нужна только коду, который читал у
+  результата несуществующее поле:
+  - было: `Day.today!().valeu` собирался молча и падал `KeyError` в рантайме;
+  - стало: предупреждение `unknown key .valeu` на сборке — поле `value`.
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,
   «Prim (value object)»; `docs/rules/23-personal-data.md`). `use Core.Prim` и все обёртки

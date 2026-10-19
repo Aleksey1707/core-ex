@@ -138,6 +138,20 @@ defmodule Core.ConfigTest do
     end
   end
 
+  describe "clock/0" do
+    test "без ключа — Core.Clock.System" do
+      Application.delete_env(:core, :clock)
+
+      assert Config.clock() == Core.Clock.System
+    end
+
+    test "ключ читается на каждый вызов" do
+      Application.put_env(:core, :clock, Custom)
+
+      assert Config.clock() == Custom
+    end
+  end
+
   describe "validate!/0" do
     test "на рабочем конфиге проходит" do
       assert :ok = Config.validate!()
@@ -171,6 +185,14 @@ defmodule Core.ConfigTest do
       Application.put_env(:core, Core.Es.Personal.KeyStore, Core.Version)
 
       assert_raise ArgumentError, ~r/Core\.Es\.Personal\.KeyStore,` — Core\.Version не экспортирует/, fn ->
+        Config.validate!()
+      end
+    end
+
+    test "ловит часы без now/0" do
+      Application.put_env(:core, :clock, Core.Version)
+
+      assert_raise ArgumentError, ~r/clock:` — Core\.Version не экспортирует now\/0/, fn ->
         Config.validate!()
       end
     end

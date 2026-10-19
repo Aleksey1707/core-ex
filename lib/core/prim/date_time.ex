@@ -46,13 +46,13 @@ defmodule Core.Prim.DateTime do
 
       @tz Keyword.get(type_opts, :tz)
 
-      @doc "Текущее время в tz модуля/конфига."
+      @doc "Доменное «сейчас» (`Core.Clock`) в tz модуля/конфига."
       @spec now() :: Core.Result.t(t())
 
       def now do
         tz = @tz || Core.Config.tz()
 
-        case DateTime.now(tz) do
+        case DateTime.shift_zone(Core.Clock.now(), tz) do
           {:ok, dt} ->
             new(dt)
 

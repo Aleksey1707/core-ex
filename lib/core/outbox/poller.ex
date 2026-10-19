@@ -291,8 +291,9 @@ defmodule Core.Outbox.Poller do
   end
 
   defp deliver_and_save(records, %__MODULE__{context: context} = state, start) do
-    at = Outbox.UpdatedAt.now!()
-    published_at = Outbox.PublishedAt.now!()
+    now = DateTime.utc_now()
+    at = Outbox.UpdatedAt.new!(now)
+    published_at = Outbox.PublishedAt.new!(now)
     results = deliver_batch(records, state, published_at, at)
     {published, retry, failed} = outcome_counts(results)
     log_batch_summary(length(results), published, retry, failed)

@@ -19,7 +19,7 @@ defmodule Core.Prim.Date do
 
   @doc "Объявить date-Prim (`name:` + опции tz/bounds)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
+    quote bind_quoted: [opts: opts], unquote: true do
       kind = Prim.Opts.prepare!(opts, Core.Prim.Date)
 
       bounds = Keyword.take(opts, ~w(after before)a)
@@ -39,13 +39,13 @@ defmodule Core.Prim.Date do
 
       @tz Keyword.get(opts, :tz)
 
-      @doc "Сегодняшняя дата в tz модуля/конфига."
+      @doc "Сегодняшняя дата доменного времени (`Core.Clock`) в tz модуля/конфига."
       @spec today() :: Core.Result.t(t())
 
       def today do
         tz = @tz || Core.Config.tz()
 
-        case DateTime.now(tz) do
+        case DateTime.shift_zone(Core.Clock.now(), tz) do
           {:ok, dt} ->
             new(DateTime.to_date(dt))
 
@@ -64,7 +64,16 @@ defmodule Core.Prim.Date do
       @doc "Сегодняшняя дата; при ошибке — raise."
       @spec today!() :: t()
 
-      def today!, do: Result.unwrap!(today())
+      unquote(
+        quote generated: true do
+          def today! do
+            case today() do
+              {:ok, %__MODULE__{} = prim} -> prim
+              {:error, %Core.Error{} = error} -> raise Core.Exc, error
+            end
+          end
+        end
+      )
 
       @doc """
       Собрать из другого date/datetime-Prim (полный pipeline целевого `new/1`).

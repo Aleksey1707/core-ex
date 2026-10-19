@@ -230,6 +230,20 @@ defmodule Core.Outbox.PollerTest do
     assert Mq.Message.find_header(message, Mq.HeaderKey.new!("aggr_id")) == "agg-1"
   end
 
+  test "время публикации реальное при остановленных часах", %{writer: writer, context: context} do
+    :ok = Core.Clock.Test.global()
+    :ok = Core.Clock.Test.freeze(~U[2000-01-01 00:00:00Z])
+    record = append_record(context, "frozen")
+    poller = start_poller(Delivery.Mq.new(MqFake.Writer, writer))
+
+    assert :processed = Poller.run_once(poller)
+
+    id = Outbox.ID.format(record.id, :full)
+    times = TestRepo.one(from(r in Schema, where: r.id == ^id, select: [r.created_at, r.updated_at, r.published_at]))
+
+    for at <- times, do: assert_in_delta(DateTime.to_unix(at), System.os_time(:second), 5)
+  end
+
   test "сбой delivery → retry (status new)", %{context: context} do
     record = append_record(context, "retry")
     delivery = Delivery.Mq.new(MqFake.Writer, MqFake.Writer.new(fail_at: 0))

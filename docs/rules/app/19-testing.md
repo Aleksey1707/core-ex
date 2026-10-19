@@ -273,6 +273,24 @@ test "падение экшена записано, ответ несёт его
 end
 ```
 
+## Доменное время
+
+Тестовые часы включаются строкой конфигурации и стартом сервера владения: `config/test.exs` MUST
+задавать `config :core, clock: Core.Clock.Test`, `test/test_helper.exs` MUST звать
+`:ok = Core.Clock.Test.start()` до `ExUnit.start/1`. Без часов тест не остановит доменное время, и
+история с истечением срока через usecase или HTTP не проверяется. В prod ключ не задаётся:
+системные часы — умолчание `Core.Config`. `freeze` / `advance` / `allow` и когда глобальный режим —
+`deps/core/docs/rules/19-testing.md`, «Время».
+
+```elixir
+# config/test.exs
+config :core, clock: Core.Clock.Test
+
+# test/test_helper.exs
+:ok = Core.Clock.Test.start()
+ExUnit.start()
+```
+
 ## Пробелы
 
 Известный пробел покрытия MUST быть записан задачей в трекере задач приложения, а не оставаться

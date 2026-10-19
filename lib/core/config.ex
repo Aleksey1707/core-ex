@@ -32,6 +32,8 @@ defmodule Core.Config do
   - `tz` — часовой пояс приложения по умолчанию; дефолт `"Etc/UTC"`.
   - `telemetry_prefix` — префикс имён telemetry-событий Core; дефолт `[otp_app()]`.
     Задавайте явно, если имена метрик должны пережить смену `otp_app`.
+  - `clock` — реализация доменного времени `Core.Clock`; дефолт `Core.Clock.System`, в тестах —
+    `Core.Clock.Test`.
 
   ## Подсистемы
 
@@ -56,6 +58,9 @@ defmodule Core.Config do
 
   @app :core
   @default_tz "Etc/UTC"
+  # Реализация часов по умолчанию — атомом, а не алиасом: `Core.Clock.System` реализует behaviour
+  # `Core.Clock`, а тот ходит сюда за `clock/0`, и ссылка отсюда замкнула бы цикл компиляции.
+  @default_clock :"Elixir.Core.Clock.System"
 
   @doc "OTP-приложение потребителя: где лежат его DI-ключи «behaviour → реализация»."
   @spec otp_app() :: atom()
@@ -139,6 +144,16 @@ defmodule Core.Config do
 
   def key_store, do: Application.get_env(@app, Core.Es.Personal.KeyStore, default_repo(Core.Es.Personal.KeyStore))
 
+  @doc """
+  Реализация доменного времени `Core.Clock`: `config :core, clock:`, по умолчанию `Core.Clock.System`.
+
+  Читается на каждый вызов `Core.Clock.now/0`: сборке реализация не нужна, а тест подменяет её
+  строкой `config/test.exs` (`Core.Clock.Test`).
+  """
+  @spec clock() :: module()
+
+  def clock, do: Application.get_env(@app, :clock, @default_clock)
+
   @doc "Часовой пояс приложения по умолчанию."
   @spec tz() :: String.t()
 
@@ -159,7 +174,8 @@ defmodule Core.Config do
 
   Звать из `start/2` приложения-потребителя: обязательные ключи заданы, `dao`
   и `codec` загружаются и экспортируют нужные функции, реализации `Core.Outbox.Repo` и
-  `Core.Es.Personal.KeyStore` экспортируют колбэки, `tz` известен системе.
+  `Core.Es.Personal.KeyStore` экспортируют колбэки, `clock` экспортирует `now/0`, `tz` известен
+  системе.
   """
   @spec validate!() :: :ok
 
@@ -180,6 +196,8 @@ defmodule Core.Config do
       "config :core, Core.Es.Personal.KeyStore,",
       Core.Es.Personal.KeyStore.behaviour_info(:callbacks)
     )
+
+    ensure_exports!(clock(), "config :core, clock:", now: 0)
 
     ensure_tz!(tz())
 

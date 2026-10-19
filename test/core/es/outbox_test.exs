@@ -86,6 +86,13 @@ defmodule Core.Es.OutboxTest do
   end
 
   describe "запись из события" do
+    test "время записи реальное при остановленных часах" do
+      :ok = Core.Clock.Test.freeze(~U[2000-01-01 00:00:00Z])
+
+      assert {:ok, record} = Fixture.from_event(EventFixture.created())
+      assert_in_delta DateTime.to_unix(Outbox.CreatedAt.value(record.created_at)), System.os_time(:second), 5
+    end
+
     test "payload — конверт события целиком" do
       event = EventFixture.created()
 

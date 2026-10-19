@@ -79,7 +79,7 @@ defmodule Core.Es.Outbox do
 
         with {:ok, key} <- Core.Outbox.Key.new(fields.aggregate_id),
              {:ok, name} <- Core.Outbox.Name.new(fields.type),
-             {:ok, created_at} <- Core.Outbox.CreatedAt.now() do
+             {:ok, created_at} <- Core.Outbox.CreatedAt.new(DateTime.utc_now()) do
           Core.Outbox.Record.new(@es_topic, key, name, payload, headers(fields), created_at)
         end
       end

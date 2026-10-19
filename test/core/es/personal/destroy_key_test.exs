@@ -41,6 +41,16 @@ defmodule Core.Es.Personal.DestroyKeyTest do
              ] = Store.Test.events!(Codec, subject_id)
     end
 
+    test "время события — доменное" do
+      subject = Account.ID.new()
+      :ok = Core.Clock.Test.freeze(~U[2026-03-01 10:00:00Z])
+
+      assert :ok = Personal.destroy_key(subject, UserID.new(), Context.new())
+
+      assert [%KeyDestroyed{at: at}] = Store.Test.events!(Codec, subject_id(subject))
+      assert DateTime.compare(Core.Es.Event.At.value(at), ~U[2026-03-01 10:00:00Z]) == :eq
+    end
+
     test "повтор — :ok без второго события" do
       subject = Account.ID.new()
       by = UserID.new()

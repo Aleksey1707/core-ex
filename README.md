@@ -158,6 +158,7 @@ config :core,
 |---|---|---|---|
 | `tz` | `String.t()` | `"Etc/UTC"` | часовой пояс приложения (`datetime_tz: :app` в кодеках, `Prim.Date*`) |
 | `telemetry_prefix` | `[atom()]` | `[otp_app()]` | префикс имён telemetry-событий Core |
+| `clock` | `module()` | `Core.Clock.System` | доменное время `Core.Clock`; в тестах — `Core.Clock.Test` |
 
 ### Подсистемы
 

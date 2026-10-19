@@ -139,7 +139,8 @@ wire-форму задаёт профиль кодека); `check_version: false
 Проверяется: `test/core/prim/uuid_test.exs`, describe «идентификатор из ключа (version: 5)» и
 «внешний идентификатор (version: :external)».
 
-`Prim.DateTime` дополнительно: `now/0` / `now!/0`, `from/1` / `from!/1` — конверсия **из другого
+`Prim.DateTime` дополнительно: `now/0` / `now!/0` (доменное время — «Доменное время
+(`Core.Clock`)»), `from/1` / `from!/1` — конверсия **из другого
 datetime-Prim** (явный API; `new/1` принимает только raw `%DateTime{}` / ISO8601, не другой Prim).
 
 `Prim.Date` — дата без времени: `today/0` / `today!/0` (в `tz:` модуля или `Core.Config.tz/0`),
@@ -180,6 +181,25 @@ defmodule MyApp.Domain.<BC>.<Aggregate> do
   end
 end
 ```
+
+### Доменное время (`Core.Clock`)
+
+«Сейчас» значений даты и времени — доменное время (`CONTEXT.md`, «Доменное время»): `now/0` /
+`now!/0` у `use Core.Prim.DateTime` и `today/0` / `today!/0` у `use Core.Prim.Date` берут момент у
+`Core.Clock.now/0` и приводят его к поясу и точности Prim. Реализацию выбирает
+`config :core, clock:` на каждый вызов: по умолчанию `Core.Clock.System`, в тестах —
+`Core.Clock.Test` (`19-testing.md`, «Время»). Решение — ADR-0083.
+
+- Код, которому нужно доменное «сейчас» без Prim, MUST звать `Core.Clock.now/0`, а не
+  `DateTime.utc_now/0`: системные часы тест не остановит.
+- Инфраструктура библиотеки — время записей outbox, аренды, поллер, cleaner, хранилище ключей
+  субъектов, читатель проекции, метрики — MUST брать реальное время явно: `DateTime.utc_now/0`,
+  Prim outbox — через `new/1`, а не `now/0`. Остановленное время ломало бы аренды, уборку и
+  чекпоинты.
+- Время события уничтожения ключа субъекта — доменное: событие читает домен.
+
+Проверяется: `test/core/clock_test.exs`; реальное время outbox — `test/core/outbox/record_test.exs`,
+`test/core/es/outbox_test.exs`, `test/core/outbox/poller_test.exs`.
 
 ## Enum (закрытое множество атомов)
 

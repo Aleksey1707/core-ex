@@ -39,6 +39,8 @@ defmodule Core.MixProject do
       {:jason, "~> 1.2"},
       {:uuid, "~> 1.1"},
       {:uuidv7, "~> 1.0"},
+      # Владение остановленным временем теста потребителя (`Core.Clock.Test`, ADR-0083)
+      {:nimble_ownership, "~> 1.0"},
       # Наблюдаемость
       {:telemetry, "~> 1.0"},
       {:telemetry_metrics, "~> 1.0"},

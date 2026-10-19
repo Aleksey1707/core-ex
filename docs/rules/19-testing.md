@@ -619,7 +619,36 @@ end
 подменить в тесте, передав явный `at`.
 
 Тест MUST NOT зависеть от реального «сейчас»: сравнения дат — с зафиксированным значением,
-переданным в конструктор.
+переданным в конструктор или остановленным `Core.Clock.Test.freeze/1`.
+
+Доменное время (`11-domain.md`, «Доменное время (`Core.Clock`)») тест останавливает и сдвигает
+через `Core.Clock.Test`, когда момент нельзя передать аргументом: история с истечением срока
+через usecase или HTTP. Подключение — `config :core, clock: Core.Clock.Test` в `config/test.exs` и
+`:ok = Core.Clock.Test.start()` в `test/test_helper.exs`.
+
+- `freeze/1` останавливает время процесса теста, `advance/1` сдвигает остановленное на `Duration`
+  или keyword `DateTime.shift/2`; `advance/1` без `freeze/1` — `ArgumentError`.
+- Время владельца видят процессы с ним в `$callers` (`Task`) — без настройки, поэтому тест
+  остаётся `async: true`. Процессу вне `$callers` (реактор, подписчик, `GenServer`) время MUST
+  открывать `allow/2`, а не глобальный режим.
+- Глобальный режим `global/0` — только при `async: false`: время теста видят все процессы VM.
+  Уборка — выход процесса теста, `on_exit` не нужен.
+- Время записей outbox, аренды и метрики идут по реальному времени: сравнивать их с остановленным
+  «сейчас» MUST NOT. Время зависимостей вне `:core` (Oban и прочие) остановку тоже не видит.
+
+```elixir
+# плохо — срок проверяется ожиданием реального времени
+{:ok, code} = Login.request_code(phone, context)
+Process.sleep(:timer.minutes(5))
+
+# хорошо — время теста остановлено и сдвинуто за срок
+:ok = Core.Clock.Test.freeze(~U[2026-03-01 10:00:00Z])
+{:ok, code} = Login.request_code(phone, context)
+:ok = Core.Clock.Test.advance(minute: 5, second: 1)
+assert {:error, %Error{code: :code_expired}} = Login.confirm(phone, code, context)
+```
+
+Проверяется: `test/core/clock_test.exs`.
 
 ## Процессы
 

@@ -69,7 +69,7 @@ defmodule Core.Outbox.Record do
          {:ok, created_at} <-
            created_at
            |> Option.to_result()
-           |> Result.or_else(&Outbox.CreatedAt.now/0) do
+           |> Result.or_else(fn -> Outbox.CreatedAt.new(DateTime.utc_now()) end) do
       {:ok,
        %__MODULE__{
          id: Outbox.ID.new(),
