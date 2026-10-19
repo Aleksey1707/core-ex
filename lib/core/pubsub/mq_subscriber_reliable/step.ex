@@ -2,12 +2,15 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   @moduledoc false
 
   # Шаг обработки одного сообщения подписчиком: `filter` → span `process` → `from_message` →
-  # контекст от `context_factory` → `on_message`, исключение обработчика — `{:error, %Error{}}`.
+  # контекст от `context_factory` с основанием из заголовка `operation_id` → `on_message`,
+  # исключение обработчика — `{:error, %Error{}}`.
   # Чтение, `commit`, счёт попыток, backoff, DLQ и telemetry цикла — у вызывающего: исход
   # он получает в `fun`, внутри span'а обработки, и может дополнить span (причина выброса в DLQ).
 
+  alias Core.Config
   alias Core.Context
   alias Core.Error
+  alias Core.Es
   alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Message
@@ -117,7 +120,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   defp decode(step, raw, fun) do
     case safe_from_message(step, raw) do
       {:ok, message} ->
-        dispatch(step, message, fun)
+        dispatch(step, raw.headers, message, fun)
 
       {:error, %Error{} = error} ->
         Logger.warning("pubsub reliable from_message: #{error.message}")
@@ -145,8 +148,8 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   # Контекст создаётся на сообщение и уничтожается после него: `Repo.Sc` держит эталоны
   # в ETS, и один контекст на весь uptime подписчика рос бы неограниченно, отдавая
   # write-репозиториям устаревшие эталоны.
-  defp dispatch(step, message, fun) do
-    context = step.context_factory.()
+  defp dispatch(step, headers, message, fun) do
+    context = with_basis(step.context_factory.(), headers)
 
     try do
       fun.(call_handler(step, message, context))
@@ -154,6 +157,22 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
       Repo.Sc.delete(context)
     end
   end
+
+  # Основание — операция события, на которое реагирует обработчик (ADR-0081): события,
+  # записанные в `on_message`, получают его как `basis_id`. Сообщение без заголовка или с
+  # нечитаемым значением (внешний источник, старая запись outbox) обрабатывается без основания.
+  defp with_basis(context, %{"operation_id" => value}) when is_binary(value) do
+    case Config.codec().load(Es.Event.OperationID, value) do
+      {:ok, %Es.Event.OperationID{} = basis} ->
+        Context.Basis.put(context, basis)
+
+      {:error, _reason} ->
+        Logger.warning("pubsub reliable basis: заголовок operation_id не читается: value=#{inspect(value)}")
+        context
+    end
+  end
+
+  defp with_basis(context, _headers), do: context
 
   defp call_handler(step, message, context) do
     case safe_on_message(step, message, context) do

@@ -75,8 +75,14 @@ state-stored агрегата целиком — тем же `Core.Es.Transact.r
   транзакции получают одну операцию, повтор `Core.Es.Transact` — новую, вне транзакции —
   операция на вызов. Наружу сгенерированный id не отдаётся; несколько транзакций одного действия —
   одна операция, только если usecase положил её в контекст.
+- Основание кладёт шаг обработки `MqSubscriberReliable`: значение заголовка `operation_id`
+  («Aggregate → Outbox.Record») становится `Core.Context.Basis` в контексте от `context_factory` до
+  `on_message`, и события, записанные обработчиком, получают `basis_id`. Обработчику для этого
+  ничего делать не нужно. Нет заголовка (внешний источник, старая запись outbox) — основания нет;
+  нечитаемое значение — `warning` в лог и обработка без основания.
 
-Проверяется: `test/core/es/operation_test.exs`.
+Проверяется: `test/core/es/operation_test.exs`; шаг подписчика —
+`test/core/pubsub/mq_subscriber_reliable/step_test.exs`, describe «основание».
 
 ## Aggregate → Outbox.Record
 

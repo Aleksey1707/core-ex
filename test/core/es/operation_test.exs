@@ -13,7 +13,9 @@ defmodule Core.Es.OperationTest do
   alias Core.EventFixture.AggID
   alias Core.Helper.Transact
   alias Core.Outbox
+  alias Core.Outbox.Delivery
   alias Core.Pagination
+  alias Core.PubSub.MqSubscriberReliable.Step
   alias Core.StateStoredFixture
   alias Core.Version
 
@@ -135,7 +137,50 @@ defmodule Core.Es.OperationTest do
     end
   end
 
+  describe "основание у подписчика" do
+    test "реакция на сообщение outbox получает основание — операцию события-причины" do
+      cause = Account.ID.new()
+      reaction = Account.ID.new()
+
+      :ok = open!(cause, Context.new())
+      [%{operation_id: %Es.Event.OperationID{} = operation}] = stored(cause)
+
+      assert :processed = Step.run(delivered(cause), reacting_step(reaction), 1)
+
+      assert [%{basis_id: ^operation, operation_id: %Es.Event.OperationID{} = own}] = stored(reaction)
+      assert own != operation
+    end
+
+    test "сообщение без заголовка operation_id — реакция без основания" do
+      cause = Account.ID.new()
+      reaction = Account.ID.new()
+
+      :ok = open!(cause, Context.new())
+      message = delivered(cause)
+
+      assert :processed =
+               Step.run(%{message | headers: Map.delete(message.headers, "operation_id")}, reacting_step(reaction), 1)
+
+      assert [%{basis_id: nil, operation_id: %Es.Event.OperationID{}}] = stored(reaction)
+    end
+  end
+
   # ---
+
+  defp delivered(id) do
+    [row] = records(id)
+    {:ok, record} = Outbox.Repo.Pg.Schema.to_entity(row)
+    {:ok, message} = Delivery.Mq.to_message(record)
+    message
+  end
+
+  defp reacting_step(id) do
+    Step.new!("test",
+      topic: Account.Outbox.topic(),
+      from_message: &{:ok, &1},
+      on_message: fn _message, _data, context -> open!(id, context) end
+    )
+  end
 
   defp open!(id, context) do
     {:ok, state} = @repo.get(id, :current, context)

@@ -4,8 +4,10 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
 
   import ExUnit.CaptureLog
 
+  alias Core.Config
   alias Core.Context
   alias Core.Error
+  alias Core.Es
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.Otel
@@ -62,6 +64,30 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
     assert :processed = Step.run(message(), step, 1)
     assert_received {:ctx, ctx}
     assert :ets.info(Context.find(ctx, :shadow_copy)) == :undefined
+  end
+
+  describe "основание" do
+    test "заголовок operation_id — основание в контексте on_message" do
+      operation = Es.Event.OperationID.new()
+      headers = %{"name" => "product_created", "operation_id" => Config.codec().dump(operation)}
+
+      assert :processed = Step.run(message(headers), step(on_message: basis_probe()), 1)
+      assert_received {:basis, ^operation}
+    end
+
+    test "без заголовка operation_id — основания нет" do
+      assert :processed = Step.run(message(), step(on_message: basis_probe()), 1)
+      assert_received {:basis, nil}
+    end
+
+    test "значение заголовка не UUID — основания нет, обработка идёт" do
+      headers = %{"name" => "product_created", "operation_id" => "not-a-uuid"}
+
+      log = capture_log(fn -> assert :processed = Step.run(message(headers), step(on_message: basis_probe()), 1) end)
+
+      assert_received {:basis, nil}
+      assert log =~ "pubsub reliable basis"
+    end
   end
 
   describe "фильтр" do
@@ -222,6 +248,15 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
         opts
       )
     )
+  end
+
+  defp basis_probe do
+    parent = self()
+
+    fn _m, _d, context ->
+      send(parent, {:basis, Context.Basis.find(context)})
+      :ok
+    end
   end
 
   defp fail(code, message \\ "boom"), do: Error.app(__MODULE__, code: code, ns: :pubsub, message: message)
