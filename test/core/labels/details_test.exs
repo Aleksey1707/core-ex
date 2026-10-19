@@ -2,6 +2,7 @@ defmodule Core.Labels.DetailsTest do
   use ExUnit.Case, async: true
 
   alias Core.Es.Event.At
+  alias Core.Es.Personal
   alias Core.EventFixture.AggID
   alias Core.Labels.Details
   alias Core.LabelsFixture.Address
@@ -12,6 +13,7 @@ defmodule Core.Labels.DetailsTest do
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
+  alias Core.LabelsFixture.Holder
   alias Core.LabelsFixture.ItemID
   alias Core.LabelsFixture.Line
   alias Core.LabelsFixture.Moment
@@ -316,6 +318,40 @@ defmodule Core.Labels.DetailsTest do
 
     assert Details.build(event(Event.Renamed, name)) ==
              {"Запись переименована", [%{label: "Название", kind: :text, value: name}]}
+  end
+
+  test "уничтоженное ПДн-значение — вид destroyed без значения, сторона изменения — элемент destroyed" do
+    payload =
+      Event.Contacted.Payload.new(
+        Holder.new!("Анна"),
+        %Address{city: Name.new!("Казань")},
+        [Holder.new!("Аня")],
+        UserID.new(),
+        %{"склад" => 5}
+      )
+
+    assert Details.build(Personal.Test.destroyed(event(Event.Contacted, payload))) ==
+             {"Контакт указан",
+              [
+                %{label: "Владелец", kind: :destroyed},
+                %{label: "Адрес", kind: :destroyed},
+                %{label: "Псевдонимы", kind: :destroyed},
+                %{label: "Учётная запись", kind: :destroyed},
+                %{label: "Лимиты", kind: :destroyed}
+              ]}
+
+    changed = event(Event.HolderChanged, Event.HolderChanged.Payload.new(Holder.new!("Анна"), Holder.new!("Аня")))
+
+    assert Details.build(Personal.Test.destroyed(changed, [:old_value])) ==
+             {"Владелец сменён",
+              [
+                %{
+                  label: "Владелец",
+                  kind: :change,
+                  old: %{kind: :destroyed},
+                  new: %{kind: :text, value: Holder.new!("Аня")}
+                }
+              ]}
   end
 
   test "нагрузка nil — пустые сведения" do

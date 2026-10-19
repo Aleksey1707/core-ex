@@ -21,6 +21,7 @@ defmodule Core.Labels.Details do
   | `:group` | `entity:`, `union:` → сведения полей struct'а; у варианта — по его `Core.Labels.Fields` |
   | `:list` | `list:` → элементы `%{kind, value}` вида спеки элемента, без подписи |
   | `:list` | `type: :map` с подписями `[label:, key:, value:]` → группы «ключ — значение» |
+  | `:destroyed` | поле с `subject:`, на месте значения `%Core.Es.Personal.Destroyed{}` → без `value` |
 
   Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim, значение — композит как есть.
   Объявление вида id или текста у базы композита действует и на композит: значение — база с
@@ -44,28 +45,40 @@ defmodule Core.Labels.Details do
   Сведения идут в порядке спеки полей; поле `:hidden` в них не попадает. Поле без значения —
   сведение с `value: nil` и своим видом; нагрузка `nil` — пустые сведения; нагрузка-Prim — одно
   сведение с подписью `payload:` события.
+
+  Уничтоженное ПДн-значение (`%Core.Es.Personal.Destroyed{}` в поле с `subject:`, ADR-0074) —
+  сведение `%{label, kind: :destroyed}` без `value` (и без `entity` у поля-ссылки), сторона
+  изменения — `%{kind: :destroyed}`: вид задаёт форму `value`, а значения у поля нет.
   """
 
   alias Core.Es
+  alias Core.Es.Personal.Destroyed
   alias Core.Helper.FieldCheck
   alias Core.Labels.Fields
   alias Core.Labels.ID
   alias Core.Labels.Text
 
   @typedoc "Вид значения сведения."
-  @type kind :: :text | :number | :date | :datetime | :user | :ref | :group | :list
+  @type kind :: :text | :number | :date | :datetime | :user | :ref | :group | :list | :destroyed
 
   @typedoc "Значение сведения: Prim, строка, число, сведения группы или элементы списка."
   @type value :: struct() | String.t() | number() | [t()] | [item()] | nil
 
-  @typedoc "Сведение: подписанное значение со своим видом, ссылка на запись или изменение «было → стало»."
+  @typedoc """
+  Сведение: подписанное значение со своим видом, ссылка на запись, изменение «было → стало» или
+  уничтоженное ПДн-значение без значения.
+  """
   @type t ::
           %{label: String.t(), kind: kind(), value: value()}
           | %{label: String.t(), kind: :ref, entity: atom(), value: struct() | nil}
           | %{label: String.t(), kind: :change, old: item(), new: item()}
+          | %{label: String.t(), kind: :destroyed}
 
   @typedoc "Элемент списка: значение со своим видом, без подписи."
-  @type item :: %{kind: kind(), value: value()} | %{kind: :ref, entity: atom(), value: struct() | nil}
+  @type item ::
+          %{kind: kind(), value: value()}
+          | %{kind: :ref, entity: atom(), value: struct() | nil}
+          | %{kind: :destroyed}
 
   # Свободная map'а выходит подписями ключа и значения, а не видом `type:`: вида у неё нет, но ответ на неё дан.
   @type_kinds [
@@ -107,6 +120,9 @@ defmodule Core.Labels.Details do
         do: field_detail(Keyword.fetch!(labels, name), spec, Map.fetch!(struct, name))
   end
 
+  defp field_detail([label: label, key: _key, value: _value], {:type, :map}, %Destroyed{}),
+    do: %{label: label, kind: :destroyed}
+
   defp field_detail([label: label, key: key, value: value], {:type, :map}, map),
     do: %{label: label, kind: :list, value: map_items(map, key, value)}
 
@@ -130,6 +146,7 @@ defmodule Core.Labels.Details do
 
   defp detail(label, spec, value), do: Map.put(item(spec, value), :label, label)
 
+  defp item(_spec, %Destroyed{}), do: %{kind: :destroyed}
   defp item(spec, value), do: Map.put(shape(spec), :value, value(spec, value))
 
   defp shape({:prim, module}), do: prim_shape(module)

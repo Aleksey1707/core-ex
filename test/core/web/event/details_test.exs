@@ -5,6 +5,7 @@ defmodule Core.Web.Event.DetailsTest do
 
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
+  alias Core.Es.Personal
   alias Core.EventFixture.AggID
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Amount
@@ -13,6 +14,7 @@ defmodule Core.Web.Event.DetailsTest do
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
+  alias Core.LabelsFixture.Holder
   alias Core.LabelsFixture.ItemID
   alias Core.LabelsFixture.Line
   alias Core.LabelsFixture.Moment
@@ -279,12 +281,58 @@ defmodule Core.Web.Event.DetailsTest do
     assert wire(event(Event.Closed, nil), %{}) == %{"title" => "Запись закрыта", "details" => []}
   end
 
+  describe "ПДн-значение" do
+    test "живое — сведением своего вида" do
+      owner = UserID.new()
+
+      assert wire(contacted(owner), %{owner => "Владелец"}) == %{
+               "title" => "Контакт указан",
+               "details" => [
+                 text("Владелец", "Анна"),
+                 group("Адрес", [text("Город", "Казань"), text("Индекс", nil)]),
+                 list("Псевдонимы", [%{"kind" => "text", "value" => "Аня"}]),
+                 user("Учётная запись", owner, "Владелец"),
+                 list("Лимиты", [%{"kind" => "group", "value" => [text("Позиция", "склад"), number("Лимит", "5")]}])
+               ]
+             }
+    end
+
+    test "уничтоженное — вид destroyed с подписью и без value, словарь ссылок не нужен" do
+      assert wire(Personal.Test.destroyed(contacted(UserID.new())), %{}) == %{
+               "title" => "Контакт указан",
+               "details" => [
+                 destroyed("Владелец"),
+                 destroyed("Адрес"),
+                 destroyed("Псевдонимы"),
+                 destroyed("Учётная запись"),
+                 destroyed("Лимиты")
+               ]
+             }
+    end
+
+    test "уничтоженная сторона изменения — элемент destroyed без подписи" do
+      payload = Event.HolderChanged.Payload.new(Holder.new!("Анна"), Holder.new!("Аня"))
+
+      assert wire(Personal.Test.destroyed(event(Event.HolderChanged, payload), [:old_value]), %{}) == %{
+               "title" => "Владелец сменён",
+               "details" => [
+                 %{
+                   "label" => "Владелец",
+                   "kind" => "change",
+                   "old" => %{"kind" => "destroyed"},
+                   "new" => %{"kind" => "text", "value" => "Аня"}
+                 }
+               ]
+             }
+    end
+  end
+
   describe "схема" do
     test "семейство видов Detail с дискриминатором kind, названия от модуля приложения" do
       %OpenApi{components: %Components{schemas: schemas}} = spec()
 
-      kinds = ~w(text number date datetime user ref group list change)
-      suffixes = ~w(Text Number Date DateTime User Ref Group List Change)
+      kinds = ~w(text number date datetime user ref group list change destroyed)
+      suffixes = ~w(Text Number Date DateTime User Ref Group List Change Destroyed)
       titles = Enum.map(suffixes, &"WebEventDetail#{&1}")
       mapping = Map.new(Enum.zip(kinds, titles), fn {kind, title} -> {kind, "#/components/schemas/#{title}"} end)
 
@@ -303,7 +351,9 @@ defmodule Core.Web.Event.DetailsTest do
             %{"label" => "Автор", "kind" => "user", "value" => %{"id" => "u1"}},
             %{"kind" => "ref", "value" => %{"id" => "i1", "name" => nil}},
             %{"kind" => "group", "value" => [%{"kind" => "text", "value" => 1}]},
-            %{"label" => "Название", "kind" => "change", "old" => %{"kind" => "text", "value" => "a"}}
+            %{"label" => "Название", "kind" => "change", "old" => %{"kind" => "text", "value" => "a"}},
+            %{"label" => "Владелец", "kind" => "text", "value" => %{"$destroyed" => true}},
+            %{"label" => "Владелец"}
           ] do
         assert {:error, _} = OpenApiSpex.cast_value(detail, schema, spec), inspect(detail)
       end
@@ -340,6 +390,19 @@ defmodule Core.Web.Event.DetailsTest do
   defp event(Event.Closed, nil), do: Event.Closed.new(AggID.new(), Version.new(), UserID.new(), At.now!())
   defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), UserID.new(), At.now!())
 
+  defp contacted(owner) do
+    payload =
+      Event.Contacted.Payload.new(
+        Holder.new!("Анна"),
+        %Address{city: Name.new!("Казань")},
+        [Holder.new!("Аня")],
+        owner,
+        %{"склад" => 5}
+      )
+
+    event(Event.Contacted, payload)
+  end
+
   defp day, do: Day.new!(~D[2026-10-13])
   defp moment, do: Moment.new!(~U[2026-10-13 09:30:00.000000Z])
 
@@ -356,6 +419,7 @@ defmodule Core.Web.Event.DetailsTest do
   end
 
   defp detail(label, kind, value), do: %{"label" => label, "kind" => kind, "value" => value}
+  defp destroyed(label), do: %{"label" => label, "kind" => "destroyed"}
   defp text(label, value), do: detail(label, "text", value)
   defp number(label, value), do: detail(label, "number", value)
   defp group(label, details), do: detail(label, "group", details)

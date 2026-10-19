@@ -1,8 +1,9 @@
 defmodule Core.WebEventFixture do
   @moduledoc """
   События страницы событий для тестов `Core.Web.Event`: нагрузка с многословными полями и вложенной
-  map'ой, событие без нагрузки; OpenAPI-схема ссылки на учётную запись. `Core.WebEventFixture.Event.Codec`
-  зарегистрирован в `Core.CodecFixture.plugins/0` — иначе фасады не смогли бы дампить события.
+  map'ой, нагрузка с ПДн-полями двух субъектов, событие без нагрузки; OpenAPI-схема ссылки на учётную
+  запись. `Core.WebEventFixture.Event.Codec` зарегистрирован в `Core.CodecFixture.plugins/0` — иначе
+  фасады не смогли бы дампить события.
   """
 
   defmodule AggID do
@@ -19,6 +20,16 @@ defmodule Core.WebEventFixture do
     use Core.Prim.UUID,
       name: "Идентификатор учётной записи",
       version: 7
+  end
+
+  defmodule ContactName do
+    @moduledoc "Имя контакта — ПДн."
+
+    use Core.Prim.String,
+      name: "Имя контакта",
+      min_len: 1,
+      max_len: 100,
+      personal: true
   end
 
   defmodule Event do
@@ -47,6 +58,28 @@ defmodule Core.WebEventFixture do
         payload: Payload
     end
 
+    defmodule Contacted do
+      @moduledoc "Событие с ПДн-полями: Prim под ключом лица и свободная map'а под ключом агрегата."
+
+      alias Core.WebEventFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка `Contacted`."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            person_id: [prim: WebEventFixture.UserID],
+            contact_name: [prim: WebEventFixture.ContactName, subject: :person_id],
+            home_address: [type: :map, subject: :aggregate_id, optional: true]
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: WebEventFixture.AggID,
+        by: WebEventFixture.UserID,
+        payload: Payload
+    end
+
     defmodule Closed do
       @moduledoc "Событие без нагрузки."
 
@@ -64,7 +97,11 @@ defmodule Core.WebEventFixture do
 
     alias Core.WebEventFixture.Event
 
-    @tag_by_mod %{Event.Noted => "web_event.noted", Event.Closed => "web_event.closed"}
+    @tag_by_mod %{
+      Event.Noted => "web_event.noted",
+      Event.Contacted => "web_event.contacted",
+      Event.Closed => "web_event.closed"
+    }
 
     use Core.Es.Event.Codec,
       event: Event,

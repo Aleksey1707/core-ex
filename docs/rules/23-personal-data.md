@@ -185,6 +185,19 @@ AAD — `event_id` и wire-ключ поля, открытый текст — JS
 |---|---|
 | после `load` | `%Core.Es.Personal.Destroyed{}` на месте поля целиком, любого вида |
 | у апкастера (wire до `load`) | `{"$pd": null}` |
+| в `payload` страницы событий (`Core.Web.Event`) | `{"$destroyed": true}` на месте поля |
+| в сведениях страницы событий (`labels: true`) | вид `destroyed` с подписью, без `value` |
+
+Клиенту страницы событий форму отдаёт `to_wire/2` модуля с `use Core.Web.Event`: он снимает маркеры
+дампа сам — живое ПДн-значение уходит открытым wire-значением, уничтоженное — `{"$destroyed": true}`
+(ключ `camelize` не меняет); форму описывает схема `payload`. `{"$pd": null}` — форма хранения и
+клиенту не уходит. Свой `Jason.encode(OutCodec.dump(event))` мимо `Core.Web.Event` на маркере
+отказывает без значения в тексте. Сведения события (`Core.Labels.Details`) отдают поле с
+`%Destroyed{}` сведением `%{label, kind: :destroyed}` без значения, сторону изменения — элементом
+`%{kind: :destroyed}`: вид задаёт форму `value`, и схемы прежних видов не меняются.
+
+Проверяется: `test/core/web/event_test.exs`, describe «ПДн-значение»;
+`test/core/web/event/details_test.exs`, describe «ПДн-значение».
 
 `%Destroyed{}` — struct без полей: ни ключа, ни субъекта, ни длины, экземпляры равны. В
 `@type t` нагрузки ПДн-поле получает `| Core.Es.Personal.Destroyed.t()`, а `@spec new` и guard

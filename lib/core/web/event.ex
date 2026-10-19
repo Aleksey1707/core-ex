@@ -27,14 +27,14 @@ defmodule Core.Web.Event do
   |---|---|
   | `id`, `aggregateId`, `type`, `at` | поля конверта дампом `codec:` |
   | `aggregateVersion` | версия агрегата после события |
-  | `payload` | нагрузка конверта, ключи — camelCase; id в ней — строки дампа, без подмены ссылками |
+  | `payload` | нагрузка конверта, ключи — camelCase; id в ней — строки дампа, без подмены ссылками; ПДн — ниже |
   | `by` | без `user_ref:` — дамп id; с ним — результат `dump:` от дампа id и имени из словаря ссылок |
   | `title` | при `labels: true` — название события |
   | `details` | при `labels: true` — сведения события (таблица ниже) |
 
   | Сведение | На wire |
   |---|---|
-  | вид | строкой: `"text"`, `"number"`, `"date"`, `"datetime"`, `"user"`, `"ref"`, `"group"`, `"list"`, `"change"` |
+  | вид | строкой: `"text"`, `"number"`, `"date"`, `"datetime"`, `"user"`, `"ref"`, `"group"`, `"list"`, `"change"`, `"destroyed"` |
   | `:number` | строкой с десятичной точкой: integer — `Integer.to_string/1`, decimal и float — нормальная запись |
   | `:text`, `:date`, `:datetime` | Prim — дампом `codec:`, строка — как есть |
   | `:ref` | `%{entity, id, name}`: вид записи — camelCase атома, id — дампом `codec:`, имя — из словаря ссылок |
@@ -44,6 +44,13 @@ defmodule Core.Web.Event do
 
   Строка, которую отдал кодек (`decimal: :string`), выходит как есть. У элемента списка и стороны
   изменения `label` нет; значения нет — `value: nil`.
+
+  Маркеры ПДн-значений дампа (`Core.Es.Personal.Marker`, поля с `subject:`) снимает сам `to_wire/2`
+  (ADR-0074): живое значение уходит открытым wire-значением — права на него проверил usecase, —
+  уничтоженное — `{"$destroyed": true}` на месте поля целиком, любого вида. Ключ `$destroyed`
+  camelize не меняет и с wire-ключом поля не совпадает. Сведение поля с уничтоженным значением —
+  вида `"destroyed"` с подписью и без `value`, у стороны изменения — `%{kind: "destroyed"}`. Свой
+  `Jason.encode` дампа в обход `to_wire/2` на маркере отказывает, и значения в тексте отказа нет.
 
   Автор или id сведений, которых нет в словаре ссылок при `user_ref:`, — `ArgumentError`: словарь
   собирают с той же страницы событий. Без `user_ref:` словарь не читается — подходит и пустой.
@@ -56,14 +63,15 @@ defmodule Core.Web.Event do
   OpenAPI-схемой события страницы событий (`schema/0`), и страница описывается
   `Core.Web.Response.Schema.page(MyAppWeb.Schemas.Event)`. Название схемы — последний сегмент имени
   модуля; объект открытый, все поля обязательны: `type` — строка без перечисления (схема одна на все
-  агрегаты), `aggregateVersion` — целое от 1, `payload` — схема без типа, nullable, `at` — `date-time`, `by` —
-  строка без `user_ref:` и `schema:` из `user_ref:` с ним.
+  агрегаты), `aggregateVersion` — целое от 1, `payload` — схема без типа, nullable, с формой уничтоженного
+  значения в описании, `at` — `date-time`, `by` — строка без `user_ref:` и `schema:` из `user_ref:` с ним.
 
   При `labels: true` — ещё `title` и `details`: схема сведений — вложенный модуль `Detail` (`oneOf` по
   видам с дискриминатором `kind`, название `<Имя>Detail`), схемы видов — его вложенные модули `Text`,
-  `Number`, `Date`, `DateTime`, `User`, `Ref`, `Group`, `List`, `Change` (`<Имя>DetailText`, …).
-  Сведения группы, списка и стороны изменения ссылаются на схему сведений, значение вида `user` — на
-  `schema:` из `user_ref:`. Без `open_api_spex` модуль — только дамп, и `schema:` не требуется.
+  `Number`, `Date`, `DateTime`, `User`, `Ref`, `Group`, `List`, `Change`, `Destroyed` (`<Имя>DetailText`,
+  …). Сведения группы, списка и стороны изменения ссылаются на схему сведений, значение вида `user` — на
+  `schema:` из `user_ref:`; у вида `destroyed` значения нет. Без `open_api_spex` модуль — только дамп, и
+  `schema:` не требуется.
 
   Сборку ломают: нет `codec:`, `codec:` без `dump/1`, неизвестная опция, `user_ref:` без `dump:` или с
   неизвестной опцией, `dump:` не захватом функции арности 2, `labels:` не boolean, `labels: true` без
@@ -74,6 +82,7 @@ defmodule Core.Web.Event do
   """
 
   alias Core.Es
+  alias Core.Es.Personal.Marker
   alias Core.Helper
   alias Core.Labels.Check
   alias Core.Web.Event.Details
@@ -102,10 +111,11 @@ defmodule Core.Web.Event do
           details: [detail()]
         }
 
-  @typedoc "Сведение для JSON; у элемента списка и стороны изменения `label` нет."
+  @typedoc "Сведение для JSON: у элемента списка и стороны изменения `label` нет, у вида `destroyed` нет `value`."
   @type detail ::
           %{optional(:label) => String.t(), required(:kind) => String.t(), required(:value) => value()}
           | %{label: String.t(), kind: String.t(), old: detail(), new: detail()}
+          | %{optional(:label) => String.t(), required(:kind) => String.t()}
 
   @typedoc "Значение сведения: дамп кодека, число строкой, ссылка, ссылка на учётную запись, сведения группы."
   @type value :: String.t() | struct() | ref() | map() | [detail()] | nil
@@ -137,7 +147,12 @@ defmodule Core.Web.Event do
       "List",
       "Элементы одного вида без подписи; у map'ы с id в ключах — группы «ключ — значение»"
     },
-    change: {quote(do: __MODULE__.Change), "Change", "Изменение: было и стало — сведения без подписи"}
+    change: {quote(do: __MODULE__.Change), "Change", "Изменение: было и стало — сведения без подписи"},
+    destroyed: {
+      quote(do: __MODULE__.Destroyed),
+      "Destroyed",
+      "Уничтоженное ПДн-значение: подпись без значения"
+    }
   ]
 
   # ===== объявление =====
@@ -354,7 +369,9 @@ defmodule Core.Web.Event do
                                   type: %OpenApiSpex.Schema{type: :string, description: "Тег события"},
                                   payload: %OpenApiSpex.Schema{
                                     nullable: true,
-                                    description: "Нагрузка события, ключи — camelCase"
+                                    description:
+                                      "Нагрузка события, ключи — camelCase; уничтоженное ПДн-значение " <>
+                                        ~s(поля — {"$destroyed": true})
                                   },
                                   at: %OpenApiSpex.Schema{
                                     type: :string,
@@ -496,8 +513,10 @@ defmodule Core.Web.Event do
     do: quote(do: %{value: %OpenApiSpex.Schema{type: :array, items: web_event_detail, nullable: true}})
 
   defp properties(:change), do: quote(do: %{old: web_event_detail, new: web_event_detail})
+  defp properties(:destroyed), do: quote(do: %{})
 
   defp required(:change), do: ~w(label kind old new)a
+  defp required(:destroyed), do: ~w(kind)a
   defp required(_kind), do: ~w(kind value)a
 
   # ===== дамп =====
@@ -514,7 +533,7 @@ defmodule Core.Web.Event do
       aggregateId: fields.aggregate_id,
       aggregateVersion: fields.aggregate_version,
       type: fields.type,
-      payload: Helper.Keys.camelize(fields.payload),
+      payload: Helper.Keys.camelize(open(fields.payload)),
       at: fields.at,
       by: by(fields.by, by, refs, user_dump)
     }
@@ -526,6 +545,14 @@ defmodule Core.Web.Event do
   end
 
   # ---
+
+  # Маркер ПДн-значения стоит только среди полей нагрузки верхнего уровня (ADR-0073).
+  defp open(payload) when is_map(payload), do: Map.new(payload, fn {key, value} -> {key, open_value(value)} end)
+  defp open(payload), do: payload
+
+  defp open_value(%Marker{destroyed: true}), do: %{"$destroyed" => true}
+  defp open_value(%Marker{value: value}), do: value
+  defp open_value(value), do: value
 
   defp by(dumped, _by, _refs, nil), do: dumped
   defp by(dumped, by, refs, user_dump) when is_function(user_dump, 2), do: user_dump.(dumped, name!(refs, by))

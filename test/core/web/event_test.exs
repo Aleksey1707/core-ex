@@ -5,12 +5,14 @@ defmodule Core.Web.EventTest do
 
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
+  alias Core.Es.Personal
   alias Core.EventFixture
   alias Core.LabelsFixture
   alias Core.Pagination
   alias Core.Version
   alias Core.Web.Response
   alias Core.WebEventFixture.AggID
+  alias Core.WebEventFixture.ContactName
   alias Core.WebEventFixture.Event
   alias Core.WebEventFixture.Plain
   alias Core.WebEventFixture.UserID
@@ -46,6 +48,52 @@ defmodule Core.Web.EventTest do
     end
   end
 
+  describe "ПДн-значение" do
+    test "живое — открытым wire-значением, ключи в camelCase, как у поля без subject:" do
+      person = UserID.new()
+      event = contacted(person, %{"street_name" => "Ленина"})
+
+      assert %{
+               payload: %{
+                 "personId" => dumped,
+                 "contactName" => "Анна",
+                 "homeAddress" => %{"streetName" => "Ленина"}
+               }
+             } = Plain.to_wire(event, %{})
+
+      assert dumped == External.dump(person)
+      assert json(Plain.to_wire(event, %{}))["payload"]["contactName"] == "Анна"
+    end
+
+    test "уничтоженное — {\"$destroyed\": true}: ключ переживает camelize, nil необязательного — null" do
+      person = UserID.new()
+
+      assert %{payload: %{"contactName" => %{"$destroyed" => true}, "homeAddress" => %{"$destroyed" => true}}} =
+               Plain.to_wire(Personal.Test.destroyed(contacted(person, %{"street_name" => "Ленина"})), %{})
+
+      assert %{"payload" => %{"personId" => _, "contactName" => %{"$destroyed" => true}, "homeAddress" => nil}} =
+               json(Plain.to_wire(Personal.Test.destroyed(contacted(person, nil)), %{}))
+    end
+
+    test "Jason.encode дампа в обход Core.Web.Event — отказ на маркере без значения" do
+      for event <- [contacted(UserID.new(), nil), Personal.Test.destroyed(contacted(UserID.new(), nil))] do
+        assert {:error, %Protocol.UndefinedError{} = error} = Jason.encode(External.dump(event))
+        refute Exception.message(error) =~ "Анна"
+        assert_raise Protocol.UndefinedError, fn -> Jason.encode!(External.dump(event)) end
+      end
+    end
+
+    test "живое и уничтоженное проходят схему; схема payload описывает уничтоженное значение" do
+      %OpenApi{components: %Components{schemas: %{"Plain" => schema}}} = spec = spec([Plain])
+      event = contacted(UserID.new(), %{"street_name" => "Ленина"})
+
+      for event <- [event, Personal.Test.destroyed(event)],
+          do: assert_schema(json(Plain.to_wire(event, %{})), "Plain", spec)
+
+      assert schema.properties.payload.description =~ ~s({"$destroyed": true})
+    end
+  end
+
   describe "с user_ref:" do
     test "by — дамп user_ref: от дампа id и имени из словаря ссылок" do
       by = UserID.new()
@@ -71,13 +119,16 @@ defmodule Core.Web.EventTest do
       [by, labelled_by] = [UserID.new(), LabelsFixture.UserID.new()]
       noted = noted(by)
       labelled = LabelsFixture.Event.Closed.new(EventFixture.AggID.new(), Version.new(), labelled_by, At.now!())
+      destroyed = Personal.Test.destroyed(labelled_contacted(labelled_by))
 
       for {module, event, refs} <- [
             {Plain, noted, %{}},
             {Plain, closed(by), %{}},
             {WithUser, noted, %{by => "Автор"}},
             {WithUser, closed(by), %{by => nil}},
-            {LabelsFixture.WebEvent, labelled, %{labelled_by => "Автор"}}
+            {LabelsFixture.WebEvent, labelled, %{labelled_by => "Автор"}},
+            {Plain, Personal.Test.destroyed(contacted(by, %{"street_name" => "Ленина"})), %{}},
+            {LabelsFixture.WebEvent, destroyed, %{labelled_by => "Автор"}}
           ] do
         title = List.last(Module.split(module))
         page = %Pagination.Result{items: [event, event], total: 7}
@@ -214,6 +265,25 @@ defmodule Core.Web.EventTest do
   # ---
 
   defp closed(by), do: Event.Closed.new(AggID.new(), Version.new(), by, At.now!())
+
+  defp contacted(person, address) do
+    payload = Event.Contacted.Payload.new(person, ContactName.new!("Анна"), address)
+
+    Event.Contacted.new(payload, AggID.new(), Version.new(), UserID.new(), At.now!())
+  end
+
+  defp labelled_contacted(by) do
+    payload =
+      LabelsFixture.Event.Contacted.Payload.new(
+        LabelsFixture.Holder.new!("Анна"),
+        %LabelsFixture.Address{city: LabelsFixture.Name.new!("Казань")},
+        [],
+        by,
+        nil
+      )
+
+    LabelsFixture.Event.Contacted.new(payload, EventFixture.AggID.new(), Version.new(), by, At.now!())
+  end
 
   defp noted(by) do
     payload = %Event.Noted.Payload{first_name: "Анна", extra_data: %{"source_kind" => %{"line_no" => 2}}}

@@ -7,8 +7,8 @@ defmodule Core.LabelsFixture do
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие другого агрегата с id в варианте
   семейства, id в скрытых полях нагрузки, вложенного struct'а, варианта семейства и map'ы, изменение на
   id, id под `text:` в поле, списке и значении изменения; автор каждого события — учётная запись с
-  резолвером; фикстурные резолверы имён; событие страницы событий со сведениями (`Core.Web.Event`,
-  `labels: true`).
+  резолвером; фикстурные резолверы имён; событие с ПДн-полями каждого вида сведений и изменение на
+  ПДн-значении; событие страницы событий со сведениями (`Core.Web.Event`, `labels: true`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
   набор ратчета полноты: в кодек не входят событие с id без вида, событие другого агрегата, событие со
@@ -43,6 +43,16 @@ defmodule Core.LabelsFixture do
     use Core.Prim.Decimal,
       name: "Сумма",
       scale: 2
+  end
+
+  defmodule Holder do
+    @moduledoc "Имя владельца — ПДн."
+
+    use Core.Prim.String,
+      name: "Имя владельца",
+      min_len: 1,
+      max_len: 50,
+      personal: true
   end
 
   defmodule Day do
@@ -810,6 +820,68 @@ defmodule Core.LabelsFixture do
       use Core.Labels.Event, title: "Лимиты заданы"
     end
 
+    defmodule Contacted do
+      @moduledoc "Событие с ПДн-полями каждого вида сведений: текст, группа, список, ссылка, map'а."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка с полями `subject:`."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            holder: [prim: LabelsFixture.Holder, subject: :aggregate_id],
+            address: [entity: LabelsFixture.Address, subject: :aggregate_id],
+            aliases: [list: [prim: LabelsFixture.Holder], subject: :aggregate_id],
+            owner: [prim: LabelsFixture.UserID, subject: :aggregate_id],
+            limits: [type: :map, subject: :aggregate_id, optional: true]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            holder: "Владелец",
+            address: "Адрес",
+            aliases: "Псевдонимы",
+            owner: "Учётная запись",
+            limits: [label: "Лимиты", key: "Позиция", value: "Лимит"]
+          ]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: UserID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Контакт указан"
+    end
+
+    defmodule HolderChanged do
+      @moduledoc "Событие «было → стало» на ПДн-значении: стороны — поля с `subject:`."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Изменение владельца."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            old_value: [prim: LabelsFixture.Holder, subject: :aggregate_id],
+            new_value: [prim: LabelsFixture.Holder, subject: :aggregate_id]
+          ]
+
+        use Core.Labels.Fields,
+          change: "Владелец",
+          value: [prim: LabelsFixture.Holder]
+      end
+
+      use Core.Es.Event,
+        aggregate_id: AggID,
+        by: UserID,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Владелец сменён"
+    end
+
     defmodule Renamed do
       @moduledoc "Событие с нагрузкой-Prim."
 
@@ -919,6 +991,8 @@ defmodule Core.LabelsFixture do
       Event.StatusSwitched => "labels_web.status_switched",
       Event.Linked => "labels_web.linked",
       Event.Limited => "labels_web.limited",
+      Event.Contacted => "labels_web.contacted",
+      Event.HolderChanged => "labels_web.holder_changed",
       Event.Renamed => "labels_web.renamed",
       Event.Closed => "labels_web.closed"
     }

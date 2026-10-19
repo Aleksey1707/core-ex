@@ -23,6 +23,8 @@ defmodule Core.Web.Event.Details do
   defp detail(%{kind: :change, old: old, new: new} = detail, env),
     do: labelled(detail, %{kind: "change", old: detail(old, env), new: detail(new, env)})
 
+  defp detail(%{kind: :destroyed} = detail, _env), do: labelled(detail, %{kind: "destroyed"})
+
   defp detail(%{kind: kind, value: value} = detail, env),
     do: labelled(detail, %{kind: Atom.to_string(kind), value: value(detail, value, env)})
 
