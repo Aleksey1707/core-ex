@@ -1,5 +1,8 @@
 defmodule Core.EsFixture.Account.KeyedRepo do
-  @moduledoc "Write-behaviour счёта с резервом названия; реализация — `Core.EsFixture.Account.KeyedRepo.Pg`."
+  @moduledoc """
+  Write-behaviour счёта с резервами названия и владельца; реализация —
+  `Core.EsFixture.Account.KeyedRepo.Pg`.
+  """
 
   use Core.Es.Aggregate.Repo,
     aggregate: Core.EsFixture.Account,

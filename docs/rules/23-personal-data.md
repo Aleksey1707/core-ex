@@ -3,7 +3,8 @@
 - **Область.** `lib/core/prim.ex`, `lib/core/prim/**` (опция `personal:`), `lib/core/codec.ex`
   (`load_composite/3`), `lib/core/es/event/payload.ex` и `lib/core/codec/plugin/fields.ex`
   (`subject:`), `lib/core/es/personal.ex`, `lib/core/es/personal/**`, шифрование и расшифровка в
-  `lib/core/es/store.ex`, flush write-репозиториев, снапшоты
+  `lib/core/es/store.ex`, flush write-репозиториев, резерв ключа из ПДн
+  (`lib/core/es/key_reservation.ex`), снапшоты
   (`lib/core/es/aggregate/repo/pg/snapshot.ex`), `lib/core/es/event/message.ex`; у потребителя —
   Prim с персональными данными (ПДн), события с ними, подписчик на топик своего приложения и своя
   реализация хранилища ключей.
@@ -408,6 +409,13 @@ WAL-архиве, репликах и копиях и читается, пока
 и результат запросов к `es_subject_keys`. Восстановление из копии — повтор уничтожения по актам
 (`deps/core/docs/rules/app/23-personal-data.md`, «Эксплуатация»).
 
+Индекс резерва ключа из ПДн (`13-repos.md`, «Резервы ключей») после снятия так же остаётся в
+мёртвом кортеже `es_key_reservations`, WAL-архиве, репликах и копиях (ADR-0077, «Цена»): снятие
+очищает живую таблицу, а не следы. Без секрета индекса след непрозрачен; копия базы вместе с
+секретом раскрывает перебором индексы ключей с малым пространством значений, например телефонов.
+Поэтому секрет индекса хранится вне базы и её копий, наравне с KEK
+(`deps/core/docs/rules/app/23-personal-data.md`, «Секрет индекса»).
+
 ```elixir
 # плохо — обработчик печатает параметры: обёрнутый ключ уходит в лог
 def handle_event(_event, _measurements, %{query: query, params: params}, _config),
@@ -534,6 +542,10 @@ describe «from_message: подписчика» — повтор и DLQ на `Co
    чистка ПДн субъекта по нему или `personal: false`; таблица с ПДн хранит идентификатор субъекта,
    на `%Destroyed{}` пишется не ПДн (`22-projections.md`, «Персональные данные»); проверки —
    `use Core.Es.ProjectionCase` (`19-testing.md`, «Проекции»).
+7. Уникальный ключ из этого значения — модуль ключа `personal: true` (`13-repos.md`, «Резервы
+   ключей»), снятие его резерва — в usecase уничтожения, идентификатор из такого ключа — нет
+   (`deps/core/docs/rules/app/23-personal-data.md`, «Usecase уничтожения», «Идентификатор
+   субъекта»).
 
 ## Связанные правила
 

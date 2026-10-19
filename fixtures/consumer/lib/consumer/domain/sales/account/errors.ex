@@ -17,6 +17,9 @@ defmodule Consumer.Domain.Sales.Account.Errors do
   def domain(module, :name_taken = code, detail),
     do: Error.domain(module, code: code, ns: ns(), message: "Название счёта занято", detail: detail)
 
+  def domain(module, :holder_taken = code, detail),
+    do: Error.domain(module, code: code, ns: ns(), message: "Владелец указан у другого счёта", detail: detail)
+
   def domain(module, :version_mismatch = code, detail),
     do: Error.domain(module, code: code, ns: ns(), message: "Версия счёта не совпадает", detail: detail)
 end

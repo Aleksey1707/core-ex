@@ -91,6 +91,29 @@ defmodule Core.Es.KeyReservation do
   Резервы пишутся и читаются через `Core.Config.dao/0`, id агрегата дампит и грузит
   `Core.Config.codec/0` — как у `Core.Es.Store`.
 
+  ## Ключ из ПДн (`personal: true`)
+
+  Модуль ключа, значение которого — ПДн (email, телефон), объявляется `personal: true`
+  (`docs/adr/0077-personal-key-reservation-index.md`). В `key` его строки — `text[]` из одной
+  строки индекса, который считает порт хранилища ключей (`Core.Es.Personal.KeyStore`, `index`)
+  над областью и частями `to_key/1`: одинаково на записи и в `find/2`, значение ключа в таблицу не
+  попадает. Остальное — как у ключа без флага: занятость, перенос, `:release`, порядок в пачке.
+
+  - `append` считает индексы всех шагов `{:reserve, value}` модулей с `personal: true` пачки одним
+    вызовом порта до записи резервов; пачка без таких шагов порт не зовёт. Сбой хранилища ключей —
+    `{:error, %Core.Error{kind: :app}}` на всю пачку: `append` откатывает транзакцию, а
+    `Core.Es.Transact` этот отказ не повторяет.
+  - `find/2` зовёт порт на каждый вызов; сбой хранилища ключей — `Core.Exc`, как сбой базы под
+    его SQL.
+  - `{:reserve, value}`, где `value` — Prim с `personal: true`, у модуля без `personal: true` —
+    `ArgumentError` на `append`: забытый флаг оставил бы ПДн в резерве открытыми. Prim, вложенный
+    в значение, проверка не видит.
+
+  Снимает резерв субъекта событие агрегата-владельца с ответом `:release` в транзакции уничтожения
+  ключа субъекта (`Core.Es.Personal.destroy_key/3`): сама операция резервы не трогает. Индекс
+  снятого ключа остаётся в мёртвом кортеже, WAL-архиве и копиях; без секрета индекса он
+  непрозрачен.
+
   ## Telemetry
 
   `[:es, :key_reservation]` (`Core.Telemetry.event/1`) — на итоговый исход каждого
@@ -105,7 +128,7 @@ defmodule Core.Es.KeyReservation do
 
   - `find(value, context)` → `Agg.ID.t() | nil` — агрегат, занявший ключ `to_key(value)`; `nil` —
     ключ свободен. Результат сужен до `%Agg.ID{} | nil`; нечитаемый id — исключение загрузки
-    фасадом.
+    фасадом, у модуля с `personal: true` сбой хранилища ключей — `Core.Exc`.
 
   ## Opts
 
@@ -113,10 +136,12 @@ defmodule Core.Es.KeyReservation do
   - `event:` — семейство событий агрегата (`event:` его кодека)
   - `id:` — Prim идентификатора агрегата
   - `code:` — код отказа в каталоге ошибок репозитория, атом
+  - `personal:` — ключ из ПДн («Ключ из ПДн»), boolean, по умолчанию `false`; ставится только на
+    область без записанных резервов
 
   На компиляции `CompileError`: нет обязательной или неизвестная опция, `scope:` — не непустая
   строка, `event:` или `id:` — не модуль, `code:` — не атом или `:version_mismatch` (конфликт
-  записи, который процесс агрегата повторяет). Сверку с агрегатом — семейство
+  записи, который процесс агрегата повторяет), `personal:` — не boolean. Сверку с агрегатом — семейство
   событий, `id:`, clause `code:` в `errors:`, полноту `reservation/1` — делает сборка репозитория
   (`Core.Es.Aggregate.Repo.Pg`).
 
@@ -131,7 +156,10 @@ defmodule Core.Es.KeyReservation do
   alias Core.Error
   alias Core.Es
   alias Core.Es.KeyReservation.Schema
+  alias Core.Es.Personal.Port
+  alias Core.Exc
   alias Core.Helper
+  alias Core.Prim
   alias Core.Result
   alias Core.Telemetry
 
@@ -139,7 +167,7 @@ defmodule Core.Es.KeyReservation do
 
   @label "Es.KeyReservation"
   @required_keys ~w(scope event id code)a
-  @optional_keys []
+  @optional_keys ~w(personal)a
 
   # Предел повторов резерва: обе причины отказа снимаются одной следующей попыткой — чужую строку
   # нашей пары `(scope, aggregate_id)` снесёт её `DELETE`, исчезнувший ключ займёт её вставка.
@@ -152,7 +180,8 @@ defmodule Core.Es.KeyReservation do
           scope: String.t(),
           event: module(),
           id: module(),
-          code: atom()
+          code: atom(),
+          personal: boolean()
         }
 
   @typedoc "Ключ — каноническая форма `to_key/1`."
@@ -205,7 +234,8 @@ defmodule Core.Es.KeyReservation do
       scope: scope!(opts),
       event: Helper.Opts.module!(opts, :event, @label),
       id: Helper.Opts.module!(opts, :id, @label),
-      code: code!(opts)
+      code: code!(opts),
+      personal: personal!(opts)
     }
   end
 
@@ -224,6 +254,16 @@ defmodule Core.Es.KeyReservation do
 
       code ->
         code
+    end
+  end
+
+  defp personal!(opts) do
+    case Keyword.get(opts, :personal, false) do
+      personal when is_boolean(personal) ->
+        personal
+
+      other ->
+        raise CompileError, description: "#{@label}: personal: ожидается boolean, получено #{inspect(other)}"
     end
   end
 
@@ -328,12 +368,25 @@ defmodule Core.Es.KeyReservation do
   @doc false
   @spec find(declaration(), key(), Context.t()) :: struct() | nil
 
-  def find(%{scope: scope, id: id}, key, %Context{}) do
-    query = from(r in Schema, where: r.scope == ^scope and r.key == ^parts(key), select: r.aggregate_id)
+  def find(%{scope: scope, id: id} = declaration, key, %Context{}) do
+    stored = stored_key!(declaration, parts(key))
+    query = from(r in Schema, where: r.scope == ^scope and r.key == ^stored, select: r.aggregate_id)
 
     case Config.dao().one(query) do
       nil -> nil
       aggregate_id -> Config.codec().load!(id, aggregate_id)
+    end
+  end
+
+  # ---
+
+  # Сбой хранилища ключей — исключение, как сбой базы под SQL поиска.
+  defp stored_key!(%{personal: false}, key), do: key
+
+  defp stored_key!(%{personal: true, scope: scope}, key) do
+    case Port.index([{scope, key}]) do
+      {:ok, [index]} -> [index]
+      {:error, %Error{} = error} -> raise Exc, error
     end
   end
 
@@ -350,36 +403,70 @@ defmodule Core.Es.KeyReservation do
   def append([], events, %Context{}, taken) when is_list(events) and is_function(taken, 2), do: :ok
 
   def append([_ | _] = declarations, events, %Context{}, taken) when is_list(events) and is_function(taken, 2) do
-    steps = for event <- events, declaration <- declarations, do: {declaration, event}
+    steps = for event <- events, declaration <- declarations, do: {declaration, event, action(declaration, event)}
 
-    case write(steps, Config.codec()) do
-      :ok -> :ok
-      {:taken, declaration} -> {:error, taken.(declaration.code, %{scope: declaration.scope})}
-      {:unresolved, declaration, aggregate_id, reason} -> {:error, unresolved(declaration, aggregate_id, reason)}
+    with {:ok, steps} <- index(steps) do
+      case write(steps, Config.codec()) do
+        :ok -> :ok
+        {:taken, declaration} -> {:error, taken.(declaration.code, %{scope: declaration.scope})}
+        {:unresolved, declaration, aggregate_id, reason} -> {:error, unresolved(declaration, aggregate_id, reason)}
+      end
     end
   end
 
   # ---
 
+  defp action(%{module: module} = declaration, event) do
+    case module.reservation(event) do
+      {:reserve, value} -> {:reserve, parts(module.to_key(ensure_flagged!(declaration, value)))}
+      :release -> :release
+      :keep -> :keep
+    end
+  end
+
+  # Вложенный Prim проверка не видит: признак — только у значения `{:reserve, value}` целиком.
+  defp ensure_flagged!(%{personal: false, module: module}, %prim{} = value) do
+    if Prim.prim?(prim) and prim.__domain_personal__() do
+      raise ArgumentError,
+            "#{inspect(module)}: {:reserve, value} с Prim personal: true #{inspect(prim)} у модуля ключа " <>
+              "без personal: true — значение легло бы в резерв открытым"
+    end
+
+    value
+  end
+
+  defp ensure_flagged!(_declaration, value), do: value
+
+  # Индексы ключей из ПДн пачки — одним вызовом порта до записи; отказ — на всю пачку.
+  defp index(steps) do
+    case for({%{personal: true, scope: scope}, _event, {:reserve, key}} <- steps, do: {scope, key}) do
+      [] -> {:ok, steps}
+      items -> with {:ok, indexes} <- Port.index(items), do: {:ok, indexed(steps, indexes)}
+    end
+  end
+
+  defp indexed([], []), do: []
+
+  defp indexed([{%{personal: true} = declaration, event, {:reserve, _key}} | steps], [index | indexes]),
+    do: [{declaration, event, {:reserve, [index]}} | indexed(steps, indexes)]
+
+  defp indexed([step | steps], indexes), do: [step | indexed(steps, indexes)]
+
   defp write([], _codec), do: :ok
 
-  defp write([{declaration, event} | steps], codec) do
+  defp write([{declaration, event, action} | steps], codec) do
     aggregate_id = codec.dump(event.aggregate_id)
 
-    case write_step(declaration, event, aggregate_id) do
+    case write_step(declaration, action, aggregate_id) do
       :ok -> write(steps, codec)
       :taken -> {:taken, declaration}
       {:unresolved, reason} -> {:unresolved, declaration, aggregate_id, reason}
     end
   end
 
-  defp write_step(%{module: module, scope: scope}, event, aggregate_id) do
-    case module.reservation(event) do
-      {:reserve, value} -> reserve_reported(scope, parts(module.to_key(value)), aggregate_id)
-      :release -> delete(keys_of(scope, aggregate_id))
-      :keep -> :ok
-    end
-  end
+  defp write_step(%{scope: scope}, {:reserve, key}, aggregate_id), do: reserve_reported(scope, key, aggregate_id)
+  defp write_step(%{scope: scope}, :release, aggregate_id), do: delete(keys_of(scope, aggregate_id))
+  defp write_step(_declaration, :keep, _aggregate_id), do: :ok
 
   defp reserve_reported(scope, key, aggregate_id) do
     resolved = reserve(scope, key, aggregate_id, 0)

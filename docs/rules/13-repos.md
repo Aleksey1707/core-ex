@@ -884,6 +884,47 @@ end
 (`make consumer-check`); порядок шагов пачки — `test/core/es/key_reservation_test.exs`, describe
 «резерв».
 
+Ключ, значение которого — ПДн (email, телефон), MUST объявляться модулем ключа `personal: true`
+(`23-personal-data.md`; решение — ADR-0077): в `key` строки ложится индекс, который считает порт
+хранилища ключей над областью и частями `to_key/1`, а не значение. Остальное — как у ключа без
+флага.
+
+- `find/2` ищет по открытому значению и отдаёт `Agg.ID.t() | nil`; сбой хранилища ключей —
+  `Core.Exc`, как сбой базы под его SQL.
+- `append` считает индексы всех шагов `{:reserve, value}` пачки одним вызовом порта до записи
+  резервов. Сбой хранилища — `{:error, %Error{kind: :app}}`: транзакция откатывается, и
+  `Core.Es.Transact` этот отказ не повторяет.
+- `{:reserve, value}` с Prim `personal: true` у модуля без флага — `ArgumentError` на `append`;
+  Prim, вложенный в значение, проверка не видит.
+- Резерв субъекта снимает событие агрегата-владельца с ответом `:release` в транзакции
+  уничтожения ключа субъекта: `destroy_key/3` резервы не трогает
+  (`deps/core/docs/rules/app/23-personal-data.md`, «Usecase уничтожения»).
+- Флаг ставится только на область без записанных резервов
+  (`deps/core/docs/rules/app/13-repos.md`, «Уникальность без индекса состояния»).
+
+```elixir
+# плохо — email в резерве открытым: остаётся в копиях и WAL-архиве и после снятия
+use Core.Es.KeyReservation,
+  scope: "user.email",
+  event: User.Event,
+  id: User.ID,
+  code: :email_taken
+
+# хорошо
+use Core.Es.KeyReservation,
+  scope: "user.email",
+  event: User.Event,
+  id: User.ID,
+  code: :email_taken,
+  personal: true
+```
+
+Проверяется: `CompileError` в `use Core.Es.KeyReservation` — `personal:` не boolean;
+`test/core/es/personal/key_reservation_test.exs` — индекс в строке, `find/2`, занятость,
+`:release` в транзакции `destroy_key/3`, `ArgumentError`;
+`test/core/es/personal/key_reservation_failure_test.exs` — сбой хранилища ключей на `append` и
+`find/2`.
+
 ### Транзакция команды (`Core.Es.Transact`)
 
 Команда event-sourced агрегата, написанная телом usecase, MUST идти через

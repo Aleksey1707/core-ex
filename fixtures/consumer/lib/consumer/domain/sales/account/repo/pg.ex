@@ -7,5 +7,5 @@ defmodule Consumer.Domain.Sales.Account.Repo.Pg do
     id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
-    key_reservations: [Account.NameKey]
+    key_reservations: [Account.NameKey, Account.HolderKey]
 end

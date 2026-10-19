@@ -1,5 +1,8 @@
 defmodule Core.EsFixture.Account.KeyedRepo.Pg do
-  @moduledoc "Write-репозиторий счёта с резервом названия `Core.EsFixture.Account.NameKey`."
+  @moduledoc """
+  Write-репозиторий счёта с резервами названия `Core.EsFixture.Account.NameKey` и владельца —
+  ключа из ПДн `Core.EsFixture.Account.HolderKey`.
+  """
 
   alias Core.EsFixture.Account
 
@@ -9,5 +12,5 @@ defmodule Core.EsFixture.Account.KeyedRepo.Pg do
     id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
-    key_reservations: [Account.NameKey]
+    key_reservations: [Account.NameKey, Account.HolderKey]
 end

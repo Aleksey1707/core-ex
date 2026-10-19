@@ -91,6 +91,15 @@ defmodule ConsumerTest.KeyFind do
     end
   end
 
+  # `{:ok, _}` по результату `find` модуля ключа из ПДн: сужение то же, что без `personal: true`
+  def case_holder_find_ok(%Account.Holder{} = holder, %Context{} = context) do
+    case Account.HolderKey.find(holder, context) do
+      # expect: the following clause will never match
+      {:ok, id} -> id
+      _free -> nil
+    end
+  end
+
   # ID другого агрегата по результату `find`
   def case_find_foreign_id(%Account.Name{} = name, %Context{} = context) do
     case Account.NameKey.find(name, context) do
