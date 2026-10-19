@@ -168,6 +168,34 @@ defmodule Core.Otel do
     :ok
   end
 
+  @doc """
+  Отметить исключение на текущем span'е: `error.type` и статус `:error`.
+
+  `error.type` — модуль исключения (`RuntimeError`), у `exit` и `throw` — имя вида. Текст
+  исключения и стек в span не уходят: в них бывает аргумент вызова, а span уходит во внешний
+  коллектор целиком.
+  """
+  @spec record_exception(:error | :exit | :throw, term(), Exception.stacktrace()) :: :ok
+
+  def record_exception(kind, reason, stacktrace) when kind in ~w(error exit throw)a,
+    do: record_failure(exception_type(kind, reason, stacktrace))
+
+  @doc """
+  Отметить сбой без `%Error{}` на текущем span'е: `error.type` и статус `:error` с тем же текстом.
+
+  Нужен исходу, который классифицирует вызывающий (`timeout` внешнего вызова): ошибки как значения у
+  него нет, а `error.type` — из закрытого множества словаря.
+  """
+  @spec record_failure(String.t()) :: :ok
+
+  def record_failure(type) when is_binary(type) do
+    span = current_span()
+
+    _ = :otel_span.set_attributes(span, %{@attr_error_type => type})
+    _ = :otel_span.set_status(span, :error, type)
+    :ok
+  end
+
   @doc "Контекст трейса текущего процесса — для явной передачи в порождённый."
   @spec ctx() :: ctx()
 
@@ -187,6 +215,13 @@ defmodule Core.Otel do
   end
 
   # ---
+
+  defp exception_type(:error, reason, stacktrace) do
+    %module{} = Exception.normalize(:error, reason, stacktrace)
+    inspect(module)
+  end
+
+  defp exception_type(kind, _reason, _stacktrace), do: Atom.to_string(kind)
 
   defp tracer(opts) do
     :opentelemetry.get_application_tracer(Keyword.get(opts, :scope, __MODULE__))

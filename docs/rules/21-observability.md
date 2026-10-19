@@ -1,10 +1,10 @@
 # Наблюдаемость
 
 - **Область.** `lib/core/otel.ex`, `lib/core/otel/**`, `lib/core/telemetry.ex`,
-  `lib/core/*/prom_ex.ex`, `lib/core/web/critical_error.ex`.
+  `lib/core/*/prom_ex.ex`, `lib/core/web/critical_error.ex`, `lib/core/external.ex`.
 - **Читать перед.** Новой метрикой, span'ом или атрибутом; правкой `Core.Otel` и словарей semconv;
   переносом контекста трассировки через асинхронный транспорт; алертом на подсистему библиотеки;
-  правкой отчёта о критической ошибке.
+  правкой отчёта о критической ошибке; обёрткой вызова внешней системы.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 ## Разделение труда
@@ -43,12 +43,14 @@ OTel-метрики библиотека **не** вводит: дублиров
 `Core.Otel` — **предметно нейтральный** фасад: span'ы, контекст, пропагация через
 carrier. Он не знает ни про MQ, ни про HTTP; атрибуты приходят готовой картой
 (`attributes:`), их имена — забота вызывающего. Своего словаря атрибутов у него нет,
-кроме `error.type` / `core.error.kind` у `record_error/1`.
+кроме `error.type` / `core.error.kind` у `record_error/1` и `error.type` у `record_exception/3` и
+`record_failure/1`.
 
 Словари живут отдельными модулями: `Core.Otel.Messaging` — операции обмена
 сообщениями по semconv (`create` / `send` / `process`), `Core.Otel.Es` — event sourcing
 (`project` — пачка проекции, `await` — ожидание проекции, `execute` — команда процесса
-агрегата, атрибуты `core.es.*`). Новая
+агрегата, атрибуты `core.es.*`), `Core.Otel.External` — внешний вызов (атрибуты
+`core.external.*` и `peer.service`). Новая
 предметная область (HTTP-клиент, кеш) — это новый `Core.Otel.<Область>`, а не ещё несколько
 клоуз в фасаде.
 
@@ -108,6 +110,30 @@ Span на периодический опрос (тик поллера, цикл
 меняет. У восстановления агрегата (`get` / `get_decision` / `get_many` / `refresh`) span'а нет.
 
 Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span».
+
+Внешний вызов (платёжный шлюз, касса, служба доставки, SMS) MUST идти в span'е
+`<system> <operation>` вида `:client` на call site — в процессе вызывающего, дочерним span'у
+usecase; ставит его `Core.External.call/4`. Когда адаптер приложения зовёт обёртку —
+`deps/core/docs/rules/app/21-observability.md`, «Внешние вызовы». Обёртка ставит span словаря
+`Core.Otel.External`, `:telemetry.span/3` `[:external, :call]` и метрики `Core.External.PromEx`
+(`external_call_duration_milliseconds`, `external_call_total` по `system`, `operation`, `outcome`);
+результат вызова она не меняет. Исход определяет классификатор вызывающего (`outcome:`):
+
+| Исход | Когда | Статус span'а |
+|---|---|---|
+| `ok` | система выполнила вызов | не ставится |
+| `timeout` | ответа нет за отведённое время | `:error`, `error.type` = `timeout` |
+| `down` | система недоступна: нет соединения, ответ 5xx | `:error`, `error.type` = `down` |
+| `rejected` | система ответила отказом по существу | не ставится: отказ — исход, а не сбой |
+| `exception` | исключение, `exit` или `throw` в вызове; ставит обёртка и поднимает его заново | `:error`, `error.type` = модуль исключения |
+
+- Текст исключения в span MUST NOT: адаптер держит в нём запрос, а в запросе — секреты и ПДн
+  («Атрибуты»). `record_exception/3` ставит только тип.
+- Повторов и circuit breaker обёртка MUST NOT делать: каждая попытка — свой вызов со своим исходом.
+
+Проверяется: `test/core/external_test.exs` — span, статус и telemetry по каждому исходу,
+исключение и `exit`, результат без изменений; `test/core/external/prom_ex_test.exs` — описание
+метрик.
 
 У вызова порта хранилища ключей (`Core.Es.Personal`) и у уничтожения ключа субъекта span'а нет,
 словаря `Core.Otel.Personal` нет: длительность и исход вызова по операции считает
@@ -285,6 +311,8 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 | `MqKafkaOffsetReset` | `sum by (topic) (increase(my_app_prom_ex_mq_kafka_offset_reset_total[5m])) > 0 or sum by (topic) (my_app_prom_ex_mq_kafka_offset_reset_total unless last_over_time(my_app_prom_ex_mq_kafka_offset_reset_total[5m] offset 5m)) > 0` | смещение вне лога, партиция перечитана с начала: подписчик увидит повторы, а записи между зафиксированным смещением и началом лога потеряны (retention, пересоздание топика) |
 | `MqKafkaReadErrors` | `sum by (topic, reason) (increase(my_app_prom_ex_mq_kafka_read_errors_total[5m])) > 0`, `for: <порог>` | чтение Kafka отказывает: `subscribe` — подписка на партиции (неизвестный топик, клиент, метаданные), `consumer_down` — падает консьюмер партиции, `lease` — аренда не продлевается |
 | `MqKafkaCommitErrors` | `sum by (topic) (increase(my_app_prom_ex_mq_kafka_commit_errors_total{reason="failed"}[5m])) > 0`, `for: <порог>` | смещение не записывается, подписчик повторяет сообщение; `reason="lease_lost"` — переход аренды, алерта на него нет |
+| `ExternalCallFailing` | `sum by (system, operation) (rate(my_app_prom_ex_external_call_total{outcome!="ok"}[5m])) / sum by (system, operation) (rate(my_app_prom_ex_external_call_total[5m])) > <порог>`, `for: <порог>` | доля внешних вызовов с исходом не `ok` за 5 минут выше порога: система тормозит (`timeout`), недоступна (`down`), массово отказывает по существу (`rejected`) или адаптер падает (`exception`) |
+| `ExternalCallSlow` | `histogram_quantile(0.95, sum by (system, operation, le) (rate(my_app_prom_ex_external_call_duration_milliseconds_bucket[5m]))) > <порог>`, `for: <порог>` | p95 длительности внешнего вызова выше порога: система отвечает, но медленно |
 | `WorkerDown` | `my_app_prom_ex_workers_up == 0`, `for: <порог>` | процесса из `watch:` нет на ноде; имя `{:global, _}` / `{:via, _, _}`, разрешённое в pid другой ноды, даёт `up` 1 — такой процесс алерт ловит, только когда его нет в кластере |
 | `WorkerMailboxHigh` | `my_app_prom_ex_workers_message_queue_len > <порог>`, `for: <порог>` | mailbox процесса растёт быстрее, чем он обрабатывает сообщения (`17-otp-concurrency.md`, «Mailbox и backpressure») |
 | `CacheUnavailable` | `sum by (cache) (increase(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m])) > 0 or sum by (cache) (my_app_prom_ex_cache_requests_total{result="cache_error"} unless last_over_time(my_app_prom_ex_cache_requests_total{result="cache_error"}[5m] offset 5m)) > 0` | процесс кеша недоступен, чтение идёт мимо кеша в store |
@@ -304,6 +332,9 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 - `PromExCollectFailing` SHOULD нести `for:`: единичный отказ опроса (таймаут пула на пике)
   gauge'и не портит — следующий цикл их обновит; недостоверны они, только пока сбор отказывает
   подряд.
+- `ExternalCallFailing` и `ExternalCallSlow`: пороги — по системе, у каждой своя норма отказов и
+  задержки; `<порог>` длительности — в миллисекундах. Доля без вызовов в окне не вычисляется, и
+  алерт молчит: недоступность системы, которую не зовут, этими алертами не видна.
 - `EsKeyReservationUnresolved`: засеять серию нулём некому — у резервов нет процесса-владельца.
   Отказ `:taken` — доменный исход, алерта на него нет.
 - Метрики хранилища ключей (`es_personal_call_*`, `es_personal_open_total`) метку с

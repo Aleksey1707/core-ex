@@ -315,6 +315,23 @@
   - было: алерта на застрявшего подписчика Stream нет;
   - стало: `max by (component, topic) (my_app_prom_ex_mq_reader_pending_age_seconds) > <порог>`.
 
+- **Внешний вызов — `Core.External.call(system, operation, fun, outcome: classify)`** (норма —
+  `docs/rules/21-observability.md`, «Где ставить span» и «Рекомендованные алерты»;
+  `docs/rules/app/21-observability.md`, «Внешние вызовы»). Раньше словаря span'ов и метрик вызова
+  внешней системы не было, и каждый адаптер писал телеметрию своим кодом или не писал её вовсе.
+  Теперь обёртка ставит span `<system> <operation>` вида `:client` словаря `Core.Otel.External`
+  (`core.external.*`, `peer.service`), `:telemetry.span/3` `[:external, :call]` и метрики плагина
+  `Core.External.PromEx` — `external_call_duration_milliseconds` и `external_call_total` по
+  `system`, `operation`, `outcome`; результат `fun` возвращается без изменений. Исход
+  (`:ok | :timeout | :down | :rejected`) определяет классификатор вызывающего; исключение — исход
+  `exception` и повторный `raise` — в telemetry это `:stop` с `outcome: :exception`, а не событие
+  `:exception`; текст исключения в span не уходит. Фасад `Core.Otel` получил
+  `record_exception/3` и `record_failure/1`. В своде — алерты `ExternalCallFailing` и
+  `ExternalCallSlow`; app-ярус требует вызов систем через обёртку. Правка потребителя:
+  - было: `Core.Otel.span("charge", [], fn -> Gateway.charge(payment) end)` или вызов без телеметрии;
+  - стало: `Core.External.call(:payment_gateway, :charge, fn -> Gateway.charge(payment) end,
+    outcome: &Gateway.outcome/1)` и `Core.External.PromEx` в `MyAppApp.PromEx.plugins/0`.
+
 ### Изменения контракта макросов
 
 - **Опция `personal:` у Prim и `subject:` у поля `Payload`** (норма — `docs/rules/11-domain.md`,
