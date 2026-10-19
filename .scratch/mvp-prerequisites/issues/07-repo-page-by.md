@@ -7,14 +7,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Repo.Pg.page_by(pg, filter, limit, offset, context, opts \\ [])` рядом с `list_by/4`:
+- [x] `Repo.Pg.page_by(pg, filter, limit, offset, context, opts \\ [])` рядом с `list_by/4`:
       - фильтр — `Ecto.Query.dynamic_expr()`;
       - `limit` и `offset` — Prim `Core.Pagination`;
       - возврат — `Pagination.Result`;
       - опции — те же, что у `page`.
-- [ ] `@doc`, `@spec` через типы `Core.Result` / `Pagination.Result`.
-- [ ] Тесты над таблицей фикстуры `TestRepo`: фильтр, страница, `total` по фильтру, пустая страница за концом.
-- [ ] Свод `13-repos.md` (Read) и CHANGELOG «Новое».
-- [ ] `make` зелёный.
+- [x] `@doc`, `@spec` через типы `Core.Result` / `Pagination.Result`.
+- [x] Тесты над таблицей фикстуры `TestRepo`: фильтр, страница, `total` по фильтру, пустая страница за концом.
+- [x] Свод `13-repos.md` (Read) и CHANGELOG «Новое».
+- [x] `make` зелёный.

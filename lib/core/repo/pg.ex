@@ -51,7 +51,7 @@ defmodule Core.Repo.Pg do
   `%Context{}`.
   """
 
-  import Ecto.Query, only: [from: 2, exclude: 2]
+  import Ecto.Query, only: [dynamic: 1, from: 2, exclude: 2]
 
   alias Core.Context
   alias Core.Error
@@ -603,16 +603,35 @@ defmodule Core.Repo.Pg do
   @spec page(map(), Pagination.Limit.t(), Pagination.Offset.t(), Context.t(), Repo.opts()) ::
           Pagination.Result.t(struct())
 
-  def page(pg, %Pagination.Limit{} = limit, %Pagination.Offset{} = offset, context, opts \\ []) do
+  def page(pg, %Pagination.Limit{} = limit, %Pagination.Offset{} = offset, context, opts \\ []),
+    do: page_by(pg, dynamic(true), limit, offset, context, opts)
+
+  @doc """
+  Страница сущностей по произвольному фильтру (limit/offset).
+
+  Сиблинг `list_by/4` для выборки страницами: `filter` — тот же `dynamic`, добавляемый к
+  `read_scope`, и `total` считается по нему же, а не по всему scope.
+  """
+  @spec page_by(
+          map(),
+          Ecto.Query.dynamic_expr(),
+          Pagination.Limit.t(),
+          Pagination.Offset.t(),
+          Context.t(),
+          Repo.opts()
+        ) :: Pagination.Result.t(struct())
+
+  def page_by(pg, filter, %Pagination.Limit{} = limit, %Pagination.Offset{} = offset, context, opts \\ []) do
     items =
       from(x in read_scope(pg, context),
+        where: ^filter,
         limit: ^Pagination.Limit.value(limit),
         offset: ^Pagination.Offset.value(offset)
       )
       |> then(&dao(pg).all(&1, opts))
       |> Enum.map(&put_baseline(pg, pg.to_entity.(&1), context))
 
-    total = dao(pg).aggregate(write_scope(pg, context), :count, opts)
+    total = dao(pg).aggregate(from(x in write_scope(pg, context), where: ^filter), :count, opts)
 
     Pagination.Result.new(items, total)
   end

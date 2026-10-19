@@ -71,6 +71,22 @@ ReadRepo.
 - Собственная Ecto-схема `<Aggregate>.ReadRepo.Pg.Schema` (MUST, см. «Generic `use Core.Repo.Pg`») и
   свои `Specs`.
 - Читающие usecases (`get`/`list`/`page`, HTTP GET) вызывают **ReadRepo**.
+- Выборка с фильтром — кастомный метод ReadRepo над `Repo.Pg.list_by/4` (вся выборка) или
+  `Repo.Pg.page_by/6` (страница). Фильтр у обоих один — `dynamic` из `Specs`, добавляемый к
+  `read_scope`; `total` страницы считается по тому же фильтру. Свой `count` рядом с `list_by` ради
+  страницы — SHOULD NOT: второй запрос с копией фильтра расходится с выборкой при первой правке.
+
+  ```elixir
+  # плохо — своя страница и свой count: фильтр скопирован, правка одного не дойдёт до другого,
+  # а default_filters не применены вовсе
+  items = DAO.all(from(v in Schema, where: v.title == ^title, limit: ^limit, offset: ^offset))
+  total = DAO.aggregate(from(v in Schema, where: v.title == ^title), :count)
+
+  # хорошо — выборка и total по одному фильтру
+  @impl true
+  def page_by_title(%Agg.Title{} = title, limit, offset, %Context{} = context, opts \\ []),
+    do: Repo.Pg.page_by(@pg, Specs.by_title(InCodec.dump(title)), limit, offset, context, opts)
+  ```
 - Изменяющие usecases вызывают **Repo** (в т.ч. internal `get` перед мутацией — это часть
   изменяющего usecase, а не чтение через ReadRepo).
 - Изменяющий фоновый прогон (уборка, пересчёт по расписанию) MAY выбирать кандидатов через ReadRepo,

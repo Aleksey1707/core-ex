@@ -80,6 +80,15 @@
   - стало: web-плаг кладёт сеанс функцией фабрики `with_session/2` через
     `Core.Context.Session.put/2` (`docs/rules/app/11-domain.md`, «Context»).
 
+- **Страница выборки с фильтром — `Repo.Pg.page_by/6`** (норма — `docs/rules/13-repos.md`, «Read
+  (`<Aggregate>.ReadRepo`)»). Раньше `Repo.Pg.list_by/4` фильтровал без страниц, а `Repo.Pg.page/5`
+  пагинировал без фильтра, и поиск страницами требовал своего запроса и своего `count` с копией
+  фильтра. Теперь `Repo.Pg.page_by(@pg, filter, limit, offset, context, opts \\ [])` берёт тот же
+  `dynamic`, что `list_by`, и отдаёт `Pagination.Result` с `total` по этому фильтру; опции — как у
+  `page`. Правка нужна только ReadRepo со своей страницей по фильтру:
+  - было: `from(x in ..., where: ^filter, limit: ..., offset: ...)` и отдельный `count`;
+  - стало: `Repo.Pg.page_by(@pg, Specs.by_title(title), limit, offset, context)`.
+
 - **Ожидание проекции до события заданной версии — `await/4` модуля проекции** (решение —
   `docs/adr/0080-await-event-of-version.md`; норма — `docs/rules/22-projections.md`,
   «Read-after-write»). Раньше `await/3` брал цель на момент вызова: событие, которое после commit
