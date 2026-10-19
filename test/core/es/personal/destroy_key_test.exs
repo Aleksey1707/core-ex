@@ -95,7 +95,7 @@ defmodule Core.Es.Personal.DestroyKeyTest do
       [written] = Store.Test.events!(Codec, subject_id(subject))
 
       assert %KeyDestroyed{} = built = Personal.Test.key_destroyed(subject, by: by, at: written.at)
-      assert %{built | id: written.id} == written
+      assert %{built | id: written.id, operation_id: written.operation_id} == written
     end
 
     test "нет by: или at: — KeyError" do

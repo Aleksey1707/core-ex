@@ -31,7 +31,8 @@ defmodule Core.Es.Personal do
 
   `subject_id` — UUID-Prim субъекта (`Prim.UUID` или `Prim.Compose` над ним), `by` — UUID-Prim
   актора: usecase берёт его своим `CurrentUser` до транзакции, как `by` команды. Права проверяет
-  usecase, `%Context{}` библиотека не читает.
+  usecase; из `%Context{}` библиотека берёт только операцию, сеанс и основание события
+  (`Core.Es.Operation`).
 
   Транзакция — вызывающего, если открыта, иначе своя. В ней:
 
@@ -67,7 +68,7 @@ defmodule Core.Es.Personal do
   defp destroy_and_append(subject_id, %Event.KeyDestroyed{} = event, context) do
     with :ok <- Port.destroy(Config.codec().dump(subject_id)) do
       written? =
-        case Es.Store.append(Event.Codec, [event], context, &already_written/1) do
+        case Es.Store.append(Event.Codec, Es.Operation.stamp([event], context), context, &already_written/1) do
           :ok -> true
           {:error, %Error{code: :already_written}} -> false
         end

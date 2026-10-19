@@ -54,6 +54,9 @@ defmodule Core.Es.Store.Schema do
     field :payload, Payload
     field :by_id, :binary_id
     field :at, :utc_datetime
+    field :operation_id, :binary_id
+    field :session_id, :binary_id
+    field :basis_id, :binary_id
   end
 
   @type t :: %__MODULE__{}
@@ -69,7 +72,10 @@ defmodule Core.Es.Store.Schema do
       aggregate_id: row.aggregate_id,
       aggregate_version: row.aggregate_version,
       at: row.at,
-      by: row.by_id
+      by: row.by_id,
+      operation_id: row.operation_id,
+      session_id: row.session_id,
+      basis_id: row.basis_id
     })
   end
 end

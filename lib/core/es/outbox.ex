@@ -10,7 +10,9 @@ defmodule Core.Es.Outbox do
   в `Core.Repo.Pg.StateStored`). Wire-payload — конверт события целиком
   (`codec.dump(event)`, формат — `Core.Es.Event.Codec`); топик, ключ, имя и заголовки
   (`name` / `aggr_id` / `event_id`) читаются из того же конверта через
-  `Core.Es.Event.Codec.to_fields/1` — второго источника wire-имени события нет.
+  `Core.Es.Event.Codec.to_fields/1` — второго источника wire-имени события нет. Операция события
+  (`Core.Es.Operation`) добавляется заголовком `operation_id`, если она есть: по нему подписчик
+  получает основание.
 
   К заголовкам добавляется `traceparent` текущего трейса (`Core.Otel.inject/1`):
   запись публикуется поллером в другом процессе и через секунду, поэтому контекст
@@ -24,8 +26,8 @@ defmodule Core.Es.Outbox do
   - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
     через `Core.Config.codec()`
 
-  Макрос занимает в вызывающем модуле имена `@es_topic`, `@es_event` и приватную
-  `es_codec/0`.
+  Макрос занимает в вызывающем модуле имена `@es_topic`, `@es_event` и приватные
+  `es_codec/0`, `headers/1`, `event_headers/1`.
   """
 
   alias Core.Helper
@@ -84,12 +86,17 @@ defmodule Core.Es.Outbox do
 
       defp es_codec, do: unquote(codec)
 
-      defp headers(fields) do
-        Core.Otel.inject(%{
+      defp headers(%{operation_id: nil} = fields), do: Core.Otel.inject(event_headers(fields))
+
+      defp headers(fields),
+        do: Core.Otel.inject(Map.put(event_headers(fields), "operation_id", fields.operation_id))
+
+      defp event_headers(fields) do
+        %{
           "name" => fields.type,
           "aggr_id" => fields.aggregate_id,
           "event_id" => fields.id
-        })
+        }
       end
     end
   end

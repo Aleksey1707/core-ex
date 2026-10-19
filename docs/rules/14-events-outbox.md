@@ -22,8 +22,8 @@ Dump/load события — только через фасад (`11-domain.md`,
 - Flush — задача Repo, **в одной DB-транзакции** со state.
 - Flush руками не пишется: его генерирует `use Core.Repo.Pg.StateStored` по опциям `event_codec:`
   и `outbox:` (см. `13-repos.md`). Порядок внутри транзакции:
-  `Outbox.from_events` → `Core.Es.Store.append` → шифрование ПДн-значений записей →
-  `Outbox.Repo.append`, затем `events` очищаются.
+  `Core.Es.Operation.stamp` → `Outbox.from_events` → `Core.Es.Store.append` → шифрование
+  ПДн-значений записей → `Outbox.Repo.append`, затем `events` очищаются.
 - Кодек событий агрегата — `use Core.Es.Event.Codec` (`event:` + `type:` + `tags:`, необязательный
   `upcasts:`; колбэк — только `upcast/2`); конверт, выбор типа по тегу, клаузы нагрузки и сборку
   события генерирует билдер, наружу кодек виден только через фасад. Формат нагрузки задаёт её
@@ -57,6 +57,26 @@ state-stored агрегата целиком — тем же `Core.Es.Transact.r
 команды (`Core.Es.Transact`)»): `get` заново сверит версию клиента. На строке агрегата
 `optimistic_lock` не используется — `version` проверяется на чтении, а расходится он именно на
 записи событий.
+
+### Операция, сеанс инициатора и основание
+
+Конверт события несёт три необязательных UUID — `operation_id`, `session_id`, `basis_id`
+(термины — `CONTEXT.md`, «Операция», «Сеанс инициатора», «Основание»; решение — ADR-0081).
+
+- Проставляет их одна функция — `Core.Es.Operation.stamp/2` — до `Outbox.from_events` и до
+  `Core.Es.Store.append`, на каждом пути записи: репозиторий event-sourced агрегата, state-stored
+  с событиями, уничтожение ключа субъекта. Новый путь записи MUST звать её там же: иначе запись
+  outbox и строка хранилища разойдутся.
+- Источник — `%Context{}`: `Core.Context.Operation`, `Core.Context.Session`, `Core.Context.Basis`.
+  Значение из контекста имеет приоритет. Сеанс кладёт приложение
+  (`deps/core/docs/rules/app/11-domain.md`, «Context»).
+- Без операции в контексте библиотека создаёт UUID v7 на внешнюю транзакцию `DAO`
+  (`Core.Helper.AfterCommit.get_or_put_in_transaction/2`): события нескольких агрегатов одной
+  транзакции получают одну операцию, повтор `Core.Es.Transact` — новую, вне транзакции —
+  операция на вызов. Наружу сгенерированный id не отдаётся; несколько транзакций одного действия —
+  одна операция, только если usecase положил её в контекст.
+
+Проверяется: `test/core/es/operation_test.exs`.
 
 ## Aggregate → Outbox.Record
 
@@ -95,7 +115,8 @@ API:
 `10-architecture.md`, «Wire-формат принадлежит адаптеру».
 
 Заголовки задаёт продюсер записи. Для событий агрегата — `<Aggregate>.Outbox.from_event/1`: `name`
-(= event name), `aggr_id` (= aggregate id), `event_id`.
+(= event name), `aggr_id` (= aggregate id), `event_id` и `operation_id` (= операция события), если
+операция есть. По `operation_id` подписчик получает основание своей реакции.
 
 Единственное исключение — **транспортный** `traceparent` (`Core.Otel.Messaging`):
 он не несёт предметного смысла и обязан описывать то звено, в котором сообщение
@@ -107,6 +128,8 @@ API:
 Wire-payload — конверт события целиком:
 
 - `event_id`, `type`, `aggregate_id`, `aggregate_version`, `at`, `by`
+- `operation_id`, `session_id`, `basis_id` — только непустые: у события без них wire прежний байт в
+  байт, отсутствующий ключ читается как `nil` (ADR-0081). Писать их `null` MUST NOT
 - плюс payload события (`payload`; у событий без нагрузки — `nil`)
 
 ПДн-значение поля с `subject:` `from_event/1` отдаёт маркером `%Core.Es.Personal.Marker{}`:

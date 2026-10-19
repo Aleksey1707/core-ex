@@ -37,6 +37,18 @@
   - было: `{:error, %Error{detail: raw}} = InCodec.load(Agg.SecretRef, raw)`;
   - стало: `{:error, %Error{detail: {:redacted, _}}}`; значение — у вызывающего, в `raw`.
 
+- **Колонки операции, сеанса и основания в `es_events`; записанное событие несёт операцию**
+  (решение — `docs/adr/0081-operation-envelope.md`; норма — `docs/rules/13-repos.md`, «Хранилище
+  событий», `docs/rules/app/18-migrations.md`, «Таблицы библиотеки»). Раньше `Core.Es.Store` писал
+  только `by` и `at`. Теперь запись идёт и в колонки `operation_id`, `session_id`, `basis_id`, а у
+  выкаченной базы их нет: без миграции запись событий падает на несуществующей колонке. Каждое
+  записанное событие получает операцию, поэтому прочитанное событие больше не равно построенному.
+  Правка потребителя:
+  - было: только делегирующая миграция `CreateEsEvents`; стало: ещё миграция со своим timestamp
+    `def up, do: Core.Es.Migration.add_operation_columns()`, `def down, do: :ok`;
+  - было: `assert built == written` в тесте записанного события; стало:
+    `assert %{built | operation_id: written.operation_id} == written`.
+
 ### Новое
 
 - **Задачи релиза `Core.Release.migrate/1`, `Core.Release.rollback/3` и
@@ -51,6 +63,22 @@
     `:ecto_repos` в `MyAppApp.Release`;
   - стало: `def migrate, do: Core.Release.migrate(:my_app)`, возврат outbox —
     `Application.load(:my_app)` и `Core.Outbox.Release.requeue(target)`.
+
+- **Операция, сеанс инициатора и основание в конверте события** (решение —
+  `docs/adr/0081-operation-envelope.md`; норма — `docs/rules/14-events-outbox.md`, «Операция, сеанс
+  инициатора и основание», `docs/rules/13-repos.md`, «Хранилище событий»). Раньше конверт нёс
+  только `by` и `at`, и события одной транзакции нельзя было собрать в одно изменение. Теперь
+  события любого пути записи (event-sourced, state-stored с событиями, уничтожение ключа субъекта)
+  несут `operation_id`, `session_id`, `basis_id` — в `es_events`, на странице потока, в пачке
+  проекции, в конверте записи outbox, а операция — ещё и заголовком `operation_id`. Значения
+  берутся из `%Context{}` аксессорами `Core.Context.Operation`, `Core.Context.Session`,
+  `Core.Context.Basis`; без операции в контексте библиотека создаёт UUID v7 на внешнюю транзакцию
+  (повтор `Core.Es.Transact` — новая операция). Пустые ключи в wire не пишутся: у события без
+  операции конверт прежний, старый конверт читается с `nil`. Колонки `es_events` и сравнение
+  событий в тестах — «Ломающие изменения контракта». Сеанс — по желанию:
+  - было: событие запроса без сеанса;
+  - стало: web-плаг кладёт сеанс функцией фабрики `with_session/2` через
+    `Core.Context.Session.put/2` (`docs/rules/app/11-domain.md`, «Context»).
 
 - **Ожидание проекции до события заданной версии — `await/4` модуля проекции** (решение —
   `docs/adr/0080-await-event-of-version.md`; норма — `docs/rules/22-projections.md`,

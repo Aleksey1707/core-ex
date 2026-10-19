@@ -65,6 +65,12 @@ defmodule Core.Es.Event.Codec do
   | `aggregate_version` | версия агрегата целым числом |
   | `at` | момент события |
   | `by` | автор события |
+  | `operation_id` | операция (`Es.Event.OperationID`); ключа нет, если операции нет |
+  | `session_id` | сеанс инициатора (`Es.Event.SessionID`); ключа нет, если сеанса нет |
+  | `basis_id` | основание — операция (`Es.Event.OperationID`); ключа нет, если основания нет |
+
+  Ключи операции, сеанса и основания пишутся только непустыми: у события без них конверт тот же,
+  что до их появления (ADR-0081). Отсутствующий ключ читается как `nil`.
 
   Ключи верхнего уровня строковые — в этой форме конверт лежит в jsonb-колонке outbox и уходит
   в брокер. Наружу форма отдаётся только парой `to_fields/1` / `from_fields/1`: транспорт,
@@ -106,19 +112,23 @@ defmodule Core.Es.Event.Codec do
   @required_keys ~w(event tags type)a
   @optional_keys ~w(upcasts)a
   @ns :es
+  @operation_keys ~w(operation_id session_id basis_id)a
 
   @typedoc "Конверт события на wire (строковые ключи)."
   @type wire :: %{optional(String.t()) => term()}
 
   @typedoc "Поля конверта по отдельности — мост к транспортам, хранящим их врозь."
   @type fields :: %{
-          id: term(),
-          type: String.t(),
-          payload: term(),
-          aggregate_id: term(),
-          aggregate_version: term(),
-          at: term(),
-          by: term()
+          required(:id) => term(),
+          required(:type) => String.t(),
+          required(:payload) => term(),
+          required(:aggregate_id) => term(),
+          required(:aggregate_version) => term(),
+          required(:at) => term(),
+          required(:by) => term(),
+          optional(:operation_id) => term(),
+          optional(:session_id) => term(),
+          optional(:basis_id) => term()
         }
 
   @typedoc """
@@ -127,13 +137,16 @@ defmodule Core.Es.Event.Codec do
   """
   @type derivation :: {:fields, [Fields.field()]} | :prim | :plugin
 
-  @typedoc "Общая часть события: идентификаторы, версия, автор и момент."
+  @typedoc "Общая часть события: идентификаторы, версия, автор, момент, операция, сеанс и основание."
   @type header :: %{
           id: Es.Event.ID.t(),
           aggregate_id: struct(),
           version: Version.t(),
           at: Es.Event.At.t(),
-          by: struct()
+          by: struct(),
+          operation_id: Es.Event.OperationID.t() | nil,
+          session_id: Es.Event.SessionID.t() | nil,
+          basis_id: Es.Event.OperationID.t() | nil
         }
 
   @doc """
@@ -458,6 +471,7 @@ defmodule Core.Es.Event.Codec do
       "at" => codec.dump(event.at),
       "by" => codec.dump(event.by)
     }
+    |> put_present(@operation_keys, &dump_present(Map.fetch!(event, &1), codec))
   end
 
   @doc """
@@ -510,8 +524,21 @@ defmodule Core.Es.Event.Codec do
          {:ok, version} <- load_field(data, :aggregate_version, Version, module),
          {:ok, by} <- load_field(data, :by, by_mod, module),
          {:ok, at} <- load_field(data, :at, Es.Event.At, module),
-         {:ok, id} <- load_field(data, :event_id, Es.Event.ID, module) do
-      {:ok, %{id: id, aggregate_id: aggregate_id, version: version, at: at, by: by}}
+         {:ok, id} <- load_field(data, :event_id, Es.Event.ID, module),
+         {:ok, operation_id} <- load_optional(data, :operation_id, Es.Event.OperationID),
+         {:ok, session_id} <- load_optional(data, :session_id, Es.Event.SessionID),
+         {:ok, basis_id} <- load_optional(data, :basis_id, Es.Event.OperationID) do
+      {:ok,
+       %{
+         id: id,
+         aggregate_id: aggregate_id,
+         version: version,
+         at: at,
+         by: by,
+         operation_id: operation_id,
+         session_id: session_id,
+         basis_id: basis_id
+       }}
     end
   end
 
@@ -519,13 +546,16 @@ defmodule Core.Es.Event.Codec do
   @spec build(module(), struct() | nil, header()) :: struct()
 
   def build(mod, payload, %{} = header) when is_atom(mod) do
-    case mod.__es_payload__() do
-      nil ->
-        mod.new(header.aggregate_id, header.version, header.by, header.at, header.id)
+    event =
+      case mod.__es_payload__() do
+        nil ->
+          mod.new(header.aggregate_id, header.version, header.by, header.at, header.id)
 
-      _payload_mod ->
-        mod.new(payload, header.aggregate_id, header.version, header.by, header.at, header.id)
-    end
+        _payload_mod ->
+          mod.new(payload, header.aggregate_id, header.version, header.by, header.at, header.id)
+      end
+
+    %{event | operation_id: header.operation_id, session_id: header.session_id, basis_id: header.basis_id}
   end
 
   @doc """
@@ -544,11 +574,19 @@ defmodule Core.Es.Event.Codec do
       aggregate_id: Helper.Map.field(data, :aggregate_id),
       aggregate_version: Helper.Map.field(data, :aggregate_version),
       at: Helper.Map.field(data, :at),
-      by: Helper.Map.field(data, :by)
+      by: Helper.Map.field(data, :by),
+      operation_id: Helper.Map.field(data, :operation_id),
+      session_id: Helper.Map.field(data, :session_id),
+      basis_id: Helper.Map.field(data, :basis_id)
     }
   end
 
-  @doc "Поля по отдельности → конверт: обратная операция к `to_fields/1`."
+  @doc """
+  Поля по отдельности → конверт: обратная операция к `to_fields/1`.
+
+  Операция, сеанс и основание пишутся только непустыми — как в `dump_envelope/4`; поля без них —
+  конверт без этих ключей.
+  """
   @spec from_fields(fields()) :: wire()
 
   def from_fields(fields) when is_map(fields) do
@@ -561,6 +599,7 @@ defmodule Core.Es.Event.Codec do
       "at" => fields.at,
       "by" => fields.by
     }
+    |> put_present(@operation_keys, &Map.get(fields, &1))
   end
 
   # ---
@@ -753,6 +792,28 @@ defmodule Core.Es.Event.Codec do
     case Helper.Map.fetch(data, key) do
       {:ok, raw} -> mod.new(raw)
       :error -> {:error, missing(module, key)}
+    end
+  end
+
+  # Пустое значение ключа не пишется: у события без операции конверт прежний байт в байт.
+  defp put_present(data, keys, value_of) do
+    Enum.reduce(keys, data, fn key, acc ->
+      case value_of.(key) do
+        nil -> acc
+        value -> Map.put(acc, Atom.to_string(key), value)
+      end
+    end)
+  end
+
+  defp dump_present(nil, _codec), do: nil
+  defp dump_present(value, codec), do: codec.dump(value)
+
+  # Ключ операции, сеанса или основания необязателен: конверт, записанный до их появления
+  # (ADR-0081), их не несёт.
+  defp load_optional(data, key, mod) do
+    case Helper.Map.field(data, key) do
+      nil -> {:ok, nil}
+      raw -> mod.new(raw)
     end
   end
 

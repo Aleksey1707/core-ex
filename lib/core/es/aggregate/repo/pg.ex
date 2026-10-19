@@ -33,7 +33,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     version}`; все расхождения — одна `:version_mismatch` со списком detail в порядке пар; `[]` —
     `{:ok, []}` без запросов; повтор id — `ArgumentError`.
   - `append(events, context, opts)` — `[]` — `:ok` без запросов; иначе в
-    `Core.Helper.Transact.run/3`: `outbox.from_events` → `Core.Es.Store.append/5` с
+    `Core.Helper.Transact.run/3`: операция, сеанс и основание событий (`Core.Es.Operation.stamp/2`)
+    → `outbox.from_events` → `Core.Es.Store.append/5` с
     непрерывностью потока → резервы ключей `key_reservations:` → шифрование ПДн-значений записей
     outbox → `Core.Config.outbox_repo().append`.
     События нескольких потоков одного типа пишутся пачкой, отказ в любом потоке откатывает всю;
@@ -667,6 +668,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp write(cfg, events, context, opts) do
     mismatch = &version_mismatch(cfg, &1)
     taken = &cfg.errors.domain(cfg.behaviour, &1, &2)
+    events = Es.Operation.stamp(events, context)
 
     with {:ok, records} <- cfg.outbox.from_events(events),
          :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true),

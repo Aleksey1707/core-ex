@@ -43,6 +43,31 @@ defmodule Core.Es.Event do
       version: 7
   end
 
+  defmodule OperationID do
+    @moduledoc """
+    Идентификатор операции
+
+    Операция — изменение одной транзакции записи; основание события — тоже операция.
+    """
+
+    use Core.Prim.UUID,
+      name: first_line(@moduledoc),
+      version: 7
+  end
+
+  defmodule SessionID do
+    @moduledoc """
+    Идентификатор сеанса инициатора
+
+    Что считать сеансом, решает приложение: значение кладёт его web-слой
+    (`Core.Context.Session`), библиотека id сеанса не выпускает.
+    """
+
+    use Core.Prim.UUID,
+      name: first_line(@moduledoc),
+      version: :external
+  end
+
   defmodule At do
     @moduledoc """
     Момент события
@@ -59,7 +84,10 @@ defmodule Core.Es.Event do
           required(:aggregate_id) => term(),
           required(:aggregate_version) => Version.t(),
           required(:at) => At.t(),
-          required(:by) => term()
+          required(:by) => term(),
+          required(:operation_id) => OperationID.t() | nil,
+          required(:session_id) => SessionID.t() | nil,
+          required(:basis_id) => OperationID.t() | nil
         }
 
   @required_keys ~w(aggregate_id by payload)a
@@ -91,7 +119,7 @@ defmodule Core.Es.Event do
       Core.Es.Event.check_subject!(payload_mod, aggregate_id_mod)
 
       @enforce_keys ~w(id payload aggregate_id aggregate_version at by)a
-      defstruct @enforce_keys
+      defstruct @enforce_keys ++ [operation_id: nil, session_id: nil, basis_id: nil]
 
       @doc false
       @spec __es_payload__() :: module() | nil
@@ -115,7 +143,10 @@ defmodule Core.Es.Event do
                 aggregate_id: unquote(aggregate_id_mod).t(),
                 aggregate_version: Version.t(),
                 at: EsEvent.At.t(),
-                by: unquote(by_mod).t()
+                by: unquote(by_mod).t(),
+                operation_id: EsEvent.OperationID.t() | nil,
+                session_id: EsEvent.SessionID.t() | nil,
+                basis_id: EsEvent.OperationID.t() | nil
               }
 
         @doc "Черновик события без нагрузки — элемент результата `decide/2` агрегата."
@@ -160,7 +191,10 @@ defmodule Core.Es.Event do
                 aggregate_id: unquote(aggregate_id_mod).t(),
                 aggregate_version: Version.t(),
                 at: EsEvent.At.t(),
-                by: unquote(by_mod).t()
+                by: unquote(by_mod).t(),
+                operation_id: EsEvent.OperationID.t() | nil,
+                session_id: EsEvent.SessionID.t() | nil,
+                basis_id: EsEvent.OperationID.t() | nil
               }
 
         @doc "Черновик события с нагрузкой — элемент результата `decide/2` агрегата."

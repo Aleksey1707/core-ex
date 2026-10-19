@@ -337,7 +337,8 @@ defmodule Core.Repo.Pg.StateStoredTest do
     TestRepo.all(from(r in Outbox.Repo.Pg.Schema, where: r.key == ^key, select: r.name))
   end
 
-  defp wires(events), do: Enum.map(events, &dump/1)
+  # Операцию записи ставит репозиторий (`Core.Es.Operation`), её проверяет `Core.Es.OperationTest`.
+  defp wires(events), do: Enum.map(events, &dump(%{&1 | operation_id: nil}))
 
   defp dump(value), do: Config.codec().dump(value)
 end

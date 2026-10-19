@@ -30,6 +30,20 @@ defmodule Core.Es.Migration do
   | `at` | момент события с точностью до секунды |
   | `xid` | транзакция записи, `pg_current_xact_id()` |
   | `number` | номер из identity |
+  | `operation_id` | операция; `NULL` у события без неё (ADR-0081) |
+  | `session_id` | сеанс инициатора; `NULL` у события без него |
+  | `basis_id` | основание; `NULL` у события без него |
+
+  Колонки операции, сеанса и основания — nullable и без индексов: поиск по операции идёт по
+  топикам, а не по `es_events`. Их добавляет `add_operation_columns/0` — её вызывает и `up/0`, и
+  миграция уже выкаченной базы:
+
+      defmodule MyApp.Infra.DAO.Migrations.AddEsEventsOperation do
+        use Ecto.Migration
+
+        def up, do: Core.Es.Migration.add_operation_columns()
+        def down, do: :ok
+      end
 
   Первичный ключ `(aggregate_type, aggregate_id, aggregate_version)` — адрес потока и версия:
   единственная проверка ожидаемой версии, таблицы потоков нет. Глобальная позиция — пара
@@ -90,6 +104,8 @@ defmodule Core.Es.Migration do
     create index(:es_events, [:xid, :number])
     create index(:es_events, [:aggregate_type, :xid, :number])
 
+    add_operation_columns()
+
     create table(:es_snapshots, primary_key: false) do
       add :aggregate_type, :string, primary_key: true
       add :aggregate_id, :binary_id, primary_key: true
@@ -111,6 +127,24 @@ defmodule Core.Es.Migration do
     create constraint(:es_checkpoints, :es_checkpoints_position, check: "(xid IS NULL) = (number IS NULL)")
 
     create constraint(:es_checkpoints, :es_checkpoints_target, check: "(target_xid IS NULL) = (target_number IS NULL)")
+
+    :ok
+  end
+
+  @doc """
+  Добавить в `es_events` колонки операции, сеанса инициатора и основания — идемпотентно: колонка,
+  которая уже есть, не трогается.
+
+  Существующие строки остаются как есть и читаются с пустыми полями.
+  """
+  @spec add_operation_columns() :: :ok
+
+  def add_operation_columns do
+    alter table(:es_events) do
+      add_if_not_exists :operation_id, :binary_id
+      add_if_not_exists :session_id, :binary_id
+      add_if_not_exists :basis_id, :binary_id
+    end
 
     :ok
   end

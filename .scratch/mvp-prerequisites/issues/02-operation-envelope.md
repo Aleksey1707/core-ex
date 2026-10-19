@@ -14,24 +14,24 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Три nullable-колонки `binary_id` в `es_events` без индексов. Идемпотентная функция миграции хранилища событий
+- [x] Три nullable-колонки `binary_id` в `es_events` без индексов. Идемпотентная функция миграции хранилища событий
       для выкаченных баз; новые базы получают колонки той же функцией.
-- [ ] Prim `Es.Event.OperationID` и `Es.Event.SessionID`. Необязательные поля `operation_id`, `session_id`, `basis_id`
+- [x] Prim `Es.Event.OperationID` и `Es.Event.SessionID`. Необязательные поля `operation_id`, `session_id`, `basis_id`
       у `%Es.Event{}`; Ecto-схема строки хранилища.
-- [ ] Аксессоры `Core.Context.Operation`, `Core.Context.Session`, `Core.Context.Basis` на `use Core.Context.Accessor`.
-- [ ] Одна функция проставляет поля до построения outbox и до `Store.append` на всех путях записи:
+- [x] Аксессоры `Core.Context.Operation`, `Core.Context.Session`, `Core.Context.Basis` на `use Core.Context.Accessor`.
+- [x] Одна функция проставляет поля до построения outbox и до `Store.append` на всех путях записи:
       - event-sourced;
       - state-stored с событиями;
       - событие уничтожения ключа субъекта.
-- [ ] Значение из контекста имеет приоритет.
-- [ ] Без операции в контексте — UUID v7 на внешнюю транзакцию DAO, со сбросом на commit и rollback.
+- [x] Значение из контекста имеет приоритет.
+- [x] Без операции в контексте — UUID v7 на внешнюю транзакцию DAO, со сбросом на commit и rollback.
       Повтор `Es.Transact` — новая операция. Вне транзакции — операция на вызов.
-- [ ] `dump_envelope` пишет ключи только непустыми, загрузка читает отсутствующий ключ как `nil`. `to_fields` и
+- [x] `dump_envelope` пишет ключи только непустыми, загрузка читает отсутствующий ключ как `nil`. `to_fields` и
       `from_fields` знают поля.
-- [ ] Заголовок `operation_id` у записи outbox, если операция есть.
-- [ ] Тесты через репозитории фикстурных агрегатов на `DataCase`:
+- [x] Заголовок `operation_id` у записи outbox, если операция есть.
+- [x] Тесты через репозитории фикстурных агрегатов на `DataCase`:
       - два агрегата одной транзакции — одна операция;
       - явная операция;
       - повтор `Es.Transact`;
@@ -39,7 +39,7 @@
       - поля в `Store.Test.events!`, на странице потока и в записи outbox;
       - старый конверт без ключей грузится;
       - dump без операции совпадает с прежним.
-- [ ] Своды: `14-events-outbox.md` (конверт, заголовки) и `13-repos.md` (хранилище событий). App-ярус: сеанс кладёт
+- [x] Своды: `14-events-outbox.md` (конверт, заголовки) и `13-repos.md` (хранилище событий). App-ярус: сеанс кладёт
       web-плаг приложения, миграция колонок.
-- [ ] CHANGELOG «Новое»: миграция колонок (было → стало), аксессоры, генерация операции.
-- [ ] `make` зелёный.
+- [x] CHANGELOG «Новое»: миграция колонок (было → стало), аксессоры, генерация операции.
+- [x] `make` зелёный.

@@ -558,8 +558,9 @@ use Repo.Pg.StateStored,
 0. `written` — входной агрегат с очищенными `events`
 1. `Repo.Pg.insert`/`update` — строка агрегата (эталоном в `Repo.Sc` уходит `written`)
 2. дочерние строки через `Repo.Pg.Children` — точечно, а не перезаписью коллекции
-3. flush: `<Aggregate>.Outbox.from_events` → `Core.Es.Store.append` → шифрование ПДн-значений
-   записей outbox → `Outbox.Repo.append` (`23-personal-data.md`, «Форма в хранении и доставке»)
+3. flush: операция событий `Core.Es.Operation.stamp` → `<Aggregate>.Outbox.from_events` →
+   `Core.Es.Store.append` → шифрование ПДн-значений записей outbox → `Outbox.Repo.append`
+   (`23-personal-data.md`, «Форма в хранении и доставке»)
 4. возврат `written`
 
 Очистка событий идёт **до** записи, а не после: эталоном `Repo.Pg.insert/4` кладёт то, что ему
@@ -672,10 +673,10 @@ clause `:version_mismatch`, Prim агрегата кодека не равен `
   (ADR-0016).
 - Следующая команда той же функции MAY идти от состояния из `Agg.execute/2` без повторного `get`:
   оно уже учитывает записываемые события.
-- `append` сам открывает `Transact.run(dao)`: `<Aggregate>.Outbox.from_events` →
-  `Core.Es.Store.append` с непрерывностью потока → резервы ключей («Резервы ключей») →
-  шифрование ПДн-значений записей outbox → `Outbox.Repo.append`. Отказ записи событий —
-  `errors.domain(behaviour, :version_mismatch, detail)` с detail
+- `append` сам открывает `Transact.run(dao)`: `Core.Es.Operation.stamp` →
+  `<Aggregate>.Outbox.from_events` → `Core.Es.Store.append` с непрерывностью потока → резервы
+  ключей («Резервы ключей») → шифрование ПДн-значений записей outbox → `Outbox.Repo.append`.
+  Отказ записи событий — `errors.domain(behaviour, :version_mismatch, detail)` с detail
   `%{aggregate_id, expected, actual, source: :storage}`; у `get` / `get_decision` / `refresh`
   detail той же формы с `source: :expected`, у `get_many` — их список в порядке пар. Реакцию
   задаёт `source:`: отказ хранилища MUST повторяться («Транзакция команды (`Core.Es.Transact`)»),
@@ -1089,6 +1090,13 @@ event-sourced и state-stored агрегатов. Поток — тип агре
   новый индекс `concurrently`; переименование и удаление колонок, изменение семантики нагрузки
   MUST NOT: таблица append-only с исторической нагрузкой, а у потребителя её DDL накатывает его
   собственная миграция (`deps/core/docs/rules/app/18-migrations.md`, «Таблицы библиотеки»).
+- Аддитивное изменение MUST быть отдельной идемпотентной функцией `Core.Es.Migration`
+  (`add_if_not_exists`): `up/0` зовёт её же, а выкаченная база — своей миграцией. Так заведены
+  колонки операции, сеанса и основания — `add_operation_columns/0`: nullable `binary_id` без
+  индексов (ADR-0081).
+- Операцию, сеанс и основание `append` из `%Context{}` MUST NOT брать: события приходят к нему уже
+  с ними от write-builder'а (`14-events-outbox.md`, «Операция, сеанс инициатора и основание»).
+  Строка хранилища, страница потока и пачка проекции отдают их в событии.
 
 ```elixir
 # плохо — отказ проглочен: транзакция закоммитит строку агрегата и часть пачки

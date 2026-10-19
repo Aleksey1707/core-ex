@@ -25,8 +25,9 @@ defmodule Core.Repo.Pg.StateStored do
   Набор ключей проверяется целиком здесь — чтобы опечатка в любой опции называла
   `Repo.Pg.StateStored`.
 
-  Каждая запись идёт одной транзакцией: строка агрегата → дочерние строки →
-  `outbox.from_events` → `Core.Es.Store.append` → шифрование ПДн-значений записей outbox →
+  Каждая запись идёт одной транзакцией: строка агрегата → дочерние строки → операция, сеанс и
+  основание событий (`Core.Es.Operation.stamp/2`) → `outbox.from_events` →
+  `Core.Es.Store.append` → шифрование ПДн-значений записей outbox →
   `Core.Config.outbox_repo().append`. Дочерние строки пишет `Core.Repo.Pg.Children` — точечно,
   а не перезаписью всей коллекции:
 
@@ -219,6 +220,8 @@ defmodule Core.Repo.Pg.StateStored do
       end
 
       defp do_flush_events(events, context, opts) do
+        events = Core.Es.Operation.stamp(events, context)
+
         with {:ok, records} <- @es_outbox.from_events(events),
              :ok <- Core.Es.Store.append(@es_event_codec, events, context, &version_mismatch/1),
              {:ok, records} <- Core.Es.Personal.Wire.seal_records(records) do

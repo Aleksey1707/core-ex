@@ -127,7 +127,10 @@ defmodule Core.Es.Store do
     tag: :string,
     payload: Schema.Payload,
     by_id: :binary_id,
-    at: :utc_datetime
+    at: :utc_datetime,
+    operation_id: :binary_id,
+    session_id: :binary_id,
+    basis_id: :binary_id
   }
 
   @typedoc "Глобальная позиция события: `xid` транзакции записи и номер."
@@ -231,7 +234,10 @@ defmodule Core.Es.Store do
       tag: tag,
       payload: fields.payload,
       by_id: fields.by,
-      at: fields.at
+      at: fields.at,
+      operation_id: fields.operation_id,
+      session_id: fields.session_id,
+      basis_id: fields.basis_id
     }
   end
 
@@ -317,7 +323,10 @@ defmodule Core.Es.Store do
         tag: r.tag,
         payload: r.payload,
         by_id: r.by_id,
-        at: r.at
+        at: r.at,
+        operation_id: r.operation_id,
+        session_id: r.session_id,
+        basis_id: r.basis_id
       }
     )
     |> continuity(type, continuous?)
@@ -434,7 +443,10 @@ defmodule Core.Es.Store do
         tag: e.tag,
         payload: e.payload,
         by_id: type(e.by_id, :binary_id),
-        at: type(e.at, :utc_datetime)
+        at: type(e.at, :utc_datetime),
+        operation_id: type(e.operation_id, :binary_id),
+        session_id: type(e.session_id, :binary_id),
+        basis_id: type(e.basis_id, :binary_id)
       }
     )
     |> after_position(position)

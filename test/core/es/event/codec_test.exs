@@ -8,6 +8,7 @@ defmodule Core.Es.Event.CodecTest do
   alias Core.Version
 
   @envelope_keys ~w(aggregate_id aggregate_version at by event_id payload type)
+  @operation_keys ~w(operation_id session_id basis_id)
 
   describe "dump/2" do
     test "отдаёт конверт события целиком" do
@@ -28,6 +29,25 @@ defmodule Core.Es.Event.CodecTest do
       assert dumped["aggregate_version"] == Version.value(event.aggregate_version)
       assert dumped["at"] == InCodec.dump(event.at)
       assert dumped["by"] == InCodec.dump(event.by)
+    end
+
+    test "операция, сеанс и основание — в конверте строками UUID" do
+      event = operated(EventFixture.created())
+
+      dumped = EventFixture.Event.Codec.dump(event, InCodec)
+
+      assert Enum.sort(Map.keys(dumped)) == Enum.sort(@envelope_keys ++ @operation_keys)
+      assert dumped["operation_id"] == InCodec.dump(event.operation_id)
+      assert dumped["session_id"] == InCodec.dump(event.session_id)
+      assert dumped["basis_id"] == InCodec.dump(event.basis_id)
+    end
+
+    test "пустые операция, сеанс и основание в конверт не пишутся" do
+      event = %{operated(EventFixture.created()) | session_id: nil, basis_id: nil}
+
+      dumped = EventFixture.Event.Codec.dump(event, InCodec)
+
+      assert Enum.sort(Map.keys(dumped)) == Enum.sort(["operation_id" | @envelope_keys])
     end
 
     test "у события без нагрузки payload равен nil" do
@@ -132,6 +152,35 @@ defmodule Core.Es.Event.CodecTest do
                InCodec.load(EventFixture.Event, data)
     end
 
+    test "round-trip через JSON: операция, сеанс и основание" do
+      event = operated(EventFixture.created())
+
+      assert {:ok, ^event} = load(json_roundtrip(InCodec.dump(event)))
+    end
+
+    test "golden-конверт без операции: load → dump побайтно прежний" do
+      golden = Jason.decode!(File.read!("test/support/fixtures/events/fixture/fixture.created.json"))
+
+      assert {:ok, event} = load(golden)
+      assert Jason.encode!(InCodec.dump(event)) == Jason.encode!(golden)
+    end
+
+    test "конверт без ключей операции грузится с пустыми полями" do
+      data = json_roundtrip(InCodec.dump(EventFixture.created()))
+
+      assert {:ok, %{operation_id: nil, session_id: nil, basis_id: nil}} = load(data)
+    end
+
+    test "неприводимая операция — доменная ошибка приведения" do
+      data =
+        EventFixture.created()
+        |> InCodec.dump()
+        |> json_roundtrip()
+        |> Map.put("operation_id", "не uuid")
+
+      assert {:error, %Error{kind: :domain}} = load(data)
+    end
+
     test "round-trip через JSON: событие с нагрузкой" do
       event = EventFixture.created()
 
@@ -185,6 +234,18 @@ defmodule Core.Es.Event.CodecTest do
       assert fields.id == dumped["event_id"]
       assert fields.by == dumped["by"]
       assert fields.type == "fixture.created"
+      assert Es.Event.Codec.from_fields(fields) == dumped
+    end
+
+    test "переносят операцию, сеанс и основание; пустые ключи обратно не пишутся" do
+      event = %{operated(EventFixture.created()) | basis_id: nil}
+      dumped = InCodec.dump(event)
+
+      fields = Es.Event.Codec.to_fields(dumped)
+
+      assert fields.operation_id == dumped["operation_id"]
+      assert fields.session_id == dumped["session_id"]
+      assert fields.basis_id == nil
       assert Es.Event.Codec.from_fields(fields) == dumped
     end
   end
@@ -479,6 +540,15 @@ defmodule Core.Es.Event.CodecTest do
   # ---
 
   defp load(data), do: InCodec.load(EventFixture.Event.Created, data)
+
+  defp operated(event) do
+    %{
+      event
+      | operation_id: Es.Event.OperationID.new(),
+        session_id: Es.Event.SessionID.new!(Ecto.UUID.generate()),
+        basis_id: Es.Event.OperationID.new()
+    }
+  end
 
   defp json_roundtrip(map) do
     map
