@@ -285,6 +285,49 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     refute_receive :handled, 200
   end
 
+  test "первый :idle после работы усыпляет процесс", %{context: context} do
+    topic = Mq.Topic.new!("hibernate_topic")
+    reader = MqFake.QueueReader.new(Enum.map(1..3, &message(topic, "b#{&1}")))
+
+    attach_cycle_telemetry(self())
+
+    sub = start_sub(reader, topic, "sub-hibernate", fn _m, _d, _c -> :ok end)
+    assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+    send(sub, :tick)
+
+    assert_receive {:cycle, :idle}, 500
+    assert eventually(fn -> hibernated?(sub) end)
+  end
+
+  test "повторный :idle процесс не усыпляет", %{context: context} do
+    topic = Mq.Topic.new!("hibernate_repeat_topic")
+    reader = MqFake.QueueReader.new([message(topic, "b1")])
+
+    attach_cycle_telemetry(self())
+
+    sub = start_sub(reader, topic, "sub-hibernate-repeat", fn _m, _d, _c -> :ok end, poll_interval_ms: 20)
+    assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+    for _ <- 1..3, do: assert_receive({:cycle, :idle}, 500)
+
+    refute eventually(fn -> hibernated?(sub) end, 10)
+  end
+
+  test "старт подписки без сообщений процесс не усыпляет", %{context: context} do
+    topic = Mq.Topic.new!("hibernate_start_topic")
+
+    attach_cycle_telemetry(self())
+
+    sub = start_sub(MqFake.QueueReader.new(), topic, "sub-hibernate-start", fn _m, _d, _c -> :ok end)
+    assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+    send(sub, :tick)
+
+    assert_receive {:cycle, :idle}, 500
+    refute eventually(fn -> hibernated?(sub) end, 10)
+  end
+
   test "контекст живёт одно сообщение: shadow copy не растёт", %{topic: topic, context: context} do
     reader = MqFake.QueueReader.new(Enum.map(1..3, &message(topic, "b#{&1}")))
     parent = self()
@@ -830,6 +873,29 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     {:ok, message} = Message.new(topic, headers, body, Mq.Key.new!("agg-1"))
 
     message
+  end
+
+  # Начиная с OTP 29 `gen_server` спит в своей `loop_hibernate`, а не в `:erlang.hibernate/3`.
+  defp hibernated?(pid) do
+    case Process.info(pid, :current_function) do
+      {:current_function, {:erlang, :hibernate, 3}} -> true
+      {:current_function, {:gen_server, :loop_hibernate, _arity}} -> true
+      _other -> false
+    end
+  end
+
+  defp eventually(check, attempts \\ 50) do
+    cond do
+      check.() ->
+        true
+
+      attempts == 0 ->
+        false
+
+      true ->
+        Process.sleep(10)
+        eventually(check, attempts - 1)
+    end
   end
 
   defp attach_cycle_telemetry(parent) do

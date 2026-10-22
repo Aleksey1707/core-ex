@@ -29,6 +29,14 @@ defmodule Core.PubSub.MqSubscriberReliable do
   После `:processed` / `:filtered` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
   После `:idle` — `poll_interval_ms`, после `:error` — текущий backoff.
 
+  Первый `:idle` после работы уводит процесс в `:hibernate`: полная сборка освобождает кучу,
+  раздутую пачкой сообщений. На холостом опросе мусора почти нет, и без этого куча держала бы
+  пиковый размер до рестарта. Повторный `:idle` процесс не усыпляет: полная сборка на каждый
+  опрос стоила бы больше, чем экономит. Работой считаются только прочитанные сообщения
+  (`:processed` / `:filtered` / `:dlq`); старт подписки работой не считается. `:error` счёт не
+  меняет: `:idle` после ошибки усыпит процесс, только если до неё были прочитанные сообщения.
+  Цикл `run_once/1` считается так же.
+
   Обработка сообщения идёт в span'е `"process <topic>"` (`kind: :consumer`),
   родитель которого извлекается из заголовков сообщения (`Core.Otel.Messaging`):
   трейс команды, записавшей событие в outbox, продолжается здесь, а не начинается
@@ -68,6 +76,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @default_poll_interval_ms 100
   @default_max_attempts 5
   @default_retry_max_ms 30_000
+  @worked ~w(processed filtered dlq)a
 
   defstruct [
     :reader_module,
@@ -84,7 +93,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
     :timer_ref,
     :pending_raw,
     attempts: 0,
-    subscribed?: false
+    subscribed?: false,
+    hibernated?: true
   ]
 
   @type domain_message :: term()
@@ -226,7 +236,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   def handle_call(:run_once, _from, state) do
     {result, state} = consume_once(state)
     emit_cycle(state, result)
-    {:reply, result, state}
+    {state, sleep} = sleep_after(state, result)
+    {:reply, result, state, sleep}
   end
 
   @doc false
@@ -239,7 +250,13 @@ defmodule Core.PubSub.MqSubscriberReliable do
     state = cancel_timer(state)
     {result, state} = consume_once(state)
     emit_cycle(state, result)
-    {:noreply, reschedule(state, result)}
+
+    {state, sleep} =
+      state
+      |> reschedule(result)
+      |> sleep_after(result)
+
+    {:noreply, state, sleep}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
@@ -423,10 +440,11 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp mark_subscribed(state, data) do
-    schedule(%{state | step: %{state.step | data: data}, subscribed?: true}, state.poll_interval_ms)
+    state = %{state | step: %{state.step | data: data}, subscribed?: true, hibernated?: true}
+    schedule(state, state.poll_interval_ms)
   end
 
-  defp reschedule(state, result) when result in ~w(processed filtered dlq)a do
+  defp reschedule(state, result) when result in @worked do
     schedule(state, 0)
   end
 
@@ -438,6 +456,10 @@ defmodule Core.PubSub.MqSubscriberReliable do
   defp reschedule(state, _other) do
     schedule(state, state.poll_interval_ms)
   end
+
+  defp sleep_after(%__MODULE__{hibernated?: false} = state, :idle), do: {%{state | hibernated?: true}, :hibernate}
+  defp sleep_after(%__MODULE__{} = state, result) when result in @worked, do: {%{state | hibernated?: false}, :infinity}
+  defp sleep_after(%__MODULE__{} = state, _result), do: {state, :infinity}
 
   defp schedule(%__MODULE__{} = state, ms) when is_integer(ms) and ms >= 0 do
     state = cancel_timer(state)
