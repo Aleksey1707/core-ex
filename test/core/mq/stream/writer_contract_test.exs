@@ -11,7 +11,7 @@ defmodule Core.Mq.Stream.WriterContractTest do
     @moduledoc false
 
     def start_link(opts) do
-      state = %{declares: 0, fail_at: Keyword.get(opts, :fail_at), sequence: %{}, published: []}
+      state = %{declares: 0, fail_at: Keyword.get(opts, :fail_at), topics: %{}, sequence: %{}, published: []}
 
       Agent.start_link(fn -> state end, name: __MODULE__)
     end
@@ -22,11 +22,13 @@ defmodule Core.Mq.Stream.WriterContractTest do
 
     def declare_producer(topic, _ref) do
       index = Agent.get_and_update(__MODULE__, &{&1.declares, %{&1 | declares: &1.declares + 1}})
+      producer_id = index + 1
+      Agent.update(__MODULE__, &%{&1 | topics: Map.put(&1.topics, producer_id, topic)})
 
       case Agent.get(__MODULE__, & &1.fail_at) do
-        nil -> {:ok, topic}
+        nil -> {:ok, producer_id}
         fail_at when index >= fail_at -> {:error, :access_refused}
-        _earlier -> {:ok, topic}
+        _earlier -> {:ok, producer_id}
       end
     end
 
@@ -34,7 +36,7 @@ defmodule Core.Mq.Stream.WriterContractTest do
       Agent.update(__MODULE__, fn state ->
         %{
           state
-          | sequence: Map.put(state.sequence, producer_id, publishing_id),
+          | sequence: Map.put(state.sequence, Map.fetch!(state.topics, producer_id), publishing_id),
             published: state.published ++ [binary]
         }
       end)

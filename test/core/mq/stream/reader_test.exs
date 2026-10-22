@@ -51,6 +51,23 @@ defmodule Core.Mq.Stream.ReaderTest do
     end
   end
 
+  # Процесс соединения — агент `WrapConn`; номера подписок выдаёт отдельный `WrapIds`,
+  # чтобы перезапуск соединения не начинал их заново.
+  defmodule WrapConn do
+    @moduledoc false
+
+    def connect, do: :ok
+    def create_stream(_topic), do: :ok
+    def query_offset(_topic, _sub), do: {:error, :not_found}
+    def store_offset(_topic, _sub, _offset), do: :ok
+    def unsubscribe(id) when id <= 255, do: :ok
+    def credit(_id, _n), do: :ok
+
+    def subscribe(_stream, _pid, _offset, _credit) do
+      {:ok, Agent.get_and_update(WrapIds, fn [id | ids] -> {id, ids} end)}
+    end
+  end
+
   setup do
     start_supervised!(%{
       id: FakeConn,
@@ -414,6 +431,44 @@ defmodule Core.Mq.Stream.ReaderTest do
       end)
 
       assert Process.alive?(reader)
+    end
+  end
+
+  describe "номера соединения исчерпаны" do
+    setup do
+      start_supervised!(%{id: WrapConn, start: {Agent, :start_link, [fn -> nil end, [name: WrapConn]]}})
+      start_supervised!(%{id: WrapIds, start: {Agent, :start_link, [fn -> [256, 1] end, [name: WrapIds]]}})
+
+      :ok
+    end
+
+    test "подписка с номером больше 255 перезапускает соединение и повторяется" do
+      conn = Process.whereis(WrapConn)
+      ref = Process.monitor(conn)
+
+      log =
+        capture_log(fn ->
+          reader =
+            start_supervised!(
+              Supervisor.child_spec(
+                {Stream.Reader,
+                 connection: WrapConn,
+                 topic: Mq.Topic.new!("wrap_test"),
+                 subscriber_name: Mq.SubscriberName.new!("sub"),
+                 reliable?: true,
+                 initial_offset: :first,
+                 retry_min_ms: 10,
+                 retry_max_ms: 20},
+                id: :wrap_reader
+              )
+            )
+
+          assert_receive {:DOWN, ^ref, :process, _, {:shutdown, :ids_exhausted}}, 1_000
+          assert eventually(fn -> Stream.Reader.info(reader).subscribed? end)
+          assert :ok = stop_supervised(:wrap_reader)
+        end)
+
+      assert log =~ "номера соединения исчерпаны"
     end
   end
 

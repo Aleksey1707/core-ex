@@ -37,9 +37,14 @@ defmodule Core.Mq.Stream.WriterTest do
 
     def create_stream(_topic), do: :ok
 
+    # `declare:` — результат для всех топиков либо карта «топик → результат».
     def declare_producer(topic, _ref) do
       Log.add({:declare, topic})
-      Agent.get(__MODULE__, & &1.declare)
+
+      case Agent.get(__MODULE__, & &1.declare) do
+        %{} = by_topic -> Map.get(by_topic, topic, {:ok, 7})
+        result -> result
+      end
     end
 
     def producer_sequence(topic, _ref) do
@@ -74,7 +79,7 @@ defmodule Core.Mq.Stream.WriterTest do
 
     def declare_producer(topic, _ref) do
       Log.add({:declare, topic})
-      {:ok, topic}
+      {:ok, producer_id(topic)}
     end
 
     def publish(producer_id, publishing_id, _binary) do
@@ -83,7 +88,7 @@ defmodule Core.Mq.Stream.WriterTest do
     end
 
     def producer_sequence("slow_a", _ref) do
-      confirmed = Agent.get(__MODULE__, &Map.get(&1, "slow_a", 0))
+      confirmed = Agent.get(__MODULE__, &Map.get(&1, producer_id("slow_a"), 0))
       if confirmed > 0, do: Process.sleep(45)
 
       {:ok, confirmed}
@@ -97,7 +102,7 @@ defmodule Core.Mq.Stream.WriterTest do
         end)
 
       if polls > 4,
-        do: {:ok, Agent.get(__MODULE__, &Map.get(&1, "slow_b", 0))},
+        do: {:ok, Agent.get(__MODULE__, &Map.get(&1, producer_id("slow_b"), 0))},
         else: {:ok, 0}
     end
 
@@ -105,6 +110,9 @@ defmodule Core.Mq.Stream.WriterTest do
       Log.add({:delete_producer, producer_id})
       :ok
     end
+
+    defp producer_id("slow_a"), do: 1
+    defp producer_id("slow_b"), do: 2
   end
 
   defmodule ExitingConn do
@@ -163,6 +171,22 @@ defmodule Core.Mq.Stream.WriterTest do
       end)
 
     assert log =~ "публикация не подтверждена"
+  end
+
+  test "отказ посреди пачки с неподтверждённым началом — индекс 0" do
+    writer = start_writer(FakeConn, confirm?: false, declare: %{"broken" => {:error, :access_refused}})
+
+    capture_log(fn ->
+      assert {:error, 0, %Error{code: :publish_unconfirmed}} =
+               Stream.Writer.put_many(writer, [message("a"), message("b", "broken")])
+    end)
+  end
+
+  test "отказ посреди пачки с подтверждённым началом — индекс отказа" do
+    writer = start_writer(FakeConn, confirm?: true, declare: %{"broken" => {:error, :access_refused}})
+
+    assert {:error, 1, %Error{code: :producer_setup_failed}} =
+             Stream.Writer.put_many(writer, [message("a"), message("b", "broken")])
   end
 
   test "неподтверждённая пачка снимает producer, следующая объявляет его заново" do

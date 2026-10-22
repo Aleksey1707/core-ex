@@ -129,7 +129,9 @@ defmodule Core.Mq.Stream.Writer do
         {:reply, result, close_batch(state, topics)}
 
       {:error, index, error, state} ->
-        {:reply, {:error, index, error}, close_batch(state, topics)}
+        {result, state} = confirm_prefix(state, messages, index, error)
+
+        {:reply, result, close_batch(state, topics)}
     end
   end
 
@@ -241,6 +243,19 @@ defmodule Core.Mq.Stream.Writer do
   # Дедлайн один на всю пачку: `confirm_timeout_ms` на каждый топик давал бы ожидание,
   # кратное числу топиков, а `:shutdown` writer'а и вызывающего поллера рассчитан на
   # пачку целиком — супервизор добил бы обоих посреди подтверждения.
+  # Отказ на `index` объявляет сообщения до него опубликованными (`Core.Mq.Writer`), а ушли
+  # они `cast`-ом без подтверждения. Не подтвердилось начало — отказ всей пачки с индексом 0.
+  defp confirm_prefix(state, _messages, 0, error), do: {{:error, 0, error}, state}
+
+  defp confirm_prefix(state, messages, index, error) do
+    topics = batch_topics(Enum.take(messages, index))
+
+    case confirm_batch(state, topics) do
+      {:ok, state} -> {{:error, index, error}, state}
+      {{:error, 0, _unconfirmed} = unconfirmed, state} -> {unconfirmed, state}
+    end
+  end
+
   defp confirm_batch(state, topics) do
     deadline = System.monotonic_time(:millisecond) + state.confirm_timeout_ms
 
@@ -332,10 +347,13 @@ defmodule Core.Mq.Stream.Writer do
     conn = state.connection
     ref = producer_reference(state, topic)
 
+    conn_pid = GenServer.whereis(conn)
+
     with {:ok, state} <- ensure_monitor(state),
          :ok <- conn.connect(),
          :ok <- ensure_stream(conn, topic),
          {:ok, producer_id} <- conn.declare_producer(topic, ref),
+         {:ok, producer_id} <- Mq.Stream.accept_id_or_restart(conn_pid, :producer, producer_id),
          {:ok, sequence} <- conn.producer_sequence(topic, ref) do
       Logger.info("stream writer: producer готов topic=#{topic} ref=#{ref} sequence=#{sequence}")
 

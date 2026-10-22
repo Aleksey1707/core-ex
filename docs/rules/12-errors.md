@@ -368,6 +368,7 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.DurationParser` | `:duration_parser` | `:domain` | `:invalid_format`, `:precision_loss`, `:unsupported_component`, `:invalid_component`, `:invalid_input`, `:negative_duration` |
 | `Core.Web.Params` | `:web` | `:domain` | `:missing_param`, `:current_not_allowed` |
 | `Core.Mq.Message` | `:mq` | `:domain` | `:header_not_found`, `:invalid_header_value` |
+| `Core.Mq.Stream` | `:mq` | `:app` | `:connection_ids_exhausted` |
 | `Core.Mq.Stream.Codec` | `:mq` | `:app` | `:encode_failed`, `:invalid_payload`, `:invalid_body`, `:invalid_topic`, `:invalid_key`, `:invalid_headers` |
 | `Core.Mq.Stream.Reader` | `:mq` | `:app` | `:not_reliable`, `:nothing_to_commit`, `:commit_failed` |
 | `Core.Mq.Stream.Writer` | `:mq` | `:app` | `:publish_unconfirmed`, `:producer_setup_failed` |

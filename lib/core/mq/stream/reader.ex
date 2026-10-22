@@ -403,10 +403,13 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     # Недоступный брокер приходит не как `{:error, _}`, а как exit по таймауту
     # `GenServer.call` к процессу соединения — иначе ретраи бы не сработали.
     defp try_subscribe(%__MODULE__{} = state) do
+      conn_pid = GenServer.whereis(state.connection)
+
       with :ok <- state.connection.connect(),
            :ok <- ensure_stream(state.connection, state.topic_name),
-           offset <- resolve_offset(state, state.initial_offset) do
-        state.connection.subscribe(state.topic_name, self(), offset, state.credit)
+           offset <- resolve_offset(state, state.initial_offset),
+           {:ok, id} <- state.connection.subscribe(state.topic_name, self(), offset, state.credit) do
+        Mq.Stream.accept_id_or_restart(conn_pid, :subscription, id)
       end
     catch
       :exit, reason -> {:error, {:exit, reason}}
