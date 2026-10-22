@@ -33,7 +33,7 @@ defmodule Core.Labels.Fields do
 
   У struct'а без спеки полей — нагрузки с ручным плагином кодека, вложенного struct'а сведений,
   варианта семейства — вид видимых полей задаёт `fields:` на языке спеки плагина по полям
-  (`Core.Codec.Plugin.Fields`), её разбирает тот же нормализатор:
+  (`Core.Codec.Field`), её разбирает тот же нормализатор:
 
       defmodule MyApp.Domain.Sales.Account.Address do
         defstruct [:city, :origin, :tags, :checksum]
@@ -92,7 +92,7 @@ defmodule Core.Labels.Fields do
   Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
 
-  alias Core.Codec.Plugin
+  alias Core.Codec.Field
   alias Core.Labels.Check
 
   @typedoc "Решение по полю: подпись, подписи map'ы с id в ключах или скрыто."
@@ -102,7 +102,7 @@ defmodule Core.Labels.Fields do
   @type map_label :: [label: String.t(), key: String.t(), value: String.t()]
 
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
-  @type spec :: Plugin.Fields.spec() | {:text, (term() -> String.t())} | {:list, spec()}
+  @type spec :: Field.spec() | {:text, (term() -> String.t())} | {:list, spec()}
 
   @typedoc "Путь поля от корня типа."
   @type path :: [atom(), ...]
@@ -242,7 +242,7 @@ defmodule Core.Labels.Fields do
         {label, spec}
 
       {changed, nil} ->
-        {label, Plugin.Fields.value_spec(Keyword.fetch!(changed, :type), "#{where(module)}: change")}
+        {label, Field.value_spec(Keyword.fetch!(changed, :type), "#{where(module)}: change")}
 
       {_changed, _value} ->
         reject!(module, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
@@ -283,9 +283,9 @@ defmodule Core.Labels.Fields do
 
   defp normalize!([], _where), do: %{}
 
-  defp normalize!(fields, where), do: Map.new(pairs(Plugin.Fields.normalize!(fields, where)))
+  defp normalize!(fields, where), do: Map.new(pairs(Field.normalize!(fields, :labels, where)))
 
-  defp pairs(fields), do: for({name, spec, _optional?, _wire, _default, _subject} <- fields, do: {name, spec})
+  defp pairs(fields), do: for(%Field{name: name, spec: spec} <- fields, do: {name, spec})
 
   defp label!(:hidden, _where), do: :hidden
 

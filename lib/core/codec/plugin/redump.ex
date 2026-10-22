@@ -26,6 +26,7 @@ defmodule Core.Codec.Plugin.Redump do
   """
 
   alias Core.Codec
+  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Codec.Plugin.Opts
   alias Core.Codec.Plugin.Variants
@@ -157,11 +158,11 @@ defmodule Core.Codec.Plugin.Redump do
   # ===== вывод =====
 
   @doc false
-  @spec fields_spec([Fields.field()]) :: Codec.Redump.spec()
+  @spec fields_spec([Field.t()]) :: Codec.Redump.spec()
 
   def fields_spec(fields) do
     specs =
-      for {_name, spec, _optional?, wire, _default, _subject} <- fields,
+      for %Field{spec: spec, wire: wire} <- fields,
           redump = field_spec(spec),
           redump != nil,
           into: %{},

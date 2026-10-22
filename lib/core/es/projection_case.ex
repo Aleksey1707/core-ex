@@ -377,7 +377,7 @@ defmodule Core.Es.ProjectionCase do
     if function_exported?(payload, :__es_payload_fields__, 0),
       do:
         for(
-          {name, _spec, _optional?, wire, _default, subject} <- payload.__es_payload_fields__(),
+          %Core.Codec.Field{name: name, wire: wire, subject: subject} <- payload.__es_payload_fields__(),
           subject,
           do: {name, wire}
         ),

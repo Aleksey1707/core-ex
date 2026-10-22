@@ -8,15 +8,45 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
   describe "subject: у поля нагрузки" do
     test "спека поля в __es_payload_fields__/0 несёт subject:" do
-      assert [{:holder, {:prim, Account.Holder}, false, "holder", :none, :aggregate_id}] =
+      assert [
+               %Core.Codec.Field{
+                 name: :holder,
+                 spec: {:prim, Account.Holder},
+                 optional?: false,
+                 wire: "holder",
+                 default: :none,
+                 subject: :aggregate_id
+               }
+             ] =
                Account.Event.HolderSet.Payload.__es_payload_fields__()
     end
 
     test "поле той же нагрузки — субъект" do
       assert [
-               {:person_id, {:prim, Core.EventFixture.PersonID}, true, "person_id", :none, nil},
-               {:contact, {:prim, Core.EventFixture.Contact}, true, "contact", :none, :person_id},
-               {:note, {:prim, Core.EventFixture.Note}, false, "note", :none, :aggregate_id}
+               %Core.Codec.Field{
+                 name: :person_id,
+                 spec: {:prim, Core.EventFixture.PersonID},
+                 optional?: true,
+                 wire: "person_id",
+                 default: :none,
+                 subject: nil
+               },
+               %Core.Codec.Field{
+                 name: :contact,
+                 spec: {:prim, Core.EventFixture.Contact},
+                 optional?: true,
+                 wire: "contact",
+                 default: :none,
+                 subject: :person_id
+               },
+               %Core.Codec.Field{
+                 name: :note,
+                 spec: {:prim, Core.EventFixture.Note},
+                 optional?: false,
+                 wire: "note",
+                 default: :none,
+                 subject: :aggregate_id
+               }
              ] = Core.EventFixture.Event.ContactSet.Payload.__es_payload_fields__()
     end
 

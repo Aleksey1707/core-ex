@@ -127,7 +127,7 @@ defmodule Core.Codec.Plugin do
 
       @codec_loadable Keyword.get(opts, :loadable, true)
       @codec_union Core.Codec.Plugin.Opts.union!(opts, @codec_loadable)
-      @codec_fields Core.Codec.Plugin.Fields.fields!(__MODULE__, Keyword.get(opts, :fields), @codec_loadable)
+      @codec_fields Core.Codec.Field.fields!(__MODULE__, Keyword.get(opts, :fields), @codec_loadable)
       @codec_variants Core.Codec.Plugin.Variants.variants!(__MODULE__, Keyword.get(opts, :variants), @codec_union)
       @codec_types Core.Codec.Plugin.Opts.all_types!(__MODULE__, [
                      Core.Codec.Plugin.Opts.types!(opts),
@@ -156,7 +156,7 @@ defmodule Core.Codec.Plugin do
       def __codec_union__, do: @codec_union
 
       @doc false
-      @spec __codec_variants__() :: [{module(), term(), [Core.Codec.Plugin.Fields.field()] | :manual}]
+      @spec __codec_variants__() :: [{module(), term(), [Core.Codec.Field.t()] | :manual}]
 
       def __codec_variants__, do: @codec_variants_info
 

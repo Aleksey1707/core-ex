@@ -18,6 +18,7 @@ defmodule Core.Codec.Plugin.Variants do
   варианта — `:unknown_tag` с `detail: %{tag:, discriminator:}`.
   """
 
+  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Helper
@@ -36,7 +37,7 @@ defmodule Core.Codec.Plugin.Variants do
   @type place :: {:tagged, String.t(), discriminator() | nil} | {:inline, discriminator()}
 
   @typedoc "Вариант: модуль, адрес как объявлен, нормализованный адрес, поля по спеке или `:manual`."
-  @type variant :: {module(), term(), place(), [Fields.field()] | :manual}
+  @type variant :: {module(), term(), place(), [Field.t()] | :manual}
 
   @typedoc "Индекс выбора варианта по wire."
   @type index ::
@@ -102,7 +103,7 @@ defmodule Core.Codec.Plugin.Variants do
   def type_by_mod(variants), do: Map.new(variants, fn {mod, _address, place, _fields} -> {mod, type(place)} end)
 
   @doc false
-  @spec introspection([variant()]) :: [{module(), term(), [Fields.field()] | :manual}]
+  @spec introspection([variant()]) :: [{module(), term(), [Field.t()] | :manual}]
 
   def introspection(variants), do: Enum.map(variants, fn {mod, address, _place, fields} -> {mod, address, fields} end)
 
@@ -112,10 +113,10 @@ defmodule Core.Codec.Plugin.Variants do
     where = "#{@label} #{inspect(plugin)}: variants, вариант #{inspect(mod)}"
     place = place!(address, where)
     disc = disc(place)
-    Fields.struct_module!(mod, where)
+    Field.struct_module!(mod, where)
     check_default!(mod, disc, where)
 
-    fields = Fields.variant_fields!(mod, spec, List.wrap(disc && elem(disc, 0)), where)
+    fields = Field.variant_fields!(mod, spec, List.wrap(disc && elem(disc, 0)), where)
     check_clash!(fields, disc, where)
 
     {mod, address, place, fields}
@@ -124,7 +125,7 @@ defmodule Core.Codec.Plugin.Variants do
   defp variant!(plugin, {mod, address}) when is_atom(mod) and not is_nil(mod) do
     where = "#{@label} #{inspect(plugin)}: variants, вариант #{inspect(mod)}"
     place = place!(address, where)
-    Fields.struct_module!(mod, where)
+    Field.struct_module!(mod, where)
     check_default!(mod, disc(place), where)
 
     {mod, address, place, :manual}
@@ -185,7 +186,7 @@ defmodule Core.Codec.Plugin.Variants do
   defp check_clash!(fields, {key, _value}, where) do
     wire = Atom.to_string(key)
 
-    if Enum.any?(fields, fn {_name, _spec, _optional?, field_wire, _default, _subject} -> field_wire == wire end) do
+    if Enum.any?(fields, &match?(%Field{wire: ^wire}, &1)) do
       raise CompileError, description: "#{where}: wire-ключ #{inspect(wire)} занят дискриминатором"
     end
   end

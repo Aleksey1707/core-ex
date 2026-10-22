@@ -51,6 +51,7 @@ defmodule Core.Labels.CompletenessCase do
     `Credo.Check.Refactor.PassAsyncInTestCases`
   """
 
+  alias Core.Codec.Field
   alias Core.Helper
   alias Core.Labels.Fields
   alias Core.Labels.ID
@@ -317,7 +318,7 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   defp diverged(variant, disc, fields) do
-    plugin = Map.new(fields, fn {name, spec, _optional?, _wire, _default, _subject} -> {name, spec} end)
+    plugin = Map.new(fields, fn %Field{name: name, spec: spec} -> {name, spec} end)
     labelled = Map.new(Fields.specs(variant))
     hidden = for {name, :hidden} <- variant.__label_fields__(), do: name
 

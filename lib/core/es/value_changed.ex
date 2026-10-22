@@ -16,7 +16,7 @@ defmodule Core.Es.ValueChanged do
   берёт вид значения изменения.
   """
 
-  alias Core.Codec.Plugin.Fields
+  alias Core.Codec.Field
   alias Core.Helper
 
   @required_keys ~w(type)a
@@ -48,7 +48,7 @@ defmodule Core.Es.ValueChanged do
       @enforce_keys ~w(old_value new_value)a
       defstruct @enforce_keys
 
-      @type t :: %__MODULE__{unquote_splicing(Core.Codec.Plugin.Fields.typespec(fields))}
+      @type t :: %__MODULE__{unquote_splicing(Core.Codec.Field.typespec(fields))}
 
       @es_value_changed [type: type_mod, nilable: nilable?]
 
@@ -58,7 +58,7 @@ defmodule Core.Es.ValueChanged do
       def __es_value_changed__, do: @es_value_changed
 
       @doc "Создать запись изменения значения."
-      @spec new(unquote_splicing(Keyword.values(Core.Codec.Plugin.Fields.typespec(fields)))) :: t()
+      @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(fields)))) :: t()
 
       def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(fields)))
           when unquote(Core.Codec.Plugin.Fields.new_guard(fields)),
@@ -80,11 +80,15 @@ defmodule Core.Es.ValueChanged do
   Спека полей `old_value` / `new_value` по типу значения: Prim → `prim:`, `Core.Enum` → `enum:`,
   иначе `entity:`; `nilable: true` → `optional: true`.
   """
-  @spec fields(module(), boolean()) :: [Fields.field()]
+  @spec fields(module(), boolean()) :: [Field.t()]
 
   def fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
-    spec = Fields.value_spec(type, "Es.ValueChanged: type")
+    {kind, mod} = Field.value_spec(type, "Es.ValueChanged: type")
 
-    for name <- ~w(old_value new_value)a, do: {name, spec, nilable?, Atom.to_string(name), :none, nil}
+    Field.normalize!(
+      for(name <- ~w(old_value new_value)a, do: {name, [{kind, mod}, optional: nilable?]}),
+      :plugin,
+      "Es.ValueChanged"
+    )
   end
 end

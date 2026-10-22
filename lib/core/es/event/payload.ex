@@ -12,7 +12,7 @@ defmodule Core.Es.Event.Payload do
           ]
       end
 
-  Спека полей — та же, что у Codec-плагина (`Core.Codec.Plugin.Fields`), без `default:`:
+  Спека полей — та же, что у Codec-плагина (`Core.Codec.Field`), без `default:`:
   событие развивается новым тегом и апкастом (ADR-0010, ADR-0020), а не дефолтом —
   `default:` даёт `CompileError`.
 
@@ -35,7 +35,8 @@ defmodule Core.Es.Event.Payload do
     не того вида ловится при сборке вызывающего. `%Core.Es.Personal.Destroyed{}` и непустое
     ПДн-значение при `nil` в поле-субъекте голова не пропускает;
   - `Inspect` без полей с `subject:`;
-  - `__es_payload_fields__/0` — спека для `Core.Es.Event.Codec`.
+  - `__es_payload_fields__/0` — внутренняя для `Core.Es.Event.Codec`: нормализованные поля спеки
+    (`Core.Codec.Field`), форма поля — не контракт.
 
   Кодирует такую нагрузку `Core.Es.Event.Codec` события: её клаузы он выводит сам. В фасаде
   нагрузка не регистрируется.
@@ -43,7 +44,7 @@ defmodule Core.Es.Event.Payload do
   Макрос занимает в модуле нагрузки имя `@es_payload_fields`.
   """
 
-  alias Core.Codec.Plugin.Fields
+  alias Core.Codec.Field
   alias Core.Helper
 
   @doc "Объявить нагрузку события по полям (`fields:`)."
@@ -51,25 +52,28 @@ defmodule Core.Es.Event.Payload do
     quote bind_quoted: [opts: opts] do
       Helper.Opts.validate!(opts, ~w(fields)a, [], "Es.Event.Payload")
 
-      @es_payload_fields Core.Codec.Plugin.Fields.payload_fields!(__MODULE__, Keyword.fetch!(opts, :fields))
+      @es_payload_fields Core.Codec.Plugin.Fields.check_subjects!(
+                           Core.Codec.Field.payload_fields!(__MODULE__, Keyword.fetch!(opts, :fields)),
+                           __MODULE__
+                         )
 
-      case Keyword.keys(Core.Codec.Plugin.Fields.subjects(@es_payload_fields)) do
+      case Keyword.keys(Core.Codec.Field.subjects(@es_payload_fields)) do
         [] -> :ok
         hidden -> @derive {Inspect, except: hidden}
       end
 
-      @enforce_keys for {name, _spec, false, _wire, _default, _subject} <- @es_payload_fields, do: name
-      defstruct Enum.map(@es_payload_fields, &elem(&1, 0))
+      @enforce_keys for %Core.Codec.Field{name: name, optional?: false} <- @es_payload_fields, do: name
+      defstruct for %Core.Codec.Field{name: name} <- @es_payload_fields, do: name
 
       @type t :: %__MODULE__{unquote_splicing(Core.Es.Event.Payload.typespec(@es_payload_fields))}
 
       @doc false
-      @spec __es_payload_fields__() :: [Core.Codec.Plugin.Fields.field()]
+      @spec __es_payload_fields__() :: [Core.Codec.Field.t()]
 
       def __es_payload_fields__, do: @es_payload_fields
 
       @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
-      @spec new(unquote_splicing(Keyword.values(Core.Codec.Plugin.Fields.typespec(@es_payload_fields)))) :: t()
+      @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(@es_payload_fields)))) :: t()
 
       def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(@es_payload_fields)))
           when unquote(Core.Codec.Plugin.Fields.payload_new_guard(@es_payload_fields)),
@@ -78,14 +82,14 @@ defmodule Core.Es.Event.Payload do
   end
 
   @doc false
-  @spec typespec([Fields.field()]) :: keyword(Macro.t())
+  @spec typespec([Field.t()]) :: keyword(Macro.t())
 
   # Тип чтения шире типа записи (ADR-0074): после `load` в поле с `subject:` бывает уничтоженное
   # значение, а `new/N` его не принимает.
   def typespec(fields) when is_list(fields) do
-    hidden = Keyword.keys(Fields.subjects(fields))
+    hidden = Keyword.keys(Field.subjects(fields))
 
-    for {name, type} <- Fields.typespec(fields) do
+    for {name, type} <- Field.typespec(fields) do
       if name in hidden, do: {name, quote(do: unquote(type) | Core.Es.Personal.Destroyed.t())}, else: {name, type}
     end
   end

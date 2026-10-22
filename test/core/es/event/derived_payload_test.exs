@@ -97,8 +97,22 @@ defmodule Core.Es.Event.DerivedPayloadTest do
 
     test "спека нагрузки — {:union, Family}" do
       assert [
-               {:mark, {:union, DerivedFixture.Mark}, false, "mark", :none, nil},
-               {:prev, {:union, DerivedFixture.Mark}, true, "prev", :none, nil}
+               %Core.Codec.Field{
+                 name: :mark,
+                 spec: {:union, DerivedFixture.Mark},
+                 optional?: false,
+                 wire: "mark",
+                 default: :none,
+                 subject: nil
+               },
+               %Core.Codec.Field{
+                 name: :prev,
+                 spec: {:union, DerivedFixture.Mark},
+                 optional?: true,
+                 wire: "prev",
+                 default: :none,
+                 subject: nil
+               }
              ] =
                Event.Marked.Payload.__es_payload_fields__()
     end

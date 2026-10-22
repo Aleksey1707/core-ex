@@ -98,6 +98,7 @@ defmodule Core.Es.Event.Codec do
   `es_dump_payload/2`, `es_load_payload/3`.
   """
 
+  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Es
@@ -135,7 +136,7 @@ defmodule Core.Es.Event.Codec do
   Как кодек выводит клаузы нагрузки: по спеке полей или передачей фасаду целиком — Prim фасад
   кодирует встроенно, сущность — плагином её типа.
   """
-  @type derivation :: {:fields, [Fields.field()]} | :prim | :plugin
+  @type derivation :: {:fields, [Field.t()]} | :prim | :plugin
 
   @typedoc "Общая часть события: идентификаторы, версия, автор, момент, операция, сеанс и основание."
   @type header :: %{
@@ -389,7 +390,7 @@ defmodule Core.Es.Event.Codec do
 
   def subjects(derived) when is_list(derived) do
     for {event, _payload, {:fields, fields}} <- derived,
-        pairs = Fields.subjects(fields),
+        pairs = Field.subjects(fields),
         pairs != [],
         into: %{},
         do: {event, pairs}

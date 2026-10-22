@@ -272,5 +272,5 @@ defmodule Core.Es.Event do
   # ---
 
   defp aggregate_subjects(payload),
-    do: Enum.filter(Fields.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))
+    do: Enum.filter(Core.Codec.Field.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))
 end

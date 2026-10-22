@@ -1,6 +1,7 @@
 defmodule Core.Codec.PluginVariantsTest do
   use ExUnit.Case, async: true
 
+  alias Core.Codec.Field
   alias Core.Codec.Redump
   alias Core.Error
   alias Core.Prim
@@ -275,7 +276,18 @@ defmodule Core.Codec.PluginVariantsTest do
     test "__codec_variants__/0 — адрес и спека, у ручного — :manual" do
       variants = ShapePlugin.__codec_variants__()
 
-      assert {Shape.Rect, {"polygon", [kind: :rect]}, [{:width, {:type, :pos_integer}, false, "width", :none, nil} | _]} =
+      assert {Shape.Rect, {"polygon", [kind: :rect]},
+              [
+                %Field{
+                  name: :width,
+                  spec: {:type, :pos_integer},
+                  optional?: false,
+                  wire: "width",
+                  default: :none,
+                  subject: nil
+                }
+                | _
+              ]} =
                List.keyfind(variants, Shape.Rect, 0)
 
       assert {Shape.Blob, "blob", :manual} = List.keyfind(variants, Shape.Blob, 0)
@@ -283,7 +295,19 @@ defmodule Core.Codec.PluginVariantsTest do
     end
 
     test "поле union: в спеке — {:union, Family}" do
-      assert [{Frame.Box, "box", [{:shape, {:union, Shape}, false, "shape", :none, nil}]}] =
+      assert [
+               {Frame.Box, "box",
+                [
+                  %Field{
+                    name: :shape,
+                    spec: {:union, Shape},
+                    optional?: false,
+                    wire: "shape",
+                    default: :none,
+                    subject: nil
+                  }
+                ]}
+             ] =
                DrawingPlugin.__codec_variants__()
     end
 

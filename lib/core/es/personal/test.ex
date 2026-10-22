@@ -17,7 +17,7 @@ defmodule Core.Es.Personal.Test do
 
   import Core.Guard, only: [is_prim: 1]
 
-  alias Core.Codec.Plugin.Fields
+  alias Core.Codec.Field
   alias Core.Config
   alias Core.Error
   alias Core.Es
@@ -130,7 +130,7 @@ defmodule Core.Es.Personal.Test do
 
   defp subject_fields(payload) do
     if exports?(payload, :__es_payload_fields__),
-      do: Keyword.keys(Fields.subjects(payload.__es_payload_fields__())),
+      do: Keyword.keys(Field.subjects(payload.__es_payload_fields__())),
       else: []
   end
 

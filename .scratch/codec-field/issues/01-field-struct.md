@@ -10,26 +10,26 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Core.Codec.Field`: struct поля с типом `t()` вместо прежнего типа поля в `Core.Codec.Plugin.Fields`;
+- [x] `Core.Codec.Field`: struct поля с типом `t()` вместо прежнего типа поля в `Core.Codec.Plugin.Fields`;
       `spec`, `default`, `subject` — прежние значения.
-- [ ] В `Core.Codec.Field` переехала грамматика: нормализация спеки плагина, нагрузки, вариантов семейства и
+- [x] В `Core.Codec.Field` переехала грамматика: нормализация спеки плагина, нагрузки, вариантов семейства и
       подписей, `value_spec`, `struct_module!`, `subjects`, `typespec`, сверка ключей спеки с полями struct,
       проверки kind-ключа, `optional:`, `list:`, `wire:`, уникальности, `default:` и `subject:` по режиму.
-- [ ] Тексты `CompileError` грамматики не изменились.
-- [ ] Ни один модуль не разбирает поле позиционным кортежем: нагрузка события, подписи и их полнота,
+- [x] Тексты `CompileError` грамматики не изменились.
+- [x] Ни один модуль не разбирает поле позиционным кортежем: нагрузка события, подписи и их полнота,
       `ProjectionCase`, варианты семейства, redump плагина, `Es.Event`, тестовый хелпер ПДн,
       `Core.Codec.Plugin.Fields`.
-- [ ] `Es.ValueChanged` строит keyword-спеку `old_value` / `new_value` и отдаёт её нормализатору; поле
+- [x] `Es.ValueChanged` строит keyword-спеку `old_value` / `new_value` и отдаёт её нормализатору; поле
       руками не собирается.
-- [ ] `__es_payload_fields__/0` — `@doc false`; `@moduledoc` нагрузки описывает её как внутреннюю для
+- [x] `__es_payload_fields__/0` — `@doc false`; `@moduledoc` нагрузки описывает её как внутреннюю для
       `Core.Es.Event.Codec`.
-- [ ] Новый тест-модуль нормализатора вызывает `Core.Codec.Field` напрямую, без сборки модулей: kind-ключ,
+- [x] Новый тест-модуль нормализатора вызывает `Core.Codec.Field` напрямую, без сборки модулей: kind-ключ,
       `optional:` и `list:`, `wire:`, уникальность имён и wire-ключей, `default:` и `subject:` по режиму,
       форма возвращаемого struct.
-- [ ] Существующие тесты плагина по полям, вариантов, redump, нагрузки (с ПДн и выведенной), `Es.ValueChanged`,
+- [x] Существующие тесты плагина по полям, вариантов, redump, нагрузки (с ПДн и выведенной), `Es.ValueChanged`,
       подписей и проекций проходят; правлены только паттерны на форму поля из `__es_payload_fields__/0`.
-- [ ] `docs/rules/11-domain.md` называет нормализатором спеки `Core.Codec.Field`.
-- [ ] CHANGELOG не правится.
-- [ ] `make` зелёный, включая `consumer-check`.
+- [x] `docs/rules/11-domain.md` называет нормализатором спеки `Core.Codec.Field`.
+- [x] CHANGELOG не правится.
+- [x] `make` зелёный, включая `consumer-check`.
