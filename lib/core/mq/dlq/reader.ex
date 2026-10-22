@@ -18,6 +18,10 @@ defmodule Core.Mq.Dlq.Reader do
 
   Сбой Postgres — `{:error, %Error{}}` (`:dlq_read_failed`, `:commit_failed`), читатель жив.
 
+  Пустой `get` — запрос в базу, а `requeued`-записи появляются только командой оператора:
+  подписчик без `poll_interval_ms:` опрашивает этот читатель раз в 5 с
+  (`default_poll_interval_ms/0`), а не раз в 100 мс, как читатели брокеров.
+
   ## Опции
 
   Обязательные: `repo:` (Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`), `topic:`
@@ -46,6 +50,7 @@ defmodule Core.Mq.Dlq.Reader do
   @call_timeout 20_000
   @lease_ttl_ms 60_000
   @poll_ms 100
+  @default_poll_interval_ms 5_000
 
   defstruct [:repo, :topic, :topic_name, :subscriber, :lease, :lease_ttl_ms, pending: nil]
 
@@ -90,6 +95,12 @@ defmodule Core.Mq.Dlq.Reader do
 
   @impl true
   def commit(server), do: GenServer.call(server, :commit, @call_timeout)
+
+  @doc "Интервал опроса подписчика без `poll_interval_ms:` — 5 с: пустой `get` идёт в базу."
+  @spec default_poll_interval_ms() :: pos_integer()
+
+  @impl true
+  def default_poll_interval_ms, do: @default_poll_interval_ms
 
   @doc false
   @impl true

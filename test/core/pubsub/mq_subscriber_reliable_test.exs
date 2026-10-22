@@ -16,6 +16,21 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
 
   require Error
 
+  # Reader с дорогим пустым опросом: своё умолчание интервала, как у `Core.Mq.Dlq.Reader`.
+  defmodule SlowPollReader do
+    @moduledoc false
+    @behaviour Core.Mq.ReaderReliable
+
+    @impl true
+    defdelegate get(reader, timeout), to: MqFake.QueueReader
+
+    @impl true
+    defdelegate commit(reader), to: MqFake.QueueReader
+
+    @impl true
+    def default_poll_interval_ms, do: 60_000
+  end
+
   setup do
     topic = Mq.Topic.new!("products")
 
@@ -326,6 +341,32 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
 
     assert_receive {:cycle, :idle}, 500
     refute eventually(fn -> hibernated?(sub) end, 10)
+  end
+
+  describe "интервал опроса по умолчанию" do
+    test "без poll_interval_ms — умолчание reader'а", %{topic: topic, context: context} do
+      attach_cycle_telemetry(self())
+      sub = start_polling_sub(SlowPollReader, topic, "sub-slow-default", [])
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      refute_receive {:cycle, _}, 300
+    end
+
+    test "явный poll_interval_ms побеждает умолчание reader'а", %{topic: topic, context: context} do
+      attach_cycle_telemetry(self())
+      sub = start_polling_sub(SlowPollReader, topic, "sub-slow-explicit", poll_interval_ms: 20)
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      assert_receive {:cycle, :idle}, 300
+    end
+
+    test "reader без своего умолчания — 100 мс", %{topic: topic, context: context} do
+      attach_cycle_telemetry(self())
+      sub = start_polling_sub(MqFake.QueueReader, topic, "sub-fast-default", [])
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, context)
+
+      assert_receive {:cycle, :idle}, 300
+    end
   end
 
   test "контекст живёт одно сообщение: shadow copy не растёт", %{topic: topic, context: context} do
@@ -843,6 +884,17 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
 
     {:ok, sub} = start_supervised({MqSubscriberReliable, child_opts}, id: {:sub, name})
 
+    sub
+  end
+
+  defp start_polling_sub(reader_module, topic, name, opts) do
+    child_opts =
+      MqFake.QueueReader.new()
+      |> sub_opts(topic, reader_module: reader_module)
+      |> Keyword.delete(:poll_interval_ms)
+      |> Keyword.merge(opts)
+
+    {:ok, sub} = start_supervised({MqSubscriberReliable, child_opts}, id: {:sub, name})
     sub
   end
 

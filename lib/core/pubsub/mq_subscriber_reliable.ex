@@ -73,7 +73,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   @shutdown_ms 30_000
   @call_timeout 5_000
-  @default_poll_interval_ms 100
+  @fallback_poll_interval_ms 100
   @default_max_attempts 5
   @default_retry_max_ms 30_000
   @worked ~w(processed filtered dlq)a
@@ -134,7 +134,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   Opts: `:reader_module`, `:reader`, `:from_message`, `:on_message`,
   опционально `:filter` (предикат по сырому сообщению до `from_message`, по умолчанию
-  пропускает всё), `:context_factory` (вызывается на каждое сообщение), `:poll_interval_ms`,
+  пропускает всё), `:context_factory` (вызывается на каждое сообщение), `:poll_interval_ms`
+  (по умолчанию — `default_poll_interval_ms/0` reader'а, если он его объявил, иначе 100),
   `:topic` (string для метрик и имени DLQ), `:name`.
 
   DLQ: `:dlq_writer` (модуль `Mq.Writer`), `:dlq_handle` (его handle — обязателен при
@@ -185,12 +186,13 @@ defmodule Core.PubSub.MqSubscriberReliable do
     # ей завершиться и закоммитить offset вместо повторной доставки после рестарта.
     Process.flag(:trap_exit, true)
     StartOpts.keys!(@label, opts, @keys)
-    poll_interval_ms = StartOpts.pos_integer!(@label, opts, :poll_interval_ms, @default_poll_interval_ms)
+    reader_module = StartOpts.module!(@label, opts, :reader_module)
+    poll_interval_ms = StartOpts.pos_integer!(@label, opts, :poll_interval_ms, default_poll_interval_ms(reader_module))
     step = Step.new!(@label, opts)
     dlq_writer = StartOpts.module!(@label, opts, :dlq_writer, nil)
 
     state = %__MODULE__{
-      reader_module: StartOpts.module!(@label, opts, :reader_module),
+      reader_module: reader_module,
       reader: StartOpts.term!(@label, opts, :reader),
       step: step,
       poll_interval_ms: poll_interval_ms,
@@ -487,6 +489,12 @@ defmodule Core.PubSub.MqSubscriberReliable do
       %{count: 1},
       %{topic: state.topic, dlq_topic: state.dlq_topic, reason: reason}
     )
+  end
+
+  defp default_poll_interval_ms(reader_module) do
+    if Code.ensure_loaded?(reader_module) and function_exported?(reader_module, :default_poll_interval_ms, 0),
+      do: reader_module.default_poll_interval_ms(),
+      else: @fallback_poll_interval_ms
   end
 
   defp retry_max_ms(opts, poll_interval_ms) do

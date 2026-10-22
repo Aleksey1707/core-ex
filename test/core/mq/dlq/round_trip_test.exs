@@ -76,6 +76,34 @@ defmodule Core.Mq.Dlq.RoundTripTest do
     assert statuses(ctx) == ~w(processed dead)
   end
 
+  test "подписчик перечитывания без poll_interval_ms не опрашивает таблицу раз в 100 мс", ctx do
+    parent = self()
+    handler = "dlq-poll-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:core, :mq, :subscriber, :cycle],
+        fn _, _, meta, _ -> send(parent, {:cycle, meta.result}) end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    opts = [
+      reader_module: Dlq.Reader,
+      reader: start_reader(ctx),
+      from_message: fn m -> {:ok, m} end,
+      on_message: fn _m, _d, _c -> :ok end,
+      topic: Mq.Topic.value(@topic)
+    ]
+
+    sub = start_supervised!({MqSubscriberReliable, opts}, id: :dlq_poll_sub)
+    :ok = MqSubscriberReliable.subscribe(sub, nil, Context.new())
+
+    refute_receive {:cycle, _}, 300
+  end
+
   # ---
 
   defp assert_round_trip(ctx, original) do
