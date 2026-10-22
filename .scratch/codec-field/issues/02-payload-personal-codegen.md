@@ -10,23 +10,23 @@
 
 **Blocked by:** 01 — Поле спеки — struct в `Core.Codec.Field`
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] В `Core.Codec.Plugin.Fields` нет кода персональных данных: маркера, `subject`-guards, загрузки `$pd`,
+- [x] В `Core.Codec.Plugin.Fields` нет кода персональных данных: маркера, `subject`-guards, загрузки `$pd`,
       редакции.
-- [ ] `Core.Codec.Plugin.Fields` открывает `@doc false` поштучные блоки значения поля (дамп значения,
+- [x] `Core.Codec.Plugin.Fields` открывает `@doc false` поштучные блоки значения поля (дамп значения,
       загрузка значения, guard поля, переменная поля); хуков «оберни значение» у генератора нет.
-- [ ] `Core.Es.Event.Payload` генерирует дамп нагрузки с маркером, guards дампа и `new`, загрузку нагрузки с
+- [x] `Core.Es.Event.Payload` генерирует дамп нагрузки с маркером, guards дампа и `new`, загрузку нагрузки с
       клаузами маркера и уничтоженного значения из этих блоков.
-- [ ] Смысловые проверки `subject:` (UUID-субъект, персональный Prim, необязательность субъекта,
+- [x] Смысловые проверки `subject:` (UUID-субъект, персональный Prim, необязательность субъекта,
       `:aggregate_id`) — в `Core.Es.Event.Payload`; грамматика знает `subject:` только как ключ режима
       нагрузки. Тексты `CompileError` не изменились.
-- [ ] Рантайм-хелперы ошибки запечатанного маркера и редакции причины переехали в `Core.Es.Event.Payload`;
+- [x] Рантайм-хелперы ошибки запечатанного маркера и редакции причины переехали в `Core.Es.Event.Payload`;
       сгенерированный код ссылается на них там.
-- [ ] `Core.Es.Event.Codec` зовёт генерацию нагрузки у `Core.Es.Event.Payload`, а не у плагина.
-- [ ] Wire нагрузки, маркер `$pd`, коды `:invalid_value` / `:sealed_personal_value` и `ns: :codec` не
+- [x] `Core.Es.Event.Codec` зовёт генерацию нагрузки у `Core.Es.Event.Payload`, а не у плагина.
+- [x] Wire нагрузки, маркер `$pd`, коды `:invalid_value` / `:sealed_personal_value` и `ns: :codec` не
       изменились: golden-фикстуры, тесты нагрузки с ПДн, проекций с ПДн и тестового хелпера ПДн проходят без
       правки ожиданий.
-- [ ] `docs/rules/12-errors.md`: в таблице кодов источник `:sealed_personal_value` — нагрузка события.
-- [ ] CHANGELOG не правится.
-- [ ] `make` зелёный, включая `consumer-check`.
+- [x] `docs/rules/12-errors.md`: в таблице кодов источник `:sealed_personal_value` — нагрузка события.
+- [x] CHANGELOG не правится.
+- [x] `make` зелёный, включая `consumer-check`.

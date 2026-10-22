@@ -81,12 +81,6 @@ defmodule Core.Codec.Field do
   end
 
   @doc false
-  @spec payload_fields!(module(), term()) :: [t()]
-
-  def payload_fields!(payload, spec) when is_atom(payload),
-    do: normalize!(spec, :payload, "Es.Event.Payload #{inspect(payload)}: fields")
-
-  @doc false
   @spec normalize!(term(), mode(), String.t()) :: [t()]
 
   def normalize!(spec, :payload, where) when is_binary(where) do

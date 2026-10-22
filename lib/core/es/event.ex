@@ -29,7 +29,7 @@ defmodule Core.Es.Event do
 
   import Core.Helper.String, only: [first_line: 1]
 
-  alias Core.Codec.Plugin.Fields
+  alias Core.Es.Event.Payload
   alias Core.Helper
   alias Core.Version
 
@@ -259,7 +259,7 @@ defmodule Core.Es.Event do
     with {:module, _payload} <- Code.ensure_compiled(payload),
          true <- function_exported?(payload, :__es_payload_fields__, 0),
          [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
-         false <- Fields.uuid_prim?(aggregate_id) do
+         false <- Payload.uuid_prim?(aggregate_id) do
       raise CompileError,
         description:
           "Es.Event: поле #{name} нагрузки #{inspect(payload)} объявлено с subject: :aggregate_id, " <>

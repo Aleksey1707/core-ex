@@ -15,8 +15,9 @@ defmodule Core.Es.Event.Codec do
 
   ## Выводимая нагрузка
 
-  - по полям (`use Core.Es.Event.Payload`) — по её спеке, тем же генератором, что у плагина по
-    полям (`Core.Codec.Plugin.Fields`);
+  - по полям (`use Core.Es.Event.Payload`) — по её спеке: клаузы с маркером ПДн-значения собирает
+    `Core.Es.Event.Payload` из тех же блоков значения поля, что у плагина по полям
+    (`Core.Codec.Plugin.Fields`);
   - `use Core.Es.ValueChanged` — спека `old_value` / `new_value` из её `type:` и `nilable:`
     (`Core.Es.ValueChanged.fields/2`);
   - Prim — `codec.dump(payload)` / `codec.load(Prim, wire)`: в конверте голое значение;
@@ -102,6 +103,7 @@ defmodule Core.Es.Event.Codec do
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Event.Payload
   alias Core.Helper
   alias Core.Prim
   alias Core.Result
@@ -422,9 +424,7 @@ defmodule Core.Es.Event.Codec do
   @spec dump_payload_clause(module(), module(), derivation()) :: {[Macro.t()], Macro.t(), Macro.t()}
 
   def dump_payload_clause(event, payload, {:fields, fields}),
-    do:
-      {Fields.payload_dump_args(event, payload, fields), Fields.payload_dump_guard(fields),
-       Fields.payload_dump_body(fields)}
+    do: {Payload.dump_args(event, payload, fields), Payload.dump_guard(fields), Payload.dump_body(fields)}
 
   def dump_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, codec} = {var(:payload), var(:codec)}
@@ -438,7 +438,7 @@ defmodule Core.Es.Event.Codec do
   @spec load_payload_clause(module(), module(), derivation()) :: {[Macro.t()], Macro.t(), Macro.t()}
 
   def load_payload_clause(event, payload, {:fields, fields}),
-    do: {Fields.load_args(event), Fields.load_guard(), Fields.payload_load_body(payload, fields)}
+    do: {Fields.load_args(event), Fields.load_guard(), Payload.load_body(payload, fields)}
 
   def load_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, wire, codec} = {var(:payload), var(:wire), var(:codec)}

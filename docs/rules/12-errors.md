@@ -381,7 +381,8 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Outbox.Delivery.Mq` | `:outbox` | `:app` | `:encode_payload_failed` |
 | `Core.Security.Secret` | `:secret` | `:app` | `:encrypt_failed`, `:decrypt_failed` |
 | `Core.Repo.Pg` | `:repo` | `:app` | `:write_failed` |
-| `Core.Codec.Plugin.Fields` (модуль ошибки — тип плагина по полям или модуль нагрузки события) | `:codec` | `:domain` | `:invalid_value`, `:sealed_personal_value` |
+| `Core.Codec.Plugin.Fields` (модуль ошибки — тип плагина по полям или модуль нагрузки события) | `:codec` | `:domain` | `:invalid_value` |
+| `Core.Es.Event.Payload` (модуль ошибки — модуль нагрузки события) | `:codec` | `:domain` | `:invalid_value`, `:sealed_personal_value` |
 | `Core.Es.Event.Codec` (модуль ошибки — кодек агрегата) | `:es` | `:domain` | `:invalid_envelope`, `:unknown_event_type` |
 | `Core.Es.Store` | `:es` | `:domain` | `:unreadable_personal_value` |
 | `Core.Es.Store` | `:es` | `:app` | `:upcast_raised` |
