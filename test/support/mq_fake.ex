@@ -188,4 +188,72 @@ defmodule Core.MqFake do
       end)
     end
   end
+
+  defmodule ReadyQueueReader do
+    @moduledoc """
+    `MqFake.QueueReader` с заявкой на готовность (`Core.Mq.ReaderReliable.notify_when_ready/2`).
+
+    Handle — имя агента из `start_link/1`: подписчик следит за процессом reader'а монитором.
+    """
+
+    @behaviour Core.Mq.ReaderReliable
+
+    alias Core.Mq.Message
+
+    @doc "Спецификация ребёнка: агент под именем `name:`."
+    @spec child_spec(keyword()) :: Supervisor.child_spec()
+
+    def child_spec(opts) when is_list(opts),
+      do: %{id: Keyword.fetch!(opts, :name), start: {__MODULE__, :start_link, [opts]}}
+
+    @doc "Запустить агент очереди `messages:` под именем `name:`."
+    @spec start_link(keyword()) :: Agent.on_start()
+
+    def start_link(opts) when is_list(opts) do
+      state = %{messages: Keyword.get(opts, :messages, []), ready_request: nil}
+      Agent.start_link(fn -> state end, name: Keyword.fetch!(opts, :name))
+    end
+
+    @doc "Добавить сообщение в конец очереди и ответить на заявку."
+    @spec push(atom(), Message.t()) :: :ok
+
+    def push(name, %Message{} = message) when is_atom(name) do
+      Agent.update(name, &notify(%{&1 | messages: &1.messages ++ [message]}))
+    end
+
+    @doc false
+    @impl true
+    def get(name, _timeout) when is_atom(name) do
+      case Agent.get(name, & &1.messages) do
+        [] -> :empty
+        [message | _rest] -> {:ok, message}
+      end
+    end
+
+    @doc false
+    @impl true
+    def commit(name) when is_atom(name) do
+      Agent.update(name, fn
+        %{messages: []} = state -> state
+        %{messages: [_committed | rest]} = state -> %{state | messages: rest}
+      end)
+    end
+
+    @doc false
+    @impl true
+    def notify_when_ready(name, pid) when is_atom(name) and is_pid(pid) do
+      ref = make_ref()
+      :ok = Agent.update(name, &notify(%{&1 | ready_request: {pid, ref}}))
+      {:ok, ref}
+    end
+
+    # ---
+
+    defp notify(%{messages: [_ | _], ready_request: {pid, ref}} = state) do
+      send(pid, {:mq_ready, ref})
+      %{state | ready_request: nil}
+    end
+
+    defp notify(state), do: state
+  end
 end

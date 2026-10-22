@@ -27,7 +27,14 @@ defmodule Core.PubSub.MqSubscriberReliable do
   без DLQ: `error` в лог, без commit, повторы с растущим интервалом.
 
   После `:processed` / `:filtered` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
-  После `:idle` — `poll_interval_ms`, после `:error` — текущий backoff.
+  После `:error` — текущий backoff. После `:idle` — `poll_interval_ms`, если reader не принимает
+  заявку на готовность (`Core.Mq.ReaderReliable.notify_when_ready/2`). Reader с заявкой в простое
+  не опрашивается: подписчик оставляет ему заявку и читает дальше по `{:mq_ready, ref}`; от
+  `poll_interval_ms` у него остаётся только начальная пауза повтора. Страховочного опроса нет:
+  заявку reader проверяет по своему буферу в своём же процессе, и разминуться с сообщением она не
+  может, а потерять её может только упавший reader — за ним подписчик следит монитором и после
+  `:DOWN` уходит в backoff. Поэтому handle такого reader'а — процесс (`GenServer.whereis/1`
+  находит pid). Не принятая заявка — тоже backoff.
 
   Первый `:idle` после работы уводит процесс в `:hibernate`: полная сборка освобождает кучу,
   раздутую пачкой сообщений. На холостом опросе мусора почти нет, и без этого куча держала бы
@@ -92,6 +99,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
     :topic,
     :timer_ref,
     :pending_raw,
+    ready_requests?: false,
+    ready_request: nil,
     attempts: 0,
     subscribed?: false,
     hibernated?: true
@@ -194,6 +203,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
     state = %__MODULE__{
       reader_module: reader_module,
       reader: StartOpts.term!(@label, opts, :reader),
+      ready_requests?: exports?(reader_module, :notify_when_ready, 2),
       step: step,
       poll_interval_ms: poll_interval_ms,
       retry_max_ms: retry_max_ms(opts, poll_interval_ms),
@@ -226,7 +236,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   def handle_call(:unsubscribe, _from, state) do
-    state = cancel_timer(state)
+    state = drop_ready(cancel_timer(state))
     {:reply, :ok, %{state | subscribed?: false, step: %{state.step | data: nil}, pending_raw: nil, attempts: 0}}
   end
 
@@ -249,7 +259,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   def handle_info(:tick, state) do
-    state = cancel_timer(state)
+    state = drop_ready(cancel_timer(state))
     {result, state} = consume_once(state)
     emit_cycle(state, result)
 
@@ -259,6 +269,15 @@ defmodule Core.PubSub.MqSubscriberReliable do
       |> sleep_after(result)
 
     {:noreply, state, sleep}
+  end
+
+  def handle_info({:mq_ready, ref}, %__MODULE__{ready_request: {ref, _monitor}} = state) do
+    handle_info(:tick, state)
+  end
+
+  def handle_info({:DOWN, monitor, :process, _pid, reason}, %__MODULE__{ready_request: {_ref, monitor}} = state) do
+    Logger.warning("pubsub reliable: reader упал в ожидании готовности: topic=#{state.topic} reason=#{inspect(reason)}")
+    {:noreply, reschedule(%{state | ready_request: nil}, :error)}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
@@ -455,8 +474,48 @@ defmodule Core.PubSub.MqSubscriberReliable do
     schedule(%{state | retry_ms: next}, state.retry_ms)
   end
 
+  defp reschedule(%__MODULE__{ready_requests?: true} = state, :idle), do: await_ready(state)
+
   defp reschedule(state, _other) do
     schedule(state, state.poll_interval_ms)
+  end
+
+  # Монитор ставится до заявки: reader, упавший между ними, приходит `:DOWN`, а не молчанием.
+  defp await_ready(state) do
+    with pid when is_pid(pid) <- GenServer.whereis(state.reader),
+         monitor = Process.monitor(pid),
+         {:ok, ref} <- safe_notify(state, monitor) do
+      %{state | ready_request: {ref, monitor}}
+    else
+      other ->
+        Logger.warning(
+          "pubsub reliable: заявка на готовность не принята: topic=#{state.topic} reason=#{inspect(other)}"
+        )
+
+        reschedule(state, :error)
+    end
+  end
+
+  defp safe_notify(state, monitor) do
+    case state.reader_module.notify_when_ready(state.reader, self()) do
+      {:ok, ref} ->
+        {:ok, ref}
+
+      {:error, %Error{}} = error ->
+        Process.demonitor(monitor, [:flush])
+        error
+    end
+  catch
+    :exit, reason ->
+      Process.demonitor(monitor, [:flush])
+      {:error, reader_unavailable_error(reason)}
+  end
+
+  defp drop_ready(%__MODULE__{ready_request: nil} = state), do: state
+
+  defp drop_ready(%__MODULE__{ready_request: {_ref, monitor}} = state) do
+    Process.demonitor(monitor, [:flush])
+    %{state | ready_request: nil}
   end
 
   defp sleep_after(%__MODULE__{hibernated?: false} = state, :idle), do: {%{state | hibernated?: true}, :hibernate}
@@ -492,10 +551,12 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp default_poll_interval_ms(reader_module) do
-    if Code.ensure_loaded?(reader_module) and function_exported?(reader_module, :default_poll_interval_ms, 0),
+    if exports?(reader_module, :default_poll_interval_ms, 0),
       do: reader_module.default_poll_interval_ms(),
       else: @fallback_poll_interval_ms
   end
+
+  defp exports?(module, fun, arity), do: Code.ensure_loaded?(module) and function_exported?(module, fun, arity)
 
   defp retry_max_ms(opts, poll_interval_ms) do
     max(StartOpts.pos_integer!(@label, opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)

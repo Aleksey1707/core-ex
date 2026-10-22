@@ -344,6 +344,38 @@ defmodule Core.Mq.Stream.ReaderTest do
     assert FakeConn.credits() == [{1, 1}]
   end
 
+  describe "заявка на готовность" do
+    test "пустой буфер: один ответ на пришедший чанк", %{reader: reader, topic: topic} do
+      assert {:ok, ref} = Stream.Reader.notify_when_ready(reader, self())
+      refute_received {:mq_ready, _}
+
+      deliver(reader, 0, encoded_many(topic, 0, 1))
+      deliver(reader, 1, encoded_many(topic, 1, 1))
+
+      assert_received {:mq_ready, ^ref}
+      refute_received {:mq_ready, _}
+    end
+
+    test "сообщение в работе: ответ сразу", %{reader: reader, topic: topic} do
+      deliver(reader, 0, encoded_many(topic, 0, 1))
+      assert {:ok, _message} = Stream.Reader.get(reader, 0)
+
+      assert {:ok, ref} = Stream.Reader.notify_when_ready(reader, self())
+
+      assert_received {:mq_ready, ^ref}
+    end
+
+    test "новая заявка заменяет прежнюю", %{reader: reader, topic: topic} do
+      assert {:ok, old_ref} = Stream.Reader.notify_when_ready(reader, self())
+      assert {:ok, ref} = Stream.Reader.notify_when_ready(reader, self())
+
+      deliver(reader, 0, encoded_many(topic, 0, 1))
+
+      assert_received {:mq_ready, ^ref}
+      refute_received {:mq_ready, ^old_ref}
+    end
+  end
+
   describe "подписка вне init/1" do
     setup do
       start_supervised!(%{

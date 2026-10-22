@@ -369,6 +369,57 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     end
   end
 
+  describe "заявка на готовность" do
+    setup %{topic: topic} do
+      reader = :"ready_reader_#{System.unique_integer([:positive])}"
+      start_supervised!({MqFake.ReadyQueueReader, name: reader, messages: [message(topic, "first")]})
+
+      {:ok, reader: reader}
+    end
+
+    test "в простое reader не опрашивается, новое сообщение читается сразу", ctx do
+      parent = self()
+      attach_cycle_telemetry(parent)
+
+      on = fn message, _data, _ctx ->
+        send(parent, {:handled, message.body})
+        :ok
+      end
+
+      sub =
+        start_sub(ctx.reader, ctx.topic, "sub-ready", on, reader_module: MqFake.ReadyQueueReader, poll_interval_ms: 20)
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, ctx.context)
+
+      assert_receive {:handled, "first"}, 500
+      assert_receive {:cycle, :processed}, 500
+      assert_receive {:cycle, :idle}, 500
+      refute_receive {:cycle, _}, 200
+
+      :ok = MqFake.ReadyQueueReader.push(ctx.reader, message(ctx.topic, "second"))
+
+      assert_receive {:handled, "second"}, 100
+    end
+
+    test "упавший reader — повтор чтения с паузой", ctx do
+      attach_cycle_telemetry(self())
+
+      sub =
+        start_sub(ctx.reader, ctx.topic, "sub-ready-down", fn _m, _d, _c -> :ok end,
+          reader_module: MqFake.ReadyQueueReader,
+          poll_interval_ms: 20
+        )
+
+      assert :ok = MqSubscriberReliable.subscribe(sub, nil, ctx.context)
+      assert_receive {:cycle, :idle}, 500
+
+      capture_log(fn ->
+        :ok = stop_supervised(ctx.reader)
+        assert_receive {:cycle, :error}, 500
+      end)
+    end
+  end
+
   test "контекст живёт одно сообщение: shadow copy не растёт", %{topic: topic, context: context} do
     reader = MqFake.QueueReader.new(Enum.map(1..3, &message(topic, "b#{&1}")))
     parent = self()

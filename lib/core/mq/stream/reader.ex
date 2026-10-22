@@ -22,8 +22,8 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     Подписка устанавливается не в `init/1`, а в `handle_continue/2`: сетевые вызовы в `init`
     блокировали бы старт всего дерева супервизии (см. `docs/rules/17-otp-concurrency.md`).
     Сбой подписки не роняет процесс — он повторяет попытку с backoff от `:retry_min_ms`
-    до `:retry_max_ms`. Пока подписки нет, `get` отдаёт `:empty`: подписчики опрашивают
-    reader каждые ~100 мс, и ошибка на каждом цикле залила бы лог. Недоступность видна
+    до `:retry_max_ms`. Пока подписки нет, `get` отдаёт `:empty`: подписчик читает после
+    каждой заявки на готовность и каждого повтора, и ошибка на каждом чтении залила бы лог. Недоступность видна
     по `warning` самого reader'а (их частота ограничена backoff'ом) и по `subscribed?`
     в `info/1` (уходит в метрику).
 
@@ -78,6 +78,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       :retry_ms,
       :buffer,
       pending: nil,
+      ready_request: nil,
       dropped_offset: nil,
       mismatch_logged?: false
     ]
@@ -131,6 +132,17 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     @doc """
+    Заявка на готовность (`Core.Mq.ReaderReliable`): `{:mq_ready, ref}` процессу `pid`, когда в
+    буфере появится запись или сообщение в работе; сразу, если они уже есть.
+    """
+    @spec notify_when_ready(t(), pid()) :: Result.t(reference())
+
+    @impl true
+    def notify_when_ready(server, pid) when is_pid(pid) do
+      GenServer.call(server, {:notify_when_ready, pid}, @call_timeout)
+    end
+
+    @doc """
     Состояние буфера и курсора reader (для метрик и разбора).
 
     `pending_ts` — timestamp чанка сообщения в `pending`: мс Unix-времени по часам ноды брокера на
@@ -177,6 +189,11 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
         {:ok, message, state} -> {:reply, {:ok, message}, state}
         {:empty, state} -> {:reply, :empty, flush_dropped(state)}
       end
+    end
+
+    def handle_call({:notify_when_ready, pid}, _from, state) do
+      ref = make_ref()
+      {:reply, {:ok, ref}, notify_if_ready(%{state | ready_request: {pid, ref}})}
     end
 
     def handle_call(:info, _from, state) do
@@ -441,8 +458,23 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     defp put_chunk(state, entries) do
       {buffer, credits} = Buffer.put_chunk(state.buffer, entries)
 
-      grant_credits(%{state | buffer: buffer}, credits)
+      notify_if_ready(grant_credits(%{state | buffer: buffer}, credits))
     end
+
+    defp notify_if_ready(%__MODULE__{ready_request: {pid, ref}} = state) do
+      if ready?(state) do
+        send(pid, {:mq_ready, ref})
+        %{state | ready_request: nil}
+      else
+        state
+      end
+    end
+
+    defp notify_if_ready(state), do: state
+
+    defp ready?(%__MODULE__{subscription_id: nil}), do: false
+    defp ready?(%__MODULE__{pending: nil, buffer: buffer}), do: Buffer.len(buffer) > 0
+    defp ready?(_state), do: true
 
     defp pop_message(%{reliable?: true, pending: {_, _, message}} = state) do
       {:ok, message, state}

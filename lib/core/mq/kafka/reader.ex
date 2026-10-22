@@ -138,6 +138,7 @@ if Code.ensure_loaded?(:brod) do
       partitions: %{},
       next_partition: 0,
       pending: nil,
+      ready_request: nil,
       stats: %{},
       resubscribe_timer: nil
     ]
@@ -192,6 +193,17 @@ if Code.ensure_loaded?(:brod) do
     @impl true
     def commit(server), do: GenServer.call(server, :commit, @call_timeout)
 
+    @doc """
+    Заявка на готовность (`Core.Mq.ReaderReliable`): `{:mq_ready, ref}` процессу `pid`, когда в
+    буфере партиции появится запись или сообщение в работе; сразу, если они уже есть. Нода без
+    аренды не отвечает, пока её не возьмёт.
+    """
+    @spec notify_when_ready(t(), pid()) :: Result.t(reference())
+
+    @impl true
+    def notify_when_ready(server, pid) when is_pid(pid),
+      do: GenServer.call(server, {:notify_when_ready, pid}, @call_timeout)
+
     @doc "Аренда, сообщение в работе и состояние партиций (для метрик и разбора)."
     @spec info(t()) :: %{
             lease?: boolean(),
@@ -240,6 +252,11 @@ if Code.ensure_loaded?(:brod) do
       end
     end
 
+    def handle_call({:notify_when_ready, pid}, _from, state) do
+      ref = make_ref()
+      {:reply, {:ok, ref}, notify_if_ready(%{state | ready_request: {pid, ref}})}
+    end
+
     def handle_call(:info, _from, state) do
       info = %{
         lease?: leased?(state),
@@ -272,7 +289,7 @@ if Code.ensure_loaded?(:brod) do
 
     def handle_info({pid, kafka_message_set(partition: partition) = set}, state) when is_pid(pid) do
       case state.partitions do
-        %{^partition => %{consumer: ^pid}} -> {:noreply, buffer(state, set)}
+        %{^partition => %{consumer: ^pid}} -> {:noreply, notify_if_ready(buffer(state, set))}
         _other -> {:noreply, state}
       end
     end
@@ -661,6 +678,23 @@ if Code.ensure_loaded?(:brod) do
         end)
 
       %{state | partitions: partitions, stats: stats}
+    end
+
+    defp notify_if_ready(%__MODULE__{ready_request: {pid, ref}} = state) do
+      if ready?(state) do
+        send(pid, {:mq_ready, ref})
+        %{state | ready_request: nil}
+      else
+        state
+      end
+    end
+
+    defp notify_if_ready(state), do: state
+
+    defp ready?(state) do
+      leased?(state) and
+        (not is_nil(state.pending) or
+           Enum.any?(state.partitions, fn {_partition, entry} -> not :queue.is_empty(entry.buffer) end))
     end
 
     defp take(%__MODULE__{pending: %{message: message}} = state), do: {:ok, message, state}

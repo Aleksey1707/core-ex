@@ -283,6 +283,42 @@ defmodule Core.Mq.Kafka.ReaderTest do
     assert partition == %{high_wm_offset: nil, committed_offset: nil, committed_ts: nil, buffered: 0}
   end
 
+  describe "заявка на готовность" do
+    test "пустой буфер: один ответ на пришедшую пачку", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 1)
+
+      assert {:ok, ref} = Reader.notify_when_ready(reader, self())
+      refute_receive {:mq_ready, _}, 50
+
+      :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", []}], 1)
+      :ok = KafkaFake.deliver(client, @topic, 1, [{0, "k", "b", []}], 1)
+
+      assert_receive {:mq_ready, ^ref}
+      refute_receive {:mq_ready, _}, 50
+    end
+
+    test "непустой буфер: ответ сразу", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+      :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", []}], 1)
+      await(fn -> Reader.info(reader).partitions[0].buffered == 1 end)
+
+      assert {:ok, ref} = Reader.notify_when_ready(reader, self())
+
+      assert_received {:mq_ready, ^ref}
+    end
+
+    test "нода без аренды не отвечает", %{client: client} do
+      :ok = Store.acquire(TestRepo, @sub, @topic, Store.new_lease(), 30_000)
+      reader = start_reader!(client)
+
+      assert {:ok, _ref} = Reader.notify_when_ready(reader, self())
+
+      refute_receive {:mq_ready, _}, 50
+    end
+  end
+
   describe "события метрик" do
     @events [
       [:core, :mq, :kafka, :offset_reset],
