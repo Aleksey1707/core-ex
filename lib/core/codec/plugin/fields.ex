@@ -73,12 +73,7 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec new_guard([Field.t()]) :: Macro.t()
 
-  def new_guard(fields) do
-    case field_guards(fields) do
-      [] -> true
-      guards -> and_guards(guards)
-    end
-  end
+  def new_guard(fields), do: and_guards(field_guards(fields))
 
   @doc false
   @spec new_body(module(), [Field.t()]) :: Macro.t()
@@ -96,7 +91,9 @@ defmodule Core.Codec.Plugin.Fields do
   # ===== блоки дампа значения поля =====
 
   @doc false
-  @spec and_guards([Macro.t(), ...]) :: Macro.t()
+  @spec and_guards([Macro.t()]) :: Macro.t()
+
+  def and_guards([]), do: true
 
   def and_guards([first | rest]) do
     Enum.reduce(rest, first, fn guard, acc -> quote(generated: true, do: unquote(acc) and unquote(guard)) end)

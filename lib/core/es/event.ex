@@ -29,6 +29,7 @@ defmodule Core.Es.Event do
 
   import Core.Helper.String, only: [first_line: 1]
 
+  alias Core.Codec.Field
   alias Core.Es.Event.Payload
   alias Core.Helper
   alias Core.Version
@@ -272,5 +273,5 @@ defmodule Core.Es.Event do
   # ---
 
   defp aggregate_subjects(payload),
-    do: Enum.filter(Core.Codec.Field.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))
+    do: Enum.filter(Field.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))
 end

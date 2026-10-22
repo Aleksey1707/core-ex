@@ -99,19 +99,11 @@ defmodule Core.Es.Event.DerivedPayloadTest do
       assert [
                %Core.Codec.Field{
                  name: :mark,
-                 spec: {:union, DerivedFixture.Mark},
-                 optional?: false,
-                 wire: "mark",
-                 default: :none,
-                 subject: nil
+                 spec: {:union, DerivedFixture.Mark}
                },
                %Core.Codec.Field{
                  name: :prev,
-                 spec: {:union, DerivedFixture.Mark},
-                 optional?: true,
-                 wire: "prev",
-                 default: :none,
-                 subject: nil
+                 spec: {:union, DerivedFixture.Mark}
                }
              ] =
                Event.Marked.Payload.__es_payload_fields__()

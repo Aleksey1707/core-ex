@@ -160,7 +160,7 @@ defmodule Core.Es.Event.Payload do
   defp personal_prim({:list, inner}), do: personal_prim(inner)
   defp personal_prim(_spec), do: nil
 
-  # ===== субъект =====
+  # ===== Prim субъекта =====
 
   # Prim — `Prim.UUID` или `Prim.Compose` над ним: только такое значение бывает субъектом ПДн-поля
   # нагрузки. `kind:` у UUID-Prim бывает свой, поэтому обёртку узнаёт `format/2` — его порождает только
@@ -178,17 +178,35 @@ defmodule Core.Es.Event.Payload do
 
   # ===== тип =====
 
+  # Тип чтения шире типа записи (ADR-0074): после `load` в поле с `subject:` бывает уничтоженное
+  # значение, а `new/N` его не принимает.
   @doc false
   @spec typespec([Field.t()]) :: keyword(Macro.t())
 
-  # Тип чтения шире типа записи (ADR-0074): после `load` в поле с `subject:` бывает уничтоженное
-  # значение, а `new/N` его не принимает.
   def typespec(fields) when is_list(fields) do
     hidden = Keyword.keys(Field.subjects(fields))
 
     for {name, type} <- Field.typespec(fields) do
       if name in hidden, do: {name, quote(do: unquote(type) | Core.Es.Personal.Destroyed.t())}, else: {name, type}
     end
+  end
+
+  # ===== new =====
+
+  @doc """
+  Guard `new/N` нагрузки события: вид каждого поля, как у `new/N` плагина по полям, плюс отказ
+  `%Core.Es.Personal.Destroyed{}` в поле, чей вид его пропустил бы (`union:`, `type: :map`), и
+  непустого ПДн-значения при `nil` в поле-субъекте.
+  """
+  @spec new_guard([Field.t()]) :: Macro.t()
+
+  def new_guard(fields) do
+    destroyed =
+      for %Field{name: name, spec: {kind, _value}, subject: subject} <- fields,
+          not is_nil(subject) and kind in ~w(union type)a,
+          do: quote(generated: true, do: not is_struct(unquote(Fields.var(name)), Core.Es.Personal.Destroyed))
+
+    Fields.and_guards(Enum.flat_map(fields, &Fields.field_guard/1) ++ destroyed ++ subject_guards(fields))
   end
 
   # ===== dump =====
@@ -242,25 +260,6 @@ defmodule Core.Es.Event.Payload do
     quote(generated: true, do: %{unquote_splicing(pairs)})
   end
 
-  @doc """
-  Guard `new/N` нагрузки события: вид каждого поля, как у `new/N` плагина по полям, плюс отказ
-  `%Core.Es.Personal.Destroyed{}` в поле, чей вид его пропустил бы (`union:`, `type: :map`), и
-  непустого ПДн-значения при `nil` в поле-субъекте.
-  """
-  @spec new_guard([Field.t()]) :: Macro.t()
-
-  def new_guard(fields) do
-    destroyed =
-      for %Field{name: name, spec: {kind, _value}, subject: subject} <- fields,
-          not is_nil(subject) and kind in ~w(union type)a,
-          do: quote(generated: true, do: not is_struct(unquote(Fields.var(name)), Core.Es.Personal.Destroyed))
-
-    case Enum.flat_map(fields, &Fields.field_guard/1) ++ destroyed ++ subject_guards(fields) do
-      [] -> true
-      guards -> Fields.and_guards(guards)
-    end
-  end
-
   # ---
 
   defp dump_pattern(%Field{subject: nil} = field), do: Fields.dump_pattern(field)
@@ -276,16 +275,6 @@ defmodule Core.Es.Event.Payload do
     if optional?,
       do: [quote(generated: true, do: is_nil(unquote(value)) or unquote(present))],
       else: [present]
-  end
-
-  # Субъект — поле той же нагрузки, а оно необязательно: непустое ПДн-значение без субъекта не
-  # проходит. Обязательного субъекта при `nil` не пропускает его же guard.
-  defp subject_guards(fields) do
-    optional = for %Field{name: name, optional?: true} <- fields, into: MapSet.new(), do: name
-
-    for %Field{name: name, subject: subject} <- fields, MapSet.member?(optional, subject) do
-      quote(generated: true, do: is_nil(unquote(Fields.var(name))) or not is_nil(unquote(Fields.var(subject))))
-    end
   end
 
   # Событие, собранное литералом мимо `new`, — без идентификатора агрегата: ПДн-значение с субъектом
@@ -414,4 +403,16 @@ defmodule Core.Es.Event.Payload do
 
   def redact(%Error{} = error), do: Prim.redact_error(error)
   def redact(_reason), do: :redacted
+
+  # ===== общее =====
+
+  # Субъект — поле той же нагрузки, а оно необязательно: непустое ПДн-значение без субъекта не
+  # проходит. Обязательного субъекта при `nil` не пропускает его же guard.
+  defp subject_guards(fields) do
+    optional = for %Field{name: name, optional?: true} <- fields, into: MapSet.new(), do: name
+
+    for %Field{name: name, subject: subject} <- fields, MapSet.member?(optional, subject) do
+      quote(generated: true, do: is_nil(unquote(Fields.var(name))) or not is_nil(unquote(Fields.var(subject))))
+    end
+  end
 end

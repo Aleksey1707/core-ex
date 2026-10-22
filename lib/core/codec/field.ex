@@ -311,7 +311,7 @@ defmodule Core.Codec.Field do
       :error ->
         nil
 
-      {:ok, subject} when is_atom(subject) and subject not in [nil, true, false] ->
+      {:ok, subject} when is_atom(subject) and subject not in ~w(nil true false)a ->
         subject
 
       {:ok, other} ->

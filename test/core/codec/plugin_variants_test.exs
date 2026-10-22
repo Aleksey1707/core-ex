@@ -280,11 +280,7 @@ defmodule Core.Codec.PluginVariantsTest do
               [
                 %Field{
                   name: :width,
-                  spec: {:type, :pos_integer},
-                  optional?: false,
-                  wire: "width",
-                  default: :none,
-                  subject: nil
+                  spec: {:type, :pos_integer}
                 }
                 | _
               ]} =
@@ -300,11 +296,7 @@ defmodule Core.Codec.PluginVariantsTest do
                 [
                   %Field{
                     name: :shape,
-                    spec: {:union, Shape},
-                    optional?: false,
-                    wire: "shape",
-                    default: :none,
-                    subject: nil
+                    spec: {:union, Shape}
                   }
                 ]}
              ] =

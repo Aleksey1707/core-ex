@@ -11,10 +11,6 @@ defmodule Core.Es.Event.PayloadPersonalTest do
       assert [
                %Core.Codec.Field{
                  name: :holder,
-                 spec: {:prim, Account.Holder},
-                 optional?: false,
-                 wire: "holder",
-                 default: :none,
                  subject: :aggregate_id
                }
              ] =
@@ -25,26 +21,17 @@ defmodule Core.Es.Event.PayloadPersonalTest do
       assert [
                %Core.Codec.Field{
                  name: :person_id,
-                 spec: {:prim, Core.EventFixture.PersonID},
                  optional?: true,
-                 wire: "person_id",
-                 default: :none,
                  subject: nil
                },
                %Core.Codec.Field{
                  name: :contact,
-                 spec: {:prim, Core.EventFixture.Contact},
                  optional?: true,
-                 wire: "contact",
-                 default: :none,
                  subject: :person_id
                },
                %Core.Codec.Field{
                  name: :note,
-                 spec: {:prim, Core.EventFixture.Note},
                  optional?: false,
-                 wire: "note",
-                 default: :none,
                  subject: :aggregate_id
                }
              ] = Core.EventFixture.Event.ContactSet.Payload.__es_payload_fields__()
