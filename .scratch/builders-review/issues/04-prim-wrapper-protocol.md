@@ -1,6 +1,6 @@
 # 04: Prim-обёртки — общий протокол в одном месте
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 
