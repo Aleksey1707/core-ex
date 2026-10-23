@@ -75,7 +75,9 @@ defmodule Core.Web.Event do
 
   Сборку ломают: нет `codec:`, `codec:` без `dump/1`, неизвестная опция, `user_ref:` без `dump:` или с
   неизвестной опцией, `dump:` не захватом функции арности 2, `labels:` не boolean, `labels: true` без
-  `user_ref:`; при `open_api_spex` — `user_ref:` без `schema:` или `schema:` без `schema/0`.
+  `user_ref:`; при `open_api_spex` — `user_ref:` без `schema:`, `schema:` без `schema/0` или `core`,
+  собранный без `open_api_spex` (тела схем строит условный модуль библиотеки; правка —
+  `mix deps.compile core --force`).
 
   Макрос занимает в модуле имя `to_wire/2`, при `open_api_spex` — ещё `schema/0` и, при
   `labels: true`, вложенный модуль `Detail` с модулями видов.
@@ -133,27 +135,24 @@ defmodule Core.Web.Event do
   @user_ref_optional_keys []
   @user_ref_schema_keys ~w(schema)a
 
-  # Вид сведения → вложенный модуль схемы в `Detail`, суффикс названия, описание.
+  # Вид сведения → вложенный модуль схемы в `Detail`; суффикс названия и описание — у
+  # `Core.Web.Event.Schema`.
   @variants [
-    text: {quote(do: __MODULE__.Text), "Text", "Текст: строка, подпись значения, «Да» / «Нет»"},
-    number: {quote(do: __MODULE__.Number), "Number", "Число строкой с десятичной точкой; единица — в подписи"},
-    date: {quote(do: __MODULE__.Date), "Date", "Дата"},
-    datetime: {quote(do: __MODULE__.DateTime), "DateTime", "Дата-время"},
-    user: {quote(do: __MODULE__.User), "User", "Ссылка на учётную запись"},
-    ref: {quote(do: __MODULE__.Ref), "Ref", "Ссылка на запись: вид записи, id и текущее имя"},
-    group: {quote(do: __MODULE__.Group), "Group", "Сведения вложенного значения"},
-    list: {
-      quote(do: __MODULE__.List),
-      "List",
-      "Элементы одного вида без подписи; у map'ы с id в ключах — группы «ключ — значение»"
-    },
-    change: {quote(do: __MODULE__.Change), "Change", "Изменение: было и стало — сведения без подписи"},
-    destroyed: {
-      quote(do: __MODULE__.Destroyed),
-      "Destroyed",
-      "Уничтоженное ПДн-значение: подпись без значения"
-    }
+    text: quote(do: __MODULE__.Text),
+    number: quote(do: __MODULE__.Number),
+    date: quote(do: __MODULE__.Date),
+    datetime: quote(do: __MODULE__.DateTime),
+    user: quote(do: __MODULE__.User),
+    ref: quote(do: __MODULE__.Ref),
+    group: quote(do: __MODULE__.Group),
+    list: quote(do: __MODULE__.List),
+    change: quote(do: __MODULE__.Change),
+    destroyed: quote(do: __MODULE__.Destroyed)
   ]
+
+  # Поле на wire → guard сужения в порождённой `to_wire/2` (`nil` — без guard'а).
+  @fields [id: nil, aggregateId: nil, aggregateVersion: :is_integer, type: :is_binary, payload: nil, at: nil, by: nil]
+  @labelled_fields Keyword.merge(@fields, by: :is_map, title: :is_binary, details: :is_list)
 
   # ===== объявление =====
 
@@ -164,6 +163,8 @@ defmodule Core.Web.Event do
   defmacro __using__(opts) do
     case Code.ensure_loaded?(OpenApiSpex) do
       true ->
+        schema_built!(__CALLER__.module, Code.ensure_compiled(__MODULE__.Schema))
+
         quote do
           unquote(wire(opts, true))
           unquote(schemas(opts))
@@ -172,6 +173,18 @@ defmodule Core.Web.Event do
       false ->
         wire(opts, false)
     end
+  end
+
+  @doc false
+  @spec schema_built!(module(), {:module, module()} | {:error, atom()}) :: :ok
+
+  def schema_built!(module, {:module, _schema}) when is_atom(module), do: :ok
+
+  def schema_built!(module, {:error, _reason}) when is_atom(module) do
+    raise CompileError,
+      description:
+        "#{@label} #{inspect(module)}: open_api_spex есть, но core собран без него — схемы события нет; " <>
+          "пересоберите: mix deps.compile core --force"
   end
 
   @doc false
@@ -266,29 +279,7 @@ defmodule Core.Web.Event do
       @doc "Событие страницы событий для JSON по словарю ссылок страницы."
       @spec to_wire(Core.Es.Event.t(), Core.Labels.Refs.t()) :: Core.Web.Event.t()
 
-      def to_wire(%_{payload: _} = event, refs) when is_map(refs) do
-        case Core.Web.Event.to_wire(event, refs, @web_event_codec, @web_event_user_dump, false) do
-          %{
-            id: id,
-            aggregateId: aggregate_id,
-            aggregateVersion: aggregate_version,
-            type: type,
-            payload: payload,
-            at: at,
-            by: by
-          }
-          when is_binary(type) and is_integer(aggregate_version) ->
-            %{
-              id: id,
-              aggregateId: aggregate_id,
-              aggregateVersion: aggregate_version,
-              type: type,
-              payload: payload,
-              at: at,
-              by: by
-            }
-        end
-      end
+      def to_wire(%_{payload: _} = event, refs) when is_map(refs), do: unquote(narrow(@fields, false))
     end
   end
 
@@ -297,100 +288,48 @@ defmodule Core.Web.Event do
       @doc "Событие страницы событий с названием и сведениями для JSON по словарю ссылок страницы."
       @spec to_wire(Core.Es.Event.t(), Core.Labels.Refs.t()) :: Core.Web.Event.labelled()
 
-      def to_wire(%_{payload: _} = event, refs) when is_map(refs) do
-        case Core.Web.Event.to_wire(event, refs, @web_event_codec, @web_event_user_dump, true) do
-          %{
-            id: id,
-            aggregateId: aggregate_id,
-            aggregateVersion: aggregate_version,
-            type: type,
-            payload: payload,
-            at: at,
-            by: %{} = by,
-            title: title,
-            details: details
-          }
-          when is_binary(type) and is_integer(aggregate_version) and is_binary(title) and is_list(details) ->
-            %{
-              id: id,
-              aggregateId: aggregate_id,
-              aggregateVersion: aggregate_version,
-              type: type,
-              payload: payload,
-              at: at,
-              by: by,
-              title: title,
-              details: details
-            }
-        end
+      def to_wire(%_{payload: _} = event, refs) when is_map(refs), do: unquote(narrow(@labelled_fields, true))
+    end
+  end
+
+  # Сужение результата библиотеки (ADR-0014): map собирается заново из переменных паттерна.
+  defp narrow(fields, labels?) do
+    vars = for {field, _guard} <- fields, do: {field, Macro.var(field, __MODULE__)}
+    wire = {:%{}, [], vars}
+
+    guard =
+      for({field, guard} <- fields, guard != nil, do: quote(do: Kernel.unquote(guard)(unquote(vars[field]))))
+      |> Enum.reduce(&quote(do: unquote(&2) and unquote(&1)))
+
+    quote generated: true do
+      case Core.Web.Event.to_wire(event, refs, @web_event_codec, @web_event_user_dump, unquote(labels?)) do
+        unquote(wire) when unquote(guard) -> unquote(wire)
       end
     end
   end
 
-  # Модули схем — только в `quote`: на `OpenApiSpex` ссылается код приложения, у которого он есть,
-  # а модуль библиотеки собирается и без него (ADR-0064). Не `OpenApiSpex.schema/2`: тот выключает
+  # Модули схем — только в `quote`: тела строит `Core.Web.Event.Schema`, который есть, только если
+  # `core` собран с `open_api_spex` (ADR-0064). Не `OpenApiSpex.schema/2`: тот выключает
   # предупреждения всего модуля, а с ним — и порождённой `to_wire/2`.
   defp schemas(opts) do
     quote generated: true do
       web_event_title = List.last(Module.split(__MODULE__))
       web_event_user = Core.Web.Event.user_schema!(__MODULE__, Keyword.get(unquote(opts), :user_ref))
 
-      web_event_labels =
+      web_event_detail =
         case @web_event_labels do
           false ->
-            %{}
+            nil
 
           true ->
             unquote(detail())
 
-            %{
-              title: %OpenApiSpex.Schema{type: :string, description: "Название события"},
-              details: %OpenApiSpex.Schema{type: :array, items: __MODULE__.Detail, description: "Сведения события"}
-            }
+            __MODULE__.Detail
         end
 
       @behaviour OpenApiSpex.Schema
 
-      @web_event_schema OpenApiSpex.build_schema(
-                          %{
-                            title: web_event_title,
-                            description: "Событие страницы событий",
-                            type: :object,
-                            properties:
-                              Map.merge(
-                                %{
-                                  id: %OpenApiSpex.Schema{type: :string, description: "Идентификатор события"},
-                                  aggregateId: %OpenApiSpex.Schema{type: :string, description: "Идентификатор агрегата"},
-                                  aggregateVersion: %OpenApiSpex.Schema{
-                                    type: :integer,
-                                    minimum: 1,
-                                    description: "Версия агрегата после события"
-                                  },
-                                  type: %OpenApiSpex.Schema{type: :string, description: "Тег события"},
-                                  payload: %OpenApiSpex.Schema{
-                                    nullable: true,
-                                    description:
-                                      "Нагрузка события, ключи — camelCase; уничтоженное ПДн-значение " <>
-                                        ~s(поля — {"$destroyed": true})
-                                  },
-                                  at: %OpenApiSpex.Schema{
-                                    type: :string,
-                                    format: :"date-time",
-                                    description: "Момент события"
-                                  },
-                                  by:
-                                    case web_event_user do
-                                      nil -> %OpenApiSpex.Schema{type: :string, description: "Идентификатор автора"}
-                                      user -> user
-                                    end
-                                },
-                                web_event_labels
-                              ),
-                            required:
-                              ~w(id aggregateId aggregateVersion type payload at by)a ++ Map.keys(web_event_labels)
-                          },
-                          struct?: false
-                        )
+      @web_event_schema Core.Web.Event.Schema.event(web_event_title, web_event_user, web_event_detail)
 
       @doc "OpenAPI-схема события страницы событий."
       @spec schema() :: OpenApiSpex.Schema.t()
@@ -405,34 +344,11 @@ defmodule Core.Web.Event do
       defmodule __MODULE__.Detail do
         @moduledoc "Сведение события страницы событий: вид — в `kind`."
 
-        web_event_detail = %OpenApiSpex.Reference{"$ref": "#/components/schemas/#{web_event_title}Detail"}
-
         unquote_splicing(Enum.map(@variants, &variant/1))
 
         @behaviour OpenApiSpex.Schema
 
-        @web_event_schema OpenApiSpex.build_schema(
-                            %{
-                              title: web_event_title <> "Detail",
-                              description: "Сведение события: вид — в `kind`",
-                              type: :object,
-                              oneOf: unquote(for {_kind, {module, _suffix, _description}} <- @variants, do: module),
-                              discriminator: %OpenApiSpex.Discriminator{
-                                propertyName: "kind",
-                                mapping:
-                                  Map.new(
-                                    unquote(
-                                      for {kind, {_module, suffix, _description}} <- @variants,
-                                          do: {"#{kind}", suffix}
-                                    ),
-                                    fn {kind, suffix} ->
-                                      {kind, "#/components/schemas/#{web_event_title}Detail#{suffix}"}
-                                    end
-                                  )
-                              }
-                            },
-                            struct?: false
-                          )
+        @web_event_schema Core.Web.Event.Schema.detail(web_event_title, unquote(@variants))
 
         @doc "OpenAPI-схема сведения события: `oneOf` по видам, дискриминатор `kind`."
         @spec schema() :: OpenApiSpex.Schema.t()
@@ -443,33 +359,14 @@ defmodule Core.Web.Event do
     end
   end
 
-  defp variant({kind, {module, suffix, description}}) do
+  defp variant({kind, module}) do
     quote generated: true do
       defmodule unquote(module) do
         @moduledoc unquote("Сведение события вида `#{kind}`.")
 
         @behaviour OpenApiSpex.Schema
 
-        @web_event_schema OpenApiSpex.build_schema(
-                            %{
-                              title: web_event_title <> "Detail" <> unquote(suffix),
-                              description: unquote(description),
-                              type: :object,
-                              properties:
-                                Map.merge(
-                                  %{
-                                    label: %OpenApiSpex.Schema{
-                                      type: :string,
-                                      description: "Подпись; нет у элемента списка и стороны изменения"
-                                    },
-                                    kind: %OpenApiSpex.Schema{type: :string, enum: [unquote("#{kind}")]}
-                                  },
-                                  unquote(properties(kind))
-                                ),
-                              required: unquote(required(kind))
-                            },
-                            struct?: false
-                          )
+        @web_event_schema Core.Web.Event.Schema.variant(web_event_title, unquote(kind), web_event_user)
 
         @doc unquote("OpenAPI-схема сведения вида `#{kind}`.")
         @spec schema() :: OpenApiSpex.Schema.t()
@@ -479,45 +376,6 @@ defmodule Core.Web.Event do
       end
     end
   end
-
-  defp properties(:text), do: quote(do: %{value: %OpenApiSpex.Schema{type: :string, nullable: true}})
-
-  defp properties(:number),
-    do: quote(do: %{value: %OpenApiSpex.Schema{type: :string, nullable: true, example: "4.5"}})
-
-  defp properties(:date), do: quote(do: %{value: %OpenApiSpex.Schema{type: :string, format: :date, nullable: true}})
-
-  defp properties(:datetime),
-    do: quote(do: %{value: %OpenApiSpex.Schema{type: :string, format: :"date-time", nullable: true}})
-
-  defp properties(:user), do: quote(do: %{value: %OpenApiSpex.Schema{allOf: [web_event_user], nullable: true}})
-
-  defp properties(:ref) do
-    quote do
-      %{
-        value: %OpenApiSpex.Schema{
-          type: :object,
-          nullable: true,
-          properties: %{
-            entity: %OpenApiSpex.Schema{type: :string, description: "Вид записи, camelCase"},
-            id: %OpenApiSpex.Schema{type: :string, description: "Идентификатор записи"},
-            name: %OpenApiSpex.Schema{type: :string, nullable: true, description: "Текущее имя записи"}
-          },
-          required: ~w(entity id name)a
-        }
-      }
-    end
-  end
-
-  defp properties(kind) when kind in ~w(group list)a,
-    do: quote(do: %{value: %OpenApiSpex.Schema{type: :array, items: web_event_detail, nullable: true}})
-
-  defp properties(:change), do: quote(do: %{old: web_event_detail, new: web_event_detail})
-  defp properties(:destroyed), do: quote(do: %{})
-
-  defp required(:change), do: ~w(label kind old new)a
-  defp required(:destroyed), do: ~w(kind)a
-  defp required(_kind), do: ~w(kind value)a
 
   # ===== дамп =====
 
@@ -555,17 +413,7 @@ defmodule Core.Web.Event do
   defp open_value(value), do: value
 
   defp by(dumped, _by, _refs, nil), do: dumped
-  defp by(dumped, by, refs, user_dump) when is_function(user_dump, 2), do: user_dump.(dumped, name!(refs, by))
 
-  defp name!(refs, by) do
-    case refs do
-      %{^by => name} ->
-        name
-
-      %{} ->
-        raise ArgumentError,
-              "автор события #{inspect(by)}: нет в словаре ссылок — словарь собирают с той же страницы " <>
-                "событий (`Core.Labels.Refs.get/2`)"
-    end
-  end
+  defp by(dumped, by, refs, user_dump) when is_function(user_dump, 2),
+    do: user_dump.(dumped, Details.name!(refs, by, "автор события"))
 end

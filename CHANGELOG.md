@@ -91,6 +91,15 @@
   custom_mutate custom_validate type_opts pipeline_opts sensitive personal value_type`. Правка
   потребителя: лишний ключ убрать или исправить; было `sensitve: true`, стало `sensitive: true`.
 
+- **`use Core.Web.Event` при `core`, собранном без `open_api_spex`, — `CompileError`, а не схема.**
+  Тела OpenAPI-схем события, сведения и видов сведения строит теперь условный модуль библиотеки
+  `Core.Web.Event.Schema` (как `Core.Web.Response.Schema`, ADR-0065), а `quote` порождает только
+  оболочки модулей и `schema/0`. Модуль есть, только если `open_api_spex` был у приложения при сборке
+  `core`. Раньше схема собиралась при раскрытии `use` и от сборки `core` не зависела; теперь
+  приложение, добавившее `open_api_spex` после сборки `core`, получает `CompileError` «Web.Event
+  <модуль>: open_api_spex есть, но core собран без него». Форма схемы не изменилась, кроме порядка
+  `required` схемы события. Правка потребителя: `mix deps.compile core --force`.
+
 ## 0.16.0
 
 ### Ломающие изменения контракта

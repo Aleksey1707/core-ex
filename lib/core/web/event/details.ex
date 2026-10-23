@@ -4,6 +4,8 @@ defmodule Core.Web.Event.Details do
   alias Core.Helper
   alias Core.Labels
 
+  # ===== дамп =====
+
   @doc false
   @spec to_wire(struct(), Labels.Refs.t(), module(), Core.Web.Event.user_dump()) :: %{
           title: String.t(),
@@ -33,25 +35,13 @@ defmodule Core.Web.Event.Details do
 
   defp value(_detail, nil, _env), do: nil
   defp value(%{kind: kind}, details, env) when kind in ~w(group list)a, do: Enum.map(details, &detail(&1, env))
-  defp value(%{kind: :user}, id, env), do: env.user_dump.(env.codec.dump(id), name!(env.refs, id))
+  defp value(%{kind: :user}, id, env), do: env.user_dump.(env.codec.dump(id), name!(env.refs, id, "id сведения"))
 
   defp value(%{kind: :ref, entity: entity}, id, env),
-    do: %{entity: Helper.Keys.camelize_key(entity), id: env.codec.dump(id), name: name!(env.refs, id)}
+    do: %{entity: Helper.Keys.camelize_key(entity), id: env.codec.dump(id), name: name!(env.refs, id, "id сведения")}
 
   defp value(%{kind: :number}, number, env), do: number(dump(number, env))
   defp value(%{kind: kind}, value, env) when kind in ~w(text date datetime)a, do: dump(value, env)
-
-  defp name!(refs, id) do
-    case refs do
-      %{^id => name} ->
-        name
-
-      %{} ->
-        raise ArgumentError,
-              "#{inspect(id)}: нет в словаре ссылок — словарь собирают с той же страницы событий " <>
-                "(`Core.Labels.Refs.get/2`)"
-    end
-  end
 
   defp dump(%_{} = prim, env), do: env.codec.dump(prim)
   defp dump(value, _env), do: value
@@ -61,4 +51,21 @@ defmodule Core.Web.Event.Details do
   defp number(number) when is_integer(number), do: Integer.to_string(number)
   defp number(number) when is_float(number), do: number(Decimal.from_float(number))
   defp number(%Decimal{} = number), do: Decimal.to_string(number, :normal)
+
+  # ===== словарь ссылок =====
+
+  @doc false
+  @spec name!(Labels.Refs.t(), term(), String.t()) :: String.t() | nil
+
+  def name!(refs, id, what) when is_map(refs) and is_binary(what) do
+    case refs do
+      %{^id => name} ->
+        name
+
+      %{} ->
+        raise ArgumentError,
+              "#{what} #{inspect(id)}: нет в словаре ссылок — словарь собирают с той же страницы событий " <>
+                "(`Core.Labels.Refs.get/2`)"
+    end
+  end
 end

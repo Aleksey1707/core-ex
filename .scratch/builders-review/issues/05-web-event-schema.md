@@ -1,6 +1,6 @@
 # 05: Web.Event — схема функциями, поля одним списком
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 

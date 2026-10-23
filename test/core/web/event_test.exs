@@ -260,6 +260,14 @@ defmodule Core.Web.EventTest do
         compile_event(:BadSchema, codec: External, user_ref: [dump: &WithUser.user_ref/2, schema: URI])
       end
     end
+
+    test "open_api_spex у приложения, core собран без него — CompileError с подсказкой пересборки" do
+      message = ~r/Stale: open_api_spex есть, но core собран без него.*mix deps.compile core --force/
+
+      assert_raise CompileError, message, fn -> Core.Web.Event.schema_built!(Stale, {:error, :nofile}) end
+
+      assert Core.Web.Event.schema_built!(Built, Code.ensure_compiled(Core.Web.Event.Schema)) == :ok
+    end
   end
 
   # ---
