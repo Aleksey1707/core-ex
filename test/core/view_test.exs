@@ -89,6 +89,16 @@ defmodule Core.ViewTest do
       assert dumped.day == OutCodec.dump(ViewFixture.Day.new!(~D[2024-06-01]))
     end
 
+    test "композит над приводимой базой дампится как база" do
+      refs = ViewFixture.Refs.new(id: @uuid, ref: @uuid)
+
+      for codec <- [OutCodec, InCodec] do
+        dumped = ViewFixture.Refs.Codec.dump(refs, codec)
+
+        assert dumped.ref == dumped.id
+      end
+    end
+
     test "формат зависит от профиля кодека" do
       assert dump(view(), InCodec).id == InCodec.dump(ViewFixture.ID.new!(@uuid))
       refute dump(view(), InCodec).id == dump(view()).id
@@ -215,6 +225,14 @@ defmodule Core.ViewTest do
       assert "Date.t() | nil" = fields[:day]
     end
 
+    test "композит над приводимой базой типизирован по kind leaf-примитива" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Refs)
+      fields = struct_type_fields(types)
+
+      assert fields[:ref] == fields[:id]
+      assert fields[:own_kind] == "#{fields[:id]} | nil"
+    end
+
     test "enum, скаляры и вложенные структуры типизированы точно", %{fields: fields} do
       assert fields[:status] =~ "Status.t()"
       assert "pos_integer()" = fields[:version]
@@ -311,6 +329,12 @@ defmodule Core.ViewTest do
     test "Prim с кастомным kind не типизируется" do
       assert_raise CompileError, ~r/типизировать нечем/, fn ->
         define(fields: [id: [prim: Core.ViewTest.LabelID]])
+      end
+    end
+
+    test "композит над Prim с кастомным kind не типизируется" do
+      assert_raise CompileError, ~r/LabelRef \(leaf Core.ViewTest.LabelID\) kind :label — типизировать нечем/, fn ->
+        define(fields: [ref: [prim: Core.ViewTest.LabelRef]])
       end
     end
 
@@ -427,6 +451,12 @@ defmodule Core.ViewTest do
 
   defmodule LabelID do
     use Core.Prim.UUID, name: "Метка", version: 4, kind: :label
+  end
+
+  defmodule LabelRef do
+    use Core.Prim.Compose,
+      name: "Ссылка на метку",
+      of: Core.ViewTest.LabelID
   end
 
   # ---

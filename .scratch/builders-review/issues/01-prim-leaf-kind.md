@@ -1,6 +1,6 @@
 # 01: Prim сам отдаёт leaf и kind
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 

@@ -168,11 +168,9 @@ defmodule Core.Es.Event.Payload do
   @doc false
   @spec uuid_prim?(module()) :: boolean()
 
-  def uuid_prim?(mod) when is_atom(mod), do: Prim.prim?(mod) and uuid_leaf?(leaf(mod))
+  def uuid_prim?(mod) when is_atom(mod), do: Prim.prim?(mod) and uuid_leaf?(Prim.leaf(mod))
 
   # ---
-
-  defp leaf(mod), do: if(Prim.composed?(mod), do: leaf(mod.__domain_base__()), else: mod)
 
   defp uuid_leaf?(mod), do: Code.ensure_loaded?(mod) and function_exported?(mod, :format, 2)
 

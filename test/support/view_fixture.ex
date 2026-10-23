@@ -41,6 +41,23 @@ defmodule Core.ViewFixture do
     use Core.Prim.Decimal, name: "Вес", min: 0
   end
 
+  defmodule IDRef do
+    @moduledoc false
+
+    use Core.Prim.Compose,
+      name: "Ссылка",
+      of: Core.ViewFixture.ID
+  end
+
+  defmodule OwnKindIDRef do
+    @moduledoc false
+
+    use Core.Prim.Compose,
+      name: "Ссылка со своим kind",
+      of: Core.ViewFixture.ID,
+      kind: :ref
+  end
+
   defmodule Status do
     @moduledoc """
     Статус фикстуры
@@ -183,6 +200,17 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule Refs do
+    @moduledoc false
+
+    use Core.View,
+      fields: [
+        id: [prim: Core.ViewFixture.ID],
+        ref: [prim: Core.ViewFixture.IDRef],
+        own_kind: [prim: Core.ViewFixture.OwnKindIDRef, optional: true]
+      ]
+  end
+
   # Фикстурные представления не входят в `Core.CodecFixture` plugins, поэтому у них свой
   # фасад: вложенный View дампится через фасад, а тот обязан знать его плагин.
   defmodule OutCodec do
@@ -196,6 +224,7 @@ defmodule Core.ViewFixture do
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
         Core.ViewFixture.Reading.Codec,
+        Core.ViewFixture.Refs.Codec,
         Core.ViewFixture.Sample.Codec,
         Core.ViewFixture.Typed.Codec
       ]
@@ -212,6 +241,7 @@ defmodule Core.ViewFixture do
         Core.ViewFixture.Nested.Codec,
         Core.ViewFixture.Plain.Codec,
         Core.ViewFixture.Reading.Codec,
+        Core.ViewFixture.Refs.Codec,
         Core.ViewFixture.Sample.Codec,
         Core.ViewFixture.Typed.Codec
       ]

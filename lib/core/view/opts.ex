@@ -231,17 +231,21 @@ defmodule Core.View.Opts do
   end
 
   defp prim_kind!(mod, name, label) do
-    kind = mod.__domain_kind__()
+    leaf = Prim.leaf(mod)
+    kind = leaf.__domain_kind__()
 
     if kind not in @coercible_kinds do
       raise CompileError,
         description:
-          "#{where(label, name)}: у #{inspect(mod)} kind #{inspect(kind)} — " <>
+          "#{where(label, name)}: у #{prim_label(mod, leaf)} kind #{inspect(kind)} — " <>
             "типизировать нечем; объявите поле через type:"
     end
 
     kind
   end
+
+  defp prim_label(leaf, leaf), do: inspect(leaf)
+  defp prim_label(mod, leaf), do: "#{inspect(mod)} (leaf #{inspect(leaf)})"
 
   defp where(label, name), do: "#{@label}: #{label}, поле #{name}"
 

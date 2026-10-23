@@ -167,9 +167,9 @@ defmodule Core.Labels.Details do
   end
 
   defp plain_kind(module) do
-    if Core.Prim.composed?(module),
-      do: plain_kind(module.__domain_base__()),
-      else: native_kind(module, module.__domain_kind__())
+    leaf = Core.Prim.leaf(module)
+
+    native_kind(leaf, leaf.__domain_kind__())
   end
 
   defp native_kind(_module, :string), do: :text

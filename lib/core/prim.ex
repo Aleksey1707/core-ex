@@ -208,6 +208,36 @@ defmodule Core.Prim do
     prim?(mod) and function_exported?(mod, :__domain_base__, 0)
   end
 
+  @doc """
+  Leaf-примитив Prim `mod` — последнее звено `chain/1`: сам `mod`, если он не композит.
+
+  `mod` — Prim; не Prim — `MatchError`.
+  """
+  @spec leaf(module()) :: module()
+
+  def leaf(mod) when is_atom(mod) do
+    [_ | _] = chain = chain(mod)
+
+    List.last(chain)
+  end
+
+  # На звено — одна проверка `prim?/1`, без `composed?/1`: read-путь `Core.Codec.coerce/2`
+  # строит цепочку на каждое поле каждой строки.
+  @doc """
+  Цепочка `Prim.Compose` от `mod` до leaf-примитива: `[Mod, Base, …, Leaf]`; `[]` — не Prim.
+
+  У leaf-примитива цепочка из него одного.
+  """
+  @spec chain(module()) :: [module()]
+
+  def chain(mod) when is_atom(mod) do
+    cond do
+      not prim?(mod) -> []
+      function_exported?(mod, :__domain_base__, 0) -> [mod | chain(mod.__domain_base__())]
+      true -> [mod]
+    end
+  end
+
   @doc "Рекурсивно достать самое внутреннее не-Prim значение."
   @spec unwrap(struct()) :: term()
 

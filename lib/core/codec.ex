@@ -318,7 +318,7 @@ defmodule Core.Codec do
   @spec coercible?(module()) :: boolean()
 
   def coercible?(mod) when is_atom(mod) do
-    case prim_chain(mod) do
+    case Prim.chain(mod) do
       [] -> false
       chain -> leaf_kind(List.last(chain)) in @coercible_kinds
     end
@@ -348,26 +348,13 @@ defmodule Core.Codec do
   def coerce(_mod, nil), do: :error
 
   def coerce(mod, value) when is_atom(mod) do
-    case prim_chain(mod) do
+    case Prim.chain(mod) do
       [] -> :error
       chain -> coerce_chain(chain, value)
     end
   end
 
   # ---
-
-  # Цепочка от `mod` до leaf-примитива: `[Mod, Base, ..., Leaf]`; `[]` — не Prim.
-  defp prim_chain(mod) do
-    cond do
-      not Prim.prim?(mod) -> []
-      has_base?(mod) -> [mod | prim_chain(mod.__domain_base__())]
-      true -> [mod]
-    end
-  end
-
-  # `Prim.composed?/1` повторил бы `prim?/1`, уже проверенный веткой выше: на read-пути
-  # `coerce/2` зовётся на каждое поле каждой строки.
-  defp has_base?(mod), do: function_exported?(mod, :__domain_base__, 0)
 
   defp leaf_kind(leaf), do: leaf.__domain_kind__()
 

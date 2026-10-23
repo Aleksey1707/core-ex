@@ -61,6 +61,20 @@ defmodule Core.Prim.ComposeTest do
     refute Prim.composed?(BaseID)
   end
 
+  test "chain/1: цепочка от модуля до leaf-примитива" do
+    assert Prim.chain(BaseID) == [BaseID]
+    assert Prim.chain(ApproverID) == [ApproverID, BaseID]
+    assert Prim.chain(NestedApproverID) == [NestedApproverID, ApproverID, BaseID]
+    assert Prim.chain(DateTime) == []
+  end
+
+  test "leaf/1: leaf-примитив цепочки, не Prim — MatchError" do
+    assert Prim.leaf(BaseID) == BaseID
+    assert Prim.leaf(ApproverID) == BaseID
+    assert Prim.leaf(NestedApproverID) == BaseID
+    assert_raise MatchError, fn -> Prim.leaf(DateTime) end
+  end
+
   test "raw/1 unwraps to leaf value" do
     {:ok, prim} = ApproverID.new(@uuid)
     assert ApproverID.raw(prim) == @uuid

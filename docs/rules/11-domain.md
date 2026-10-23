@@ -78,6 +78,8 @@ use Core.Prim,
 | `name/0` | имя Prim из `name:` — уходит в message доменной ошибки |
 | `Prim.prim?/1` | модуль объявлен через `use Prim` (`__domain_kind__/0` + `value/1`); при необходимости загружает модуль |
 | `Prim.composed?/1` | Prim объявлен через `Prim.Compose` (есть `__domain_base__/0`) |
+| `Prim.chain/1` | цепочка `Prim.Compose` от модуля до leaf-примитива: `[Mod, Base, …, Leaf]`; `[]` — не Prim |
+| `Prim.leaf/1` | leaf-примитив Prim (у не-композита — сам модуль); не Prim — `MatchError` |
 | `Prim.unwrap/1` | рекурсивно достать самое внутреннее не-Prim значение |
 
 В function heads: обязательный Prim — `%Mod{}` (default); композиция в `when` — `Core.Guard.is/2` /
