@@ -1085,10 +1085,11 @@ event-sourced и state-stored агрегатов. Поток — тип агре
 | страж `xid` | в потоке есть событие транзакции с `xid` больше текущей — иначе выдача по позиции переставила бы версии потока |
 | `continuous?: true` (`Es.Aggregate.Repo.Pg`) | первая версия потока в пачке не равна наибольшей версии потока + 1 (у пустого — не 1) |
 
-- `Core.Es.Store.append` MUST NOT вызываться вне write-builder'ов библиотеки
-  (`use Core.Repo.Pg.StateStored`, `use Core.Es.Aggregate.Repo.Pg`), уничтожения ключа субъекта
-  `Core.Es.Personal.destroy_key/3` и тестов самого `Core.Es.Store`; MAY — тестовые дублёры в
-  `test/support`. Usecase читает поток только через `page_stream/4` репозитория агрегата
+- `Core.Es.Store.append` и запись пачки builder'ов `Core.Es.Store.Write.append/4` MUST NOT
+  вызываться вне write-builder'ов библиотеки (`use Core.Repo.Pg.StateStored`,
+  `use Core.Es.Aggregate.Repo.Pg`; `Store.append` — ещё и из `Core.Es.Store.Write`), уничтожения
+  ключа субъекта `Core.Es.Personal.destroy_key/3` и тестов самого `Core.Es.Store`; MAY — тестовые
+  дублёры в `test/support`. Usecase читает поток только через `page_stream/4` репозитория агрегата
   («Страница потока»).
 - Тип агрегата `"core.subject"` зарезервирован библиотекой: поток субъекта с событием уничтожения
   ключа пишет `destroy_key/3`, кодек `Core.Es.Personal.Event.Codec` фасад подключает сам, и кодек

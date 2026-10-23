@@ -1,6 +1,6 @@
 # 02: Запись событий агрегата — один module
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 

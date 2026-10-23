@@ -33,10 +33,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     version}`; все расхождения — одна `:version_mismatch` со списком detail в порядке пар; `[]` —
     `{:ok, []}` без запросов; повтор id — `ArgumentError`.
   - `append(events, context, opts)` — `[]` — `:ok` без запросов; иначе в
-    `Core.Helper.Transact.run/3`: операция, сеанс и основание событий (`Core.Es.Operation.stamp/2`)
-    → `outbox.from_events` → `Core.Es.Store.append/5` с
-    непрерывностью потока → резервы ключей `key_reservations:` → шифрование ПДн-значений записей
-    outbox → `Core.Config.outbox_repo().append`.
+    `Core.Helper.Transact.run/3` — запись событий и outbox `Core.Es.Store.Write` с непрерывностью
+    потока и резервами ключей `key_reservations:`.
     События нескольких потоков одного типа пишутся пачкой, отказ в любом потоке откатывает всю;
     событие не из `tags:` кодека — `FunctionClauseError`.
   - `refresh(state, version, context, opts)` — события потока после `state.version`, свёрнутые
@@ -162,7 +160,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   import Core.Version, only: [is_version: 1]
   import Ecto.Query
 
-  alias Core.Config
   alias Core.Context
   alias Core.Error
   alias Core.Es
@@ -660,21 +657,19 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   def append(_cfg, [], %Context{}, opts) when is_list(opts), do: :ok
 
   def append(cfg, [_ | _] = events, %Context{} = context, opts) when is_list(opts),
-    do: Transact.run(cfg.dao, fn -> write(cfg, events, context, opts) end, opts)
+    do: Transact.run(cfg.dao, fn -> Es.Store.Write.append(write_path(cfg), events, context, opts) end, opts)
 
   # ---
 
-  defp write(cfg, events, context, opts) do
-    mismatch = &version_mismatch(cfg, &1)
-    taken = &cfg.errors.domain(cfg.behaviour, &1, &2)
-    events = Es.Operation.stamp(events, context)
-
-    with {:ok, records} <- cfg.outbox.from_events(events),
-         :ok <- Es.Store.append(cfg.event_codec, events, context, mismatch, continuous?: true),
-         :ok <- Es.KeyReservation.append(cfg.key_reservations, events, context, taken),
-         {:ok, records} <- Es.Personal.Wire.seal_records(records) do
-      Config.outbox_repo().append(records, context, opts)
-    end
+  defp write_path(cfg) do
+    %{
+      event_codec: cfg.event_codec,
+      outbox: cfg.outbox,
+      mismatch: &version_mismatch(cfg, &1),
+      continuous?: true,
+      key_reservations: cfg.key_reservations,
+      taken: &cfg.errors.domain(cfg.behaviour, &1, &2)
+    }
   end
 
   # ===== общее =====

@@ -25,11 +25,9 @@ defmodule Core.Repo.Pg.StateStored do
   Набор ключей проверяется целиком здесь — чтобы опечатка в любой опции называла
   `Repo.Pg.StateStored`.
 
-  Каждая запись идёт одной транзакцией: строка агрегата → дочерние строки → операция, сеанс и
-  основание событий (`Core.Es.Operation.stamp/2`) → `outbox.from_events` →
-  `Core.Es.Store.append` → шифрование ПДн-значений записей outbox →
-  `Core.Config.outbox_repo().append`. Дочерние строки пишет `Core.Repo.Pg.Children` — точечно,
-  а не перезаписью всей коллекции:
+  Каждая запись идёт одной транзакцией: строка агрегата → дочерние строки → события и outbox
+  (`Core.Es.Store.Write`, без непрерывности потока и резервов ключей). Дочерние строки пишет
+  `Core.Repo.Pg.Children` — точечно, а не перезаписью всей коллекции:
 
   | Путь | Запросов на дочернюю таблицу |
   |---|---|
@@ -220,13 +218,8 @@ defmodule Core.Repo.Pg.StateStored do
       end
 
       defp do_flush_events(events, context, opts) do
-        events = Core.Es.Operation.stamp(events, context)
-
-        with {:ok, records} <- @es_outbox.from_events(events),
-             :ok <- Core.Es.Store.append(@es_event_codec, events, context, &version_mismatch/1),
-             {:ok, records} <- Core.Es.Personal.Wire.seal_records(records) do
-          Core.Config.outbox_repo().append(records, context, opts)
-        end
+        path = %{event_codec: @es_event_codec, outbox: @es_outbox, mismatch: &version_mismatch/1}
+        Core.Es.Store.Write.append(path, events, context, opts)
       end
 
       defp version_mismatch(detail),

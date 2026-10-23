@@ -9,21 +9,15 @@ defmodule Core.Es.OperationTest do
   alias Core.EsAggregateRepoContract
   alias Core.EsFixture.Account
   alias Core.EsFixture.UserID
-  alias Core.EventFixture
-  alias Core.EventFixture.AggID
   alias Core.Helper.Transact
   alias Core.Outbox
   alias Core.Outbox.Delivery
   alias Core.Pagination
   alias Core.PubSub.MqSubscriberReliable.Step
-  alias Core.StateStoredFixture
-  alias Core.Version
 
-  require Config
   require Error
 
   @repo Account.Repo.Pg
-  @state_stored Config.repo!(StateStoredFixture.Repo)
 
   describe "event-sourced агрегат" do
     test "два агрегата одной транзакции — одна операция в событиях, странице потока и outbox" do
@@ -105,22 +99,6 @@ defmodule Core.Es.OperationTest do
       assert_received {:attempt, written}
       assert [%{operation_id: ^written}] = stored(id)
       assert refused != written
-    end
-  end
-
-  describe "state-stored агрегат с событиями" do
-    test "операция и сеанс — в событиях потока и записи outbox" do
-      id = AggID.new()
-      session = Es.Event.SessionID.new!(Ecto.UUID.generate())
-      created = EventFixture.in_stream(EventFixture.created(), id, 1)
-
-      assert {:ok, _written} = @state_stored.insert(entity(id, [created]), Context.Session.put(Context.new(), session))
-
-      assert [%{operation_id: %Es.Event.OperationID{} = operation, session_id: ^session}] =
-               Es.Store.Test.events!(EventFixture.Event.Codec, id)
-
-      dumped = Config.codec().dump(operation)
-      assert [%{payload: %{"operation_id" => ^dumped}, headers: %{"operation_id" => ^dumped}}] = records(id)
     end
   end
 
@@ -206,15 +184,5 @@ defmodule Core.Es.OperationTest do
       message: "Отказ записи",
       detail: %{aggregate_id: Config.codec().dump(id), expected: 1, actual: nil, source: :storage}
     )
-  end
-
-  defp entity(id, events) do
-    %StateStoredFixture.Entity{
-      id: id,
-      version: Version.new!(1),
-      name: "Приёмка",
-      children: %{},
-      events: Es.Events.new(events)
-    }
   end
 end

@@ -3,7 +3,7 @@ defmodule Core.Es.Store.Opts do
   Сверки опций write-builder'ов хранилища событий на компиляции: `use Core.Repo.Pg.StateStored`
   и `use Core.Es.Aggregate.Repo.Pg`.
 
-  Оба builder'а пишут события через `Core.Es.Store.append/5` и собирают его вызов из модулей
+  Оба builder'а пишут события через `Core.Es.Store.Write.append/4` и собирают его вызов из модулей
   агрегата — кодека событий, outbox и каталога ошибок. Рассинхрон этих модулей ловит компилятор,
   а не первый `append` в рантайме.
 
