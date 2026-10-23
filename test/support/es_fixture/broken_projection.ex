@@ -35,7 +35,6 @@ defmodule Core.EsFixture.BrokenProjection do
   end
 
   def project(%Account.Event.Renamed{payload: payload}), do: rename(payload.name)
-
   def project(%Account.Event.Closed{}), do: :ok
 
   @doc "Очистить read-модель — таблица названий забыта."

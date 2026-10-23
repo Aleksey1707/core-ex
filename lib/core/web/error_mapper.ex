@@ -78,7 +78,6 @@ defmodule Core.Web.ErrorMapper do
   def map(error, opts \\ [])
 
   def map(%Error{kind: :domain, code: :version_mismatch} = error, _opts), do: {412, Response.error(error), nil}
-
   def map(%Error{kind: :domain, code: :access_denied} = error, _opts), do: {403, Response.error(error), nil}
 
   def map(%Error{code: code} = error, opts) do
@@ -92,7 +91,6 @@ defmodule Core.Web.ErrorMapper do
   # ---
 
   defp by_kind(%Error{kind: :domain} = error, _opts), do: {400, Response.error(error), nil}
-
   defp by_kind(%Error{kind: :app}, opts), do: {500, critical(opts), :error}
 
   # ===== unauthorized =====
@@ -163,7 +161,6 @@ defmodule Core.Web.ErrorMapper do
   end
 
   def by_status(500, opts), do: critical(opts)
-
   def by_status(status, opts) when status in 501..599, do: critical(Keyword.delete(opts, :error_id))
 
   # ===== cast_errors =====

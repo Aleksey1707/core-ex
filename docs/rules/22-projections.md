@@ -58,7 +58,6 @@ use Core.Es.Projection,
 
 @impl true
 def project(%Account.Event.Opened{} = event), do: insert_row(event)
-
 def project(%Account.Event.Closed{} = event), do: close_row(event)
 
 @impl true

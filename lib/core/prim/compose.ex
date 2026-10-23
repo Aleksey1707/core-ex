@@ -70,9 +70,7 @@ defmodule Core.Prim.Compose do
   @spec cast(term(), module(), module()) :: Result.t()
 
   def cast(%base{} = prim, base, _self), do: {:ok, prim}
-
   def cast(%self{value: value}, _base, self), do: {:ok, value}
-
   def cast(raw, base, _self) when is_atom(base), do: base.new(raw)
 
   @doc """

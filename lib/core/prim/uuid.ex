@@ -232,7 +232,6 @@ defmodule Core.Prim.UUID do
   end
 
   defp from_canonical(uuid, :full), do: uuid
-
   defp from_canonical(uuid, :urn), do: "urn:uuid:" <> uuid
 
   defp from_canonical(

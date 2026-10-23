@@ -365,7 +365,6 @@ defmodule Core.Es.Aggregate.Process.Server do
   defp version(nil), do: nil
 
   defp command_module({:execute, %{call: %{command: %{__struct__: command}}}}), do: command
-
   defp command_module(message), do: message
 
   # ===== общее =====

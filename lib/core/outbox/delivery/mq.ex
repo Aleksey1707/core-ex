@@ -158,7 +158,6 @@ defmodule Core.Outbox.Delivery.Mq do
   end
 
   defp headers(%Record{headers: headers}) when is_map(headers), do: headers
-
   defp headers(%Record{headers: nil}), do: %{}
 
   defp encode_body(payload) do

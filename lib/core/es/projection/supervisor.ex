@@ -234,7 +234,6 @@ defmodule Core.Es.Projection.Supervisor do
   end
 
   defp listeners(_projections, false), do: []
-
   defp listeners(projections, true), do: listeners(projections, [])
 
   defp listeners(projections, connection) do

@@ -525,7 +525,6 @@ defmodule MyApp.Domain.<BC>.<Aggregate>.Projection do
 
   @impl true
   def project(%Agg.Event.Opened{} = event), do: insert_row(event)
-
   def project(%Agg.Event.Completed{} = event), do: complete_row(event)
 
   @impl true

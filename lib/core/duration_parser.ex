@@ -149,7 +149,6 @@ defmodule Core.DurationParser do
   # ---
 
   defp timeout(:infinity, _rounding), do: {:ok, :infinity}
-
   defp timeout(ms, _rounding) when is_integer(ms) and ms >= 0, do: {:ok, ms}
 
   defp timeout(str, rounding) when is_binary(str) do
@@ -171,7 +170,6 @@ defmodule Core.DurationParser do
   # Контракт модуля — `{:error, %Error{}}`: отрицательное число, float и прочий мусор
   # обязаны приходить ошибкой, а не `FunctionClauseError` из середины парсера.
   defp timeout(ms, _rounding) when is_integer(ms), do: {:error, negative_duration_error(ms)}
-
   defp timeout(other, _rounding), do: {:error, invalid_input_error(other)}
 
   defp keyword_timeout(components, rounding) do

@@ -78,7 +78,6 @@ defmodule Core.Outbox.Test.Reactor do
   end
 
   def handle_info({:DOWN, _ref, :process, owner, _reason}, %{owner: owner} = state), do: {:stop, :normal, state}
-
   def handle_info(_other, state), do: {:noreply, state}
 
   @doc false
@@ -87,7 +86,6 @@ defmodule Core.Outbox.Test.Reactor do
     do: {:reply, {:ok, Outbox.Test.report(state.subscribers)}, state}
 
   def handle_call(:report, _from, state), do: {:reply, {:crashed, state.crash}, state}
-
   def handle_call(:dead_letters, _from, state), do: {:reply, Outbox.Test.dead_letters(self()), state}
 
   # ---

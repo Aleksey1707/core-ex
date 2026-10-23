@@ -70,7 +70,6 @@ defmodule Core.Web.Response do
   # ---
 
   defp data(%Error{errors: []}), do: %{}
-
   defp data(%Error{errors: [_ | _] = errors}), do: %{errors: Enum.map(errors, &element/1)}
 
   defp element(%Error{message: message} = error), do: %{code: code(error), message: message}

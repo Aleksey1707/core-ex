@@ -220,7 +220,6 @@ defmodule Core.Codec.Plugin do
         @spec type(struct() | module()) :: String.t()
 
         def type(%mod{}) when is_map_key(@codec_type_by_mod, mod), do: Map.fetch!(@codec_type_by_mod, mod)
-
         def type(mod) when is_atom(mod) and is_map_key(@codec_type_by_mod, mod), do: Map.fetch!(@codec_type_by_mod, mod)
 
         @doc "Множество wire-тегов вариантов."

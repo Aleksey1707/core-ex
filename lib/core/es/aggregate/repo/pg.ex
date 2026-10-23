@@ -636,7 +636,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   end
 
   defp mismatch_detail(_state, :current, _codec), do: nil
-
   defp mismatch_detail(%{version: version}, %Version{} = version, _codec), do: nil
 
   defp mismatch_detail(state, %Version{} = expected, codec) do

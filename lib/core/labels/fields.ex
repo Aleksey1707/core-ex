@@ -282,7 +282,6 @@ defmodule Core.Labels.Fields do
   end
 
   defp normalize!([], _where), do: %{}
-
   defp normalize!(fields, where), do: Map.new(pairs(Field.normalize!(fields, :labels, where)))
 
   defp pairs(fields), do: for(%Field{name: name, spec: spec} <- fields, do: {name, spec})

@@ -172,7 +172,6 @@ defmodule Core.Outbox.Supervisor do
   # ---
 
   defp singleton!(%{enabled: false}), do: :ok
-
   defp singleton!(%{cluster_query: query}) when query in [nil, :ignore, ""], do: :ok
 
   defp singleton!(%{allow_cluster: true, cluster_query: query}) do
@@ -207,7 +206,6 @@ defmodule Core.Outbox.Supervisor do
   end
 
   defp pairs([]), do: []
-
   defp pairs([head | tail]), do: Enum.map(tail, &{head, &1}) ++ pairs(tail)
 
   defp partition_error(a, b) do
@@ -309,7 +307,6 @@ defmodule Core.Outbox.Supervisor do
   # ---
 
   defp connection_items(nil), do: []
-
   defp connection_items(%{name: name}), do: [%{component: "outbox_connection", name: name}]
 
   defp poller_items(%{name: name, label: label, writer: writer}) do
@@ -317,7 +314,6 @@ defmodule Core.Outbox.Supervisor do
   end
 
   defp writer_items(nil, _label), do: []
-
   defp writer_items(%{name: name}, label), do: [%{component: "outbox_writer:#{label}", name: name}]
 
   defp cleaner_item, do: %{component: "outbox_cleaner", name: Cleaner}
@@ -423,11 +419,9 @@ defmodule Core.Outbox.Supervisor do
   end
 
   defp via!({module, handle} = via) when is_atom(module) and not is_nil(module) and not is_nil(handle), do: via
-
   defp via!(other), do: StartOpts.raise_invalid!(@label, :via, "{модуль Mq.Writer, handle процесса}", other)
 
   defp connection!(nil), do: nil
-
   defp connection!(spec), do: StartOpts.process!(@label, :connection, spec)
 
   defp process_names(connection, pollers) do

@@ -129,7 +129,6 @@ defmodule Core.Otel.Messaging do
   # Спека: `{messaging.operation.name} {destination}`; без известного назначения
   # остаётся одно имя операции — иначе в имя попал бы высококардинальный мусор.
   defp name(operation, nil), do: operation
-
   defp name(operation, destination), do: "#{operation} #{destination}"
 
   defp attributes(opts, operation, destination) do
@@ -146,7 +145,6 @@ defmodule Core.Otel.Messaging do
   end
 
   defp put_optional(attributes, _key, nil), do: attributes
-
   defp put_optional(attributes, key, value), do: Map.put(attributes, key, value)
 
   defp span_opts(opts, kind, attributes) do

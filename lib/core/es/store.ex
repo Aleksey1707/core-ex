@@ -262,7 +262,6 @@ defmodule Core.Es.Store do
   end
 
   defp ensure_next!(_id, last, version, true) when version == last + 1, do: :ok
-
   defp ensure_next!(_id, last, version, false) when version > last, do: :ok
 
   defp ensure_next!(id, last, version, true) do

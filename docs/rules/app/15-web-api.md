@@ -303,7 +303,6 @@ def respond(conn, {:projected, view}, render) when is_function(render, 2),
   do: conn |> applied(200) |> render.(view)
 
 def respond(conn, {:accepted, id, version}, _render), do: accepted(conn, id, version)
-
 def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 ```
 

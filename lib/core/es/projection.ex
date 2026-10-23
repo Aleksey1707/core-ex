@@ -13,7 +13,6 @@ defmodule Core.Es.Projection do
 
         @impl true
         def project(%Account.Event.Opened{} = event), do: ...
-
         def project(%Account.Event.Closed{} = event), do: ...
 
         @impl true

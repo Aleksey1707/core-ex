@@ -57,7 +57,6 @@ defmodule Core.Es.Personal.Test do
   end
 
   defp names!(mod, [], _fields), do: raise(ArgumentError, "#{inspect(mod)}: нет полей с subject:")
-
   defp names!(_mod, subjects, :all), do: subjects
 
   defp names!(mod, subjects, fields) do

@@ -38,7 +38,6 @@ defmodule Core.EsFixture.Catalog do
 
   @impl true
   def evolve(state, %Event.Created{payload: payload}), do: %{state | path: payload.name}
-
   def evolve(state, %Event.Closed{}), do: %{state | closed?: true}
 
   # Контакт лица каталог не хранит: событие кодека, общего с агрегатом `Core.EventFixture`.

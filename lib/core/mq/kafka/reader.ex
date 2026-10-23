@@ -417,7 +417,6 @@ if Code.ensure_loaded?(:brod) do
     end
 
     defp leased?(%__MODULE__{lease: nil}), do: false
-
     defp leased?(%__MODULE__{lease_deadline: deadline}), do: System.monotonic_time(:millisecond) < deadline
 
     defp hold_lease(%__MODULE__{lease: nil} = state, started) do
@@ -507,7 +506,6 @@ if Code.ensure_loaded?(:brod) do
     end
 
     defp subscribed({state, []}), do: %{state | retry_ms: state.retry_min_ms}
-
     defp subscribed({state, failures}), do: schedule_resubscribe(state, failures)
 
     defp subscribe_partition({state, failures}, partition, begin_offset) do

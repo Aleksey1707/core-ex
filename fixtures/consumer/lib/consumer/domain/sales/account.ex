@@ -75,7 +75,6 @@ defmodule Consumer.Domain.Sales.Account do
     do: {:ok, [Event.HolderSet.draft(Event.HolderSet.Payload.new(holder))]}
 
   def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
-
   def decide(%Cmd.Close{}, %__MODULE__{status: :frozen}), do: {:ok, [Event.Closed.draft()]}
 
   def decide(%Cmd.Close{} = command, %__MODULE__{status: :open} = state) do
@@ -100,6 +99,5 @@ defmodule Consumer.Domain.Sales.Account do
     do: %{state | holder: payload.holder}
 
   def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
-
   def evolve(state, %Event.Closed{}), do: %{state | status: :closed}
 end

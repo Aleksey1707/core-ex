@@ -90,6 +90,5 @@ defmodule Core.OtelFixture do
   defp to_events(events), do: Enum.map(:otel_events.list(events), &event(&1, :name))
 
   defp to_status(:undefined), do: :undefined
-
   defp to_status(record), do: {status(record, :code), status(record, :message)}
 end

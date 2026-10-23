@@ -111,7 +111,6 @@ defmodule Core.Codec.Plugin.Fields do
   @spec field_guard(Field.t()) :: [Macro.t()]
 
   def field_guard(%Field{spec: {kind, _mod}, optional?: false}) when kind in @pattern_kinds, do: []
-
   def field_guard(%Field{name: name, spec: spec, optional?: false}), do: [value_guard(spec, var(name))]
 
   def field_guard(%Field{name: name, spec: spec, optional?: true}) do

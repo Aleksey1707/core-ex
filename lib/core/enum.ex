@@ -100,7 +100,6 @@ defmodule Core.Enum do
       @spec dump(t() | nil) :: String.t() | nil
 
       def dump(nil), do: nil
-
       def dump(value) when value in @enum_values, do: Atom.to_string(value)
 
       if codes do

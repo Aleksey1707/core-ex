@@ -258,7 +258,6 @@ defmodule Core.Error do
   defp validate_message!(:app, _fields), do: :ok
 
   defp validate_errors!([]), do: raise(ArgumentError, "множество ошибок не может быть пустым")
-
   defp validate_errors!([_ | _] = errors), do: Enum.each(errors, &validate_element!/1)
 
   defp validate_element!(%__MODULE__{errors: []}), do: :ok

@@ -165,7 +165,6 @@ defmodule Core.Codec.Facade do
   @spec plugins!(term()) :: [module()]
 
   def plugins!(plugins) when is_list(plugins), do: plugins ++ [Core.Es.Personal.Event.Codec]
-
   def plugins!(_plugins), do: raise(CompileError, description: "plugins: ожидается список модулей")
 
   @doc """

@@ -75,11 +75,8 @@ defmodule Core.Repo do
   @spec expand_only(:full | :permanent | :read | [atom()]) :: [atom()]
 
   def expand_only(:full), do: @full_methods
-
   def expand_only(:permanent), do: @permanent_methods
-
   def expand_only(:read), do: @read_methods
-
   def expand_only(list) when is_list(list), do: list
 
   def expand_only(other) do
@@ -121,7 +118,6 @@ defmodule Core.Repo do
   end
 
   defp item_type([], _opts, _only), do: quote(do: struct())
-
   defp item_type([:entity], opts, _only), do: remote_type(opts, :entity)
 
   defp item_type([:view], opts, only) do

@@ -414,7 +414,6 @@ defmodule Core.Mq.PromEx do
   end
 
   defp lags(false, _info, _now), do: %{messages: 0, seconds: 0}
-
   defp lags(true, info, now), do: %{messages: lag_messages(info), seconds: lag_seconds(info, now)}
 
   defp lag_messages(%{high_wm_offset: high_wm, committed_offset: committed})
@@ -424,7 +423,6 @@ defmodule Core.Mq.PromEx do
   defp lag_messages(_info), do: nil
 
   defp lag_seconds(%{committed_ts: ts}, now) when is_integer(ts), do: (now - ts) / 1_000
-
   defp lag_seconds(_info, _now), do: nil
 
   defp emit_kafka_reader_group({{component, topic}, samples}) do

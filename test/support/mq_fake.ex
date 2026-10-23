@@ -56,7 +56,6 @@ defmodule Core.MqFake do
     @spec published(handle()) :: [Message.t()]
 
     def published(name) when is_atom(name), do: published(%__MODULE__{agent: name})
-
     def published(%__MODULE__{agent: agent}), do: Agent.get(agent, &Enum.reverse/1)
 
     @doc "Тела опубликованных сообщений."
@@ -163,7 +162,6 @@ defmodule Core.MqFake do
     @spec pending(handle()) :: non_neg_integer()
 
     def pending(name) when is_atom(name), do: pending(%__MODULE__{agent: name})
-
     def pending(%__MODULE__{agent: agent}), do: Agent.get(agent, &length/1)
 
     @doc false

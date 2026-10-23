@@ -83,7 +83,6 @@ defmodule Core.EsFixture.Account do
     do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
 
   def decide(%Cmd.Check{}, %__MODULE__{}), do: {:ok, []}
-
   def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
@@ -100,7 +99,6 @@ defmodule Core.EsFixture.Account do
     do: {:ok, [Event.HolderSet.draft(Event.HolderSet.Payload.new(holder))]}
 
   def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
-
   def decide(%Cmd.Close{}, %__MODULE__{status: :frozen}), do: {:ok, [Event.Closed.draft()]}
 
   # Closed решается по состоянию после Frozen: промежуточное событие сворачивается в той же команде.
@@ -128,11 +126,8 @@ defmodule Core.EsFixture.Account do
     do: %{state | name: payload.name, status: :open}
 
   def evolve(state, %Event.Renamed{payload: payload}), do: %{state | name: payload.name}
-
   def evolve(state, %Event.HolderSet{payload: payload}), do: %{state | holder: payload.holder}
-
   def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
-
   def evolve(state, %Event.Closed{}), do: %{state | status: :closed}
 
   # Тип удалён: событие больше не пишется, записанное читается и состояние не меняет.

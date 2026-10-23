@@ -177,11 +177,8 @@ defmodule Core.KafkaFake do
 
   @impl true
   def handle_call({:get_metadata, [_topic]}, _from, state), do: {:reply, {:ok, %{topics: []}}, state}
-
   def handle_call({:get_metadata, {:all, _topics}}, _from, state), do: {:reply, {:ok, %{topics: []}}, state}
-
   def handle_call(:get_workers_table, _from, state), do: {:reply, {:ok, state.table}, state}
-
   def handle_call(:get_consumers_sup_pid, _from, state), do: {:reply, {:error, :unknown_topic_or_partition}, state}
 
   # Остановка и новый старт консьюмеров топика одним шагом: `:brod.start_consumer/3` следом

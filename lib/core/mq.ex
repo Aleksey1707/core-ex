@@ -42,7 +42,6 @@ defmodule Core.Mq do
     @spec cast(term()) :: Result.t(binary(), {:invalid_key, String.t()})
 
     def cast(value) when is_binary(value) and byte_size(value) > 0, do: {:ok, value}
-
     def cast(_value), do: {:error, {:invalid_key, "ожидаются непустые байты"}}
   end
 

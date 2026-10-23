@@ -33,21 +33,15 @@ defmodule Core.Outbox do
   @spec topics_overlap?(topics_filter(), topics_filter()) :: boolean()
 
   def topics_overlap?(:all, other), do: not empty_filter?(other)
-
   def topics_overlap?(other, :all), do: not empty_filter?(other)
-
   def topics_overlap?({:only, a}, {:only, b}), do: Enum.any?(a, &(&1 in b))
-
   def topics_overlap?({:only, a}, {:except, b}), do: Enum.any?(a, &(&1 not in b))
-
   def topics_overlap?({:except, b}, {:only, a}), do: Enum.any?(a, &(&1 not in b))
-
   def topics_overlap?({:except, _}, {:except, _}), do: true
 
   # ---
 
   defp empty_filter?({:only, []}), do: true
-
   defp empty_filter?(_filter), do: false
 
   defmodule Status do

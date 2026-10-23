@@ -153,11 +153,9 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   # ---
 
   defp dlq_opts(nil), do: []
-
   defp dlq_opts(%{module: module, name: name}), do: [dlq_writer: module, dlq_handle: name]
 
   defp dlq_children(nil), do: []
-
   defp dlq_children(dlq_writer), do: [child(dlq_writer)]
 
   defp topic_children(%{reader: reader, subscriber: subscriber}, dlq_opts) do
@@ -198,7 +196,6 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   # ---
 
   defp dlq_items(nil, _component), do: []
-
   defp dlq_items(%{name: name}, component), do: [%{component: "mq_dlq_writer:#{component}", name: name}]
 
   defp topic_items(%{subscriber: subscriber} = topic, component) do
@@ -284,7 +281,6 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   end
 
   defp dlq_writer!(nil), do: nil
-
   defp dlq_writer!(spec), do: StartOpts.process!(@label, :dlq_writer, spec)
 
   defp topics!(topics) do

@@ -232,6 +232,5 @@ defmodule Core.Mq.Stream.Codec do
     do: %{position: position, token: token}
 
   defp redact(value) when is_binary(value), do: {:redacted, byte_size(value)}
-
   defp redact(_value), do: :redacted
 end

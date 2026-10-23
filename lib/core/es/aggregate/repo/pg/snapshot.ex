@@ -239,7 +239,6 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   def write(cfg, states)
 
   def write(_cfg, []), do: :ok
-
   def write(cfg, [_ | _] = states), do: AfterCommit.register(fn -> upsert(cfg, states) end)
 
   # ---

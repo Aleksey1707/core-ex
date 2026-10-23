@@ -307,7 +307,6 @@ defmodule Core.Outbox.Poller do
   # следующую же пачку. Без отдельного исхода цикл планировался бы как `:processed` —
   # `schedule(0)`, и недоступный брокер сжигал бы `max_attempts` за миллисекунды.
   defp cycle_outcome(0, 0), do: :processed
-
   defp cycle_outcome(_retry, _failed), do: :retry
 
   defp release_reserved(records, %__MODULE__{context: context} = state) do

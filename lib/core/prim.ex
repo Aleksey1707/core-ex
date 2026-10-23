@@ -355,7 +355,6 @@ defmodule Core.Prim do
   # Обёртке, которой для cast нужны опции (байтовая отсечка `Prim.String`), передаётся
   # `fun/2`; остальным хватает `fun/1`.
   def run_cast(fun, raw, opts) when is_function(fun, 2), do: normalize_ok(fun.(raw, opts))
-
   def run_cast(fun, raw, _opts) when is_function(fun, 1), do: normalize_ok(fun.(raw))
 
   @doc false

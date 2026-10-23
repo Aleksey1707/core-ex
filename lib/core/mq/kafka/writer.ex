@@ -123,7 +123,6 @@ if Code.ensure_loaded?(:brod) do
          do: {:error_code, code}
 
     defp normalize_brod_reason(reason) when is_atom(reason) or is_binary(reason), do: reason
-
     defp normalize_brod_reason(reason), do: inspect(reason)
 
     defp kafka_error(reason) do

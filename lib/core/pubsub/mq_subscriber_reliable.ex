@@ -337,7 +337,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp settle(state, raw, {:retry, error}), do: fail_attempt(state, raw, error)
-
   defp settle(state, raw, {:reject, error}), do: reject(state, raw, error)
 
   defp succeed(state) do

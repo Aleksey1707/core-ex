@@ -110,6 +110,5 @@ defmodule Core.Prim.String do
   end
 
   defp trim(value, true), do: String.trim(value)
-
   defp trim(value, false), do: value
 end

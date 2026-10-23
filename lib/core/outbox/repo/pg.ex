@@ -270,7 +270,6 @@ defmodule Core.Outbox.Repo.Pg do
   end
 
   defp apply_topics_filter(query, :all), do: query
-
   defp apply_topics_filter(query, {:only, []}), do: from(r in query, where: false)
 
   defp apply_topics_filter(query, {:only, topics}) when is_list(topics) do
@@ -412,11 +411,9 @@ defmodule Core.Outbox.Repo.Pg do
   end
 
   defp fence(query, nil), do: from(r in query, where: is_nil(r.lease_id))
-
   defp fence(query, lease), do: from(r in query, where: r.lease_id == ^lease)
 
   defp dump_lease(%Record{lease_id: nil}), do: nil
-
   defp dump_lease(%Record{lease_id: lease_id}), do: Config.codec().dump(lease_id)
 
   defp dump_id(%Record{id: id}), do: Config.codec().dump(id)

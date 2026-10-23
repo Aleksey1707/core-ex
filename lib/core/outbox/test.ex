@@ -251,7 +251,6 @@ defmodule Core.Outbox.Test do
   @spec dead_letters(GenServer.server()) :: [DeadLetter.t()]
 
   def dead_letters(owner) when owner == self(), do: state().dead_letters
-
   def dead_letters(reactor), do: GenServer.call(reactor, :dead_letters, @call_timeout_ms)
 
   # ===== тишина =====
@@ -341,7 +340,6 @@ defmodule Core.Outbox.Test do
   end
 
   defp error_text(nil), do: "—"
-
   defp error_text(%Error{} = error), do: error.message
 
   # ===== реактор =====
