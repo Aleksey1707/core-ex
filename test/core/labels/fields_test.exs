@@ -1,6 +1,7 @@
 defmodule Core.Labels.FieldsTest do
   use ExUnit.Case, async: true
 
+  alias Core.Codec.Field
   alias Core.Labels.Fields
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Event.Linked
@@ -76,6 +77,83 @@ defmodule Core.Labels.FieldsTest do
 
     test "map'а с id в ключах — подпись поля" do
       assert {[:limits], "Лимиты"} in Fields.paths(Linked.Payload)
+    end
+  end
+
+  describe "declare!/3 — разбор по объявлению модуля" do
+    @where "Labels.Fields X"
+
+    test "labels: у нагрузки — спека видимых полей из нагрузки" do
+      payload = Field.normalize!([name: [prim: Name], note: [type: :string]], :payload, "нагрузка")
+
+      assert Fields.declare!({:payload, payload}, [labels: [name: "Название", note: :hidden]], @where) == %{
+               specs: [name: {:prim, Name}, note: {:type, :string}],
+               fields: [name: "Название", note: :hidden],
+               change: nil
+             }
+    end
+
+    test "fields: у struct'а — спека видимых полей из fields:" do
+      declared = Fields.declare!(:struct, [fields: [city: [prim: Name]], labels: [city: "Город"]], @where)
+
+      assert declared.specs == [city: {:prim, Name}]
+      assert declared.fields == [city: "Город"]
+    end
+
+    test "спека и у нагрузки, и в fields: — CompileError" do
+      payload = Field.normalize!([name: [prim: Name]], :payload, "нагрузка")
+
+      assert_raise CompileError, ~r/^Labels.Fields X: спека поля и у нагрузки события, и в `fields:`/, fn ->
+        Fields.declare!({:payload, payload}, [fields: [name: [prim: Name]], labels: [name: "Название"]], @where)
+      end
+    end
+
+    test "labels: без нагрузки и без fields: — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields X: не нагрузка/, fn ->
+        Fields.declare!(:struct, [labels: [city: "Город"]], @where)
+      end
+    end
+
+    test "change: у Core.Es.ValueChanged — вид значения из его type:" do
+      assert Fields.declare!({:change, [type: Name, nilable: false]}, [change: "Название"], @where) ==
+               %{specs: [], fields: [], change: {"Название", {:prim, Name}}}
+    end
+
+    test "change: у ручного struct'а с value: — вид значения из value:" do
+      text = &Atom.to_string/1
+
+      assert Fields.declare!(:struct, [change: "Метки", value: [list: [text: text]]], @where).change ==
+               {"Метки", {:list, {:text, text}}}
+    end
+
+    test "change: у ручного struct'а без value: — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields X: ручной struct изменения без `value:`/, fn ->
+        Fields.declare!(:struct, [change: "Метки"], @where)
+      end
+    end
+
+    test "change: до defstruct — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields X: `use Core.Labels.Fields, change:` подключается после/, fn ->
+        Fields.declare!(:none, [change: "Метки"], @where)
+      end
+    end
+
+    test "value: без change: — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields X: `value:` без `change:`/, fn ->
+        Fields.declare!(:struct, [labels: [city: "Город"], value: [prim: Name]], @where)
+      end
+    end
+
+    test "labels: и change: вместе — CompileError" do
+      assert_raise CompileError, "Labels.Fields X: одна из опций `labels:` / `change:`, задано обе", fn ->
+        Fields.declare!(:struct, [labels: [city: "Город"], change: "Город"], @where)
+      end
+    end
+
+    test "ни labels:, ни change: — CompileError" do
+      assert_raise CompileError, "Labels.Fields X: одна из опций `labels:` / `change:`, задано ни одной", fn ->
+        Fields.declare!(:struct, [], @where)
+      end
     end
   end
 

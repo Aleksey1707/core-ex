@@ -322,4 +322,31 @@ defmodule Core.EnumTest do
       end
     end
   end
+
+  describe "declared_values/1" do
+    test "значения модуля, который ещё собирается; модуль без use Core.Enum — nil" do
+      defmodule Declared do
+        @moduledoc false
+
+        use Core.Enum,
+          name: "Объявлен",
+          values: ~w(new done)a
+
+        @declared Core.Enum.declared_values(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule Undeclared do
+        @moduledoc false
+
+        @declared Core.Enum.declared_values(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert Declared.declared() == ~w(new done)a
+      assert Undeclared.declared() == nil
+    end
+  end
 end

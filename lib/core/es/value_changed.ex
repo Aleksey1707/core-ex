@@ -12,8 +12,9 @@ defmodule Core.Es.ValueChanged do
   клаузы нагрузки события с такой нагрузкой — map
   `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
 
-  Макрос занимает в модуле имя `@es_value_changed`: по нему `use Core.Labels.Fields, change:` ниже
-  берёт вид значения изменения.
+  Макрос занимает в модуле имя `@es_value_changed`: `type:` и `nilable:` модуля, который ещё
+  собирается, отдаёт `declared/1` — по нему `use Core.Labels.Fields, change:` ниже берёт вид значения
+  изменения.
   """
 
   alias Core.Codec.Field
@@ -75,6 +76,11 @@ defmodule Core.Es.ValueChanged do
   @spec optional_keys() :: [atom()]
 
   def optional_keys, do: @optional_keys
+
+  @doc false
+  @spec declared(module()) :: [type: module(), nilable: boolean()] | nil
+
+  def declared(module) when is_atom(module), do: Module.get_attribute(module, :es_value_changed)
 
   @doc """
   Спека полей `old_value` / `new_value` по типу значения: Prim → `prim:`, `Core.Enum` → `enum:`,

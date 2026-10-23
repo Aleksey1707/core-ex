@@ -69,42 +69,42 @@ defmodule Core.Labels.Values do
 
   def optional_keys, do: @optional_keys
 
-  # Значения Enum известны уже при раскрытии `use`: `use Core.Enum` выше положил их в атрибут.
+  # Значения Enum известны уже при раскрытии `use`: `use Core.Enum` выше отдаёт их `Core.Enum.declared_values/1`.
   @doc false
   @spec labels!(module(), term()) :: [{atom(), String.t()}]
 
-  def labels!(module, labels) when is_atom(module) do
-    values = values!(module)
-    where = "#{where(module)}: labels"
+  def labels!(module, labels) when is_atom(module),
+    do: labels!(Core.Enum.declared_values(module), labels, "#{@label} #{inspect(module)}")
+
+  @doc false
+  @spec labels!([atom()] | nil, term(), String.t()) :: [{atom(), String.t()}]
+
+  def labels!(values, labels, where) when is_binary(where) do
+    values = values!(values, where)
+    labels_where = "#{where}: labels"
 
     labels =
-      for {value, text} <- Check.keyword!(labels, where), do: {value, Check.text!(text, "#{where}, значение #{value}")}
+      for {value, text} <- Check.keyword!(labels, labels_where),
+          do: {value, Check.text!(text, "#{labels_where}, значение #{value}")}
 
     labelled = Keyword.keys(labels)
 
-    ensure_none!(module, values -- labelled, "значения без подписи")
-    ensure_none!(module, labelled -- values, "подписи значений вне Enum")
+    ensure_none!(values -- labelled, "значения без подписи", where)
+    ensure_none!(labelled -- values, "подписи значений вне Enum", where)
 
     for value <- values, do: {value, Keyword.fetch!(labels, value)}
   end
 
   # ---
 
-  defp values!(module) do
-    case Module.get_attribute(module, :enum_values) do
-      [_ | _] = values ->
-        values
+  defp values!([_ | _] = values, _where), do: values
 
-      _none ->
-        raise CompileError,
-          description: "#{where(module)}: не Enum: `use Core.Labels.Values` подключается после `use Core.Enum`"
-    end
+  defp values!(_none, where) do
+    raise CompileError, description: "#{where}: не Enum: `use Core.Labels.Values` подключается после `use Core.Enum`"
   end
 
-  defp ensure_none!(_module, [], _message), do: :ok
+  defp ensure_none!([], _message, _where), do: :ok
 
-  defp ensure_none!(module, values, message),
-    do: raise(CompileError, description: "#{where(module)}: #{message}: #{inspect(values)}")
-
-  defp where(module), do: "#{@label} #{inspect(module)}"
+  defp ensure_none!(values, message, where),
+    do: raise(CompileError, description: "#{where}: #{message}: #{inspect(values)}")
 end

@@ -1,6 +1,6 @@
 # 06: Labels — явный interface чтения чужих объявлений
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 03 — Чтение подписей (реализация: тот же `fields.ex`)
 

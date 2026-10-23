@@ -204,6 +204,11 @@ defmodule Core.Prim do
       function_exported?(mod, :value, 1)
   end
 
+  @doc false
+  @spec declared?(module()) :: boolean()
+
+  def declared?(mod) when is_atom(mod), do: Module.defines?(mod, {:__domain_kind__, 0})
+
   @doc "Prim объявлен через `Prim.Compose` (есть `__domain_base__/0`)."
   @spec composed?(module()) :: boolean()
 

@@ -43,6 +43,13 @@ defmodule Core.Labels.Text do
         "Labels.Text"
       )
 
+      Core.Labels.Check.prim!(
+        Core.Prim.declared?(__MODULE__),
+        Core.Labels.ID.declared?(__MODULE__) or Core.Labels.Text.declared?(__MODULE__),
+        "Core.Labels.Text",
+        "Labels.Text #{inspect(__MODULE__)}"
+      )
+
       @label_text Core.Labels.Text.declare!(__MODULE__, Keyword.fetch!(opts, :with))
 
       @doc false
@@ -65,16 +72,18 @@ defmodule Core.Labels.Text do
   @doc false
   @spec declare!(module(), term()) :: (struct() -> String.t())
 
-  def declare!(module, fun) when is_atom(module) do
-    Check.prim!(module, "Core.Labels.Text", where(module))
-    Check.capture!(fun, 1, "#{where(module)}: with")
-  end
+  def declare!(module, fun) when is_atom(module), do: Check.capture!(fun, 1, "#{where(module)}: with")
 
   # ---
 
   defp where(module), do: "#{@label} #{inspect(module)}"
 
   # ===== интроспекция =====
+
+  @doc false
+  @spec declared?(module()) :: boolean()
+
+  def declared?(module) when is_atom(module), do: Module.defines?(module, {:__label_text__, 0})
 
   @doc "Функция текста Prim или `nil`, если Prim её не объявляет."
   @spec find(module()) :: (struct() -> String.t()) | nil

@@ -91,4 +91,28 @@ defmodule Core.Es.EventTest do
   test "draft/0 — черновик события без нагрузки: модуль события" do
     assert EmptyEvent.draft() == EmptyEvent
   end
+
+  describe "declared?/1" do
+    test "событие, которое ещё собирается, — да; модуль без use — нет" do
+      defmodule DeclaredEvent do
+        @moduledoc false
+        use Core.Es.Event, aggregate_id: AggID, by: ActorID, payload: nil
+
+        @declared Core.Es.Event.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule UndeclaredEvent do
+        @moduledoc false
+
+        @declared Core.Es.Event.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert DeclaredEvent.declared()
+      refute UndeclaredEvent.declared()
+    end
+  end
 end

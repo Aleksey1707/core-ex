@@ -10,6 +10,9 @@ defmodule Core.Enum do
   источник. Коды одного типа — все целые либо все непустые строки — и без повторов, иначе
   `CompileError`. `values/0` выводится из ключей карты и упорядочен по коду; дополнительно
   генерируются `codes/0`, `to_code/1`, `from_code/1` и `from_code!/1`.
+
+  Макрос занимает в модуле имя `@enum_values`: значения модуля, который ещё собирается, отдаёт
+  `declared_values/1` — по нему `use Core.Labels.Values` ниже берёт значения.
   """
 
   alias Core.Error
@@ -173,6 +176,11 @@ defmodule Core.Enum do
   @spec optional_keys() :: [atom()]
 
   def optional_keys, do: @optional_keys
+
+  @doc false
+  @spec declared_values(module()) :: [atom()] | nil
+
+  def declared_values(module) when is_atom(module), do: Module.get_attribute(module, :enum_values)
 
   @doc """
   Модуль объявлен через `use Core.Enum` (есть `values/0` и `name/0`).

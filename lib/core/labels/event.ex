@@ -82,7 +82,7 @@ defmodule Core.Labels.Event do
   @spec declaration!(module(), keyword()) :: {String.t(), String.t() | nil}
 
   def declaration!(module, opts) when is_atom(module) and is_list(opts) do
-    if not Module.defines?(module, {:__es_payload__, 0}) do
+    if not Core.Es.Event.declared?(module) do
       raise CompileError,
         description: "#{where(module)}: не событие: `use Core.Labels.Event` подключается после `use Core.Es.Event`"
     end

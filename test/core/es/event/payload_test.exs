@@ -125,6 +125,27 @@ defmodule Core.Es.Event.PayloadTest do
     end
   end
 
+  describe "declared_fields/1" do
+    test "поля спеки нагрузки, которая ещё собирается; модуль без use — nil" do
+      defmodule DeclaredFields do
+        use Core.Es.Event.Payload, fields: [name: [prim: Account.Name]]
+
+        @declared Core.Es.Event.Payload.declared_fields(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule UndeclaredFields do
+        @declared Core.Es.Event.Payload.declared_fields(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert [%Core.Codec.Field{name: :name, spec: {:prim, Account.Name}}] = DeclaredFields.declared()
+      assert UndeclaredFields.declared() == nil
+    end
+  end
+
   defp event(mod, payload) do
     mod.new(payload, Account.ID.new(), Version.new!(3), UserID.new(), Core.Es.Event.At.new!(@at))
   end

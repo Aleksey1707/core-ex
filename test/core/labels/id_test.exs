@@ -116,6 +116,30 @@ defmodule Core.Labels.IDTest do
     end
   end
 
+  describe "declared?/1" do
+    test "Prim с use Core.Labels.ID, который ещё собирается, — да; Prim без него — нет" do
+      defmodule DeclaredID do
+        use Core.Prim.UUID, name: "Объявлен", version: 7
+        use Core.Labels.ID, kind: :id
+
+        @declared Core.Labels.ID.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule UndeclaredID do
+        use Core.Prim.UUID, name: "Не объявлен", version: 7
+
+        @declared Core.Labels.ID.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert DeclaredID.declared()
+      refute UndeclaredID.declared()
+    end
+  end
+
   # ---
 
   defp compile_id(name, opts) do

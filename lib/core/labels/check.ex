@@ -39,15 +39,19 @@ defmodule Core.Labels.Check do
   @doc """
   Проверить хост объявления вида значения (`Core.Labels.ID`, `Core.Labels.Text`): Prim, объявленный
   выше, без второго такого объявления — значение выходит в сведения одним способом.
-  """
-  @spec prim!(module(), String.t(), String.t()) :: :ok
 
-  def prim!(module, macro, where) when is_atom(module) and is_binary(macro) and is_binary(where) do
+  Признаки хоста читает `use` у владельцев: `prim?` — `Core.Prim.declared?/1`, `kinded?` —
+  `Core.Labels.ID.declared?/1` или `Core.Labels.Text.declared?/1`.
+  """
+  @spec prim!(boolean(), boolean(), String.t(), String.t()) :: :ok
+
+  def prim!(prim?, kinded?, macro, where)
+      when is_boolean(prim?) and is_boolean(kinded?) and is_binary(macro) and is_binary(where) do
     cond do
-      not Module.defines?(module, {:__domain_kind__, 0}) ->
+      not prim? ->
         raise CompileError, description: "#{where}: не Prim: `use #{macro}` подключается после `use Core.Prim.*`"
 
-      Module.defines?(module, {:__label_id__, 0}) or Module.defines?(module, {:__label_text__, 0}) ->
+      kinded? ->
         raise CompileError,
           description:
             "#{where}: `use Core.Labels.ID` и `use Core.Labels.Text` вместе — " <>

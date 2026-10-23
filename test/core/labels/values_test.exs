@@ -1,6 +1,7 @@
 defmodule Core.Labels.ValuesTest do
   use ExUnit.Case, async: true
 
+  alias Core.Labels.Values
   alias Core.LabelsFixture.Status
 
   test "label/1 — подпись значения" do
@@ -15,6 +16,31 @@ defmodule Core.Labels.ValuesTest do
   test "labels/0 — пары в порядке values/0, а не labels:" do
     assert Status.labels() == [draft: "Черновик", active: "Активна", archived: "В архиве"]
     assert Keyword.keys(Status.labels()) == Status.values()
+  end
+
+  describe "labels!/3 — разбор по значениям Enum" do
+    test "пары в порядке значений Enum, а не labels:" do
+      assert Values.labels!(~w(new done)a, [done: "Готов", new: "Новый"], "Labels.Values X") ==
+               [new: "Новый", done: "Готов"]
+    end
+
+    test "значение без подписи — CompileError" do
+      assert_raise CompileError, "Labels.Values X: значения без подписи: [:done]", fn ->
+        Values.labels!(~w(new done)a, [new: "Новый"], "Labels.Values X")
+      end
+    end
+
+    test "подпись вне Enum — CompileError" do
+      assert_raise CompileError, "Labels.Values X: подписи значений вне Enum: [:lost]", fn ->
+        Values.labels!(~w(new)a, [new: "Новый", lost: "Потерян"], "Labels.Values X")
+      end
+    end
+
+    test "не Enum — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Values X: не Enum: `use Core.Labels.Values` подключается после/, fn ->
+        Values.labels!(nil, [new: "Новый"], "Labels.Values X")
+      end
+    end
   end
 
   describe "отказ сборки" do

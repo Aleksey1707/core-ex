@@ -333,4 +333,25 @@ defmodule Core.PrimTest do
       assert {:ok, _} = WithArityTwoValidator.new("abc")
     end
   end
+
+  describe "declared?/1" do
+    test "Prim, который ещё собирается, — да; модуль без use — нет" do
+      defmodule DeclaredPrim do
+        use Core.Prim.String, name: "Объявлен", max_len: 10
+
+        @declared Core.Prim.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule UndeclaredPrim do
+        @declared Core.Prim.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert DeclaredPrim.declared()
+      refute UndeclaredPrim.declared()
+    end
+  end
 end

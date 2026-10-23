@@ -33,8 +33,6 @@ defmodule Core.Labels.ID do
   Макрос занимает в Prim имя `__label_id__/0`.
   """
 
-  alias Core.Labels.Check
-
   @typedoc "Вид id в сведениях."
   @type kind :: :ref | :user | :id
 
@@ -56,6 +54,13 @@ defmodule Core.Labels.ID do
         Core.Labels.ID.required_keys(),
         Core.Labels.ID.optional_keys(),
         "Labels.ID"
+      )
+
+      Core.Labels.Check.prim!(
+        Core.Prim.declared?(__MODULE__),
+        Core.Labels.ID.declared?(__MODULE__) or Core.Labels.Text.declared?(__MODULE__),
+        "Core.Labels.ID",
+        "Labels.ID #{inspect(__MODULE__)}"
       )
 
       @label_id Core.Labels.ID.declare!(__MODULE__, opts)
@@ -80,10 +85,8 @@ defmodule Core.Labels.ID do
   @doc false
   @spec declare!(module(), keyword()) :: t()
 
-  def declare!(module, opts) when is_atom(module) and is_list(opts) do
-    Check.prim!(module, "Core.Labels.ID", where(module))
-    kind!(module, Keyword.fetch!(opts, :kind), Keyword.get(opts, :entity), Keyword.get(opts, :resolver))
-  end
+  def declare!(module, opts) when is_atom(module) and is_list(opts),
+    do: kind!(module, Keyword.fetch!(opts, :kind), Keyword.get(opts, :entity), Keyword.get(opts, :resolver))
 
   # ---
 
@@ -124,6 +127,11 @@ defmodule Core.Labels.ID do
   defp where(module), do: "#{@label} #{inspect(module)}"
 
   # ===== интроспекция =====
+
+  @doc false
+  @spec declared?(module()) :: boolean()
+
+  def declared?(module) when is_atom(module), do: Module.defines?(module, {:__label_id__, 0})
 
   @doc "Объявление вида id у Prim или `nil`, если Prim его не несёт."
   @spec find(module()) :: t() | nil

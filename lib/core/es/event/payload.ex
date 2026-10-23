@@ -42,7 +42,8 @@ defmodule Core.Es.Event.Payload do
   поштучных блоков значения поля `Core.Codec.Plugin.Fields`: на месте поля с `subject:` — маркер
   `{"$pd": …}` (ADR-0073, ADR-0074). В фасаде нагрузка не регистрируется.
 
-  Макрос занимает в модуле нагрузки имя `@es_payload_fields`.
+  Макрос занимает в модуле нагрузки имя `@es_payload_fields`: поля спеки нагрузки, которая ещё
+  собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей.
   """
 
   alias Core.Codec.Field
@@ -85,6 +86,11 @@ defmodule Core.Es.Event.Payload do
           do: unquote(Core.Codec.Plugin.Fields.new_body(__MODULE__, @es_payload_fields))
     end
   end
+
+  @doc false
+  @spec declared_fields(module()) :: [Field.t()] | nil
+
+  def declared_fields(module) when is_atom(module), do: Module.get_attribute(module, :es_payload_fields)
 
   # Грамматику проверяет `Core.Codec.Field`, смысл `subject:` — эта функция: ПДн без субъекта ушло бы
   # в неизменяемую историю открытым (ADR-0073).

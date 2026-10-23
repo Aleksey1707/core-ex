@@ -70,4 +70,29 @@ defmodule Core.Es.ValueChangedTest do
     assert Sample.__es_value_changed__() == [type: SampleName, nilable: false]
     assert NilableSample.__es_value_changed__() == [type: SamplePrice, nilable: true]
   end
+
+  describe "declared/1" do
+    test "type: и nilable: модуля, который ещё собирается; модуль без use — nil" do
+      defmodule DeclaredChange do
+        @moduledoc false
+        use Core.Es.ValueChanged, type: Core.Es.ValueChangedTest.SampleName, nilable: true
+
+        @declared Core.Es.ValueChanged.declared(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule UndeclaredChange do
+        @moduledoc false
+        defstruct [:old_value, :new_value]
+
+        @declared Core.Es.ValueChanged.declared(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert DeclaredChange.declared() == [type: SampleName, nilable: true]
+      assert UndeclaredChange.declared() == nil
+    end
+  end
 end

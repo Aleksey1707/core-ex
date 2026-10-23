@@ -249,6 +249,11 @@ defmodule Core.Es.Event do
 
   def optional_keys, do: @optional_keys
 
+  @doc false
+  @spec declared?(module()) :: boolean()
+
+  def declared?(module) when is_atom(module), do: Module.defines?(module, {:__es_payload__, 0})
+
   # `subject: :aggregate_id` у поля нагрузки по полям требует UUID-Prim агрегата: идентификатор
   # субъекта — UUID (ADR-0073). Нагрузку другого вида проверять нечем — `:ok`.
   @doc false

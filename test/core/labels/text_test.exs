@@ -63,6 +63,30 @@ defmodule Core.Labels.TextTest do
     end
   end
 
+  describe "declared?/1" do
+    test "Prim с use Core.Labels.Text, который ещё собирается, — да; Prim без него — нет" do
+      defmodule DeclaredText do
+        use Core.Prim.String, name: "Объявлен", max_len: 10
+        use Core.Labels.Text, with: &Core.LabelsFixture.Texts.unit/1
+
+        @declared Core.Labels.Text.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      defmodule UndeclaredText do
+        use Core.Prim.String, name: "Не объявлен", max_len: 10
+
+        @declared Core.Labels.Text.declared?(__MODULE__)
+
+        def declared, do: @declared
+      end
+
+      assert DeclaredText.declared()
+      refute UndeclaredText.declared()
+    end
+  end
+
   # ---
 
   defp compile_text(name, opts) do
