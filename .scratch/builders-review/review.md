@@ -24,17 +24,24 @@ Status: needs-triage
 | 5 | `05-web-event-schema.md` | Web.Event: схема функциями, поля одним списком | Strong | не меняется |
 | 6 | `06-labels-foreign-declarations.md` | Labels: явный interface чтения чужих объявлений | Worth exploring | не меняется |
 | 7 | `07-aggregate-wiring.md` | Связи агрегата вычисляются один раз | Strong | ломается |
+| 7 | `13-aggregate-wiring-checks.md` | Сверка `id:` / `aggregate:` репозитория (из 07) | Strong | не меняется |
 | 7 | `08-event-family-id-by.md` | Событие: `aggregate_id`/`by` на семейство | Worth exploring | ломается |
+| 7 | `14-event-template-one-branch.md` | Шаблон события: одна ветка `quote` (из 08) | Worth exploring | не меняется |
 | 8 | `09-facade-es-knowledge.md` | Фасад Codec перестаёт знать про события | Worth exploring | не меняется |
 | 8 | `10-key-reservation-completeness.md` | Полнота `reservation/1` — в модуле ключа | Worth exploring | не меняется |
-| — | `11-field-spec-shared-syntax.md` | Общий синтаксис спеки для View и плагина | Worth exploring | не меняется |
-| — | `12-speculative.md` | View по kind, режимы разбора опций, рефлексия redump | Speculative | — |
+| — | `11-field-spec-shared-syntax.md` | Общий синтаксис спеки для View и плагина — wontfix | Worth exploring | не меняется |
+| — | `15-field-check-shared-rules.md` | Общие правила спеки полей в одном месте (из 11) | Worth exploring | не меняется |
+| — | `12-speculative.md` | View по kind, режимы разбора опций, рефлексия redump — разнесён | Speculative | — |
+| — | `16-es-cmd-marker.md` | `Es.Cmd`: снять маркер `__es_cmd__/0` (из 12) | Strong | не меняется |
+| — | `17-use-opts-parsing-mode.md` | Опции `use`: один режим разбора (из 12) | Worth exploring | решается |
+| — | `18-plugin-manual-clauses-module.md` | Разбор ручных клауз плагина — свой module (из 12) | Speculative | не меняется |
 
 Зависимости:
 - 03 опирается на 01 и на `.scratch/codec-field/` (struct поля).
 - 06 лучше делать после 03.
-- 07 и 08 пересекаются: их обсуждают вместе, а ломающие изменения идут одним выпуском.
-- 11 — после `.scratch/codec-field/`.
+- 07 и 08 пересекаются: их обсуждают вместе, а ломающие изменения идут одним выпуском. Карта: `.scratch/aggregate-wiring/map.md` (поглотила и 10).
+- 15 — после 01.
+- 17 — после 07 и 14.
 
 ## Смотрел, трения нет
 
