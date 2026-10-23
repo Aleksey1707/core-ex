@@ -55,7 +55,7 @@ defmodule Core.Labels.CompletenessCase do
   alias Core.Helper
   alias Core.Labels.Fields
   alias Core.Labels.ID
-  alias Core.Labels.Text
+  alias Core.Labels.Kind
   alias Core.Result
 
   @label "Labels.CompletenessCase"
@@ -193,7 +193,7 @@ defmodule Core.Labels.CompletenessCase do
   def check_fields(modules) when is_list(modules) do
     undecided =
       for {:struct, owner, field, module} <- walk(modules).places,
-          not exports?(module, :__label_fields__),
+          not Fields.labelled?(module),
           do: {owner, field, module}
 
     result(undecided: undecided)
@@ -231,7 +231,7 @@ defmodule Core.Labels.CompletenessCase do
       for plugin <- modules,
           exports?(plugin, :__codec_variants__),
           {variant, address, fields} when is_list(fields) <- plugin.__codec_variants__(),
-          exports?(variant, :__label_fields__),
+          Fields.labelled?(variant),
           gap <- diverged(variant, disc(address), fields),
           do: gap
 
@@ -289,38 +289,25 @@ defmodule Core.Labels.CompletenessCase do
   defp place({places, seen}, place), do: {[place | places], seen}
 
   defp descend({places, seen} = acc, module, families) do
-    if MapSet.member?(seen, module) or not exports?(module, :__label_fields__) do
+    if MapSet.member?(seen, module) or not Fields.labelled?(module) do
       acc
     else
       module
-      |> specs()
+      |> Fields.visible()
       |> Enum.reduce({places, MapSet.put(seen, module)}, fn {name, spec}, acc ->
         visit(module, name, spec, acc, families)
       end)
     end
   end
 
-  defp specs(module) do
-    case Fields.change(module) do
-      nil -> Fields.specs(module)
-      {_label, spec} -> [old_value: spec, new_value: spec]
-    end
-  end
-
   defp user?(module), do: match?(%{kind: :user}, ID.find(module))
 
-  defp unkinded?(module) do
-    cond do
-      ID.find(module) != nil or Text.find(module) != nil -> false
-      Core.Prim.composed?(module) -> unkinded?(module.__domain_base__())
-      true -> module.__domain_kind__() == :uuid
-    end
-  end
+  defp unkinded?(module), do: match?({:unkinded, _leaf}, Kind.of(module))
 
   defp diverged(variant, disc, fields) do
     plugin = Map.new(fields, fn %Field{name: name, spec: spec} -> {name, spec} end)
     labelled = Map.new(Fields.specs(variant))
-    hidden = for {name, :hidden} <- variant.__label_fields__(), do: name
+    hidden = for {name, :hidden} <- Fields.labels(variant), do: name
 
     for name <- Enum.uniq(Map.keys(plugin) ++ Map.keys(labelled)) -- [disc | hidden],
         Map.get(labelled, name) != Map.get(plugin, name),

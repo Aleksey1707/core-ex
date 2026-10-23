@@ -35,8 +35,7 @@ defmodule Core.Labels.Refs do
   alias Core.Context
   alias Core.Es
   alias Core.Labels.Fields
-  alias Core.Labels.ID
-  alias Core.Labels.Text
+  alias Core.Labels.Kind
   alias Core.Pagination
   alias Core.Result
 
@@ -76,8 +75,10 @@ defmodule Core.Labels.Refs do
       {{:fields, names}, acc} ->
         collect(Map.values(Map.take(struct, names)), acc)
 
-      {{:id, resolver}, {groups, roles}} ->
-        {Map.update(groups, resolver, MapSet.new([struct]), &MapSet.put(&1, struct)), roles}
+      {{:id, owner, resolver}, {groups, roles}} ->
+        id = Kind.owned(struct, owner)
+
+        {Map.update(groups, resolver, MapSet.new([id]), &MapSet.put(&1, id)), roles}
     end
   end
 
@@ -103,29 +104,21 @@ defmodule Core.Labels.Refs do
   defp classify(module) do
     cond do
       Core.Prim.prim?(module) -> prim_role(module)
-      labelled?(module) -> {:fields, visible_fields(module)}
+      Fields.labelled?(module) -> {:fields, visible_fields(module)}
       true -> :descend
     end
   end
 
-  # Композит без своего объявления выходит видом базы — спуск к ней.
+  # Композит без своего объявления выходит объявлением базы: ссылка — id владельца объявления.
   defp prim_role(module) do
-    case {ID.find(module), Text.find(module)} do
-      {%{resolver: nil}, nil} -> :skip
-      {%{resolver: resolver}, nil} -> {:id, resolver}
-      {nil, nil} -> if Core.Prim.composed?(module), do: :descend, else: :skip
-      {nil, _fun} -> :skip
+    case Kind.of(module) do
+      {:declared, _owner, %{resolver: nil}} -> :skip
+      {:declared, owner, %{resolver: resolver}} -> {:id, owner, resolver}
+      _other -> :skip
     end
   end
 
-  defp labelled?(module), do: Code.ensure_loaded?(module) and function_exported?(module, :__label_fields__, 0)
-
-  defp visible_fields(module) do
-    case Fields.change(module) do
-      nil -> for {name, spec} <- Fields.specs(module), not text?(spec), do: name
-      {_label, spec} -> if text?(spec), do: [], else: ~w(old_value new_value)a
-    end
-  end
+  defp visible_fields(module), do: for({name, spec} <- Fields.visible(module), not text?(spec), do: name)
 
   # Значение `text:` выходит в сведения текстом функции, а не ссылкой.
   defp text?({:text, _fun}), do: true

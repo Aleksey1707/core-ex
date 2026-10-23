@@ -55,8 +55,7 @@ defmodule Core.Labels.Details do
   alias Core.Es.Personal.Destroyed
   alias Core.Helper.FieldCheck
   alias Core.Labels.Fields
-  alias Core.Labels.ID
-  alias Core.Labels.Text
+  alias Core.Labels.Kind
 
   @typedoc "Вид значения сведения."
   @type kind :: :text | :number | :date | :datetime | :user | :ref | :group | :list | :destroyed
@@ -114,7 +113,7 @@ defmodule Core.Labels.Details do
   end
 
   defp fields_details(module, struct) do
-    labels = module.__label_fields__()
+    labels = Fields.labels(module)
 
     for {name, spec} <- Fields.specs(module),
         do: field_detail(Keyword.fetch!(labels, name), spec, Map.fetch!(struct, name))
@@ -157,29 +156,26 @@ defmodule Core.Labels.Details do
   defp shape({:type, type}), do: %{kind: type_kind(type)}
 
   defp prim_shape(module) do
-    case declaration(module) do
-      nil -> %{kind: plain_kind(module)}
-      {_owner, {:text, _fun}} -> %{kind: :text}
-      {_owner, %{kind: :id}} -> %{kind: :text}
-      {_owner, %{kind: :user}} -> %{kind: :user}
-      {_owner, %{kind: :ref, entity: entity}} -> %{kind: :ref, entity: entity}
+    case Kind.of(module) do
+      {:plain, kind} ->
+        %{kind: kind}
+
+      {:declared, _owner, {:text, _fun}} ->
+        %{kind: :text}
+
+      {:declared, _owner, %{kind: :id}} ->
+        %{kind: :text}
+
+      {:declared, _owner, %{kind: :user}} ->
+        %{kind: :user}
+
+      {:declared, _owner, %{kind: :ref, entity: entity}} ->
+        %{kind: :ref, entity: entity}
+
+      {:unkinded, leaf} ->
+        raise ArgumentError,
+              "#{inspect(leaf)}: id без вида в сведениях — `use Core.Labels.ID` после `use Core.Prim.UUID`"
     end
-  end
-
-  defp plain_kind(module) do
-    leaf = Core.Prim.leaf(module)
-
-    native_kind(leaf, leaf.__domain_kind__())
-  end
-
-  defp native_kind(_module, :string), do: :text
-  defp native_kind(_module, kind) when kind in ~w(integer decimal)a, do: :number
-  defp native_kind(_module, :date), do: :date
-  defp native_kind(_module, :datetime), do: :datetime
-
-  defp native_kind(module, :uuid) do
-    raise ArgumentError,
-          "#{inspect(module)}: id без вида в сведениях — `use Core.Labels.ID` после `use Core.Prim.UUID`"
   end
 
   for type <- FieldCheck.type_values(), kind = Keyword.fetch!(@type_kinds, type), not is_nil(kind) do
@@ -197,22 +193,10 @@ defmodule Core.Labels.Details do
   defp value(_spec, value), do: value
 
   defp prim_value(module, prim) do
-    case declaration(module) do
-      nil -> prim
-      {owner, {:text, fun}} -> fun.(declared(prim, owner))
-      {owner, _id} -> declared(prim, owner)
+    case Kind.of(module) do
+      {:plain, _kind} -> prim
+      {:declared, owner, {:text, fun}} -> fun.(Kind.owned(prim, owner))
+      {:declared, owner, _id} -> Kind.owned(prim, owner)
     end
   end
-
-  # Объявление Prim в сведениях — своё или базы композита — и Prim, который его несёт.
-  defp declaration(module) do
-    case {Text.find(module), ID.find(module)} do
-      {nil, nil} -> if Core.Prim.composed?(module), do: declaration(module.__domain_base__())
-      {fun, nil} -> {module, {:text, fun}}
-      {nil, id} -> {module, id}
-    end
-  end
-
-  defp declared(%owner{} = prim, owner), do: prim
-  defp declared(%_composite{value: base}, owner), do: declared(base, owner)
 end

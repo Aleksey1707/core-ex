@@ -310,18 +310,13 @@ defmodule Core.Labels.Fields do
 
     fields = Map.keys(module.__struct__()) -- [:__struct__]
 
-    visible =
-      case change(module) do
-        nil ->
-          ensure_labels!(env, fields)
-          specs(module)
+    case change(module) do
+      nil -> ensure_labels!(env, fields)
+      {_label, spec} -> ensure_change!(env, fields, spec)
+    end
 
-        {_label, spec} ->
-          ensure_change!(env, fields, spec)
-          [old_value: spec, new_value: spec]
-      end
-
-    labelled_maps = for {name, [_ | _]} <- module.__label_fields__(), do: name
+    visible = visible(module)
+    labelled_maps = for {name, [_ | _]} <- labels(module), do: name
     not_maps = for {name, spec} <- visible, name in labelled_maps, not map?(spec), do: name
     maps = for {name, {:type, :map}} <- visible, name not in labelled_maps, do: name
     map_lists = for {name, {:list, inner}} <- visible, map?(inner), do: name
@@ -344,7 +339,7 @@ defmodule Core.Labels.Fields do
 
   defp ensure_labels!(env, fields) do
     module = env.module
-    labels = module.__label_fields__()
+    labels = labels(module)
     labelled = Keyword.keys(labels)
 
     ensure_none!(env, fields -- labelled, "поля без подписи или `:hidden`")
@@ -375,12 +370,9 @@ defmodule Core.Labels.Fields do
   defp map?({:list, inner}), do: map?(inner)
   defp map?(_spec), do: false
 
-  defp unlabelled?({:entity, mod}), do: not exports?(mod, :__label_fields__)
+  defp unlabelled?({:entity, mod}), do: not labelled?(mod)
   defp unlabelled?({:list, inner}), do: unlabelled?(inner)
   defp unlabelled?(_spec), do: false
-
-  # `function_exported?/3` отвечает только про загруженный модуль, а собранный при сборке проекта не загружен.
-  defp exports?(mod, fun), do: match?({:module, _}, Code.ensure_compiled(mod)) and function_exported?(mod, fun, 0)
 
   defp ensure_none!(_env, [], _message), do: :ok
   defp ensure_none!(env, fields, message), do: fail!(env, "#{message}: #{inspect(fields)}")
@@ -400,9 +392,38 @@ defmodule Core.Labels.Fields do
   @spec specs(module()) :: [{atom(), spec()}]
 
   def specs(module) when is_atom(module) do
-    labels = module.__label_fields__()
+    labels = labels(module)
 
     for {name, spec} <- module.__label_specs__(), Keyword.fetch!(labels, name) != :hidden, do: {name, spec}
+  end
+
+  @doc """
+  Struct объявляет решение по полям (`use Core.Labels.Fields`). Модуль, ещё не загруженный, грузится или
+  собирается — ответ верен и при сборке, и в рантайме.
+  """
+  @spec labelled?(module()) :: boolean()
+
+  def labelled?(module) when is_atom(module) do
+    (:erlang.module_loaded(module) or match?({:module, _}, Code.ensure_compiled(module))) and
+      function_exported?(module, :__label_fields__, 0)
+  end
+
+  @doc "Решение по каждому полю — в порядке объявления `labels:`; у изменения — пусто."
+  @spec labels(module()) :: [{atom(), label()}]
+
+  def labels(module) when is_atom(module), do: module.__label_fields__()
+
+  @doc """
+  Видимые поля struct'а со спекой значения — в порядке спеки, без `:hidden`; у struct'а изменения —
+  `old_value` / `new_value` со спекой значения `change:`.
+  """
+  @spec visible(module()) :: [{atom(), spec()}]
+
+  def visible(module) when is_atom(module) do
+    case change(module) do
+      nil -> specs(module)
+      {_label, spec} -> [old_value: spec, new_value: spec]
+    end
   end
 
   @doc """
@@ -415,7 +436,7 @@ defmodule Core.Labels.Fields do
   @spec paths(module()) :: [{path(), String.t()}]
 
   def paths(module) when is_atom(module) do
-    labels = module.__label_fields__()
+    labels = labels(module)
 
     Enum.flat_map(specs(module), fn {name, spec} ->
       nested = for {path, label} <- nested_paths(spec), do: {[name | path], label}

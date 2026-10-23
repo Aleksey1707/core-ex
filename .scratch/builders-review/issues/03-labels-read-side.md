@@ -1,6 +1,6 @@
 # 03: Чтение подписей — одна классификация
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 01 — Prim сам отдаёт leaf и kind (`.scratch/codec-field/` — resolved)
 

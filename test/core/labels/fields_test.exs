@@ -4,6 +4,8 @@ defmodule Core.Labels.FieldsTest do
   alias Core.Labels.Fields
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Event.Linked
+  alias Core.LabelsFixture.Event.NameChanged
+  alias Core.LabelsFixture.Event.OriginChanged
   alias Core.LabelsFixture.Event.Shipped
   alias Core.LabelsFixture.Event.Tagged
   alias Core.LabelsFixture.Event.Updated
@@ -17,6 +19,37 @@ defmodule Core.Labels.FieldsTest do
   test "specs/1 — спека fields: в порядке объявления, без скрытых полей" do
     assert Fields.specs(Address) == [city: {:prim, Name}, zip: {:type, :string}]
     assert Keyword.keys(Fields.specs(Tagged.Payload)) == ~w(origin tags count)a
+  end
+
+  describe "labelled?/1" do
+    test "struct с решением по полям — да; struct без него, не struct и не модуль — нет" do
+      assert Fields.labelled?(Address)
+      assert Fields.labelled?(NameChanged.Payload)
+      refute Fields.labelled?(URI)
+      refute Fields.labelled?(Name)
+      refute Fields.labelled?(Core.LabelsFixture.Texts)
+      refute Fields.labelled?(Core.LabelsFixture.Missing)
+    end
+  end
+
+  describe "visible/1" do
+    test "видимые поля в порядке спеки, без скрытых" do
+      assert Fields.visible(Address) == [city: {:prim, Name}, zip: {:type, :string}]
+    end
+
+    test "struct изменения — old_value / new_value со спекой значения" do
+      assert Fields.visible(NameChanged.Payload) == [old_value: {:prim, Name}, new_value: {:prim, Name}]
+
+      assert [old_value: {:text, fun}, new_value: {:text, fun}] = Fields.visible(OriginChanged.Payload)
+      assert fun == (&Core.LabelsFixture.Texts.origin/1)
+    end
+  end
+
+  describe "labels/1" do
+    test "решение по каждому полю, у изменения — пусто" do
+      assert Fields.labels(Address) == [city: "Город", zip: "Индекс", checksum: :hidden]
+      assert Fields.labels(NameChanged.Payload) == []
+    end
   end
 
   describe "paths/1" do

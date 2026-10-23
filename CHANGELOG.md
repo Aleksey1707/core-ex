@@ -32,6 +32,19 @@
   (`ref: [prim: User.ID]`) или `type:`, стало — можно `ref: [prim: Approver.ID]`; свой спуск по
   `__domain_base__/0` заменяется на `Prim.chain/1` / `Prim.leaf/1`.
 
+- **Вид Prim в сведениях отдаёт `Core.Labels.Kind`; `Core.Labels.Fields` отвечает, подписан ли
+  struct и какие поля у него видимы.** Правило «как Prim выходит в сведения» было записано трижды — в
+  сведениях, словаре ссылок и ратчете полноты, — и держалось на дисциплине. Теперь `Kind.of(mod)`
+  отдаёт данными `{:declared, owner, {:text, fun} | id}` (первое звено цепочки композита с
+  `Core.Labels.Text` / `Core.Labels.ID`), `{:plain, :text | :number | :date | :datetime}` или
+  `{:unkinded, leaf}` (`kind: :uuid` без объявления), `{:custom, leaf}` (свой kind leaf); `Kind.owned(prim, owner)` — значение владельца
+  внутри композита. В `Fields`: `labelled?/1` (грузит или собирает модуль — верно и при сборке, и в
+  рантайме), `labels/1` — решение по каждому полю, `visible/1` — видимые поля, у struct'а изменения —
+  `old_value` / `new_value` со спекой `change:`. Поведение сведений, словаря ссылок и ратчета не
+  меняется. Правка потребителя: было — чтение `__label_fields__/0` / `__label_specs__/0`,
+  `Labels.Text.find/1` + `Labels.ID.find/1` со спуском по композиту, стало — `Fields.labels/1` /
+  `Fields.visible/1` / `Fields.labelled?/1` и `Kind.of/1`.
+
 - **Подписчик Stream и Kafka в простое не опрашивает reader, а ждёт заявки на готовность.** Раньше
   подписчик звал `get` раз в 100 мс и без сообщений: около 0,06 % ядра на подписчик, у двух сотен
   подписчиков — заметная доля CPU ноды. В `Core.Mq.ReaderReliable` появился необязательный колбэк

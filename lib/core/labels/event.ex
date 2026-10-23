@@ -32,6 +32,7 @@ defmodule Core.Labels.Event do
   """
 
   alias Core.Labels.Check
+  alias Core.Labels.Fields
 
   @label "Labels.Event"
   @required_keys ~w(title)a
@@ -134,7 +135,7 @@ defmodule Core.Labels.Event do
   end
 
   defp ensure_fields!(env, payload) do
-    if function_exported?(payload, :__label_fields__, 0),
+    if Fields.labelled?(payload),
       do: :ok,
       else: fail!(env, "нагрузка-struct #{inspect(payload)} без `use Core.Labels.Fields`")
   end
