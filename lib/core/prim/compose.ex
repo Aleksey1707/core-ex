@@ -17,8 +17,7 @@ defmodule Core.Prim.Compose do
   use Core.Prim.Wrapper,
     label: "Prim.Compose",
     native_kind: :composite,
-    required: ~w(name of)a,
-    optional: ~w(kind mutate validate sensitive personal)a
+    required: ~w(of)a
 
   @doc "Объявить Compose-Prim поверх базового (`of:` / `name:`)."
   defmacro __using__(opts) do
@@ -36,15 +35,14 @@ defmodule Core.Prim.Compose do
         Core.Prim.Compose.cast(raw, @base, __MODULE__)
       end
 
-      use Prim,
+      require Prim.Wrapper
+
+      Prim.Wrapper.use_prim(opts, kind,
         cast: &__MODULE__.__compose_cast__/1,
-        custom_mutate: Keyword.get(opts, :mutate),
-        custom_validate: Keyword.get(opts, :validate),
-        name: Keyword.fetch!(opts, :name),
-        kind: kind,
         sensitive: Core.Prim.Compose.sensitive?(opts, unquote(base)),
         personal: Core.Prim.Compose.personal?(opts, unquote(base)),
         value_type: unquote(base).t()
+      )
 
       @doc "Модуль базового Prim."
       @spec __domain_base__() :: module()
@@ -62,7 +60,6 @@ defmodule Core.Prim.Compose do
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
-    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     ensure_base!(Keyword.fetch!(opts, :of))
   end
 

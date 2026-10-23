@@ -14,8 +14,7 @@ defmodule Core.Prim.Date do
   use Core.Prim.Wrapper,
     label: "Prim.Date",
     native_kind: :date,
-    required: ~w(name)a,
-    optional: ~w(kind after before tz mutate validate sensitive personal)a
+    optional: ~w(after before tz)a
 
   @doc "Объявить date-Prim (`name:` + опции tz/bounds)."
   defmacro __using__(opts) do
@@ -25,17 +24,14 @@ defmodule Core.Prim.Date do
       bounds = Keyword.take(opts, ~w(after before)a)
       type_opts = Keyword.take(opts, ~w(after before tz)a)
 
-      use Prim,
+      require Prim.Wrapper
+
+      Prim.Wrapper.use_prim(opts, kind,
         cast: &Core.Prim.Date.cast/1,
         validate: {Validator.Date, bounds},
-        custom_mutate: Keyword.get(opts, :mutate),
-        custom_validate: Keyword.get(opts, :validate),
-        name: Keyword.fetch!(opts, :name),
-        kind: kind,
         type_opts: type_opts,
-        sensitive: Keyword.get(opts, :sensitive, false),
-        personal: Keyword.get(opts, :personal, false),
         value_type: Date.t()
+      )
 
       @tz Keyword.get(opts, :tz)
 
@@ -109,7 +105,6 @@ defmodule Core.Prim.Date do
   def validate_opts!(opts) do
     Prim.Opts.struct_bounds!(opts, :after, :before, Date, label())
     Prim.Opts.tz!(opts, :tz, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
   end
 
   @doc false

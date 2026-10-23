@@ -35,6 +35,9 @@ defmodule Core.Prim do
 
   require Error
 
+  @required_keys ~w(cast name kind)a
+  @optional_keys ~w(mutate validate custom_mutate custom_validate type_opts pipeline_opts sensitive personal)a
+
   # ===== объявление =====
 
   @doc "Объявить доменный Prim (`cast` / `name` / `kind` + опциональные mutate/validate)."
@@ -42,7 +45,7 @@ defmodule Core.Prim do
     {value_type, opts} = Keyword.pop(opts, :value_type, quote(do: term()))
 
     quote bind_quoted: [opts: opts], unquote: true do
-      Helper.Opts.require!(opts, ~w(cast name kind)a, "Prim")
+      Helper.Opts.validate!(opts, unquote(@required_keys), unquote(@optional_keys), "Prim")
 
       @cast Keyword.fetch!(opts, :cast)
       @name Keyword.fetch!(opts, :name)

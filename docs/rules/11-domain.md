@@ -36,8 +36,8 @@ use Core.Prim,
   personal: ...
 ```
 
-`cast:`, `name:` и `kind:` обязательны (без любой из них — `CompileError`). Конвейер:
-`cast → mutate → custom_mutate → validate → custom_validate`.
+`cast:`, `name:` и `kind:` обязательны (без любой из них — `CompileError`), ключ вне списка — тоже
+`CompileError`. Конвейер: `cast → mutate → custom_mutate → validate → custom_validate`.
 
 `type_opts:` — опции **типа** (`precision`, `tz`, границы): их отдаёт
 `__domain_type_opts__/0` и получают validate-шаги. `pipeline_opts:` (default —
@@ -95,7 +95,14 @@ use Core.Prim,
 `Core.Validator.*` (sibling, не под Prim).
 
 Порядок проверок у всех обёрток один — `Core.Prim.Opts.prepare!/2` (набор ключей →
-`kind:` → значения опций); метаданные билдера объявляет `use Core.Prim.Wrapper`.
+`kind:` → флаги `sensitive:` / `personal:` → значения собственных опций); метаданные билдера
+объявляет `use Core.Prim.Wrapper`.
+
+Общие ключи обёрток (`name:` — обязательный; `kind:`, `mutate:`, `validate:`, `sensitive:`,
+`personal:`) и их передача в базу — у `Core.Prim.Wrapper`: обёртка объявляет в
+`use Core.Prim.Wrapper` только свои ключи, а базовый Prim собирает
+`Core.Prim.Wrapper.use_prim/3` (`mutate:` / `validate:` обёртки → `custom_mutate:` /
+`custom_validate:` базы). Базовый `use Core.Prim` с неизвестным ключом — `CompileError`.
 
 **Значения** опций обёрток проверяются на компиляции (`Core.Prim.Opts`, `CompileError`):
 границы и их порядок, `%Regex{}`, `%Date{}` / `%DateTime{}`, IANA-зона `tz:`, версия UUID,

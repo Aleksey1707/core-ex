@@ -20,8 +20,7 @@ defmodule Core.Prim.String do
   use Core.Prim.Wrapper,
     label: "Prim.String",
     native_kind: :string,
-    required: ~w(name)a,
-    optional: ~w(kind min_len max_len sec_max_len re trim mutate validate sensitive personal)a
+    optional: ~w(min_len max_len sec_max_len re trim)a
 
   @sec_max_len_slack 50
   @max_utf8_bytes_per_char 4
@@ -38,19 +37,16 @@ defmodule Core.Prim.String do
         trim: Keyword.get(opts, :trim, true)
       ]
 
-      use Prim,
+      require Prim.Wrapper
+
+      Prim.Wrapper.use_prim(opts, kind,
         cast: &Core.Prim.String.cast/2,
         mutate: &Core.Prim.String.mutate/2,
         validate: {Validator.String, type_opts},
-        custom_mutate: Keyword.get(opts, :mutate),
-        custom_validate: Keyword.get(opts, :validate),
-        name: Keyword.fetch!(opts, :name),
-        kind: kind,
         type_opts: type_opts,
         pipeline_opts: pipeline_opts,
-        sensitive: Keyword.get(opts, :sensitive, false),
-        personal: Keyword.get(opts, :personal, false),
         value_type: String.t()
+      )
     end
   end
 
@@ -61,7 +57,7 @@ defmodule Core.Prim.String do
     Prim.Opts.non_neg_integer!(opts, ~w(min_len max_len sec_max_len)a, label())
     Prim.Opts.int_bounds!(opts, :min_len, :max_len, label())
     Prim.Opts.regex!(opts, :re, label())
-    Prim.Opts.boolean!(opts, ~w(trim sensitive personal)a, label())
+    Prim.Opts.boolean!(opts, ~w(trim)a, label())
     require_byte_limit!(opts)
   end
 

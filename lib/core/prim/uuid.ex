@@ -31,8 +31,7 @@ defmodule Core.Prim.UUID do
   use Core.Prim.Wrapper,
     label: "Prim.UUID",
     native_kind: :uuid,
-    required: ~w(name)a,
-    optional: ~w(kind version check_version namespace scope mutate validate sensitive personal)a
+    optional: ~w(version check_version namespace scope)a
 
   @versions [1, 4, 5, 7]
   @key_opts ~w(namespace scope)a
@@ -55,17 +54,14 @@ defmodule Core.Prim.UUID do
           Keyword.put(type_opts, :version, nil)
         end
 
-      use Prim,
+      require Prim.Wrapper
+
+      Prim.Wrapper.use_prim(opts, kind,
         cast: &Core.Prim.UUID.cast/1,
         validate: {Validator.UUID, validate_opts},
-        custom_mutate: Keyword.get(opts, :mutate),
-        custom_validate: Keyword.get(opts, :validate),
-        name: Keyword.fetch!(opts, :name),
-        kind: kind,
         type_opts: type_opts,
-        sensitive: Keyword.get(opts, :sensitive, false),
-        personal: Keyword.get(opts, :personal, false),
         value_type: String.t()
+      )
 
       case version do
         5 ->
@@ -111,7 +107,7 @@ defmodule Core.Prim.UUID do
 
   def validate_opts!(opts) do
     Prim.Opts.allowed!(opts, :version, [nil, :external | @versions], label())
-    Prim.Opts.boolean!(opts, ~w(check_version sensitive personal)a, label())
+    Prim.Opts.boolean!(opts, ~w(check_version)a, label())
     version = Keyword.get(opts, :version, 4)
     check_version_opt!(opts, version)
     key_opts!(opts, version)

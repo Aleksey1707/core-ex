@@ -19,8 +19,7 @@ defmodule Core.Prim.Integer do
   use Core.Prim.Wrapper,
     label: "Prim.Integer",
     native_kind: :integer,
-    required: ~w(name)a,
-    optional: ~w(kind min max sec_max_len mutate validate sensitive personal)a
+    optional: ~w(min max sec_max_len)a
 
   @sec_max_len_slack 4
   @default_sec_max_len 40
@@ -33,18 +32,15 @@ defmodule Core.Prim.Integer do
       type_opts = Keyword.take(opts, ~w(min max)a)
       pipeline_opts = [sec_max_len: Core.Prim.Integer.sec_max_len(opts)]
 
-      use Prim,
+      require Prim.Wrapper
+
+      Prim.Wrapper.use_prim(opts, kind,
         cast: &Core.Prim.Integer.cast/2,
         validate: {Validator.Integer, type_opts},
-        custom_mutate: Keyword.get(opts, :mutate),
-        custom_validate: Keyword.get(opts, :validate),
-        name: Keyword.fetch!(opts, :name),
-        kind: kind,
         type_opts: type_opts,
         pipeline_opts: pipeline_opts,
-        sensitive: Keyword.get(opts, :sensitive, false),
-        personal: Keyword.get(opts, :personal, false),
         value_type: integer()
+      )
     end
   end
 
@@ -54,7 +50,6 @@ defmodule Core.Prim.Integer do
   def validate_opts!(opts) do
     Prim.Opts.int_bounds!(opts, :min, :max, label())
     Prim.Opts.non_neg_integer!(opts, ~w(sec_max_len)a, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     fits_bounds!(opts)
   end
 

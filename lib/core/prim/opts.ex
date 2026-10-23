@@ -16,9 +16,10 @@ defmodule Core.Prim.Opts do
   @doc """
   Проверить опции `use` обёртки и вернуть её `kind`.
 
-  Порядок один на все обёртки: набор ключей → `kind:` → значения опций
-  (`validate_opts!/1` самой обёртки). Метаданные берутся из `Core.Prim.Wrapper`,
-  поэтому копиям пролога негде разъехаться.
+  Порядок один на все обёртки: набор ключей → `kind:` → общие флаги
+  (`Core.Prim.Wrapper.flags/0`) → значения собственных опций (`validate_opts!/1` самой
+  обёртки). Метаданные берутся из `Core.Prim.Wrapper`, поэтому копиям пролога негде
+  разъехаться.
   """
   @spec prepare!(keyword(), module()) :: atom()
 
@@ -27,6 +28,7 @@ defmodule Core.Prim.Opts do
 
     Helper.Opts.validate!(opts, wrapper.required_keys(), wrapper.optional_keys(), label)
     kind = kind!(opts, wrapper.native_kind(), label)
+    boolean!(opts, Prim.Wrapper.flags(), label)
     wrapper.validate_opts!(opts)
 
     kind

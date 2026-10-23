@@ -19,8 +19,7 @@ defmodule Core.Prim.DateTime do
   use Core.Prim.Wrapper,
     label: "Prim.DateTime",
     native_kind: :datetime,
-    required: ~w(name)a,
-    optional: ~w(kind after before tz precision mutate validate sensitive personal)a
+    optional: ~w(after before tz precision)a
 
   @precisions ~w(second millisecond microsecond)a
 
@@ -31,18 +30,15 @@ defmodule Core.Prim.DateTime do
 
       type_opts = Keyword.take(opts, ~w(after before tz precision)a)
 
-      use Prim,
+      require Prim.Wrapper
+
+      Prim.Wrapper.use_prim(opts, kind,
         cast: &Core.Prim.DateTime.cast/1,
         mutate: &Core.Prim.DateTime.mutate/2,
         validate: {Validator.DateTime, type_opts},
-        custom_mutate: Keyword.get(opts, :mutate),
-        custom_validate: Keyword.get(opts, :validate),
-        name: Keyword.fetch!(opts, :name),
-        kind: kind,
         type_opts: type_opts,
-        sensitive: Keyword.get(opts, :sensitive, false),
-        personal: Keyword.get(opts, :personal, false),
         value_type: DateTime.t()
+      )
 
       @tz Keyword.get(type_opts, :tz)
 
@@ -117,7 +113,6 @@ defmodule Core.Prim.DateTime do
   def validate_opts!(opts) do
     Prim.Opts.struct_bounds!(opts, :after, :before, DateTime, label())
     Prim.Opts.tz!(opts, :tz, label())
-    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
     validate_precision!(Keyword.get(opts, :precision, :second))
   end
 

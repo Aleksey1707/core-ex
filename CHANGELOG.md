@@ -81,6 +81,16 @@
   `current_function` как `:erlang.hibernate/3`, с OTP 29 — `:gen_server.loop_hibernate/4`. Код
   потребителя не меняется.
 
+### Изменения контракта макросов
+
+- **Базовый `use Core.Prim` отклоняет неизвестные ключи.** Раньше база проверяла только
+  обязательные `cast:` / `name:` / `kind:`, и опечатка во флаге молча снимала редакцию значения:
+  `use Core.Prim, …, sensitve: true` собирался с `__domain_sensitive__() == false`, и `inspect/1`
+  печатал значение. Теперь неизвестный ключ — `CompileError` «Prim: неизвестные опции: […]», как у
+  обёрток (`Prim.String` / … / `Prim.Compose`). Допустимы `cast name kind mutate validate
+  custom_mutate custom_validate type_opts pipeline_opts sensitive personal value_type`. Правка
+  потребителя: лишний ключ убрать или исправить; было `sensitve: true`, стало `sensitive: true`.
+
 ## 0.16.0
 
 ### Ломающие изменения контракта

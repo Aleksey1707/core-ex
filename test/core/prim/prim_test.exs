@@ -114,6 +114,22 @@ defmodule Core.PrimTest do
     end
   end
 
+  test "rejects unknown option" do
+    assert_raise CompileError, ~r/Prim: неизвестные опции: \[:sensitve\]/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.PrimTest.Typo do
+            use Core.Prim,
+              cast: &Core.PrimTest.identity_cast/1,
+              name: "X",
+              kind: :x,
+              sensitve: true
+          end
+        end
+      )
+    end
+  end
+
   test "rejects error without detail" do
     defmodule BadValidate do
       use Core.Prim,
