@@ -52,24 +52,33 @@ Type: wayfinder:map
 - [Откуда модуль ключа берёт семейство и id](issues/06-key-reservation-source.md): ключ ссылается `aggregate:`,
   `event:` / `id:` уходят; полноту `reservation/1` проверяет сам ключ, `Repo.Pg` сверяет только агрегат ключа,
   `code:` и области. Ревью 10 поглощено.
-- [Агрегат и кодек проекции без соглашения об именах](issues/07-projection-source.md): кодек — ссылкой семейства
-  `codec:` (атом, сверяет кодек); агрегат из `await` уходит — `await(%Agg.ID{}, timeout)`, общий ID двух кодеков в
-  `events:` — `await/2` по всем его потокам, `await/3` с агрегатом первым аргументом (`aggregate:` у семейства).
+- [Агрегат и кодек проекции без соглашения об именах](issues/07-projection-source.md): кодек и агрегат — ссылками
+  семейства `codec:` / `aggregate:` (атомы, сверяют кодек и билдер репозитория); `await` прежний — агрегат первым
+  аргументом во всех формах, литерал из `aggregate:` семейства (пересмотр 2026-10-24: формы без агрегата отменены).
 - [Прототип проекции с кодеком из семейства и `await` по ID](issues/09-projection-prototype.md): собирается,
-  `consumer-check` проходит, ID не из `events:` даёт предупреждение у вызывающего, обе сверки дают `CompileError`.
+  `consumer-check` проходит, обе сверки дают `CompileError`; формы `await` без агрегата отменены пересмотром тикета 07.
   Правка кодека перекомпилирует проекцию и без агрегата. `codec:` раскрывается как runtime-ссылка (иначе цикл
   семейство ↔ кодек). Ветка `prototype/projection-wiring`.
 - [Прототип модуля ключа с `aggregate:`](issues/08-key-reservation-prototype.md): собирается, `consumer-check`
   проходит, `find/2` ловит чужой id; неполный `reservation/1` — предупреждение на `use` ключа, ключ чужого агрегата
   в `Repo.Pg` — `CompileError`; из xref ушло ключ → семейство, перекомпиляция та же. Ветка
   `prototype/key-reservation-wiring`.
+- [Режим перехода на новые опции](issues/10-transition-mode.md): сразу `CompileError` одним выпуском, текст общий —
+  переход описывают CHANGELOG и «Версия библиотеки»; `Opts.validate!` сообщает недостающие и неизвестные опции одной
+  ошибкой; `await` не ломается.
+- [Прототип `aggregate:` у семейства](issues/12-family-aggregate-prototype.md): вариант Б (runtime-ссылка) — xref и
+  перекомпиляция как у базы; `await` с агрегатом из семейства, общий ID собирается. Владельца сверяют `Repo.Pg` и
+  `StateStored` (`CompileError`), семейство — `@after_verify` с `IO.warn`; `Es.Aggregate` не сверяет. `Catalog` в
+  `test/support` придётся отделить от state-stored. Ветка `prototype/family-aggregate`.
+- [Форма ADR и спека](issues/11-adr-spec-shape.md): ADR-0084 самодостаточен, ADR-0014 уточняется строкой в шапке;
+  один пункт CHANGELOG в «Изменениях контракта макросов», четыре строки «Версии библиотеки»; срезы `Opts` → семейство
+  → репозиторий / ключ / проекция, каждый правит свои своды; `@after_verify` — только для ссылок семейства. В
+  `CONTEXT.md` — «Владелец потока».
+- [Запись ADR-0084 и спека](issues/13-write-adr-spec.md): ADR-0084 (`docs/adr/0084-aggregate-wiring.md`) и строка в
+  шапке ADR-0014 записаны; `spec.md` готов к `/to-tickets` — пять срезов, текст пункта CHANGELOG, строки «Версии
+  библиотеки».
 
 ## Not yet specified
-
-- Режим перехода: сразу `CompileError` «было → стало» или период с предупреждением. Сейчас снятые опции дают
-  только «нет обязательных опций» без подсказки (тикет 08).
-- Форма ADR и спека: что уточняется в ADR-0014 и ADR об `await` (0027, 0030, 0039, 0080), пункты CHANGELOG,
-  правка `docs/rules/13-repos.md`, `14-events-outbox.md`, `22-projections.md`, свода `app/`.
 
 ## Out of scope
 
