@@ -131,6 +131,9 @@ defmodule Core.Es.KeyReservation do
 
   ## Opts
 
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов
+  функции в опции — `CompileError` «ожидается литерал».
+
   - `scope:` — область ключа, непустая строка
   - `aggregate:` — event-sourced агрегат (`use Core.Es.Aggregate`); кодек событий и Prim
     идентификатора (литерал в `find/2`) — из его кодека
@@ -172,6 +175,7 @@ defmodule Core.Es.KeyReservation do
   @label "Es.KeyReservation"
   @required_keys ~w(scope aggregate code)a
   @optional_keys ~w(personal)a
+  @expression_keys []
 
   # Предел повторов резерва: обе причины отказа снимаются одной следующей попыткой — чужую строку
   # нашей пары `(scope, aggregate_id)` снесёт её `DELETE`, исчезнувший ключ займёт её вставка.
@@ -202,10 +206,13 @@ defmodule Core.Es.KeyReservation do
 
   @doc "Объявить модуль изменяемого уникального ключа event-sourced агрегата."
   defmacro __using__(opts) do
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+
     declaration =
       opts
-      |> Macro.expand_literals(__CALLER__)
-      |> validate_opts!()
+      |> Helper.Opts.literal!(@expression_keys, @label)
+      |> parse!()
       |> Map.put(:module, __CALLER__.module)
 
     checks = checks(declaration, __CALLER__.line)
@@ -236,8 +243,7 @@ defmodule Core.Es.KeyReservation do
 
   # ---
 
-  defp validate_opts!(opts) do
-    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+  defp parse!(opts) do
     aggregate = Helper.Opts.module!(opts, :aggregate, @label, exports: [__es_event_codec__: 0])
     event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
 
@@ -261,7 +267,7 @@ defmodule Core.Es.KeyReservation do
 
   defp scope!(opts) do
     case Helper.Opts.binary!(opts, :scope, @label) do
-      "" -> raise CompileError, description: "#{@label}: scope: ожидается непустая строка, получено \"\""
+      "" -> Helper.Opts.reject!("#{@label}: scope", "ожидается непустая строка, получено \"\"")
       scope -> scope
     end
   end
@@ -269,8 +275,7 @@ defmodule Core.Es.KeyReservation do
   defp code!(opts) do
     case Helper.Opts.atom!(opts, :code, @label) do
       :version_mismatch ->
-        raise CompileError,
-          description: "#{@label}: code: :version_mismatch — код конфликта записи, а не отказа резерва"
+        Helper.Opts.reject!("#{@label}: code", ":version_mismatch — код конфликта записи, а не отказа резерва")
 
       code ->
         code
@@ -283,7 +288,7 @@ defmodule Core.Es.KeyReservation do
         personal
 
       other ->
-        raise CompileError, description: "#{@label}: personal: ожидается boolean, получено #{inspect(other)}"
+        Helper.Opts.reject!("#{@label}: personal", "ожидается boolean, получено #{inspect(other)}")
     end
   end
 
@@ -313,18 +318,17 @@ defmodule Core.Es.KeyReservation do
   end
 
   defp modules!(keys, label) do
-    raise CompileError,
-      description: "#{label}: key_reservations: ожидается список модулей ключа, получено #{inspect(keys)}"
+    Helper.Opts.reject!("#{label}: key_reservations", "ожидается список модулей ключа, получено #{inspect(keys)}")
   end
 
   defp declaration!(module, aggregate, errors, label) do
     declaration = module.__es_key_reservation__()
 
     if declaration.aggregate != aggregate do
-      raise CompileError,
-        description:
-          "#{label}: key_reservations: aggregate: #{inspect(declaration.aggregate)} у #{inspect(module)} " <>
-            "не равен агрегату репозитория #{inspect(aggregate)}"
+      Helper.Opts.reject!(
+        "#{label}: key_reservations: aggregate",
+        "#{inspect(declaration.aggregate)} у #{inspect(module)} не равен агрегату репозитория #{inspect(aggregate)}"
+      )
     end
 
     ensure_code!(errors, declaration, label)
@@ -353,8 +357,10 @@ defmodule Core.Es.KeyReservation do
         :ok
 
       {scope, modules} ->
-        raise CompileError,
-          description: "#{label}: key_reservations: область #{inspect(scope)} повторяется: #{inspect(modules)}"
+        Helper.Opts.reject!(
+          "#{label}: key_reservations",
+          "область #{inspect(scope)} повторяется: #{inspect(modules)}"
+        )
     end
   end
 

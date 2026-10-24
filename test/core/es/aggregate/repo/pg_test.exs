@@ -249,6 +249,26 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
                )
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Aggregate\.Repo\.Pg: неизвестные опции: \[:snapshots\]$/, fn ->
+        compile!(Typo, [snapshots: [every: 2]], quote(do: raise("тело вычислено")))
+      end
+    end
+
+    test "атрибут в errors: и snapshot: — «ожидается литерал»" do
+      message = ~r/^Es\.Aggregate\.Repo\.Pg: errors: ожидается литерал, получено @errors$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(AttrErrors, [errors: quote(do: @errors)], quote(do: @errors(Account.Errors)))
+      end
+
+      message = ~r/^Es\.Aggregate\.Repo\.Pg: snapshot: ожидается литерал, получено \[every: @every\]$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(AttrSnapshot, [snapshot: [every: quote(do: @every)]], quote(do: @every(2)))
+      end
+    end
+
     test "behaviour — use Core.Es.Aggregate.Repo" do
       message = ~r/модуль Core\.StateStoredFixture\.Repo должен экспортировать __es_aggregate_repo__\/0/
 
@@ -274,7 +294,9 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
-  defp compile!(name, overrides) do
+  # `prelude` стоит в теле перед `use`: тело раскрывается целиком до вычисления, поэтому ошибка
+  # раскрытия приходит раньше, чем `raise` в `prelude`.
+  defp compile!(name, overrides, prelude \\ nil) do
     opts =
       base_opts()
       |> Keyword.merge(overrides)
@@ -283,6 +305,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(Module.concat(__MODULE__, name)) do
+          unquote(prelude)
           use Core.Es.Aggregate.Repo.Pg, unquote(opts)
         end
       end

@@ -202,6 +202,20 @@ defmodule Core.Es.KeyReservationTest do
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.KeyReservation: неизвестные опции: \[:scop\]$/, fn ->
+        compile_key!(Typo, [scop: "fixture.typo"], quote(do: raise("тело вычислено")))
+      end
+    end
+
+    test "атрибут в scope: — «ожидается литерал»" do
+      message = ~r/^Es\.KeyReservation: scope: ожидается литерал, получено @scope$/
+
+      assert_raise CompileError, message, fn ->
+        compile_key!(AttrScope, [scope: quote(do: @scope)], quote(do: @scope("fixture.attr")))
+      end
+    end
+
     test "scope: — непустая строка" do
       assert_raise CompileError, ~r/Es\.KeyReservation: scope: ожидается непустая строка, получено ""/, fn ->
         compile_key!(EmptyScope, scope: "")
@@ -307,7 +321,9 @@ defmodule Core.Es.KeyReservationTest do
     |> Config.dao().all()
   end
 
-  defp compile_key!(name, overrides) do
+  # `prelude` стоит в теле перед `use`: тело раскрывается целиком до вычисления, поэтому ошибка
+  # раскрытия приходит раньше, чем `raise` в `prelude`.
+  defp compile_key!(name, overrides, prelude \\ nil) do
     opts =
       [scope: @scope, aggregate: Account, code: :name_taken]
       |> Keyword.merge(overrides)
@@ -316,6 +332,7 @@ defmodule Core.Es.KeyReservationTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(Module.concat(__MODULE__, name)) do
+          unquote(prelude)
           use Core.Es.KeyReservation, unquote(opts)
 
           def reservation(_event), do: :keep

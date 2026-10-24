@@ -50,6 +50,9 @@ defmodule Core.Es.Aggregate.Repo do
 
   ## Opts
 
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов
+  функции в опции — `CompileError` «ожидается литерал».
+
   - `aggregate:` — модуль агрегата (`use Core.Es.Aggregate`); тип состояния — его `t()`
   """
 
@@ -59,15 +62,17 @@ defmodule Core.Es.Aggregate.Repo do
   @label "Es.Aggregate.Repo"
   @required_keys ~w(aggregate)a
   @optional_keys []
+  @expression_keys []
   @callbacks [get: 4, get_decision: 5, get_many: 3, append: 3, refresh: 4, page_stream: 4]
 
   # ===== объявление =====
 
   @doc "Объявить behaviour write-репозитория event-sourced агрегата."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    aggregate = Helper.Opts.module!(lit, :aggregate, @label, exports: [__es_event_codec__: 0])
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    aggregate = Helper.Opts.module!(opts, :aggregate, @label, exports: [__es_event_codec__: 0])
     event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
     id = event_codec.__es_aggregate_id__()
 

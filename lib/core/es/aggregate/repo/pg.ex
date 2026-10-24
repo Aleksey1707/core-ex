@@ -124,6 +124,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   ## Opts
 
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов
+  функции в опции — `CompileError` «ожидается литерал».
+
   - `behaviour:` — `use Core.Es.Aggregate.Repo`; модуль ошибок `:version_mismatch`, источник агрегата
     и Prim идентификатора
   - `errors:` — каталог ошибок с clause `:version_mismatch`
@@ -170,16 +173,19 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @label "Es.Aggregate.Repo.Pg"
   @required_keys ~w(behaviour errors outbox)a
   @optional_keys ~w(repo codec snapshot key_reservations)a
+  @expression_keys []
   @stream_types %{index: :integer, aggregate_id: :binary_id, after_version: :integer}
 
   # ===== объявление =====
 
   @doc "Реализовать write-репозиторий event-sourced агрегата на хранилище событий."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    cfg = validate_opts!(lit)
-    dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
-    codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    cfg = config!(opts)
+    dao = Helper.Opts.module_or_config!(opts, :repo, :dao, @label)
+    codec = Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
 
     quote generated: true do
       @behaviour unquote(cfg.behaviour)
@@ -276,9 +282,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   # ---
 
-  defp validate_opts!(opts) do
-    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
-
+  defp config!(opts) do
     behaviour = behaviour!(opts)
     %{aggregate: aggregate, id: id} = behaviour.__es_aggregate_repo__()
     event_codec = aggregate.__es_event_codec__()
@@ -311,10 +315,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
         behaviour
 
       missing ->
-        raise CompileError,
-          description:
-            "#{@label}: behaviour #{inspect(behaviour)} должен объявлять #{inspect(missing)} " <>
-              "(use Core.Es.Aggregate.Repo)"
+        Helper.Opts.reject!(
+          "#{@label}: behaviour",
+          "#{inspect(behaviour)} должен объявлять #{inspect(missing)} (use Core.Es.Aggregate.Repo)"
+        )
     end
   end
 

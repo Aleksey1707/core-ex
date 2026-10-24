@@ -65,17 +65,13 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
 
   defp every!(every, _label) when is_integer(every) and every > 0, do: every
 
-  defp every!(every, label) do
-    raise CompileError,
-      description: "#{label}: every: ожидается целое больше нуля, получено #{inspect(every)}"
-  end
+  defp every!(every, label),
+    do: Helper.Opts.reject!("#{label}: every", "ожидается целое больше нуля, получено #{inspect(every)}")
 
   defp version!(version, _label) when is_integer(version), do: version
 
-  defp version!(version, label) do
-    raise CompileError,
-      description: "#{label}: version: ожидается целое, получено #{inspect(version)}"
-  end
+  defp version!(version, label),
+    do: Helper.Opts.reject!("#{label}: version", "ожидается целое, получено #{inspect(version)}")
 
   # Снапшот — одно ПДн-значение одного субъекта: ПДн другого субъекта под ключом агрегата не
   # уничтожались бы вместе со своим ключом.
@@ -87,10 +83,11 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
         subjects != %{}
 
       fields ->
-        raise CompileError,
-          description:
-            "#{label}: субъект ПДн-поля — поле нагрузки, а не :aggregate_id: " <>
-              Enum.map_join(fields, ", ", fn {mod, field} -> "#{inspect(mod)}.#{field}" end)
+        Helper.Opts.reject!(
+          label,
+          "субъект ПДн-поля — поле нагрузки, а не :aggregate_id: " <>
+            Enum.map_join(fields, ", ", fn {mod, field} -> "#{inspect(mod)}.#{field}" end)
+        )
     end
   end
 

@@ -30,12 +30,29 @@ defmodule Core.Es.Aggregate.RepoTest do
                    ~r/aggregate: модуль .* должен экспортировать __es_event_codec__/,
                    fn -> compile!(StateStored, aggregate: Core.StateStoredFixture.Entity) end
     end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Aggregate\.Repo: неизвестные опции: \[:agregate\]$/, fn ->
+        compile!(Typo, [aggregate: Account, agregate: Account], quote(do: raise("тело вычислено")))
+      end
+    end
+
+    test "атрибут в aggregate: — «ожидается литерал»" do
+      message = ~r/^Es\.Aggregate\.Repo: aggregate: ожидается литерал, получено @aggregate$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(AttrAggregate, [aggregate: quote(do: @aggregate)], quote(do: @aggregate(Account)))
+      end
+    end
   end
 
-  defp compile!(name, opts) do
+  # `prelude` стоит в теле перед `use`: тело раскрывается целиком до вычисления, поэтому ошибка
+  # раскрытия приходит раньше, чем `raise` в `prelude`.
+  defp compile!(name, opts, prelude \\ nil) do
     Code.eval_quoted(
       quote do
         defmodule unquote(Module.concat(__MODULE__, name)) do
+          unquote(prelude)
           use Core.Es.Aggregate.Repo, unquote(opts)
         end
       end

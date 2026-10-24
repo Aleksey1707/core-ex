@@ -217,10 +217,6 @@
                  # 17 — Es-событие
                  "lib/core/es/event.ex",
                  "lib/core/es/event/payload.ex",
-                 # 19 — Es-репозиторий
-                 "lib/core/es/aggregate/repo.ex",
-                 "lib/core/es/aggregate/repo/pg.ex",
-                 "lib/core/es/key_reservation.ex",
                  # 20 — проекция
                  "lib/core/es/projection.ex"
                ]
