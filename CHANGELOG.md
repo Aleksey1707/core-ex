@@ -42,6 +42,17 @@
   Правка потребителя: нет, если фасад не звали на событии уничтожения ключа; иначе — `Core.Es.Personal.Event.Codec.dump(event, codec)` /
   `Core.Es.Personal.Event.Codec.load(Core.Es.Personal.Event, wire, codec)`.
 
+- **Ошибки опций Prim — `CompileError` с меткой builder'а.** Опции Prim разбираются при раскрытии
+  `use` (ADR-0085), а отказ в опции — `CompileError` «<метка>: <ключ>: …» (`docs/rules/20-agreements.md`,
+  «Опции `use`»). Поэтому `Core.Prim.validate_kind!/2` стала `validate_kind!/3` с меткой
+  builder'а и отказывает `CompileError` вместо `ArgumentError`, а `Core.Prim.DateTime.validate_precision!/1`
+  удалена: `precision:` проверяет `use Core.Prim.DateTime`. Правка потребителя: было
+  `Core.Prim.validate_kind!(native, kind)`, стало `Core.Prim.validate_kind!(native, kind, label)`;
+  ожидание `ArgumentError` на чужой встроенный `kind:` или неизвестный `precision:` → `CompileError`.
+  Протокол обёрток библиотеки сменился вместе с прологом: `Core.Prim.Opts.prepare!/3` (опции AST и
+  `__CALLER__`, возврат — разобранные опции) вместо `prepare!/2`, `Core.Prim.Wrapper.base_opts/2` вместо
+  макроса `use_prim/3` и `flags/0`; своей обёртки Prim вне библиотеки контракт не предусматривает.
+
 ### Новое
 
 - **`Core.Helper.Module.exports?/3` — проверка экспорта, которая грузит модуль** (норма —
@@ -190,6 +201,8 @@
 
   | Builder | Опции-выражения |
   |---|---|
+  | `use Core.Prim` | `name:`, `cast:`, `mutate:`, `validate:`, `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `value_type:` |
+  | `use Core.Prim.String` и другие обёртки | `name:`, `mutate:`, `validate:` и свои: `re:`, `max_len:`, `namespace:`, `min:` / `max:` у `Prim.Decimal` |
   | `use Core.Enum` | `name:` |
   | `use Core.Codec.Facade` | `plugins:` |
   | `use Core.Codec.Plugin` | `types:` |

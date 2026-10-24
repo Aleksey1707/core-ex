@@ -172,7 +172,7 @@ defmodule Core.Prim.DateTest do
   end
 
   test "rejects builtin kind of another wrapper" do
-    assert_raise ArgumentError, ~r/— встроенный/, fn ->
+    assert_raise CompileError, ~r/: kind: :[a-z]+ — встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTest.BadKind do

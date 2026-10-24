@@ -5,11 +5,13 @@ defmodule Core.Prim.Date do
   Опции: `name:` (обязательна), `kind:`, `after:` / `before:`, `tz:`, `mutate:` /
   `validate:`, `sensitive:`, `personal:`. Дополнительно генерирует `today/0`, `today!/0` и
   `from/1`, `from!/1` (из date- или datetime-Prim, с приведением в `tz:`).
+
+  Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:` — проверяются в
+  теле модуля; остальные опции — литералы.
   """
 
   alias Core.Prim
   alias Core.Result
-  alias Core.Validator
 
   use Core.Prim.Wrapper,
     label: "Prim.Date",
@@ -18,22 +20,23 @@ defmodule Core.Prim.Date do
 
   @doc "Объявить date-Prim (`name:` + опции tz/bounds)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts], unquote: true do
-      kind = Prim.Opts.prepare!(opts, Core.Prim.Date)
+    opts = Prim.Opts.prepare!(opts, __CALLER__, __MODULE__)
+    bounds = Macro.escape(Keyword.take(opts, ~w(after before)a))
+    type_opts = Macro.escape(Keyword.take(opts, ~w(after before tz)a))
 
-      bounds = Keyword.take(opts, ~w(after before)a)
-      type_opts = Keyword.take(opts, ~w(after before tz)a)
+    base_opts =
+      Prim.Wrapper.base_opts(opts, label()) ++
+        [
+          cast: quote(do: &Core.Prim.Date.cast/1),
+          validate: quote(do: {Core.Validator.Date, unquote(bounds)}),
+          type_opts: type_opts,
+          value_type: quote(do: Date.t())
+        ]
 
-      require Prim.Wrapper
+    quote do
+      use Core.Prim, unquote(base_opts)
 
-      Prim.Wrapper.use_prim(opts, kind,
-        cast: &Core.Prim.Date.cast/1,
-        validate: {Validator.Date, bounds},
-        type_opts: type_opts,
-        value_type: Date.t()
-      )
-
-      @tz Keyword.get(opts, :tz)
+      @tz unquote(Keyword.get(opts, :tz))
 
       @doc "Сегодняшняя дата доменного времени (`Core.Clock`) в tz модуля/конфига."
       @spec today() :: Core.Result.t(t())
@@ -99,7 +102,7 @@ defmodule Core.Prim.Date do
     end
   end
 
-  @doc "Проверить значения опций билдера на этапе компиляции."
+  @doc "Проверить значения опций-литералов билдера при раскрытии `use`."
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do

@@ -10,11 +10,14 @@ defmodule Core.Prim.Integer do
   упирается в лимит BEAM и поднимает `SystemLimitError` мимо контракта `new/1`.
   Границы `min:` / `max:` от этого не защищают — они проверяются уже после разбора.
   Default выводится из `max:` (его десятичная запись + запас), а без `max:` — 40 байт.
+
+  Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:` — проверяются в
+  теле модуля; остальные опции — литералы.
   """
 
+  alias Core.Helper
   alias Core.Prim
   alias Core.Result
-  alias Core.Validator
 
   use Core.Prim.Wrapper,
     label: "Prim.Integer",
@@ -26,25 +29,25 @@ defmodule Core.Prim.Integer do
 
   @doc "Объявить integer-Prim (`name:` + опции min/max)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      kind = Prim.Opts.prepare!(opts, Core.Prim.Integer)
+    opts = Prim.Opts.prepare!(opts, __CALLER__, __MODULE__)
+    type_opts = Macro.escape(Keyword.take(opts, ~w(min max)a))
 
-      type_opts = Keyword.take(opts, ~w(min max)a)
-      pipeline_opts = [sec_max_len: Core.Prim.Integer.sec_max_len(opts)]
+    base_opts =
+      Prim.Wrapper.base_opts(opts, label()) ++
+        [
+          cast: quote(do: &Core.Prim.Integer.cast/2),
+          validate: quote(do: {Core.Validator.Integer, unquote(type_opts)}),
+          type_opts: type_opts,
+          pipeline_opts: [sec_max_len: sec_max_len(opts)],
+          value_type: quote(do: integer())
+        ]
 
-      require Prim.Wrapper
-
-      Prim.Wrapper.use_prim(opts, kind,
-        cast: &Core.Prim.Integer.cast/2,
-        validate: {Validator.Integer, type_opts},
-        type_opts: type_opts,
-        pipeline_opts: pipeline_opts,
-        value_type: integer()
-      )
+    quote do
+      use Core.Prim, unquote(base_opts)
     end
   end
 
-  @doc "Проверить значения опций билдера на этапе компиляции."
+  @doc "Проверить значения опций-литералов билдера при раскрытии `use`."
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
@@ -103,10 +106,10 @@ defmodule Core.Prim.Integer do
         :ok
 
       bytes ->
-        raise CompileError,
-          description:
-            "#{label()}: sec_max_len (#{limit}) меньше десятичной записи границ " <>
-              "(#{bytes} байт) — Prim не примет собственный max"
+        Helper.Opts.reject!(
+          label(),
+          "sec_max_len (#{limit}) меньше десятичной записи границ (#{bytes} байт) — Prim не примет собственный max"
+        )
     end
   end
 

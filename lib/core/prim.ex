@@ -4,7 +4,15 @@ defmodule Core.Prim do
   validate → custom_validate`.
 
   Опции `use`: обязательные `cast:`, `name:`, `kind:`; необязательные `mutate:`, `validate:`,
-  `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `sensitive:`, `personal:`.
+  `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `sensitive:`, `personal:`,
+  `value_type:` (AST типа значения, default `term()`).
+
+  Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:` (`first_line(@moduledoc)`),
+  `cast:`, `mutate:`, `validate:`, `custom_mutate:`, `custom_validate:`, `type_opts:`,
+  `pipeline_opts:` — проверяются в теле модуля; `value_type:` — AST типа, его подставляет в `@type t`
+  компилятор типов. Остальные (`kind:`, `sensitive:`, `personal:`) — литералы: атрибут или вызов в
+  них — `CompileError` «ожидается литерал».
+
   Типизированные обёртки — `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` /
   `Date` / `Compose`.
 
@@ -35,29 +43,37 @@ defmodule Core.Prim do
 
   require Error
 
+  @label "Prim"
   @required_keys ~w(cast name kind)a
-  @optional_keys ~w(mutate validate custom_mutate custom_validate type_opts pipeline_opts sensitive personal)a
+  @optional_keys ~w(mutate validate custom_mutate custom_validate type_opts pipeline_opts sensitive personal)a ++
+                   ~w(value_type)a
+  @expression_keys ~w(cast name mutate validate custom_mutate custom_validate type_opts pipeline_opts value_type)a
 
   # ===== объявление =====
 
   @doc "Объявить доменный Prim (`cast` / `name` / `kind` + опциональные mutate/validate)."
   defmacro __using__(opts) do
-    {value_type, opts} = Keyword.pop(opts, :value_type, quote(do: term()))
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-    quote bind_quoted: [opts: opts], unquote: true do
-      Helper.Opts.validate!(opts, unquote(@required_keys), unquote(@optional_keys), "Prim")
+    Helper.Opts.atom!(opts, :kind, @label)
+    flags!(opts)
 
-      @cast Keyword.fetch!(opts, :cast)
-      @name Keyword.fetch!(opts, :name)
-      @domain_kind Keyword.fetch!(opts, :kind)
-      @mutate Keyword.get(opts, :mutate)
-      @validate Keyword.get(opts, :validate)
-      @custom_mutate Keyword.get(opts, :custom_mutate)
-      @custom_validate Keyword.get(opts, :custom_validate)
-      @type_opts Keyword.get(opts, :type_opts, [])
-      @pipeline_opts Keyword.get(opts, :pipeline_opts, @type_opts)
-      @sensitive Keyword.get(opts, :sensitive, false)
-      @personal Keyword.get(opts, :personal, false)
+    value_type = Keyword.get(opts, :value_type, quote(do: term()))
+
+    quote do
+      @cast Core.Prim.cast!(unquote(opts[:cast]))
+      @name Core.Helper.Opts.binary_value!(unquote(opts[:name]), :name, unquote(@label))
+      @domain_kind unquote(opts[:kind])
+      @mutate unquote(steps_ast(opts, :mutate))
+      @validate unquote(steps_ast(opts, :validate))
+      @custom_mutate unquote(steps_ast(opts, :custom_mutate))
+      @custom_validate unquote(steps_ast(opts, :custom_validate))
+      @type_opts unquote(keyword_ast(opts, :type_opts, []))
+      @pipeline_opts unquote(keyword_ast(opts, :pipeline_opts, quote(do: @type_opts)))
+      @sensitive unquote(Keyword.get(opts, :sensitive, false))
+      @personal unquote(Keyword.get(opts, :personal, false))
       @redacted @sensitive or @personal
 
       @enforce_keys ~w(value)a
@@ -152,6 +168,65 @@ defmodule Core.Prim do
     end
   end
 
+  @doc false
+  @spec cast!(term()) :: cast_spec()
+
+  def cast!(cast) when is_function(cast, 1) or is_function(cast, 2), do: cast
+  def cast!(cast), do: Helper.Opts.reject!("#{@label}: cast", "ожидается fun/1 или fun/2, получено #{inspect(cast)}")
+
+  @doc false
+  @spec steps!(term(), atom(), String.t()) :: mutate_spec() | validate_spec() | nil
+
+  def steps!(steps, key, label) when is_atom(key) and is_binary(label) do
+    if steps?(steps) do
+      steps
+    else
+      expected = "{Module, opts}, fun/1, fun/2 или их список"
+      Helper.Opts.reject!("#{label}: #{key}", "ожидается #{expected}, получено #{inspect(steps)}")
+    end
+  end
+
+  @doc false
+  @spec keyword!(term(), atom()) :: keyword()
+
+  def keyword!(opts, key) when is_atom(key) do
+    if Keyword.keyword?(opts),
+      do: opts,
+      else: Helper.Opts.reject!("#{@label}: #{key}", "ожидается keyword, получено #{inspect(opts)}")
+  end
+
+  # ---
+
+  defp flags!(opts) do
+    for {key, value} <- Keyword.take(opts, ~w(sensitive personal)a), not is_boolean(value) do
+      Helper.Opts.reject!("#{@label}: #{key}", "ожидается true или false, получено #{inspect(value)}")
+    end
+  end
+
+  defp steps_ast(opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, steps} -> quote(do: Core.Prim.steps!(unquote(steps), unquote(key), unquote(@label)))
+      :error -> nil
+    end
+  end
+
+  defp keyword_ast(opts, key, default) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} -> quote(do: Core.Prim.keyword!(unquote(value), unquote(key)))
+      :error -> default
+    end
+  end
+
+  defp steps?(nil), do: true
+  defp steps?(steps) when is_list(steps), do: Enum.all?(steps, &step?/1)
+  defp steps?(step), do: step?(step)
+
+  defp step?({module, opts}) when is_atom(module) and is_list(opts), do: true
+  defp step?(fun) when is_function(fun, 1) or is_function(fun, 2), do: true
+  defp step?(_step), do: false
+
+  # ===== сведения и ошибки =====
+
   @type reason :: {atom(), String.t()} | Error.t()
   @type error :: {:error, reason()}
   @type cast_result :: Result.t(term(), reason())
@@ -172,22 +247,23 @@ defmodule Core.Prim do
 
   def reserved_kinds, do: @native_kinds ++ [@composite_kind]
 
-  @doc "Проверка kind обёртки: native/reserved или свой (не чужой reserved)."
-  @spec validate_kind!(atom(), atom()) :: :ok
+  @doc """
+  Проверка `kind:` обёртки: native/reserved или свой (не чужой reserved).
 
-  def validate_kind!(native, kind)
-      when is_atom(native) and is_atom(kind) do
-    cond do
-      kind == native ->
-        :ok
+  Чужой встроенный kind — `CompileError` «<label>: kind: …».
+  """
+  @spec validate_kind!(atom(), atom(), String.t()) :: :ok
 
-      kind in reserved_kinds() ->
-        raise ArgumentError,
-              "kind #{inspect(kind)} — встроенный; используйте нативный #{inspect(native)} либо свой kind"
-
-      true ->
-        :ok
+  def validate_kind!(native, kind, label)
+      when is_atom(native) and is_atom(kind) and is_binary(label) do
+    if kind != native and kind in reserved_kinds() do
+      Helper.Opts.reject!(
+        "#{label}: kind",
+        "#{inspect(kind)} — встроенный; используйте нативный #{inspect(native)} либо свой kind"
+      )
     end
+
+    :ok
   end
 
   @doc """

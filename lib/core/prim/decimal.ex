@@ -12,16 +12,21 @@ defmodule Core.Prim.Decimal do
   растёт вместе с вводом (миллион цифр — десятки миллисекунд занятого шедулера),
   а границы `min:` / `max:` проверяются уже после него. Default выводится из `max:`
   и `scale:`, а без `max:` — 64 байта.
+
+  Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:`,
+  `min:`, `max:` (`Decimal.new/1`) — проверяются в теле модуля;
+  остальные опции — литералы.
   """
 
+  alias Core.Helper
   alias Core.Prim
   alias Core.Result
-  alias Core.Validator
 
   use Core.Prim.Wrapper,
     label: "Prim.Decimal",
     native_kind: :decimal,
-    optional: ~w(min max scale sec_max_len)a
+    optional: ~w(min max scale sec_max_len)a,
+    expression: ~w(min max)a
 
   # запас на знак, точку, ведущие нули и экспоненциальную запись
   @sec_max_len_slack 8
@@ -29,31 +34,44 @@ defmodule Core.Prim.Decimal do
 
   @doc "Объявить decimal-Prim (`name:` + опции min/max/scale)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      kind = Prim.Opts.prepare!(opts, Core.Prim.Decimal)
+    opts = Prim.Opts.prepare!(opts, __CALLER__, __MODULE__)
+    type_opts = Prim.Opts.quoted(Keyword.take(opts, ~w(min max scale)a), expression_keys())
+    sec_max_len = Keyword.take(opts, [:sec_max_len])
 
-      type_opts = Keyword.take(opts, ~w(min max scale)a)
-      pipeline_opts = [sec_max_len: Core.Prim.Decimal.sec_max_len(opts)]
+    base_opts =
+      Prim.Wrapper.base_opts(opts, label()) ++
+        [
+          cast: quote(do: &Core.Prim.Decimal.cast/2),
+          validate: quote(do: {Core.Validator.Decimal, @prim_type_opts}),
+          type_opts: quote(do: @prim_type_opts),
+          pipeline_opts:
+            quote(do: [sec_max_len: Core.Prim.Decimal.sec_max_len(unquote(sec_max_len) ++ @prim_type_opts)]),
+          value_type: quote(do: Decimal.t())
+        ]
 
-      require Prim.Wrapper
+    quote do
+      @prim_type_opts Core.Prim.Decimal.type_opts!(unquote(type_opts), unquote(sec_max_len))
 
-      Prim.Wrapper.use_prim(opts, kind,
-        cast: &Core.Prim.Decimal.cast/2,
-        validate: {Validator.Decimal, type_opts},
-        type_opts: type_opts,
-        pipeline_opts: pipeline_opts,
-        value_type: Decimal.t()
-      )
+      use Core.Prim, unquote(base_opts)
     end
   end
 
-  @doc "Проверить значения опций билдера на этапе компиляции."
+  @doc "Проверить значения опций-литералов билдера при раскрытии `use`."
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
-    Prim.Opts.decimal_bounds!(opts, :min, :max, label())
     Prim.Opts.non_neg_integer!(opts, ~w(scale sec_max_len)a, label())
-    fits_bounds!(opts)
+  end
+
+  @doc false
+  @spec type_opts!(keyword(), keyword()) :: keyword()
+
+  # Опции типа с вычисленными опциями-выражениями `min:` / `max:` — проверка в теле модуля.
+  def type_opts!(type_opts, sec_max_len) do
+    Prim.Opts.decimal_bounds!(type_opts, :min, :max, label())
+    fits_bounds!(sec_max_len ++ type_opts)
+
+    type_opts
   end
 
   @doc "Байтовая граница строкового ввода: явная `sec_max_len:` либо выведенная из границ."
@@ -113,10 +131,10 @@ defmodule Core.Prim.Decimal do
         :ok
 
       bytes ->
-        raise CompileError,
-          description:
-            "#{label()}: sec_max_len (#{limit}) меньше записи границ со scale " <>
-              "(#{bytes} байт) — Prim не примет собственный max"
+        Helper.Opts.reject!(
+          label(),
+          "sec_max_len (#{limit}) меньше записи границ со scale (#{bytes} байт) — Prim не примет собственный max"
+        )
     end
   end
 

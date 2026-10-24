@@ -226,16 +226,6 @@
                  "lib/core/repo/constraint_errors_case.ex",
                  "lib/core/repo/pg/schema.ex",
                  "lib/core/view.ex",
-                 # 12 — Prim
-                 "lib/core/prim.ex",
-                 "lib/core/prim/compose.ex",
-                 "lib/core/prim/date.ex",
-                 "lib/core/prim/date_time.ex",
-                 "lib/core/prim/decimal.ex",
-                 "lib/core/prim/integer.ex",
-                 "lib/core/prim/string.ex",
-                 "lib/core/prim/uuid.ex",
-                 "lib/core/prim/wrapper.ex",
                  # 16 — Repo.Pg
                  "lib/core/repo/pg.ex",
                  "lib/core/repo/pg/state_stored.ex",

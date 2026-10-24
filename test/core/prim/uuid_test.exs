@@ -290,15 +290,15 @@ defmodule Core.Prim.UUIDTest do
     end
 
     test "CompileError: невалидный namespace: и пустой scope:" do
-      assert_raise CompileError, ~r/namespace: ожидается UUID-строка, получено: "delivery"/, fn ->
+      assert_raise CompileError, ~r/namespace: ожидается UUID-строка, получено "delivery"/, fn ->
         compile_uuid(version: 5, namespace: "delivery", scope: "delivery")
       end
 
-      assert_raise CompileError, ~r/namespace: ожидается UUID-строка, получено: :dns/, fn ->
+      assert_raise CompileError, ~r/namespace: ожидается UUID-строка, получено :dns/, fn ->
         compile_uuid(version: 5, namespace: :dns, scope: "delivery")
       end
 
-      assert_raise CompileError, ~r/scope: ожидается непустая строка, получено: ""/, fn ->
+      assert_raise CompileError, ~r/scope: ожидается непустая строка, получено ""/, fn ->
         compile_uuid(version: 5, namespace: StreamID.namespace(), scope: "")
       end
     end

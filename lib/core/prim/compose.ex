@@ -9,8 +9,13 @@ defmodule Core.Prim.Compose do
   Флаги `sensitive:` и `personal:` наследуются от базового Prim, если не заданы явно; понизить
   флаг (`sensitive: false` поверх чувствительной базы, `personal: false` поверх персональной)
   нельзя — `CompileError`.
+
+  Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:` — проверяются в
+  теле модуля; остальные опции — литералы.
+  `of:` — модуль-литерал: проверяется при раскрытии и MUST NOT быть вложен в вызывающего.
   """
 
+  alias Core.Helper
   alias Core.Prim
   alias Core.Result
 
@@ -21,12 +26,19 @@ defmodule Core.Prim.Compose do
 
   @doc "Объявить Compose-Prim поверх базового (`of:` / `name:`)."
   defmacro __using__(opts) do
+    opts = Prim.Opts.prepare!(opts, __CALLER__, __MODULE__)
     base = Keyword.fetch!(opts, :of)
 
-    quote bind_quoted: [opts: opts], unquote: true do
-      kind = Prim.Opts.prepare!(opts, Core.Prim.Compose)
+    base_opts =
+      Keyword.merge(Prim.Wrapper.base_opts(opts, label()),
+        cast: quote(do: &__MODULE__.__compose_cast__/1),
+        sensitive: sensitive?(opts, base),
+        personal: personal?(opts, base),
+        value_type: quote(do: unquote(base).t())
+      )
 
-      @base Keyword.fetch!(opts, :of)
+    quote do
+      @base unquote(base)
 
       @doc false
       @spec __compose_cast__(term()) :: Core.Result.t()
@@ -35,14 +47,7 @@ defmodule Core.Prim.Compose do
         Core.Prim.Compose.cast(raw, @base, __MODULE__)
       end
 
-      require Prim.Wrapper
-
-      Prim.Wrapper.use_prim(opts, kind,
-        cast: &__MODULE__.__compose_cast__/1,
-        sensitive: Core.Prim.Compose.sensitive?(opts, unquote(base)),
-        personal: Core.Prim.Compose.personal?(opts, unquote(base)),
-        value_type: unquote(base).t()
-      )
+      use Core.Prim, unquote(base_opts)
 
       @doc "Модуль базового Prim."
       @spec __domain_base__() :: module()
@@ -56,11 +61,12 @@ defmodule Core.Prim.Compose do
     end
   end
 
-  @doc "Проверить значения опций билдера на этапе компиляции."
+  @doc "Проверить значения опций-литералов билдера при раскрытии `use`."
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
-    ensure_base!(Keyword.fetch!(opts, :of))
+    Prim.Opts.boolean!(opts, ~w(sensitive personal)a, label())
+    ensure_base!(Helper.Opts.module!(opts, :of, label()))
   end
 
   @doc "Cast: базовый Prim / себя / raw через `base.new/1`."
@@ -98,11 +104,8 @@ defmodule Core.Prim.Compose do
   # ---
 
   defp ensure_base!(base) do
-    Code.ensure_compiled!(base)
-
     if not Prim.prim?(base) do
-      raise CompileError,
-        description: "#{label()}: of: ожидается Prim-модуль, получено: #{inspect(base)}"
+      Helper.Opts.reject!("#{label()}: of", "ожидается Prim-модуль, получено #{inspect(base)}")
     end
 
     :ok
@@ -118,10 +121,10 @@ defmodule Core.Prim.Compose do
 
   defp refuse_downgrade!(base, flag, adjective) do
     if base_flag?(base, flag) do
-      raise CompileError,
-        description:
-          "#{label()}: #{flag}: false поверх #{adjective} #{inspect(base)} — " <>
-            "композит открыл бы raw базы в Error.detail; уберите опцию"
+      Helper.Opts.reject!(
+        "#{label()}: #{flag}",
+        "false поверх #{adjective} #{inspect(base)} — композит открыл бы raw базы в Error.detail; уберите опцию"
+      )
     end
 
     false

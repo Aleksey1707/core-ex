@@ -6,6 +6,9 @@ defmodule Core.Prim.DateTime do
   (`:second` — default, `:millisecond`, `:microsecond`), `tz:`, `mutate:` / `validate:`,
   `sensitive:`, `personal:`. Дополнительно генерирует `now/0`, `now!/0` и `from/1`, `from!/1`
   (конверсия из другого datetime-Prim).
+
+  Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:` — проверяются в
+  теле модуля; остальные опции — литералы.
   """
 
   @behaviour Core.Mutator
@@ -14,7 +17,6 @@ defmodule Core.Prim.DateTime do
   alias Core.Error
   alias Core.Prim
   alias Core.Result
-  alias Core.Validator
 
   use Core.Prim.Wrapper,
     label: "Prim.DateTime",
@@ -25,22 +27,23 @@ defmodule Core.Prim.DateTime do
 
   @doc "Объявить datetime-Prim (`name:` + опции tz/precision/bounds)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts], unquote: true do
-      kind = Prim.Opts.prepare!(opts, Core.Prim.DateTime)
+    opts = Prim.Opts.prepare!(opts, __CALLER__, __MODULE__)
+    type_opts = Macro.escape(Keyword.take(opts, ~w(after before tz precision)a))
 
-      type_opts = Keyword.take(opts, ~w(after before tz precision)a)
+    base_opts =
+      Prim.Wrapper.base_opts(opts, label()) ++
+        [
+          cast: quote(do: &Core.Prim.DateTime.cast/1),
+          mutate: quote(do: &Core.Prim.DateTime.mutate/2),
+          validate: quote(do: {Core.Validator.DateTime, unquote(type_opts)}),
+          type_opts: type_opts,
+          value_type: quote(do: DateTime.t())
+        ]
 
-      require Prim.Wrapper
+    quote do
+      use Core.Prim, unquote(base_opts)
 
-      Prim.Wrapper.use_prim(opts, kind,
-        cast: &Core.Prim.DateTime.cast/1,
-        mutate: &Core.Prim.DateTime.mutate/2,
-        validate: {Validator.DateTime, type_opts},
-        type_opts: type_opts,
-        value_type: DateTime.t()
-      )
-
-      @tz Keyword.get(type_opts, :tz)
+      @tz unquote(Keyword.get(opts, :tz))
 
       @doc "Доменное «сейчас» (`Core.Clock`) в tz модуля/конфига."
       @spec now() :: Core.Result.t(t())
@@ -107,23 +110,13 @@ defmodule Core.Prim.DateTime do
 
   def precisions, do: @precisions
 
-  @doc "Проверить значения опций билдера на этапе компиляции."
+  @doc "Проверить значения опций-литералов билдера при раскрытии `use`."
   @spec validate_opts!(keyword()) :: :ok
 
   def validate_opts!(opts) do
     Prim.Opts.struct_bounds!(opts, :after, :before, DateTime, label())
     Prim.Opts.tz!(opts, :tz, label())
-    validate_precision!(Keyword.get(opts, :precision, :second))
-  end
-
-  @doc "Проверить `precision:` — атом как у `DateTime.truncate/2`."
-  @spec validate_precision!(atom()) :: :ok
-
-  def validate_precision!(precision) when precision in @precisions, do: :ok
-
-  def validate_precision!(precision) do
-    raise ArgumentError,
-          "неизвестное precision: #{inspect(precision)}; допустимые: #{inspect(@precisions)}"
+    Prim.Opts.allowed!(opts, :precision, @precisions, label())
   end
 
   @doc false

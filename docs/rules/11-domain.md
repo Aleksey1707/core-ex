@@ -94,15 +94,18 @@ use Core.Prim,
 `Prim.String` / `Integer` / `Decimal` / `UUID` / `DateTime` / `Date` / `Compose` +
 `Core.Validator.*` (sibling, не под Prim).
 
-Порядок проверок у всех обёрток один — `Core.Prim.Opts.prepare!/2` (набор ключей →
-`kind:` → флаги `sensitive:` / `personal:` → значения собственных опций); метаданные билдера
-объявляет `use Core.Prim.Wrapper`.
+Пролог у всех обёрток один — `Core.Prim.Opts.prepare!/3` при раскрытии `use` (набор ключей →
+опции-литералы → `kind:` → значения собственных опций-литералов); метаданные билдера объявляет
+`use Core.Prim.Wrapper`. Опции-выражения (`name:`, `mutate:`, `validate:` и свои, перечисленные в
+`@moduledoc` обёртки) проверяются в теле модуля (`20-agreements.md`, «Опции `use`»).
 
 Общие ключи обёрток (`name:` — обязательный; `kind:`, `mutate:`, `validate:`, `sensitive:`,
 `personal:`) и их передача в базу — у `Core.Prim.Wrapper`: обёртка объявляет в
-`use Core.Prim.Wrapper` только свои ключи, а базовый Prim собирает
-`Core.Prim.Wrapper.use_prim/3` (`mutate:` / `validate:` обёртки → `custom_mutate:` /
-`custom_validate:` базы). Базовый `use Core.Prim` с неизвестным ключом — `CompileError`.
+`use Core.Prim.Wrapper` только свои ключи, а опции базового Prim собирает
+`Core.Prim.Wrapper.base_opts/2` (`mutate:` / `validate:` обёртки → `custom_mutate:` /
+`custom_validate:` базы). `name:`, `sensitive:`, `personal:` проверяет базовый `use Core.Prim`
+(метка `Prim:`), у `Prim.Compose` флаги — она сама. Базовый `use Core.Prim` с неизвестным ключом —
+`CompileError`.
 
 **Значения** опций обёрток проверяются на компиляции (`Core.Prim.Opts`, `CompileError`):
 границы и их порядок, `%Regex{}`, `%Date{}` / `%DateTime{}`, IANA-зона `tz:`, версия UUID,
@@ -164,7 +167,7 @@ datetime-Prim** (явный API; `new/1` принимает только raw `%D
 
 Native kinds: `:string`, `:integer`, `:decimal`, `:uuid`, `:datetime`, `:date`
 (`Prim.native_kinds/0`). Reserved: native + `:composite`. Опциональный `kind:` — свой атом (не чужой
-reserved; проверка `Prim.validate_kind!/2`); тогда в профилях Codec нужны `dump(%Mod{})` и/или
+reserved; проверка `Prim.validate_kind!/3`); тогда в профилях Codec нужны `dump(%Mod{})` и/или
 `dump_kind(prim, kind)`.
 
 Правило `name:`: брать из первой строки `@moduledoc` через `Helper.String.first_line/1`.

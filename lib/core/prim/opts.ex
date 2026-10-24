@@ -6,6 +6,10 @@ defmodule Core.Prim.Opts do
   регулярку, таймзону, версию UUID, namespace UUIDv5. Ошибка в опции обязана падать `CompileError`
   на `use`, потому что в рантайме она приходит доменной ошибкой первого `new/1`,
   где неотличима от невалидного пользовательского ввода.
+
+  Пролог обёрток — `prepare!/3` (ADR-0085): ключи и опции-литералы проверяются при раскрытии
+  `use`, опции-выражения — в теле модуля теми же проверками над вычисленным значением. Все отказы —
+  `CompileError` через `Core.Helper.Opts.reject!/2`.
   """
 
   alias Core.Helper
@@ -14,24 +18,32 @@ defmodule Core.Prim.Opts do
   @tz_shape ~r{^[A-Za-z][A-Za-z0-9+\-_]*(/[A-Za-z0-9+\-_]+)*$}
 
   @doc """
-  Проверить опции `use` обёртки и вернуть её `kind`.
+  Пролог `__using__` обёртки: разобрать её опции при раскрытии и вернуть их с резолвленным `kind`.
 
-  Порядок один на все обёртки: набор ключей → `kind:` → общие флаги
-  (`Core.Prim.Wrapper.flags/0`) → значения собственных опций (`validate_opts!/1` самой
-  обёртки). Метаданные берутся из `Core.Prim.Wrapper`, поэтому копиям пролога негде
-  разъехаться.
+  Порядок один на все обёртки: `Core.Helper.Opts.expand!/3` → `validate!/4` (полный набор ключей
+  обёртки) → `literal!/3` (опции-выражения `expression_keys/0` остаются AST) → `kind:` →
+  `validate_opts!/1` самой обёртки. Метаданные берутся из `Core.Prim.Wrapper`, поэтому копиям
+  пролога негде разъехаться. `validate_opts!/1` проверяет значения только опций-литералов: у
+  опций-выражений там AST, их значения проверяет тело модуля.
   """
-  @spec prepare!(keyword(), module()) :: atom()
+  @spec prepare!(Macro.t(), Macro.Env.t(), module()) :: keyword()
 
-  def prepare!(opts, wrapper) when is_list(opts) and is_atom(wrapper) do
+  def prepare!(opts, %Macro.Env{} = caller, wrapper) when is_atom(wrapper) do
     label = wrapper.label()
-
+    opts = Helper.Opts.expand!(opts, caller, label)
     Helper.Opts.validate!(opts, wrapper.required_keys(), wrapper.optional_keys(), label)
-    kind = kind!(opts, wrapper.native_kind(), label)
-    boolean!(opts, Prim.Wrapper.flags(), label)
+    opts = Helper.Opts.literal!(opts, wrapper.expression_keys(), label)
+    opts = Keyword.put(opts, :kind, kind!(opts, wrapper.native_kind(), label))
     wrapper.validate_opts!(opts)
 
-    kind
+    opts
+  end
+
+  @doc "keyword-AST опций для `quote`: опции-литералы — через `Macro.escape/1`, опции-выражения — AST как есть."
+  @spec quoted(keyword(), [atom()]) :: Macro.t()
+
+  def quoted(opts, expression_keys) when is_list(opts) and is_list(expression_keys) do
+    Enum.map(opts, fn {key, value} -> {key, if(key in expression_keys, do: value, else: Macro.escape(value))} end)
   end
 
   @doc "Резолв и проверка `kind:`: свой атом либо native обёртки."
@@ -40,7 +52,7 @@ defmodule Core.Prim.Opts do
   def kind!(opts, native, label) when is_list(opts) and is_atom(native) do
     case Keyword.get(opts, :kind, native) do
       kind when is_atom(kind) ->
-        Prim.validate_kind!(native, kind)
+        Prim.validate_kind!(native, kind, label)
         kind
 
       other ->
@@ -174,10 +186,10 @@ defmodule Core.Prim.Opts do
     max = Keyword.get(opts, max_key)
 
     if not is_nil(min) and not is_nil(max) and compare.(min, max) == :gt do
-      raise CompileError,
-        description:
-          "#{label}: #{min_key} (#{inspect(min)}) больше #{max_key} (#{inspect(max)}) — " <>
-            "такой Prim не примет ни одного значения"
+      Helper.Opts.reject!(
+        label,
+        "#{min_key} (#{inspect(min)}) больше #{max_key} (#{inspect(max)}) — такой Prim не примет ни одного значения"
+      )
     end
 
     :ok
@@ -198,8 +210,8 @@ defmodule Core.Prim.Opts do
 
   defp decimal?(_value), do: false
 
-  defp bad!(label, key, expected, value) do
-    raise CompileError,
-      description: "#{label}: #{key}: ожидается #{expected}, получено: #{inspect(value)}"
-  end
+  @spec bad!(String.t(), atom(), String.t(), term()) :: no_return()
+
+  defp bad!(label, key, expected, value),
+    do: Helper.Opts.reject!("#{label}: #{key}", "ожидается #{expected}, получено #{inspect(value)}")
 end

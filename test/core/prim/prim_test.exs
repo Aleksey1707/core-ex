@@ -147,7 +147,7 @@ defmodule Core.PrimTest do
   end
 
   test "wrapper rejects foreign builtin kind" do
-    assert_raise ArgumentError, ~r/— встроенный/, fn ->
+    assert_raise CompileError, ~r/: kind: :[a-z]+ — встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.PrimTest.BadKind do
@@ -202,7 +202,7 @@ defmodule Core.PrimTest do
   end
 
   test "wrapper rejects reserved kind :composite" do
-    assert_raise ArgumentError, ~r/— встроенный/, fn ->
+    assert_raise CompileError, ~r/: kind: :[a-z]+ — встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.PrimTest.CompositeKind do

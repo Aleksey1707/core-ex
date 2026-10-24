@@ -124,7 +124,7 @@ defmodule Core.Prim.ComposeTest do
   end
 
   test "rejects reserved kind :uuid" do
-    assert_raise ArgumentError, ~r/— встроенный/, fn ->
+    assert_raise CompileError, ~r/: kind: :[a-z]+ — встроенный/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.ComposeTest.BadKind do
