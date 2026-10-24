@@ -28,11 +28,11 @@ defmodule Core.Es.Personal.EventsTest do
   defmodule RaisingCodec do
     @moduledoc false
 
-    # Фасад, чья загрузка `HolderSet` падает с открытым значением поля в аргументах кадра.
+    # Фасад, чья загрузка ПДн-значения `Holder` падает с открытым значением в аргументах кадра.
     def dump(value), do: Config.codec().dump(value)
 
-    def load(_union, %{"payload" => %{"holder" => holder}}), do: String.to_integer(holder)
-    def load(union, wire), do: Config.codec().load(union, wire)
+    def load(Core.EsFixture.Account.Holder, holder) when is_binary(holder), do: String.to_integer(holder)
+    def load(mod, raw), do: Config.codec().load(mod, raw)
   end
 
   defmodule RaisingRepo do

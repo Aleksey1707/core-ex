@@ -22,8 +22,8 @@ defmodule Core.Es.EventCompatCase do
 
   1. у каждого тега `types/0` есть фикстура `<тег>.json`;
   2. каждая фикстура каталога, кроме источников `upcasts:`, несёт в `type` тег из имени файла и
-     грузится через `codec.load(<Aggregate>.Event, _)`; посторонний `*.json` и фикстура тега,
-     которого в кодеке нет, — провал;
+     грузится кодеком по семейству `<Aggregate>.Event` с фасадом `Core.Config.codec/0`; посторонний
+     `*.json` и фикстура тега, которого в кодеке нет, — провал;
   3. у каждого источника `upcasts:` есть фикстура;
   4. фикстура источника несёт его тег и грузится — апкастом, в модуль конца цепочки;
   5. персональный Prim (`personal: true`) в загруженной фикстуре текущего тега лежит только в поле
@@ -424,7 +424,7 @@ defmodule Core.Es.EventCompatCase do
     with {:ok, body} <- File.read(path),
          {:ok, data} <- Jason.decode(body),
          :ok <- check_type(data, tag(path)) do
-      codec.load(event_codec.__codec_union__(), data)
+      event_codec.load(event_codec.__es_family__(), data, codec)
     end
   end
 

@@ -33,6 +33,18 @@ defmodule Core.Codec.Plugin do
 
   Ручной вариант (`{Type, адрес}`) пишет только поля — колбэками `dump_variant/2` / `load_variant/3`.
 
+  ## Протокол фасада
+
+  Две служебные функции плагина фасад зовёт при своей сборке, и о видах плагинов он не знает:
+
+  - `__codec_pattern__/1` — паттерн, которым фасад сужает результат `load/2` / `load!/2` для типа
+    плагина; по умолчанию `%Type{}`;
+  - `__codec_check__/1` — проверка плагина против полного списка плагинов фасада, отказ —
+    `CompileError`; по умолчанию проверять нечего.
+
+  `use` генерирует обе по умолчанию, плагин MAY переопределить их (образец — кодек событий:
+  сужение по нагрузке, уникальность типа агрегата и обслуживание нагрузок-сущностей).
+
   ## Спека пере-дампа
 
   Спеку `Core.Codec.Redump` каждого типа из `fields:`, варианта из `variants:` и семейства с
@@ -102,6 +114,12 @@ defmodule Core.Codec.Plugin do
   """
   @callback redump_spec(module()) :: Core.Codec.Redump.spec()
 
+  @doc false
+  @callback __codec_pattern__(type :: module()) :: Macro.t()
+
+  @doc false
+  @callback __codec_check__(plugins :: [module()]) :: :ok
+
   @optional_callbacks load: 3, dump_variant: 2, load_variant: 3, redump_spec: 1
 
   @doc """
@@ -159,6 +177,20 @@ defmodule Core.Codec.Plugin do
       @spec __codec_variants__() :: [{module(), term(), [Core.Codec.Field.t()] | :manual}]
 
       def __codec_variants__, do: @codec_variants_info
+
+      @doc false
+      @spec __codec_pattern__(module()) :: Macro.t()
+
+      @impl true
+      def __codec_pattern__(type) when is_atom(type), do: quote(do: %unquote(type){})
+
+      @doc false
+      @spec __codec_check__([module()]) :: :ok
+
+      @impl true
+      def __codec_check__(plugins) when is_list(plugins), do: :ok
+
+      defoverridable __codec_pattern__: 1, __codec_check__: 1
 
       import Core.Helper.Map, only: [field: 2]
 

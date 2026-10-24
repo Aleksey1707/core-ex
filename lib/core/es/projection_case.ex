@@ -13,7 +13,7 @@ defmodule Core.Es.ProjectionCase do
   `ACCESS EXCLUSIVE` до конца sandbox-транзакции.
 
   Фикстура модуля из `events:` — `<тип агрегата>/<текущий тег>.json` от корня `fixtures:`; тип
-  агрегата и тег берутся из кодека события, фикстура грузится фасадом `codec:` проекции. Тег в
+  агрегата и тег берутся из кодека события, фикстуру грузит он же с фасадом `codec:` проекции. Тег в
   `type` фикстуры сверяется с текущим: фикстуры источников `upcasts:` не прогоняются, апкаст
   проверяет `Core.Es.EventCompatCase`. Нет фикстуры, в ней чужой тег или она не грузится — провал
   теста с путями. Событие уничтожения ключа `Core.Es.Personal.Event.KeyDestroyed` case строит сам
@@ -90,7 +90,7 @@ defmodule Core.Es.ProjectionCase do
 
   @typedoc """
   Причина: файл не читается, не JSON, тег в конверте (`type`) — не текущий тег модуля или ошибка
-  фасада.
+  загрузки.
   """
   @type reason :: File.posix() | Jason.DecodeError.t() | %{type: term()} | Core.Error.t()
 
@@ -464,7 +464,7 @@ defmodule Core.Es.ProjectionCase do
     with {:ok, body} <- File.read(path),
          {:ok, data} <- Jason.decode(body),
          :ok <- check_type(data, tag) do
-      codec.load(event_codec.__codec_union__(), data)
+      event_codec.load(event_codec.__es_family__(), data, codec)
     end
   end
 

@@ -19,20 +19,20 @@ defmodule Core.Codec.Facade do
 
   ## Семейства типов
 
-  Плагин с `union:` (образец — `Core.Es.Event.Codec`) получает клоузу `load/2` на сам
-  модуль-семейство: `codec.load(<Aggregate>.Event, data)` возвращает то событие, тег
-  которого лежит в данных. Выбор конкретного типа — задача плагина, фасад про теги
-  не знает: модули типов и семейств обязаны быть уникальными между плагинами, и это
-  проверяется на компиляции. Так же уникален между кодеками событий тип агрегата (`type:`), а
-  нагрузку-сущность события обязан обслуживать плагин того же фасада.
+  Плагин с `union:` получает клоузу `load/2` на сам модуль-семейство: `codec.load(<Aggregate>.Event,
+  data)` возвращает то событие, тег которого лежит в данных. Выбор конкретного типа — задача
+  плагина, фасад про теги не знает: модули типов и семейств обязаны быть уникальными между
+  плагинами, и это проверяется на компиляции.
 
-  К `plugins:` фасад сам добавляет кодек события уничтожения ключа
-  `Core.Es.Personal.Event.Codec`: тип агрегата `"core.subject"` зарезервирован, и кодек
-  потребителя с ним — `CompileError` той же проверки уникальности типа.
+  Свои проверки плагин делает сам: фасад при сборке отдаёт каждому плагину полный список
+  `plugins:` (`__codec_check__/1`, `Core.Codec.Plugin`), отказ — `CompileError`. Так кодек событий
+  сверяет уникальность типа агрегата и то, что его нагрузку-сущность обслуживает плагин того же
+  фасада. Плагинов сверх `plugins:` фасад не добавляет.
 
   ## Сужение результата
 
-  Клоузы плагинов сужают его результат паттерном, и компилятор у вызывающего знает тип значения:
+  Клоузы плагинов сужают его результат паттерном, который отдаёт сам плагин (`__codec_pattern__/1`,
+  по умолчанию `%Type{}`), и компилятор у вызывающего знает тип значения:
   `load(A, raw)` — `{:ok, %A{}} | {:error, _}`, `load(<Aggregate>.Event, raw)` — объединение
   `{:ok, %Event.X{}}` по событиям кодека, `load!/2` — само значение, ошибка плагина — `raise Core.Exc`.
   Событие сужается и по нагрузке: `%Event.X{payload: %Payload{}}` либо `payload: nil`. Опечатка в
@@ -61,8 +61,7 @@ defmodule Core.Codec.Facade do
       @plugins Core.Codec.Facade.plugins!(Keyword.get(opts, :plugins, []))
 
       Core.Codec.Facade.validate_mods!(@plugins)
-      Core.Codec.Facade.validate_es_types!(@plugins)
-      Core.Codec.Facade.validate_es_payloads!(@plugins)
+      Core.Codec.Facade.check_plugins!(@plugins)
 
       require Core.Guard
 
@@ -158,13 +157,10 @@ defmodule Core.Codec.Facade do
     end
   end
 
-  @doc """
-  Плагины фасада: `plugins:` потребителя и кодек зарезервированного типа агрегата
-  `Core.Es.Personal.Event.Codec` (ADR-0079), который библиотека подключает сама.
-  """
+  @doc "Плагины фасада — `plugins:` как объявлены."
   @spec plugins!(term()) :: [module()]
 
-  def plugins!(plugins) when is_list(plugins), do: plugins ++ [Core.Es.Personal.Event.Codec]
+  def plugins!(plugins) when is_list(plugins), do: plugins
   def plugins!(_plugins), do: raise(CompileError, description: "plugins: ожидается список модулей")
 
   @doc """
@@ -241,20 +237,12 @@ defmodule Core.Codec.Facade do
 
   def load_clauses(plugin, mod, fun) when is_atom(plugin) and is_atom(mod) and fun in [:load, :load!] do
     types = if mod == plugin.__codec_union__(), do: plugin.__codec_types__(), else: [mod]
-    patterns = Enum.map(types, &type_pattern(plugin, &1))
+    patterns = Enum.map(types, &plugin.__codec_pattern__/1)
 
     Enum.flat_map(patterns, &ok_clause(&1, fun)) ++ error_clause(fun)
   end
 
   # ---
-
-  # Поля struct компилятор не типизирует, поэтому событие сужается ещё и по нагрузке: иначе опечатка
-  # в её поле после `load/2` молчала бы.
-  defp type_pattern(plugin, type) do
-    if Helper.Module.exports?(plugin, :__es_type__, 0),
-      do: Core.Es.Check.event_pattern(type),
-      else: quote(do: %unquote(type){})
-  end
 
   defp ok_clause(pattern, :load), do: quote(generated: true, do: ({:ok, unquote(pattern) = value} -> {:ok, value}))
   defp ok_clause(pattern, :load!), do: quote(generated: true, do: ({:ok, unquote(pattern) = value} -> value))
@@ -262,65 +250,20 @@ defmodule Core.Codec.Facade do
   defp error_clause(:load), do: quote(generated: true, do: ({:error, reason} -> {:error, reason}))
   defp error_clause(:load!), do: quote(generated: true, do: ({:error, %Core.Error{} = error} -> raise Core.Exc, error))
 
-  # ===== кодеки событий =====
+  # ===== проверки плагинов =====
 
   @doc """
-  Проверить типы агрегата кодеков событий среди плагинов (compile-time).
+  Проверки плагинов против полного списка `plugins:` (compile-time).
 
-  Тип агрегата (`type:` у `Core.Es.Event.Codec`) — первая часть адреса потока событий, поэтому
-  два кодека с одним типом в одном фасаде — `CompileError`.
+  Что проверять, знает плагин (`__codec_check__/1`): у кодека событий — уникальность типа
+  агрегата и обслуживание нагрузок-сущностей, у прочих по умолчанию нечего. Отказ — `CompileError`.
   """
-  @spec validate_es_types!([module()]) :: :ok
+  @spec check_plugins!([module()]) :: :ok
 
-  def validate_es_types!(plugins) when is_list(plugins) do
-    _by_type =
-      plugins
-      |> ensure_plugins!()
-      |> Enum.filter(&Helper.Module.exports?(&1, :__es_type__, 0))
-      |> Enum.reduce(%{}, &put_unique_es_type!/2)
-
-    :ok
-  end
-
-  @doc """
-  Проверить, что нагрузку-сущность каждого события кодеков событий обслуживает плагин фасада
-  (compile-time).
-
-  Такую нагрузку кодек событий передаёт фасаду целиком (`Core.Es.Event.Codec.plugin_payloads/1`),
-  и без плагина её типа событие не записать и не прочитать.
-  """
-  @spec validate_es_payloads!([module()]) :: :ok
-
-  def validate_es_payloads!(plugins) when is_list(plugins) do
-    plugins = ensure_plugins!(plugins)
-    served = MapSet.new(Enum.flat_map(plugins, & &1.__codec_types__()))
-
-    for plugin <- plugins,
-        Helper.Module.exports?(plugin, :__es_type__, 0),
-        {event, payload} <- Core.Es.Event.Codec.plugin_payloads(plugin.__es_mods__()),
-        not MapSet.member?(served, payload) do
-      raise CompileError,
-        description:
-          "нагрузку #{inspect(payload)} события #{inspect(event)} (#{inspect(plugin)}) " <>
-            "не обслуживает ни один плагин фасада: объявите её тип в Codec-плагине и добавьте его в plugins:"
-    end
-
-    :ok
-  end
-
-  # ---
-
-  defp put_unique_es_type!(plugin, acc) do
-    type = plugin.__es_type__()
-
-    case Map.fetch(acc, type) do
-      {:ok, other} ->
-        raise CompileError,
-          description: "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
-
-      :error ->
-        Map.put(acc, type, plugin)
-    end
+  def check_plugins!(plugins) when is_list(plugins) do
+    plugins
+    |> ensure_plugins!()
+    |> Enum.each(&(:ok = &1.__codec_check__(plugins)))
   end
 
   # ===== общее =====

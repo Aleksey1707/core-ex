@@ -60,7 +60,7 @@ defmodule Core.Es.Event.Message do
   defp decode(nil), do: {:error, invalid_body(%{tombstone: true})}
 
   defp load_wire(family, %{"event_id" => event_id} = wire, codec) when is_binary(event_id) do
-    case Es.Store.load_wires([{family, wire}], codec) do
+    case Es.Store.load_wires([{family, wire}], &codec.load/2) do
       {:ok, [loaded]} -> to_decode_result(loaded)
       {:error, %Error{}} = error -> error
     end

@@ -296,6 +296,21 @@ defmodule Core.Es.Event.CodecTest do
       end
     end
 
+    test "зарезервированный тип \"core.subject\" вне кодека библиотеки — CompileError" do
+      assert_raise CompileError, ~r/type: "core.subject" зарезервирован.*Core.Es.Personal.Event.Codec/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.ReservedType do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "core.subject",
+                tags: %{Core.EventFixture.Event.Closed => "core.subject.closed"}
+            end
+          end
+        )
+      end
+    end
+
     test "тип агрегата доступен интроспекцией" do
       assert EventFixture.Event.Codec.__es_type__() == "fixture"
     end

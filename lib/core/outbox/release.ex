@@ -99,7 +99,10 @@ defmodule Core.Outbox.Release do
     modules = Enum.filter(app_modules(app), &Code.ensure_loaded?/1)
 
     type_by_family =
-      for module <- modules, event_codec?(module), into: %{}, do: {module.__codec_union__(), module.__es_type__()}
+      for module <- modules,
+          Es.Event.Codec.codec?(module),
+          into: %{},
+          do: {module.__es_family__(), module.__es_type__()}
 
     modules
     |> Enum.filter(&outbox?/1)
@@ -113,8 +116,6 @@ defmodule Core.Outbox.Release do
       {:error, reason} -> raise ArgumentError, "#{@label}: приложение #{inspect(app)} не загружено: #{inspect(reason)}"
     end
   end
-
-  defp event_codec?(module), do: Core.Helper.Module.exports?(module, :__es_type__, 0)
 
   defp outbox?(module),
     do: Core.Helper.Module.exports?(module, :__es_event__, 0) and Core.Helper.Module.exports?(module, :topic, 0)

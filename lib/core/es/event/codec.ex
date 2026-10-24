@@ -22,8 +22,8 @@ defmodule Core.Es.Event.Codec do
     (`Core.Es.ValueChanged.fields/2`);
   - Prim — `codec.dump(payload)` / `codec.load(Prim, wire)`: в конверте голое значение;
   - любая другая struct — так же, целиком через фасад: её wire-форму задаёт плагин её типа (по
-    полям или ручной). Что такой плагин есть, проверяет сборка фасада
-    (`Core.Codec.Facade.validate_es_payloads!/1`).
+    полям или ручной). Что такой плагин есть, проверяет кодек при сборке фасада
+    (`check_facade!/2`).
 
   События без нагрузки (`payload: nil` у `use Es.Event`) в конверте несут `nil`.
 
@@ -49,6 +49,16 @@ defmodule Core.Es.Event.Codec do
   `codec.load(<Aggregate>.Event, data)` восстанавливает событие по тегу внутри конверта.
   Модуль событий агрегата объявлен семейством (`union:` у `Core.Codec.Plugin`), поэтому
   у фасада не появляется ни реестра тегов, ни функций сверх `dump/1` и `load/2`.
+
+  Сужение результата и проверки сборки фасада кодек отдаёт сам, через протокол плагина
+  (`Core.Codec.Plugin`, «Протокол фасада»): событие сужается и по нагрузке (`Core.Es.Check.event_pattern/1`),
+  а `check_facade!/2` сверяет уникальность типа агрегата среди кодеков событий фасада и то, что
+  нагрузку-сущность обслуживает плагин того же фасада. Фасад о событиях не знает.
+
+  Пути `Core.Es.Store` событие дампят и грузят кодеком напрямую (`dump/2`, `load/3` по
+  `__es_family__/0`), фасад приложения передаётся как `codec` для вложенных значений: так пишется
+  и читается поток кодека, которого нет в `plugins:` (`Core.Es.Personal.Event.Codec`). Признак
+  «модуль — кодек событий» — `codec?/1`.
 
   Отсюда и область уникальности тега: он выбирает модуль **внутри одного кодека**, а не
   во всём приложении. Квалифицировать его именем агрегата (`delivery.registered`) всё
@@ -80,10 +90,11 @@ defmodule Core.Es.Event.Codec do
 
   ## Opts
 
-  - `event:` — объединяющий модуль событий агрегата (семейство для `codec.load/2`)
+  - `event:` — объединяющий модуль событий агрегата (семейство для `codec.load/2`, `__es_family__/0`)
   - `type:` — тип агрегата: wire-имя, первая часть адреса потока событий (`__es_type__/0`);
     формат — как у тега, в конверт не попадает. Дубль среди плагинов фасада — `CompileError`;
-    префикс тегов и уникальность на приложение — `Core.Es.Event.TagsCase`
+    `"core.subject"` зарезервирован за `Core.Es.Personal.Event.Codec` (ADR-0079), в другом модуле —
+    `CompileError`; префикс тегов и уникальность на приложение — `Core.Es.Event.TagsCase`
   - `tags:` — `%{Mod => "wire_tag"}`, SSOT wire-имён событий
   - `upcasts:` — `%{"старый тег" => "новый тег"}` (`__es_upcasts__/0`), необязательная. Событие
     тега-источника при загрузке по семейству до выбора модуля проходит цепочку шагов: нагрузку
@@ -116,6 +127,10 @@ defmodule Core.Es.Event.Codec do
   @optional_keys ~w(upcasts)a
   @ns :es
   @operation_keys ~w(operation_id session_id basis_id)a
+  @reserved_type "core.subject"
+  # Атом, а не алиас: кодек субъекта сам собирается через `use` этого модуля, и ссылка на него
+  # замкнула бы цикл компиляции.
+  @reserved_codec :"Elixir.Core.Es.Personal.Event.Codec"
 
   @typedoc "Конверт события на wire (строковые ключи)."
   @type wire :: %{optional(String.t()) => term()}
@@ -178,7 +193,7 @@ defmodule Core.Es.Event.Codec do
       @behaviour Core.Es.Event.Codec
 
       @es_event unquote(event)
-      @es_type Core.Es.Event.Codec.type!(unquote(type))
+      @es_type Core.Es.Event.Codec.type!(unquote(type), __MODULE__)
       @es_tag_by_mod Core.Es.Event.Codec.tags!(unquote(tags))
       @es_mod_by_tag Core.Es.Event.Codec.mods!(@es_tag_by_mod)
       @es_upcasts Core.Es.Event.Codec.upcasts!(unquote(upcasts), @es_mod_by_tag)
@@ -206,6 +221,11 @@ defmodule Core.Es.Event.Codec do
       def __es_aggregate_id__, do: @es_aggregate_id
 
       @doc false
+      @spec __es_family__() :: module()
+
+      def __es_family__, do: @es_event
+
+      @doc false
       @spec __es_mods__() :: [module()]
 
       def __es_mods__, do: Map.keys(@es_tag_by_mod)
@@ -214,6 +234,20 @@ defmodule Core.Es.Event.Codec do
       @spec __es_upcasts__() :: %{optional(String.t()) => String.t()}
 
       def __es_upcasts__, do: @es_upcasts
+
+      # Поля struct компилятор не типизирует, поэтому событие сужается ещё и по нагрузке: иначе опечатка
+      # в её поле после `load/2` фасада молчала бы.
+      @doc false
+      @spec __codec_pattern__(module()) :: Macro.t()
+
+      @impl true
+      def __codec_pattern__(type) when is_atom(type), do: Core.Es.Check.event_pattern(type)
+
+      @doc false
+      @spec __codec_check__([module()]) :: :ok
+
+      @impl true
+      def __codec_check__(plugins) when is_list(plugins), do: Core.Es.Event.Codec.check_facade!(__MODULE__, plugins)
 
       @doc "Wire-тег события по struct или модулю."
       @spec type(event() | module()) :: String.t()
@@ -303,11 +337,18 @@ defmodule Core.Es.Event.Codec do
   def optional_keys, do: @optional_keys
 
   @doc false
-  @spec type!(term()) :: String.t()
+  @spec type!(term(), module()) :: String.t()
 
-  def type!(type) when is_binary(type) and type != "", do: type
+  def type!(@reserved_type, module) when module != @reserved_codec do
+    raise CompileError,
+      description:
+        "#{@label}: type: #{inspect(@reserved_type)} зарезервирован библиотекой — поток субъекта " <>
+          "пишет кодек #{inspect(@reserved_codec)} (ADR-0079), у #{inspect(module)} — другой type:"
+  end
 
-  def type!(other) do
+  def type!(type, module) when is_binary(type) and type != "" and is_atom(module), do: type
+
+  def type!(other, _module) do
     raise CompileError,
       description:
         "#{@label}: type: ожидается непустая строка, как у тега события, получено " <>
@@ -403,6 +444,26 @@ defmodule Core.Es.Event.Codec do
 
   def payloadless(tags) when is_map(tags),
     do: Enum.filter(Enum.sort(Map.keys(tags)), &is_nil(&1.__es_payload__()))
+
+  @doc "Модуль — кодек событий (`use Core.Es.Event.Codec`)."
+  @spec codec?(module()) :: boolean()
+
+  def codec?(module) when is_atom(module), do: Helper.Module.exports?(module, :__es_type__, 0)
+
+  @doc """
+  Проверить кодек событий `codec` против плагинов фасада (compile-time, `__codec_check__/1`).
+
+  - Тип агрегата (`type:`) — первая часть адреса потока событий, поэтому два кодека с одним
+    типом в одном фасаде — `CompileError`; отказ называет оба, его поднимает второй по списку.
+  - Нагрузку-сущность каждого события (`plugin_payloads/1`) кодек передаёт фасаду целиком, и без
+    плагина её типа событие не записать и не прочитать — `CompileError`.
+  """
+  @spec check_facade!(module(), [module()]) :: :ok
+
+  def check_facade!(codec, plugins) when is_atom(codec) and is_list(plugins) do
+    ensure_unique_type!(codec, Enum.take_while(plugins, &(&1 != codec)))
+    ensure_payloads_served!(codec, MapSet.new(Enum.flat_map(plugins, & &1.__codec_types__())))
+  end
 
   @doc """
   События с нагрузкой-сущностью и её тип: такую нагрузку кодирует плагин фасада.
@@ -604,6 +665,30 @@ defmodule Core.Es.Event.Codec do
   end
 
   # ---
+
+  defp ensure_unique_type!(codec, earlier) do
+    type = codec.__es_type__()
+
+    case Enum.find(earlier, &(codec?(&1) and &1.__es_type__() == type)) do
+      nil ->
+        :ok
+
+      other ->
+        raise CompileError,
+          description: "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(codec)} и #{inspect(other)}"
+    end
+  end
+
+  defp ensure_payloads_served!(codec, served) do
+    for {event, payload} <- plugin_payloads(codec.__es_mods__()), not MapSet.member?(served, payload) do
+      raise CompileError,
+        description:
+          "нагрузку #{inspect(payload)} события #{inspect(event)} (#{inspect(codec)}) " <>
+            "не обслуживает ни один плагин фасада: объявите её тип в Codec-плагине и добавьте его в plugins:"
+    end
+
+    :ok
+  end
 
   defp validate_tag!({mod, tag}) when is_atom(mod) and is_binary(tag) and tag != "" do
     Code.ensure_compiled!(mod)

@@ -1092,9 +1092,9 @@ event-sourced и state-stored агрегатов. Поток — тип агре
   дублёры в `test/support`. Usecase читает поток только через `page_stream/4` репозитория агрегата
   («Страница потока»).
 - Тип агрегата `"core.subject"` зарезервирован библиотекой: поток субъекта с событием уничтожения
-  ключа пишет `destroy_key/3`, кодек `Core.Es.Personal.Event.Codec` фасад подключает сам, и кодек
-  потребителя с этим `type:` — `CompileError` (`23-personal-data.md`, «Уничтожение ключа
-  субъекта»).
+  ключа пишет `destroy_key/3` кодеком `Core.Es.Personal.Event.Codec` (фасад — только для вложенных
+  Prim, в его `plugins:` кодека нет), и кодек с этим `type:` вне библиотеки — `CompileError` сборки
+  кодека (`23-personal-data.md`, «Уничтожение ключа субъекта»).
 - Любой отказ проверки — `{:error, mismatch.(detail)}` с detail
   `%{aggregate_id, expected, actual, source: :storage}`: ns и код ошибки задаёт вызывающий
   write-репозиторий (`errors.domain(behaviour, :version_mismatch, _)`), а не хранилище. `source:`

@@ -14,8 +14,8 @@ defmodule Core.Es.Event.TagsCase do
   `app/14-events-outbox.md`, «Wire-тег события» держится тестом на всё дерево, а не сборкой кодека:
   сборка видит один кодек и проверила бы лишь локальную тень нормы.
 
-  Кодеки — модули `otp_app:` (`Application.spec/2`) с `__es_type__/0`: его генерирует каждый
-  `use Core.Es.Event.Codec`. Перечня нет: новый кодек попадает под проверку сам.
+  Кодеки — модули `otp_app:` (`Application.spec/2`), которые `Core.Es.Event.Codec.codec?/1` признаёт
+  кодеком событий. Перечня нет: новый кодек попадает под проверку сам.
 
   Теги кодека — значения `tags:` **плюс ключи `upcasts:`**: ключ `upcasts:` — записанный тег,
   которого в `tags:` уже нет, и в хранилище он соседствует с чужими наравне. Значения `upcasts:`
@@ -64,6 +64,7 @@ defmodule Core.Es.Event.TagsCase do
   Макрос занимает в тест-модуле имена `@es_except_tags` и `@es_except_types`.
   """
 
+  alias Core.Es
   alias Core.Helper
   alias Core.Result
 
@@ -236,11 +237,9 @@ defmodule Core.Es.Event.TagsCase do
   defp app_codecs!(otp_app) do
     case Application.spec(otp_app, :modules) do
       nil -> raise ArgumentError, "#{@label}: приложение #{inspect(otp_app)} не загружено"
-      modules -> for module <- modules, codec?(module), do: describe(module)
+      modules -> for module <- modules, Es.Event.Codec.codec?(module), do: describe(module)
     end
   end
-
-  defp codec?(module), do: Helper.Module.exports?(module, :__es_type__, 0)
 
   defp describe(codec), do: %{codec: codec, type: codec.__es_type__(), tags: tags(codec)}
 

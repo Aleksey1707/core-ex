@@ -1,6 +1,6 @@
 # 09: Фасад Codec перестаёт знать про события
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 

@@ -417,7 +417,10 @@ use Core.Codec.Facade,
 - Генерируются `__codec_types__/0` (объединение трёх опций), `__codec_union__/0`,
   `__codec_loadable__/0`, `__codec_variants__/0`, `__codec_redump__/1` (спека пере-дампа типа —
   `13-repos.md`, «jsonb-нагрузка на read-пути»; только на типы со спекой, у плагина без них её
-  нет), `__codec_redump_missing__/0` (типы без спеки — отказ по ним бросает фасад)
+  нет), `__codec_redump_missing__/0` (типы без спеки — отказ по ним бросает фасад), протокол фасада
+  `__codec_pattern__/1` (паттерн сужения результата `load/2`, по умолчанию `%Type{}`) и
+  `__codec_check__/1` (проверка против всех `plugins:` при сборке фасада, по умолчанию `:ok`) —
+  обе MAY переопределяться, о видах плагинов фасад не знает
 - `loadable: false` — dump-only (как `<Aggregate>.View.Codec`: у read-модели обратного пути нет)
 - Хелперы плагина (импорт при `use`): `field/2` — из `Core.Helper.Map` (generic-аксессор map по
   atom-или-string ключу, доступен любому коду); `dump_optional/2` / `dump_many/2` / `dump_raw/3` /

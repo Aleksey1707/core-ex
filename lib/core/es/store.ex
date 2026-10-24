@@ -56,7 +56,7 @@ defmodule Core.Es.Store do
   struct его ID: потребитель читает страницу у репозитория. Отдаёт `Core.Pagination.Result` из
   событий потока одного агрегата по возрастанию версии; `total` — число событий всего потока.
   Условия видимости по `xid` в запросе нет: порядок внутри потока держит версия. Строки грузятся
-  фасадом, апкаст действует; первая ошибка загрузки (`:unknown_event_type`, `:invalid_envelope`) —
+  кодеком событий, апкаст действует; первая ошибка загрузки (`:unknown_event_type`, `:invalid_envelope`) —
   `{:error, _}` на всю страницу, событие не пропускается.
 
   Доступ не проверяется, `:not_found` нет: пустой поток — страница с `total: 0`. Права
@@ -83,7 +83,10 @@ defmodule Core.Es.Store do
   со снапшотом репозитория event-sourced агрегата, страница потока, пачка проекции,
   `Core.Es.Store.Test.events!/2` и сообщение брокера (`Core.Es.Event.Message.load/2`). Шаг
   принимает пачку строк целиком и проходит её стадиями: все строки → конверты, все `{"$pd": …}`
-  пачки → один вызов `open` хранилища ключей, затем каждый конверт → апкаст и загрузка фасадом.
+  пачки → один вызов `open` хранилища ключей, затем каждый конверт → апкаст и загрузка кодеком
+  событий потока строки, фасад ему — для вложенных значений (сообщение брокера грузит фасад по
+  семейству). Так же, кодеком событий, пачка дампится при записи: поток кодека, которого нет в
+  `plugins:` фасада (поток субъекта `"core.subject"`), пишется и читается наравне с остальными.
   Открытое значение встаёт на место `$pd` wire-значением поля, уничтоженный ключ — `{"$pd": null}`;
   строку `:skip` шаг не расшифровывает и не грузит.
 
@@ -224,7 +227,7 @@ defmodule Core.Es.Store do
   # `type/1` кодека событий — и тег, и проверка, что событие из его `tags:`.
   defp to_row(event, ord, event_codec, codec) do
     tag = event_codec.type(event)
-    fields = Es.Event.Codec.to_fields(codec.dump(event))
+    fields = Es.Event.Codec.to_fields(event_codec.dump(event, codec))
 
     %{
       ord: ord,
@@ -578,7 +581,9 @@ defmodule Core.Es.Store do
 
   def load_fold_rows(rows, event_codec, codec, sealed)
       when is_list(rows) and is_atom(event_codec) and is_atom(codec) and is_list(sealed) do
-    with {:ok, {loaded, opened}} <- load_entries(Enum.map(rows, &to_wire({event_codec, &1})), codec, sealed),
+    entries = Enum.map(rows, &to_wire({event_codec, &1}))
+
+    with {:ok, {loaded, opened}} <- load_entries(entries, &load_event(&1, &2, codec), sealed),
          do: {:ok, {Enum.map(loaded, &Result.unwrap!/1), opened}}
   end
 
@@ -592,36 +597,41 @@ defmodule Core.Es.Store do
   @spec load_batch([entry()], module()) :: Result.t([loaded()])
 
   def load_batch(entries, codec) when is_list(entries) and is_atom(codec),
-    do: load_wires(Enum.map(entries, &to_wire/1), codec)
+    do: load_wires(Enum.map(entries, &to_wire/1), &load_event(&1, &2, codec))
 
+  # `load` получает ключ записи и открытый конверт: у путей хранилища ключ — кодек событий потока, у
+  # `Core.Es.Event.Message` — семейство для фасада.
   @doc false
-  @spec load_wires([{module(), Es.Event.Codec.wire()} | :skip], module()) :: Result.t([loaded()])
+  @spec load_wires([{module(), Es.Event.Codec.wire()} | :skip], (module(), Es.Event.Codec.wire() -> Result.t())) ::
+          Result.t([loaded()])
 
-  def load_wires(entries, codec) when is_list(entries) and is_atom(codec) do
-    with {:ok, {loaded, []}} <- load_entries(entries, codec, []), do: {:ok, loaded}
+  def load_wires(entries, load) when is_list(entries) and is_function(load, 2) do
+    with {:ok, {loaded, []}} <- load_entries(entries, load, []), do: {:ok, loaded}
   end
 
   # ---
 
-  defp load_entries(entries, codec, sealed) do
+  defp load_entries(entries, load, sealed) do
     with {:ok, {opened, opened_sealed}} <- Personal.Wire.open_wires(Enum.map(entries, &wire/1), sealed),
-         do: {:ok, {Enum.zip_with(entries, opened, &load_wire(&1, &2, codec)), opened_sealed}}
+         do: {:ok, {Enum.zip_with(entries, opened, &load_wire(&1, &2, load)), opened_sealed}}
   end
 
   defp to_wire(:skip), do: :skip
+  defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec), do: {event_codec, Schema.to_wire(row)}
 
-  defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec),
-    do: {event_codec.__codec_union__(), Schema.to_wire(row)}
+  # Событие грузит кодек событий потока, фасад приходит ему только для вложенных значений: поток
+  # кодека, которого нет в `plugins:` фасада (`"core.subject"`), читается так же.
+  defp load_event(event_codec, wire, codec), do: event_codec.load(event_codec.__es_family__(), wire, codec)
 
   defp wire(:skip), do: :skip
-  defp wire({_family, wire}), do: wire
+  defp wire({_key, wire}), do: wire
 
-  defp load_wire(:skip, :skip, _codec), do: :skip
-  defp load_wire(_entry, {:unreadable, event_id, field}, _codec), do: {:error, unreadable(event_id, field)}
-  defp load_wire({family, _wire}, {:ok, {wire, false}}, codec), do: codec.load(family, wire)
+  defp load_wire(:skip, :skip, _load), do: :skip
+  defp load_wire(_entry, {:unreadable, event_id, field}, _load), do: {:error, unreadable(event_id, field)}
+  defp load_wire({key, _wire}, {:ok, {wire, false}}, load), do: load.(key, wire)
 
-  defp load_wire({family, _wire}, {:ok, {wire, true}}, codec) do
-    codec.load(family, wire)
+  defp load_wire({key, _wire}, {:ok, {wire, true}}, load) do
+    load.(key, wire)
   rescue
     exception -> {:error, upcast_raised(wire, exception, __STACKTRACE__)}
   end

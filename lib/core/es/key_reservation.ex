@@ -316,7 +316,7 @@ defmodule Core.Es.KeyReservation do
 
   defp declaration!(module, event_codec, id, errors, label) do
     declaration = module.__es_key_reservation__()
-    family = event_codec.__codec_union__()
+    family = event_codec.__es_family__()
 
     if declaration.event != family do
       raise CompileError,

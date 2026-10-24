@@ -50,7 +50,7 @@ defmodule Core.Es.Projection do
   его `type:`. Пачка читает события типов агрегатов из `events:` и решает по тегу, прошедшему
   цепочку `upcasts:` кодека:
 
-  - тег модуля из `events:` — событие грузится фасадом с апкастом и уходит в `project/1`;
+  - тег модуля из `events:` — событие грузится кодеком с апкастом и уходит в `project/1`;
   - тег, известный кодеку, но не объявленный, — событие пропускается без загрузки;
   - тег, неизвестный кодеку, — ошибка загрузки `:unknown_event_type`
     (`docs/adr/0010-event-evolution-tag-upcast.md`).
@@ -180,7 +180,7 @@ defmodule Core.Es.Projection do
   - `version:` — версия проекции, целое ≥ 1, по умолчанию 1
   - `personal:` — только `false`: read-модель ПДн не держит («Персональные данные»)
   - `repo:` — Ecto-репозиторий транзакции пачки; по умолчанию `Core.Config.dao/0` в рантайме
-  - `codec:` — фасад загрузки событий; по умолчанию `Core.Config.codec/0` в рантайме
+  - `codec:` — фасад вложенных значений событий; по умолчанию `Core.Config.codec/0` в рантайме
 
   На компиляции `CompileError`: нет `project/1` или `clear/0`; `name:` не непустая строка;
   `version:` не целое ≥ 1; `events:` пустой, с повтором, с модулем, который не событие, с
@@ -480,7 +480,7 @@ defmodule Core.Es.Projection do
             "#{@label}: events: кодек #{inspect(codec)} события #{inspect(mod)} не найден — " <>
               "кодек событий <Aggregate>.Event.<Name> — <Aggregate>.Event.Codec"
 
-      not Helper.Module.exports?(codec, :__es_type__, 0) ->
+      not Es.Event.Codec.codec?(codec) ->
         raise CompileError,
           description:
             "#{@label}: events: #{inspect(codec)} события #{inspect(mod)} — не кодек событий " <>
@@ -498,8 +498,7 @@ defmodule Core.Es.Projection do
   defp family?(mod) do
     codec = codec_name(Module.split(mod))
 
-    Helper.Module.exports?(codec, :__es_type__, 0) and
-      codec.__codec_union__() == mod
+    Es.Event.Codec.codec?(codec) and codec.__es_family__() == mod
   end
 
   # Кодек событий агрегата — `<Aggregate>.Event.Codec` рядом с модулями событий (раскладка

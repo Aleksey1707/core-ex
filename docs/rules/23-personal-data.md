@@ -458,8 +458,9 @@ def handle_event(_event, %{total_time: time}, %{query: query}, _config),
 - проекция с ПДн объявляет его в `events:` и по нему чистит read-модель — `22-projections.md`,
   «Персональные данные».
 
-Тип `"core.subject"` зарезервирован: кодек библиотека подключает к каждому фасаду сама, и кодек
-потребителя с этим `type:` MUST NOT — `CompileError` проверки уникальности типа агрегата фасада.
+Тип `"core.subject"` зарезервирован: кодек с этим `type:` вне библиотеки MUST NOT — `CompileError`
+сборки кодека (`use Core.Es.Event.Codec`). В `plugins:` фасада кодек субъекта не входит: поток
+субъекта пишет и читает сам кодек событий, фасад приложения он получает только для вложенных Prim.
 Строки потока субъекта остаются в `es_events` навсегда — контракт хранения.
 
 Гонку уничтожения с записью ПДн того же субъекта решает блокировка строки ключа: событие либо
@@ -481,8 +482,8 @@ subject_ids
 
 Проверяется: `test/core/es/personal/destroy_key_test.exs` — след, событие, повтор, откат;
 `test/core/es/personal/key_store/race_test.exs` — уничтожение в порядке дампа против записи пачки;
-`test/core/es/personal/destroy_key_failure_test.exs` — сбой порта; `test/core/codec/facade_test.exs`
-— `CompileError` на `type: "core.subject"`; golden события —
+`test/core/es/personal/destroy_key_failure_test.exs` — сбой порта;
+`test/core/es/event/codec_test.exs` — `CompileError` на `type: "core.subject"`; golden события —
 `test/core/es/personal/event_compat_test.exs`.
 
 ## Подписчик того же приложения

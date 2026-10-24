@@ -10,6 +10,7 @@ defmodule Core.Es.Store.Opts do
   `label` — имя builder'а: по тексту `CompileError` видно, какой `use` его поднял.
   """
 
+  alias Core.Es
   alias Core.Es.Outbox
   alias Core.Helper
 
@@ -17,7 +18,7 @@ defmodule Core.Es.Store.Opts do
   @spec event_codec!(module(), String.t()) :: module()
 
   def event_codec!(event_codec, label) when is_atom(event_codec) and is_binary(label) do
-    unless Helper.Module.exports?(event_codec, :__es_type__, 0) do
+    unless Es.Event.Codec.codec?(event_codec) do
       raise CompileError,
         description:
           "#{label}: event_codec: #{inspect(event_codec)} — не кодек событий с type: " <>
@@ -72,7 +73,7 @@ defmodule Core.Es.Store.Opts do
   def ensure_outbox_event!(outbox, event_codec, label)
       when is_atom(outbox) and is_atom(event_codec) and is_binary(label) do
     event = outbox.__es_event__()
-    family = event_codec.__codec_union__()
+    family = event_codec.__es_family__()
 
     if event != family do
       raise CompileError,

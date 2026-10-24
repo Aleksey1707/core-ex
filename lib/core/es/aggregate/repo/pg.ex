@@ -64,7 +64,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   (`Core.Es.Transact`): отказ хранилища снимается повтором, сверка ожидаемой версии — нет.
 
   Нечитаемый поток у `get` / `get_decision` / `get_many` / `refresh` — исключение: неизвестный
-  тег — `Core.Exc` загрузки фасадом, разрыв версий — `ArgumentError` из `Agg.fold/2`.
+  тег — `Core.Exc` загрузки кодеком событий, разрыв версий — `ArgumentError` из `Agg.fold/2`.
   `page_stream` отдаёт ошибку загрузки `{:error, _}` на всю страницу.
 
   ## Резервы ключей
@@ -137,7 +137,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `get_decision` / `get_many` / `refresh`); по умолчанию `Core.Config.dao/0` в рантайме. Сами
     события `Core.Es.Store.append/5` пишет, а страницу потока `page_stream` читает через
     `Core.Config.dao/0`
-  - `codec:` — фасад дампа id и загрузки событий при восстановлении состояния; по умолчанию
+  - `codec:` — фасад дампа id и вложенных значений событий при восстановлении состояния; по умолчанию
     `Core.Config.codec/0` в рантайме. Страница потока грузится через `Core.Config.codec/0`
   - `snapshot:` — `[every: N, version: V]`, без опции снапшоты выключены: `every:` — сколько
     свёрнутых событий потока дают запись снапшота, целое больше нуля, обязательна; `version:` —
