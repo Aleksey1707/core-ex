@@ -162,7 +162,8 @@ defmodule Core.Es.Aggregate.Process do
 
   @label "Es.Aggregate.Process"
   @required_keys ~w(repo)a
-  @optional_keys []
+  @optional_keys ~w()a
+  @expression_keys ~w()a
   @execute_defaults [timeout: 5_000]
   @start_defaults [retries: 3, idle_timeout: 60_000]
   @personal_state_max_age 300_000
@@ -204,9 +205,10 @@ defmodule Core.Es.Aggregate.Process do
 
   @doc "Объявить процесс event-sourced агрегата."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    behaviour = Helper.Opts.module!(lit, :repo, @label, exports: [__es_aggregate_repo__: 0])
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    behaviour = Helper.Opts.module!(opts, :repo, @label, exports: [__es_aggregate_repo__: 0])
     %{aggregate: aggregate, id: id} = behaviour.__es_aggregate_repo__()
     event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
     process = __CALLER__.module

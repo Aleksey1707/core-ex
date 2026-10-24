@@ -132,25 +132,48 @@ defmodule Core.Labels.CompletenessCaseTest do
 
   describe "опции" do
     test "без otp_app: — CompileError" do
-      assert_raise CompileError, ~r/нет обязательных опций: \[:otp_app\]/, fn -> use_case(async: true) end
+      assert_raise CompileError, ~r/^Labels\.CompletenessCase: нет обязательных опций: \[:otp_app\]$/, fn ->
+        use_case(async: true)
+      end
     end
 
     test "otp_app: не атом — CompileError" do
-      assert_raise CompileError, ~r/otp_app: ожидается атом/, fn -> use_case(otp_app: "core") end
+      assert_raise CompileError, ~r/^Labels\.CompletenessCase: otp_app: ожидается атом, получено "core"$/, fn ->
+        use_case(otp_app: "core")
+      end
     end
 
     test "async: не boolean — CompileError" do
-      assert_raise CompileError, ~r/async: ожидается boolean/, fn -> use_case(otp_app: :core, async: :yes) end
+      assert_raise CompileError, ~r/^Labels\.CompletenessCase: async: ожидается boolean, получено :yes$/, fn ->
+        use_case(otp_app: :core, async: :yes)
+      end
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:app\]/, fn ->
+      assert_raise CompileError, ~r/^Labels\.CompletenessCase: неизвестные опции: \[:app\]$/, fn ->
         use_case(otp_app: :core, app: :core)
+      end
+    end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Labels\.CompletenessCase: неизвестные опции: \[:asnyc\]$/, fn ->
+        expand(otp_app: :core, asnyc: true)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Labels\.CompletenessCase: otp_app: ожидается литерал, получено @app$/, fn ->
+        use_case(otp_app: quote(do: @app))
       end
     end
   end
 
   # ---
+
+  defp expand(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], CompletenessCase)
+    Macro.expand(quote(do: Core.Labels.CompletenessCase.__using__(unquote(opts))), env)
+  end
 
   defp use_case(opts) do
     Code.eval_quoted(

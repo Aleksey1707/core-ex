@@ -46,6 +46,7 @@ defmodule Core.Enum.DocsCase do
   @label "Enum.DocsCase"
   @required_keys ~w(otp_app)a
   @optional_keys ~w(async)a
+  @expression_keys ~w()a
   @values_header "Значение"
 
   @typedoc """
@@ -64,10 +65,11 @@ defmodule Core.Enum.DocsCase do
 
   @doc "Сгенерировать тесты описаний значений enum приложения."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    otp_app = Helper.Opts.atom!(lit, :otp_app, @label)
-    async = async!(lit)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    otp_app = Helper.Opts.atom!(opts, :otp_app, @label)
+    async = async!(opts)
 
     quote do
       use ExUnit.Case, async: unquote(async)
@@ -98,8 +100,7 @@ defmodule Core.Enum.DocsCase do
         async
 
       other ->
-        raise CompileError,
-          description: "#{@label}: async: ожидается boolean, получено #{inspect(other)}"
+        Helper.Opts.reject!("#{@label}: async", "ожидается boolean, получено #{inspect(other)}")
     end
   end
 

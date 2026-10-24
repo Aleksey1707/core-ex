@@ -76,6 +76,7 @@ defmodule Core.Es.ProjectionCase do
   @label "Es.ProjectionCase"
   @required_keys ~w(projection)a
   @optional_keys ~w(async fixtures)a
+  @expression_keys ~w()a
   @fixtures_root "test/support/fixtures/events"
 
   @table_writes_sql """
@@ -117,11 +118,12 @@ defmodule Core.Es.ProjectionCase do
 
   @doc "Сгенерировать тесты очистки `clear/0` и ПДн read-модели проекции."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    projection = Helper.Opts.module!(lit, :projection, @label, exports: [__es_projection__: 0])
-    fixtures = fixtures!(lit)
-    :ok = ensure_sync!(lit)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    projection = Helper.Opts.module!(opts, :projection, @label, exports: [__es_projection__: 0])
+    fixtures = fixtures!(opts)
+    :ok = ensure_sync!(opts)
 
     quote do
       use ExUnit.Case, async: false
@@ -152,10 +154,10 @@ defmodule Core.Es.ProjectionCase do
         fixtures
 
       other ->
-        raise CompileError,
-          description:
-            "#{@label}: fixtures: ожидается непустая строка — корень фикстур, получено " <>
-              inspect(other)
+        Helper.Opts.reject!(
+          "#{@label}: fixtures",
+          "ожидается непустая строка — корень фикстур, получено #{inspect(other)}"
+        )
     end
   end
 
@@ -165,10 +167,11 @@ defmodule Core.Es.ProjectionCase do
         :ok
 
       other ->
-        raise CompileError,
-          description:
-            "#{@label}: async: допускается только false — TRUNCATE в clear/0 держит блокировку " <>
-              "до конца sandbox, получено #{inspect(other)}"
+        Helper.Opts.reject!(
+          "#{@label}: async",
+          "допускается только false — TRUNCATE в clear/0 держит блокировку до конца sandbox, " <>
+            "получено #{inspect(other)}"
+        )
     end
   end
 

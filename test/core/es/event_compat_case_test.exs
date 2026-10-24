@@ -107,44 +107,63 @@ defmodule Core.Es.EventCompatCaseTest do
     test "обе опции aggregate: и event_codec: или ни одной — CompileError" do
       both = [aggregate: Account, event_codec: EventFixture.Event.Codec]
 
-      for opts <- [[], both] do
-        assert_raise CompileError, ~r/ровно одна из опций aggregate: и event_codec:/, fn ->
-          use_case(opts)
-        end
+      for {opts, keys} <- [{[], "\\[\\]"}, {both, "\\[:aggregate, :event_codec\\]"}] do
+        message = ~r/^Es\.EventCompatCase: ожидается ровно одна из опций aggregate: и event_codec:, получено #{keys}$/
+
+        assert_raise CompileError, message, fn -> use_case(opts) end
       end
     end
 
     test "aggregate: не event-sourced агрегат — CompileError" do
       assert_raise CompileError,
-                   ~r/aggregate: модуль .* должен экспортировать __es_event_codec__\/0/,
+                   ~r/^Es\.EventCompatCase: aggregate: модуль .* должен экспортировать __es_event_codec__\/0$/,
                    fn ->
                      use_case(aggregate: EventFixture.Event.Codec)
                    end
     end
 
     test "event_codec: не кодек событий — CompileError" do
-      assert_raise CompileError, ~r/должен экспортировать __es_type__\/0/, fn ->
-        use_case(event_codec: Core.Version)
-      end
+      assert_raise CompileError,
+                   ~r/^Es\.EventCompatCase: event_codec: модуль Core\.Version должен экспортировать __es_type__\/0$/,
+                   fn ->
+                     use_case(event_codec: Core.Version)
+                   end
     end
 
     test "fixtures: не непустая строка — CompileError" do
       for fixtures <- ["", :fixtures] do
-        assert_raise CompileError, ~r/fixtures: ожидается непустая строка/, fn ->
+        message =
+          ~r/^Es\.EventCompatCase: fixtures: ожидается непустая строка — каталог фикстур, получено #{inspect(fixtures)}$/
+
+        assert_raise CompileError, message, fn ->
           use_case(event_codec: EventFixture.Event.Codec, fixtures: fixtures)
         end
       end
     end
 
     test "async: не boolean — CompileError" do
-      assert_raise CompileError, ~r/async: ожидается boolean/, fn ->
+      assert_raise CompileError, ~r/^Es\.EventCompatCase: async: ожидается boolean, получено :yes$/, fn ->
         use_case(event_codec: EventFixture.Event.Codec, async: :yes)
       end
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:codec\]/, fn ->
+      assert_raise CompileError, ~r/^Es\.EventCompatCase: неизвестные опции: \[:codec\]$/, fn ->
         use_case(event_codec: EventFixture.Event.Codec, codec: InCodec)
+      end
+    end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.EventCompatCase: неизвестные опции: \[:fixture\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], EventCompatCase)
+        opts = [event_codec: EventFixture.Event.Codec, fixture: "test"]
+        Macro.expand(quote(do: Core.Es.EventCompatCase.__using__(unquote(opts))), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.EventCompatCase: fixtures: ожидается литерал, получено @dir$/, fn ->
+        use_case(event_codec: EventFixture.Event.Codec, fixtures: quote(do: @dir))
       end
     end
   end

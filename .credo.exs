@@ -214,18 +214,6 @@
              files: %{
                included: ["lib/"],
                excluded: [
-                 # 11 — пролог группы «раскрытие»
-                 "lib/core/enum/docs_case.ex",
-                 "lib/core/es/aggregate.ex",
-                 "lib/core/es/aggregate/process.ex",
-                 "lib/core/es/cmd.ex",
-                 "lib/core/es/event_compat_case.ex",
-                 "lib/core/es/personal/key_store_case.ex",
-                 "lib/core/es/projection_case.ex",
-                 "lib/core/labels/completeness_case.ex",
-                 "lib/core/repo/constraint_errors_case.ex",
-                 "lib/core/repo/pg/schema.ex",
-                 "lib/core/view.ex",
                  # 17 — Es-событие
                  "lib/core/es/event.ex",
                  "lib/core/es/event/payload.ex",

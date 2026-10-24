@@ -114,7 +114,7 @@ defmodule Core.Repo.Pg.SchemaTest do
   end
 
   test "требует обязательные опции" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Schema: нет обязательных опций: \[:id\]/, fn ->
+    assert_raise CompileError, ~r/^Repo\.Pg\.Schema: нет обязательных опций: \[:id\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.Pg.SchemaTest.MissingId do
@@ -154,24 +154,26 @@ defmodule Core.Repo.Pg.SchemaTest do
   end
 
   test "entity и view взаимоисключающие" do
-    assert_raise CompileError, ~r/взаимоисключающие/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.Repo.Pg.SchemaTest.BothModes do
-            defstruct ~w(id)a
+    assert_raise CompileError,
+                 ~r/^Repo\.Pg\.Schema: entity: и view: взаимоисключающие \(write — агрегат, read — View\)$/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Repo.Pg.SchemaTest.BothModes do
+                         defstruct ~w(id)a
 
-            use Core.Repo.Pg.Schema,
-              entity: Core.Repo.Pg.SchemaTest.Entity,
-              view: Core.Repo.Pg.SchemaTest.View,
-              id: Core.Repo.Pg.SchemaTest.FakeId
-          end
-        end
-      )
-    end
+                         use Core.Repo.Pg.Schema,
+                           entity: Core.Repo.Pg.SchemaTest.Entity,
+                           view: Core.Repo.Pg.SchemaTest.View,
+                           id: Core.Repo.Pg.SchemaTest.FakeId
+                       end
+                     end
+                   )
+                 end
   end
 
   test "требует entity или view" do
-    assert_raise CompileError, ~r/нет обязательных опций: \[:entity\] или \[:view\]/, fn ->
+    assert_raise CompileError, ~r/^Repo\.Pg\.Schema: нет обязательных опций: \[:entity\] или \[:view\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.Pg.SchemaTest.NoMode do
@@ -185,7 +187,7 @@ defmodule Core.Repo.Pg.SchemaTest do
   end
 
   test "отклоняет неизвестную опцию" do
-    assert_raise CompileError, ~r/Repo\.Pg\.Schema: неизвестные опции: \[:table\]/, fn ->
+    assert_raise CompileError, ~r/^Repo\.Pg\.Schema: неизвестные опции: \[:table\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.Pg.SchemaTest.UnknownOpt do
@@ -195,6 +197,33 @@ defmodule Core.Repo.Pg.SchemaTest do
               entity: Core.Repo.Pg.SchemaTest.Entity,
               id: Core.Repo.Pg.SchemaTest.FakeId,
               table: "fakes"
+          end
+        end
+      )
+    end
+  end
+
+  test "опечатка в ключе — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Repo\.Pg\.Schema: неизвестные опции: \[:entiy\]$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Repo.Pg.Schema)
+      opts = [entity: Core.Repo.Pg.SchemaTest.Entity, id: Core.Repo.Pg.SchemaTest.FakeId, entiy: :x]
+      Macro.expand(quote(do: Core.Repo.Pg.Schema.__using__(unquote(opts))), env)
+    end
+  end
+
+  test "атрибут в опции — «ожидается литерал»" do
+    assert_raise CompileError, ~r/^Repo\.Pg\.Schema: codec: ожидается литерал, получено @codec$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Repo.Pg.SchemaTest.AttrCodec do
+            defstruct []
+
+            @codec Core.CodecFixture.Internal
+
+            use Core.Repo.Pg.Schema,
+              entity: Core.Repo.Pg.SchemaTest.Entity,
+              id: Core.Repo.Pg.SchemaTest.FakeId,
+              codec: @codec
           end
         end
       )

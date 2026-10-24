@@ -200,26 +200,38 @@ defmodule Core.Enum.DocsCaseTest do
 
   describe "опции" do
     test "без otp_app: — CompileError" do
-      assert_raise CompileError, ~r/нет обязательных опций: \[:otp_app\]/, fn ->
+      assert_raise CompileError, ~r/^Enum\.DocsCase: нет обязательных опций: \[:otp_app\]$/, fn ->
         use_case(async: true)
       end
     end
 
     test "otp_app: не атом — CompileError" do
-      assert_raise CompileError, ~r/otp_app: ожидается атом/, fn ->
+      assert_raise CompileError, ~r/^Enum\.DocsCase: otp_app: ожидается атом, получено "core"$/, fn ->
         use_case(otp_app: "core")
       end
     end
 
     test "async: не boolean — CompileError" do
-      assert_raise CompileError, ~r/async: ожидается boolean/, fn ->
+      assert_raise CompileError, ~r/^Enum\.DocsCase: async: ожидается boolean, получено :yes$/, fn ->
         use_case(otp_app: :core, async: :yes)
       end
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:modules\]/, fn ->
+      assert_raise CompileError, ~r/^Enum\.DocsCase: неизвестные опции: \[:modules\]$/, fn ->
         use_case(otp_app: :core, modules: [Coded])
+      end
+    end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Enum\.DocsCase: неизвестные опции: \[:asnyc\]$/, fn ->
+        expand(otp_app: :core, asnyc: true)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Enum\.DocsCase: otp_app: ожидается литерал, получено @app$/, fn ->
+        use_case(otp_app: quote(do: @app))
       end
     end
   end
@@ -235,6 +247,11 @@ defmodule Core.Enum.DocsCaseTest do
     after
       Code.put_compiler_option(:docs, docs)
     end
+  end
+
+  defp expand(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], DocsCase)
+    Macro.expand(quote(do: Core.Enum.DocsCase.__using__(unquote(opts))), env)
   end
 
   defp use_case(opts) do

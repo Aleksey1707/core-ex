@@ -78,7 +78,8 @@ defmodule Core.Es.Aggregate do
 
   @label "Es.Aggregate"
   @required_keys ~w(event_codec)a
-  @optional_keys []
+  @optional_keys ~w()a
+  @expression_keys ~w()a
   @state_keys ~w(id version)a
 
   @typedoc "Черновик события — элемент результата `decide/2`: `{Event.Mod, payload}` или `Event.Mod`."
@@ -95,9 +96,10 @@ defmodule Core.Es.Aggregate do
 
   @doc "Объявить event-sourced агрегат."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    event_codec = Helper.Opts.atom!(lit, :event_codec, @label)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    event_codec = Helper.Opts.atom!(opts, :event_codec, @label)
 
     quote generated: true do
       @behaviour Core.Es.Aggregate

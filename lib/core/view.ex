@@ -68,12 +68,14 @@ defmodule Core.View do
   @label "View"
   @required_keys ~w(fields)a
   @optional_keys ~w(forms)a
+  @expression_keys ~w()a
 
   @doc "Объявить представление read-пути (`fields:` + опционально `forms:`)."
   defmacro __using__(opts) do
     view = __CALLER__.module
-    opts = Macro.expand_literals(opts, __CALLER__)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
     forms = Opts.forms!(Keyword.get(opts, :forms, []))
     fields = Opts.fields!(Keyword.fetch!(opts, :fields), Keyword.keys(forms))
@@ -115,8 +117,7 @@ defmodule Core.View do
         :ok
 
       unused ->
-        raise CompileError,
-          description: "#{@label}: формы #{inspect(unused)} объявлены, но не используются"
+        Helper.Opts.reject!("#{@label}: forms", "формы #{inspect(unused)} объявлены, но не используются")
     end
   end
 

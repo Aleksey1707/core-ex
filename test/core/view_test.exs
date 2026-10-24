@@ -289,7 +289,7 @@ defmodule Core.ViewTest do
 
   describe "проверки декларации" do
     test "sensitive Prim не допускается" do
-      assert_raise CompileError, ~r/sensitive/, fn ->
+      assert_raise CompileError, ~r/^View: fields: secret: prim: Core\.PrimFixture\.Sensitive объявлен sensitive/, fn ->
         define(fields: [secret: [prim: Core.PrimFixture.Sensitive]])
       end
     end
@@ -315,19 +315,19 @@ defmodule Core.ViewTest do
     end
 
     test "не-Enum в enum: не допускается" do
-      assert_raise CompileError, ~r/не Core.Enum/, fn ->
+      assert_raise CompileError, ~r/^View: fields: status: enum: DateTime не Core\.Enum$/, fn ->
         define(fields: [status: [enum: DateTime]])
       end
     end
 
     test "не-модуль в prim: не допускается" do
-      assert_raise CompileError, ~r/ожидался модуль/, fn ->
+      assert_raise CompileError, ~r/^View: fields: id: prim: ожидался модуль, задано "Core\.ViewFixture\.ID"$/, fn ->
         define(fields: [id: [prim: "Core.ViewFixture.ID"]])
       end
     end
 
     test "не-Prim в prim: не допускается" do
-      assert_raise CompileError, ~r/не Prim/, fn ->
+      assert_raise CompileError, ~r/^View: fields: id: prim: DateTime не Prim$/, fn ->
         define(fields: [id: [prim: DateTime]])
       end
     end
@@ -339,21 +339,25 @@ defmodule Core.ViewTest do
     end
 
     test "композит над Prim с кастомным kind не типизируется" do
-      assert_raise CompileError, ~r/LabelRef \(leaf Core.ViewTest.LabelID\) kind :label — типизировать нечем/, fn ->
-        define(fields: [ref: [prim: Core.ViewTest.LabelRef]])
-      end
+      assert_raise CompileError,
+                   ~r/^View: fields: ref: prim: у .*LabelRef \(leaf Core.ViewTest.LabelID\) kind :label — типизировать нечем/,
+                   fn ->
+                     define(fields: [ref: [prim: Core.ViewTest.LabelRef]])
+                   end
     end
 
     test "неизвестный type:" do
-      assert_raise CompileError, ~r/неизвестный type:.*:map/, fn ->
+      assert_raise CompileError, ~r/^View: fields: n: type: ожидается один из \[.*:map\], получено :float$/, fn ->
         define(fields: [n: [type: :float]])
       end
     end
 
     test "нужен ровно один kind-ключ" do
-      assert_raise CompileError, ~r/ровно один из/, fn ->
-        define(fields: [id: [prim: Core.ViewFixture.ID, type: :string]])
-      end
+      assert_raise CompileError,
+                   ~r/^View: fields: id: ожидается ровно один из .*, получено \[prim: .*, type: :string\]$/,
+                   fn ->
+                     define(fields: [id: [prim: Core.ViewFixture.ID, type: :string]])
+                   end
 
       assert_raise CompileError, ~r/ровно один из/, fn ->
         define(fields: [id: [optional: true]])
@@ -361,13 +365,13 @@ defmodule Core.ViewTest do
     end
 
     test "необъявленная форма" do
-      assert_raise CompileError, ~r/не объявлена в forms:/, fn ->
+      assert_raise CompileError, ~r/^View: fields: items: form: форма :item не объявлена в forms:$/, fn ->
         define(fields: [items: [list: [form: :item]]])
       end
     end
 
     test "неиспользуемая форма" do
-      assert_raise CompileError, ~r/не используются/, fn ->
+      assert_raise CompileError, ~r/^View: forms: формы \[:item\] объявлены, но не используются$/, fn ->
         define(
           fields: [id: [prim: Core.ViewFixture.ID]],
           forms: [item: [code: [type: :string]]]
@@ -388,37 +392,43 @@ defmodule Core.ViewTest do
     end
 
     test "не-View в view: не допускается" do
-      assert_raise CompileError, ~r/не Core.View/, fn ->
+      assert_raise CompileError, ~r/^View: fields: nested: view: DateTime не Core\.View$/, fn ->
         define(fields: [nested: [view: DateTime]])
       end
     end
 
     test "jsonb требует модуль типа или ссылку на функцию-спеку" do
-      assert_raise CompileError, ~r/поле payload: jsonb: — модуль типа или \{Модуль, :функция\} спеки redump/, fn ->
-        define(fields: [payload: [jsonb: "spec"]])
-      end
+      assert_raise CompileError,
+                   ~r/^View: fields: payload: jsonb: ожидается модуль типа или \{Модуль, :функция\} спеки redump, получено "spec"$/,
+                   fn ->
+                     define(fields: [payload: [jsonb: "spec"]])
+                   end
 
-      assert_raise CompileError, ~r/поле payload: :spec недоступен/, fn ->
+      assert_raise CompileError, ~r/^View: fields: payload: jsonb: :spec недоступен/, fn ->
         define(fields: [payload: [jsonb: :spec]])
       end
 
-      assert_raise CompileError, ~r/не объявлена/, fn ->
+      assert_raise CompileError, ~r/^View: fields: payload: jsonb: .*Specs\.missing_spec\/0 не объявлена/, fn ->
         define(fields: [payload: [jsonb: {Core.ViewFixture.Specs, :missing_spec}]])
       end
     end
 
     test "jsonb: Prim или Core.Enum — CompileError" do
-      assert_raise CompileError, ~r/поле payload: jsonb: .*ViewFixture.Weight — Prim/, fn ->
-        define(fields: [payload: [jsonb: Core.ViewFixture.Weight]])
-      end
+      assert_raise CompileError,
+                   ~r/^View: fields: payload: jsonb: Core\.ViewFixture\.Weight — Prim, а не тип плагина; нужен prim:$/,
+                   fn ->
+                     define(fields: [payload: [jsonb: Core.ViewFixture.Weight]])
+                   end
 
-      assert_raise CompileError, ~r/поле payloads: jsonb: .*ViewFixture.Status — Core.Enum/, fn ->
-        define(fields: [payloads: [list: [jsonb: Core.ViewFixture.Status]]])
-      end
+      assert_raise CompileError,
+                   ~r/^View: fields: payloads: jsonb: Core\.ViewFixture\.Status — Core\.Enum, а не тип плагина; нужен enum:$/,
+                   fn ->
+                     define(fields: [payloads: [list: [jsonb: Core.ViewFixture.Status]]])
+                   end
     end
 
     test "forms: — keyword-список без дублей" do
-      assert_raise CompileError, ~r/forms: должен быть keyword-списком/, fn ->
+      assert_raise CompileError, ~r/^View: forms: ожидается keyword-список форм, получено :mark$/, fn ->
         define(fields: [id: [prim: Core.ViewFixture.ID]], forms: :mark)
       end
 
@@ -429,7 +439,7 @@ defmodule Core.ViewTest do
         )
       end
 
-      assert_raise CompileError, ~r/View: форма mark: повторяются \[:code\]/, fn ->
+      assert_raise CompileError, ~r/^View: forms: mark: повторяются \[:code\]$/, fn ->
         define(
           fields: [mark: [form: :mark]],
           forms: [mark: [code: [type: :string], code: [type: :boolean]]]
@@ -438,23 +448,39 @@ defmodule Core.ViewTest do
     end
 
     test "optional: — boolean и задаётся у самого поля" do
-      assert_raise CompileError, ~r/optional: — boolean/, fn ->
+      assert_raise CompileError, ~r/^View: fields: id: optional: ожидается boolean, получено "да"$/, fn ->
         define(fields: [id: [prim: Core.ViewFixture.ID, optional: "да"]])
       end
 
-      assert_raise CompileError, ~r/optional: задаётся у самого поля/, fn ->
+      assert_raise CompileError, ~r/^View: fields: tags: list: optional: задаётся у самого поля, не в list:$/, fn ->
         define(fields: [tags: [list: [type: :string, optional: true]]])
       end
     end
 
     test "вложенность списков глубже допустимой" do
-      assert_raise CompileError, ~r/вложенность списков/, fn ->
+      assert_raise CompileError, ~r/^View: вложенность списков 4 глубже допустимой \(4\)$/, fn ->
         define(fields: [deep: [list: [list: [list: [list: [list: [type: :string]]]]]]])
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^View: неизвестные опции: \[:form\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.View)
+        opts = [fields: [id: [type: :string]], form: []]
+        Macro.expand(quote(do: Core.View.__using__(unquote(opts))), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^View: fields: ожидается литерал, получено @fields$/, fn ->
+        define(fields: quote(do: @fields))
+      end
+    end
+
     test "пустой и дублирующий список полей" do
-      assert_raise CompileError, ~r/непустой keyword-список/, fn -> define(fields: []) end
+      assert_raise CompileError, ~r/^View: fields: ожидается непустой keyword-список полей, получено \[\]$/, fn ->
+        define(fields: [])
+      end
 
       assert_raise CompileError, ~r/View: fields: повторяются \[:id\]/, fn ->
         define(fields: [id: [prim: Core.ViewFixture.ID], id: [type: :string]])

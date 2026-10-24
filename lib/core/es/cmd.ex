@@ -21,14 +21,16 @@ defmodule Core.Es.Cmd do
   alias Core.Helper
 
   @label "Es.Cmd"
-  @required_keys []
-  @optional_keys []
+  @required_keys ~w()a
+  @optional_keys ~w()a
+  @expression_keys ~w()a
   @stamp_keys ~w(by at)a
 
   @doc "Объявить команду event-sourced агрегата."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    Helper.Opts.literal!(opts, @expression_keys, @label)
 
     quote do
       @after_compile Core.Es.Cmd

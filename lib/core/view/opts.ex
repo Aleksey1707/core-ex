@@ -9,6 +9,7 @@ defmodule Core.View.Opts do
   """
 
   alias Core.Codec
+  alias Core.Helper
   alias Core.Helper.FieldCheck
   alias Core.Prim
 
@@ -53,13 +54,13 @@ defmodule Core.View.Opts do
 
   def forms!(forms) do
     if not Keyword.keyword?(forms) do
-      raise CompileError, description: "#{@label}: forms: должен быть keyword-списком"
+      Helper.Opts.reject!("#{@label}: forms", "ожидается keyword-список форм, получено #{inspect(forms)}")
     end
 
     names = Keyword.keys(forms)
     FieldCheck.unique!(names, "#{@label}: forms")
 
-    Enum.map(forms, fn {name, fields} -> {name, fields!(fields, names, "форма #{name}")} end)
+    Enum.map(forms, fn {name, fields} -> {name, fields!(fields, names, "forms: #{name}")} end)
   end
 
   @doc "Проверить и нормализовать `fields:` — поля представления."
@@ -67,12 +68,12 @@ defmodule Core.View.Opts do
 
   def fields!(fields, form_names, label \\ "fields") do
     if not Keyword.keyword?(fields) or fields == [] do
-      raise CompileError, description: "#{@label}: #{label} — непустой keyword-список полей"
+      Helper.Opts.reject!("#{@label}: #{label}", "ожидается непустой keyword-список полей, получено #{inspect(fields)}")
     end
 
     FieldCheck.unique!(Keyword.keys(fields), "#{@label}: #{label}")
 
-    Enum.map(fields, fn {name, opts} -> field!(name, opts, form_names, label) end)
+    Enum.map(fields, fn {name, opts} -> field!(name, opts, form_names, "#{@label}: #{label}: #{name}") end)
   end
 
   @doc "Формы, на которые ссылается хотя бы одна спека."
@@ -102,36 +103,37 @@ defmodule Core.View.Opts do
 
   # ---
 
-  defp field!(name, opts, form_names, label) when is_atom(name) do
+  defp field!(name, opts, form_names, path) when is_atom(name) do
     if not Keyword.keyword?(opts) do
-      raise CompileError, description: "#{where(label, name)} — keyword-спека"
+      Helper.Opts.reject!(path, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
-    {kind_key, value} = kind_key!(name, opts, label)
+    {kind_key, value} = kind_key!(opts, path)
     optional? = Keyword.get(opts, :optional, false)
 
     if not is_boolean(optional?) do
-      raise CompileError, description: "#{where(label, name)}: optional: — boolean"
+      Helper.Opts.reject!("#{path}: optional", "ожидается boolean, получено #{inspect(optional?)}")
     end
 
-    {name, spec!(kind_key, value, name, form_names, label), optional?}
+    {name, spec!(kind_key, value, name, form_names, path), optional?}
   end
 
-  defp kind_key!(name, opts, label) do
+  defp kind_key!(opts, path) do
     case Keyword.drop(opts, ~w(optional)a) do
       [{key, value}] when key in ~w(prim enum type view form list jsonb)a ->
         {key, value}
 
       other ->
-        raise CompileError,
-          description:
-            "#{where(label, name)}: нужен ровно один из " <>
-              "prim:/enum:/type:/view:/form:/list:/jsonb:, задано #{inspect(other)}"
+        Helper.Opts.reject!(
+          path,
+          "ожидается ровно один из prim:/enum:/type:/view:/form:/list:/jsonb:, получено #{inspect(other)}"
+        )
     end
   end
 
-  defp spec!(:prim, mod, name, _form_names, label) do
-    FieldCheck.prim!(mod, where(label, name))
+  defp spec!(:prim, mod, _name, _form_names, path) do
+    at = "#{path}: prim"
+    FieldCheck.prim!(mod, at)
     leaf = Prim.leaf(mod)
 
     case Codec.check_readable(mod) do
@@ -139,110 +141,107 @@ defmodule Core.View.Opts do
         {:prim, mod, leaf.__domain_kind__()}
 
       {:error, :not_coercible} ->
-        raise CompileError,
-          description:
-            "#{where(label, name)}: у #{prim_label(mod, leaf)} kind #{inspect(leaf.__domain_kind__())} — " <>
-              "типизировать нечем; объявите поле через type:"
+        Helper.Opts.reject!(
+          at,
+          "у #{prim_label(mod, leaf)} kind #{inspect(leaf.__domain_kind__())} — типизировать нечем; " <>
+            "объявите поле через type:"
+        )
 
       {:error, :sensitive} ->
-        raise CompileError,
-          description:
-            "#{where(label, name)}: #{inspect(mod)} объявлен sensitive — " <>
-              "чувствительное значение не место в read-модели"
+        Helper.Opts.reject!(
+          at,
+          "#{inspect(mod)} объявлен sensitive — чувствительное значение не место в read-модели"
+        )
     end
   end
 
-  defp spec!(:enum, mod, name, _form_names, label) do
-    FieldCheck.enum!(mod, where(label, name))
+  defp spec!(:enum, mod, _name, _form_names, path) do
+    FieldCheck.enum!(mod, "#{path}: enum")
 
     {:enum, mod}
   end
 
-  defp spec!(:type, type, name, _form_names, label) do
+  defp spec!(:type, type, _name, _form_names, path) do
     if type not in @type_values do
-      raise CompileError,
-        description:
-          "#{where(label, name)}: неизвестный type: #{inspect(type)}, " <>
-            "ожидается один из #{inspect(@type_values)}"
+      Helper.Opts.reject!(
+        "#{path}: type",
+        "ожидается один из #{inspect(@type_values)}, получено #{inspect(type)}"
+      )
     end
 
     {:type, type}
   end
 
-  defp spec!(:view, mod, name, _form_names, label) do
-    FieldCheck.module!(mod, where(label, name))
+  defp spec!(:view, mod, _name, _form_names, path) do
+    at = "#{path}: view"
+    FieldCheck.module!(mod, at)
 
     if not Core.Helper.Module.exports?(mod, :__view__, 0) do
-      raise CompileError,
-        description: "#{where(label, name)}: #{inspect(mod)} не Core.View"
+      Helper.Opts.reject!(at, "#{inspect(mod)} не Core.View")
     end
 
     {:view, mod}
   end
 
-  defp spec!(:form, form_name, name, form_names, label) do
+  defp spec!(:form, form_name, _name, form_names, path) do
     if form_name not in form_names do
-      raise CompileError,
-        description: "#{where(label, name)}: форма #{inspect(form_name)} не объявлена в forms:"
+      Helper.Opts.reject!("#{path}: form", "форма #{inspect(form_name)} не объявлена в forms:")
     end
 
     {:form, form_name}
   end
 
-  defp spec!(:list, inner, name, form_names, label) do
-    {^name, spec, optional?} = field!(name, inner, form_names, label)
+  defp spec!(:list, inner, name, form_names, path) do
+    {^name, spec, optional?} = field!(name, inner, form_names, path)
 
     if optional? do
-      raise CompileError,
-        description: "#{where(label, name)}: optional: задаётся у самого поля, не в list:"
+      Helper.Opts.reject!("#{path}: list", "optional: задаётся у самого поля, не в list:")
     end
 
     {:list, spec}
   end
 
-  defp spec!(:jsonb, {mod, fun}, name, _form_names, label)
+  defp spec!(:jsonb, {mod, fun}, _name, _form_names, path)
        when is_atom(mod) and is_atom(fun) do
-    FieldCheck.module!(mod, where(label, name))
+    at = "#{path}: jsonb"
+    FieldCheck.module!(mod, at)
 
     if not Core.Helper.Module.exports?(mod, fun, 0) do
-      raise CompileError,
-        description:
-          "#{where(label, name)}: #{inspect(mod)}.#{fun}/0 не объявлена " <>
-            "(спека redump задаётся кодеком, который пишет эту wire-форму)"
+      Helper.Opts.reject!(
+        at,
+        "#{inspect(mod)}.#{fun}/0 не объявлена (спека redump задаётся кодеком, который пишет эту wire-форму)"
+      )
     end
 
     {:jsonb, {mod, fun}}
   end
 
   # Есть ли у типа спека, знает только фасад: её выводит или объявляет плагин типа (`{:codec, Type}`).
-  defp spec!(:jsonb, type, name, _form_names, label) when is_atom(type) do
-    FieldCheck.module!(type, where(label, name))
+  defp spec!(:jsonb, type, _name, _form_names, path) when is_atom(type) do
+    at = "#{path}: jsonb"
+    FieldCheck.module!(type, at)
 
     cond do
       Prim.prim?(type) ->
-        raise CompileError,
-          description: "#{where(label, name)}: jsonb: #{inspect(type)} — Prim, а не тип плагина; нужен prim:"
+        Helper.Opts.reject!(at, "#{inspect(type)} — Prim, а не тип плагина; нужен prim:")
 
       Core.Enum.enum?(type) ->
-        raise CompileError,
-          description: "#{where(label, name)}: jsonb: #{inspect(type)} — Core.Enum, а не тип плагина; нужен enum:"
+        Helper.Opts.reject!(at, "#{inspect(type)} — Core.Enum, а не тип плагина; нужен enum:")
 
       true ->
         {:jsonb, type}
     end
   end
 
-  defp spec!(:jsonb, other, name, _form_names, label) do
-    raise CompileError,
-      description:
-        "#{where(label, name)}: jsonb: — модуль типа или {Модуль, :функция} спеки redump, " <>
-          "задано #{inspect(other)}"
+  defp spec!(:jsonb, other, _name, _form_names, path) do
+    Helper.Opts.reject!(
+      "#{path}: jsonb",
+      "ожидается модуль типа или {Модуль, :функция} спеки redump, получено #{inspect(other)}"
+    )
   end
 
   defp prim_label(leaf, leaf), do: inspect(leaf)
   defp prim_label(mod, leaf), do: "#{inspect(mod)} (leaf #{inspect(leaf)})"
-
-  defp where(label, name), do: "#{@label}: #{label}, поле #{name}"
 
   defp collect_forms({:form, name}, acc), do: MapSet.put(acc, name)
   defp collect_forms({:list, inner}, acc), do: collect_forms(inner, acc)

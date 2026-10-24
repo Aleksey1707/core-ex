@@ -35,13 +35,17 @@ defmodule Core.Es.Personal.KeyStoreCase do
   alias Core.Helper
 
   @label "Es.Personal.KeyStoreCase"
+  @required_keys ~w(impl)a
+  @optional_keys ~w(async)a
+  @expression_keys ~w()a
 
   @doc "Сгенерировать контрактные тесты реализации порта хранилища ключей."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, ~w(impl)a, ~w(async)a, @label)
-    impl = Helper.Opts.module!(lit, :impl, @label)
-    async = Keyword.get(lit, :async, true)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    impl = Helper.Opts.module!(opts, :impl, @label)
+    async = async!(opts)
 
     quote do
       use ExUnit.Case, async: unquote(async)
@@ -176,6 +180,18 @@ defmodule Core.Es.Personal.KeyStoreCase do
 
         head <> <<Bitwise.bxor(last, 1)>>
       end
+    end
+  end
+
+  # ---
+
+  defp async!(opts) do
+    case Keyword.get(opts, :async, true) do
+      async when is_boolean(async) ->
+        async
+
+      other ->
+        Helper.Opts.reject!("#{@label}: async", "ожидается boolean, получено #{inspect(other)}")
     end
   end
 end

@@ -57,6 +57,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
   @label "Repo.ConstraintErrorsCase"
   @required_keys ~w(otp_app)a
   @optional_keys ~w(async)a
+  @expression_keys ~w()a
 
   @constraint_names_sql """
   SELECT conname::text FROM pg_constraint WHERE conrelid = to_regclass($1)
@@ -98,10 +99,11 @@ defmodule Core.Repo.ConstraintErrorsCase do
 
   @doc "Сгенерировать тесты сверки `constraint_errors:` репозиториев приложения."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    otp_app = Helper.Opts.atom!(lit, :otp_app, @label)
-    async = async!(lit)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    otp_app = Helper.Opts.atom!(opts, :otp_app, @label)
+    async = async!(opts)
 
     quote do
       use ExUnit.Case, async: unquote(async)
@@ -144,8 +146,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
         async
 
       other ->
-        raise CompileError,
-          description: "#{@label}: async: ожидается boolean, получено #{inspect(other)}"
+        Helper.Opts.reject!("#{@label}: async", "ожидается boolean, получено #{inspect(other)}")
     end
   end
 

@@ -195,14 +195,14 @@ defmodule Core.Es.ProjectionCaseTest do
 
   describe "опции" do
     test "нет projection: — CompileError" do
-      assert_raise CompileError, ~r/нет обязательных опций: \[:projection\]/, fn ->
+      assert_raise CompileError, ~r/^Es\.ProjectionCase: нет обязательных опций: \[:projection\]$/, fn ->
         use_case([])
       end
     end
 
     test "projection: не проекция — CompileError" do
       assert_raise CompileError,
-                   ~r/projection: модуль .* должен экспортировать __es_projection__\/0/,
+                   ~r/^Es\.ProjectionCase: projection: модуль .* должен экспортировать __es_projection__\/0$/,
                    fn ->
                      use_case(projection: Account)
                    end
@@ -210,7 +210,10 @@ defmodule Core.Es.ProjectionCaseTest do
 
     test "fixtures: не непустая строка — CompileError" do
       for fixtures <- ["", :fixtures] do
-        assert_raise CompileError, ~r/fixtures: ожидается непустая строка/, fn ->
+        message =
+          ~r/^Es\.ProjectionCase: fixtures: ожидается непустая строка — корень фикстур, получено #{inspect(fixtures)}$/
+
+        assert_raise CompileError, message, fn ->
           use_case(projection: EsFixture.Projection, fixtures: fixtures)
         end
       end
@@ -218,15 +221,31 @@ defmodule Core.Es.ProjectionCaseTest do
 
     test "async: не false — CompileError" do
       for async <- [true, :no] do
-        assert_raise CompileError, ~r/async: допускается только false/, fn ->
-          use_case(projection: EsFixture.Projection, async: async)
-        end
+        assert_raise CompileError,
+                     ~r/^Es\.ProjectionCase: async: допускается только false .*, получено #{inspect(async)}$/,
+                     fn ->
+                       use_case(projection: EsFixture.Projection, async: async)
+                     end
       end
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:codec\]/, fn ->
+      assert_raise CompileError, ~r/^Es\.ProjectionCase: неизвестные опции: \[:codec\]$/, fn ->
         use_case(projection: EsFixture.Projection, codec: Core.CodecFixture.Internal)
+      end
+    end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.ProjectionCase: неизвестные опции: \[:fixture\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], ProjectionCase)
+        opts = [projection: EsFixture.Projection, fixture: "test"]
+        Macro.expand(quote(do: Core.Es.ProjectionCase.__using__(unquote(opts))), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.ProjectionCase: projection: ожидается литерал, получено @projection$/, fn ->
+        use_case(projection: quote(do: @projection))
       end
     end
   end

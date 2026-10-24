@@ -999,6 +999,29 @@ defmodule Core.Es.Aggregate.ProcessTest do
     end
   end
 
+  describe "опции" do
+    test "неизвестная опция — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Aggregate\.Process: неизвестные опции: \[:retries\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Es.Aggregate.Process)
+        opts = [repo: Account.Repo, retries: 3]
+        Macro.expand(quote(do: Core.Es.Aggregate.Process.__using__(unquote(opts))), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.Aggregate\.Process: repo: ожидается литерал, получено @repo$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Aggregate.ProcessTest.AttrRepo do
+              @repo Core.EsFixture.Account.Repo
+              use Core.Es.Aggregate.Process, repo: @repo
+            end
+          end
+        )
+      end
+    end
+  end
+
   describe "span" do
     setup do
       :ok = OtelFixture.attach()

@@ -37,12 +37,20 @@ defmodule Core.Es.CmdTest do
       end
     end
 
-    test "отклоняет опции" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:aggregate\]/, fn ->
+    test "отклоняет опции при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Cmd: неизвестные опции: \[:aggregate\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.Cmd)
+        Macro.expand(quote(do: Core.Es.Cmd.__using__(aggregate: Core.Version)), env)
+      end
+    end
+
+    test "список опций выражением — «ожидается литеральный keyword»" do
+      assert_raise CompileError, ~r/^Es\.Cmd: ожидается литеральный keyword, получено @opts$/, fn ->
         Code.eval_quoted(
           quote do
-            defmodule Core.Es.CmdTest.WithOpts do
-              use Core.Es.Cmd, aggregate: Core.Version
+            defmodule Core.Es.CmdTest.AttrOpts do
+              @opts []
+              use Core.Es.Cmd, @opts
             end
           end
         )

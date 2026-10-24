@@ -38,26 +38,20 @@ defmodule Core.Repo.Pg.Schema do
   @label "Repo.Pg.Schema"
   @required_keys ~w(id)a
   @optional_keys ~w(entity view codec)a
+  @expression_keys ~w()a
 
   @doc "Объявить производные функции Ecto-схемы репозитория."
   defmacro __using__(opts) do
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+
     cfg =
       opts
-      |> Macro.expand_literals(__CALLER__)
-      |> validate_opts!()
+      |> Helper.Opts.literal!(@expression_keys, @label)
+      |> parse!()
 
     {:__block__, [], parts(cfg)}
   end
-
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
 
   @doc false
   @spec after_compile!(Macro.Env.t(), binary()) :: :ok
@@ -77,9 +71,7 @@ defmodule Core.Repo.Pg.Schema do
 
   # ---
 
-  defp validate_opts!(opts) do
-    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
-
+  defp parse!(opts) do
     {mode, item} = mode!(opts)
 
     %{
@@ -107,15 +99,10 @@ defmodule Core.Repo.Pg.Schema do
     {:view, Helper.Opts.module!(opts, :view, @label, exports: [__view__: 0])}
   end
 
-  defp mode([], _opts) do
-    raise CompileError,
-      description: "#{@label}: нет обязательных опций: [:entity] или [:view]"
-  end
+  defp mode([], _opts), do: Helper.Opts.reject!(@label, "нет обязательных опций: [:entity] или [:view]")
 
-  defp mode(_entity_and_view, _opts) do
-    raise CompileError,
-      description: "#{@label}: entity: и view: взаимоисключающие (write — агрегат, read — View)"
-  end
+  defp mode(_entity_and_view, _opts),
+    do: Helper.Opts.reject!(@label, "entity: и view: взаимоисключающие (write — агрегат, read — View)")
 
   defp parts(%{mode: :entity} = cfg) do
     [type_t(), to_entity_bang(cfg), to_model_bang(cfg), dump_id(cfg)]

@@ -8,6 +8,7 @@ defmodule Core.View.Dumper do
   не-список на месте `list:` возвращаются без изменений.
   """
 
+  alias Core.Helper
   alias Core.View.Opts
 
   @label "View"
@@ -131,10 +132,8 @@ defmodule Core.View.Dumper do
   # заводить атомы в рантайме. Вложенность глубже — не форма представления, а недосмотр.
   defp item_var!(depth) when depth < length(@item_vars), do: Enum.at(@item_vars, depth)
 
-  defp item_var!(depth) do
-    raise CompileError,
-      description: "#{@label}: вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})"
-  end
+  defp item_var!(depth),
+    do: Helper.Opts.reject!(@label, "вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})")
 
   defp field_access(value, name), do: {{:., [], [value, name]}, [no_parens: true], []}
 

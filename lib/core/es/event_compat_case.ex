@@ -66,8 +66,9 @@ defmodule Core.Es.EventCompatCase do
   alias Core.Result
 
   @label "Es.EventCompatCase"
-  @required_keys []
+  @required_keys ~w()a
   @optional_keys ~w(aggregate async event_codec fixtures)a
+  @expression_keys ~w()a
   @source_keys ~w(aggregate event_codec)a
   @codec_exports [__es_type__: 0, __es_upcasts__: 0, __es_subjects__: 0]
   @fixtures_root "test/support/fixtures/events"
@@ -98,11 +99,12 @@ defmodule Core.Es.EventCompatCase do
 
   @doc "Сгенерировать тесты golden-фикстур событий агрегата."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    event_codec = source!(lit)
-    fixtures = fixtures!(lit, event_codec)
-    async = async!(lit)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    event_codec = source!(opts)
+    fixtures = fixtures!(opts, event_codec)
+    async = async!(opts)
 
     quote do
       use ExUnit.Case, async: unquote(async)
@@ -183,15 +185,15 @@ defmodule Core.Es.EventCompatCase do
         Helper.Opts.module!(
           [event_codec: aggregate.__es_event_codec__()],
           :event_codec,
-          "#{@label}: #{inspect(aggregate)}",
+          "#{@label}: aggregate",
           exports: @codec_exports
         )
 
       keys ->
-        raise CompileError,
-          description:
-            "#{@label}: ожидается ровно одна из опций aggregate: и event_codec:, получено " <>
-              inspect(keys)
+        Helper.Opts.reject!(
+          @label,
+          "ожидается ровно одна из опций aggregate: и event_codec:, получено #{inspect(keys)}"
+        )
     end
   end
 
@@ -201,10 +203,10 @@ defmodule Core.Es.EventCompatCase do
         fixtures
 
       {:ok, other} ->
-        raise CompileError,
-          description:
-            "#{@label}: fixtures: ожидается непустая строка — каталог фикстур, получено " <>
-              inspect(other)
+        Helper.Opts.reject!(
+          "#{@label}: fixtures",
+          "ожидается непустая строка — каталог фикстур, получено #{inspect(other)}"
+        )
 
       :error ->
         Path.join(@fixtures_root, event_codec.__es_type__())
@@ -217,8 +219,7 @@ defmodule Core.Es.EventCompatCase do
         async
 
       other ->
-        raise CompileError,
-          description: "#{@label}: async: ожидается boolean, получено #{inspect(other)}"
+        Helper.Opts.reject!("#{@label}: async", "ожидается boolean, получено #{inspect(other)}")
     end
   end
 

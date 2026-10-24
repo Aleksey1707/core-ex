@@ -155,20 +155,34 @@ defmodule Core.Es.AggregateTest do
     end
 
     test "event_codec: не атом — CompileError" do
-      assert_raise CompileError, ~r/event_codec: ожидается атом/, fn ->
+      assert_raise CompileError, ~r/^Es\.Aggregate: event_codec: ожидается атом, получено "account"$/, fn ->
         compile(BadCodec, [event_codec: "account"], ~w(id version)a)
       end
     end
 
     test "без event_codec: — CompileError" do
-      assert_raise CompileError, ~r/нет обязательных опций: \[:event_codec\]/, fn ->
+      assert_raise CompileError, ~r/^Es\.Aggregate: нет обязательных опций: \[:event_codec\]$/, fn ->
         compile(NoCodec, [], ~w(id version)a)
       end
     end
 
     test "отклоняет неизвестную опцию" do
-      assert_raise CompileError, ~r/неизвестные опции: \[:snapshot\]/, fn ->
+      assert_raise CompileError, ~r/^Es\.Aggregate: неизвестные опции: \[:snapshot\]$/, fn ->
         compile(UnknownOpt, [event_codec: Account.Event.Codec, snapshot: true], ~w(id version)a)
+      end
+    end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Aggregate: неизвестные опции: \[:evnet_codec\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.Aggregate)
+        opts = [event_codec: Account.Event.Codec, evnet_codec: Account.Event.Codec]
+        Macro.expand(quote(do: Core.Es.Aggregate.__using__(unquote(opts))), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.Aggregate: event_codec: ожидается литерал, получено @codec$/, fn ->
+        compile(AttrCodec, [event_codec: quote(do: @codec)], ~w(id version)a)
       end
     end
   end
