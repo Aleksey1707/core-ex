@@ -562,10 +562,10 @@ defmodule Core.CodecTest do
     assert {:module, _} = Code.ensure_loaded(Core.CodecFixture.Prim.External)
     assert {:module, _} = Code.ensure_loaded(Core.CodecFixture.Internal)
     assert {:module, _} = Code.ensure_loaded(Core.CodecFixture.External)
-    assert function_exported?(Core.CodecFixture.Internal, :dump, 1)
-    assert function_exported?(Core.CodecFixture.Internal, :load, 2)
-    assert function_exported?(Core.CodecFixture.Internal, :load!, 2)
-    assert function_exported?(Core.CodecFixture.External, :dump, 1)
+    assert Core.Helper.Module.exports?(Core.CodecFixture.Internal, :dump, 1)
+    assert Core.Helper.Module.exports?(Core.CodecFixture.Internal, :load, 2)
+    assert Core.Helper.Module.exports?(Core.CodecFixture.Internal, :load!, 2)
+    assert Core.Helper.Module.exports?(Core.CodecFixture.External, :dump, 1)
   end
 
   test "compose dump matches base dump" do

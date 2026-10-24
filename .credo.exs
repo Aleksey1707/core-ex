@@ -41,7 +41,7 @@
       # If you create your own checks, you must specify the source files for
       # them here, so they can be loaded by Credo before running the analysis.
       #
-      requires: [],
+      requires: ["scripts/credo_checks.exs"],
       #
       # If you want to enforce a style guide and need a more traditional linting
       # experience, you can change `strict` to `true` below:
@@ -190,6 +190,7 @@
           # Включены осознанно: проверяют правила из docs/rules/ и гигиену окружения
           #   Specs — 20-agreements.md
           #   UnsafeToAtom — 20-agreements.md («Атомы из внешних данных»)
+          #   CredoChecks.FunctionExported — 20-agreements.md («Экспорт модуля»), scripts/credo_checks.exs
           #   LeakyEnvironment — утечка окружения в подпроцессы
           #   MixEnv — runtime-конфиг вместо `Mix.env/0`
           #   PassAsyncInTestCases — 19-testing.md
@@ -203,7 +204,8 @@
           # 13-repos.md обязан идти после блока `schema` (иначе нет defstruct).
           {Credo.Check.Readability.StrictModuleLayout,
            [ignore: ~w/use module_attribute module defstruct type typep opaque callback/a]},
-          {Credo.Check.Warning.UnsafeToAtom, [files: %{excluded: ["test/"]}]}
+          {Credo.Check.Warning.UnsafeToAtom, [files: %{excluded: ["test/"]}]},
+          {CredoChecks.FunctionExported, [files: %{excluded: ["lib/core/helper/module.ex"]}]}
         ],
         disabled: [
           # `_` и `_name` несут разный смысл: первое — «значение не важно вообще»

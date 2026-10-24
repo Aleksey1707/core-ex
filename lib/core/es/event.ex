@@ -262,8 +262,7 @@ defmodule Core.Es.Event do
   def check_subject!(nil, _aggregate_id), do: :ok
 
   def check_subject!(payload, aggregate_id) when is_atom(payload) and is_atom(aggregate_id) do
-    with {:module, _payload} <- Code.ensure_compiled(payload),
-         true <- function_exported?(payload, :__es_payload_fields__, 0),
+    with true <- Helper.Module.exports?(payload, :__es_payload_fields__, 0),
          [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
          false <- Payload.uuid_prim?(aggregate_id) do
       raise CompileError,

@@ -30,6 +30,16 @@
 
 ### Новое
 
+- **`Core.Helper.Module.exports?/3` — проверка экспорта, которая грузит модуль** (норма —
+  `docs/rules/20-agreements.md`, «Экспорт модуля»). `function_exported?/3` отвечает только про
+  загруженный код, и ещё не загруженный модуль (ленивая загрузка Mix в dev и test) молча выглядел
+  пустым: так `use Core.Es.ProjectionCase` пропускал фикстуры (пункт «ПДн-тесты
+  `use Core.Es.ProjectionCase` больше не проходят молча…»). `exports?/3` модуль грузит, а при сборке
+  ждёт его компиляции — ответ верен и в макросе, и в рантайме. В библиотеке голый
+  `function_exported?/3` запрещён проверкой Credo. Правка потребителя не обязательна; свои проверки
+  экспорта рекомендуется перевести: было `function_exported?(mod, :f, 0)`, стало
+  `Core.Helper.Module.exports?(mod, :f, 0)`.
+
 - **Поле `prim:` у `Core.View` принимает `Prim.Compose`; в `Core.Prim` появились `chain/1` и
   `leaf/1`.** Раньше `use Core.View` брал kind самого композита (`:composite`) и падал
   `CompileError` «типизировать нечем», хотя `Core.Codec.coercible?/1` и Redump композит

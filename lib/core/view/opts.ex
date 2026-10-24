@@ -163,7 +163,7 @@ defmodule Core.View.Opts do
   defp spec!(:view, mod, name, _form_names, label) do
     FieldCheck.module!(mod, where(label, name))
 
-    if not function_exported?(mod, :__view__, 0) do
+    if not Core.Helper.Module.exports?(mod, :__view__, 0) do
       raise CompileError,
         description: "#{where(label, name)}: #{inspect(mod)} не Core.View"
     end
@@ -195,7 +195,7 @@ defmodule Core.View.Opts do
        when is_atom(mod) and is_atom(fun) do
     FieldCheck.module!(mod, where(label, name))
 
-    if not function_exported?(mod, fun, 0) do
+    if not Core.Helper.Module.exports?(mod, fun, 0) do
       raise CompileError,
         description:
           "#{where(label, name)}: #{inspect(mod)}.#{fun}/0 не объявлена " <>

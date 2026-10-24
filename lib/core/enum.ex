@@ -185,15 +185,12 @@ defmodule Core.Enum do
   @doc """
   Модуль объявлен через `use Core.Enum` (есть `values/0` и `name/0`).
 
-  При необходимости загружает модуль: `function_exported?/3` отвечает только
-  про уже загруженный код (lazy loading, purge при code reload).
+  При необходимости загружает модуль (`Core.Helper.Module.exports?/3`).
   """
   @spec enum?(module()) :: boolean()
 
   def enum?(mod) when is_atom(mod) do
-    (:erlang.module_loaded(mod) or match?({:module, _}, Code.ensure_compiled(mod))) and
-      function_exported?(mod, :values, 0) and
-      function_exported?(mod, :name, 0)
+    Helper.Module.exports?(mod, :values, 0) and Helper.Module.exports?(mod, :name, 0)
   end
 
   @typedoc "Тип внешних кодов enum: целые или строки."

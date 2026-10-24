@@ -178,7 +178,7 @@ defmodule Core.Es.Event.Payload do
 
   # ---
 
-  defp uuid_leaf?(mod), do: Code.ensure_loaded?(mod) and function_exported?(mod, :format, 2)
+  defp uuid_leaf?(mod), do: Helper.Module.exports?(mod, :format, 2)
 
   # ===== тип =====
 

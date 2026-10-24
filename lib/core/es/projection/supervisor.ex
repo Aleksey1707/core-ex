@@ -193,7 +193,7 @@ defmodule Core.Es.Projection.Supervisor do
   end
 
   defp projection?(mod) when is_atom(mod),
-    do: Code.ensure_loaded?(mod) and function_exported?(mod, :__es_projection__, 0)
+    do: Core.Helper.Module.exports?(mod, :__es_projection__, 0)
 
   defp projection?(_other), do: false
 

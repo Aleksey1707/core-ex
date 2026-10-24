@@ -36,8 +36,8 @@ defmodule Core.Es.OutboxTest do
         end
       )
 
-    assert function_exported?(impl, :from_event, 1)
-    assert function_exported?(impl, :from_events, 1)
+    assert Core.Helper.Module.exports?(impl, :from_event, 1)
+    assert Core.Helper.Module.exports?(impl, :from_events, 1)
   end
 
   test "topic/0 отдаёт топик из опции topic: строкой" do

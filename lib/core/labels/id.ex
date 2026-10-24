@@ -137,6 +137,6 @@ defmodule Core.Labels.ID do
   @spec find(module()) :: t() | nil
 
   def find(module) when is_atom(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :__label_id__, 0), do: module.__label_id__()
+    if Core.Helper.Module.exports?(module, :__label_id__, 0), do: module.__label_id__()
   end
 end

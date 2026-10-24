@@ -17,8 +17,7 @@ defmodule Core.Es.Store.Opts do
   @spec event_codec!(module(), String.t()) :: module()
 
   def event_codec!(event_codec, label) when is_atom(event_codec) and is_binary(label) do
-    unless match?({:module, _}, Code.ensure_compiled(event_codec)) and
-             function_exported?(event_codec, :__es_type__, 0) do
+    unless Helper.Module.exports?(event_codec, :__es_type__, 0) do
       raise CompileError,
         description:
           "#{label}: event_codec: #{inspect(event_codec)} — не кодек событий с type: " <>

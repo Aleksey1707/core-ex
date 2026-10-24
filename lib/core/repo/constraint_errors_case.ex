@@ -156,7 +156,7 @@ defmodule Core.Repo.ConstraintErrorsCase do
 
   def repos!(otp_app) when is_atom(otp_app) do
     with modules when is_list(modules) <- Application.spec(otp_app, :modules),
-         [_ | _] = repos <- Enum.filter(modules, &exports?(&1, :__constraint_errors__, 0)) do
+         [_ | _] = repos <- Enum.filter(modules, &Helper.Module.exports?(&1, :__constraint_errors__, 0)) do
       repos
     else
       nil -> raise ArgumentError, "#{@label}: приложение #{inspect(otp_app)} не загружено"
@@ -292,17 +292,13 @@ defmodule Core.Repo.ConstraintErrorsCase do
 
   defp write_repos(repos), do: Enum.filter(repos, &write?/1)
 
-  defp write?(repo), do: Enum.any?(Repo.write_methods(), &exports?(repo, &1, 3))
+  defp write?(repo), do: Enum.any?(Repo.write_methods(), &Helper.Module.exports?(repo, &1, 3))
 
   defp children(repo) do
-    if exports?(repo, :__children_constraint_errors__, 0),
+    if Helper.Module.exports?(repo, :__children_constraint_errors__, 0),
       do: repo.__children_constraint_errors__(),
       else: []
   end
-
-  # `function_exported?/3` не грузит модуль: ещё не загруженный репозиторий иначе выпал бы из сверки молча.
-  defp exports?(module, name, arity),
-    do: Code.ensure_loaded?(module) and function_exported?(module, name, arity)
 
   defp changeset_constraints(schema) do
     schema

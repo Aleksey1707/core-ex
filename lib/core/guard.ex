@@ -87,7 +87,7 @@ defmodule Core.Guard do
         description: "не удалось скомпилировать #{inspect(mod)}: #{inspect(reason)}" <> unaliased_hint(mod, env)
     end
 
-    unless function_exported?(mod, :values, 0) do
+    unless Core.Helper.Module.exports?(mod, :values, 0) do
       raise CompileError,
         file: env.file,
         line: env.line,
@@ -188,7 +188,7 @@ defmodule Core.Guard do
   end
 
   defp enum_name(mod) do
-    if function_exported?(mod, :name, 0),
+    if Core.Helper.Module.exports?(mod, :name, 0),
       do: mod.name(),
       else: inspect(mod)
   end

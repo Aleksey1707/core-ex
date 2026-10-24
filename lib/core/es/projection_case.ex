@@ -374,7 +374,7 @@ defmodule Core.Es.ProjectionCase do
   defp subject_wires(nil), do: []
 
   defp subject_wires(payload) do
-    if Code.ensure_loaded?(payload) and function_exported?(payload, :__es_payload_fields__, 0),
+    if Helper.Module.exports?(payload, :__es_payload_fields__, 0),
       do:
         for(
           %Core.Codec.Field{name: name, wire: wire, subject: subject} <- payload.__es_payload_fields__(),

@@ -251,7 +251,7 @@ defmodule Core.Codec.Facade do
   # Поля struct компилятор не типизирует, поэтому событие сужается ещё и по нагрузке: иначе опечатка
   # в её поле после `load/2` молчала бы.
   defp type_pattern(plugin, type) do
-    if function_exported?(plugin, :__es_type__, 0),
+    if Helper.Module.exports?(plugin, :__es_type__, 0),
       do: Core.Es.Check.event_pattern(type),
       else: quote(do: %unquote(type){})
   end
@@ -276,7 +276,7 @@ defmodule Core.Codec.Facade do
     _by_type =
       plugins
       |> ensure_plugins!()
-      |> Enum.filter(&function_exported?(&1, :__es_type__, 0))
+      |> Enum.filter(&Helper.Module.exports?(&1, :__es_type__, 0))
       |> Enum.reduce(%{}, &put_unique_es_type!/2)
 
     :ok
@@ -296,7 +296,7 @@ defmodule Core.Codec.Facade do
     served = MapSet.new(Enum.flat_map(plugins, & &1.__codec_types__()))
 
     for plugin <- plugins,
-        function_exported?(plugin, :__es_type__, 0),
+        Helper.Module.exports?(plugin, :__es_type__, 0),
         {event, payload} <- Core.Es.Event.Codec.plugin_payloads(plugin.__es_mods__()),
         not MapSet.member?(served, payload) do
       raise CompileError,
@@ -336,7 +336,7 @@ defmodule Core.Codec.Facade do
   defp ensure_plugin!(plugin) when is_atom(plugin) and not is_nil(plugin) do
     Code.ensure_compiled!(plugin)
 
-    if not function_exported?(plugin, :__codec_types__, 0) do
+    if not Helper.Module.exports?(plugin, :__codec_types__, 0) do
       raise CompileError,
         description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"
     end

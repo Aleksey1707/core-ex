@@ -114,9 +114,10 @@ defmodule Core.Outbox.Release do
     end
   end
 
-  defp event_codec?(module), do: function_exported?(module, :__es_type__, 0)
+  defp event_codec?(module), do: Core.Helper.Module.exports?(module, :__es_type__, 0)
 
-  defp outbox?(module), do: function_exported?(module, :__es_event__, 0) and function_exported?(module, :topic, 0)
+  defp outbox?(module),
+    do: Core.Helper.Module.exports?(module, :__es_event__, 0) and Core.Helper.Module.exports?(module, :topic, 0)
 
   defp put_topic!(outbox, topics, type_by_family) do
     family = outbox.__es_event__()

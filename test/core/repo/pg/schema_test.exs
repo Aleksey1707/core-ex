@@ -133,8 +133,8 @@ defmodule Core.Repo.Pg.SchemaTest do
     assert %View{id: "x", name: "X"} = ReadSchema.to_view(%ReadSchema{id: "x", name: "X"})
     assert ReadSchema.dump_id(id) == Core.CodecFixture.Internal.dump(id)
 
-    refute function_exported?(ReadSchema, :to_entity!, 1)
-    refute function_exported?(ReadSchema, :to_model!, 1)
+    refute Core.Helper.Module.exports?(ReadSchema, :to_entity!, 1)
+    refute Core.Helper.Module.exports?(ReadSchema, :to_model!, 1)
   end
 
   test "режим view требует to_view/1" do

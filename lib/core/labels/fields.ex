@@ -423,8 +423,7 @@ defmodule Core.Labels.Fields do
   @spec labelled?(module()) :: boolean()
 
   def labelled?(module) when is_atom(module) do
-    (:erlang.module_loaded(module) or match?({:module, _}, Code.ensure_compiled(module))) and
-      function_exported?(module, :__label_fields__, 0)
+    Core.Helper.Module.exports?(module, :__label_fields__, 0)
   end
 
   @doc "Решение по каждому полю — в порядке объявления `labels:`; у изменения — пусто."

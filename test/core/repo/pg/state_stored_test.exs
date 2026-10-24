@@ -177,7 +177,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
 
     test "outbox: :none — модуль публикации не требуется" do
       assert {{:module, module, _binary, _}, []} = compile!(NoneOutbox, outbox: :none)
-      assert function_exported?(module, :insert, 3)
+      assert Core.Helper.Module.exports?(module, :insert, 3)
     end
 
     test "отклоняет нелитеральные opts" do

@@ -67,8 +67,7 @@ defmodule Core.Web.HealthPlug do
   end
 
   defp repo?(repo) do
-    is_atom(repo) and match?({:module, _}, Code.ensure_compiled(repo)) and
-      function_exported?(repo, :__adapter__, 0)
+    is_atom(repo) and Core.Helper.Module.exports?(repo, :__adapter__, 0)
   end
 
   defp path!(opts, key, default) do

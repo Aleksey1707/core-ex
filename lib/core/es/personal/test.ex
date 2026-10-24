@@ -42,7 +42,7 @@ defmodule Core.Es.Personal.Test do
   @spec destroyed(struct(), :all | [atom()]) :: struct()
 
   def destroyed(%mod{} = value, fields \\ :all) when fields == :all or is_list(fields) do
-    if exports?(mod, :__es_payload__),
+    if Core.Helper.Module.exports?(mod, :__es_payload__, 0),
       do: %{value | payload: destroy(value.payload, fields)},
       else: destroy(value, fields)
   end
@@ -128,10 +128,8 @@ defmodule Core.Es.Personal.Test do
   # ===== общее =====
 
   defp subject_fields(payload) do
-    if exports?(payload, :__es_payload_fields__),
+    if Core.Helper.Module.exports?(payload, :__es_payload_fields__, 0),
       do: Keyword.keys(Field.subjects(payload.__es_payload_fields__())),
       else: []
   end
-
-  defp exports?(mod, fun), do: Code.ensure_loaded?(mod) and function_exported?(mod, fun, 0)
 end

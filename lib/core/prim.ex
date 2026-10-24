@@ -193,15 +193,12 @@ defmodule Core.Prim do
   @doc """
   Модуль объявлен через `use Prim` (есть `__domain_kind__/0` и `value/1`).
 
-  При необходимости загружает модуль: `function_exported?/3` отвечает только
-  про уже загруженный код (lazy loading, purge при code reload).
+  При необходимости загружает модуль (`Core.Helper.Module.exports?/3`).
   """
   @spec prim?(module()) :: boolean()
 
   def prim?(mod) when is_atom(mod) do
-    (:erlang.module_loaded(mod) or match?({:module, _}, Code.ensure_compiled(mod))) and
-      function_exported?(mod, :__domain_kind__, 0) and
-      function_exported?(mod, :value, 1)
+    Helper.Module.exports?(mod, :__domain_kind__, 0) and Helper.Module.exports?(mod, :value, 1)
   end
 
   @doc false
@@ -213,7 +210,7 @@ defmodule Core.Prim do
   @spec composed?(module()) :: boolean()
 
   def composed?(mod) when is_atom(mod) do
-    prim?(mod) and function_exported?(mod, :__domain_base__, 0)
+    prim?(mod) and Helper.Module.exports?(mod, :__domain_base__, 0)
   end
 
   @doc """
@@ -241,7 +238,7 @@ defmodule Core.Prim do
   def chain(mod) when is_atom(mod) do
     cond do
       not prim?(mod) -> []
-      function_exported?(mod, :__domain_base__, 0) -> [mod | chain(mod.__domain_base__())]
+      Helper.Module.exports?(mod, :__domain_base__, 0) -> [mod | chain(mod.__domain_base__())]
       true -> [mod]
     end
   end

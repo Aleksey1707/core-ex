@@ -147,8 +147,8 @@ defmodule Core.EnumTest do
   end
 
   test "enum без codes: не объявляет from_code/1" do
-    refute function_exported?(Sample, :from_code, 1)
-    refute function_exported?(Sample, :codes, 0)
+    refute Core.Helper.Module.exports?(Sample, :from_code, 1)
+    refute Core.Helper.Module.exports?(Sample, :codes, 0)
   end
 
   test "compile-time: дубликаты кодов" do

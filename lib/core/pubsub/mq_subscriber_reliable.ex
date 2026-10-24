@@ -203,7 +203,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
     state = %__MODULE__{
       reader_module: reader_module,
       reader: StartOpts.term!(@label, opts, :reader),
-      ready_requests?: exports?(reader_module, :notify_when_ready, 2),
+      ready_requests?: Core.Helper.Module.exports?(reader_module, :notify_when_ready, 2),
       step: step,
       poll_interval_ms: poll_interval_ms,
       retry_max_ms: retry_max_ms(opts, poll_interval_ms),
@@ -550,12 +550,10 @@ defmodule Core.PubSub.MqSubscriberReliable do
   end
 
   defp default_poll_interval_ms(reader_module) do
-    if exports?(reader_module, :default_poll_interval_ms, 0),
+    if Core.Helper.Module.exports?(reader_module, :default_poll_interval_ms, 0),
       do: reader_module.default_poll_interval_ms(),
       else: @fallback_poll_interval_ms
   end
-
-  defp exports?(module, fun, arity), do: Code.ensure_loaded?(module) and function_exported?(module, fun, arity)
 
   defp retry_max_ms(opts, poll_interval_ms) do
     max(StartOpts.pos_integer!(@label, opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)

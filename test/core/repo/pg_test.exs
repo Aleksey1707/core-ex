@@ -240,10 +240,10 @@ defmodule Core.Repo.PgTest do
   end
 
   test "read-репозиторий с to_view не получает методов записи" do
-    refute function_exported?(ViewReadRepoPg, :insert, 3)
-    refute function_exported?(ViewReadRepoPg, :save, 3)
-    refute function_exported?(ViewReadRepoPg, :delete, 4)
-    assert function_exported?(ViewReadRepoPg, :page, 4)
+    refute Core.Helper.Module.exports?(ViewReadRepoPg, :insert, 3)
+    refute Core.Helper.Module.exports?(ViewReadRepoPg, :save, 3)
+    refute Core.Helper.Module.exports?(ViewReadRepoPg, :delete, 4)
+    assert Core.Helper.Module.exports?(ViewReadRepoPg, :page, 4)
   end
 
   test "to_model обязателен только для behaviour с записью" do
@@ -572,12 +572,12 @@ defmodule Core.Repo.PgTest do
         end
       )
 
-    assert function_exported?(impl, :get, 3)
-    assert function_exported?(impl, :get, 4)
-    assert function_exported?(impl, :insert, 2)
-    assert function_exported?(impl, :insert, 3)
-    refute function_exported?(impl, :update, 2)
-    refute function_exported?(impl, :update, 3)
+    assert Core.Helper.Module.exports?(impl, :get, 3)
+    assert Core.Helper.Module.exports?(impl, :get, 4)
+    assert Core.Helper.Module.exports?(impl, :insert, 2)
+    assert Core.Helper.Module.exports?(impl, :insert, 3)
+    refute Core.Helper.Module.exports?(impl, :update, 2)
+    refute Core.Helper.Module.exports?(impl, :update, 3)
 
     behaviours =
       impl.__info__(:attributes)
@@ -608,7 +608,7 @@ defmodule Core.Repo.PgTest do
         end
       )
 
-    assert function_exported?(impl, :count, 1)
+    assert Core.Helper.Module.exports?(impl, :count, 1)
     assert Core.Repo.Pg.always_true(Context.new())
   end
 

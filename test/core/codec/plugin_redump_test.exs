@@ -390,7 +390,7 @@ defmodule Core.Codec.PluginRedumpTest do
     end
 
     test "тип без спеки клаузы плагина не получает — отказ бросает фасад" do
-      refute function_exported?(NoSpecPlugin, :__codec_redump__, 1)
+      refute Core.Helper.Module.exports?(NoSpecPlugin, :__codec_redump__, 1)
       assert NoSpecPlugin.__codec_redump_missing__() == [{Cell.Dot, Cell.Dot}, {Cell, Cell.Dot}]
 
       assert LegacyPlugin.__codec_redump_missing__() == [{Legacy.Mark, Legacy.Mark}]

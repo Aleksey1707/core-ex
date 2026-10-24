@@ -113,7 +113,7 @@ defmodule Core.Codec.Field do
   def struct_module!(mod, where) do
     FieldCheck.module!(mod, where)
 
-    if not function_exported?(mod, :__struct__, 0) do
+    if not Core.Helper.Module.exports?(mod, :__struct__, 0) do
       raise CompileError, description: "#{where}: #{inspect(mod)} не struct"
     end
 
@@ -240,7 +240,7 @@ defmodule Core.Codec.Field do
     FieldCheck.module!(mod, where)
 
     cond do
-      function_exported?(mod, :__struct__, 0) ->
+      Core.Helper.Module.exports?(mod, :__struct__, 0) ->
         raise CompileError,
           description: "#{where}: union: #{inspect(mod)} — struct, а не семейство; нужен entity: или prim:"
 

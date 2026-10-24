@@ -139,7 +139,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
 
     test "outbox: :none — модуль публикации не требуется" do
       assert {{:module, module, _binary, _}, []} = compile!(NoneOutbox, outbox: :none)
-      assert function_exported?(module, :append, 3)
+      assert Core.Helper.Module.exports?(module, :append, 3)
     end
 
     test "кодек событий берётся из агрегата, а не из опции" do

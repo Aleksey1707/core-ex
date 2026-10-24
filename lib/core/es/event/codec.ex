@@ -608,7 +608,7 @@ defmodule Core.Es.Event.Codec do
   defp validate_tag!({mod, tag}) when is_atom(mod) and is_binary(tag) and tag != "" do
     Code.ensure_compiled!(mod)
 
-    unless function_exported?(mod, :__es_payload__, 0) do
+    unless Helper.Module.exports?(mod, :__es_payload__, 0) do
       raise CompileError,
         description: "#{@label}: tags: #{inspect(mod)} не объявлен через `use Core.Es.Event`"
     end
@@ -677,8 +677,8 @@ defmodule Core.Es.Event.Codec do
     Code.ensure_compiled!(payload)
 
     cond do
-      function_exported?(payload, :__es_payload_fields__, 0) -> {:fields, payload.__es_payload_fields__()}
-      function_exported?(payload, :__es_value_changed__, 0) -> {:fields, value_changed_fields(payload)}
+      Helper.Module.exports?(payload, :__es_payload_fields__, 0) -> {:fields, payload.__es_payload_fields__()}
+      Helper.Module.exports?(payload, :__es_value_changed__, 0) -> {:fields, value_changed_fields(payload)}
       Prim.prim?(payload) -> :prim
       true -> :plugin
     end

@@ -371,7 +371,7 @@ defmodule Core.Repo.Pg do
   def validate_errors_module!(errors) when is_atom(errors) do
     Code.ensure_compiled!(errors)
 
-    unless function_exported?(errors, :domain, 3) do
+    unless Helper.Module.exports?(errors, :domain, 3) do
       raise CompileError,
         description: "errors: модуль #{inspect(errors)} должен экспортировать domain/3"
     end

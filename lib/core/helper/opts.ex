@@ -163,7 +163,7 @@ defmodule Core.Helper.Opts do
   end
 
   defp ensure_exported!(module, {name, arity}, label) do
-    unless function_exported?(module, name, arity) do
+    unless Core.Helper.Module.exports?(module, name, arity) do
       raise CompileError,
         description: "#{label}: модуль #{inspect(module)} должен экспортировать #{name}/#{arity}"
     end

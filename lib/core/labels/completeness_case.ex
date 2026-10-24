@@ -175,7 +175,9 @@ defmodule Core.Labels.CompletenessCase do
   @spec check_titles([module()]) :: Result.unit(untitled())
 
   def check_titles(modules) when is_list(modules) do
-    result(untitled: for(event <- walk(modules).events, not exports?(event, :__label_title__), do: event))
+    result(
+      untitled: for(event <- walk(modules).events, not Helper.Module.exports?(event, :__label_title__, 0), do: event)
+    )
   end
 
   @doc false
@@ -205,7 +207,7 @@ defmodule Core.Labels.CompletenessCase do
   def check_values(modules) when is_list(modules) do
     unlabelled =
       for {:enum, owner, field, module} <- walk(modules).places,
-          not exports?(module, :labels),
+          not Helper.Module.exports?(module, :labels, 0),
           do: {owner, field, module}
 
     result(unlabelled: unlabelled)
@@ -229,7 +231,7 @@ defmodule Core.Labels.CompletenessCase do
 
     diverged =
       for plugin <- modules,
-          exports?(plugin, :__codec_variants__),
+          Helper.Module.exports?(plugin, :__codec_variants__, 0),
           {variant, address, fields} when is_list(fields) <- plugin.__codec_variants__(),
           Fields.labelled?(variant),
           gap <- diverged(variant, disc(address), fields),
@@ -243,11 +245,20 @@ defmodule Core.Labels.CompletenessCase do
   # Обход от событий кодеков: места `{вид, владелец, поле, модуль}`, где нагрузка достигает модуля.
   defp walk(modules) do
     families =
-      for plugin <- modules, exports?(plugin, :__codec_union__), family = plugin.__codec_union__(), reduce: %{} do
+      for plugin <- modules,
+          Helper.Module.exports?(plugin, :__codec_union__, 0),
+          family = plugin.__codec_union__(),
+          reduce: %{} do
         acc -> Map.update(acc, family, [plugin], &[plugin | &1])
       end
 
-    events = for codec <- modules, exports?(codec, :__es_mods__), event <- codec.__es_mods__(), uniq: true, do: event
+    events =
+      for codec <- modules,
+          Helper.Module.exports?(codec, :__es_mods__, 0),
+          event <- codec.__es_mods__(),
+          uniq: true,
+          do: event
+
     {places, _seen} = Enum.reduce(events, {[], MapSet.new()}, &visit_event(&1, &2, families))
 
     %{events: Enum.sort(events), places: places}
@@ -317,9 +328,6 @@ defmodule Core.Labels.CompletenessCase do
   defp disc({_tag, [{key, _value}]}), do: key
   defp disc([{key, _value}]), do: key
   defp disc(tag) when is_binary(tag), do: nil
-
-  # `function_exported?/3` не грузит модуль: ещё не загруженный выпал бы из обхода молча.
-  defp exports?(module, fun), do: Code.ensure_loaded?(module) and function_exported?(module, fun, 0)
 
   defp result(gaps) do
     case for({key, [_ | _] = found} <- gaps, into: %{}, do: {key, Enum.sort(Enum.uniq(found))}) do

@@ -53,6 +53,28 @@
 
 Проверяется `Credo.Check.Warning.UnsafeToAtom` (включён для `lib/`).
 
+## Экспорт модуля
+
+В коде библиотеки (`lib/`, `test/`) экспорт модуля проверяется `Core.Helper.Module.exports?/3`.
+`function_exported?/3` и `:erlang.function_exported/3` — MUST NOT, в том числе за
+`Code.ensure_loaded?/1`.
+
+Почему: обе отвечают только про загруженный код. Mix в dev и test грузит модули лениво, и ещё не
+загруженный модуль для них пуст: проверка молча его пропускает, а итог зависит от порядка тестов.
+В релизе модули загружены на старте, и там ошибки не видно. `exports?/3` модуль грузит, а при
+сборке ждёт его компиляции, поэтому один вызов верен и в макросе, и в рантайме. Отдельной формы
+для «модуль уже загружен» нет: различать два случая на ревью и есть то, что не срабатывало.
+
+```elixir
+# плохо — не загруженный модуль выпадает из сверки
+for module <- modules, function_exported?(module, :__es_type__, 0), do: module
+
+# хорошо
+for module <- modules, Helper.Module.exports?(module, :__es_type__, 0), do: module
+```
+
+Проверяется: `mix credo --strict` (`CredoChecks.FunctionExported`, `scripts/credo_checks.exs`).
+
 ## Логирование (`Logger`)
 
 | Уровень | Когда |

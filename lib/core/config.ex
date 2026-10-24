@@ -228,7 +228,7 @@ defmodule Core.Config do
       raise ArgumentError, "Core.Config: `#{where}` — модуль #{inspect(module)} не найден"
 
     Enum.each(funs, fn {fun, arity} ->
-      function_exported?(module, fun, arity) ||
+      Core.Helper.Module.exports?(module, fun, arity) ||
         raise ArgumentError,
               "Core.Config: `#{where}` — #{inspect(module)} " <>
                 "не экспортирует #{fun}/#{arity}"

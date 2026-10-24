@@ -440,7 +440,7 @@ defmodule Core.Es.Projection do
       not compiled?(mod) ->
         raise CompileError, description: "#{@label}: events: модуль #{inspect(mod)} не найден"
 
-      function_exported?(mod, :__es_payload__, 0) ->
+      Helper.Module.exports?(mod, :__es_payload__, 0) ->
         codec!(mod, codec_name(event_family!(mod)))
 
       family?(mod) ->
@@ -480,7 +480,7 @@ defmodule Core.Es.Projection do
             "#{@label}: events: кодек #{inspect(codec)} события #{inspect(mod)} не найден — " <>
               "кодек событий <Aggregate>.Event.<Name> — <Aggregate>.Event.Codec"
 
-      not function_exported?(codec, :__es_type__, 0) ->
+      not Helper.Module.exports?(codec, :__es_type__, 0) ->
         raise CompileError,
           description:
             "#{@label}: events: #{inspect(codec)} события #{inspect(mod)} — не кодек событий " <>
@@ -498,7 +498,7 @@ defmodule Core.Es.Projection do
   defp family?(mod) do
     codec = codec_name(Module.split(mod))
 
-    compiled?(codec) and function_exported?(codec, :__es_type__, 0) and
+    Helper.Module.exports?(codec, :__es_type__, 0) and
       codec.__codec_union__() == mod
   end
 

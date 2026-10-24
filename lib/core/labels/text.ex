@@ -89,6 +89,6 @@ defmodule Core.Labels.Text do
   @spec find(module()) :: (struct() -> String.t()) | nil
 
   def find(module) when is_atom(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :__label_text__, 0), do: module.__label_text__()
+    if Core.Helper.Module.exports?(module, :__label_text__, 0), do: module.__label_text__()
   end
 end

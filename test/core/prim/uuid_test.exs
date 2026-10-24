@@ -275,8 +275,8 @@ defmodule Core.Prim.UUIDTest do
     test "new/0 не генерируется, from_key/1 приватен" do
       Code.ensure_loaded!(DeliveryID)
 
-      refute function_exported?(DeliveryID, :new, 0)
-      refute function_exported?(DeliveryID, :from_key, 1)
+      refute Core.Helper.Module.exports?(DeliveryID, :new, 0)
+      refute Core.Helper.Module.exports?(DeliveryID, :from_key, 1)
     end
 
     test "CompileError: нет namespace: или scope: при version: 5" do
@@ -318,8 +318,8 @@ defmodule Core.Prim.UUIDTest do
     test "new/0 и from_key/1 не генерируются" do
       Code.ensure_loaded!(SourceID)
 
-      refute function_exported?(SourceID, :new, 0)
-      refute function_exported?(SourceID, :from_key, 1)
+      refute Core.Helper.Module.exports?(SourceID, :new, 0)
+      refute Core.Helper.Module.exports?(SourceID, :from_key, 1)
     end
 
     test "new/1 принимает UUID любой версии и отвергает не-UUID" do

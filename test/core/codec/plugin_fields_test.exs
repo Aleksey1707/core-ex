@@ -317,7 +317,7 @@ defmodule Core.Codec.PluginFieldsTest do
 
     test "loadable: false — только dump/2" do
       assert DumpOnlyFacade.dump(%Label{name: Name.new!("x")}) == %{"name" => "x"}
-      refute function_exported?(DumpOnlyPlugin, :load, 3)
+      refute Core.Helper.Module.exports?(DumpOnlyPlugin, :load, 3)
     end
 
     test "union: варианты по полям, клауза семейства — руками" do

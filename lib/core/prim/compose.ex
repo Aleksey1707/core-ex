@@ -130,9 +130,7 @@ defmodule Core.Prim.Compose do
   defp base_flag?(base, flag) do
     getter = getter(flag)
 
-    (:erlang.module_loaded(base) or Code.ensure_loaded?(base)) and
-      function_exported?(base, getter, 0) and
-      apply(base, getter, [])
+    Core.Helper.Module.exports?(base, getter, 0) and apply(base, getter, [])
   end
 
   defp getter(:sensitive), do: :__domain_sensitive__

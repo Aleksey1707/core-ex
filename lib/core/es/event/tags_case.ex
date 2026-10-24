@@ -240,8 +240,7 @@ defmodule Core.Es.Event.TagsCase do
     end
   end
 
-  # `function_exported?/3` не грузит модуль: ещё не загруженный кодек иначе выпал бы из сверки молча.
-  defp codec?(module), do: Code.ensure_loaded?(module) and function_exported?(module, :__es_type__, 0)
+  defp codec?(module), do: Helper.Module.exports?(module, :__es_type__, 0)
 
   defp describe(codec), do: %{codec: codec, type: codec.__es_type__(), tags: tags(codec)}
 
