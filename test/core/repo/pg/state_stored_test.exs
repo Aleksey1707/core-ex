@@ -80,12 +80,26 @@ defmodule Core.Repo.Pg.StateStoredTest do
                    fn -> compile!(NoEntity, entity: :__drop__, id: :__drop__) end
     end
 
-    test "отклоняет неизвестную собственную опцию" do
-      assert_raise CompileError,
-                   ~r/Repo\.Pg\.StateStored: неизвестные опции: \[:childrens\]/,
-                   fn ->
-                     compile!(BadOwnOpt, childrens: [])
-                   end
+    test "опечатка в ключе — одна ошибка при раскрытии, с меткой Repo.Pg" do
+      assert_raise CompileError, ~r/^Repo\.Pg: неизвестные опции: \[:childrens\]$/, fn ->
+        compile!(BadOwnOpt, [childrens: []], quote(do: raise("тело вычислено")))
+      end
+    end
+
+    test "атрибут в event_codec: — «ожидается литерал»" do
+      message = ~r/^Repo\.Pg\.StateStored: event_codec: ожидается литерал, получено @codec$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(AttrCodec, [event_codec: quote(do: @codec)], quote(do: @codec(unquote(@codec))))
+      end
+    end
+
+    test "to_entity: — выражение, проверяется в теле Repo.Pg, с меткой" do
+      message = ~r/^Repo\.Pg: to_entity: ожидается захват функции арности 1 .*, получено 1$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(IntMapper, [to_entity: quote(do: @mapper)], quote(do: @mapper(1)))
+      end
     end
 
     test "event_codec — кодек событий с type:" do
@@ -123,6 +137,12 @@ defmodule Core.Repo.Pg.StateStoredTest do
                    fn ->
                      compile!(NoVersionMismatch, errors: NoVersionErrors)
                    end
+    end
+
+    test "errors: без domain/3 — CompileError до вложенного Repo.Pg" do
+      message = ~r/^Repo\.Pg\.StateStored: errors: модуль .*SoloChild должен экспортировать domain\/3$/
+
+      assert_raise CompileError, message, fn -> compile!(NoDomainErrors, errors: SoloChild) end
     end
 
     test "требует behaviour с insert/update/save" do
@@ -190,7 +210,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
 
     test "отклоняет нелитеральные opts" do
       assert_raise CompileError,
-                   ~r/Repo\.Pg\.StateStored: ожидается литеральный keyword opts/,
+                   ~r/^Repo\.Pg\.StateStored: ожидается литеральный keyword, получено Keyword\.new\(\)$/,
                    fn ->
                      Code.eval_quoted(
                        quote do
@@ -295,7 +315,9 @@ defmodule Core.Repo.Pg.StateStoredTest do
     end
   end
 
-  defp compile!(name, overrides) do
+  # `prelude` стоит в теле перед `use`: тело раскрывается целиком до вычисления, поэтому ошибка
+  # раскрытия приходит раньше, чем `raise` в `prelude`.
+  defp compile!(name, overrides, prelude \\ nil) do
     opts =
       base_opts()
       |> Keyword.merge(overrides)
@@ -304,6 +326,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(Module.concat(__MODULE__, name)) do
+          unquote(prelude)
           use Core.Repo.Pg.StateStored, unquote(opts)
         end
       end

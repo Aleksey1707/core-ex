@@ -226,9 +226,6 @@
                  "lib/core/repo/constraint_errors_case.ex",
                  "lib/core/repo/pg/schema.ex",
                  "lib/core/view.ex",
-                 # 16 — Repo.Pg
-                 "lib/core/repo/pg.ex",
-                 "lib/core/repo/pg/state_stored.ex",
                  # 17 — Es-событие
                  "lib/core/es/event.ex",
                  "lib/core/es/event/payload.ex",

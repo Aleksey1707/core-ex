@@ -372,7 +372,7 @@ defmodule Core.Repo.PgTest do
   end
 
   test "отклоняет недопустимый shadow_copy?" do
-    assert_raise CompileError, ~r/неизвестные значения shadow_copy\?: \[:maybe\]/, fn ->
+    assert_raise CompileError, ~r/^Repo\.Pg: shadow_copy\?: ожидается boolean, получено :maybe$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.PgTest.ShadowBehaviour do
@@ -768,7 +768,90 @@ defmodule Core.Repo.PgTest do
     end
   end
 
+  describe "опции use" do
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Repo\.Pg: неизвестные опции: \[:shadow_copy\]$/, fn ->
+        expand_using(view_opts(shadow_copy: true))
+      end
+    end
+
+    test "атрибут в errors: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Repo\.Pg: errors: ожидается литерал, получено @errors$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.Repo.PgTest.AttrErrors do
+              @errors Core.Repo.PgTest.Errors
+              use Core.Repo.Pg, unquote(view_opts(errors: quote(do: @errors)))
+            end
+          end
+        )
+      end
+    end
+
+    test "to_view: — выражение, проверяется в теле, с меткой" do
+      assert {:__block__, _, _} = expand_using(view_opts(to_view: quote(do: @mapper)))
+
+      assert_raise CompileError, ~r/^Repo\.Pg: to_view: ожидается захват функции арности 1 .*, получено 1$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.Repo.PgTest.IntMapper do
+              @mapper 1
+              use Core.Repo.Pg, unquote(view_opts(to_view: quote(do: @mapper)))
+            end
+          end
+        )
+      end
+    end
+
+    test "query: — выражение, проверяется в теле, с меткой" do
+      assert_raise CompileError, ~r/^Repo\.Pg: query: ожидается Ecto-запрос или схема, получено 1$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.Repo.PgTest.IntQuery do
+              @query 1
+              use Core.Repo.Pg, unquote(view_opts(query: quote(do: @query)))
+            end
+          end
+        )
+      end
+    end
+
+    test "query: from(…) — выражение" do
+      query = quote(do: from(s in Core.Repo.PgTest.VersionedSchema, where: s.version > 0))
+
+      assert {{:module, impl, _binary, _}, []} =
+               Code.eval_quoted(
+                 quote do
+                   defmodule Core.Repo.PgTest.FromQuery do
+                     import Ecto.Query, only: [from: 2]
+
+                     use Core.Repo.Pg, unquote(view_opts(query: query))
+                   end
+                 end
+               )
+
+      assert Core.Helper.Module.exports?(impl, :page, 4)
+    end
+  end
+
   # ---
+
+  defp view_opts(overrides) do
+    Keyword.merge(
+      [
+        behaviour: ViewReadRepo,
+        schema: VersionedSchema,
+        to_view: quote(do: &Core.Repo.PgTest.to_view/1),
+        errors: Errors
+      ],
+      overrides
+    )
+  end
+
+  defp expand_using(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Repo.Pg)
+    Macro.expand(quote(do: Core.Repo.Pg.__using__(unquote(opts))), env)
+  end
 
   defp versioned_pg do
     %{

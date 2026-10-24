@@ -10,6 +10,13 @@ defmodule Core.Repo.Pg do
   Макрос занимает в вызывающем модуле имена `@pg`, `@id_type`, `@entity_type` и добавляет
   `alias Context/Pagination/Repo/Version` + `import Version, only: [is_version: 1]`.
 
+  ## Опции
+
+  Ключи и опции-литералы проверяются при раскрытии `use` (`docs/rules/20-agreements.md`, «Опции
+  `use`»). Опции-выражения — `query:` (`from(…)`, `Specs.base_query()`), `to_entity:`, `to_model:`,
+  `to_view:`, `to_id:`, `default_filters:` (захваты `&Mod.fun/1`): они проверяются в теле модуля,
+  `query:` — Ecto-запросом или схемой, остальные — функцией арности 1. Остальные опции — литералы.
+
   ## Намеренное поведение
 
   - `insert/4` не применяет `default_filters`: в `INSERT` нет `WHERE`.
@@ -63,9 +70,11 @@ defmodule Core.Repo.Pg do
 
   require Error
 
+  @label "Repo.Pg"
   @required_keys ~w(schema behaviour errors)a
   @optional_keys ~w(repo query default_filters to_entity to_model to_view to_id version_field
                     shadow_copy? id entity constraint_errors)a
+  @expression_keys ~w(query to_entity to_model to_view to_id default_filters)a
   @known_error_codes ~w(not_found version_mismatch incomplete_result no_ids)a
   @constraint_types ~w(unique foreign_key check exclusion)a
   # Ecto кладёт в ошибку changeset не тип ограничения, а его error_type
@@ -78,54 +87,50 @@ defmodule Core.Repo.Pg do
 
   @doc "Реализовать Repo behaviour через PostgreSQL (generic CRUD)."
   defmacro __using__(opts) do
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+
+    shadow_copy? = shadow_copy!(Keyword.get(opts, :shadow_copy?, false))
+
+    behaviour = Helper.Opts.module!(opts, :behaviour, @label)
+
+    only =
+      behaviour.behaviour_info(:callbacks)
+      |> Enum.map(fn {name, _arity} -> name end)
+      |> Enum.uniq()
+
+    errors = Keyword.fetch!(opts, :errors)
+    validate_errors_module!(errors)
+
+    constraint_errors = normalize_constraint_errors!(Keyword.get(opts, :constraint_errors, []))
+    validate_constraint_error_codes!(errors, constraint_errors, "#{@label}: constraint_errors")
+    validate_mappers!(opts, only)
+
+    schema = Keyword.fetch!(opts, :schema)
+
     # credo:disable-for-next-line Credo.Check.Refactor.LongQuoteBlocks
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Repo.Pg.required_keys(),
-        Core.Repo.Pg.optional_keys(),
-        "Repo.Pg"
-      )
+    quote do
+      @behaviour unquote(behaviour)
 
-      shadow_copy? = Keyword.get(opts, :shadow_copy?, false)
+      only = unquote(only)
 
-      Helper.Opts.allowed!(shadow_copy?, [true, false], "значения shadow_copy?", "Repo.Pg")
-
-      behaviour = Keyword.fetch!(opts, :behaviour)
-      Code.ensure_compiled!(behaviour)
-      @behaviour behaviour
-
-      only =
-        behaviour.behaviour_info(:callbacks)
-        |> Enum.map(fn {name, _arity} -> name end)
-        |> Enum.uniq()
-
-      schema = Keyword.fetch!(opts, :schema)
-      errors = Keyword.fetch!(opts, :errors)
-      Core.Repo.Pg.validate_errors_module!(errors)
-
-      constraint_errors =
-        Core.Repo.Pg.normalize_constraint_errors!(Keyword.get(opts, :constraint_errors, []))
-
-      Core.Repo.Pg.validate_constraint_error_codes!(errors, constraint_errors)
-      Core.Repo.Pg.validate_mappers!(opts, only)
-
-      @id_type Keyword.get(opts, :id)
-      @entity_type Keyword.get(opts, :entity)
+      @id_type unquote(Keyword.get(opts, :id))
+      @entity_type unquote(Keyword.get(opts, :entity))
 
       @pg %{
-        dao: Keyword.get(opts, :repo),
-        module: behaviour,
-        schema: schema,
-        query: Keyword.get(opts, :query, schema),
-        default_filters: Keyword.get(opts, :default_filters, &Core.Repo.Pg.always_true/1),
-        to_entity: Keyword.get(opts, :to_view) || Keyword.fetch!(opts, :to_entity),
-        to_model: Keyword.get(opts, :to_model),
-        to_id: Keyword.get(opts, :to_id, &Function.identity/1),
-        version_field: Keyword.get(opts, :version_field, :version),
-        shadow_copy?: shadow_copy?,
-        errors: errors,
-        constraint_errors: constraint_errors
+        dao: unquote(Keyword.get(opts, :repo)),
+        module: unquote(behaviour),
+        schema: unquote(schema),
+        query: Core.Repo.Pg.query!(unquote(Keyword.get(opts, :query, schema))),
+        default_filters: unquote(mapper_ast(opts, :default_filters, quote(do: &Core.Repo.Pg.always_true/1))),
+        to_entity: unquote(decoder(opts)),
+        to_model: unquote(mapper_ast(opts, :to_model, nil)),
+        to_id: unquote(mapper_ast(opts, :to_id, quote(do: &Function.identity/1))),
+        version_field: unquote(Keyword.get(opts, :version_field, :version)),
+        shadow_copy?: unquote(shadow_copy?),
+        errors: unquote(errors),
+        constraint_errors: unquote(Macro.escape(constraint_errors))
       }
 
       alias Core.Context
@@ -276,20 +281,31 @@ defmodule Core.Repo.Pg do
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
   @doc "Фильтр по умолчанию: без ограничений (дефолт опции `default_filters:`)."
   @spec always_true(Context.t()) :: true
 
   def always_true(_context), do: true
+
+  @doc false
+  @spec mapper!(term(), atom()) :: (term() -> term())
+
+  def mapper!(fun, _key) when is_function(fun, 1), do: fun
+
+  def mapper!(other, key) do
+    Helper.Opts.reject!(
+      "#{@label}: #{key}",
+      "ожидается захват функции арности 1 (`&Mod.fun/1`), получено #{inspect(other)}"
+    )
+  end
+
+  @doc false
+  @spec query!(term()) :: Ecto.Queryable.t()
+
+  def query!(query) do
+    if Ecto.Queryable.impl_for(query),
+      do: query,
+      else: Helper.Opts.reject!("#{@label}: query", "ожидается Ecto-запрос или схема, получено #{inspect(query)}")
+  end
 
   @doc """
   Проверить пару декодер/энкодер строки против набора методов behaviour.
@@ -310,6 +326,25 @@ defmodule Core.Repo.Pg do
 
   # ---
 
+  defp shadow_copy!(shadow_copy?) when is_boolean(shadow_copy?), do: shadow_copy?
+
+  defp shadow_copy!(other),
+    do: Helper.Opts.reject!("#{@label}: shadow_copy?", "ожидается boolean, получено #{inspect(other)}")
+
+  defp decoder(opts) do
+    case Keyword.has_key?(opts, :to_view) do
+      true -> mapper_ast(opts, :to_view, nil)
+      false -> mapper_ast(opts, :to_entity, nil)
+    end
+  end
+
+  defp mapper_ast(opts, key, default) do
+    case Keyword.fetch(opts, key) do
+      {:ok, fun} -> quote(do: Core.Repo.Pg.mapper!(unquote(fun), unquote(key)))
+      :error -> default
+    end
+  end
+
   defp validate_decoder!(opts) do
     opts
     |> Keyword.take(~w(to_entity to_view)a)
@@ -321,23 +356,24 @@ defmodule Core.Repo.Pg do
   defp ensure_single_decoder!([_one]), do: :ok
 
   defp ensure_single_decoder!([]) do
-    raise CompileError,
-      description: "to_entity/to_view: нужен декодер строки — to_entity: (write) или to_view: (read)"
+    Helper.Opts.reject!(
+      "#{@label}: to_entity/to_view",
+      "нужен декодер строки — to_entity: (write) или to_view: (read)"
+    )
   end
 
   defp ensure_single_decoder!(_entity_and_view) do
-    raise CompileError,
-      description: "to_entity/to_view: взаимоисключающие (write — агрегат, read — View)"
+    Helper.Opts.reject!("#{@label}: to_entity/to_view", "взаимоисключающие (write — агрегат, read — View)")
   end
 
   # Эталон в `Repo.Sc` — механизм write-пути: на чтении он получил бы представление
   # (`Repo.Sc.put/2` требует `id`), а сверять его при записи всё равно не с чем.
   defp validate_shadow_copy!(opts) do
     if Keyword.has_key?(opts, :to_view) and Keyword.get(opts, :shadow_copy?) == true do
-      raise CompileError,
-        description:
-          "shadow_copy?: недопустим с to_view: — read-путь не кладёт представление " <>
-            "эталоном в Repo.Sc"
+      Helper.Opts.reject!(
+        "#{@label}: shadow_copy?",
+        "недопустим с to_view: — read-путь не кладёт представление эталоном в Repo.Sc"
+      )
     end
 
     :ok
@@ -345,13 +381,11 @@ defmodule Core.Repo.Pg do
 
   defp validate_encoder!(opts, true) do
     if Keyword.has_key?(opts, :to_view) do
-      raise CompileError,
-        description: "to_view: недопустим для behaviour с insert/update/save"
+      Helper.Opts.reject!("#{@label}: to_view", "недопустим для behaviour с insert/update/save")
     end
 
     unless Keyword.has_key?(opts, :to_model) do
-      raise CompileError,
-        description: "to_model: обязателен для behaviour с insert/update/save"
+      Helper.Opts.reject!("#{@label}: to_model", "обязателен для behaviour с insert/update/save")
     end
 
     :ok
@@ -365,15 +399,14 @@ defmodule Core.Repo.Pg do
   @spec validate_errors_module!(module()) :: :ok
 
   def validate_errors_module!(errors) when is_list(errors) do
-    raise CompileError, description: "errors: ожидается модуль Errors, получен keyword"
+    Helper.Opts.reject!("#{@label}: errors", "ожидается модуль Errors, получен keyword")
   end
 
   def validate_errors_module!(errors) when is_atom(errors) do
     Code.ensure_compiled!(errors)
 
     unless Helper.Module.exports?(errors, :domain, 3) do
-      raise CompileError,
-        description: "errors: модуль #{inspect(errors)} должен экспортировать domain/3"
+      Helper.Opts.reject!("#{@label}: errors", "модуль #{inspect(errors)} должен экспортировать domain/3")
     end
 
     Enum.each(@known_error_codes, fn code ->
@@ -383,7 +416,7 @@ defmodule Core.Repo.Pg do
         FunctionClauseError ->
           reraise CompileError,
                   [
-                    description: "errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
+                    description: "#{@label}: errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
                   ],
                   __STACKTRACE__
       end
@@ -393,8 +426,7 @@ defmodule Core.Repo.Pg do
   end
 
   def validate_errors_module!(other) do
-    raise CompileError,
-      description: "errors: ожидается модуль Errors, получено #{inspect(other)}"
+    Helper.Opts.reject!("#{@label}: errors", "ожидается модуль Errors, получено #{inspect(other)}")
   end
 
   @doc false
@@ -404,26 +436,24 @@ defmodule Core.Repo.Pg do
 
   def normalize_constraint_errors!(raw) when is_list(raw) do
     unless Keyword.keyword?(raw) do
-      raise CompileError,
-        description: "constraint_errors: ожидается keyword [type: [field: code]]"
+      Helper.Opts.reject!("#{@label}: constraint_errors", "ожидается keyword [type: [field: code]]")
     end
 
     Enum.reduce(raw, %{}, &put_constraint_type/2)
   end
 
   def normalize_constraint_errors!(other) do
-    raise CompileError,
-      description: "constraint_errors: ожидается keyword, получено #{inspect(other)}"
+    Helper.Opts.reject!("#{@label}: constraint_errors", "ожидается keyword, получено #{inspect(other)}")
   end
 
   @doc false
-  @spec validate_constraint_error_codes!(module(), %{optional(term()) => atom()}) :: :ok
+  @spec validate_constraint_error_codes!(module(), %{optional(term()) => atom()}, String.t()) :: :ok
 
-  def validate_constraint_error_codes!(errors, mapping) do
+  def validate_constraint_error_codes!(errors, mapping, where) do
     mapping
     |> Map.values()
     |> Enum.uniq()
-    |> Enum.each(&ensure_constraint_error_code!(errors, &1))
+    |> Enum.each(&ensure_constraint_error_code!(errors, &1, where))
 
     :ok
   end
@@ -470,14 +500,17 @@ defmodule Core.Repo.Pg do
 
   defp put_constraint_type({type, fields}, acc) do
     unless type in @constraint_types do
-      raise CompileError,
-        description: "constraint_errors: неизвестный тип #{inspect(type)}, допустимы #{inspect(@constraint_types)}"
+      Helper.Opts.reject!(
+        "#{@label}: constraint_errors",
+        "неизвестный тип #{inspect(type)}, допустимы #{inspect(@constraint_types)}"
+      )
     end
 
     unless is_list(fields) and Keyword.keyword?(fields) do
-      raise CompileError,
-        description:
-          "constraint_errors: для #{inspect(type)} ожидается keyword [field: code], получено #{inspect(fields)}"
+      Helper.Opts.reject!(
+        "#{@label}: constraint_errors",
+        "для #{inspect(type)} ожидается keyword [field: code], получено #{inspect(fields)}"
+      )
     end
 
     Enum.reduce(fields, acc, &put_constraint_field(type, &1, &2))
@@ -485,27 +518,27 @@ defmodule Core.Repo.Pg do
 
   defp put_constraint_field(type, {field, code}, acc) do
     unless is_atom(field) and is_atom(code) do
-      raise CompileError,
-        description: "constraint_errors: field и code должны быть атомами, получено #{inspect({field, code})}"
+      Helper.Opts.reject!(
+        "#{@label}: constraint_errors",
+        "field и code должны быть атомами, получено #{inspect({field, code})}"
+      )
     end
 
     key = {Map.fetch!(@error_types, type), field}
 
     if Map.has_key?(acc, key) do
-      raise CompileError, description: "constraint_errors: дубликат #{inspect({type, field})}"
+      Helper.Opts.reject!("#{@label}: constraint_errors", "дубликат #{inspect({type, field})}")
     end
 
     Map.put(acc, key, code)
   end
 
-  defp ensure_constraint_error_code!(errors, code) do
+  defp ensure_constraint_error_code!(errors, code, where) do
     errors.domain(__MODULE__, code, nil)
   rescue
     FunctionClauseError ->
       reraise CompileError,
-              [
-                description: "constraint_errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
-              ],
+              [description: "#{where}: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"],
               __STACKTRACE__
   end
 

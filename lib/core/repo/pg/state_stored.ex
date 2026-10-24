@@ -22,8 +22,13 @@ defmodule Core.Repo.Pg.StateStored do
   Надстройка над `Core.Repo.Pg`: свои опции макрос забирает себе, остальные передаёт
   в `use Repo.Pg` как есть, затем переопределяет `insert/3`, `update/3` и `save/3` и добавляет
   страницу потока `page_stream/4`.
-  Набор ключей проверяется целиком здесь — чтобы опечатка в любой опции называла
-  `Repo.Pg.StateStored`.
+
+  Опции — опции `Repo.Pg` плюс свои ключи (`docs/rules/20-agreements.md`, «Опции `use`»). При
+  раскрытии `use` здесь проверяются свои ключи (`event_codec:`, `outbox:`, `children:`),
+  обязательность `to_entity:`, `to_model:`, `entity:`, `id:` и сверки по модулям ниже; читаемые
+  здесь опции `Repo.Pg` (`behaviour:`, `errors:`, `repo:`) — по форме, без которой их не прочесть.
+  Неизвестные ключи и опции-выражения остатка проверяет `use Core.Repo.Pg`: опечатка в
+  необязательном ключе приходит с меткой `Repo.Pg:`.
 
   Каждая запись идёт одной транзакцией: строка агрегата → дочерние строки → события и outbox
   (`Core.Es.Store.Write`, без непрерывности потока и резервов ключей). Дочерние строки пишет
@@ -69,6 +74,8 @@ defmodule Core.Repo.Pg.StateStored do
 
   ## Opts (сверх опций `Repo.Pg`)
 
+  Свои опции — литералы.
+
   - `event_codec:` — кодек событий агрегата (`use Core.Es.Event.Codec`); его `type:` — тип
     агрегата в адресе потока
   - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`) либо `:none`: агрегат не публикует
@@ -107,17 +114,20 @@ defmodule Core.Repo.Pg.StateStored do
   @label "Repo.Pg.StateStored"
   @children_label "#{@label}: children"
   @own_keys ~w(event_codec outbox children)a
+  @required_keys ~w(to_entity to_model event_codec outbox entity id)a
+  @read_keys ~w(behaviour repo errors entity id)a
   @required_callbacks ~w(insert update save)a
 
   @doc "Реализовать write-репозиторий state-stored агрегата через PostgreSQL."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    cfg = validate_opts!(lit)
-    pg_opts = Keyword.drop(opts, @own_keys)
-    dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.require!(opts, @required_keys, @label)
+    read = Helper.Opts.literal!(Keyword.take(opts, @own_keys ++ @read_keys), [], @label)
+    cfg = config!(read)
+    dao = Helper.Opts.module_or_config!(read, :repo, :dao, @label)
 
     quote do
-      use Core.Repo.Pg, unquote(pg_opts)
+      use Core.Repo.Pg, unquote(Keyword.drop(opts, @own_keys))
 
       @es_event_codec unquote(cfg.event_codec)
       @es_outbox unquote(cfg.outbox)
@@ -228,26 +238,9 @@ defmodule Core.Repo.Pg.StateStored do
     end
   end
 
-  @doc false
-  @spec own_keys() :: [atom()]
-
-  def own_keys, do: @own_keys
-
   # ---
 
-  defp validate_opts!(opts) do
-    unless Keyword.keyword?(opts) do
-      raise CompileError,
-        description: "#{@label}: ожидается литеральный keyword opts, получено #{Macro.to_string(opts)}"
-    end
-
-    Helper.Opts.validate!(
-      opts,
-      Core.Repo.Pg.required_keys() ++ ~w(to_entity to_model event_codec outbox entity id)a,
-      Core.Repo.Pg.optional_keys() ++ ~w(children)a,
-      @label
-    )
-
+  defp config!(opts) do
     event_codec =
       Es.Store.Opts.event_codec!(Helper.Opts.module!(opts, :event_codec, @label), @label)
 
@@ -438,7 +431,7 @@ defmodule Core.Repo.Pg.StateStored do
 
   defp validate_constraint_codes!(mapping, errors) do
     module = Helper.Opts.module!([errors: errors], :errors, @children_label, exports: [domain: 3])
-    Core.Repo.Pg.validate_constraint_error_codes!(module, mapping)
+    Core.Repo.Pg.validate_constraint_error_codes!(module, mapping, "#{@children_label}: constraint_errors")
 
     mapping
   end
