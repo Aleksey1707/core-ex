@@ -191,6 +191,7 @@
           #   Specs — 20-agreements.md
           #   UnsafeToAtom — 20-agreements.md («Атомы из внешних данных»)
           #   CredoChecks.FunctionExported — 20-agreements.md («Экспорт модуля»), scripts/credo_checks.exs
+          #   CredoChecks.UseOpts — 20-agreements.md («Опции `use`»), scripts/credo_checks.exs
           #   LeakyEnvironment — утечка окружения в подпроцессы
           #   MixEnv — runtime-конфиг вместо `Mix.env/0`
           #   PassAsyncInTestCases — 19-testing.md
@@ -205,7 +206,71 @@
           {Credo.Check.Readability.StrictModuleLayout,
            [ignore: ~w/use module_attribute module defstruct type typep opaque callback/a]},
           {Credo.Check.Warning.UnsafeToAtom, [files: %{excluded: ["test/"]}]},
-          {CredoChecks.FunctionExported, [files: %{excluded: ["lib/core/helper/module.ex"]}]}
+          {CredoChecks.FunctionExported, [files: %{excluded: ["lib/core/helper/module.ex"]}]},
+          # Храповик перевода builder'ов (.scratch/use-opts-parsing/spec.md, «Порядок работ»): срез
+          # вычёркивает свои файлы, влитый последним удаляет `excluded`.
+          {CredoChecks.UseOpts,
+           [
+             files: %{
+               included: ["lib/"],
+               excluded: [
+                 # 11 — пролог группы «раскрытие»
+                 "lib/core/enum/docs_case.ex",
+                 "lib/core/es/aggregate.ex",
+                 "lib/core/es/aggregate/process.ex",
+                 "lib/core/es/cmd.ex",
+                 "lib/core/es/event_compat_case.ex",
+                 "lib/core/es/personal/key_store_case.ex",
+                 "lib/core/es/projection_case.ex",
+                 "lib/core/labels/completeness_case.ex",
+                 "lib/core/repo/constraint_errors_case.ex",
+                 "lib/core/repo/pg/schema.ex",
+                 "lib/core/view.ex",
+                 # 12 — Prim
+                 "lib/core/prim.ex",
+                 "lib/core/prim/compose.ex",
+                 "lib/core/prim/date.ex",
+                 "lib/core/prim/date_time.ex",
+                 "lib/core/prim/decimal.ex",
+                 "lib/core/prim/integer.ex",
+                 "lib/core/prim/string.ex",
+                 "lib/core/prim/uuid.ex",
+                 "lib/core/prim/wrapper.ex",
+                 # 13 — Labels
+                 "lib/core/labels/event.ex",
+                 "lib/core/labels/fields.ex",
+                 "lib/core/labels/id.ex",
+                 "lib/core/labels/text.ex",
+                 "lib/core/labels/values.ex",
+                 "lib/core/web/event.ex",
+                 # 14 — тело-мелкие
+                 "lib/core/context/accessor.ex",
+                 "lib/core/enum.ex",
+                 "lib/core/es/value_changed.ex",
+                 # 15 — Codec
+                 "lib/core/codec.ex",
+                 "lib/core/codec/facade.ex",
+                 "lib/core/codec/plugin.ex",
+                 # 16 — Repo.Pg
+                 "lib/core/repo/pg.ex",
+                 "lib/core/repo/pg/state_stored.ex",
+                 # 17 — Es-событие
+                 "lib/core/es/event.ex",
+                 "lib/core/es/event/payload.ex",
+                 # 18 — Es-кодек; `Es.Event.Family` появился в AW-2, в инвентаре его нет
+                 "lib/core/es/event/codec.ex",
+                 "lib/core/es/event/family.ex",
+                 "lib/core/es/event/tags_case.ex",
+                 "lib/core/es/outbox.ex",
+                 # 19 — Es-репозиторий
+                 "lib/core/es/aggregate/repo.ex",
+                 "lib/core/es/aggregate/repo/pg.ex",
+                 "lib/core/es/key_reservation.ex",
+                 # 20 — проекция
+                 "lib/core/es/projection.ex"
+               ]
+             }
+           ]}
         ],
         disabled: [
           # `_` и `_name` несут разный смысл: первое — «значение не важно вообще»

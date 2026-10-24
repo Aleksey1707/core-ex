@@ -594,8 +594,75 @@ def load_builtin(mod, raw, _kind) when is_atom(mod), do: mod.new(raw)
 В `use` каждый передаваемый параметр обязан быть на отдельной строке.
 Список атомов должен описываться через ~w(...)a
 
-Параметры __using__ макроса должны делиться на обязательные и опциональные, оформляться в виде
-атрибутов модуля и выполняться проверка переданных параметров и их значений на этапе компиляции.
+### Опции `use`
+
+Builder — модуль с `defmacro __using__`. Его опции объявляются атрибутами `@required_keys`,
+`@optional_keys` и `@expression_keys`; режим разбора опции задаёт объявление, а не форма вызова
+(ADR-0085).
+
+- Пролог `__using__` MUST — `Core.Helper.Opts.expand!/3` → `validate!` → `literal!/3`: ключи и
+  опции-литералы проверяются при раскрытии. Список опций MUST быть литеральным keyword-AST.
+- Опция-литерал — значение, для которого после `expand!/3` (алиасы, `__MODULE__`, сигилы
+  `~w()a` / `~D[]` / `~U[]`, унарный минус) истинно `Macro.quoted_literal?/1`.
+- Опция-выражение (атрибут, вызов функции, захват `&Mod.fun/n`, `~r//`) MUST уходить AST-ом в
+  атрибут тела через валидатор `<key>!`: публичный `@doc false` builder'а или value-вариант
+  `Core.Helper.Opts`. Выражением опция объявляется, только если нелитерал разрешает контракт
+  или он есть у реального вызова; `@moduledoc` builder'а MUST называть опции-выражения.
+- Опция-модуль (`repo:`, `codec:`, `errors:` …) MUST быть литералом.
+- Проверка по другому модулю SHOULD идти при раскрытии (`Core.Helper.Opts.module!`). У опции,
+  чей модуль MAY быть вложен в вызывающего, — в теле через `<key>!` на
+  `unquote(Macro.escape(value))`; `@moduledoc` называет такие опции. Проверка MUST падать на
+  несобранном модуле (`Code.ensure_compiled!`); `exports?` — только после неё.
+- Код, генерируемый по проверке в теле, MUST стоять в месте `use` вторым
+  `quote unquote: false`, а не в `@before_compile`.
+- Builder, собранный из другого, MUST подключать его вложенным `use`. Ключ проверяет тот, кто
+  его отбрасывает: отданный внутреннему как есть — внутренний, поглощённый или пересобранный —
+  внешний. Читатель чужого ключа проверяет форму, без которой ключ не прочесть, и свои усиления.
+- Функции ключей (`required_keys/0`, `optional_keys/0`, `expression_keys/0`) builder MUST NOT
+  экспортировать; исключение — протокол `Core.Prim.Wrapper`.
+- `quote bind_quoted:` в модуле с `__using__` — MUST NOT.
+
+Ошибка опции (при раскрытии и в `<key>!`) — `CompileError` через
+`Core.Helper.Opts.reject!(where, message)`; другие классы исключений MUST NOT.
+
+- Префикс — `<метка builder'а>: <ключ>[: <элемент>…]: <текст>`, без модуля вызывающего; при
+  композиции — метка внутреннего builder'а.
+- `file:` / `line:` не передаются: строку `use` даёт стек.
+- Несовпадение формы или типа — `ожидается <что>, получено <значение>` (`inspect/1`, AST —
+  `Macro.to_string/1`); смысловое нарушение — свободный текст.
+
+Проверки хуков `@before_compile` / `@after_compile` — о модуле, а не об опции: правило их не
+задевает.
+
+```elixir
+# плохо — опции разбираются при вычислении тела, ключи — через проходные функции
+defmacro __using__(opts) do
+  quote bind_quoted: [opts: opts] do
+    Helper.Opts.validate!(opts, Core.Enum.required_keys(), Core.Enum.optional_keys(), "Enum")
+    @enum_name Keyword.fetch!(opts, :name)
+  end
+end
+
+# хорошо — ключи и литералы при раскрытии, выражение — AST-ом в `<key>!`
+@required_keys ~w(name)a
+@optional_keys ~w(values codes)a
+@expression_keys ~w(name)a
+
+defmacro __using__(opts) do
+  opts = Helper.Opts.expand!(opts, __CALLER__, "Enum")
+  Helper.Opts.validate!(opts, @required_keys, @optional_keys, "Enum")
+  opts = Helper.Opts.literal!(opts, @expression_keys, "Enum")
+
+  quote do
+    @enum_name Core.Helper.Opts.binary_value!(unquote(opts[:name]), :name, "Enum")
+    @enum_values unquote(Core.Enum.values!(opts[:values], opts[:codes]))
+  end
+end
+```
+
+Проверяется: `mix credo --strict` (`CredoChecks.UseOpts`, только `lib/`) — `quote bind_quoted:`
+в модуле с `__using__`, первое употребление `opts` в `__using__` мимо `Helper.Opts.expand!/3` /
+`Prim.Opts.prepare!`, функции ключей вне `Core.Prim.Wrapper`.
 
 ### Однострочные клаузы
 

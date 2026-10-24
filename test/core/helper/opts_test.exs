@@ -135,4 +135,66 @@ defmodule Core.Helper.OptsTest do
       Opts.atom!([key: nil], :key, "T")
     end
   end
+
+  describe "expand!" do
+    test "раскрывает сигилы ~w()a / ~D[] / ~U[] и алиасы" do
+      opts =
+        quote(do: [only: ~w(get save)a, on: ~D[2026-01-02], at: ~U[2026-01-02 03:04:05Z], mod: Opts])
+        |> Opts.expand!(__ENV__, "T")
+        |> Opts.literal!([], "T")
+
+      assert opts == [only: [:get, :save], on: ~D[2026-01-02], at: ~U[2026-01-02 03:04:05Z], mod: Opts]
+    end
+
+    test "сворачивает унарный минус над числом в списках и парах" do
+      opts = Opts.expand!(quote(do: [min: -1, range: [{:lo, -2.5}, {:hi, 3}]]), __ENV__, "T")
+
+      assert opts == [min: -1, range: [lo: -2.5, hi: 3]]
+    end
+
+    test "список опций выражением — CompileError «ожидается литеральный keyword»" do
+      assert_raise CompileError, ~r/^T: ожидается литеральный keyword, получено @opts$/, fn ->
+        Opts.expand!(quote(do: @opts), __ENV__, "T")
+      end
+    end
+  end
+
+  describe "literal!" do
+    test "вычисляет кортеж и struct, опцию-выражение отдаёт AST" do
+      opts =
+        quote(do: [pair: {:a, 1, [b: 2]}, at: %Date{year: 2026, month: 1, day: 2}, with: &Exports.new/1])
+        |> Opts.expand!(__ENV__, "T")
+        |> Opts.literal!(~w(with)a, "T")
+
+      assert opts[:pair] == {:a, 1, [b: 2]}
+      assert opts[:at] == %Date{year: 2026, month: 1, day: 2}
+      assert Macro.to_string(opts[:with]) == "&Exports.new/1"
+    end
+
+    test "захват в опции-литерале — CompileError «ожидается литерал»" do
+      assert_raise CompileError, ~r/^T: with: ожидается литерал, получено &Exports.new\/1$/, fn ->
+        Opts.literal!([with: quote(do: &Exports.new/1)], [], "T")
+      end
+    end
+
+    test "атрибут в опции-литерале — CompileError «ожидается литерал»" do
+      assert_raise CompileError, ~r/^T: values: ожидается литерал, получено @values$/, fn ->
+        Opts.literal!([values: quote(do: @values)], ~w(name)a, "T")
+      end
+    end
+  end
+
+  test "reject! — CompileError «<where>: <message>»" do
+    assert_raise CompileError, ~r/^T: only: ожидается список, получено 1$/, fn ->
+      Opts.reject!("T: only", "ожидается список, получено 1")
+    end
+  end
+
+  test "binary_value! проверяет значение опции-выражения" do
+    assert "Имя" == Opts.binary_value!("Имя", :name, "T")
+
+    assert_raise CompileError, ~r/^T: name: ожидается строка, получено 1$/, fn ->
+      Opts.binary_value!(1, :name, "T")
+    end
+  end
 end

@@ -167,7 +167,7 @@ defmodule Core.RepoTest do
   end
 
   test "use rejects unknown method" do
-    assert_raise CompileError, ~r/неизвестные метод\(ы\): \[:foo\]/, fn ->
+    assert_raise CompileError, ~r/^Repo: only: неизвестные метод\(ы\): \[:foo\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.RepoTest.BadMethod do
@@ -179,11 +179,59 @@ defmodule Core.RepoTest do
   end
 
   test "use rejects unknown repository kind" do
-    assert_raise CompileError, ~r/неизвестный вид репозитория: :weird/, fn ->
+    assert_raise CompileError,
+                 ~r"^Repo: only: ожидается :full / :permanent / :read или список, получено :weird$",
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.RepoTest.BadKind do
+                         use Core.Repo, only: :weird
+                       end
+                     end
+                   )
+                 end
+  end
+
+  test "use раскрывает only: ~w()a" do
+    {{:module, mod, _bin, _}, _binding} =
       Code.eval_quoted(
         quote do
-          defmodule Core.RepoTest.BadKind do
-            use Core.Repo, only: :weird
+          defmodule Core.RepoTest.SigilOnly do
+            use Core.Repo, only: ~w(get save)a
+          end
+        end
+      )
+
+    assert Enum.sort(mod.behaviour_info(:callbacks)) == [get: 4, save: 3]
+  end
+
+  test "опечатка в ключе — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Repo: неизвестные опции: \[:olny\]$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Repo)
+      Macro.expand(quote(do: Core.Repo.__using__(olny: :read)), env)
+    end
+  end
+
+  test "атрибут в опции — «ожидается литерал»" do
+    assert_raise CompileError, ~r/^Repo: only: ожидается литерал, получено @methods$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.RepoTest.AttrOnly do
+            @methods ~w(get)a
+            use Core.Repo, only: @methods
+          end
+        end
+      )
+    end
+  end
+
+  test "список опций выражением — «ожидается литеральный keyword»" do
+    assert_raise CompileError, ~r/^Repo: ожидается литеральный keyword, получено @opts$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.RepoTest.AttrOpts do
+            @opts [only: :read]
+            use Core.Repo, @opts
           end
         end
       )

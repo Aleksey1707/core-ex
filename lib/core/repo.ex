@@ -22,6 +22,12 @@ defmodule Core.Repo do
   «write — агрегат, read — View» проверяет компилятор, а не ревью.
 
   Без `entity:` / `view:` элемент типизируется как `struct()`, без `id:` — как `term()`.
+
+  ## Опции
+
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов
+  функции в опции — `CompileError` «ожидается литерал». Модули `entity:` / `view:` / `id:`
+  проверяются при раскрытии и MUST NOT быть вложены в вызывающего.
   """
 
   alias Core.Helper
@@ -36,25 +42,18 @@ defmodule Core.Repo do
   @label "Repo"
   @required_keys ~w()a
   @optional_keys ~w(only entity view id)a
+  @expression_keys ~w()a
 
   @doc "Объявить Repo behaviour (`only:` — :full / :permanent / :read / список)."
   defmacro __using__(opts) do
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+
     opts
-    |> Macro.expand_literals(__CALLER__)
-    |> expand_only!(__CALLER__)
-    |> validate_opts!()
+    |> Helper.Opts.literal!(@expression_keys, @label)
+    |> parse!()
     |> callbacks()
   end
-
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
 
   @doc false
   @spec known_methods() :: [atom()]
@@ -80,31 +79,20 @@ defmodule Core.Repo do
   def expand_only(list) when is_list(list), do: list
 
   def expand_only(other) do
-    raise CompileError, description: "неизвестный вид репозитория: #{inspect(other)}"
+    expected = ":full / :permanent / :read или список"
+    Helper.Opts.reject!("#{@label}: only", "ожидается #{expected}, получено #{inspect(other)}")
   end
 
   # ---
 
-  # `only:` разбирается по AST, а не через `bind_quoted`, поэтому `~w(get save)a` доезжает
-  # сюда невычисленным вызовом макроса `sigil_w`. Список атомов — предписанная проектом
-  # форма записи (`docs/rules/20-agreements.md`), так что разворачивать её обязан билдер.
-  defp expand_only!(opts, env) do
-    case Keyword.fetch(opts, :only) do
-      {:ok, value} -> Keyword.put(opts, :only, Macro.expand(value, env))
-      :error -> opts
-    end
-  end
-
-  defp validate_opts!(opts) do
-    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
-
+  defp parse!(opts) do
     only =
       opts
       |> Keyword.get(:only, :full)
       |> expand_only()
       |> Enum.uniq()
 
-    Helper.Opts.allowed!(only, @known_methods, "метод(ы)", @label)
+    Helper.Opts.allowed!(only, @known_methods, "метод(ы)", "#{@label}: only")
 
     %{only: only, item: item_type!(opts, only), id: id_type!(opts)}
   end
@@ -125,10 +113,8 @@ defmodule Core.Repo do
     remote_type(opts, :view, exports: [__view__: 0])
   end
 
-  defp item_type(_entity_and_view, _opts, _only) do
-    raise CompileError,
-      description: "#{@label}: entity: и view: взаимоисключающие (write — агрегат, read — View)"
-  end
+  defp item_type(_entity_and_view, _opts, _only),
+    do: Helper.Opts.reject!(@label, "entity: и view: взаимоисключающие (write — агрегат, read — View)")
 
   defp id_type!(opts) do
     if Keyword.has_key?(opts, :id),
@@ -143,8 +129,7 @@ defmodule Core.Repo do
         :ok
 
       found ->
-        raise CompileError,
-          description: "#{@label}: view: допустим только для read-методов, найдены: #{inspect(found)}"
+        Helper.Opts.reject!("#{@label}: view", "допустим только для read-методов, найдены: #{inspect(found)}")
     end
   end
 

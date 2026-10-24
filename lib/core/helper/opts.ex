@@ -1,14 +1,59 @@
 defmodule Core.Helper.Opts do
   @moduledoc """
-  Валидация опций `__using__`-макросов на этапе компиляции.
+  Разбор опций `__using__`-макросов на этапе компиляции (ADR-0085, `docs/rules/20-agreements.md`,
+  «Опции `use`»).
 
-  `validate!/4` проверяет обязательные и неизвестные ключи, `module!/4` — что значение
-  является модулем (и, при `exports:`, что он экспортирует нужные функции), `binary!/3` /
-  `atom!/3` — что значение нужного типа.
-  Опечатка в опции даёт `CompileError`, а не сбой в рантайме.
+  ## Пролог
+
+  Builder объявляет опции атрибутами `@required_keys`, `@optional_keys`, `@expression_keys` и
+  разбирает их при раскрытии:
+
+      defmacro __using__(opts) do
+        opts = Helper.Opts.expand!(opts, __CALLER__, "Enum")
+        Helper.Opts.validate!(opts, @required_keys, @optional_keys, "Enum")
+        opts = Helper.Opts.literal!(opts, @expression_keys, "Enum")
+        ...
+      end
+
+  `expand!/3` требует литеральный keyword-AST и раскрывает алиасы, `__MODULE__`, сигилы
+  `~w()a` / `~D[]` / `~U[]` и унарный минус над числом. `validate!/4` проверяет обязательные и
+  неизвестные ключи. `literal!/3` вычисляет опции-литералы и отдаёт опции-выражения AST-ом.
+
+  ## Опция-литерал и опция-выражение
+
+  Опция-литерал — значение, для которого после `expand!/3` истинно `Macro.quoted_literal?/1`;
+  иное значение такой опции — `CompileError` «ожидается литерал». Её проверяют при раскрытии:
+  `module!/4`, `binary!/3`, `atom!/3`, `allowed!/4`; в `quote` значение уходит через
+  `Macro.escape/1`.
+
+  Опция-выражение (атрибут, вызов функции, захват) уходит AST-ом в атрибут тела через валидатор
+  `<key>!`: `@doc false` функцию builder'а или value-вариант отсюда (`binary_value!/3`).
 
   `module_or_config!/4` — опция-модуль с дефолтом из `Core.Config`, резолвимым в рантайме.
+
+  ## Тексты ошибок
+
+  Все отказы — `CompileError` через `reject!/2` с префиксом `<метка>: <ключ>[: <элемент>…]: <текст>`:
+  несовпадение формы или типа — «ожидается <что>, получено <значение>», смысловое нарушение —
+  свободный текст. `file:` / `line:` не передаются: строку `use` даёт стек.
   """
+
+  @doc """
+  Раскрыть литералы опций `use`: алиасы, `__MODULE__`, сигилы `~w()a` / `~D[]` / `~U[]` и унарный
+  минус над числом.
+
+  Список опций MUST быть литеральным keyword-AST, иначе — `CompileError` «ожидается литеральный
+  keyword». Обход значений идёт в списки и пары.
+  """
+  @spec expand!(Macro.t(), Macro.Env.t(), String.t()) :: keyword()
+
+  def expand!(opts, %Macro.Env{} = caller, label) do
+    unless Keyword.keyword?(opts) do
+      reject!(label, "ожидается литеральный keyword, получено #{Macro.to_string(opts)}")
+    end
+
+    Enum.map(opts, fn {key, value} -> {key, expand_value(Macro.expand_literals(value, caller), caller)} end)
+  end
 
   @doc """
   Проверить обязательные/опциональные ключи opts.
@@ -33,8 +78,21 @@ defmodule Core.Helper.Opts do
 
     case {missing, unknown} do
       {[], []} -> :ok
-      {missing, unknown} -> raise CompileError, description: options_error(missing, unknown, label)
+      {missing, unknown} -> reject!(label, options_error(missing, unknown))
     end
+  end
+
+  @doc """
+  Потребовать литерал у всех опций, кроме `expression_keys`, и вычислить его.
+
+  Литерал — значение, для которого после `expand!/3` истинно `Macro.quoted_literal?/1`; его AST
+  вычисляется (кортеж или struct в AST значением не являются). Опции-выражения возвращаются AST
+  как есть.
+  """
+  @spec literal!(keyword(), [atom()], String.t()) :: keyword()
+
+  def literal!(opts, expression_keys, label) do
+    Enum.map(opts, fn {key, value} -> {key, literal_value!(value, key in expression_keys, key, label)} end)
   end
 
   @doc """
@@ -49,9 +107,7 @@ defmodule Core.Helper.Opts do
 
     missing = Enum.reject(required, &Keyword.has_key?(opts, &1))
 
-    if missing != [] do
-      raise CompileError, description: "#{label}: нет обязательных опций: #{inspect(missing)}"
-    end
+    if missing != [], do: reject!(label, "нет обязательных опций: #{inspect(missing)}")
 
     :ok
   end
@@ -65,9 +121,7 @@ defmodule Core.Helper.Opts do
       |> List.wrap()
       |> Enum.reject(&(&1 in allowed))
 
-    if unknown != [] do
-      raise CompileError, description: "#{label}: неизвестные #{subject}: #{inspect(unknown)}"
-    end
+    if unknown != [], do: reject!(label, "неизвестные #{subject}: #{inspect(unknown)}")
 
     :ok
   end
@@ -113,8 +167,7 @@ defmodule Core.Helper.Opts do
         value
 
       value ->
-        raise CompileError,
-          description: "#{label}: #{key}: ожидается строка, получено #{inspect(value)}"
+        reject!("#{label}: #{key}", "ожидается строка, получено #{inspect(value)}")
     end
   end
 
@@ -127,20 +180,51 @@ defmodule Core.Helper.Opts do
         value
 
       value ->
-        raise CompileError,
-          description: "#{label}: #{key}: ожидается атом, получено #{inspect(value)}"
+        reject!("#{label}: #{key}", "ожидается атом, получено #{inspect(value)}")
     end
   end
 
+  @doc "Проверить значение опции-выражения в теле (`<key>!`): строка."
+  @spec binary_value!(term(), atom(), String.t()) :: String.t()
+
+  def binary_value!(value, _key, _label) when is_binary(value), do: value
+  def binary_value!(value, key, label), do: reject!("#{label}: #{key}", "ожидается строка, получено #{inspect(value)}")
+
+  @doc """
+  Отказать в опции: `CompileError` «<where>: <message>».
+
+  `where` — метка builder'а с путём до опции (`"Repo: only"`), `message` — что не так.
+  """
+  @spec reject!(String.t(), String.t()) :: no_return()
+
+  def reject!(where, message) when is_binary(where) and is_binary(message),
+    do: raise(CompileError, description: "#{where}: #{message}")
+
   # ---
 
-  defp options_error(missing, unknown, label) do
+  defp options_error(missing, unknown) do
     parts =
       for {keys, text} <- [{missing, "нет обязательных опций"}, {unknown, "неизвестные опции"}],
           keys != [],
           do: "#{text}: #{inspect(keys)}"
 
-    "#{label}: #{Enum.join(parts, "; ")}"
+    Enum.join(parts, "; ")
+  end
+
+  defp expand_value({:sigil_w, _meta, _args} = sigil, caller), do: Macro.expand(sigil, caller)
+  defp expand_value({:sigil_D, _meta, _args} = sigil, caller), do: Macro.expand(sigil, caller)
+  defp expand_value({:sigil_U, _meta, _args} = sigil, caller), do: Macro.expand(sigil, caller)
+  defp expand_value({:-, _meta, [number]}, _caller) when is_number(number), do: -number
+  defp expand_value(list, caller) when is_list(list), do: Enum.map(list, &expand_value(&1, caller))
+  defp expand_value({left, right}, caller), do: {expand_value(left, caller), expand_value(right, caller)}
+  defp expand_value(value, _caller), do: value
+
+  defp literal_value!(value, true = _expression?, _key, _label), do: value
+
+  defp literal_value!(value, false = _expression?, key, label) do
+    if Macro.quoted_literal?(value),
+      do: elem(Code.eval_quoted(value), 0),
+      else: reject!("#{label}: #{key}", "ожидается литерал, получено #{Macro.to_string(value)}")
   end
 
   defp fetch!(opts, key, label, checks) do
@@ -158,7 +242,7 @@ defmodule Core.Helper.Opts do
         default
 
       :error ->
-        raise CompileError, description: "#{label}: нет обязательных опций: #{inspect([key])}"
+        reject!(label, "нет обязательных опций: #{inspect([key])}")
     end
   end
 
@@ -169,20 +253,18 @@ defmodule Core.Helper.Opts do
   end
 
   defp ensure_module!(value, label, _exports) do
-    raise CompileError, description: "#{label}: ожидается модуль, получено #{inspect(value)}"
+    reject!(label, "ожидается модуль, получено #{inspect(value)}")
   end
 
   defp ensure_exported!(module, {name, arity}, label) do
     unless Core.Helper.Module.exports?(module, name, arity) do
-      raise CompileError,
-        description: "#{label}: модуль #{inspect(module)} должен экспортировать #{name}/#{arity}"
+      reject!(label, "модуль #{inspect(module)} должен экспортировать #{name}/#{arity}")
     end
   end
 
   defp keyword!(opts, label) do
     unless Keyword.keyword?(opts) do
-      raise CompileError,
-        description: "#{label}: ожидается keyword opts, получено #{inspect(opts)}"
+      reject!(label, "ожидается keyword opts, получено #{inspect(opts)}")
     end
   end
 end

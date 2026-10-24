@@ -30,6 +30,8 @@ defmodule Core.DAO do
 
   @doc "Объявить `Ecto.Repo` потребителя с поддержкой after-commit хуков."
   defmacro __using__(opts) do
+    # Открытый список: опции уходят в `use Ecto.Repo` как есть, разбирать их здесь нечего.
+    # credo:disable-for-next-line CredoChecks.UseOpts
     Helper.Opts.require!(opts, @required_keys, @label)
 
     quote do
