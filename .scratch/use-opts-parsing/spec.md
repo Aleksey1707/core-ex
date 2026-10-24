@@ -1,7 +1,7 @@
 # Разбор опций `use`: режим по опции
 
 Type: spec
-Status: ready-for-agent
+Status: resolved
 
 Решение и отвергнутые варианты — ADR-0085 (`docs/adr/0085-use-opts-parsing.md`). Решения, замеры и инвентарь —
 `.scratch/use-opts-parsing/issues/`, `inventory.md`. Образец — ветка `prototype/use-opts-mode` (`1e1cd7d`).
