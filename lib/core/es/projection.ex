@@ -184,13 +184,18 @@ defmodule Core.Es.Projection do
   - `repo:` — Ecto-репозиторий транзакции пачки; по умолчанию `Core.Config.dao/0` в рантайме
   - `codec:` — фасад вложенных значений событий; по умолчанию `Core.Config.codec/0` в рантайме
 
-  На компиляции `CompileError`: нет `project/1` или `clear/0`; `name:` не непустая строка;
-  `version:` не целое ≥ 1; `events:` пустой, с повтором, с модулем, который не событие, с
-  семейством событий, с событием, чей `family:` не семейство (`use Core.Es.Event.Family`), с
-  событием, у семейства которого `codec:` не найден, не кодек с `type:` или кодек другого
-  семейства, с событием, не объявленным в `tags:` кодека, с двумя кодеками одного типа агрегата;
-  событие с полем `subject:` без события уничтожения ключа и без `personal: false` или с обоими;
-  `personal:` не `false` или без событий с полями `subject:`.
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): ключи и значения
+  проверяются при раскрытии `use`, атрибут или вызов функции в опции — `CompileError`
+  «ожидается литерал».
+
+  При раскрытии `use` `CompileError`: `name:` не непустая строка; `version:` не целое ≥ 1;
+  `events:` пустой, с повтором, с модулем, который не событие или не собран (модуль события в
+  проекцию не вкладывается), с семейством событий, с событием, чей `family:` не семейство
+  (`use Core.Es.Event.Family`), с событием, у семейства которого `codec:` не найден, не кодек с
+  `type:` или кодек другого семейства, с событием, не объявленным в `tags:` кодека, с двумя
+  кодеками одного типа агрегата; событие с полем `subject:` без события уничтожения ключа и без
+  `personal: false` или с обоими; `personal:` не `false` или без событий с полями `subject:`. При
+  сборке модуля — нет `project/1` или `clear/0`.
 
   Макрос занимает в вызывающем модуле имена `@es_projection`, `@es_use_line`, `await/3` и
   функций-проверок, по одному на модуль `events:`.
@@ -206,6 +211,7 @@ defmodule Core.Es.Projection do
   @label "Es.Projection"
   @required_keys ~w(name events)a
   @optional_keys ~w(version personal repo codec)a
+  @expression_keys ~w()a
   @default_version 1
   @default_batch_size 100
 
@@ -235,29 +241,18 @@ defmodule Core.Es.Projection do
 
   @doc "Объявить проекцию."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
-    codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
-
-    # `name:`, `events:` и `version:` уходят в тело модуля как есть: значение атрибута на этапе
-    # разворачивания макроса ещё не записано, и прочитать его оттуда нельзя.
-    name = Keyword.fetch!(opts, :name)
-    events = Keyword.fetch!(opts, :events)
-    version = Keyword.get(opts, :version, @default_version)
-    personal = Keyword.get(opts, :personal)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    dao = Helper.Opts.module_or_config!(opts, :repo, :dao, @label)
+    codec = Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
+    declaration = declaration!(opts)
 
     quote do
       @behaviour Core.Es.Projection
       @before_compile Core.Es.Projection
       @es_use_line unquote(__CALLER__.line)
-
-      @es_projection Core.Es.Projection.declaration!(
-                       unquote(name),
-                       unquote(events),
-                       unquote(version),
-                       unquote(personal)
-                     )
+      @es_projection unquote(Macro.escape(declaration))
 
       @doc false
       @spec __es_projection__() :: Core.Es.Projection.t()
@@ -266,6 +261,180 @@ defmodule Core.Es.Projection do
         do: Map.merge(@es_projection, %{dao: unquote(dao), codec: unquote(codec)})
     end
   end
+
+  # ---
+
+  defp declaration!(opts) do
+    pairs = events!(Keyword.fetch!(opts, :events))
+    :ok = personal!(pairs, Keyword.get(opts, :personal))
+
+    %{
+      name: name!(Keyword.fetch!(opts, :name)),
+      version: version!(Keyword.get(opts, :version, @default_version)),
+      events: Enum.map(pairs, &elem(&1, 0)),
+      streams: streams!(pairs)
+    }
+  end
+
+  defp name!(name) when is_binary(name) and name != "", do: name
+  defp name!(name), do: Helper.Opts.reject!("#{@label}: name", "ожидается непустая строка, получено #{inspect(name)}")
+
+  defp version!(version) when is_integer(version) and version >= 1, do: version
+
+  defp version!(version),
+    do: Helper.Opts.reject!("#{@label}: version", "ожидается целое ≥ 1, получено #{inspect(version)}")
+
+  defp events!([_ | _] = events) do
+    ensure_unique!(events)
+    Enum.map(events, &{&1, event_codec!(&1)})
+  end
+
+  defp events!(events) do
+    Helper.Opts.reject!(
+      "#{@label}: events",
+      "ожидается непустой список модулей событий, получено #{inspect(events)}"
+    )
+  end
+
+  defp ensure_unique!(events) do
+    case Enum.uniq(events -- Enum.uniq(events)) do
+      [] -> :ok
+      repeated -> Helper.Opts.reject!("#{@label}: events", "модули объявлены дважды: #{inspect(repeated)}")
+    end
+  end
+
+  defp event_codec!(mod) when is_atom(mod) and not is_nil(mod) do
+    cond do
+      not compiled?(mod) ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "модуль #{inspect(mod)} не найден или не собран — модуль события в проекцию не вкладывается"
+        )
+
+      Helper.Module.exports?(mod, :__es_payload__, 0) ->
+        codec!(mod, family!(mod))
+
+      family?(mod) ->
+        Helper.Opts.reject!("#{@label}: events", "#{inspect(mod)} — семейство событий, объявляются модули событий")
+
+      true ->
+        Helper.Opts.reject!("#{@label}: events", "#{inspect(mod)} — не модуль события (use Core.Es.Event)")
+    end
+  end
+
+  defp event_codec!(other),
+    do: Helper.Opts.reject!("#{@label}: events", "ожидается модуль события, получено #{inspect(other)}")
+
+  # Семейство события — его ссылка `family:`: по нему находятся кодек и агрегат `await/3`.
+  defp family!(mod) do
+    family = mod.__es_family__()
+
+    cond do
+      not compiled?(family) ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "семейство #{inspect(family)} события #{inspect(mod)} не найдено — family: события"
+        )
+
+      family?(family) ->
+        family
+
+      true ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "#{inspect(mod)} — событие вне семейства: family: #{inspect(family)} — " <>
+            "не семейство событий (use Core.Es.Event.Family)"
+        )
+    end
+  end
+
+  defp codec!(mod, family) do
+    codec = family.__es_codec__()
+
+    cond do
+      not compiled?(codec) ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "кодек #{inspect(codec)} события #{inspect(mod)} не найден — codec: семейства #{inspect(family)}"
+        )
+
+      not Es.Event.Codec.codec?(codec) ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "#{inspect(codec)} события #{inspect(mod)} — не кодек событий с type: (use Core.Es.Event.Codec), " <>
+            "codec: семейства #{inspect(family)}"
+        )
+
+      codec.__codec_union__() != family ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "семейство #{inspect(family)} события #{inspect(mod)} объявляет codec: #{inspect(codec)} — " <>
+            "кодек семейства #{inspect(codec.__codec_union__())}"
+        )
+
+      mod not in codec.__es_mods__() ->
+        Helper.Opts.reject!("#{@label}: events", "#{inspect(mod)} не объявлен в tags: #{inspect(codec)}")
+
+      true ->
+        codec
+    end
+  end
+
+  defp family?(mod), do: Helper.Module.exports?(mod, :__es_codec__, 0)
+
+  defp compiled?(mod), do: match?({:module, _}, Code.ensure_compiled(mod))
+
+  # Событие с полем `subject:` несёт ПДн: read-модель либо чистит их по событию уничтожения ключа,
+  # либо объявляет, что ПДн не держит (ADR-0079).
+  defp personal!(pairs, personal) when personal in [nil, false] do
+    subject_events = for {mod, codec} <- pairs, Map.has_key?(codec.__es_subjects__(), mod), do: mod
+    personal!(subject_events, List.keymember?(pairs, KeyDestroyed, 0), personal)
+  end
+
+  defp personal!(_pairs, personal),
+    do: Helper.Opts.reject!("#{@label}: personal", "ожидается false, получено #{inspect(personal)}")
+
+  defp personal!([], _destroyed?, nil), do: :ok
+  defp personal!([_ | _], true, nil), do: :ok
+  defp personal!([_ | _], false, false), do: :ok
+
+  defp personal!([], _destroyed?, false),
+    do: Helper.Opts.reject!("#{@label}: personal", "false не нужна — у событий events: нет полей subject:")
+
+  defp personal!(subject_events, false, nil) do
+    Helper.Opts.reject!(
+      "#{@label}: events",
+      "#{inspect(subject_events)} несут поля subject: — объяви #{inspect(KeyDestroyed)} в events: " <>
+        "(read-модель чистит ПДн субъекта) или personal: false (read-модель ПДн не держит)"
+    )
+  end
+
+  defp personal!(_subject_events, true, false),
+    do:
+      Helper.Opts.reject!("#{@label}: personal", "false вместе с #{inspect(KeyDestroyed)} в events: — объявляется одно")
+
+  defp streams!(pairs) do
+    pairs
+    |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+    |> Enum.reduce(%{}, fn {codec, mods}, streams -> put_stream!(streams, codec, mods) end)
+  end
+
+  defp put_stream!(streams, codec, mods) do
+    type = codec.__es_type__()
+
+    case Map.fetch(streams, type) do
+      {:ok, %{codec: other}} ->
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "тип агрегата #{inspect(type)} у двух кодеков: #{inspect(codec)} и #{inspect(other)}"
+        )
+
+      :error ->
+        Map.put(streams, type, %{codec: codec, tags: MapSet.new(mods, &codec.type/1)})
+    end
+  end
+
+  # ===== генерация =====
 
   @doc false
   defmacro __before_compile__(env) do
@@ -368,194 +537,6 @@ defmodule Core.Es.Projection do
     for event <- Module.get_attribute(module, :es_projection).events do
       args = [quote(do: unquote(Es.Check.event_pattern(event)) = event)]
       Es.Check.define("project/1 принимает", event, args, quote(do: project(event)), line)
-    end
-  end
-
-  # ===== проверка опций =====
-
-  @doc false
-  @spec declaration!(term(), term(), term(), term()) :: %{
-          name: String.t(),
-          version: pos_integer(),
-          events: [module()],
-          streams: %{optional(String.t()) => stream()}
-        }
-
-  def declaration!(name, events, version, personal) do
-    name = name!(name)
-    pairs = events!(events)
-    :ok = personal!(pairs, personal)
-
-    %{
-      name: name,
-      version: version!(version),
-      events: Enum.map(pairs, &elem(&1, 0)),
-      streams: streams!(pairs)
-    }
-  end
-
-  # ---
-
-  defp name!(name) when is_binary(name) and name != "", do: name
-
-  defp name!(name) do
-    raise CompileError,
-      description: "#{@label}: name: ожидается непустая строка, получено #{inspect(name)}"
-  end
-
-  defp version!(version) when is_integer(version) and version >= 1, do: version
-
-  defp version!(version) do
-    raise CompileError,
-      description: "#{@label}: version: ожидается целое ≥ 1, получено #{inspect(version)}"
-  end
-
-  defp events!([_ | _] = events) do
-    ensure_unique!(events)
-    Enum.map(events, &{&1, event_codec!(&1)})
-  end
-
-  defp events!(events) do
-    raise CompileError,
-      description:
-        "#{@label}: events: ожидается непустой список модулей событий, получено " <>
-          inspect(events)
-  end
-
-  defp ensure_unique!(events) do
-    case Enum.uniq(events -- Enum.uniq(events)) do
-      [] ->
-        :ok
-
-      repeated ->
-        raise CompileError,
-          description: "#{@label}: events: модули объявлены дважды: #{inspect(repeated)}"
-    end
-  end
-
-  defp event_codec!(mod) when is_atom(mod) and not is_nil(mod) do
-    cond do
-      not compiled?(mod) ->
-        raise CompileError, description: "#{@label}: events: модуль #{inspect(mod)} не найден"
-
-      Helper.Module.exports?(mod, :__es_payload__, 0) ->
-        codec!(mod, family!(mod))
-
-      family?(mod) ->
-        raise CompileError,
-          description: "#{@label}: events: #{inspect(mod)} — семейство событий, объявляются модули событий"
-
-      true ->
-        raise CompileError,
-          description: "#{@label}: events: #{inspect(mod)} — не модуль события (use Core.Es.Event)"
-    end
-  end
-
-  defp event_codec!(other) do
-    raise CompileError,
-      description: "#{@label}: events: ожидается модуль события, получено #{inspect(other)}"
-  end
-
-  # Семейство события — его ссылка `family:`: по нему находятся кодек и агрегат `await/3`.
-  defp family!(mod) do
-    family = mod.__es_family__()
-
-    if family?(family) do
-      family
-    else
-      raise CompileError,
-        description:
-          "#{@label}: events: #{inspect(mod)} — событие вне семейства: family: #{inspect(family)} — " <>
-            "не семейство событий (use Core.Es.Event.Family)"
-    end
-  end
-
-  defp codec!(mod, family) do
-    codec = family.__es_codec__()
-
-    cond do
-      not compiled?(codec) ->
-        raise CompileError,
-          description:
-            "#{@label}: events: кодек #{inspect(codec)} события #{inspect(mod)} не найден — " <>
-              "codec: семейства #{inspect(family)}"
-
-      not Es.Event.Codec.codec?(codec) ->
-        raise CompileError,
-          description:
-            "#{@label}: events: #{inspect(codec)} события #{inspect(mod)} — не кодек событий " <>
-              "с type: (use Core.Es.Event.Codec), codec: семейства #{inspect(family)}"
-
-      codec.__codec_union__() != family ->
-        raise CompileError,
-          description:
-            "#{@label}: events: семейство #{inspect(family)} события #{inspect(mod)} объявляет " <>
-              "codec: #{inspect(codec)} — кодек семейства #{inspect(codec.__codec_union__())}"
-
-      mod not in codec.__es_mods__() ->
-        raise CompileError,
-          description: "#{@label}: events: #{inspect(mod)} не объявлен в tags: #{inspect(codec)}"
-
-      true ->
-        codec
-    end
-  end
-
-  defp family?(mod), do: Helper.Module.exports?(mod, :__es_codec__, 0)
-
-  defp compiled?(mod), do: match?({:module, _}, Code.ensure_compiled(mod))
-
-  # Событие с полем `subject:` несёт ПДн: read-модель либо чистит их по событию уничтожения ключа,
-  # либо объявляет, что ПДн не держит (ADR-0079).
-  defp personal!(pairs, personal) when personal in [nil, false] do
-    subject_events = for {mod, codec} <- pairs, Map.has_key?(codec.__es_subjects__(), mod), do: mod
-    personal!(subject_events, List.keymember?(pairs, KeyDestroyed, 0), personal)
-  end
-
-  defp personal!(_pairs, personal) do
-    raise CompileError,
-      description: "#{@label}: personal: допускается только false, получено #{inspect(personal)}"
-  end
-
-  defp personal!([], _destroyed?, nil), do: :ok
-  defp personal!([_ | _], true, nil), do: :ok
-  defp personal!([_ | _], false, false), do: :ok
-
-  defp personal!([], _destroyed?, false) do
-    raise CompileError,
-      description: "#{@label}: personal: false не нужна — у событий events: нет полей subject:"
-  end
-
-  defp personal!(subject_events, false, nil) do
-    raise CompileError,
-      description:
-        "#{@label}: events: #{inspect(subject_events)} несут поля subject: — объяви #{inspect(KeyDestroyed)} " <>
-          "в events: (read-модель чистит ПДн субъекта) или personal: false (read-модель ПДн не держит)"
-  end
-
-  defp personal!(_subject_events, true, false) do
-    raise CompileError,
-      description: "#{@label}: personal: false вместе с #{inspect(KeyDestroyed)} в events: — объявляется одно"
-  end
-
-  defp streams!(pairs) do
-    pairs
-    |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
-    |> Enum.reduce(%{}, fn {codec, mods}, streams -> put_stream!(streams, codec, mods) end)
-  end
-
-  defp put_stream!(streams, codec, mods) do
-    type = codec.__es_type__()
-
-    case Map.fetch(streams, type) do
-      {:ok, %{codec: other}} ->
-        raise CompileError,
-          description:
-            "#{@label}: events: тип агрегата #{inspect(type)} у двух кодеков: " <>
-              "#{inspect(codec)} и #{inspect(other)}"
-
-      :error ->
-        Map.put(streams, type, %{codec: codec, tags: MapSet.new(mods, &codec.type/1)})
     end
   end
 

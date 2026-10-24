@@ -207,18 +207,7 @@
            [ignore: ~w/use module_attribute module defstruct type typep opaque callback/a]},
           {Credo.Check.Warning.UnsafeToAtom, [files: %{excluded: ["test/"]}]},
           {CredoChecks.FunctionExported, [files: %{excluded: ["lib/core/helper/module.ex"]}]},
-          # Храповик перевода builder'ов (.scratch/use-opts-parsing/spec.md, «Порядок работ»): срез
-          # вычёркивает свои файлы, влитый последним удаляет `excluded`.
-          {CredoChecks.UseOpts,
-           [
-             files: %{
-               included: ["lib/"],
-               excluded: [
-                 # 20 — проекция
-                 "lib/core/es/projection.ex"
-               ]
-             }
-           ]}
+          {CredoChecks.UseOpts, [files: %{included: ["lib/"]}]}
         ],
         disabled: [
           # `_` и `_name` несут разный смысл: первое — «значение не важно вообще»

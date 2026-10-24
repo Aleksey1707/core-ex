@@ -390,7 +390,7 @@ defmodule Core.Es.ProjectionTest do
 
     test "personal: не false — CompileError" do
       for personal <- [true, :no] do
-        assert_raise CompileError, ~r/personal: допускается только false/, fn ->
+        assert_raise CompileError, ~r/^Es\.Projection: personal: ожидается false, получено #{inspect(personal)}$/, fn ->
           compile!(BadPersonal, events: [Account.Event.HolderSet], personal: personal)
         end
       end
@@ -401,8 +401,57 @@ defmodule Core.Es.ProjectionTest do
         compile!(NoEventsOpt, events: :__drop__)
       end
 
-      assert_raise CompileError, ~r/неизвестные опции: \[:batch_size\]/, fn ->
+      assert_raise CompileError, ~r/^Es\.Projection: неизвестные опции: \[:batch_size\]$/, fn ->
         compile!(UnknownOpt, batch_size: 10)
+      end
+    end
+
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Projection: неизвестные опции: \[:evnets\]$/, fn ->
+        expand!(name: "compile_test", events: [Account.Event.Opened], evnets: [])
+      end
+    end
+
+    test "events: — при раскрытии" do
+      assert_raise CompileError, ~r/^Es\.Projection: events: .*Account\.Event — семейство событий/, fn ->
+        expand!(name: "compile_test", events: [Account.Event])
+      end
+    end
+
+    test "модуль события, вложенный в проекцию, — при раскрытии не собран" do
+      assert_raise CompileError, ~r/^Es\.Projection: events: модуль .*Nested\.Done не найден или не собран/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.ProjectionTest.Nested do
+              defmodule Done do
+                use Core.Es.Event,
+                  family: Core.EsFixture.Account.Event,
+                  payload: nil
+              end
+
+              use Core.Es.Projection,
+                name: "nested",
+                events: [Core.Es.ProjectionTest.Nested.Done]
+
+              def project(_event), do: :ok
+              def clear, do: :ok
+            end
+          end
+        )
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      attrs = [name: quote(do: @name), events: quote(do: @events), version: quote(do: @version)]
+
+      for {key, value} <- attrs ++ [repo: quote(do: @repo), codec: quote(do: @codec)] do
+        assert_raise CompileError, ~r/^Es\.Projection: #{key}: ожидается литерал, получено @#{key}$/, fn ->
+          compile!(AttrOpt, [{key, value}])
+        end
+      end
+
+      assert_raise CompileError, ~r/^Es\.Projection: personal: ожидается литерал, получено @personal$/, fn ->
+        compile!(AttrPersonal, events: [Account.Event.HolderSet], personal: quote(do: @personal))
       end
     end
   end
@@ -1002,6 +1051,11 @@ defmodule Core.Es.ProjectionTest do
         __ENV__.file
       )
     end)
+  end
+
+  defp expand!(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.Projection)
+    Macro.expand(quote(do: Core.Es.Projection.__using__(unquote(opts))), env)
   end
 
   defp compile!(name, overrides, body \\ nil) do
