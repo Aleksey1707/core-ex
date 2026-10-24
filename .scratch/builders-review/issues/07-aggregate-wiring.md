@@ -1,6 +1,6 @@
 # 07: Связи агрегата вычисляются один раз
 
-**Status:** ready-for-human
+**Status:** closed
 
 **Blocked by:** None (can start immediately). Обсуждается вместе с 08.
 
@@ -84,3 +84,7 @@
 
 Дизайн-сессия вынесена в карту `.scratch/aggregate-wiring/map.md` («Связи event-sourced агрегата»).
 Вопросы дизайн-сессии выше стали её тикетами или туманом.
+
+Карта завершена 2026-10-24. Решение — ADR-0084 (`docs/adr/0084-aggregate-wiring.md`), реализация —
+спек `.scratch/aggregate-wiring/spec.md` (ready-for-agent) → `/to-tickets`.
+Вопросы дизайн-сессии 1–5 закрыты тикетами карты 04, 06, 07 и 10.

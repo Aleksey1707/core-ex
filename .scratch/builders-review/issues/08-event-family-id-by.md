@@ -1,6 +1,6 @@
 # 08: Событие — `aggregate_id` / `by` на семейство, одна ветка `quote`
 
-**Status:** ready-for-human
+**Status:** closed
 
 **Blocked by:** None. Обсуждается вместе с 07.
 
@@ -35,3 +35,6 @@
 (`.scratch/aggregate-wiring/issues/02-family-declaration.md`), прототип — тикет 03, ветка
 `prototype/family-declaration`. Не делегируется агенту: изменение ломающее, режим перехода («Not yet
 specified» карты) и спек выбирает мейнтейнер. Дальше — спек карты → `/to-tickets`.
+
+Карта завершена 2026-10-24. Решение — ADR-0084 (`docs/adr/0084-aggregate-wiring.md`), реализация —
+спек `.scratch/aggregate-wiring/spec.md` (ready-for-agent) → `/to-tickets`.
