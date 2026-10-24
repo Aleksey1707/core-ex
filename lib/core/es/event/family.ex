@@ -23,7 +23,8 @@ defmodule Core.Es.Event.Family do
 
   ## Опции
 
-  Все обязательны; недостающая или неизвестная — `CompileError`.
+  Все обязательны и все — литералы; недостающая, неизвестная или не литерал — `CompileError` при
+  раскрытии `use`.
 
   - `aggregate_id:` — Prim идентификатора агрегата, `by:` — Prim автора события. Семейство ждёт
     оба модуля при раскрытии `use`.
@@ -65,22 +66,21 @@ defmodule Core.Es.Event.Family do
   @label "Es.Event.Family"
   @required_keys ~w(aggregate aggregate_id by codec)a
   @optional_keys ~w()a
+  @expression_keys ~w()a
   @refs ~w(aggregate codec)a
 
   # ===== объявление =====
 
   @doc "Объявить семейство событий агрегата (`aggregate:` / `aggregate_id:` / `by:` / `codec:`)."
   defmacro __using__(opts) do
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label, @refs)
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-    lit =
-      Macro.expand_literals(Keyword.drop(opts, @refs), __CALLER__) ++
-        Macro.expand_literals(Keyword.take(opts, @refs), %{__CALLER__ | function: {:__es_codec__, 0}})
-
-    aggregate = Helper.Opts.atom!(lit, :aggregate, @label)
-    aggregate_id = Helper.Opts.module!(lit, :aggregate_id, @label)
-    by = Helper.Opts.module!(lit, :by, @label)
-    codec = Helper.Opts.atom!(lit, :codec, @label)
+    aggregate = Helper.Opts.atom!(opts, :aggregate, @label)
+    aggregate_id = Helper.Opts.module!(opts, :aggregate_id, @label)
+    by = Helper.Opts.module!(opts, :by, @label)
+    codec = Helper.Opts.atom!(opts, :codec, @label)
 
     quote do
       @before_compile Core.Es.Event.Family

@@ -211,6 +211,9 @@
   | `use Core.Labels.Text` | `with:` |
   | `use Core.Labels.Fields` | `fields:`, `value:` |
   | `use Core.Web.Event` | `user_ref:` |
+  | `use Core.Es.Event.Codec` | `tags:`, `upcasts:` |
+
+  Опции `use Core.Es.Event.TagsCase` (`except_tags:`, `except_types:`) — только литералы.
 
 ## 0.16.0
 

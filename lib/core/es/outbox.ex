@@ -27,6 +27,8 @@ defmodule Core.Es.Outbox do
   - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
     через `Core.Config.codec()`
 
+  Все опции — литералы: ключи и значения проверяются при раскрытии `use`.
+
   Запись из конверта без `traceparent` собирает `record/2` — её же зовёт переопубликация окна
   (`Core.Outbox.Release.republish_since/2`), поэтому пересобранная запись совпадает с записанной.
 
@@ -41,15 +43,19 @@ defmodule Core.Es.Outbox do
   @label "Es.Outbox"
   @required_keys ~w(topic family)a
   @optional_keys ~w(codec)a
+  @expression_keys ~w()a
 
   # ===== билдер =====
 
   @doc "Объявить маппер событий агрегата в записи outbox."
   defmacro __using__(opts) do
-    {topic, family, codec} =
-      opts
-      |> Macro.expand_literals(__CALLER__)
-      |> validate_opts!()
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+
+    topic = validate_topic!(opts)
+    family = Helper.Opts.module!(opts, :family, @label)
+    codec = Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
 
     quote do
       @es_topic unquote(Macro.escape(topic))
@@ -95,34 +101,14 @@ defmodule Core.Es.Outbox do
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
   # ---
-
-  defp validate_opts!(opts) do
-    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
-
-    {
-      validate_topic!(opts),
-      Helper.Opts.module!(opts, :family, @label),
-      Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
-    }
-  end
 
   defp validate_topic!(opts) do
     topic = Helper.Opts.binary!(opts, :topic, @label)
 
     case Outbox.Topic.new(topic) do
       {:ok, topic} -> topic
-      {:error, error} -> raise CompileError, description: "#{@label}: topic: #{error}"
+      {:error, error} -> Helper.Opts.reject!("#{@label}: topic", to_string(error))
     end
   end
 

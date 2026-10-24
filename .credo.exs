@@ -217,11 +217,6 @@
                  # 17 — Es-событие
                  "lib/core/es/event.ex",
                  "lib/core/es/event/payload.ex",
-                 # 18 — Es-кодек; `Es.Event.Family` появился в AW-2, в инвентаре его нет
-                 "lib/core/es/event/codec.ex",
-                 "lib/core/es/event/family.ex",
-                 "lib/core/es/event/tags_case.ex",
-                 "lib/core/es/outbox.ex",
                  # 19 — Es-репозиторий
                  "lib/core/es/aggregate/repo.ex",
                  "lib/core/es/aggregate/repo/pg.ex",

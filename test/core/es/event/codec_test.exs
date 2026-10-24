@@ -373,7 +373,7 @@ defmodule Core.Es.Event.CodecTest do
 
     test "codec: семейства — другой кодек — CompileError" do
       message =
-        "Es.Event.Codec: семейство Core.EventFixture.Event объявляет codec: Core.EventFixture.Event.Codec, " <>
+        "Es.Event.Codec: family: семейство Core.EventFixture.Event объявляет codec: Core.EventFixture.Event.Codec, " <>
           "а не Core.Es.Event.CodecTest.ForeignCodec"
 
       assert_raise CompileError, message, fn ->
@@ -583,7 +583,73 @@ defmodule Core.Es.Event.CodecTest do
     end
   end
 
+  describe "опции use" do
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Event\.Codec: неизвестные опции: \[:tgas\]$/, fn ->
+        expand_using(
+          family: Core.EventFixture.Event,
+          type: "codec_test",
+          tags: quote(do: @tags),
+          tgas: quote(do: @tags)
+        )
+      end
+    end
+
+    test "атрибут в type: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.Event\.Codec: type: ожидается литерал, получено @type_name$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.AttrType do
+              @type_name "codec_test"
+
+              use Core.Es.Event.Codec,
+                family: Core.EventFixture.Event,
+                type: @type_name,
+                tags: %{Core.EventFixture.Event.Closed => "attr_type.closed"}
+            end
+          end
+        )
+      end
+    end
+
+    test "type: проверяется при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Event\.Codec: type: ожидается непустая строка/, fn ->
+        expand_using(family: Core.EventFixture.Event, type: "", tags: quote(do: @tags))
+      end
+    end
+
+    test "tags: и upcasts: — выражения, проверяются в теле, с меткой" do
+      assert {:__block__, _, _} =
+               expand_using(
+                 family: Core.EventFixture.Event,
+                 type: "codec_test",
+                 tags: quote(do: @tags),
+                 upcasts: quote(do: @upcasts)
+               )
+
+      assert_raise CompileError, ~r/^Es\.Event\.Codec: tags: ожидается непустая map/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.IntTags do
+              @tags 1
+
+              use Core.Es.Event.Codec,
+                family: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: @tags
+            end
+          end
+        )
+      end
+    end
+  end
+
   # ---
+
+  defp expand_using(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], Es.Event.Codec)
+    Macro.expand(quote(do: Core.Es.Event.Codec.__using__(unquote(opts))), env)
+  end
 
   defp load(data), do: InCodec.load(EventFixture.Event.Created, data)
 

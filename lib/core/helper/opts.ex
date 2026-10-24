@@ -18,6 +18,8 @@ defmodule Core.Helper.Opts do
   `expand!/3` требует литеральный keyword-AST и раскрывает алиасы, `__MODULE__`, сигилы
   `~w()a` / `~D[]` / `~U[]` и унарный минус над числом. `validate!/4` проверяет обязательные и
   неизвестные ключи. `literal!/3` вычисляет опции-литералы и отдаёт опции-выражения AST-ом.
+  Опция-ссылка на модуль без compile-ребра (атом без загрузки) раскрывается четвёртым аргументом
+  `expand!/4` — `refs`.
 
   ## Опция-литерал и опция-выражение
 
@@ -44,15 +46,24 @@ defmodule Core.Helper.Opts do
 
   Список опций MUST быть литеральным keyword-AST, иначе — `CompileError` «ожидается литеральный
   keyword». Обход значений идёт в списки и пары.
-  """
-  @spec expand!(Macro.t(), Macro.Env.t(), String.t()) :: keyword()
 
-  def expand!(opts, %Macro.Env{} = caller, label) do
+  `refs` — ключи опций-ссылок: модуль в них — атом без загрузки, и алиас раскрывается как в теле
+  функции, с runtime-ребром xref вместо compile (`Core.Es.Event.Family`, `aggregate:` / `codec:`).
+  """
+  @spec expand!(Macro.t(), Macro.Env.t(), String.t(), [atom()]) :: keyword()
+
+  def expand!(opts, %Macro.Env{} = caller, label, refs \\ []) when is_list(refs) do
     unless Keyword.keyword?(opts) do
       reject!(label, "ожидается литеральный keyword, получено #{Macro.to_string(opts)}")
     end
 
-    Enum.map(opts, fn {key, value} -> {key, expand_value(Macro.expand_literals(value, caller), caller)} end)
+    # Контекст функции, а не тела модуля: ссылка на алиас даёт runtime-ребро xref.
+    ref_env = %{caller | function: {:__ref__, 0}}
+
+    Enum.map(opts, fn {key, value} ->
+      env = if key in refs, do: ref_env, else: caller
+      {key, expand_value(Macro.expand_literals(value, env), env)}
+    end)
   end
 
   @doc """

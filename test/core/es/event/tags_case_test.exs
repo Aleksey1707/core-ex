@@ -21,24 +21,38 @@ defmodule Core.Es.Event.TagsCaseTest do
       end
     end
 
-    test "except_tags! принимает map кодек => теги" do
-      assert TagsCase.except_tags!(%{Order => ~w(created)}) == %{Order => ~w(created)}
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Event\.TagsCase: неизвестные опции: \[:except_tag\]$/, fn ->
+        expand_using(otp_app: :core, except_tag: %{})
+      end
     end
 
-    test "except_tags! на не-map — CompileError" do
-      assert_raise CompileError, ~r/except_tags/, fn -> TagsCase.except_tags!([:x]) end
+    test "except_tags: и except_types: — литералы, проверяются при раскрытии" do
+      assert {:__block__, _, _} =
+               expand_using(otp_app: :core, except_tags: %{Order => ~w(created)}, except_types: [Order])
+
+      assert_raise CompileError, ~r/^Es\.Event\.TagsCase: except_tags: ожидается map/, fn ->
+        expand_using(otp_app: :core, except_tags: [:x])
+      end
+
+      assert_raise CompileError, ~r/^Es\.Event\.TagsCase: except_tags: .*Order: ожидается непустая строка/, fn ->
+        expand_using(otp_app: :core, except_tags: %{Order => [:created]})
+      end
+
+      assert_raise CompileError, ~r/^Es\.Event\.TagsCase: except_types: ожидается список кодеков/, fn ->
+        expand_using(otp_app: :core, except_types: %{})
+      end
     end
 
-    test "except_tags! на теге не-строке — CompileError" do
-      assert_raise CompileError, ~r/непустая строка/, fn -> TagsCase.except_tags!(%{Order => [:created]}) end
-    end
-
-    test "except_types! принимает список кодеков" do
-      assert TagsCase.except_types!([Order]) == [Order]
-    end
-
-    test "except_types! на не-списке — CompileError" do
-      assert_raise CompileError, ~r/except_types/, fn -> TagsCase.except_types!(%{}) end
+    test "атрибут в except_tags: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.Event\.TagsCase: except_tags: ожидается литерал, получено @excepts$/, fn ->
+        Code.compile_string("""
+        defmodule AttrExceptTags do
+          @excepts %{}
+          use Core.Es.Event.TagsCase, otp_app: :core, except_tags: @excepts
+        end
+        """)
+      end
     end
   end
 
@@ -176,5 +190,12 @@ defmodule Core.Es.Event.TagsCaseTest do
       assert {:error, %{duplicate_types: [{"order", [Order, Parcel]}]}} =
                TagsCase.check_type_uniqueness([@order, parcel])
     end
+  end
+
+  # ---
+
+  defp expand_using(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], TagsCase)
+    Macro.expand(quote(do: Core.Es.Event.TagsCase.__using__(unquote(Macro.escape(opts)))), env)
   end
 end

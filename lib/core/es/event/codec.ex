@@ -102,6 +102,9 @@ defmodule Core.Es.Event.Codec do
     каждого отдаёт `upcast/2`, заголовок конверта не меняется. `CompileError`: источник в
     `tags:`, цель ни в `tags:`, ни источником, цикл
 
+  `tags:` и `upcasts:` — опции-выражения: принимают атрибут модуля (`tags: @tag_by_mod`), значение
+  проверяется в теле модуля. `family:` и `type:` — литералы, проверяются при раскрытии `use`.
+
   Prim агрегата и автора не задаются: их объявляет семейство (`aggregate_id:` и `by:`), и Prim
   агрегата кодек отдаёт своим `__es_aggregate_id__/0`.
 
@@ -109,7 +112,7 @@ defmodule Core.Es.Event.Codec do
 
   - событие из `tags:` не из семейства `family:` (`__es_family__/0`) —
     `событие <E> не из семейства <F>`;
-  - `codec:` семейства — не этот кодек: `семейство <F> объявляет codec: <C>, а не <кодек>`.
+  - `codec:` семейства — не этот кодек: `family: семейство <F> объявляет codec: <C>, а не <кодек>`.
 
   Макрос занимает в вызывающем модуле имена `@es_family`, `@es_type`, `@es_aggregate_id`, `@es_by`,
   `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless`, `@es_subjects` и приватные
@@ -131,6 +134,7 @@ defmodule Core.Es.Event.Codec do
   @label "Es.Event.Codec"
   @required_keys ~w(family tags type)a
   @optional_keys ~w(upcasts)a
+  @expression_keys ~w(tags upcasts)a
   @ns :es
   @operation_keys ~w(operation_id session_id basis_id)a
   @reserved_type "core.subject"
@@ -185,24 +189,25 @@ defmodule Core.Es.Event.Codec do
 
   @doc "Объявить кодек событий агрегата."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
     family =
-      Helper.Opts.module!(lit, :family, @label, exports: [__es_aggregate_id__: 0, __es_by__: 0, __es_codec__: 0])
+      Helper.Opts.module!(opts, :family, @label, exports: [__es_aggregate_id__: 0, __es_by__: 0, __es_codec__: 0])
 
-    # `tags:` и `upcasts:` уходят в тело модуля как есть: значение атрибута (`@tag_by_mod`) на
+    type = type!(opts[:type], __CALLER__.module)
+
+    # `tags:` и `upcasts:` уходят в тело модуля выражением: значение атрибута (`@tag_by_mod`) на
     # этапе разворачивания макроса ещё не записано, и прочитать его оттуда нельзя.
-    tags = Keyword.fetch!(opts, :tags)
-    type = Keyword.fetch!(opts, :type)
     upcasts = Keyword.get(opts, :upcasts, quote(do: %{}))
 
     quote do
       @behaviour Core.Es.Event.Codec
 
       @es_family unquote(family)
-      @es_type Core.Es.Event.Codec.type!(unquote(type), __MODULE__)
-      @es_tag_by_mod Core.Es.Event.Codec.tags!(unquote(tags), @es_family)
+      @es_type unquote(type)
+      @es_tag_by_mod Core.Es.Event.Codec.tags!(unquote(opts[:tags]), @es_family)
       @es_mod_by_tag Core.Es.Event.Codec.mods!(@es_tag_by_mod)
       @es_upcasts Core.Es.Event.Codec.upcasts!(unquote(upcasts), @es_mod_by_tag)
       @es_aggregate_id unquote(family.__es_aggregate_id__())
@@ -337,35 +342,6 @@ defmodule Core.Es.Event.Codec do
   end
 
   @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec type!(term(), module()) :: String.t()
-
-  def type!(@reserved_type, module) when module != @reserved_codec do
-    raise CompileError,
-      description:
-        "#{@label}: type: #{inspect(@reserved_type)} зарезервирован библиотекой — поток субъекта " <>
-          "пишет кодек #{inspect(@reserved_codec)} (ADR-0079), у #{inspect(module)} — другой type:"
-  end
-
-  def type!(type, module) when is_binary(type) and type != "" and is_atom(module), do: type
-
-  def type!(other, _module) do
-    raise CompileError,
-      description:
-        "#{@label}: type: ожидается непустая строка, как у тега события, получено " <>
-          inspect(other)
-  end
-
-  @doc false
   @spec tags!(term(), module()) :: %{optional(module()) => String.t()}
 
   def tags!(tags, family) when is_map(tags) and map_size(tags) > 0 and is_atom(family) do
@@ -373,12 +349,9 @@ defmodule Core.Es.Event.Codec do
     tags
   end
 
-  def tags!(other, _family) do
-    raise CompileError,
-      description:
-        "#{@label}: tags: ожидается непустая map %{Модуль => \"тег\"}, получено " <>
-          inspect(other)
-  end
+  def tags!(other, _family),
+    do:
+      Helper.Opts.reject!("#{@label}: tags", ~s(ожидается непустая map %{Модуль => "тег"}, получено #{inspect(other)}))
 
   @doc false
   @spec mods!(%{optional(module()) => String.t()}) :: %{optional(String.t()) => module()}
@@ -395,12 +368,12 @@ defmodule Core.Es.Event.Codec do
     upcasts
   end
 
-  def upcasts!(other, _mod_by_tag) do
-    raise CompileError,
-      description:
-        ~s(#{@label}: upcasts: ожидается map %{"старый тег" => "новый тег"}, получено ) <>
-          inspect(other)
-  end
+  def upcasts!(other, _mod_by_tag),
+    do:
+      Helper.Opts.reject!(
+        "#{@label}: upcasts",
+        ~s(ожидается map %{"старый тег" => "новый тег"}, получено #{inspect(other)})
+      )
 
   @doc false
   @spec ensure_family_codec!(module(), module()) :: :ok
@@ -411,9 +384,10 @@ defmodule Core.Es.Event.Codec do
         :ok
 
       other ->
-        raise CompileError,
-          description:
-            "#{@label}: семейство #{inspect(family)} объявляет codec: #{inspect(other)}, а не #{inspect(codec)}"
+        Helper.Opts.reject!(
+          "#{@label}: family",
+          "семейство #{inspect(family)} объявляет codec: #{inspect(other)}, а не #{inspect(codec)}"
+        )
     end
   end
 
@@ -668,6 +642,23 @@ defmodule Core.Es.Event.Codec do
 
   # ---
 
+  defp type!(@reserved_type, module) when module != @reserved_codec do
+    Helper.Opts.reject!(
+      "#{@label}: type",
+      "#{inspect(@reserved_type)} зарезервирован библиотекой — поток субъекта " <>
+        "пишет кодек #{inspect(@reserved_codec)} (ADR-0079), у #{inspect(module)} — другой type:"
+    )
+  end
+
+  defp type!(type, module) when is_binary(type) and type != "" and is_atom(module), do: type
+
+  defp type!(other, _module),
+    do:
+      Helper.Opts.reject!(
+        "#{@label}: type",
+        "ожидается непустая строка, как у тега события, получено #{inspect(other)}"
+      )
+
   defp ensure_unique_type!(codec, earlier) do
     type = codec.__es_type__()
 
@@ -695,31 +686,23 @@ defmodule Core.Es.Event.Codec do
   defp validate_tag!({mod, tag}, family) when is_atom(mod) and is_binary(tag) and tag != "" do
     Code.ensure_compiled!(mod)
 
-    unless Helper.Module.exports?(mod, :__es_payload__, 0) do
-      raise CompileError,
-        description: "#{@label}: tags: #{inspect(mod)} не объявлен через `use Core.Es.Event`"
-    end
+    unless Helper.Module.exports?(mod, :__es_payload__, 0),
+      do: Helper.Opts.reject!("#{@label}: tags", "#{inspect(mod)} не объявлен через `use Core.Es.Event`")
 
-    unless mod.__es_family__() == family do
-      raise CompileError,
-        description: "#{@label}: tags: событие #{inspect(mod)} не из семейства #{inspect(family)}"
-    end
+    unless mod.__es_family__() == family,
+      do: Helper.Opts.reject!("#{@label}: tags", "событие #{inspect(mod)} не из семейства #{inspect(family)}")
 
     :ok
   end
 
-  defp validate_tag!(other, _family) do
-    raise CompileError,
-      description:
-        "#{@label}: tags: ожидается {модуль события, непустая строка}, получено " <>
-          Macro.to_string(other)
-  end
+  defp validate_tag!(other, _family),
+    do:
+      Helper.Opts.reject!("#{@label}: tags", "ожидается {модуль события, непустая строка}, получено #{inspect(other)}")
 
   defp put_unique_tag!({mod, tag}, acc) do
     case Map.fetch(acc, tag) do
       {:ok, other} ->
-        raise CompileError,
-          description: "#{@label}: tags: дубликат тега #{inspect(tag)} у #{inspect(mod)} и #{inspect(other)}"
+        Helper.Opts.reject!("#{@label}: tags", "дубликат тега #{inspect(tag)} у #{inspect(mod)} и #{inspect(other)}")
 
       :error ->
         Map.put(acc, tag, mod)
@@ -728,25 +711,25 @@ defmodule Core.Es.Event.Codec do
 
   defp validate_upcast!({from, to} = pair, _upcasts, _mod_by_tag)
        when not is_binary(from) or from == "" or not is_binary(to) or to == "" do
-    raise CompileError,
-      description:
-        ~s(#{@label}: upcasts: ожидается пара непустых строк {"старый тег", "новый тег"}, ) <>
-          "получено #{inspect(pair)}"
+    Helper.Opts.reject!(
+      "#{@label}: upcasts",
+      ~s(ожидается пара непустых строк {"старый тег", "новый тег"}, получено #{inspect(pair)})
+    )
   end
 
   defp validate_upcast!({from, _to}, _upcasts, mod_by_tag) when is_map_key(mod_by_tag, from) do
-    raise CompileError,
-      description:
-        "#{@label}: upcasts: источник #{inspect(from)} объявлен в tags: — " <>
-          "записанный тег читает либо модуль, либо апкаст"
+    Helper.Opts.reject!(
+      "#{@label}: upcasts",
+      "источник #{inspect(from)} объявлен в tags: — записанный тег читает либо модуль, либо апкаст"
+    )
   end
 
   defp validate_upcast!({from, to}, upcasts, mod_by_tag)
        when not is_map_key(mod_by_tag, to) and not is_map_key(upcasts, to) do
-    raise CompileError,
-      description:
-        "#{@label}: upcasts: цель #{inspect(to)} не объявлена ни в tags:, " <>
-          "ни источником upcasts: (апкаст из #{inspect(from)})"
+    Helper.Opts.reject!(
+      "#{@label}: upcasts",
+      "цель #{inspect(to)} не объявлена ни в tags:, ни источником upcasts: (апкаст из #{inspect(from)})"
+    )
   end
 
   defp validate_upcast!(_pair, _upcasts, _mod_by_tag), do: :ok
@@ -755,7 +738,7 @@ defmodule Core.Es.Event.Codec do
     cond do
       tag in path ->
         cycle = Enum.map_join(Enum.reverse([tag | path]), " → ", &inspect/1)
-        raise CompileError, description: "#{@label}: upcasts: цикл #{cycle}"
+        Helper.Opts.reject!("#{@label}: upcasts", "цикл #{cycle}")
 
       is_map_key(upcasts, tag) ->
         ensure_acyclic!(Map.fetch!(upcasts, tag), upcasts, [tag | path])

@@ -61,6 +61,8 @@ defmodule Core.Es.Event.TagsCase do
   - `async:` — опция `ExUnit.Case`, необязательная, по умолчанию `true`; явное значение требует
     `Credo.Check.Refactor.PassAsyncInTestCases`
 
+  Все опции — литералы: ключи и значения проверяются при раскрытии `use`.
+
   Макрос занимает в тест-модуле имена `@es_except_tags` и `@es_except_types`.
   """
 
@@ -71,6 +73,7 @@ defmodule Core.Es.Event.TagsCase do
   @label "Es.Event.TagsCase"
   @required_keys ~w(otp_app)a
   @optional_keys ~w(async except_tags except_types)a
+  @expression_keys ~w()a
   @type_format ~r/^[a-z][a-z0-9_]*$/
   @segment "[a-z][a-z0-9_]*"
 
@@ -93,21 +96,20 @@ defmodule Core.Es.Event.TagsCase do
 
   @doc "Сгенерировать тесты wire-тегов событий приложения."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    otp_apps = otp_apps!(lit)
-    async = async!(lit)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-    # `except_tags:` и `except_types:` уходят в тело тест-модуля как есть: map на этапе
-    # разворачивания макроса ещё AST, а значение атрибута оттуда не прочитать.
-    except_tags = Keyword.get(opts, :except_tags, quote(do: %{}))
-    except_types = Keyword.get(opts, :except_types, quote(do: []))
+    otp_apps = otp_apps!(opts)
+    async = async!(opts)
+    except_tags = except_tags!(Keyword.get(opts, :except_tags, %{}))
+    except_types = except_types!(Keyword.get(opts, :except_types, []))
 
     quote do
       use ExUnit.Case, async: unquote(async)
 
-      @es_except_tags Core.Es.Event.TagsCase.except_tags!(unquote(except_tags))
-      @es_except_types Core.Es.Event.TagsCase.except_types!(unquote(except_types))
+      @es_except_tags unquote(Macro.escape(except_tags))
+      @es_except_types unquote(Macro.escape(except_types))
 
       setup_all do
         %{codecs: Core.Es.Event.TagsCase.codecs!(unquote(otp_apps))}
@@ -143,16 +145,15 @@ defmodule Core.Es.Event.TagsCase do
         apps
 
       other ->
-        raise CompileError,
-          description: "#{@label}: otp_app: ожидается атом или непустой список атомов, получено " <> inspect(other)
+        Helper.Opts.reject!(
+          "#{@label}: otp_app",
+          "ожидается атом или непустой список атомов, получено #{inspect(other)}"
+        )
     end
   end
 
   defp app!(app) when is_atom(app) and not is_nil(app), do: :ok
-
-  defp app!(other) do
-    raise CompileError, description: "#{@label}: otp_app: ожидается атом, получено #{inspect(other)}"
-  end
+  defp app!(other), do: Helper.Opts.reject!("#{@label}: otp_app", "ожидается атом, получено #{inspect(other)}")
 
   defp async!(opts) do
     case Keyword.get(opts, :async, true) do
@@ -160,63 +161,48 @@ defmodule Core.Es.Event.TagsCase do
         async
 
       other ->
-        raise CompileError,
-          description: "#{@label}: async: ожидается boolean, получено #{inspect(other)}"
+        Helper.Opts.reject!("#{@label}: async", "ожидается boolean, получено #{inspect(other)}")
     end
   end
 
-  # ===== опции исключений =====
-
-  @doc false
-  @spec except_tags!(term()) :: %{optional(module()) => [String.t()]}
-
-  def except_tags!(excepts) when is_map(excepts) do
+  defp except_tags!(excepts) when is_map(excepts) do
     Enum.each(excepts, &except_tags_entry!/1)
     excepts
   end
 
-  def except_tags!(other) do
-    raise CompileError,
-      description: ~s(#{@label}: except_tags: ожидается map %{Кодек => ["тег"]}, получено ) <> inspect(other)
-  end
+  defp except_tags!(other),
+    do: Helper.Opts.reject!("#{@label}: except_tags", ~s(ожидается map %{Кодек => ["тег"]}, получено #{inspect(other)}))
 
-  @doc false
-  @spec except_types!(term()) :: [module()]
-
-  def except_types!(types) when is_list(types) do
+  defp except_types!(types) when is_list(types) do
     Enum.each(types, &codec!/1)
     types
   end
 
-  def except_types!(other) do
-    raise CompileError,
-      description: "#{@label}: except_types: ожидается список кодеков, получено #{inspect(other)}"
-  end
-
-  # ---
+  defp except_types!(other),
+    do: Helper.Opts.reject!("#{@label}: except_types", "ожидается список кодеков, получено #{inspect(other)}")
 
   defp except_tags_entry!({codec, tags}) when is_atom(codec) and not is_nil(codec) and is_list(tags) do
     Enum.each(tags, &tag!(&1, codec))
   end
 
   defp except_tags_entry!({codec, tags}) do
-    raise CompileError,
-      description: ~s(#{@label}: except_tags: ожидается пара {Кодек, ["тег"]}, получено ) <> inspect({codec, tags})
+    Helper.Opts.reject!(
+      "#{@label}: except_tags",
+      ~s(ожидается пара {Кодек, ["тег"]}, получено #{inspect({codec, tags})})
+    )
   end
 
   defp tag!(tag, _codec) when is_binary(tag) and tag != "", do: :ok
 
   defp tag!(other, codec) do
-    raise CompileError,
-      description: "#{@label}: except_tags: у #{inspect(codec)} ожидается непустая строка, получено " <> inspect(other)
+    Helper.Opts.reject!(
+      "#{@label}: except_tags: #{inspect(codec)}",
+      "ожидается непустая строка, получено #{inspect(other)}"
+    )
   end
 
   defp codec!(codec) when is_atom(codec) and not is_nil(codec), do: :ok
-
-  defp codec!(other) do
-    raise CompileError,
-      description: "#{@label}: except_types: ожидается кодек, получено #{inspect(other)}"
-  end
+  defp codec!(other), do: Helper.Opts.reject!("#{@label}: except_types", "ожидается кодек, получено #{inspect(other)}")
 
   # ===== кодеки приложения =====
 

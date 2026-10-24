@@ -47,6 +47,40 @@ defmodule Core.Es.Event.FamilyTest do
     end
   end
 
+  describe "опции use" do
+    test "атрибут в aggregate_id: — «ожидается литерал»" do
+      message = ~r/^Es\.Event\.Family: aggregate_id: ожидается литерал, получено @id$/
+
+      assert_raise CompileError, message, fn ->
+        compile!("""
+        defmodule Core.Es.Event.FamilyTest.AttrID do
+          @id Core.EventFixture.AggID
+
+          use Core.Es.Event.Family,
+            aggregate: Core.StateStoredFixture.Entity,
+            aggregate_id: @id,
+            by: Core.EventFixture.ActorID,
+            codec: Core.EventFixture.Event.Codec
+        end
+        """)
+      end
+    end
+
+    test "codec: не атом — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Event\.Family: codec: ожидается атом, получено "codec"$/, fn ->
+        compile!("""
+        defmodule Core.Es.Event.FamilyTest.StringCodec do
+          use Core.Es.Event.Family,
+            aggregate: Core.StateStoredFixture.Entity,
+            aggregate_id: Core.EventFixture.AggID,
+            by: Core.EventFixture.ActorID,
+            codec: "codec"
+        end
+        """)
+      end
+    end
+  end
+
   describe "сверки ссылок после сборки" do
     test "верные ссылки — без предупреждений" do
       assert capture_io(:stderr, fn -> Family.__after_verify__(EventFixture.Event) end) == ""

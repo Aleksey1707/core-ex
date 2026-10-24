@@ -85,6 +85,30 @@ defmodule Core.Es.OutboxTest do
     end
   end
 
+  describe "опции use" do
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es\.Outbox: неизвестные опции: \[:topik\]$/, fn ->
+        expand_using(topic: "fakes", family: Core.EventFixture.Event, topik: "fakes")
+      end
+    end
+
+    test "атрибут в topic: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es\.Outbox: topic: ожидается литерал, получено @topic$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.Es.OutboxTest.AttrTopic do
+              @topic "fakes"
+
+              use Core.Es.Outbox,
+                topic: @topic,
+                family: Core.EventFixture.Event
+            end
+          end
+        )
+      end
+    end
+  end
+
   describe "запись из события" do
     test "время записи реальное при остановленных часах" do
       :ok = Core.Clock.Test.freeze(~U[2000-01-01 00:00:00Z])
@@ -123,5 +147,12 @@ defmodule Core.Es.OutboxTest do
       assert %{"traceparent" => traceparent} = record.headers
       assert traceparent =~ ~r/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/
     end
+  end
+
+  # ---
+
+  defp expand_using(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.Outbox)
+    Macro.expand(quote(do: Core.Es.Outbox.__using__(unquote(opts))), env)
   end
 end
