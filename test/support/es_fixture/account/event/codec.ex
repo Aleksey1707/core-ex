@@ -18,7 +18,7 @@ defmodule Core.EsFixture.Account.Event.Codec do
   }
 
   use Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "account",
     tags: @tag_by_mod,
     upcasts: @upcasts

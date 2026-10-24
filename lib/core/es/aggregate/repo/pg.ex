@@ -147,7 +147,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   На компиляции `CompileError`, если `behaviour:` — не `use Core.Es.Aggregate.Repo` (нет
   `__es_aggregate_repo__/0` или колбэков), его `aggregate:` / `id:` не равны `aggregate:` / `id:`
   реализации, `aggregate:` — не event-sourced агрегат, и на сверках
-  `Core.Es.Store.Opts`: кодек агрегата без `type:`, его Prim агрегата не равен `id:`, событие
+  `Core.Es.Store.Opts`: кодек агрегата без `type:`, семейство кодека называет владельцем потока не
+  `aggregate:`, Prim агрегата кодека не равен `id:`, событие
   `outbox:` не равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
   не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля, `version:` не
   целое или у ПДн-поля события субъект — поле нагрузки, а не `:aggregate_id`; `key_reservations:`
@@ -292,6 +293,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       Helper.Opts.module!(opts, :aggregate, @label, exports: [__es_event_codec__: 0, fold: 2])
 
     event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
+    Es.Store.Opts.ensure_family_aggregate!(event_codec, aggregate, @label)
     id = Helper.Opts.module!(opts, :id, @label)
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
 

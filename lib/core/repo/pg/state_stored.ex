@@ -88,7 +88,8 @@ defmodule Core.Repo.Pg.StateStored do
   заголовки переопределённых функций, `id:` сверяется с кодеком.
 
   На компиляции `CompileError`, если `event_codec:` — не кодек событий с `type:`, Prim
-  агрегата кодека (`__es_aggregate_id__/0`) не равен `id:`, событие `outbox:`
+  агрегата кодека (`__es_aggregate_id__/0`) не равен `id:`, семейство кодека называет владельцем
+  потока (`aggregate:`) не `entity:`, событие `outbox:`
   (`__es_event__/0`) не равно семейству кодека, в `errors:` нет clause `:version_mismatch`.
 
   ## Контракты дочерней схемы
@@ -253,11 +254,14 @@ defmodule Core.Repo.Pg.StateStored do
     id = Helper.Opts.module!(opts, :id, @label)
     Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
 
+    entity = Helper.Opts.module!(opts, :entity, @label)
+    Es.Store.Opts.ensure_family_aggregate!(event_codec, entity, @label)
+
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
     Es.Store.Opts.ensure_version_mismatch!(errors, @label)
 
     %{
-      entity: Helper.Opts.module!(opts, :entity, @label),
+      entity: entity,
       id: id,
       event_codec: event_codec,
       outbox: Es.Store.Opts.outbox!(opts, event_codec, @label),

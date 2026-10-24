@@ -21,6 +21,21 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     end
   end
 
+  defmodule Stranger do
+    @moduledoc "Агрегат на кодеке счёта: семейство счёта называет владельцем потока другой агрегат."
+
+    use Core.Es.Aggregate,
+      event_codec: Core.EsFixture.Account.Event.Codec
+
+    defstruct id: nil, version: nil
+
+    @impl true
+    def decide(_command, _state), do: {:ok, []}
+
+    @impl true
+    def evolve(state, _event), do: state
+  end
+
   describe "DI" do
     test "реализация резолвится по конвенции <Behaviour>.Pg" do
       assert @repo == Account.Repo.Pg
@@ -160,6 +175,14 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
                    fn ->
                      compile!(StateStored, aggregate: Core.StateStoredFixture.Entity)
                    end
+    end
+
+    test "семейство кодека называет владельцем потока другой агрегат — CompileError" do
+      message =
+        "Es.Aggregate.Repo.Pg: event_codec: семейство Core.EsFixture.Account.Event объявляет aggregate: " <>
+          "Core.EsFixture.Account, а не #{inspect(Stranger)}"
+
+      assert_raise CompileError, message, fn -> compile!(StrangerRepo, aggregate: Stranger) end
     end
 
     test "Prim агрегата кодека сверяется с id:" do

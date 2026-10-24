@@ -11,7 +11,7 @@ defmodule Core.Es.OutboxTest do
 
     use Core.Es.Outbox,
       topic: "fakes",
-      event: Core.EventFixture.Event
+      family: Core.EventFixture.Event
   end
 
   defmodule FakeEvent do
@@ -29,7 +29,7 @@ defmodule Core.Es.OutboxTest do
           defmodule Core.Es.OutboxTest.Ok do
             use Core.Es.Outbox,
               topic: "fakes",
-              event: Core.Es.OutboxTest.FakeEvent
+              family: Core.Es.OutboxTest.FakeEvent
           end
 
           Core.Es.OutboxTest.Ok
@@ -45,7 +45,7 @@ defmodule Core.Es.OutboxTest do
   end
 
   test "требует обязательные опции" do
-    assert_raise CompileError, ~r/нет обязательных опций: \[:event\]/, fn ->
+    assert_raise CompileError, ~r/нет обязательных опций: \[:family\]/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Es.OutboxTest.MissingEvent do
@@ -63,7 +63,7 @@ defmodule Core.Es.OutboxTest do
           defmodule Core.Es.OutboxTest.UnknownOpt do
             use Core.Es.Outbox,
               topic: "fakes",
-              event: Core.Es.OutboxTest.FakeEvent,
+              family: Core.Es.OutboxTest.FakeEvent,
               weird: true
           end
         end
@@ -78,7 +78,7 @@ defmodule Core.Es.OutboxTest do
           defmodule Core.Es.OutboxTest.BadTopic do
             use Core.Es.Outbox,
               topic: "не топик",
-              event: Core.Es.OutboxTest.FakeEvent
+              family: Core.Es.OutboxTest.FakeEvent
           end
         end
       )

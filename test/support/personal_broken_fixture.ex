@@ -77,7 +77,7 @@ defmodule Core.PersonalBrokenFixture do
     alias Core.PersonalBrokenFixture.Event
 
     use Es.Event.Codec,
-      event: Event,
+      family: Event,
       type: "personal_broken",
       tags: %{
         Event.ContactAdded => "personal_broken.contact_added",

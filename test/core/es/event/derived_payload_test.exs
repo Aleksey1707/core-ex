@@ -145,15 +145,20 @@ defmodule Core.Es.Event.DerivedPayloadTest do
                    fn ->
                      Code.eval_quoted(
                        quote do
+                         unquote(
+                           Core.EventFixture.family_ast(Core.Es.Event.DerivedPayloadTest.ManualDump,
+                             Located: DerivedFixture.Place
+                           )
+                         )
+
                          defmodule Core.Es.Event.DerivedPayloadTest.ManualDump do
-                           alias Core.DerivedFixture.Event
-
                            use Core.Es.Event.Codec,
-                             event: Event,
+                             family: __MODULE__.Family,
                              type: "derived_manual_dump",
-                             tags: %{Event.Located => "derived_manual_dump.located"}
+                             tags: %{__MODULE__.Located => "derived_manual_dump.located"}
 
-                           def dump_payload(%Event.Located{payload: place}, _codec), do: %{"name" => place.name.value}
+                           def dump_payload(%__MODULE__.Located{payload: place}, _codec),
+                             do: %{"name" => place.name.value}
                          end
                        end
                      )
@@ -166,17 +171,17 @@ defmodule Core.Es.Event.DerivedPayloadTest do
       assert_raise CompileError, message, fn ->
         Code.eval_quoted(
           quote do
+            unquote(Core.EventFixture.family_ast(Core.Es.Event.DerivedPayloadTest.ManualLoad, Tagged: Name))
+
             defmodule Core.Es.Event.DerivedPayloadTest.ManualLoad do
-              alias Core.DerivedFixture.Event
-
               use Core.Es.Event.Codec,
-                event: Event,
+                family: __MODULE__.Family,
                 type: "derived_manual_load",
-                tags: %{Event.Tagged => "derived_manual_load.tagged"}
+                tags: %{__MODULE__.Tagged => "derived_manual_load.tagged"}
 
-              def dump_payload(%Event.Tagged{payload: name}, codec), do: codec.dump(name)
+              def dump_payload(%__MODULE__.Tagged{payload: name}, codec), do: codec.dump(name)
 
-              def load_payload(Event.Tagged, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
+              def load_payload(__MODULE__.Tagged, wire, codec), do: codec.load(Core.EventFixture.Name, wire)
             end
           end
         )

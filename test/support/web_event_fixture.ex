@@ -107,7 +107,7 @@ defmodule Core.WebEventFixture do
     }
 
     use Core.Es.Event.Codec,
-      event: Event.Family,
+      family: Event.Family,
       type: "web_event",
       tags: @tag_by_mod
   end

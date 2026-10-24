@@ -15,7 +15,7 @@ defmodule Core.OtelChainTest do
 
     use Core.Es.Outbox,
       topic: "fakes",
-      event: Core.EventFixture.Event
+      family: Core.EventFixture.Event
   end
 
   setup do

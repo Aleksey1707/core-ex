@@ -13,7 +13,7 @@ defmodule Consumer.Domain.Sales.Account.Event.Codec do
   @upcasts %{"account.opened.v1" => "account.opened"}
 
   use Core.Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "account",
     tags: @tag_by_mod,
     upcasts: @upcasts

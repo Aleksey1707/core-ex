@@ -56,7 +56,7 @@ defmodule Core.MacroConfigTest do
   describe "компиляция без конфигурации потребителя" do
     test "Es.Outbox — без codec" do
       assert_compiles(EsOutbox, """
-        use Core.Es.Outbox, topic: "fakes", event: Core.EventFixture.Event
+        use Core.Es.Outbox, topic: "fakes", family: Core.EventFixture.Event
       """)
     end
 
@@ -143,7 +143,7 @@ defmodule Core.MacroConfigTest do
 
     test "Es.Outbox дампит событие текущим фасадом" do
       assert_compiles(LateCodec, """
-        use Core.Es.Outbox, topic: "fakes", event: Core.EventFixture.Event
+        use Core.Es.Outbox, topic: "fakes", family: Core.EventFixture.Event
       """)
 
       module = Module.concat(__MODULE__, LateCodec)

@@ -14,7 +14,7 @@ defmodule Core.Es.Personal.Event.Codec do
   @tag_by_mod %{Event.KeyDestroyed => "core.subject.key_destroyed"}
 
   use Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "core.subject",
     tags: @tag_by_mod
 end

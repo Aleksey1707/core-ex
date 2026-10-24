@@ -137,7 +137,7 @@ defmodule ConsumerTest.LongName.Event.Codec do
   alias ConsumerTest.LongName.Event.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotelIndia.JulietKiloLimaMikeNovemberOscarPapaQuebecRomeo.SierraTangoUniformVictorWhiskeyXrayYankeeZulu.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotel.IndiaJulietKiloLimaMikeNovember
 
   use Core.Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "long_name",
     tags: %{IndiaJulietKiloLimaMikeNovember => "long_name.extended", Event.Closed => "long_name.closed"}
 end

@@ -73,7 +73,7 @@ defmodule Core.Es.ProjectionTest do
     @moduledoc false
 
     use Core.Es.Event.Codec,
-      event: Core.Es.ProjectionTest.Twin.Family,
+      family: Core.Es.ProjectionTest.Twin.Family,
       type: "account",
       tags: %{Core.Es.ProjectionTest.Twin.Event.Done => "twin.done"}
   end
@@ -112,7 +112,7 @@ defmodule Core.Es.ProjectionTest do
     @moduledoc false
 
     use Core.Es.Event.Codec,
-      event: Core.Es.ProjectionTest.Loose.Family,
+      family: Core.Es.ProjectionTest.Loose.Family,
       type: "loose",
       tags: %{Core.Es.ProjectionTest.Loose.Events.Done => "loose.done"}
   end

@@ -228,19 +228,13 @@ defmodule Core.Codec.FacadeTest do
     assert_raise CompileError, ~r/тип агрегата "fixture".*DupTypeCodec.*EventFixture/, fn ->
       Code.eval_quoted(
         quote do
-          defmodule Core.Codec.FacadeTest.DupTypeEvent do
-            defmodule Opened do
-              use Core.Es.Event,
-                family: Core.EventFixture.Event,
-                payload: nil
-            end
-          end
+          unquote(Core.EventFixture.family_ast(Core.Codec.FacadeTest.DupTypeCodec))
 
           defmodule Core.Codec.FacadeTest.DupTypeCodec do
             use Core.Es.Event.Codec,
-              event: Core.Codec.FacadeTest.DupTypeEvent,
+              family: Core.Codec.FacadeTest.DupTypeCodec.Family,
               type: "fixture",
-              tags: %{Core.Codec.FacadeTest.DupTypeEvent.Opened => "fixture.opened"}
+              tags: %{Core.Codec.FacadeTest.DupTypeCodec.Done => "fixture.done"}
           end
 
           defmodule Core.Codec.FacadeTest.DupTypeFacade do

@@ -10,9 +10,9 @@ defmodule Core.Labels.CompletenessCaseTest do
   alias Core.LabelsBrokenFixture.Event.Unlabelled
   alias Core.LabelsFixture
 
-  # Полный набор: кодек событий с подписями и плагин семейства их нагрузки. Сломанный — кодек и
+  # Полный набор: кодеки событий с подписями и плагин семейства их нагрузки. Сломанный — кодек и
   # плагин `Core.LabelsBrokenFixture`: в нём по пробелу каждого вида.
-  @full [LabelsFixture.Event.Codec, LabelsFixture.Shape.Codec]
+  @full [LabelsFixture.Event.Codec, LabelsFixture.Event.ManualFamily.Codec, LabelsFixture.Shape.Codec]
   @broken [LabelsBrokenFixture.Event.Codec, LabelsBrokenFixture.Mark.Codec]
 
   describe "check_found/1" do

@@ -102,7 +102,7 @@ defmodule ConsumerTest.Shipment.Event.Codec do
   alias ConsumerTest.Shipment.Event
 
   use Core.Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "shipment",
     tags: %{Event.Shipped => "shipment.shipped"}
 end

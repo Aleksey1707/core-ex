@@ -559,7 +559,7 @@ use Repo.Pg.StateStored,
 | Опция | Обяз. | Значение |
 |---|---|---|
 | `event_codec:` | да | `<Aggregate>.Event.Codec`; его `type:` — тип агрегата в потоке хранилища событий |
-| `outbox:` | да | `<Aggregate>.Outbox` (`event:` сверяется с семейством кодека) либо `:none` |
+| `outbox:` | да | `<Aggregate>.Outbox` (`family:` сверяется с семейством кодека) либо `:none` |
 | `children:` | нет | `[[schema:, fk:, key:, constraint_errors:], …]`; строки — из `Schema.Child.to_models/1` |
 | `entity:` | да | в `Repo.Pg` опциональна, здесь обязательна (по ней строятся заголовки) |
 | `id:` | да | в `Repo.Pg` опциональна, здесь обязательна: сверяется на компиляции с Prim агрегата кодека |

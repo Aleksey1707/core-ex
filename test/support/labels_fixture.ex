@@ -10,12 +10,14 @@ defmodule Core.LabelsFixture do
   резолвером; фикстурные резолверы имён; событие с ПДн-полями каждого вида сведений и изменение на
   ПДн-значении; событие страницы событий со сведениями (`Core.Web.Event`, `labels: true`).
 
-  Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодек `Core.LabelsFixture.Event.Codec` — полный
-  набор ратчета полноты: в кодек не входят событие с id без вида, событие другого агрегата, событие со
-  скрытыми id (у его семейства `Core.LabelsFixture.Mark` плагина нет), изменение на id и события с id
-  под `text:`. Кодек `Core.LabelsFixture.WebEvent.Codec` — события с нагрузкой, которую дампят фасады:
-  он, плагин семейства, плагин вложенных struct'ов `Core.LabelsFixture.Codec` и ручной плагин нагрузки
-  `Core.LabelsFixture.Event.Limited.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
+  Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодеки `Core.LabelsFixture.Event.Codec` и
+  `Core.LabelsFixture.Event.ManualFamily.Codec` — полный набор ратчета полноты: в кодеки не входят
+  событие с id без вида, событие другого агрегата, событие со скрытыми id (у его семейства
+  `Core.LabelsFixture.Mark` плагина нет), изменение на id и события с id под `text:`. Нагрузку событий
+  `Core.LabelsFixture.Event.Codec` дампят фасады: он, плагин семейства, плагин вложенных struct'ов
+  `Core.LabelsFixture.Codec` и ручной плагин нагрузки `Core.LabelsFixture.Event.Limited.Codec`
+  зарегистрированы в `Core.CodecFixture.plugins/0`. События с нагрузкой без плагина — в семействе
+  `ManualFamily`, его кодек в фасад не входит.
   """
 
   alias Core.EventFixture.AggID
@@ -372,6 +374,18 @@ defmodule Core.LabelsFixture do
       @type t :: Core.LabelsFixture.Event.Assigned.t()
     end
 
+    defmodule ManualFamily do
+      @moduledoc "Семейство событий с нагрузкой без плагина: в фасад их кодек не входит."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsFixture,
+        aggregate_id: AggID,
+        by: UserID,
+        codec: Core.LabelsFixture.Event.ManualFamily.Codec
+
+      @type t :: struct()
+    end
+
     defmodule Updated do
       @moduledoc "Событие с нагрузкой по полям: поле каждого вида, необязательное и скрытое."
 
@@ -501,7 +515,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        family: Family,
+        family: ManualFamily,
         payload: Payload
 
       use Core.Labels.Event, title: "Метки расставлены"
@@ -560,7 +574,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        family: Family,
+        family: ManualFamily,
         payload: Payload
 
       use Core.Labels.Event, title: "Источник изменён"
@@ -580,7 +594,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        family: Family,
+        family: ManualFamily,
         payload: Payload
 
       use Core.Labels.Event, title: "Метки изменены"
@@ -917,18 +931,18 @@ defmodule Core.LabelsFixture do
       Event.Updated => "labels.updated",
       Event.StatusChanged => "labels.status_changed",
       Event.Shipped => "labels.shipped",
-      Event.Tagged => "labels.tagged",
       Event.NameChanged => "labels.name_changed",
       Event.StatusSwitched => "labels.status_switched",
-      Event.OriginChanged => "labels.origin_changed",
-      Event.TagsChanged => "labels.tags_changed",
       Event.Linked => "labels.linked",
+      Event.Limited => "labels.limited",
+      Event.Contacted => "labels.contacted",
+      Event.HolderChanged => "labels.holder_changed",
       Event.Renamed => "labels.renamed",
       Event.Closed => "labels.closed"
     }
 
     use Core.Es.Event.Codec,
-      event: Event.Family,
+      family: Event.Family,
       type: "labels",
       tags: @tag_by_mod
   end
@@ -939,9 +953,26 @@ defmodule Core.LabelsFixture do
     alias Core.LabelsFixture.Event
 
     use Core.Es.Event.Codec,
-      event: Event.ItemFamily,
+      family: Event.ItemFamily,
       type: "labels_item",
       tags: %{Event.Assigned => "labels_item.assigned"}
+  end
+
+  defmodule Event.ManualFamily.Codec do
+    @moduledoc "Кодек событий с нагрузкой без плагина: ратчет полноты, без фасада."
+
+    alias Core.LabelsFixture.Event
+
+    @tag_by_mod %{
+      Event.Tagged => "labels_manual.tagged",
+      Event.OriginChanged => "labels_manual.origin_changed",
+      Event.TagsChanged => "labels_manual.tags_changed"
+    }
+
+    use Core.Es.Event.Codec,
+      family: Event.ManualFamily,
+      type: "labels_manual",
+      tags: @tag_by_mod
   end
 
   defmodule Codec do
@@ -989,30 +1020,6 @@ defmodule Core.LabelsFixture do
            {:ok, limit} <- codec.load(Count, limit),
            do: {:ok, {id, limit}}
     end
-  end
-
-  defmodule WebEvent.Codec do
-    @moduledoc "Кодек событий страницы событий со сведениями (плагин фасадов `Core.CodecFixture.*`)."
-
-    alias Core.LabelsFixture.Event
-
-    @tag_by_mod %{
-      Event.Updated => "labels_web.updated",
-      Event.Shipped => "labels_web.shipped",
-      Event.NameChanged => "labels_web.name_changed",
-      Event.StatusSwitched => "labels_web.status_switched",
-      Event.Linked => "labels_web.linked",
-      Event.Limited => "labels_web.limited",
-      Event.Contacted => "labels_web.contacted",
-      Event.HolderChanged => "labels_web.holder_changed",
-      Event.Renamed => "labels_web.renamed",
-      Event.Closed => "labels_web.closed"
-    }
-
-    use Core.Es.Event.Codec,
-      event: Event.Family,
-      type: "labels_web",
-      tags: @tag_by_mod
   end
 
   defmodule WebEvent do

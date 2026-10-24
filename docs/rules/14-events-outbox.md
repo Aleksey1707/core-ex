@@ -24,16 +24,19 @@ Dump/load события — только через фасад (`11-domain.md`,
   и `outbox:` (см. `13-repos.md`). Порядок внутри транзакции:
   `Core.Es.Operation.stamp` → `Outbox.from_events` → `Core.Es.Store.append` → шифрование
   ПДн-значений записей → `Outbox.Repo.append`, затем `events` очищаются.
-- Кодек событий агрегата — `use Core.Es.Event.Codec` (`event:` + `type:` + `tags:`, необязательный
+- Кодек событий агрегата — `use Core.Es.Event.Codec` (`family:` + `type:` + `tags:`, необязательный
   `upcasts:`; колбэк — только `upcast/2`); конверт, выбор типа по тегу, клаузы нагрузки и сборку
   события генерирует билдер, наружу кодек виден только через фасад. Формат нагрузки задаёт её
   спека (`use Core.Es.Event.Payload`, `use Core.Es.ValueChanged`), Prim или плагин её типа
   (`11-domain.md`, «Нагрузка по полям», «Нагрузка-Prim и `Es.ValueChanged`», «Нагрузка-сущность»).
   Проверяется: `CompileError` — `dump_payload/2` или `load_payload/3` в модуле кодека; тип
   нагрузки-сущности без плагина в фасаде.
-- Prim агрегата и автора билдер выводит из самих событий (`__es_aggregate_id__/0`,
-  `__es_by__/0`) — опциями они не задаются, расхождение между событиями одного кодека
-  ловится на компиляции.
+- Кодек ссылается на семейство `family:` (`11-domain.md`, «Семейство событий
+  (`Core.Es.Event.Family`)»): Prim агрегата и автора кодек берёт у семейства, опциями они не
+  задаются. Событие из `tags:` MUST быть из семейства `family:`, а `codec:` семейства — этим
+  кодеком.
+  Проверяется: `CompileError` на строке `use` кодека — `событие <E> не из семейства <F>`,
+  `семейство <F> объявляет codec: <C>, а не <кодек>`.
 - `type:` у кодека событий — MUST: тип агрегата в формате тега. Проверяется на компиляции:
   кодек без `type:` и один `type:` у двух кодеков среди плагинов фасада — `CompileError`.
 - Wire-тег уникален **внутри своего кодека**: дубль — `CompileError`. Квалификация тега именем
@@ -91,11 +94,15 @@ state-stored агрегата целиком — тем же `Core.Es.Transact.r
 ```elixir
 use Es.Outbox,
   topic: "<topic>",
-  event: Agg.Event
+  family: Agg.Event
 ```
 
 `topic` валидируется `Outbox.Topic` на этапе компиляции: опечатка — `CompileError`, а не ошибка
-в рантайме на каждом событии.
+в рантайме на каждом событии. `family:` — семейство событий агрегата, то же, что у кодека; так же
+объявляют `Outbox` event-sourced и state-stored агрегат.
+
+Проверяется: `CompileError` в `use` write-репозитория (`Repo.Pg.StateStored`,
+`Es.Aggregate.Repo.Pg`) — `family:` `Outbox` не равно семейству кодека `event_codec:`.
 
 Агрегат, чьи события наружу не публикуются, модуля `<Aggregate>.Outbox` не заводит: его
 write-репозиторий объявляет `outbox: :none` (`13-repos.md`).
@@ -213,7 +220,7 @@ use Core.Prim.String,
 @upcasts %{"delivery.registered" => "delivery.registered.v2"}
 
 use Es.Event.Codec,
-  event: Event,
+  family: Event,
   type: "delivery",
   tags: @tag_by_mod,
   upcasts: @upcasts

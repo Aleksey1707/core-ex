@@ -191,7 +191,7 @@ defmodule Core.DerivedFixture do
     alias Core.DerivedFixture.Event
 
     use Core.Es.Event.Codec,
-      event: Event,
+      family: Event,
       type: "derived",
       tags: %{
         Event.Tagged => "derived.tagged",

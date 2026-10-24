@@ -10,7 +10,7 @@ defmodule Consumer.Domain.Sales.Parcel.Event.Codec do
   }
 
   use Core.Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "parcel",
     tags: @tag_by_mod
 end

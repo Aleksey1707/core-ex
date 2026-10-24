@@ -5,7 +5,7 @@ defmodule Core.Es.Event.Codec do
       @tag_by_mod %{Event.Registered => "delivery.registered", Event.Updated => "delivery.updated"}
 
       use Core.Es.Event.Codec,
-        event: MyApp.Domain.<BC>.Delivery.Event,
+        family: MyApp.Domain.<BC>.Delivery.Event,
         type: "delivery",
         tags: @tag_by_mod
 
@@ -90,7 +90,8 @@ defmodule Core.Es.Event.Codec do
 
   ## Opts
 
-  - `event:` — объединяющий модуль событий агрегата (семейство для `codec.load/2`, `__es_family__/0`)
+  - `family:` — семейство событий агрегата (`use Core.Es.Event.Family`): union для `codec.load/2`,
+    `__es_family__/0`, Prim агрегата и автора
   - `type:` — тип агрегата: wire-имя, первая часть адреса потока событий (`__es_type__/0`);
     формат — как у тега, в конверт не попадает. Дубль среди плагинов фасада — `CompileError`;
     `"core.subject"` зарезервирован за `Core.Es.Personal.Event.Codec` (ADR-0079), в другом модуле —
@@ -101,11 +102,16 @@ defmodule Core.Es.Event.Codec do
     каждого отдаёт `upcast/2`, заголовок конверта не меняется. `CompileError`: источник в
     `tags:`, цель ни в `tags:`, ни источником, цикл
 
-  Prim агрегата и автора не задаются: они выводятся из самих событий
-  (`__es_aggregate_id__/0` и `__es_by__/0`), и расхождение между событиями одного
-  кодека — `CompileError`. Выведенный Prim агрегата кодек отдаёт тем же `__es_aggregate_id__/0`.
+  Prim агрегата и автора не задаются: их объявляет семейство (`aggregate_id:` и `by:`), и Prim
+  агрегата кодек отдаёт своим `__es_aggregate_id__/0`.
 
-  Макрос занимает в вызывающем модуле имена `@es_event`, `@es_type`, `@es_aggregate_id`, `@es_by`,
+  Ссылки сверяются `CompileError` на строке `use`:
+
+  - событие из `tags:` не из семейства `family:` (`__es_family__/0`) —
+    `событие <E> не из семейства <F>`;
+  - `codec:` семейства — не этот кодек: `семейство <F> объявляет codec: <C>, а не <кодек>`.
+
+  Макрос занимает в вызывающем модуле имена `@es_family`, `@es_type`, `@es_aggregate_id`, `@es_by`,
   `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless`, `@es_subjects` и приватные
   `es_dump_payload/2`, `es_load_payload/3`.
   """
@@ -123,7 +129,7 @@ defmodule Core.Es.Event.Codec do
   require Error
 
   @label "Es.Event.Codec"
-  @required_keys ~w(event tags type)a
+  @required_keys ~w(family tags type)a
   @optional_keys ~w(upcasts)a
   @ns :es
   @operation_keys ~w(operation_id session_id basis_id)a
@@ -181,7 +187,9 @@ defmodule Core.Es.Event.Codec do
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
-    event = Helper.Opts.module!(lit, :event, @label)
+
+    family =
+      Helper.Opts.module!(lit, :family, @label, exports: [__es_aggregate_id__: 0, __es_by__: 0, __es_codec__: 0])
 
     # `tags:` и `upcasts:` уходят в тело модуля как есть: значение атрибута (`@tag_by_mod`) на
     # этапе разворачивания макроса ещё не записано, и прочитать его оттуда нельзя.
@@ -192,20 +200,22 @@ defmodule Core.Es.Event.Codec do
     quote do
       @behaviour Core.Es.Event.Codec
 
-      @es_event unquote(event)
+      @es_family unquote(family)
       @es_type Core.Es.Event.Codec.type!(unquote(type), __MODULE__)
-      @es_tag_by_mod Core.Es.Event.Codec.tags!(unquote(tags))
+      @es_tag_by_mod Core.Es.Event.Codec.tags!(unquote(tags), @es_family)
       @es_mod_by_tag Core.Es.Event.Codec.mods!(@es_tag_by_mod)
       @es_upcasts Core.Es.Event.Codec.upcasts!(unquote(upcasts), @es_mod_by_tag)
-      @es_aggregate_id Core.Es.Event.Codec.derive!(@es_tag_by_mod, :__es_aggregate_id__)
-      @es_by Core.Es.Event.Codec.derive!(@es_tag_by_mod, :__es_by__)
+      @es_aggregate_id unquote(family.__es_aggregate_id__())
+      @es_by unquote(family.__es_by__())
+
+      Core.Es.Event.Codec.ensure_family_codec!(@es_family, __MODULE__)
 
       use Core.Codec.Plugin,
         types: Map.keys(@es_tag_by_mod),
-        union: @es_event
+        union: @es_family
 
       @typedoc "Событие агрегата."
-      @type event :: unquote(event).t()
+      @type event :: unquote(family).t()
 
       @typedoc "Нагрузка события на wire."
       @type wire_payload :: map() | String.t() | number() | boolean() | list() | nil
@@ -223,7 +233,7 @@ defmodule Core.Es.Event.Codec do
       @doc false
       @spec __es_family__() :: module()
 
-      def __es_family__, do: @es_event
+      def __es_family__, do: @es_family
 
       @doc false
       @spec __es_mods__() :: [module()]
@@ -277,7 +287,7 @@ defmodule Core.Es.Event.Codec do
       end
 
       @doc """
-      Конверт → событие: по модулю события либо по семейству `#{inspect(unquote(event))}`.
+      Конверт → событие: по модулю события либо по семейству `#{inspect(unquote(family))}`.
 
       В варианте с семейством модуль выбирается по тегу внутри данных.
       """
@@ -285,7 +295,7 @@ defmodule Core.Es.Event.Codec do
               Core.Result.t(event())
 
       @impl true
-      def load(@es_event, data, codec) when is_atom(codec) do
+      def load(@es_family, data, codec) when is_atom(codec) do
         Core.Es.Event.Codec.load_by_tag(data, @es_mod_by_tag, @es_upcasts, __MODULE__, codec)
       end
 
@@ -356,14 +366,14 @@ defmodule Core.Es.Event.Codec do
   end
 
   @doc false
-  @spec tags!(term()) :: %{optional(module()) => String.t()}
+  @spec tags!(term(), module()) :: %{optional(module()) => String.t()}
 
-  def tags!(tags) when is_map(tags) and map_size(tags) > 0 do
-    Enum.each(tags, &validate_tag!/1)
+  def tags!(tags, family) when is_map(tags) and map_size(tags) > 0 and is_atom(family) do
+    Enum.each(tags, &validate_tag!(&1, family))
     tags
   end
 
-  def tags!(other) do
+  def tags!(other, _family) do
     raise CompileError,
       description:
         "#{@label}: tags: ожидается непустая map %{Модуль => \"тег\"}, получено " <>
@@ -392,26 +402,18 @@ defmodule Core.Es.Event.Codec do
           inspect(other)
   end
 
-  @doc """
-  Вывести Prim агрегата или автора из самих событий кодека.
+  @doc false
+  @spec ensure_family_codec!(module(), module()) :: :ok
 
-  Дублировать их опцией `use` значило бы завести второй источник истины, который никто
-  не сверяет: у событий одного агрегата они и так одинаковы, а расхождение — ошибка.
-  """
-  @spec derive!(%{optional(module()) => String.t()}, atom()) :: module()
+  def ensure_family_codec!(family, codec) when is_atom(family) and is_atom(codec) do
+    case family.__es_codec__() do
+      ^codec ->
+        :ok
 
-  def derive!(tags, fun) when is_map(tags) and is_atom(fun) do
-    tags
-    |> Map.keys()
-    |> Enum.map(&{&1, apply(&1, fun, [])})
-    |> Enum.uniq_by(&elem(&1, 1))
-    |> case do
-      [{_mod, value}] ->
-        value
-
-      pairs ->
+      other ->
         raise CompileError,
-          description: "#{@label}: события кодека объявлены с разными #{fun}: #{inspect(pairs)}"
+          description:
+            "#{@label}: семейство #{inspect(family)} объявляет codec: #{inspect(other)}, а не #{inspect(codec)}"
     end
   end
 
@@ -690,7 +692,7 @@ defmodule Core.Es.Event.Codec do
     :ok
   end
 
-  defp validate_tag!({mod, tag}) when is_atom(mod) and is_binary(tag) and tag != "" do
+  defp validate_tag!({mod, tag}, family) when is_atom(mod) and is_binary(tag) and tag != "" do
     Code.ensure_compiled!(mod)
 
     unless Helper.Module.exports?(mod, :__es_payload__, 0) do
@@ -698,10 +700,15 @@ defmodule Core.Es.Event.Codec do
         description: "#{@label}: tags: #{inspect(mod)} не объявлен через `use Core.Es.Event`"
     end
 
+    unless mod.__es_family__() == family do
+      raise CompileError,
+        description: "#{@label}: tags: событие #{inspect(mod)} не из семейства #{inspect(family)}"
+    end
+
     :ok
   end
 
-  defp validate_tag!(other) do
+  defp validate_tag!(other, _family) do
     raise CompileError,
       description:
         "#{@label}: tags: ожидается {модуль события, непустая строка}, получено " <>

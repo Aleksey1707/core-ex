@@ -124,7 +124,7 @@ defmodule Core.StateStoredFixture do
 
     use Core.Es.Outbox,
       topic: "fixture",
-      event: Core.EventFixture.Event
+      family: Core.EventFixture.Event
   end
 
   defmodule Repo do

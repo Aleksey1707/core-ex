@@ -59,12 +59,12 @@ defmodule Core.Repo.Pg.StateStoredTest do
     end
   end
 
-  defmodule CreatedOutbox do
+  defmodule AccountOutbox do
     @moduledoc false
 
     use Core.Es.Outbox,
       topic: "fixture",
-      event: Core.EventFixture.Event.Created
+      family: Core.EsFixture.Account.Event
   end
 
   describe "компиляция" do
@@ -101,11 +101,19 @@ defmodule Core.Repo.Pg.StateStoredTest do
       assert_raise CompileError, message, fn -> compile!(OtherId, id: EventFixture.ActorID) end
     end
 
+    test "семейство кодека называет владельцем потока другую сущность — CompileError" do
+      message =
+        "Repo.Pg.StateStored: event_codec: семейство Core.EventFixture.Event объявляет aggregate: " <>
+          "Core.StateStoredFixture.Entity, а не Core.EsFixture.Account"
+
+      assert_raise CompileError, message, fn -> compile!(OtherOwner, entity: Core.EsFixture.Account) end
+    end
+
     test "событие outbox сверяется с семейством кодека" do
-      message = ~r/outbox: событие .*\.Event\.Created .* не равно семейству кодека .*\.Event$/
+      message = ~r/outbox: событие .*Account\.Event .* не равно семейству кодека .*EventFixture\.Event$/
 
       assert_raise CompileError, message, fn ->
-        compile!(OtherOutboxEvent, outbox: CreatedOutbox)
+        compile!(OtherOutboxEvent, outbox: AccountOutbox)
       end
     end
 

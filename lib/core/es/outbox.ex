@@ -4,12 +4,12 @@ defmodule Core.Es.Outbox do
 
       use Core.Es.Outbox,
         topic: "roles",
-        event: MyApp.Domain.<BC>.Role.Event
+        family: MyApp.Domain.<BC>.Role.Event
 
-  Генерирует `topic/0`, `from_events/1`, `from_event/1` и интроспекцию `__es_event__/0` (сверка
-  в `Core.Repo.Pg.StateStored`). Wire-payload — конверт события целиком
-  (`codec.dump(event)`, формат — `Core.Es.Event.Codec`); топик, ключ, имя и заголовки
-  (`name` / `aggr_id` / `event_id`) читаются из того же конверта через
+  Генерирует `topic/0`, `from_events/1`, `from_event/1` и интроспекцию `__es_event__/0` — семейство
+  (сверка с семейством кодека в `Core.Repo.Pg.StateStored` и `Core.Es.Aggregate.Repo.Pg`).
+  Wire-payload — конверт события целиком (`codec.dump(event)`, формат — `Core.Es.Event.Codec`);
+  топик, ключ, имя и заголовки (`name` / `aggr_id` / `event_id`) читаются из того же конверта через
   `Core.Es.Event.Codec.to_fields/1` — второго источника wire-имени события нет. Операция события
   (`Core.Es.Operation`) добавляется заголовком `operation_id`, если она есть: по нему подписчик
   получает основание.
@@ -22,7 +22,8 @@ defmodule Core.Es.Outbox do
 
   - `topic:` — имя топика (строка); валидируется `Outbox.Topic` на этапе компиляции, его отдаёт
     `topic/0`
-  - `event:` — объединяющий модуль событий агрегата (нужен для `@type event`)
+  - `family:` — семейство событий агрегата (`use Core.Es.Event.Family`); `@type event` — его `t()`.
+    Event-sourced и state-stored агрегат объявляют его одинаково
   - `codec:` — entity-фасад Codec; по умолчанию резолвится в рантайме
     через `Core.Config.codec()`
 
@@ -38,24 +39,24 @@ defmodule Core.Es.Outbox do
   alias Core.Result
 
   @label "Es.Outbox"
-  @required_keys ~w(topic event)a
+  @required_keys ~w(topic family)a
   @optional_keys ~w(codec)a
 
   # ===== билдер =====
 
   @doc "Объявить маппер событий агрегата в записи outbox."
   defmacro __using__(opts) do
-    {topic, event, codec} =
+    {topic, family, codec} =
       opts
       |> Macro.expand_literals(__CALLER__)
       |> validate_opts!()
 
     quote do
       @es_topic unquote(Macro.escape(topic))
-      @es_event unquote(event)
+      @es_event unquote(family)
 
       @typedoc "Событие агрегата, отображаемое в запись outbox."
-      @type event :: unquote(event).t()
+      @type event :: unquote(family).t()
 
       @doc false
       @spec __es_event__() :: module()
@@ -111,7 +112,7 @@ defmodule Core.Es.Outbox do
 
     {
       validate_topic!(opts),
-      Helper.Opts.module!(opts, :event, @label),
+      Helper.Opts.module!(opts, :family, @label),
       Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
     }
   end

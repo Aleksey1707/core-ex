@@ -150,7 +150,7 @@ defmodule Core.EventFixture do
     }
 
     use Es.Event.Codec,
-      event: Event,
+      family: Event,
       type: "fixture",
       tags: @tag_by_mod,
       upcasts: @upcasts
@@ -217,5 +217,41 @@ defmodule Core.EventFixture do
 
   def in_stream(event, %AggID{} = id, version) when is_integer(version) do
     %{event | aggregate_id: id, aggregate_version: Version.new!(version)}
+  end
+
+  @doc """
+  Семейство `<codec>.Family` и его события `<codec>.<Name>` для кодека `codec`, который тест
+  собирает тем же `Code.eval_quoted`: события кодека — из его семейства, `codec:` семейства — он сам.
+  `events` — `[Name: payload]`, нагрузка `nil` — событие без нагрузки.
+  """
+  @spec family_ast(module(), keyword(module() | nil)) :: Macro.t()
+
+  def family_ast(codec, events \\ [Done: nil]) when is_atom(codec) and is_list(events) do
+    family = Module.concat(codec, Family)
+
+    events_ast =
+      for {name, payload} <- events do
+        quote do
+          defmodule unquote(Module.concat(codec, name)) do
+            use Core.Es.Event,
+              family: unquote(family),
+              payload: unquote(payload)
+          end
+        end
+      end
+
+    quote do
+      defmodule unquote(family) do
+        use Core.Es.Event.Family,
+          aggregate: Core.EventFixture,
+          aggregate_id: Core.EventFixture.AggID,
+          by: Core.EventFixture.ActorID,
+          codec: unquote(codec)
+
+        @type t :: struct()
+      end
+
+      unquote_splicing(events_ast)
+    end
   end
 end

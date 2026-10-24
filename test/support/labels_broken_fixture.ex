@@ -191,7 +191,7 @@ defmodule Core.LabelsBrokenFixture do
     }
 
     use Core.Es.Event.Codec,
-      event: Event.Family,
+      family: Event.Family,
       type: "labels_broken",
       tags: @tag_by_mod
   end
@@ -204,7 +204,7 @@ defmodule Core.LabelsBrokenFixture do
     @tag_by_mod %{Event.ByRef => "labels_broken_by_ref.marked"}
 
     use Core.Es.Event.Codec,
-      event: Event.ByRefFamily,
+      family: Event.ByRefFamily,
       type: "labels_broken_by_ref",
       tags: @tag_by_mod
   end
@@ -217,7 +217,7 @@ defmodule Core.LabelsBrokenFixture do
     @tag_by_mod %{Event.ByID => "labels_broken_by_id.marked"}
 
     use Core.Es.Event.Codec,
-      event: Event.ByIDFamily,
+      family: Event.ByIDFamily,
       type: "labels_broken_by_id",
       tags: @tag_by_mod
   end

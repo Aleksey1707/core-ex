@@ -3,5 +3,5 @@ defmodule Core.EsFixture.Account.Outbox do
 
   use Core.Es.Outbox,
     topic: "accounts",
-    event: Core.EsFixture.Account.Event
+    family: Core.EsFixture.Account.Event
 end

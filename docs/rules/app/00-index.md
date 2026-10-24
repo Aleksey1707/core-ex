@@ -129,6 +129,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | свой контроллер или маршрут проверки `/health` / `/ready` с запросом в базу | `Core.Web.HealthPlug` в эндпоинте до `Plug.Telemetry` (`15-web-api.md`, «Проверки живости и готовности») |
 | свой обход `Ecto.Migrator` по `:ecto_repos` и свой `UPDATE` очереди outbox в `MyAppApp.Release` | `Core.Release.migrate/1`, `rollback/3` и `Core.Outbox.Release.requeue/1` (`10-architecture.md`, «Задачи релиза») |
 | `use Core.Es.Event, aggregate_id:, by:`; семейство `<Aggregate>.Event` — модуль с `@type t` | `use Core.Es.Event, family:` и `use Core.Es.Event.Family, aggregate:, aggregate_id:, by:, codec:` (`deps/core/docs/rules/11-domain.md`, «Es.Event») |
+| `event:` у `use Core.Es.Event.Codec` и `use Core.Es.Outbox` | `family:` (`deps/core/docs/rules/14-events-outbox.md`) |
 
 Встреченная в приложении устаревшая форма — не повод для точечной правки посреди чужой задачи:
 это либо отдельная задача, либо строка в `DEBT.md` с условием снятия.

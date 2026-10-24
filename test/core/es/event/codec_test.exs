@@ -257,7 +257,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.MissingTags do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test"
             end
           end
@@ -271,7 +271,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.MissingType do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 tags: %{Core.EventFixture.Event.Closed => "missing_type.closed"}
             end
           end
@@ -286,7 +286,7 @@ defmodule Core.Es.Event.CodecTest do
             quote do
               defmodule Core.Es.Event.CodecTest.BadType do
                 use Core.Es.Event.Codec,
-                  event: Core.EventFixture.Event,
+                  family: Core.EventFixture.Event,
                   type: unquote(type),
                   tags: %{Core.EventFixture.Event.Closed => "bad_type.closed"}
               end
@@ -302,7 +302,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.ReservedType do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "core.subject",
                 tags: %{Core.EventFixture.Event.Closed => "core.subject.closed"}
             end
@@ -339,7 +339,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.UnknownOpt do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{Core.EventFixture.Event.Closed => "unknown_opt.closed"},
                 aggregate_id: Core.EventFixture.AggID
@@ -349,13 +349,51 @@ defmodule Core.Es.Event.CodecTest do
       end
     end
 
-    test "выводит Prim агрегата и автора из самих событий" do
+    test "старая форма event: — CompileError с недостающей и неизвестной опцией" do
+      assert_raise CompileError, ~r/нет обязательных опций: \[:family\]; неизвестные опции: \[:event\]/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.OldForm do
+              use Core.Es.Event.Codec,
+                event: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{Core.EventFixture.Event.Closed => "old_form.closed"}
+            end
+          end
+        )
+      end
+    end
+
+    test "берёт Prim агрегата и автора у семейства" do
+      assert EventFixture.Event.Codec.__es_aggregate_id__() == EventFixture.AggID
+
       assert {:ok, _} =
                InCodec.load(EventFixture.Event.Closed, InCodec.dump(EventFixture.closed()))
     end
 
-    test "события с разными Prim агрегата — CompileError" do
-      assert_raise CompileError, ~r/разными __es_aggregate_id__/, fn ->
+    test "codec: семейства — другой кодек — CompileError" do
+      message =
+        "Es.Event.Codec: семейство Core.EventFixture.Event объявляет codec: Core.EventFixture.Event.Codec, " <>
+          "а не Core.Es.Event.CodecTest.ForeignCodec"
+
+      assert_raise CompileError, message, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.ForeignCodec do
+              use Core.Es.Event.Codec,
+                family: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{Core.EventFixture.Event.Closed => "foreign.closed"}
+            end
+          end
+        )
+      end
+    end
+
+    test "событие из tags: не из семейства кодека — CompileError" do
+      message = ~r/tags: событие .*CodecTest\.OtherEvent не из семейства Core\.EventFixture\.Event$/
+
+      assert_raise CompileError, message, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Es.Event.CodecTest.OtherEvent do
@@ -366,7 +404,7 @@ defmodule Core.Es.Event.CodecTest do
 
             defmodule Core.Es.Event.CodecTest.MixedCodec do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{
                   Core.EventFixture.Event.Closed => "mixed.closed",
@@ -384,7 +422,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.DupTag do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{
                   Core.EventFixture.Event.Created => "dup.tag",
@@ -402,7 +440,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.NotAnEvent do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{Core.Version => "not_an_event.version"}
             end
@@ -415,43 +453,37 @@ defmodule Core.Es.Event.CodecTest do
       {mod, _} =
         Code.eval_quoted(
           quote do
+            unquote(EventFixture.family_ast(Core.Es.Event.CodecTest.PayloadlessCodec))
+
             defmodule Core.Es.Event.CodecTest.PayloadlessCodec do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.Es.Event.CodecTest.PayloadlessCodec.Family,
                 type: "codec_test",
-                tags: %{Core.EventFixture.Event.Closed => "payloadless.closed"}
+                tags: %{Core.Es.Event.CodecTest.PayloadlessCodec.Done => "payloadless.done"}
             end
 
             Core.Es.Event.CodecTest.PayloadlessCodec
           end
         )
 
-      assert mod.type(Core.EventFixture.Event.Closed) == "payloadless.closed"
+      assert mod.type(Core.Es.Event.CodecTest.PayloadlessCodec.Done) == "payloadless.done"
     end
 
     test "модуль нагрузки, общий у двух событий, — кодек собирается" do
+      events = [Granted: EventFixture.Name, Revoked: EventFixture.Name]
+
       {mod, _} =
         Code.eval_quoted(
           quote do
-            defmodule Core.Es.Event.CodecTest.Granted do
-              use Core.Es.Event,
-                family: Core.EventFixture.Event,
-                payload: Core.EventFixture.Name
-            end
-
-            defmodule Core.Es.Event.CodecTest.Revoked do
-              use Core.Es.Event,
-                family: Core.EventFixture.Event,
-                payload: Core.EventFixture.Name
-            end
+            unquote(EventFixture.family_ast(Core.Es.Event.CodecTest.SharedPayloadCodec, events))
 
             defmodule Core.Es.Event.CodecTest.SharedPayloadCodec do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.Es.Event.CodecTest.SharedPayloadCodec.Family,
                 type: "codec_test",
                 tags: %{
-                  Core.Es.Event.CodecTest.Granted => "shared.granted",
-                  Core.Es.Event.CodecTest.Revoked => "shared.revoked"
+                  Core.Es.Event.CodecTest.SharedPayloadCodec.Granted => "shared.granted",
+                  Core.Es.Event.CodecTest.SharedPayloadCodec.Revoked => "shared.revoked"
                 }
             end
 
@@ -459,8 +491,8 @@ defmodule Core.Es.Event.CodecTest do
           end
         )
 
-      assert mod.type(Core.Es.Event.CodecTest.Granted) == "shared.granted"
-      assert mod.type(Core.Es.Event.CodecTest.Revoked) == "shared.revoked"
+      assert mod.type(Core.Es.Event.CodecTest.SharedPayloadCodec.Granted) == "shared.granted"
+      assert mod.type(Core.Es.Event.CodecTest.SharedPayloadCodec.Revoked) == "shared.revoked"
     end
 
     test "источник upcasts: объявлен в tags: — CompileError" do
@@ -469,7 +501,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.UpcastSourceInTags do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{
                   Core.EventFixture.Event.Created => "src.created",
@@ -488,7 +520,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.UpcastUnknownTarget do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{Core.EventFixture.Event.Closed => "dst.closed"},
                 upcasts: %{"dst.old" => "dst.gone"}
@@ -504,7 +536,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.UpcastCycle do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.EventFixture.Event,
                 type: "codec_test",
                 tags: %{Core.EventFixture.Event.Closed => "loop.closed"},
                 upcasts: %{"loop.a" => "loop.b", "loop.b" => "loop.a"}
@@ -518,12 +550,14 @@ defmodule Core.Es.Event.CodecTest do
       assert_raise CompileError, ~r/обязан объявить upcast\/2/, fn ->
         Code.eval_quoted(
           quote do
+            unquote(EventFixture.family_ast(Core.Es.Event.CodecTest.NoUpcastClauses))
+
             defmodule Core.Es.Event.CodecTest.NoUpcastClauses do
               use Core.Es.Event.Codec,
-                event: Core.EventFixture.Event,
+                family: Core.Es.Event.CodecTest.NoUpcastClauses.Family,
                 type: "codec_test",
-                tags: %{Core.EventFixture.Event.Closed => "no_upcast.closed"},
-                upcasts: %{"no_upcast.old" => "no_upcast.closed"}
+                tags: %{Core.Es.Event.CodecTest.NoUpcastClauses.Done => "no_upcast.done"},
+                upcasts: %{"no_upcast.old" => "no_upcast.done"}
             end
           end
         )
@@ -537,7 +571,7 @@ defmodule Core.Es.Event.CodecTest do
             quote do
               defmodule Core.Es.Event.CodecTest.BadUpcasts do
                 use Core.Es.Event.Codec,
-                  event: Core.EventFixture.Event,
+                  family: Core.EventFixture.Event,
                   type: "codec_test",
                   tags: %{Core.EventFixture.Event.Closed => "shape.closed"},
                   upcasts: unquote(Macro.escape(upcasts))

@@ -102,15 +102,19 @@ defmodule Core.Es.Event.PayloadTest do
     end
 
     test "кодек только с выводимыми нагрузками собирается без ручных клауз и предупреждений" do
+      events = [Renamed: Event.Renamed.Payload]
+
       {{{:module, mod, _, _}, _}, diagnostics} =
         Code.with_diagnostics(fn ->
           Code.eval_quoted(
             quote do
+              unquote(Core.EventFixture.family_ast(Core.Es.Event.PayloadTest.DerivedOnly, events))
+
               defmodule Core.Es.Event.PayloadTest.DerivedOnly do
                 use Core.Es.Event.Codec,
-                  event: Core.EsFixture.Account.Event,
+                  family: Core.Es.Event.PayloadTest.DerivedOnly.Family,
                   type: "derived_only",
-                  tags: %{Core.EsFixture.Account.Event.Renamed => "derived_only.renamed"}
+                  tags: %{Core.Es.Event.PayloadTest.DerivedOnly.Renamed => "derived_only.renamed"}
               end
             end
           )
@@ -118,10 +122,20 @@ defmodule Core.Es.Event.PayloadTest do
 
       assert diagnostics == []
 
-      renamed = event(Event.Renamed, Event.Renamed.Payload.new(Account.Name.new!("Отгрузка")))
+      renamed_mod = Core.Es.Event.PayloadTest.DerivedOnly.Renamed
+      payload = Event.Renamed.Payload.new(Account.Name.new!("Отгрузка"))
+
+      renamed =
+        renamed_mod.new(
+          payload,
+          Core.EventFixture.AggID.new(),
+          Version.new!(3),
+          Core.EventFixture.ActorID.new(),
+          Core.Es.Event.At.new!(@at)
+        )
 
       assert mod.dump(renamed, InCodec)["payload"] == %{"name" => "Отгрузка"}
-      assert mod.load(Event.Renamed, mod.dump(renamed, InCodec), InCodec) == {:ok, renamed}
+      assert mod.load(renamed_mod, mod.dump(renamed, InCodec), InCodec) == {:ok, renamed}
     end
   end
 

@@ -10,7 +10,7 @@ defmodule Core.EsFixture.Catalog.Event.Codec do
   }
 
   use Core.Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "catalog",
     tags: @tag_by_mod
 end

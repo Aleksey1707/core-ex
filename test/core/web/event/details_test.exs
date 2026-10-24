@@ -144,7 +144,7 @@ defmodule Core.Web.Event.DetailsTest do
   test "title и details — рядом с полями события, автор — ссылкой на учётную запись" do
     %Event.Closed{by: by} = closed = event(Event.Closed, nil)
 
-    assert %{type: "labels_web.closed", by: %{login: "Автор"}, title: "Запись закрыта", details: []} =
+    assert %{type: "labels.closed", by: %{login: "Автор"}, title: "Запись закрыта", details: []} =
              WebEvent.to_wire(closed, %{by => "Автор"})
   end
 

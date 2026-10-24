@@ -46,6 +46,27 @@ defmodule Core.Es.Store.Opts do
   end
 
   @doc """
+  Владелец потока семейства кодека (`aggregate:` у `use Core.Es.Event.Family`) — агрегат или
+  сущность builder'а `owner`: поток семейства пишет один владелец.
+  """
+  @spec ensure_family_aggregate!(module(), module(), String.t()) :: :ok
+
+  def ensure_family_aggregate!(event_codec, owner, label)
+      when is_atom(event_codec) and is_atom(owner) and is_binary(label) do
+    family = event_codec.__es_family__()
+    aggregate = family.__es_aggregate__()
+
+    if aggregate != owner do
+      raise CompileError,
+        description:
+          "#{label}: event_codec: семейство #{inspect(family)} объявляет aggregate: " <>
+            "#{inspect(aggregate)}, а не #{inspect(owner)}"
+    end
+
+    :ok
+  end
+
+  @doc """
   Модуль outbox агрегата: `<Aggregate>.Outbox` либо `Core.Es.Outbox.None` при `outbox: :none`.
 
   `:none` — агрегат не публикует события наружу: сверять с семейством кодека нечего, записей

@@ -9,7 +9,7 @@ defmodule Consumer.Domain.Sales.Grants.Event.Codec do
   }
 
   use Core.Es.Event.Codec,
-    event: Event,
+    family: Event,
     type: "grants",
     tags: @tag_by_mod
 end
