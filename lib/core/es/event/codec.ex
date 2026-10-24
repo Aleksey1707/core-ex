@@ -212,7 +212,7 @@ defmodule Core.Es.Event.Codec do
 
       use Core.Codec.Plugin,
         types: Map.keys(@es_tag_by_mod),
-        union: @es_family
+        union: unquote(family)
 
       @typedoc "Событие агрегата."
       @type event :: unquote(family).t()

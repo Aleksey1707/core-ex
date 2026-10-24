@@ -199,7 +199,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "семейство в двух плагинах — CompileError" do
-    assert_raise CompileError, ~r/объявлен дважды/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Facade: plugins: тип .+ объявлен дважды: в .+ и .+$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.DupUnionA do
@@ -262,7 +262,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "duplicate codec types raise CompileError" do
-    assert_raise CompileError, ~r/объявлен дважды/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Facade: plugins: тип .+ объявлен дважды: в .+ и .+$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.DupA do
@@ -297,7 +297,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "prim: не модуль — CompileError" do
-    assert_raise CompileError, ~r/ожидается модуль/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Facade: prim: ожидается модуль, получено "профиль"$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.BadPrimFacade do
@@ -309,7 +309,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "prim: модуль без интерфейса профиля — CompileError" do
-    assert_raise CompileError, ~r/должен экспортировать dump\/1/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Facade: prim: модуль String должен экспортировать dump\/1$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.NotProfileFacade do
@@ -321,7 +321,7 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "не-модуль в plugins — CompileError" do
-    assert_raise CompileError, ~r/плагин .*ожидается модуль/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Facade: plugins: ожидается модуль, получено "строка"$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.NotModulePluginFacade do
@@ -335,13 +335,60 @@ defmodule Core.Codec.FacadeTest do
   end
 
   test "non-plugin in plugins list raises CompileError" do
-    assert_raise CompileError, ~r/должен реализовывать Codec.Plugin/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Facade: plugins: плагин String должен реализовывать Codec\.Plugin$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.FacadeTest.BadPluginFacade do
             use Core.Codec.Facade,
               prim: Core.CodecFixture.Prim.Internal,
               plugins: [String]
+          end
+        end
+      )
+    end
+  end
+
+  test "опечатка в ключе — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Codec\.Facade: неизвестные опции: \[:plugin\]$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Codec.Facade)
+      Macro.expand(quote(do: Core.Codec.Facade.__using__(prim: Core.CodecFixture.Prim.Internal, plugin: [])), env)
+    end
+  end
+
+  test "атрибут в prim: — «ожидается литерал»" do
+    assert_raise CompileError, ~r/^Codec\.Facade: prim: ожидается литерал, получено @prim$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.AttrPrimFacade do
+            @prim Core.CodecFixture.Prim.Internal
+            use Core.Codec.Facade, prim: @prim
+          end
+        end
+      )
+    end
+  end
+
+  test "plugins: выражение — вычисляется в теле" do
+    {{:module, mod, _bin, _}, _binding} =
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.ExprPluginsFacade do
+            @plugins []
+            use Core.Codec.Facade, prim: Core.CodecFixture.Prim.Internal, plugins: @plugins
+          end
+        end
+      )
+
+    assert {:ok, %Version{}} = mod.load(Version, 1)
+  end
+
+  test "plugins: неверное выражение — в теле, с меткой" do
+    assert_raise CompileError, ~r/^Codec\.Facade: plugins: ожидается список модулей, получено :plugins$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.FacadeTest.BadExprPluginsFacade do
+            @plugins :plugins
+            use Core.Codec.Facade, prim: Core.CodecFixture.Prim.Internal, plugins: @plugins
           end
         end
       )

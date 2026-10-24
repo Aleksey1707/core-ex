@@ -91,7 +91,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "union с loadable: false — CompileError" do
-    assert_raise CompileError, ~r/union: требует loadable: true/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Plugin: union: требует loadable: true$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.DumpOnlyUnion do
@@ -113,7 +113,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "union не модуль — CompileError" do
-    assert_raise CompileError, ~r/union: ожидается модуль/, fn ->
+    assert_raise CompileError, ~r/^Codec\.Plugin: union: ожидается модуль, получено "family"$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.BadUnion do
@@ -158,5 +158,143 @@ defmodule Core.Codec.PluginTest do
         end
       )
     end
+  end
+
+  test "опечатка в ключе — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Codec\.Plugin: неизвестные опции: \[:type\]$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Codec.Plugin)
+      Macro.expand(quote(do: Core.Codec.Plugin.__using__(type: [Core.Version])), env)
+    end
+  end
+
+  test "loadable: не boolean — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Codec\.Plugin: loadable: ожидается true или false, получено :no$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Codec.Plugin)
+      Macro.expand(quote(do: Core.Codec.Plugin.__using__(types: [Core.Version], loadable: :no)), env)
+    end
+  end
+
+  test "атрибут в опции-литерале — «ожидается литерал»" do
+    assert_raise CompileError, ~r/^Codec\.Plugin: fields: ожидается литерал, получено @fields$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.AttrFields do
+            defmodule X do
+              defstruct [:a]
+            end
+
+            @fields [{X, a: [type: :string]}]
+            use Core.Codec.Plugin, fields: @fields
+          end
+        end
+      )
+    end
+
+    assert_raise CompileError, ~r/^Codec\.Plugin: union: ожидается литерал, получено @family$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.AttrUnion do
+            @family Core.Codec.PluginTest.AttrUnion
+            use Core.Codec.Plugin, types: [Core.Version], union: @family
+          end
+        end
+      )
+    end
+  end
+
+  test "types: выражение — вычисляется в теле" do
+    {{:module, mod, _bin, _}, _binding} =
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.ExprTypes do
+            defmodule X do
+              defstruct []
+            end
+
+            @types %{Core.Codec.PluginTest.ExprTypes.X => "x"}
+            use Core.Codec.Plugin, types: Map.keys(@types), loadable: false
+
+            @impl true
+            def dump(%Core.Codec.PluginTest.ExprTypes.X{}, _codec), do: :x
+          end
+        end
+      )
+
+    assert mod.__codec_types__() == [Core.Codec.PluginTest.ExprTypes.X]
+  end
+
+  test "types: неверное выражение — в теле, с меткой" do
+    assert_raise CompileError, ~r/^Codec\.Plugin: types: ожидается список модулей, получено :x$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.BadExprTypes do
+            @types :x
+            use Core.Codec.Plugin, types: @types, loadable: false
+          end
+        end
+      )
+    end
+  end
+
+  test "вложенный модуль ниже use — «недоступен»" do
+    assert_raise CompileError,
+                 ~r/^Codec\.Plugin .*NestedBelow: fields, тип .*NestedBelow\.X: .*NestedBelow\.X недоступен/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Codec.PluginTest.NestedBelow do
+                         use Core.Codec.Plugin, fields: [{Core.Codec.PluginTest.NestedBelow.X, a: [type: :string]}]
+
+                         defmodule X do
+                           defstruct [:a]
+                         end
+                       end
+                     end
+                   )
+                 end
+
+    assert_raise CompileError,
+                 ~r/^Codec\.Plugin .*NestedVariant: variants, вариант .*NestedVariant\.X: .* недоступен/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Codec.PluginTest.NestedVariant do
+                         use Core.Codec.Plugin,
+                           union: Core.Codec.PluginTest.NestedVariant,
+                           variants: [{Core.Codec.PluginTest.NestedVariant.X, "x", a: [type: :string]}]
+
+                         defmodule X do
+                           defstruct [:a]
+                         end
+                       end
+                     end
+                   )
+                 end
+  end
+
+  test "вложенный модуль выше use — fields: и variants: собираются" do
+    {{:module, mod, _bin, _}, _binding} =
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.NestedAbove do
+            defmodule X do
+              defstruct [:a]
+            end
+
+            defmodule Y do
+              defstruct [:b]
+            end
+
+            use Core.Codec.Plugin,
+              fields: [{Core.Codec.PluginTest.NestedAbove.X, a: [type: :string]}],
+              union: Core.Codec.PluginTest.NestedAbove,
+              variants: [{Core.Codec.PluginTest.NestedAbove.Y, "y", b: [type: :string]}]
+          end
+        end
+      )
+
+    y = struct(Module.concat(mod, Y), b: "b")
+    assert mod.dump(struct(Module.concat(mod, X), a: "a"), nil) == %{"a" => "a"}
+    assert {:ok, ^y} = mod.load(mod, mod.dump(y, nil), nil)
   end
 end

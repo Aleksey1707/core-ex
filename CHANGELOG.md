@@ -191,6 +191,8 @@
   | Builder | Опции-выражения |
   |---|---|
   | `use Core.Enum` | `name:` |
+  | `use Core.Codec.Facade` | `plugins:` |
+  | `use Core.Codec.Plugin` | `types:` |
   | `use Core.Labels.Text` | `with:` |
   | `use Core.Labels.Fields` | `fields:`, `value:` |
   | `use Core.Web.Event` | `user_ref:` |

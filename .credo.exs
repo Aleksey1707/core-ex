@@ -236,10 +236,6 @@
                  "lib/core/prim/string.ex",
                  "lib/core/prim/uuid.ex",
                  "lib/core/prim/wrapper.ex",
-                 # 15 — Codec
-                 "lib/core/codec.ex",
-                 "lib/core/codec/facade.ex",
-                 "lib/core/codec/plugin.ex",
                  # 16 — Repo.Pg
                  "lib/core/repo/pg.ex",
                  "lib/core/repo/pg/state_stored.ex",

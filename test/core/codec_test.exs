@@ -443,7 +443,7 @@ defmodule Core.CodecTest do
   end
 
   test "profile rejects missing datetime_tz" do
-    assert_raise CompileError, ~r/нет обязательных опций/, fn ->
+    assert_raise CompileError, ~r/^Codec: нет обязательных опций: \[:datetime_tz\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.MissingTz do
@@ -458,7 +458,7 @@ defmodule Core.CodecTest do
   end
 
   test "profile rejects unknown datetime_tz and legacy :raw" do
-    assert_raise ArgumentError, ~r/неизвестная зона datetime_tz/, fn ->
+    assert_raise CompileError, ~r/^Codec: datetime_tz: неизвестная зона "Not\/AZone"$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.BadTz do
@@ -472,21 +472,23 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/datetime_tz: ожидается :keep/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.CodecTest.LegacyUtc do
-            use Core.Codec,
-              uuid: :hex,
-              datetime: :iso8601,
-              datetime_tz: :utc,
-              decimal: :string
-          end
-        end
-      )
-    end
+    assert_raise CompileError,
+                 ~r/^Codec: datetime_tz: ожидается :keep, :app или строка IANA-зоны, получено :utc$/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.CodecTest.LegacyUtc do
+                         use Core.Codec,
+                           uuid: :hex,
+                           datetime: :iso8601,
+                           datetime_tz: :utc,
+                           decimal: :string
+                       end
+                     end
+                   )
+                 end
 
-    assert_raise ArgumentError, ~r/неизвестное значение datetime/, fn ->
+    assert_raise CompileError, ~r/^Codec: datetime: ожидается одно из \[:datetime, :iso8601\], получено :raw$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.LegacyDatetimeRaw do
@@ -500,7 +502,7 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/неизвестное значение date: :raw/, fn ->
+    assert_raise CompileError, ~r/^Codec: date: ожидается одно из \[:date, :iso8601\], получено :raw$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.BadDate do
@@ -515,7 +517,7 @@ defmodule Core.CodecTest do
       )
     end
 
-    assert_raise ArgumentError, ~r/неизвестное значение decimal/, fn ->
+    assert_raise CompileError, ~r/^Codec: decimal: ожидается одно из \[:decimal, :string\], получено :raw$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.CodecTest.LegacyDecimalRaw do
@@ -524,6 +526,36 @@ defmodule Core.CodecTest do
               datetime: :iso8601,
               datetime_tz: :keep,
               decimal: :raw
+          end
+        end
+      )
+    end
+  end
+
+  test "опечатка в ключе — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Codec: неизвестные опции: \[:uiud\]$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Codec)
+
+      Macro.expand(
+        quote(
+          do: Core.Codec.__using__(uiud: :hex, uuid: :hex, datetime: :iso8601, datetime_tz: :keep, decimal: :string)
+        ),
+        env
+      )
+    end
+  end
+
+  test "атрибут в опции — «ожидается литерал»" do
+    assert_raise CompileError, ~r/^Codec: uuid: ожидается литерал, получено @uuid$/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.CodecTest.AttrUuid do
+            @uuid :hex
+            use Core.Codec,
+              uuid: @uuid,
+              datetime: :iso8601,
+              datetime_tz: :keep,
+              decimal: :string
           end
         end
       )

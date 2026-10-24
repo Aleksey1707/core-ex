@@ -43,125 +43,145 @@ defmodule Core.Codec.Facade do
   без плагина — предупреждение при сборке, при исполнении — `FunctionClauseError`; struct с полем
   `value`, который не Prim, — `ArgumentError`. Фолбэк `load/2` / `load!/2` по атому не сужен: Prim по
   атому в guard не распознать, и модуль без плагина компилятор не ловит.
+
+  ## Опции
+
+  `plugins:` — опция-выражение (`docs/rules/20-agreements.md`, «Опции `use`»): список вычисляется в
+  теле фасада, поэтому законны `<App>.Codec.plugins()` и атрибут; не список — `CompileError`
+  «Codec.Facade: plugins: ожидается список модулей». `prim:` — литерал, модуль профиля проверяется
+  при раскрытии `use` и MUST NOT быть вложен в фасад.
   """
 
   alias Core.Helper
   alias Core.Prim
 
+  @label "Codec.Facade"
+  @required_keys ~w(prim)a
+  @optional_keys ~w(plugins)a
+  @expression_keys ~w(plugins)a
+
   # ===== билдер =====
 
   @doc "Объявить entity-фасад (`prim:` + `plugins:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(opts, ~w(prim)a, ~w(plugins)a, "Codec.Facade")
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    prim = Helper.Opts.module!(opts, :prim, @label, exports: [dump: 1, load: 2, load!: 2])
 
-      @behaviour Core.Codec.Facade.Behaviour
+    [
+      quote do
+        @behaviour Core.Codec.Facade.Behaviour
 
-      @prim Helper.Opts.module!(opts, :prim, "Codec.Facade", exports: [dump: 1, load: 2, load!: 2])
-      @plugins Core.Codec.Facade.plugins!(Keyword.get(opts, :plugins, []))
+        @prim unquote(prim)
+        @plugins Core.Codec.Facade.plugins!(unquote(Keyword.get(opts, :plugins, [])))
 
-      Core.Codec.Facade.validate_mods!(@plugins)
-      Core.Codec.Facade.check_plugins!(@plugins)
+        Core.Codec.Facade.validate_mods!(@plugins)
+        Core.Codec.Facade.check_plugins!(@plugins)
+      end,
+      quote unquote: false do
+        require Core.Guard
 
-      require Core.Guard
+        @doc "Dump: entity-плагин или Prim; struct без плагина обязан быть Prim."
+        @spec dump(struct()) :: term()
 
-      @doc "Dump: entity-плагин или Prim; struct без плагина обязан быть Prim."
-      @spec dump(struct()) :: term()
-
-      @impl true
-      for plugin <- @plugins,
-          type <- plugin.__codec_types__() do
-        def dump(%unquote(type){} = value) do
-          unquote(plugin).dump(value, __MODULE__)
-        end
-      end
-
-      def dump(%mod{} = value) when Core.Guard.is_prim(value) do
-        if Prim.prim?(mod),
-          do: @prim.dump(value),
-          else: raise(ArgumentError, "нет codec-плагина для #{inspect(mod)}")
-      end
-
-      @doc "Load: entity-плагин или Prim."
-      @spec load(module(), term()) :: Core.Result.t()
-
-      @impl true
-      for plugin <- @plugins,
-          plugin.__codec_loadable__(),
-          mod <- Core.Codec.Facade.load_mods(plugin) do
-        def load(unquote(mod), raw) do
-          case unquote(plugin).load(unquote(mod), raw, __MODULE__) do
-            unquote(Core.Codec.Facade.load_clauses(plugin, mod, :load))
+        @impl true
+        for plugin <- @plugins,
+            type <- plugin.__codec_types__() do
+          def dump(%unquote(type){} = value) do
+            unquote(plugin).dump(value, __MODULE__)
           end
         end
-      end
 
-      # Тип dump-only плагина (`loadable: false`) load-клоузы не получает и без этой
-      # ветки уходил бы в Prim-фолбэк, падая `UndefinedFunctionError` на
-      # `__domain_kind__/0`, которого у entity нет.
-      for plugin <- @plugins,
-          not plugin.__codec_loadable__(),
-          type <- plugin.__codec_types__() do
-        def load(unquote(type), _raw) do
-          raise ArgumentError,
-                "#{inspect(unquote(plugin))} — dump-only плагин: " <>
-                  "#{inspect(unquote(type))} через load/2 не восстанавливается"
+        def dump(%mod{} = value) when Core.Guard.is_prim(value) do
+          if Prim.prim?(mod),
+            do: @prim.dump(value),
+            else: raise(ArgumentError, "нет codec-плагина для #{inspect(mod)}")
         end
-      end
 
-      def load(mod, raw) when is_atom(mod) do
-        if Prim.prim?(mod),
-          do: @prim.load(mod, raw),
-          else: raise(ArgumentError, "нет codec-плагина для #{inspect(mod)}")
-      end
+        @doc "Load: entity-плагин или Prim."
+        @spec load(module(), term()) :: Core.Result.t()
 
-      @doc "Load через `load/2`; при ошибке — raise."
-      @spec load!(module(), term()) :: term()
-
-      @impl true
-      for plugin <- @plugins,
-          plugin.__codec_loadable__(),
-          mod <- Core.Codec.Facade.load_mods(plugin) do
-        def load!(unquote(mod), raw) do
-          case unquote(plugin).load(unquote(mod), raw, __MODULE__) do
-            unquote(Core.Codec.Facade.load_clauses(plugin, mod, :load!))
+        @impl true
+        for plugin <- @plugins,
+            plugin.__codec_loadable__(),
+            mod <- Core.Codec.Facade.load_mods(plugin) do
+          def load(unquote(mod), raw) do
+            case unquote(plugin).load(unquote(mod), raw, __MODULE__) do
+              unquote(Core.Codec.Facade.load_clauses(plugin, mod, :load))
+            end
           end
         end
-      end
 
-      def load!(mod, raw) when is_atom(mod) do
-        Core.Result.unwrap!(load(mod, raw))
-      end
+        # Тип dump-only плагина (`loadable: false`) load-клоузы не получает и без этой
+        # ветки уходил бы в Prim-фолбэк, падая `UndefinedFunctionError` на
+        # `__domain_kind__/0`, которого у entity нет.
+        for plugin <- @plugins,
+            not plugin.__codec_loadable__(),
+            type <- plugin.__codec_types__() do
+          def load(unquote(type), _raw) do
+            raise ArgumentError,
+                  "#{inspect(unquote(plugin))} — dump-only плагин: " <>
+                    "#{inspect(unquote(type))} через load/2 не восстанавливается"
+          end
+        end
 
-      @doc false
-      if Core.Codec.Facade.redump?(@plugins),
-        do: @spec(__codec_redump__(module()) :: Core.Codec.Redump.spec()),
-        else: @spec(__codec_redump__(module()) :: no_return())
+        def load(mod, raw) when is_atom(mod) do
+          if Prim.prim?(mod),
+            do: @prim.load(mod, raw),
+            else: raise(ArgumentError, "нет codec-плагина для #{inspect(mod)}")
+        end
 
-      @impl true
-      for plugin <- @plugins,
-          missing = plugin.__codec_redump_missing__(),
-          mod <- Core.Codec.Facade.load_mods(plugin),
-          not List.keymember?(missing, mod, 0) do
-        def __codec_redump__(unquote(mod)), do: unquote(plugin).__codec_redump__(unquote(mod))
-      end
+        @doc "Load через `load/2`; при ошибке — raise."
+        @spec load!(module(), term()) :: term()
 
-      for plugin <- @plugins,
-          {mod, culprit} <- plugin.__codec_redump_missing__() do
-        def __codec_redump__(unquote(mod)), do: Core.Codec.Plugin.Redump.missing!(unquote(culprit), unquote(plugin))
-      end
+        @impl true
+        for plugin <- @plugins,
+            plugin.__codec_loadable__(),
+            mod <- Core.Codec.Facade.load_mods(plugin) do
+          def load!(unquote(mod), raw) do
+            case unquote(plugin).load(unquote(mod), raw, __MODULE__) do
+              unquote(Core.Codec.Facade.load_clauses(plugin, mod, :load!))
+            end
+          end
+        end
 
-      def __codec_redump__(mod) when is_atom(mod) do
-        raise ArgumentError, "#{inspect(mod)}: нет codec-плагина в фасаде #{inspect(__MODULE__)} — спеки redump нет"
+        def load!(mod, raw) when is_atom(mod) do
+          Core.Result.unwrap!(load(mod, raw))
+        end
+
+        @doc false
+        if Core.Codec.Facade.redump?(@plugins),
+          do: @spec(__codec_redump__(module()) :: Core.Codec.Redump.spec()),
+          else: @spec(__codec_redump__(module()) :: no_return())
+
+        @impl true
+        for plugin <- @plugins,
+            missing = plugin.__codec_redump_missing__(),
+            mod <- Core.Codec.Facade.load_mods(plugin),
+            not List.keymember?(missing, mod, 0) do
+          def __codec_redump__(unquote(mod)), do: unquote(plugin).__codec_redump__(unquote(mod))
+        end
+
+        for plugin <- @plugins,
+            {mod, culprit} <- plugin.__codec_redump_missing__() do
+          def __codec_redump__(unquote(mod)), do: Core.Codec.Plugin.Redump.missing!(unquote(culprit), unquote(plugin))
+        end
+
+        def __codec_redump__(mod) when is_atom(mod) do
+          raise ArgumentError, "#{inspect(mod)}: нет codec-плагина в фасаде #{inspect(__MODULE__)} — спеки redump нет"
+        end
       end
-    end
+    ]
   end
 
-  @doc "Плагины фасада — `plugins:` как объявлены."
+  @doc false
   @spec plugins!(term()) :: [module()]
 
   def plugins!(plugins) when is_list(plugins), do: plugins
-  def plugins!(_plugins), do: raise(CompileError, description: "plugins: ожидается список модулей")
+
+  def plugins!(other),
+    do: Helper.Opts.reject!("#{@label}: plugins", "ожидается список модулей, получено #{inspect(other)}")
 
   @doc """
   Есть ли у плагинов фасада хоть один тип со спекой пере-дампа.
@@ -222,8 +242,10 @@ defmodule Core.Codec.Facade do
   defp put_unique_mod!(acc, mod, plugin) do
     case Map.fetch(acc, mod) do
       {:ok, other} ->
-        raise CompileError,
-          description: "тип #{inspect(mod)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
+        Helper.Opts.reject!(
+          "#{@label}: plugins",
+          "тип #{inspect(mod)} объявлен дважды: в #{inspect(plugin)} и #{inspect(other)}"
+        )
 
       :error ->
         Map.put(acc, mod, plugin)
@@ -280,12 +302,10 @@ defmodule Core.Codec.Facade do
     Code.ensure_compiled!(plugin)
 
     if not Helper.Module.exports?(plugin, :__codec_types__, 0) do
-      raise CompileError,
-        description: "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin"
+      Helper.Opts.reject!("#{@label}: plugins", "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin")
     end
   end
 
-  defp ensure_plugin!(plugin) do
-    raise CompileError, description: "плагин #{inspect(plugin)}: ожидается модуль"
-  end
+  defp ensure_plugin!(plugin),
+    do: Helper.Opts.reject!("#{@label}: plugins", "ожидается модуль, получено #{inspect(plugin)}")
 end

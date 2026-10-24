@@ -28,6 +28,12 @@ defmodule Core.Codec do
   идемпотентным: на read-пути оно применяется к значению, уже прошедшему dump профиля
   записи, а нормализовать его нечем. У форматируемых kind эту роль играет `cast` в
   `coerce/2` — там значение возвращается к каноническому виду до dump.
+
+  ## Опции
+
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): ключи и значения
+  проверяются при раскрытии `use`, атрибут или вызов функции в опции — `CompileError`
+  «ожидается литерал».
   """
 
   alias Core.Config
@@ -62,27 +68,28 @@ defmodule Core.Codec do
 
   @optional_callbacks dump_kind: 2, load_kind: 3
 
+  @label "Codec"
+  @required_keys ~w(uuid datetime datetime_tz decimal)a
+  @optional_keys ~w(date)a
+  @expression_keys ~w()a
+
   # ===== билдер =====
 
   @doc "Объявить Prim-профиль кодека (`uuid` / `datetime` / `datetime_tz` / `decimal`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        ~w(uuid datetime datetime_tz decimal)a,
-        ~w(date)a,
-        "Codec"
-      )
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    validate_profile_opts!(opts)
 
-      Core.Codec.validate_profile_opts!(opts)
-
+    quote do
       @behaviour Core.Codec
 
-      @codec_uuid Keyword.fetch!(opts, :uuid)
-      @codec_datetime Keyword.fetch!(opts, :datetime)
-      @codec_datetime_tz Keyword.fetch!(opts, :datetime_tz)
-      @codec_date Keyword.get(opts, :date, Core.Codec.default_fmt(:date))
-      @codec_decimal Keyword.fetch!(opts, :decimal)
+      @codec_uuid unquote(Keyword.fetch!(opts, :uuid))
+      @codec_datetime unquote(Keyword.fetch!(opts, :datetime))
+      @codec_datetime_tz unquote(Keyword.fetch!(opts, :datetime_tz))
+      @codec_date unquote(fetch_fmt(opts, :date))
+      @codec_decimal unquote(Keyword.fetch!(opts, :decimal))
 
       @doc "Dump Prim по kind (builtin-форматы профиля)."
       @impl true
@@ -149,28 +156,19 @@ defmodule Core.Codec do
     end
   end
 
-  # ===== опции профиля =====
+  # ---
 
-  @doc false
-  @spec validate_profile_opts!(keyword()) :: :ok
-
-  def validate_profile_opts!(opts) do
+  defp validate_profile_opts!(opts) do
     Enum.each(@allowed_fmts, fn {key, allowed} ->
       value = fetch_fmt(opts, key)
 
       if value not in allowed,
-        do: raise(ArgumentError, "неизвестное значение #{key}: #{inspect(value)}")
+        do:
+          Helper.Opts.reject!("#{@label}: #{key}", "ожидается одно из #{inspect(allowed)}, получено #{inspect(value)}")
     end)
 
     validate_datetime_tz!(Keyword.fetch!(opts, :datetime_tz))
   end
-
-  @doc false
-  @spec default_fmt(atom()) :: atom()
-
-  def default_fmt(key) when is_map_key(@default_fmts, key), do: Map.fetch!(@default_fmts, key)
-
-  # ---
 
   defp fetch_fmt(opts, key) when is_map_key(@default_fmts, key) do
     Keyword.get(opts, key, Map.fetch!(@default_fmts, key))
@@ -181,31 +179,28 @@ defmodule Core.Codec do
   defp validate_datetime_tz!(:keep), do: :ok
   defp validate_datetime_tz!(:app), do: :ok
 
-  # tz-база не поднимается на этапе компиляции (`ensure_all_started(:tzdata)` тянул бы
-  # чтение/скачивание базы внутрь компилятора): если она уже доступна — зона проверяется
-  # полностью, иначе только форма имени, а неизвестная зона всплывёт на первом dump.
   defp validate_datetime_tz!(tz) when is_binary(tz) do
-    case DateTime.shift_zone(DateTime.utc_now(), tz) do
-      {:ok, _} ->
-        :ok
+    if not valid_tz?(tz), do: Helper.Opts.reject!("#{@label}: datetime_tz", "неизвестная зона #{inspect(tz)}")
 
-      {:error, :time_zone_not_found} ->
-        raise ArgumentError, "неизвестная зона datetime_tz: #{inspect(tz)}"
-
-      {:error, _no_tz_database} ->
-        validate_tz_shape!(tz)
-    end
+    :ok
   end
 
   defp validate_datetime_tz!(other) do
-    raise ArgumentError,
-          "datetime_tz: ожидается :keep, :app или строка IANA-зоны, получено: #{inspect(other)}"
+    Helper.Opts.reject!(
+      "#{@label}: datetime_tz",
+      "ожидается :keep, :app или строка IANA-зоны, получено #{inspect(other)}"
+    )
   end
 
-  defp validate_tz_shape!(tz) do
-    if Regex.match?(~r{^[A-Za-z][A-Za-z0-9+\-_]*(/[A-Za-z0-9+\-_]+)*$}, tz),
-      do: :ok,
-      else: raise(ArgumentError, "неизвестная зона datetime_tz: #{inspect(tz)}")
+  # tz-база не поднимается на этапе компиляции (`ensure_all_started(:tzdata)` тянул бы
+  # чтение/скачивание базы внутрь компилятора): если она уже доступна — зона проверяется
+  # полностью, иначе только форма имени, а неизвестная зона всплывёт на первом dump.
+  defp valid_tz?(tz) do
+    case DateTime.shift_zone(DateTime.utc_now(), tz) do
+      {:ok, _} -> true
+      {:error, :time_zone_not_found} -> false
+      {:error, _no_tz_database} -> Regex.match?(~r{^[A-Za-z][A-Za-z0-9+\-_]*(/[A-Za-z0-9+\-_]+)*$}, tz)
+    end
   end
 
   # ===== dump =====

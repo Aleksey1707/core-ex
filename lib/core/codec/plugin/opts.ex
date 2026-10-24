@@ -9,40 +9,51 @@ defmodule Core.Codec.Plugin.Opts do
   `@spec` у `dump/2` / `load/3` плагина с `fields:` или `variants:` — `CompileError`.
   """
 
+  alias Core.Helper
+
+  @label "Codec.Plugin"
+
   # ===== опции =====
 
   @doc false
-  @spec types!(keyword()) :: [module()]
+  @spec types!(term()) :: [module()]
 
-  def types!(opts) do
-    case Keyword.get(opts, :types, []) do
-      types when is_list(types) ->
-        validate_modules!(types)
+  def types!(types) do
+    if not (is_list(types) and Enum.all?(types, &(is_atom(&1) and not is_nil(&1)))) do
+      Helper.Opts.reject!("#{@label}: types", "ожидается список модулей, получено #{inspect(types)}")
+    end
 
-      other ->
-        raise CompileError, description: "types: ожидается список модулей, получено: #{inspect(other)}"
+    types
+  end
+
+  @doc false
+  @spec loadable!(keyword()) :: boolean()
+
+  def loadable!(opts) do
+    case Keyword.get(opts, :loadable, true) do
+      loadable when is_boolean(loadable) -> loadable
+      other -> Helper.Opts.reject!("#{@label}: loadable", "ожидается true или false, получено #{inspect(other)}")
     end
   end
 
   @doc false
-  @spec all_types!(module(), [[module()]]) :: [module()]
+  @spec all_types!([[module()]]) :: [module()]
 
-  def all_types!(plugin, groups) do
+  def all_types!(groups) do
     all = Enum.concat(groups)
 
     case {all, all -- Enum.uniq(all)} do
       {[], _dupes} ->
-        raise CompileError,
-          description: "Codec.Plugin #{inspect(plugin)}: нет типов — задайте types:, fields: или variants:"
+        Helper.Opts.reject!(@label, "нет типов — задайте types:, fields: или variants:")
 
       {all, []} ->
         all
 
       {_all, dupes} ->
-        raise CompileError,
-          description:
-            "Codec.Plugin #{inspect(plugin)}: типы объявлены в нескольких опциях: #{inspect(Enum.uniq(dupes))} — " <>
-              "types: только для ручных типов"
+        Helper.Opts.reject!(
+          "#{@label}: types",
+          "типы объявлены в нескольких опциях: #{inspect(Enum.uniq(dupes))} — types: только для ручных типов"
+        )
     end
   end
 
@@ -119,25 +130,15 @@ defmodule Core.Codec.Plugin.Opts do
     end
   end
 
-  defp validate_modules!(types) do
-    if not Enum.all?(types, &(is_atom(&1) and not is_nil(&1))) do
-      raise CompileError, description: "types: ожидается список модулей"
-    end
-
-    types
-  end
-
   # Семейство существует ради `load/3`: у dump-only плагина восстанавливать нечем,
   # и клоуза фасада для него была бы обещанием, которого плагин не выполняет.
-  defp validate_union!(union, false) when is_atom(union) do
-    raise CompileError, description: "union: требует loadable: true"
-  end
+  defp validate_union!(union, false) when is_atom(union),
+    do: Helper.Opts.reject!("#{@label}: union", "требует loadable: true")
 
   defp validate_union!(union, _loadable?) when is_atom(union) and not is_nil(union), do: union
 
-  defp validate_union!(other, _loadable?) do
-    raise CompileError, description: "union: ожидается модуль, получено: #{inspect(other)}"
-  end
+  defp validate_union!(other, _loadable?),
+    do: Helper.Opts.reject!("#{@label}: union", "ожидается модуль, получено #{inspect(other)}")
 
   # ===== ручные клаузы =====
 
