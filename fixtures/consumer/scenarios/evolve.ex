@@ -31,8 +31,7 @@ defmodule ConsumerTest.BadEvolve.Repo do
   # expect: incompatible types given to ConsumerTest.BadEvolve.evolve/2
   # expect: incompatible types given to ConsumerTest.BadEvolve.evolve/2
   use Core.Es.Aggregate.Repo,
-    aggregate: ConsumerTest.BadEvolve,
-    id: Consumer.Domain.Sales.Account.ID
+    aggregate: ConsumerTest.BadEvolve
 end
 
 defmodule ConsumerTest.BadEvolvePayload do
@@ -63,8 +62,7 @@ defmodule ConsumerTest.BadEvolvePayload.Repo do
   # C2a — опечатка в поле нагрузки без паттерна `%Payload{}`: при определении молчит
   # expect: incompatible types given to ConsumerTest.BadEvolvePayload.evolve/2
   use Core.Es.Aggregate.Repo,
-    aggregate: ConsumerTest.BadEvolvePayload,
-    id: Consumer.Domain.Sales.Account.ID
+    aggregate: ConsumerTest.BadEvolvePayload
 end
 
 defmodule ConsumerTest.BadEvolveState do
@@ -97,8 +95,7 @@ defmodule ConsumerTest.BadEvolveState.Repo do
   # C4 — опечатка в ключе `%{state | …}`: при определении молчит
   # expect: incompatible types given to ConsumerTest.BadEvolveState.evolve/2
   use Core.Es.Aggregate.Repo,
-    aggregate: ConsumerTest.BadEvolveState,
-    id: Consumer.Domain.Sales.Account.ID
+    aggregate: ConsumerTest.BadEvolveState
 end
 
 defmodule ConsumerTest.LongName.Event do
@@ -166,8 +163,7 @@ defmodule ConsumerTest.LongName.Repo do
   # C1l — C1 у события, чьё имя модуля в имени функции-проверки укорачивается до последних сегментов
   # expect: incompatible types given to ConsumerTest.LongName.evolve/2
   use Core.Es.Aggregate.Repo,
-    aggregate: ConsumerTest.LongName,
-    id: Consumer.Domain.Sales.Account.ID
+    aggregate: ConsumerTest.LongName
 end
 
 defmodule ConsumerTest.Evolve do

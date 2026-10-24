@@ -3,8 +3,6 @@ defmodule Consumer.Domain.Sales.Order.Repo.Pg do
 
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Consumer.Domain.Sales.Order.Repo,
-    aggregate: Order,
-    id: Order.ID,
     errors: Order.Errors,
     outbox: Order.Outbox
 end

@@ -331,8 +331,6 @@ defmodule Core.Es.KeyReservationTest do
   defp compile_repo!(name, keys) do
     opts = [
       behaviour: Account.KeyedRepo,
-      aggregate: Account,
-      id: Account.ID,
       errors: Account.Errors,
       outbox: Account.Outbox,
       key_reservations: keys

@@ -5,8 +5,6 @@ defmodule Core.EsFixture.Account.Repo.Pg.Unpublished do
 
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Core.EsFixture.Account.Repo,
-    aggregate: Account,
-    id: Account.ID,
     errors: Account.Errors,
     outbox: :none
 end

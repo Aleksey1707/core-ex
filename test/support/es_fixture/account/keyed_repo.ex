@@ -5,6 +5,5 @@ defmodule Core.EsFixture.Account.KeyedRepo do
   """
 
   use Core.Es.Aggregate.Repo,
-    aggregate: Core.EsFixture.Account,
-    id: Core.EsFixture.Account.ID
+    aggregate: Core.EsFixture.Account
 end

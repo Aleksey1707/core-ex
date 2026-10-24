@@ -28,8 +28,6 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
     use Core.Es.Aggregate.Repo.Pg,
       behaviour: Core.EsFixture.Account.Repo,
-      aggregate: Core.EsFixture.Account,
-      id: Core.EsFixture.Account.ID,
       errors: Core.EsFixture.Account.Errors,
       outbox: Core.EsFixture.Account.Outbox,
       repo: Core.Es.Aggregate.Repo.Pg.SnapshottedTest.FailingDao,

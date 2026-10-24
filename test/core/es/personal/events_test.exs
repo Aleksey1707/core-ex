@@ -40,8 +40,6 @@ defmodule Core.Es.Personal.EventsTest do
 
     use Core.Es.Aggregate.Repo.Pg,
       behaviour: Core.EsFixture.Account.Repo,
-      aggregate: Core.EsFixture.Account,
-      id: Core.EsFixture.Account.ID,
       errors: Core.EsFixture.Account.Errors,
       outbox: Core.EsFixture.Account.Outbox,
       codec: Core.Es.Personal.EventsTest.RaisingCodec

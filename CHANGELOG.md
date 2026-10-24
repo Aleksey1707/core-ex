@@ -141,21 +141,13 @@
   <модуль>: open_api_spex есть, но core собран без него». Форма схемы не изменилась, кроме порядка
   `required` схемы события. Правка потребителя: `mix deps.compile core --force`.
 
-- **Рассогласованные `id:` / `aggregate:` у behaviour и реализации репозитория event-sourced агрегата
-  — `CompileError`.** `use Core.Es.Aggregate.Repo` проверял только, что `aggregate:` — event-sourced
-  агрегат, и `id:` с Prim агрегата кодека не сверял; `use Core.Es.Aggregate.Repo.Pg` проверял у
-  `behaviour:` только набор колбэков. `use Core.Es.Aggregate.Process` берёт тип головы `execute` из
-  `behaviour.__es_aggregate_repo__().id`, поэтому неверный `id:` behaviour'а давал процесс с чужой
-  головой. Теперь `use Core.Es.Aggregate.Repo` сверяет `id:` с `__es_aggregate_id__/0` кодека
-  агрегата, а `use Core.Es.Aggregate.Repo.Pg` требует от `behaviour:` экспорт
-  `__es_aggregate_repo__/0` (`use Core.Es.Aggregate.Repo`) и сверяет с ним свои `aggregate:` /
-  `id:`. Правка потребителя — привести опции к Prim и агрегату кодека:
-  - `id:` behaviour'а: было `use Core.Es.Aggregate.Repo, aggregate: Account, id: Other.ID`, стало
-    `id: Account.ID`;
-  - рукописный behaviour с `@callback`: было `behaviour: MyBehaviour`, стало behaviour на
-    `use Core.Es.Aggregate.Repo, aggregate: …, id: …`;
-  - реализация над behaviour другого агрегата: было `behaviour: Other.Repo, aggregate: Account`,
-    стало `behaviour: Account.Repo`.
+- **`behaviour:` у `use Core.Es.Aggregate.Repo.Pg` — только `use Core.Es.Aggregate.Repo`.**
+  Реализация проверяла у `behaviour:` только набор колбэков, а `use Core.Es.Aggregate.Process`
+  берёт тип головы `execute` из `behaviour.__es_aggregate_repo__().id`. Теперь
+  `use Core.Es.Aggregate.Repo.Pg` требует от `behaviour:` экспорт `__es_aggregate_repo__/0` и берёт
+  из него агрегат и Prim идентификатора (пункт «Связи event-sourced агрегата называет один
+  владелец…»). Правка потребителя: рукописный behaviour с `@callback` — было
+  `behaviour: MyBehaviour`, стало behaviour на `use Core.Es.Aggregate.Repo, aggregate: …`.
 
 - **Связи event-sourced агрегата называет один владелец: новое семейство
   `use Core.Es.Event.Family`, опции-копии уходят** (решение — ADR-0084; норма —
@@ -164,8 +156,10 @@
   копии сверками задним числом; принадлежность событий кодека семейству не сверял никто, проекция
   находила кодек и агрегат по имени модуля. Теперь семейство владеет `aggregate_id` и `by` и
   называет владельца потока и кодек, событие, кодек и `Outbox` ссылаются на семейство; Prim
-  агрегата и автора кодек берёт у семейства, а не выводит из событий. Старая форма — `CompileError`
-  «нет обязательных опций: …; неизвестные опции: …». Правка потребителя:
+  агрегата и автора кодек берёт у семейства, а не выводит из событий. Behaviour репозитория
+  указывает на агрегат и берёт Prim идентификатора у его кодека, реализация — на behaviour и
+  берёт у него агрегат и Prim; сверять копии `id:` / `aggregate:` больше нечего. Старая форма —
+  `CompileError` «нет обязательных опций: …; неизвестные опции: …». Правка потребителя:
 
   | Билдер | Было | Стало |
   |---|---|---|
@@ -173,6 +167,8 @@
   | `use Core.Es.Event` | `aggregate_id:`, `by:` | `family:` |
   | `use Core.Es.Event.Codec` | `event:` | `family:` |
   | `use Core.Es.Outbox` | `event:` | `family:` |
+  | `use Core.Es.Aggregate.Repo` | `aggregate:`, `id:` | `aggregate:` |
+  | `use Core.Es.Aggregate.Repo.Pg` | `behaviour:`, `aggregate:`, `id:`, … | `behaviour:`, … |
 
   Новые проверки сборки: семейство без `@type t` — `CompileError`; событие из `tags:` не из
   семейства кодека и `codec:` семейства на чужой кодек — `CompileError` в кодеке; семейство кодека

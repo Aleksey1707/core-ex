@@ -640,8 +640,7 @@ Event-sourced агрегат (`11-domain.md`, «Event-sourced») хранитс�
 ```elixir
 defmodule MyApp.Domain.<BC>.Account.Repo do
   use Core.Es.Aggregate.Repo,
-    aggregate: MyApp.Domain.<BC>.Account,
-    id: MyApp.Domain.<BC>.Account.ID
+    aggregate: MyApp.Domain.<BC>.Account
 end
 
 defmodule MyApp.Domain.<BC>.Account.Repo.Pg do
@@ -649,22 +648,25 @@ defmodule MyApp.Domain.<BC>.Account.Repo.Pg do
 
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: MyApp.Domain.<BC>.Account.Repo,
-    aggregate: Account,
-    id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox
 end
 ```
+
+Связь называет один владелец (ADR-0084): behaviour — агрегат, реализация — behaviour. Prim
+идентификатора behaviour берёт у кодека событий агрегата (`aggregate_id:` его семейства), а
+реализация агрегат и Prim — у behaviour (`__es_aggregate_repo__/0`); `id:` у behaviour и
+`aggregate:` / `id:` у реализации — неизвестные опции.
 
 Кодек событий берётся из `event_codec:` агрегата, отдельной опции нет; `repo:` и `codec:` —
 опциональны, по умолчанию `Core.Config`; `snapshot:` — «Снапшоты» ниже; `outbox: :none` — как у
 state-stored («Write state-stored агрегата»). Реализация резолвится по конвенции `<Behaviour>.Pg`
 («DI»).
 
-Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo` — Prim агрегата кодека не равен `id:`;
-в `use Core.Es.Aggregate.Repo.Pg` — `behaviour:` не `use Core.Es.Aggregate.Repo`, `aggregate:` /
-`id:` behaviour'а не равны `aggregate:` / `id:` реализации, нет `outbox:`, в `errors:` нет clause
-`:version_mismatch`, Prim агрегата кодека не равен `id:`, событие `outbox:` не из семейства кодека.
+Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo` — `aggregate:` не event-sourced
+агрегат; в `use Core.Es.Aggregate.Repo.Pg` — `behaviour:` не `use Core.Es.Aggregate.Repo`,
+семейство кодека называет владельцем потока не агрегат behaviour, нет `outbox:`, в `errors:` нет
+clause `:version_mismatch`, событие `outbox:` не из семейства кодека.
 
 | Функция | Возврат | Исходы |
 |---|---|---|
@@ -771,8 +773,6 @@ end)
 ```elixir
 use Core.Es.Aggregate.Repo.Pg,
   behaviour: MyApp.Domain.<BC>.Account.Repo,
-  aggregate: Account,
-  id: Account.ID,
   errors: Account.Errors,
   outbox: Account.Outbox,
   snapshot: [every: 100]
@@ -854,8 +854,6 @@ end
 
 use Core.Es.Aggregate.Repo.Pg,
   behaviour: MyApp.Domain.<BC>.User.Repo,
-  aggregate: User,
-  id: User.ID,
   errors: User.Errors,
   outbox: User.Outbox,
   key_reservations: [User.LoginKey]

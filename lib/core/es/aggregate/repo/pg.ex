@@ -7,14 +7,13 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
         use Core.Es.Aggregate.Repo.Pg,
           behaviour: MyApp.Domain.<BC>.Account.Repo,
-          aggregate: Account,
-          id: Account.ID,
           errors: Account.Errors,
           outbox: Account.Outbox
       end
 
   Строки состояния нет: `get` / `get_decision` / `get_many` / `refresh` сворачивают события потока
-  через `Agg.fold/2`; тип агрегата и семейство событий — из кодека `__es_event_codec__/0` агрегата.
+  через `Agg.fold/2`. Агрегат и Prim идентификатора — из `__es_aggregate_repo__/0` behaviour, тип
+  агрегата и семейство событий — из кодека `__es_event_codec__/0` агрегата.
   `Repo.Sc`, `default_filters` и `delete` не участвуют: доступ решают usecase и `decide`,
   удаление — доменное событие.
 
@@ -127,9 +126,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   ## Opts
 
-  - `behaviour:` — `use Core.Es.Aggregate.Repo`; модуль ошибок `:version_mismatch`
-  - `aggregate:` — `use Core.Es.Aggregate`
-  - `id:` — Prim идентификатора агрегата
+  - `behaviour:` — `use Core.Es.Aggregate.Repo`; модуль ошибок `:version_mismatch`, источник агрегата
+    и Prim идентификатора
   - `errors:` — каталог ошибок с clause `:version_mismatch`
   - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`) либо `:none`: агрегат не публикует
     события наружу, записей outbox нет
@@ -145,11 +143,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `key_reservations:` — список модулей ключа (`use Core.Es.KeyReservation`), по умолчанию `[]`
 
   На компиляции `CompileError`, если `behaviour:` — не `use Core.Es.Aggregate.Repo` (нет
-  `__es_aggregate_repo__/0` или колбэков), его `aggregate:` / `id:` не равны `aggregate:` / `id:`
-  реализации, `aggregate:` — не event-sourced агрегат, и на сверках
-  `Core.Es.Store.Opts`: кодек агрегата без `type:`, семейство кодека называет владельцем потока не
-  `aggregate:`, Prim агрегата кодека не равен `id:`, событие
-  `outbox:` не равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
+  `__es_aggregate_repo__/0` или колбэков), и на сверках `Core.Es.Store.Opts`: кодек агрегата без
+  `type:`, семейство кодека называет владельцем потока не агрегат behaviour, событие `outbox:` не
+  равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
   не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля, `version:` не
   целое или у ПДн-поля события субъект — поле нагрузки, а не `:aggregate_id`; `key_reservations:`
   — не список модулей ключа, у модуля ключа событие не равно семейству кодека или `id:` — `id:`
@@ -175,7 +171,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Version
 
   @label "Es.Aggregate.Repo.Pg"
-  @required_keys ~w(behaviour aggregate id errors outbox)a
+  @required_keys ~w(behaviour errors outbox)a
   @optional_keys ~w(repo codec snapshot key_reservations)a
   @stream_types %{index: :integer, aggregate_id: :binary_id, after_version: :integer}
 
@@ -184,7 +180,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @doc "Реализовать write-репозиторий event-sourced агрегата на хранилище событий."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
-    cfg = validate_opts!(lit, __CALLER__.module)
+    cfg = validate_opts!(lit)
     dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
     checks = Es.KeyReservation.checks(cfg.key_reservations, cfg.event_codec, __CALLER__.line)
@@ -286,24 +282,21 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   # ---
 
-  defp validate_opts!(opts, impl) do
+  defp validate_opts!(opts) do
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
 
-    aggregate =
-      Helper.Opts.module!(opts, :aggregate, @label, exports: [__es_event_codec__: 0, fold: 2])
-
+    behaviour = behaviour!(opts)
+    %{aggregate: aggregate, id: id} = behaviour.__es_aggregate_repo__()
     event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
     Es.Store.Opts.ensure_family_aggregate!(event_codec, aggregate, @label)
-    id = Helper.Opts.module!(opts, :id, @label)
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
 
     outbox = Es.Store.Opts.outbox!(opts, event_codec, @label)
 
-    Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
     Es.Store.Opts.ensure_version_mismatch!(errors, @label)
 
     %{
-      behaviour: behaviour!(opts, impl, aggregate, id),
+      behaviour: behaviour,
       aggregate: aggregate,
       id: id,
       event_codec: event_codec,
@@ -316,31 +309,18 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     }
   end
 
-  defp behaviour!(opts, impl, aggregate, id) do
+  defp behaviour!(opts) do
     behaviour = Helper.Opts.module!(opts, :behaviour, @label, exports: [__es_aggregate_repo__: 0])
 
     case Es.Aggregate.Repo.callbacks() -- behaviour.behaviour_info(:callbacks) do
       [] ->
-        ensure_behaviour_aggregate!(behaviour, impl, aggregate, id)
+        behaviour
 
       missing ->
         raise CompileError,
           description:
             "#{@label}: behaviour #{inspect(behaviour)} должен объявлять #{inspect(missing)} " <>
               "(use Core.Es.Aggregate.Repo)"
-    end
-  end
-
-  defp ensure_behaviour_aggregate!(behaviour, impl, aggregate, id) do
-    case behaviour.__es_aggregate_repo__() do
-      %{aggregate: ^aggregate, id: ^id} ->
-        behaviour
-
-      declared ->
-        raise CompileError,
-          description:
-            "#{@label}: behaviour #{inspect(behaviour)} объявлен для aggregate: #{inspect(declared.aggregate)}, " <>
-              "id: #{inspect(declared.id)}, а #{inspect(impl)} — для aggregate: #{inspect(aggregate)}, id: #{inspect(id)}"
     end
   end
 

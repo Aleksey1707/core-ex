@@ -4,8 +4,7 @@ defmodule Core.Es.Aggregate.Repo do
 
       defmodule MyApp.Domain.<BC>.Account.Repo do
         use Core.Es.Aggregate.Repo,
-          aggregate: MyApp.Domain.<BC>.Account,
-          id: MyApp.Domain.<BC>.Account.ID
+          aggregate: MyApp.Domain.<BC>.Account
       end
 
   Генерирует `@callback`:
@@ -29,7 +28,9 @@ defmodule Core.Es.Aggregate.Repo do
   по конвенции `<Behaviour>.Pg`.
 
   Интроспекция — `__es_aggregate_repo__/0`: по ней `use Core.Es.Aggregate.Process` находит
-  агрегат и Prim идентификатора.
+  агрегат и Prim идентификатора, а `use Core.Es.Aggregate.Repo.Pg` — головы своих функций. Prim
+  идентификатора — `__es_aggregate_id__/0` кодека событий агрегата (его семейство), отдельной опции
+  нет.
 
   ## Полнота `evolve`
 
@@ -44,21 +45,19 @@ defmodule Core.Es.Aggregate.Repo do
   - опечатка в поле нагрузки, которую clause не сузила паттерном `%Payload{}`.
 
   Агрегат без репозитория полноту `evolve` не проверяет. Кодек агрегата грузится при сборке
-  репозитория; не кодек событий или его Prim агрегата (`__es_aggregate_id__/0`) не равен `id:` —
-  `CompileError`. Макрос занимает в вызывающем модуле имена функций-проверок, по одному на событие
+  репозитория; не кодек событий — `CompileError`. Макрос занимает в вызывающем модуле имена функций-проверок, по одному на событие
   кодека.
 
   ## Opts
 
   - `aggregate:` — модуль агрегата (`use Core.Es.Aggregate`); тип состояния — его `t()`
-  - `id:` — Prim идентификатора агрегата
   """
 
   alias Core.Es
   alias Core.Helper
 
   @label "Es.Aggregate.Repo"
-  @required_keys ~w(aggregate id)a
+  @required_keys ~w(aggregate)a
   @optional_keys []
   @callbacks [get: 4, get_decision: 5, get_many: 3, append: 3, refresh: 4, page_stream: 4]
 
@@ -69,9 +68,8 @@ defmodule Core.Es.Aggregate.Repo do
     lit = Macro.expand_literals(opts, __CALLER__)
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
     aggregate = Helper.Opts.module!(lit, :aggregate, @label, exports: [__es_event_codec__: 0])
-    id = Helper.Opts.module!(lit, :id, @label)
     event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
-    Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
+    id = event_codec.__es_aggregate_id__()
 
     quote do
       unquote_splicing(evolve_checks(aggregate, event_codec, __CALLER__.line))

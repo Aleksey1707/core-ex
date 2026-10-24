@@ -124,8 +124,6 @@ defmodule Core.Es.Personal.KeyReservationTest do
 
     opts = [
       behaviour: Account.KeyedRepo,
-      aggregate: Account,
-      id: Account.ID,
       errors: Account.Errors,
       outbox: Account.Outbox,
       key_reservations: [key]

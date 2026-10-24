@@ -8,31 +8,27 @@ defmodule Core.Es.Aggregate.RepoTest do
              [append: 3, get: 4, get_decision: 5, get_many: 3, page_stream: 4, refresh: 4]
   end
 
+  test "id агрегата — Prim агрегата его кодека" do
+    assert Account.Repo.__es_aggregate_repo__() == %{aggregate: Account, id: Account.ID}
+  end
+
   describe "компиляция" do
-    test "требует aggregate и id" do
+    test "требует aggregate" do
       assert_raise CompileError,
-                   ~r/Es\.Aggregate\.Repo: нет обязательных опций: \[:aggregate, :id\]/,
+                   ~r/^Es\.Aggregate\.Repo: нет обязательных опций: \[:aggregate\]$/,
                    fn -> compile!(NoOpts, []) end
+    end
+
+    test "старая форма с id: — неизвестная опция" do
+      assert_raise CompileError,
+                   ~r/^Es\.Aggregate\.Repo: неизвестные опции: \[:id\]$/,
+                   fn -> compile!(OldForm, aggregate: Account, id: Account.ID) end
     end
 
     test "aggregate — event-sourced агрегат" do
       assert_raise CompileError,
                    ~r/aggregate: модуль .* должен экспортировать __es_event_codec__/,
-                   fn ->
-                     compile!(StateStored,
-                       aggregate: Core.StateStoredFixture.Entity,
-                       id: Account.ID
-                     )
-                   end
-    end
-
-    test "Prim агрегата кодека сверяется с id:" do
-      message =
-        ~r/^Es\.Aggregate\.Repo: event_codec: Prim агрегата .*Account\.ID .* не равен id: .*UserID$/
-
-      assert_raise CompileError, message, fn ->
-        compile!(OtherId, aggregate: Account, id: Core.EsFixture.UserID)
-      end
+                   fn -> compile!(StateStored, aggregate: Core.StateStoredFixture.Entity) end
     end
   end
 

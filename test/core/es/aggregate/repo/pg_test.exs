@@ -36,6 +36,13 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     def evolve(state, _event), do: state
   end
 
+  defmodule StrangerRepo do
+    @moduledoc false
+
+    use Core.Es.Aggregate.Repo,
+      aggregate: Core.Es.Aggregate.Repo.PgTest.Stranger
+  end
+
   describe "DI" do
     test "реализация резолвится по конвенции <Behaviour>.Pg" do
       assert @repo == Account.Repo.Pg
@@ -169,12 +176,13 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
                    fn -> compile!(NoVersionMismatch, errors: NoVersionErrors) end
     end
 
-    test "aggregate — event-sourced агрегат" do
-      assert_raise CompileError,
-                   ~r/aggregate: модуль .* должен экспортировать __es_event_codec__/,
-                   fn ->
-                     compile!(StateStored, aggregate: Core.StateStoredFixture.Entity)
-                   end
+    test "старая форма с aggregate: / id: — одно сообщение с недостающими и неизвестными" do
+      message =
+        ~r/^Es\.Aggregate\.Repo\.Pg: нет обязательных опций: \[:outbox\]; неизвестные опции: \[:aggregate, :id\]$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(OldForm, aggregate: Account, id: Account.ID, outbox: :__drop__)
+      end
     end
 
     test "семейство кодека называет владельцем потока другой агрегат — CompileError" do
@@ -182,14 +190,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
         "Es.Aggregate.Repo.Pg: event_codec: семейство Core.EsFixture.Account.Event объявляет aggregate: " <>
           "Core.EsFixture.Account, а не #{inspect(Stranger)}"
 
-      assert_raise CompileError, message, fn -> compile!(StrangerRepo, aggregate: Stranger) end
-    end
-
-    test "Prim агрегата кодека сверяется с id:" do
-      message =
-        ~r/Prim агрегата Core\.EsFixture\.Account\.ID .* не равен id: Core\.EsFixture\.UserID/
-
-      assert_raise CompileError, message, fn -> compile!(OtherId, id: Core.EsFixture.UserID) end
+      assert_raise CompileError, message, fn -> compile!(StrangerPg, behaviour: StrangerRepo) end
     end
 
     test "событие outbox сверяется с семейством кодека" do
@@ -234,8 +235,6 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
       assert_raise CompileError, message, fn ->
         compile!(PayloadSubjectSnapshot,
           behaviour: Core.EsFixture.Catalog.Repo,
-          aggregate: Core.EsFixture.Catalog,
-          id: Core.EventFixture.AggID,
           errors: Core.EventFixture.Errors,
           outbox: :none,
           snapshot: [every: 2]
@@ -245,8 +244,6 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
       assert {{:module, _module, _binary, _}, []} =
                compile!(PayloadSubjectNoSnapshot,
                  behaviour: Core.EsFixture.Catalog.Repo,
-                 aggregate: Core.EsFixture.Catalog,
-                 id: Core.EventFixture.AggID,
                  errors: Core.EventFixture.Errors,
                  outbox: :none
                )
@@ -257,15 +254,6 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
 
       assert_raise CompileError, message, fn ->
         compile!(StateStoredBehaviour, behaviour: Core.StateStoredFixture.Repo)
-      end
-    end
-
-    test "aggregate: и id: сверяются с behaviour" do
-      message =
-        ~r/behaviour .*Catalog\.Repo .*: .*Catalog, id: .*AggID, а .*\.OtherBehaviour .*: .*Account, id: .*Account\.ID$/
-
-      assert_raise CompileError, message, fn ->
-        compile!(OtherBehaviour, behaviour: Core.EsFixture.Catalog.Repo)
       end
     end
   end
@@ -304,8 +292,6 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
   defp base_opts do
     [
       behaviour: Account.Repo,
-      aggregate: Account,
-      id: Account.ID,
       errors: Account.Errors,
       outbox: Account.Outbox
     ]

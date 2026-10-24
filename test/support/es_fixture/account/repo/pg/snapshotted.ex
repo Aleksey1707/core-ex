@@ -5,8 +5,6 @@ defmodule Core.EsFixture.Account.Repo.Pg.Snapshotted do
 
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Core.EsFixture.Account.Repo,
-    aggregate: Account,
-    id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
     snapshot: [every: 2]

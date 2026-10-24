@@ -29,8 +29,6 @@ defmodule ConsumerTest.BadKey.Repo.Pg do
   # expect: incompatible types given to ConsumerTest.BadKey.reservation/1
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Consumer.Domain.Sales.Account.Repo,
-    aggregate: Account,
-    id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
     key_reservations: [ConsumerTest.BadKey]
@@ -68,8 +66,6 @@ defmodule ConsumerTest.BadKeyPayload.Repo.Pg do
   # expect: incompatible types given to ConsumerTest.BadKeyPayload.reservation/1
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Consumer.Domain.Sales.Account.Repo,
-    aggregate: Account,
-    id: Account.ID,
     errors: Account.Errors,
     outbox: Account.Outbox,
     key_reservations: [ConsumerTest.BadKeyPayload]

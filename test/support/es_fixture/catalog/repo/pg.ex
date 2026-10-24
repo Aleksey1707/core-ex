@@ -6,8 +6,6 @@ defmodule Core.EsFixture.Catalog.Repo.Pg do
 
   use Core.Es.Aggregate.Repo.Pg,
     behaviour: Core.EsFixture.Catalog.Repo,
-    aggregate: Catalog,
-    id: EventFixture.AggID,
     errors: EventFixture.Errors,
     outbox: :none,
     key_reservations: [Catalog.PathKey]
