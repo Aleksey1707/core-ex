@@ -115,4 +115,36 @@ defmodule Core.Es.EventTest do
       refute UndeclaredEvent.declared()
     end
   end
+
+  describe "отказ сборки use" do
+    test "неизвестная опция" do
+      assert_raise CompileError, ~r/Es.Event: неизвестные опции: \[:codec\]/, fn ->
+        compile_event(:UnknownOpt, aggregate_id: AggID, by: ActorID, payload: nil, codec: AggID)
+      end
+    end
+
+    test "нет обязательной опции" do
+      assert_raise CompileError, ~r/Es.Event: нет обязательных опций: \[:payload\]/, fn ->
+        compile_event(:NoPayloadOpt, aggregate_id: AggID, by: ActorID)
+      end
+    end
+
+    test ":payload — не модуль и не nil" do
+      assert_raise CompileError, ~r/Es.Event: :payload должен быть модулем или nil/, fn ->
+        compile_event(:StringPayload, aggregate_id: AggID, by: ActorID, payload: "ValuePayload")
+      end
+    end
+  end
+
+  # ---
+
+  defp compile_event(name, opts) do
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(Module.concat(__MODULE__, name)) do
+          use Core.Es.Event, unquote(opts)
+        end
+      end
+    )
+  end
 end

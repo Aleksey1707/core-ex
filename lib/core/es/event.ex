@@ -91,33 +91,34 @@ defmodule Core.Es.Event do
           required(:basis_id) => OperationID.t() | nil
         }
 
+  @label "Es.Event"
   @required_keys ~w(aggregate_id by payload)a
   @optional_keys ~w()a
 
+  # ===== объявление =====
+
   @doc "Объявить событие агрегата (`aggregate_id:` / `by:` / `payload:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Es.Event.required_keys(),
-        Core.Es.Event.optional_keys(),
-        "Es.Event"
-      )
+    lit = Macro.expand_literals(opts, __CALLER__)
+    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
 
+    payload_mod = Keyword.fetch!(lit, :payload)
+    aggregate_id_mod = Keyword.fetch!(lit, :aggregate_id)
+    by_mod = Keyword.fetch!(lit, :by)
+
+    unless is_nil(payload_mod) or is_atom(payload_mod) do
+      raise CompileError, description: "#{@label}: :payload должен быть модулем или nil"
+    end
+
+    check_subject!(payload_mod, aggregate_id_mod)
+
+    payload = payload_parts(payload_mod)
+
+    quote do
       alias Core.Es.Event, as: EsEvent
       alias Core.Version
 
       import Core.Guard, only: [is_opt: 2]
-
-      payload_mod = Keyword.fetch!(opts, :payload)
-      aggregate_id_mod = Keyword.fetch!(opts, :aggregate_id)
-      by_mod = Keyword.fetch!(opts, :by)
-
-      unless is_nil(payload_mod) or is_atom(payload_mod) do
-        raise CompileError, description: "Es.Event: :payload должен быть модулем или nil"
-      end
-
-      Core.Es.Event.check_subject!(payload_mod, aggregate_id_mod)
 
       @enforce_keys ~w(id payload aggregate_id aggregate_version at by)a
       defstruct @enforce_keys ++ [operation_id: nil, session_id: nil, basis_id: nil]
@@ -137,117 +138,89 @@ defmodule Core.Es.Event do
 
       def __es_by__, do: unquote(by_mod)
 
-      if is_nil(payload_mod) do
-        @type t :: %__MODULE__{
-                id: EsEvent.ID.t(),
-                payload: nil,
-                aggregate_id: unquote(aggregate_id_mod).t(),
-                aggregate_version: Version.t(),
-                at: EsEvent.At.t(),
-                by: unquote(by_mod).t(),
-                operation_id: EsEvent.OperationID.t() | nil,
-                session_id: EsEvent.SessionID.t() | nil,
-                basis_id: EsEvent.OperationID.t() | nil
-              }
+      @type t :: %__MODULE__{
+              id: EsEvent.ID.t(),
+              payload: unquote(payload.type),
+              aggregate_id: unquote(aggregate_id_mod).t(),
+              aggregate_version: Version.t(),
+              at: EsEvent.At.t(),
+              by: unquote(by_mod).t(),
+              operation_id: EsEvent.OperationID.t() | nil,
+              session_id: EsEvent.SessionID.t() | nil,
+              basis_id: EsEvent.OperationID.t() | nil
+            }
 
-        @doc "Черновик события без нагрузки — элемент результата `decide/2` агрегата."
-        @spec draft() :: __MODULE__
+      @doc unquote(payload.draft_doc)
+      @spec draft(unquote_splicing(payload.specs)) :: unquote(payload.draft_spec)
 
-        def draft, do: __MODULE__
+      def draft(unquote_splicing(payload.heads)), do: unquote(payload.draft)
 
-        @doc "Создать событие без нагрузки. Опциональный `id` — для восстановления из хранилища."
-        @spec new(
-                unquote(aggregate_id_mod).t(),
-                Version.t(),
-                unquote(by_mod).t(),
-                EsEvent.At.t(),
-                EsEvent.ID.t() | nil
-              ) :: t()
+      @doc unquote(payload.new_doc)
+      @spec new(
+              unquote_splicing(payload.specs),
+              unquote(aggregate_id_mod).t(),
+              Version.t(),
+              unquote(by_mod).t(),
+              EsEvent.At.t(),
+              EsEvent.ID.t() | nil
+            ) :: t()
 
-        def new(aggregate_id, aggregate_version, by, at, id \\ nil)
+      def new(unquote_splicing(payload.args), aggregate_id, aggregate_version, by, at, id \\ nil)
 
-        def new(
-              %unquote(aggregate_id_mod){} = aggregate_id,
-              %Version{} = aggregate_version,
-              %unquote(by_mod){} = by,
-              %EsEvent.At{} = at,
-              id
-            )
-            when is_opt(id, EsEvent.ID) do
-          id = id || EsEvent.ID.new()
+      def new(
+            unquote_splicing(payload.heads),
+            %unquote(aggregate_id_mod){} = aggregate_id,
+            %Version{} = aggregate_version,
+            %unquote(by_mod){} = by,
+            %EsEvent.At{} = at,
+            id
+          )
+          when is_opt(id, EsEvent.ID) do
+        id = id || EsEvent.ID.new()
 
-          %__MODULE__{
-            id: id,
-            payload: nil,
-            aggregate_id: aggregate_id,
-            aggregate_version: aggregate_version,
-            at: at,
-            by: by
-          }
-        end
-      else
-        @type t :: %__MODULE__{
-                id: EsEvent.ID.t(),
-                payload: unquote(payload_mod).t(),
-                aggregate_id: unquote(aggregate_id_mod).t(),
-                aggregate_version: Version.t(),
-                at: EsEvent.At.t(),
-                by: unquote(by_mod).t(),
-                operation_id: EsEvent.OperationID.t() | nil,
-                session_id: EsEvent.SessionID.t() | nil,
-                basis_id: EsEvent.OperationID.t() | nil
-              }
-
-        @doc "Черновик события с нагрузкой — элемент результата `decide/2` агрегата."
-        @spec draft(unquote(payload_mod).t()) :: {__MODULE__, unquote(payload_mod).t()}
-
-        def draft(%unquote(payload_mod){} = payload), do: {__MODULE__, payload}
-
-        @doc "Создать событие. Опциональный `id` — для восстановления из хранилища."
-        @spec new(
-                unquote(payload_mod).t(),
-                unquote(aggregate_id_mod).t(),
-                Version.t(),
-                unquote(by_mod).t(),
-                EsEvent.At.t(),
-                EsEvent.ID.t() | nil
-              ) :: t()
-
-        def new(payload, aggregate_id, aggregate_version, by, at, id \\ nil)
-
-        def new(
-              %unquote(payload_mod){} = payload,
-              %unquote(aggregate_id_mod){} = aggregate_id,
-              %Version{} = aggregate_version,
-              %unquote(by_mod){} = by,
-              %EsEvent.At{} = at,
-              id
-            )
-            when is_opt(id, EsEvent.ID) do
-          id = id || EsEvent.ID.new()
-
-          %__MODULE__{
-            id: id,
-            payload: payload,
-            aggregate_id: aggregate_id,
-            aggregate_version: aggregate_version,
-            at: at,
-            by: by
-          }
-        end
+        %__MODULE__{
+          id: id,
+          payload: unquote(payload.value),
+          aggregate_id: aggregate_id,
+          aggregate_version: aggregate_version,
+          at: at,
+          by: by
+        }
       end
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
+  # ---
 
-  def required_keys, do: @required_keys
+  defp payload_parts(nil) do
+    %{
+      type: nil,
+      specs: [],
+      args: [],
+      heads: [],
+      value: nil,
+      draft_spec: quote(do: __MODULE__),
+      draft: quote(do: __MODULE__),
+      draft_doc: "Черновик события без нагрузки — элемент результата `decide/2` агрегата.",
+      new_doc: "Создать событие без нагрузки. Опциональный `id` — для восстановления из хранилища."
+    }
+  end
 
-  @doc false
-  @spec optional_keys() :: [atom()]
+  defp payload_parts(payload_mod) do
+    %{
+      type: quote(do: unquote(payload_mod).t()),
+      specs: [quote(do: unquote(payload_mod).t())],
+      args: [quote(do: payload)],
+      heads: [quote(do: %unquote(payload_mod){} = payload)],
+      value: quote(do: payload),
+      draft_spec: quote(do: {__MODULE__, unquote(payload_mod).t()}),
+      draft: quote(do: {__MODULE__, payload}),
+      draft_doc: "Черновик события с нагрузкой — элемент результата `decide/2` агрегата.",
+      new_doc: "Создать событие. Опциональный `id` — для восстановления из хранилища."
+    }
+  end
 
-  def optional_keys, do: @optional_keys
+  # ===== проверки сборки =====
 
   @doc false
   @spec declared?(module()) :: boolean()
@@ -267,7 +240,7 @@ defmodule Core.Es.Event do
          false <- Payload.uuid_prim?(aggregate_id) do
       raise CompileError,
         description:
-          "Es.Event: поле #{name} нагрузки #{inspect(payload)} объявлено с subject: :aggregate_id, " <>
+          "#{@label}: поле #{name} нагрузки #{inspect(payload)} объявлено с subject: :aggregate_id, " <>
             "а aggregate_id: #{inspect(aggregate_id)} — не Prim.UUID и не Prim.Compose над ним"
     end
 

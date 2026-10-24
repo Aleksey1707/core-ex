@@ -1,6 +1,6 @@
 # 14: Шаблон события — одна ветка `quote`, разбор опций при раскрытии
 
-**Status:** ready-for-agent
+**Status:** closed
 
 **Blocked by:** None (can start immediately)
 
