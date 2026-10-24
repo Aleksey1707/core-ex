@@ -87,6 +87,12 @@ defmodule Core.PrimFixture do
     use Core.Prim.Compose, name: "Ссылка на лицо", of: Core.EsFixture.UserID
   end
 
+  defmodule SensitiveLabel do
+    @moduledoc false
+
+    use Core.Prim.UUID, name: "Чувствительная метка", version: 4, kind: :label, sensitive: true
+  end
+
   defmodule PersonalSensitive do
     @moduledoc false
 

@@ -174,10 +174,10 @@ defmodule Core.Codec.Plugin.Redump do
   # ---
 
   defp field_spec({:prim, mod}) do
-    cond do
-      mod.__domain_sensitive__() -> :sensitive
-      Codec.coercible?(mod) -> {:prim, mod}
-      true -> nil
+    case Codec.check_readable(mod) do
+      :ok -> {:prim, mod}
+      {:error, :sensitive} -> :sensitive
+      {:error, :not_coercible} -> nil
     end
   end
 

@@ -55,4 +55,16 @@ defmodule Core.Helper.FieldCheckTest do
       assert_raise CompileError, ~r/недоступен/, fn -> FieldCheck.enum!(Core.Nope, @where) end
     end
   end
+
+  describe "unique!/2" do
+    test "без повторов — :ok" do
+      assert FieldCheck.unique!([:a, :b], "Декларация") == :ok
+    end
+
+    test "повторы — CompileError, каждый повтор один раз" do
+      assert_raise CompileError, ~r/^Декларация: повторяются \[:a, "b"\]$/, fn ->
+        FieldCheck.unique!([:a, "b", :a, "b", :a, :c], "Декларация")
+      end
+    end
+  end
 end

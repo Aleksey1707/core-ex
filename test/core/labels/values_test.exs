@@ -57,7 +57,7 @@ defmodule Core.Labels.ValuesTest do
     end
 
     test "повтор значения — CompileError" do
-      assert_raise CompileError, ~r/Twice: labels: ключи повторяются \[:new\]/, fn ->
+      assert_raise CompileError, ~r/Twice: labels: повторяются \[:new\]/, fn ->
         compile_enum(:Twice, labels: [new: "Новый", new: "Свежий", done: "Готов"])
       end
     end

@@ -30,7 +30,6 @@ defmodule Core.Codec.Redump do
 
   alias Core.Codec
   alias Core.Helper
-  alias Core.Prim
 
   @type spec ::
           {:prim, module()}
@@ -106,22 +105,22 @@ defmodule Core.Codec.Redump do
   @spec validate!(term()) :: spec()
 
   def validate!({:prim, mod} = spec) when is_atom(mod) do
-    cond do
-      not Prim.prim?(mod) ->
+    case Codec.check_readable(mod) do
+      :ok ->
+        spec
+
+      {:error, :not_prim} ->
         raise ArgumentError, "спека {:prim, _} требует Prim-модуль, получено: #{inspect(mod)}"
 
-      not Codec.coercible?(mod) ->
+      {:error, :not_coercible} ->
         raise ArgumentError,
               "спека {:prim, #{inspect(mod)}}: kind #{inspect(mod.__domain_kind__())} " <>
                 "не приводится из wire-значения — переводить такое поле нечем"
 
-      mod.__domain_sensitive__() ->
+      {:error, :sensitive} ->
         raise ArgumentError,
               "спека {:prim, #{inspect(mod)}}: Prim объявлен sensitive — " <>
                 "чувствительному значению не место на read-пути"
-
-      true ->
-        spec
     end
   end
 

@@ -322,6 +322,12 @@ defmodule Core.Codec.PluginVariantsTest do
       end
     end
 
+    test "тип в variants: дважды — CompileError" do
+      assert_raise CompileError, ~r/DupVariant: variants: повторяются \[.*DupVariant.T\]$/, fn ->
+        compile(:DupVariant, quote(do: [{T, "t", a: [type: :string]}, {T, "u", a: [type: :string]}]))
+      end
+    end
+
     test "тип в двух опциях — CompileError" do
       assert_raise CompileError, ~r/типы объявлены в нескольких опциях: \[.*Twice.T\]/, fn ->
         compile(:Twice, quote(do: [{T, "t", a: [type: :string]}]), types: true)

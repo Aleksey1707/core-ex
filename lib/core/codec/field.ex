@@ -67,7 +67,7 @@ defmodule Core.Codec.Field do
 
   def fields!(plugin, fields, loadable?) when is_list(fields) do
     pairs = Enum.map(fields, &pair!(plugin, &1))
-    check_unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: fields: типы объявлены дважды")
+    FieldCheck.unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: fields")
     mode = if loadable?, do: :plugin, else: :dump_only
 
     Enum.map(pairs, fn {type, spec} ->
@@ -177,9 +177,9 @@ defmodule Core.Codec.Field do
       raise CompileError, description: "#{where}: непустой keyword-список полей"
     end
 
-    check_unique!(Keyword.keys(spec), "#{where}: поля повторяются")
+    FieldCheck.unique!(Keyword.keys(spec), where)
     fields = Enum.map(spec, fn {name, opts} -> field!(name, opts, mode, "#{where}, поле #{name}") end)
-    check_unique!(Enum.map(fields, fn %__MODULE__{wire: wire} -> wire end), "#{where}: wire-ключи повторяются")
+    FieldCheck.unique!(Enum.map(fields, fn %__MODULE__{wire: wire} -> wire end), "#{where}, wire-ключи")
 
     fields
   end
@@ -347,13 +347,6 @@ defmodule Core.Codec.Field do
   end
 
   defp check_default!(_spec, _default, _where), do: :ok
-
-  defp check_unique!(items, message) do
-    case items -- Enum.uniq(items) do
-      [] -> :ok
-      dupes -> raise CompileError, description: "#{message}: #{inspect(Enum.uniq(dupes))}"
-    end
-  end
 
   # ===== субъекты =====
 

@@ -455,7 +455,7 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "тип объявлен дважды — CompileError" do
-      assert_raise CompileError, ~r/типы объявлены дважды/, fn ->
+      assert_raise CompileError, ~r/Twice: fields: повторяются \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Codec.PluginFieldsTest.Twice do
@@ -479,11 +479,11 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "повтор поля и повтор wire-ключа — CompileError" do
-      assert_raise CompileError, ~r/поля повторяются: \[:a\]/, fn ->
+      assert_raise CompileError, ~r/: повторяются \[:a\]/, fn ->
         compile_plugin(:DupField, a: [prim: Name], a: [prim: Name, wire: "b"])
       end
 
-      assert_raise CompileError, ~r/wire-ключи повторяются: \["b"\]/, fn ->
+      assert_raise CompileError, ~r/wire-ключи: повторяются \["b"\]/, fn ->
         compile_plugin(:DupWire, a: [prim: Name, wire: "b"], b: [prim: Name])
       end
     end

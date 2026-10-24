@@ -67,7 +67,7 @@ defmodule Core.Codec.FieldTest do
     end
 
     test "тип объявлен дважды" do
-      assert_raise CompileError, ~r/Codec.Plugin P: fields: типы объявлены дважды/, fn ->
+      assert_raise CompileError, ~r/Codec.Plugin P: fields: повторяются \[Core.Codec.FieldTest.Tag\]/, fn ->
         Field.fields!(P, [{Tag, name: [prim: Name]}, {Tag, name: [prim: Name]}], true)
       end
     end
@@ -141,13 +141,13 @@ defmodule Core.Codec.FieldTest do
 
   describe "уникальность" do
     test "имён полей" do
-      assert_raise CompileError, ~r/W: поля повторяются: \[:a\]/, fn ->
+      assert_raise CompileError, ~r/W: повторяются \[:a\]/, fn ->
         Field.normalize!([a: [prim: Name], a: [prim: Name]], :plugin, @where)
       end
     end
 
     test "wire-ключей" do
-      assert_raise CompileError, ~r/W: wire-ключи повторяются: \["b"\]/, fn ->
+      assert_raise CompileError, ~r/W, wire-ключи: повторяются \["b"\]/, fn ->
         Field.normalize!([a: [prim: Name, wire: "b"], b: [prim: Name]], :plugin, @where)
       end
     end

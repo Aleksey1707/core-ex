@@ -294,6 +294,12 @@ defmodule Core.ViewTest do
       end
     end
 
+    test "sensitive Prim с кастомным kind — отказ по sensitive" do
+      assert_raise CompileError, ~r/SensitiveLabel объявлен sensitive/, fn ->
+        define(fields: [secret: [prim: Core.PrimFixture.SensitiveLabel]])
+      end
+    end
+
     test "personal Prim допускается и показывается" do
       {{:module, mod, _, _}, _} = define(fields: [phone: [prim: Core.PrimFixture.Personal]])
 
@@ -416,10 +422,17 @@ defmodule Core.ViewTest do
         define(fields: [id: [prim: Core.ViewFixture.ID]], forms: :mark)
       end
 
-      assert_raise CompileError, ~r/дубли ключей/, fn ->
+      assert_raise CompileError, ~r/View: forms: повторяются \[:mark\]/, fn ->
         define(
           fields: [mark: [form: :mark]],
           forms: [mark: [code: [type: :string]], mark: [code: [type: :string]]]
+        )
+      end
+
+      assert_raise CompileError, ~r/View: форма mark: повторяются \[:code\]/, fn ->
+        define(
+          fields: [mark: [form: :mark]],
+          forms: [mark: [code: [type: :string], code: [type: :boolean]]]
         )
       end
     end
@@ -443,7 +456,7 @@ defmodule Core.ViewTest do
     test "пустой и дублирующий список полей" do
       assert_raise CompileError, ~r/непустой keyword-список/, fn -> define(fields: []) end
 
-      assert_raise CompileError, ~r/дубли ключей/, fn ->
+      assert_raise CompileError, ~r/View: fields: повторяются \[:id\]/, fn ->
         define(fields: [id: [prim: Core.ViewFixture.ID], id: [type: :string]])
       end
     end

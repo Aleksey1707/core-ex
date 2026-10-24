@@ -329,6 +329,31 @@ defmodule Core.CodecTest do
     end
   end
 
+  describe "check_readable/1" do
+    test "приводимый не-sensitive Prim и композит над ним годны" do
+      assert Codec.check_readable(SampleUUID) == :ok
+      assert Codec.check_readable(ApproverID) == :ok
+      assert Codec.check_readable(Core.PrimFixture.Personal) == :ok
+    end
+
+    test "не Prim" do
+      assert Codec.check_readable(DateTime) == {:error, :not_prim}
+    end
+
+    test "значение не приводится из wire" do
+      assert Codec.check_readable(LabelID) == {:error, :not_coercible}
+    end
+
+    test "sensitive-Prim и композит над ним" do
+      assert Codec.check_readable(Core.PrimFixture.Sensitive) == {:error, :sensitive}
+      assert Codec.check_readable(Core.PrimFixture.SensitiveRef) == {:error, :sensitive}
+    end
+
+    test "sensitive решает раньше приводимости" do
+      assert Codec.check_readable(Core.PrimFixture.SensitiveLabel) == {:error, :sensitive}
+    end
+  end
+
   describe "Codec.Helper.dump_many/2 и dump_optional/2" do
     test "дампит каждый элемент списка профилем" do
       ids = [SampleUUID.new!(@uuid), SampleUUID.new!(@uuid)]

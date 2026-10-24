@@ -54,6 +54,14 @@
   экспорта рекомендуется перевести: было `function_exported?(mod, :f, 0)`, стало
   `Core.Helper.Module.exports?(mod, :f, 0)`.
 
+- **`Core.Codec.check_readable/1` — годен ли Prim для read-пути.** Правило «Prim, не sensitive,
+  значение приводится из wire» было записано и в разборе `prim:` у `use Core.View`, и в
+  `Core.Codec.Redump.validate!/1`, и в выводе спеки redump плагина, каждый раз своим каскадом.
+  Теперь решает одна функция: `:ok` или `{:error, :not_prim | :sensitive | :not_coercible}`, сама
+  не бросает. Sensitive решает раньше приводимости: `Redump.validate!/1` на sensitive-Prim с
+  кастомным kind отказывает по sensitive, а не по kind; тип исключения тот же (`ArgumentError`).
+  Правка потребителя: нет.
+
 - **Поле `prim:` у `Core.View` принимает `Prim.Compose`; в `Core.Prim` появились `chain/1` и
   `leaf/1`.** Раньше `use Core.View` брал kind самого композита (`:composite`) и падал
   `CompileError` «типизировать нечем», хотя `Core.Codec.coercible?/1` и Redump композит

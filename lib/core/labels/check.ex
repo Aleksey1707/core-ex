@@ -10,6 +10,8 @@ defmodule Core.Labels.Check do
   двоеточие после `where` ставит сама проверка.
   """
 
+  alias Core.Helper.FieldCheck
+
   @doc "Проверить текст подписи: непустая строка; строка из одних пробелов — пустая."
   @spec text!(term(), String.t()) :: String.t()
 
@@ -70,11 +72,8 @@ defmodule Core.Labels.Check do
       raise CompileError, description: "#{where}: непустой keyword-список, задано #{inspect(list)}"
     end
 
-    keys = Keyword.keys(list)
+    FieldCheck.unique!(Keyword.keys(list), where)
 
-    case keys -- Enum.uniq(keys) do
-      [] -> list
-      repeated -> raise CompileError, description: "#{where}: ключи повторяются #{inspect(Enum.uniq(repeated))}"
-    end
+    list
   end
 end

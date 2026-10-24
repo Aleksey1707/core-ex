@@ -57,7 +57,7 @@ defmodule Core.View.Opts do
     end
 
     names = Keyword.keys(forms)
-    check_duplicates!(names, "forms:")
+    FieldCheck.unique!(names, "#{@label}: forms")
 
     Enum.map(forms, fn {name, fields} -> {name, fields!(fields, names, "форма #{name}")} end)
   end
@@ -65,12 +65,12 @@ defmodule Core.View.Opts do
   @doc "Проверить и нормализовать `fields:` — поля представления."
   @spec fields!(term(), [atom()], String.t()) :: [field()]
 
-  def fields!(fields, form_names, label \\ "fields:") do
+  def fields!(fields, form_names, label \\ "fields") do
     if not Keyword.keyword?(fields) or fields == [] do
       raise CompileError, description: "#{@label}: #{label} — непустой keyword-список полей"
     end
 
-    check_duplicates!(Keyword.keys(fields), label)
+    FieldCheck.unique!(Keyword.keys(fields), "#{@label}: #{label}")
 
     Enum.map(fields, fn {name, opts} -> field!(name, opts, form_names, label) end)
   end
@@ -132,15 +132,24 @@ defmodule Core.View.Opts do
 
   defp spec!(:prim, mod, name, _form_names, label) do
     FieldCheck.prim!(mod, where(label, name))
+    leaf = Prim.leaf(mod)
 
-    if mod.__domain_sensitive__() do
-      raise CompileError,
-        description:
-          "#{where(label, name)}: #{inspect(mod)} объявлен sensitive — " <>
-            "чувствительное значение не место в read-модели"
+    case Codec.check_readable(mod) do
+      :ok ->
+        {:prim, mod, leaf.__domain_kind__()}
+
+      {:error, :not_coercible} ->
+        raise CompileError,
+          description:
+            "#{where(label, name)}: у #{prim_label(mod, leaf)} kind #{inspect(leaf.__domain_kind__())} — " <>
+              "типизировать нечем; объявите поле через type:"
+
+      {:error, :sensitive} ->
+        raise CompileError,
+          description:
+            "#{where(label, name)}: #{inspect(mod)} объявлен sensitive — " <>
+              "чувствительное значение не место в read-модели"
     end
-
-    {:prim, mod, prim_kind!(mod, name, label)}
   end
 
   defp spec!(:enum, mod, name, _form_names, label) do
@@ -230,20 +239,6 @@ defmodule Core.View.Opts do
           "задано #{inspect(other)}"
   end
 
-  defp prim_kind!(mod, name, label) do
-    leaf = Prim.leaf(mod)
-    kind = leaf.__domain_kind__()
-
-    if kind not in @coercible_kinds do
-      raise CompileError,
-        description:
-          "#{where(label, name)}: у #{prim_label(mod, leaf)} kind #{inspect(kind)} — " <>
-            "типизировать нечем; объявите поле через type:"
-    end
-
-    kind
-  end
-
   defp prim_label(leaf, leaf), do: inspect(leaf)
   defp prim_label(mod, leaf), do: "#{inspect(mod)} (leaf #{inspect(leaf)})"
 
@@ -252,14 +247,4 @@ defmodule Core.View.Opts do
   defp collect_forms({:form, name}, acc), do: MapSet.put(acc, name)
   defp collect_forms({:list, inner}, acc), do: collect_forms(inner, acc)
   defp collect_forms(_spec, acc), do: acc
-
-  defp check_duplicates!(names, label) do
-    case names -- Enum.uniq(names) do
-      [] ->
-        :ok
-
-      dupes ->
-        raise CompileError, description: "#{@label}: #{label} — дубли ключей #{inspect(dupes)}"
-    end
-  end
 end

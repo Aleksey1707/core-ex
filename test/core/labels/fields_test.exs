@@ -292,7 +292,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "повтор поля — CompileError" do
-      assert_raise CompileError, ~r/Twice: labels: ключи повторяются \[:name\]/, fn ->
+      assert_raise CompileError, ~r/Twice: labels: повторяются \[:name\]/, fn ->
         compile_payload(:Twice, labels: [name: "Название", name: "Имя", note: :hidden])
       end
     end

@@ -69,7 +69,7 @@ defmodule Core.Codec.Plugin.Variants do
 
   def variants!(plugin, variants, _union) when is_list(variants) and variants != [] do
     parsed = Enum.map(variants, &variant!(plugin, &1))
-    check_mods!(plugin, parsed)
+    Helper.FieldCheck.unique!(Enum.map(parsed, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: variants")
     check_places!(plugin, parsed)
 
     parsed
@@ -188,18 +188,6 @@ defmodule Core.Codec.Plugin.Variants do
 
     if Enum.any?(fields, &match?(%Field{wire: ^wire}, &1)) do
       raise CompileError, description: "#{where}: wire-ключ #{inspect(wire)} занят дискриминатором"
-    end
-  end
-
-  defp check_mods!(plugin, variants) do
-    mods = Enum.map(variants, &elem(&1, 0))
-
-    case mods -- Enum.uniq(mods) do
-      [] ->
-        :ok
-
-      dupes ->
-        raise CompileError, description: "#{@label} #{inspect(plugin)}: variants: типы дважды: #{inspect(dupes)}"
     end
   end
 

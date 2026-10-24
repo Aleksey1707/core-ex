@@ -325,6 +325,25 @@ defmodule Core.Codec do
   end
 
   @doc """
+  Prim `mod` годен для read-пути (`Core.View`, `Core.Codec.Redump`): `mod` — Prim, он не объявлен
+  sensitive — чувствительному значению не место в read-модели, и его значение приводится из wire
+  (`coercible?/1`). Sensitive решает раньше приводимости: такой Prim закрыт при любом kind.
+
+  Не бросает: отказ на языке декларации (`CompileError` опции макроса, `ArgumentError` функции
+  над данными) строит вызывающий.
+  """
+  @spec check_readable(module()) :: Result.unit(:not_prim | :not_coercible | :sensitive)
+
+  def check_readable(mod) when is_atom(mod) do
+    cond do
+      not Prim.prim?(mod) -> {:error, :not_prim}
+      mod.__domain_sensitive__() -> {:error, :sensitive}
+      not coercible?(mod) -> {:error, :not_coercible}
+      true -> :ok
+    end
+  end
+
+  @doc """
   Значение без Prim-обёртки → Prim `mod`, годный для `dump/1`.
 
   Read-путь не валидирует: значение уже прошло запись, и `new/1` поднял бы доменную

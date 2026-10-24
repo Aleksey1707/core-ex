@@ -1,6 +1,6 @@
 # 15: Общие правила спеки полей — в одном месте
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** 01 (`01-prim-leaf-kind.md`: меняет разбор `prim:` у View)
 
