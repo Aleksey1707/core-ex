@@ -2,7 +2,7 @@ defmodule Core.Es.CmdTest do
   use ExUnit.Case, async: true
 
   describe "use Core.Es.Cmd" do
-    test "by и at в @enforce_keys — команда с интроспекцией" do
+    test "by и at в @enforce_keys — команда собирается" do
       cmd =
         compile(
           Valid,
@@ -10,7 +10,7 @@ defmodule Core.Es.CmdTest do
           quote(do: defstruct(@enforce_keys))
         )
 
-      assert cmd.__es_cmd__()
+      assert_raise ArgumentError, ~r/:by, :at/, fn -> struct!(cmd, name: 1) end
     end
 
     test "без by или at в @enforce_keys — CompileError" do

@@ -1,6 +1,6 @@
 # 16: `Es.Cmd.__es_cmd__/0` — снять маркер, который никто не читает
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 
@@ -35,10 +35,10 @@
 - Тест builder'а команды: проверка `cmd.__es_cmd__()` удаляется; проверки `@enforce_keys` остаются.
 
 **Acceptance criteria:**
-- [ ] `grep -rn __es_cmd__ lib test fixtures docs` пуст.
-- [ ] Тесты `Core.Es.Cmd` зелёные, проверки `by` / `at` на месте.
-- [ ] CHANGELOG не меняется: функция `@doc false`, вне контракта.
-- [ ] `make` зелёный, включая `consumer-check`.
+- [x] `grep -rn __es_cmd__ lib test fixtures docs` пуст.
+- [x] Тесты `Core.Es.Cmd` зелёные, проверки `by` / `at` на месте.
+- [x] CHANGELOG не меняется: функция `@doc false`, вне контракта.
+- [x] `make` зелёный, включая `consumer-check`.
 
 **Out of scope:**
 - Распознавание команды процессом агрегата — его сейчас нет, и тикет его не заводит.

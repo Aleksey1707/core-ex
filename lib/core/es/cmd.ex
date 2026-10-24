@@ -15,7 +15,7 @@ defmodule Core.Es.Cmd do
   Типы значений проверяет конструктор события при исполнении команды
   (`Core.Es.Aggregate`).
 
-  Опций нет. Интроспекция — `__es_cmd__/0`: по ней процесс агрегата узнаёт команду.
+  Опций нет.
   """
 
   alias Core.Helper
@@ -32,11 +32,6 @@ defmodule Core.Es.Cmd do
 
     quote do
       @after_compile Core.Es.Cmd
-
-      @doc false
-      @spec __es_cmd__() :: true
-
-      def __es_cmd__, do: true
     end
   end
 
