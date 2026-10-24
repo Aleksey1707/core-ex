@@ -12,7 +12,9 @@ defmodule Core.Es.Event do
     агрегата и автора и запекает их в головы `new/5,6`, `@type t` и `@spec`. Опций
     `aggregate_id:` / `by:` у события нет — старая форма даёт `CompileError` с недостающими и
     неизвестными опциями.
-  - `payload:` — модуль нагрузки или `nil` (событие без нагрузки).
+  - `payload:` — модуль нагрузки или `nil` (событие без нагрузки). Модуль MAY быть вложен в событие:
+    проверки по нему (`subject: :aggregate_id` у поля нагрузки) идут в теле события. Вложенный модуль
+    MUST быть объявлен выше `use` — ниже он ещё не собран, и сборка падает `CompileError` «недоступен».
 
   Wire-имя события задаётся в `<Aggregate>.Event.Codec`, не здесь. Оттуда же читается
   интроспекция события — `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`,
@@ -46,6 +48,7 @@ defmodule Core.Es.Event do
   alias Core.Codec.Field
   alias Core.Es.Event.Payload
   alias Core.Helper
+  alias Core.Helper.FieldCheck
   alias Core.Version
 
   defmodule ID do
@@ -125,11 +128,11 @@ defmodule Core.Es.Event do
       raise CompileError, description: "#{@label}: :payload должен быть модулем или nil"
     end
 
-    check_subject!(payload_mod, aggregate_id_mod)
-
     payload = payload_parts(payload_mod)
 
     quote do
+      Core.Es.Event.payload!(unquote(Macro.escape(payload_mod)), unquote(aggregate_id_mod))
+
       alias Core.Es.Event, as: EsEvent
       alias Core.Version
 
@@ -247,14 +250,24 @@ defmodule Core.Es.Event do
 
   def declared?(module) when is_atom(module), do: Module.defines?(module, {:__es_payload__, 0})
 
-  # `subject: :aggregate_id` у поля нагрузки по полям требует UUID-Prim агрегата: идентификатор
-  # субъекта — UUID (ADR-0073). Нагрузку другого вида проверять нечем — `:ok`.
+  # Модуль нагрузки MAY быть вложен в событие: при раскрытии `use` он ещё не собран, поэтому проверки по
+  # нему — в теле, и несобранный модуль — отказ, а не тихий пропуск. `subject: :aggregate_id` у поля
+  # нагрузки по полям требует UUID-Prim агрегата: идентификатор субъекта — UUID (ADR-0073). Нагрузку
+  # другого вида проверять нечем.
   @doc false
-  @spec check_subject!(module() | nil, module()) :: :ok
+  @spec payload!(module() | nil, module()) :: module() | nil
 
-  def check_subject!(nil, _aggregate_id), do: :ok
+  def payload!(nil, _aggregate_id), do: nil
 
-  def check_subject!(payload, aggregate_id) when is_atom(payload) and is_atom(aggregate_id) do
+  def payload!(payload, aggregate_id) when is_atom(payload) and is_atom(aggregate_id) do
+    FieldCheck.module!(payload, "#{@label}: payload")
+    check_subject!(payload, aggregate_id)
+    payload
+  end
+
+  # ---
+
+  defp check_subject!(payload, aggregate_id) do
     with true <- Helper.Module.exports?(payload, :__es_payload_fields__, 0),
          [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
          false <- Payload.uuid_prim?(aggregate_id) do
@@ -266,8 +279,6 @@ defmodule Core.Es.Event do
 
     :ok
   end
-
-  # ---
 
   defp aggregate_subjects(payload),
     do: Enum.filter(Field.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))

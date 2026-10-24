@@ -1,6 +1,6 @@
 # 01: `Es.Event` — проверка `subject: :aggregate_id` молча пропускается на вложенном `Payload`
 
-Status: needs-triage
+Status: resolved
 
 Blocked by: None
 

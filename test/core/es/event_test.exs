@@ -147,6 +147,22 @@ defmodule Core.Es.EventTest do
         compile_event(:StringPayload, family: Core.EventFixture.Event, payload: "ValuePayload")
       end
     end
+
+    test "payload: вложен ниже use — модуль недоступен, а не тихий пропуск проверок" do
+      assert_raise CompileError, ~r/Es.Event: payload: .*LatePayload\.Payload недоступен/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.EventTest.LatePayload do
+              use Core.Es.Event, family: Core.EventFixture.Event, payload: __MODULE__.Payload
+
+              defmodule Payload do
+                defstruct [:value]
+              end
+            end
+          end
+        )
+      end
+    end
   end
 
   # ---

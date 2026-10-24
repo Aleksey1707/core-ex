@@ -188,6 +188,36 @@ defmodule Core.Es.Event.PayloadPersonalTest do
                      )
                    end
     end
+
+    test "subject: :aggregate_id при не-UUID aggregate_id: — и у Payload, вложенного в событие" do
+      assert_raise CompileError,
+                   ~r/Es.Event: поле holder нагрузки .*Nested\.Payload объявлено с subject: :aggregate_id/,
+                   fn ->
+                     compile(
+                       quote do
+                         defmodule Core.Es.Event.PayloadPersonalTest.NestedStream.Event do
+                           use Core.Es.Event.Family,
+                             aggregate: Account,
+                             aggregate_id: Account.Name,
+                             by: Core.EsFixture.UserID,
+                             codec: Account.Event.Codec
+
+                           @type t :: struct()
+                         end
+
+                         defmodule Core.Es.Event.PayloadPersonalTest.NestedStream.Nested do
+                           defmodule Payload do
+                             use Core.Es.Event.Payload, fields: [holder: [prim: Account.Name, subject: :aggregate_id]]
+                           end
+
+                           use Core.Es.Event,
+                             family: Core.Es.Event.PayloadPersonalTest.NestedStream.Event,
+                             payload: __MODULE__.Payload
+                         end
+                       end
+                     )
+                   end
+    end
   end
 
   # ---
