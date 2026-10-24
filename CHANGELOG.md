@@ -133,6 +133,22 @@
   <модуль>: open_api_spex есть, но core собран без него». Форма схемы не изменилась, кроме порядка
   `required` схемы события. Правка потребителя: `mix deps.compile core --force`.
 
+- **Рассогласованные `id:` / `aggregate:` у behaviour и реализации репозитория event-sourced агрегата
+  — `CompileError`.** `use Core.Es.Aggregate.Repo` проверял только, что `aggregate:` — event-sourced
+  агрегат, и `id:` с Prim агрегата кодека не сверял; `use Core.Es.Aggregate.Repo.Pg` проверял у
+  `behaviour:` только набор колбэков. `use Core.Es.Aggregate.Process` берёт тип головы `execute` из
+  `behaviour.__es_aggregate_repo__().id`, поэтому неверный `id:` behaviour'а давал процесс с чужой
+  головой. Теперь `use Core.Es.Aggregate.Repo` сверяет `id:` с `__es_aggregate_id__/0` кодека
+  агрегата, а `use Core.Es.Aggregate.Repo.Pg` требует от `behaviour:` экспорт
+  `__es_aggregate_repo__/0` (`use Core.Es.Aggregate.Repo`) и сверяет с ним свои `aggregate:` /
+  `id:`. Правка потребителя — привести опции к Prim и агрегату кодека:
+  - `id:` behaviour'а: было `use Core.Es.Aggregate.Repo, aggregate: Account, id: Other.ID`, стало
+    `id: Account.ID`;
+  - рукописный behaviour с `@callback`: было `behaviour: MyBehaviour`, стало behaviour на
+    `use Core.Es.Aggregate.Repo, aggregate: …, id: …`;
+  - реализация над behaviour другого агрегата: было `behaviour: Other.Repo, aggregate: Account`,
+    стало `behaviour: Account.Repo`.
+
 ## 0.16.0
 
 ### Ломающие изменения контракта

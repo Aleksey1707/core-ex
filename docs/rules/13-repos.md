@@ -661,9 +661,10 @@ end
 state-stored («Write state-stored агрегата»). Реализация резолвится по конвенции `<Behaviour>.Pg`
 («DI»).
 
-Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo.Pg` — нет `outbox:`, в `errors:` нет
-clause `:version_mismatch`, Prim агрегата кодека не равен `id:`, событие `outbox:` не из
-семейства кодека.
+Проверяется: `CompileError` в `use Core.Es.Aggregate.Repo` — Prim агрегата кодека не равен `id:`;
+в `use Core.Es.Aggregate.Repo.Pg` — `behaviour:` не `use Core.Es.Aggregate.Repo`, `aggregate:` /
+`id:` behaviour'а не равны `aggregate:` / `id:` реализации, нет `outbox:`, в `errors:` нет clause
+`:version_mismatch`, Prim агрегата кодека не равен `id:`, событие `outbox:` не из семейства кодека.
 
 | Функция | Возврат | Исходы |
 |---|---|---|

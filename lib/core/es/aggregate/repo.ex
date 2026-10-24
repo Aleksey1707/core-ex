@@ -44,8 +44,9 @@ defmodule Core.Es.Aggregate.Repo do
   - опечатка в поле нагрузки, которую clause не сузила паттерном `%Payload{}`.
 
   Агрегат без репозитория полноту `evolve` не проверяет. Кодек агрегата грузится при сборке
-  репозитория; не кодек событий — `CompileError`. Макрос занимает в вызывающем модуле имена
-  функций-проверок, по одному на событие кодека.
+  репозитория; не кодек событий или его Prim агрегата (`__es_aggregate_id__/0`) не равен `id:` —
+  `CompileError`. Макрос занимает в вызывающем модуле имена функций-проверок, по одному на событие
+  кодека.
 
   ## Opts
 
@@ -69,9 +70,11 @@ defmodule Core.Es.Aggregate.Repo do
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
     aggregate = Helper.Opts.module!(lit, :aggregate, @label, exports: [__es_event_codec__: 0])
     id = Helper.Opts.module!(lit, :id, @label)
+    event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
+    Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
 
     quote do
-      unquote_splicing(evolve_checks(aggregate, __CALLER__.line))
+      unquote_splicing(evolve_checks(aggregate, event_codec, __CALLER__.line))
 
       @doc false
       @spec __es_aggregate_repo__() :: %{aggregate: module(), id: module()}
@@ -124,9 +127,7 @@ defmodule Core.Es.Aggregate.Repo do
 
   # ---
 
-  defp evolve_checks(aggregate, line) do
-    event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
-
+  defp evolve_checks(aggregate, event_codec, line) do
     for event <- Enum.sort(event_codec.__es_mods__()) do
       args = [quote(do: %unquote(aggregate){} = state), quote(do: unquote(Es.Check.event_pattern(event)) = event)]
       Es.Check.define("evolve/2 принимает", event, args, quote(do: unquote(aggregate).evolve(state, event)), line)

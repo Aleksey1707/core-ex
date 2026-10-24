@@ -1,6 +1,6 @@
 # 13: Сверка `id:` / `aggregate:` у репозитория event-sourced агрегата
 
-**Status:** ready-for-agent
+**Status:** closed
 
 **Blocked by:** None (can start immediately)
 

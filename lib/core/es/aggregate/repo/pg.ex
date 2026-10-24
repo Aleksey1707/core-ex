@@ -144,8 +144,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     ручная часть маркера, целое, по умолчанию 1
   - `key_reservations:` — список модулей ключа (`use Core.Es.KeyReservation`), по умолчанию `[]`
 
-  На компиляции `CompileError`, если `behaviour:` не объявляет колбэки
-  `Core.Es.Aggregate.Repo`, `aggregate:` — не event-sourced агрегат, и на сверках
+  На компиляции `CompileError`, если `behaviour:` — не `use Core.Es.Aggregate.Repo` (нет
+  `__es_aggregate_repo__/0` или колбэков), его `aggregate:` / `id:` не равны `aggregate:` / `id:`
+  реализации, `aggregate:` — не event-sourced агрегат, и на сверках
   `Core.Es.Store.Opts`: кодек агрегата без `type:`, его Prim агрегата не равен `id:`, событие
   `outbox:` не равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
   не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля, `version:` не
@@ -182,7 +183,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @doc "Реализовать write-репозиторий event-sourced агрегата на хранилище событий."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
-    cfg = validate_opts!(lit)
+    cfg = validate_opts!(lit, __CALLER__.module)
     dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
     checks = Es.KeyReservation.checks(cfg.key_reservations, cfg.event_codec, __CALLER__.line)
@@ -284,7 +285,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   # ---
 
-  defp validate_opts!(opts) do
+  defp validate_opts!(opts, impl) do
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
 
     aggregate =
@@ -300,7 +301,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     Es.Store.Opts.ensure_version_mismatch!(errors, @label)
 
     %{
-      behaviour: behaviour!(opts),
+      behaviour: behaviour!(opts, impl, aggregate, id),
       aggregate: aggregate,
       id: id,
       event_codec: event_codec,
@@ -313,18 +314,31 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     }
   end
 
-  defp behaviour!(opts) do
-    behaviour = Helper.Opts.module!(opts, :behaviour, @label)
+  defp behaviour!(opts, impl, aggregate, id) do
+    behaviour = Helper.Opts.module!(opts, :behaviour, @label, exports: [__es_aggregate_repo__: 0])
 
     case Es.Aggregate.Repo.callbacks() -- behaviour.behaviour_info(:callbacks) do
       [] ->
-        behaviour
+        ensure_behaviour_aggregate!(behaviour, impl, aggregate, id)
 
       missing ->
         raise CompileError,
           description:
             "#{@label}: behaviour #{inspect(behaviour)} должен объявлять #{inspect(missing)} " <>
               "(use Core.Es.Aggregate.Repo)"
+    end
+  end
+
+  defp ensure_behaviour_aggregate!(behaviour, impl, aggregate, id) do
+    case behaviour.__es_aggregate_repo__() do
+      %{aggregate: ^aggregate, id: ^id} ->
+        behaviour
+
+      declared ->
+        raise CompileError,
+          description:
+            "#{@label}: behaviour #{inspect(behaviour)} объявлен для aggregate: #{inspect(declared.aggregate)}, " <>
+              "id: #{inspect(declared.id)}, а #{inspect(impl)} — для aggregate: #{inspect(aggregate)}, id: #{inspect(id)}"
     end
   end
 

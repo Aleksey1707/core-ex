@@ -229,11 +229,20 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
                )
     end
 
-    test "behaviour объявляет колбэки Es.Aggregate.Repo" do
-      message = ~r/должен объявлять \[get_decision: 5, get_many: 3, append: 3, refresh: 4, page_stream: 4\]/
+    test "behaviour — use Core.Es.Aggregate.Repo" do
+      message = ~r/модуль Core\.StateStoredFixture\.Repo должен экспортировать __es_aggregate_repo__\/0/
 
       assert_raise CompileError, message, fn ->
         compile!(StateStoredBehaviour, behaviour: Core.StateStoredFixture.Repo)
+      end
+    end
+
+    test "aggregate: и id: сверяются с behaviour" do
+      message =
+        ~r/behaviour .*Catalog\.Repo .*: .*Catalog, id: .*AggID, а .*\.OtherBehaviour .*: .*Account, id: .*Account\.ID$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(OtherBehaviour, behaviour: Core.EsFixture.Catalog.Repo)
       end
     end
   end

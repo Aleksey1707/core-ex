@@ -25,6 +25,15 @@ defmodule Core.Es.Aggregate.RepoTest do
                      )
                    end
     end
+
+    test "Prim агрегата кодека сверяется с id:" do
+      message =
+        ~r/^Es\.Aggregate\.Repo: event_codec: Prim агрегата .*Account\.ID .* не равен id: .*UserID$/
+
+      assert_raise CompileError, message, fn ->
+        compile!(OtherId, aggregate: Account, id: Core.EsFixture.UserID)
+      end
+    end
   end
 
   defp compile!(name, opts) do
