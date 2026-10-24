@@ -29,7 +29,7 @@
 <bc>/<aggregate>/repo/pg/schema.ex        # Ecto-схема write-пути
 <bc>/<aggregate>/repo/pg/schema/*.ex      # дочерние таблицы
 <bc>/<aggregate>/repo/pg/specs.ex         # фрагменты запросов write-пути
-<bc>/<aggregate>/event.ex                 # семейство событий: @moduledoc, @type t
+<bc>/<aggregate>/event.ex                 # семейство событий: use Core.Es.Event.Family, @type t
 <bc>/<aggregate>/event/<name>.ex          # одно событие; своя нагрузка — вложенный Payload
 <bc>/<aggregate>/event/codec.ex           # кодек событий
 <bc>/<aggregate>/outbox.ex                # маппинг событий в очередь
@@ -162,6 +162,9 @@ Read-модель — единица раскладки чтения: View, Read
   помощники приложения над семейством (`name/1`, `names/0`). Вложенные `defmodule` событий и
   команд в них MUST NOT. `t` события даёт `use Es.Event`; команда объявляет `@type t` сама,
   рядом со struct.
+- Семейство событий — `use Core.Es.Event.Family, aggregate:, aggregate_id:, by:, codec:`
+  (`deps/core/docs/rules/11-domain.md`, «Семейство событий (`Core.Es.Event.Family`)»); событие
+  ссылается на него `family: <Aggregate>.Event`.
 
 Почему: модуль находится по имени без чтения файла, а порог «одним файлом, пока он маленький»
 произволен — агрегат на границе переезжал бы туда и обратно.
@@ -177,8 +180,7 @@ defmodule MyApp.Domain.<BC>.<Aggregate>.Event do
     defmodule Payload do ... end
 
     use Es.Event,
-      aggregate_id: <Aggregate>.ID,
-      by: MyApp.Domain.Users.User.ID,
+      family: MyApp.Domain.<BC>.<Aggregate>.Event,
       payload: Payload
   end
 
@@ -192,8 +194,7 @@ defmodule MyApp.Domain.<BC>.<Aggregate>.Event.Opened do
   defmodule Payload do ... end
 
   use Es.Event,
-    aggregate_id: <Aggregate>.ID,
-    by: MyApp.Domain.Users.User.ID,
+    family: <Aggregate>.Event,
     payload: Payload
 end
 
@@ -201,8 +202,16 @@ end
 defmodule MyApp.Domain.<BC>.<Aggregate>.Event do
   @moduledoc "События агрегата."
 
+  alias MyApp.Domain.<BC>.<Aggregate>
   alias MyApp.Domain.<BC>.<Aggregate>.Event.Closed
   alias MyApp.Domain.<BC>.<Aggregate>.Event.Opened
+  alias MyApp.Domain.Users.User
+
+  use Core.Es.Event.Family,
+    aggregate: <Aggregate>,
+    aggregate_id: <Aggregate>.ID,
+    by: User.ID,
+    codec: <Aggregate>.Event.Codec
 
   @type t :: Opened.t() | Closed.t()
 end

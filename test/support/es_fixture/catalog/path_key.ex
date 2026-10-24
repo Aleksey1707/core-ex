@@ -4,8 +4,8 @@ defmodule Core.EsFixture.Catalog.PathKey do
   названия счёта `Core.EsFixture.Account.NameKey`.
   """
 
+  alias Core.EsFixture.Catalog.Event
   alias Core.EventFixture.AggID
-  alias Core.EventFixture.Event
   alias Core.EventFixture.Name
 
   use Core.Es.KeyReservation,
@@ -18,7 +18,7 @@ defmodule Core.EsFixture.Catalog.PathKey do
   @spec reservation(Event.t()) :: {:reserve, Name.t()} | :release
 
   @impl true
-  def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.name}
+  def reservation(%Event.Created{payload: payload}), do: {:reserve, payload.path}
   def reservation(%Event.Closed{}), do: :release
   def reservation(%Event.ContactSet{}), do: :keep
 

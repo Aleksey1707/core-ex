@@ -96,6 +96,12 @@ defmodule Core.DerivedFixture do
     alias Core.DerivedFixture.Event.StatusChanged
     alias Core.DerivedFixture.Event.Tagged
 
+    use Core.Es.Event.Family,
+      aggregate: Core.DerivedFixture,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      codec: Core.DerivedFixture.Event.Codec
+
     @type t :: Tagged.t() | Renamed.t() | NoteChanged.t() | StatusChanged.t() | Marked.t() | Located.t()
   end
 
@@ -103,8 +109,7 @@ defmodule Core.DerivedFixture do
     @moduledoc "Нагрузка — Prim."
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.DerivedFixture.Event,
       payload: Core.EventFixture.Name
   end
 
@@ -119,8 +124,7 @@ defmodule Core.DerivedFixture do
     end
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.DerivedFixture.Event,
       payload: Payload
   end
 
@@ -136,8 +140,7 @@ defmodule Core.DerivedFixture do
     end
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.DerivedFixture.Event,
       payload: Payload
   end
 
@@ -152,8 +155,7 @@ defmodule Core.DerivedFixture do
     end
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.DerivedFixture.Event,
       payload: Payload
   end
 
@@ -171,8 +173,7 @@ defmodule Core.DerivedFixture do
     end
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.DerivedFixture.Event,
       payload: Payload
   end
 
@@ -180,8 +181,7 @@ defmodule Core.DerivedFixture do
     @moduledoc "Нагрузка — сущность со своим плагином."
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.DerivedFixture.Event,
       payload: Core.DerivedFixture.Place
   end
 

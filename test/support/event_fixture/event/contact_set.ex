@@ -4,9 +4,6 @@ defmodule Core.EventFixture.Event.ContactSet do
   `note` — под ключом агрегата.
   """
 
-  alias Core.EventFixture.ActorID
-  alias Core.EventFixture.AggID
-
   defmodule Payload do
     @moduledoc "Нагрузка `ContactSet`."
 
@@ -19,7 +16,6 @@ defmodule Core.EventFixture.Event.ContactSet do
   end
 
   use Core.Es.Event,
-    aggregate_id: AggID,
-    by: ActorID,
+    family: Core.EventFixture.Event,
     payload: Payload
 end

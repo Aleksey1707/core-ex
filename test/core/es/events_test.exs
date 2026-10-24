@@ -4,18 +4,10 @@ defmodule Core.Es.EventsTest do
   alias Core.Error
   alias Core.Es.Event
   alias Core.Es.Events
+  alias Core.EventFixture.ActorID
+  alias Core.EventFixture.AggID
   alias Core.Exc
   alias Core.Version
-
-  defmodule AggID do
-    @moduledoc false
-    use Core.Prim.UUID, name: "agg id", version: 7
-  end
-
-  defmodule ActorID do
-    @moduledoc false
-    use Core.Prim.UUID, name: "actor id", version: 7
-  end
 
   defmodule ValuePayload do
     @moduledoc false
@@ -26,12 +18,12 @@ defmodule Core.Es.EventsTest do
 
   defmodule EventA do
     @moduledoc false
-    use Event, aggregate_id: AggID, by: ActorID, payload: ValuePayload
+    use Event, family: Core.EventFixture.Event, payload: ValuePayload
   end
 
   defmodule EventB do
     @moduledoc false
-    use Event, aggregate_id: AggID, by: ActorID, payload: nil
+    use Event, family: Core.EventFixture.Event, payload: nil
   end
 
   setup do

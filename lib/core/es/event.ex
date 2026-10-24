@@ -2,9 +2,21 @@ defmodule Core.Es.Event do
   @moduledoc """
   Базовый builder отдельного события версионированного агрегата (`use`).
 
+  ```elixir
+  use Core.Es.Event,
+    family: Account.Event,
+    payload: Payload
+  ```
+
+  - `family:` — семейство событий агрегата (`use Core.Es.Event.Family`): у него событие берёт Prim
+    агрегата и автора и запекает их в головы `new/5,6`, `@type t` и `@spec`. Опций
+    `aggregate_id:` / `by:` у события нет — старая форма даёт `CompileError` с недостающими и
+    неизвестными опциями.
+  - `payload:` — модуль нагрузки или `nil` (событие без нагрузки).
+
   Wire-имя события задаётся в `<Aggregate>.Event.Codec`, не здесь. Оттуда же читается
-  интроспекция события — `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`:
-  кодек выводит по ней Prim агрегата и автора и клаузы нагрузки.
+  интроспекция события — `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`,
+  `__es_family__/0`: кодек выводит по ней Prim агрегата и автора и клаузы нагрузки.
 
   ## Черновик события
 
@@ -92,19 +104,20 @@ defmodule Core.Es.Event do
         }
 
   @label "Es.Event"
-  @required_keys ~w(aggregate_id by payload)a
+  @required_keys ~w(family payload)a
   @optional_keys ~w()a
 
   # ===== объявление =====
 
-  @doc "Объявить событие агрегата (`aggregate_id:` / `by:` / `payload:`)."
+  @doc "Объявить событие агрегата (`family:` / `payload:`)."
   defmacro __using__(opts) do
     lit = Macro.expand_literals(opts, __CALLER__)
     Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
 
     payload_mod = Keyword.fetch!(lit, :payload)
-    aggregate_id_mod = Keyword.fetch!(lit, :aggregate_id)
-    by_mod = Keyword.fetch!(lit, :by)
+    family_mod = Helper.Opts.module!(lit, :family, @label, exports: [__es_aggregate_id__: 0, __es_by__: 0])
+    aggregate_id_mod = family_mod.__es_aggregate_id__()
+    by_mod = family_mod.__es_by__()
 
     unless is_nil(payload_mod) or is_atom(payload_mod) do
       raise CompileError, description: "#{@label}: :payload должен быть модулем или nil"
@@ -137,6 +150,11 @@ defmodule Core.Es.Event do
       @spec __es_by__() :: module()
 
       def __es_by__, do: unquote(by_mod)
+
+      @doc false
+      @spec __es_family__() :: module()
+
+      def __es_family__, do: unquote(family_mod)
 
       @type t :: %__MODULE__{
               id: EsEvent.ID.t(),

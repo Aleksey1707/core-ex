@@ -360,8 +360,7 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.OtherEvent do
               use Core.Es.Event,
-                aggregate_id: Core.EventFixture.ActorID,
-                by: Core.EventFixture.ActorID,
+                family: Core.EsFixture.Account.Event,
                 payload: nil
             end
 
@@ -436,15 +435,13 @@ defmodule Core.Es.Event.CodecTest do
           quote do
             defmodule Core.Es.Event.CodecTest.Granted do
               use Core.Es.Event,
-                aggregate_id: Core.EventFixture.AggID,
-                by: Core.EventFixture.ActorID,
+                family: Core.EventFixture.Event,
                 payload: Core.EventFixture.Name
             end
 
             defmodule Core.Es.Event.CodecTest.Revoked do
               use Core.Es.Event,
-                aggregate_id: Core.EventFixture.AggID,
-                by: Core.EventFixture.ActorID,
+                family: Core.EventFixture.Event,
                 payload: Core.EventFixture.Name
             end
 

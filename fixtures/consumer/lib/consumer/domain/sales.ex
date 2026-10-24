@@ -6,7 +6,8 @@ defmodule Consumer.Domain.Sales do
     процесс), `Order` (enum `Status` отдельным файлом в guard `is_enum/2` самого агрегата), `Ping` (события
     без нагрузки),
     `Grants` (два события делят модуль нагрузки, нагрузка по полям с `union:`), `NeverFails` и
-    `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата.
+    `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата
+    (владелец потока — struct `Parcel`).
   - Акторы: `Client` — usecases в каталоге каждого агрегата и read-модели.
   - Значения без владельца (`Values`): `UserID`, идентификаторы из ключа `DeliveryID` и `InspectionID`.
   - Read-модели: активность `Activity` по назначению — проекция на события `Account` и `Order`;

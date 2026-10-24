@@ -103,7 +103,7 @@ fields: [recipient_id: [prim: Order.RecipientID], address: [entity: Order.Addres
 
 - персональный Prim на прямом поле (`prim:` / `list: [prim:]`) без `subject:`;
 - субъект — не `Prim.UUID` и не `Prim.Compose` над ним; у
-  `subject: :aggregate_id` это проверяет `use Core.Es.Event` по `aggregate_id:`;
+  `subject: :aggregate_id` это проверяет `use Core.Es.Event` по `aggregate_id:` семейства;
 - поле с `subject:` в роли субъекта, `subject:` на несуществующее поле или на само себя;
 - обязательное ПДн-поле при необязательном поле-субъекте;
 - wire-ключ, начинающийся с `$`, — у любой нагрузки, с ПДн и без: форма `{"$pd": …}`

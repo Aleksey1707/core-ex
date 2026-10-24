@@ -2,7 +2,6 @@ defmodule Core.EsFixture.Account.Event.Opened do
   @moduledoc "Счёт открыт."
 
   alias Core.EsFixture.Account
-  alias Core.EsFixture.UserID
 
   defmodule Payload do
     @moduledoc "Нагрузка `Opened`."
@@ -12,7 +11,6 @@ defmodule Core.EsFixture.Account.Event.Opened do
   end
 
   use Core.Es.Event,
-    aggregate_id: Account.ID,
-    by: UserID,
+    family: Account.Event,
     payload: Payload
 end

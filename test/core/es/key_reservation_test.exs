@@ -244,7 +244,7 @@ defmodule Core.Es.KeyReservationTest do
 
     test "событие модуля ключа — семейство кодека агрегата" do
       message =
-        ~r/key_reservations: событие Core\.EventFixture\.Event у .*PathKey не равно семейству кодека .*Account\.Event$/
+        ~r/key_reservations: событие Core\.EsFixture\.Catalog\.Event у .*PathKey не равно семейству кодека .*Account\.Event$/
 
       assert_raise CompileError, message, fn -> compile_repo!(ForeignEvent, [Catalog.PathKey]) end
     end

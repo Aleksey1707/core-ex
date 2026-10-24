@@ -2,7 +2,6 @@ defmodule Core.EsFixture.Account.Event.Renamed do
   @moduledoc "Счёт переименован."
 
   alias Core.EsFixture.Account
-  alias Core.EsFixture.UserID
 
   defmodule Payload do
     @moduledoc "Нагрузка `Renamed` — по полям: клаузы кодека выводятся."
@@ -11,7 +10,6 @@ defmodule Core.EsFixture.Account.Event.Renamed do
   end
 
   use Core.Es.Event,
-    aggregate_id: Account.ID,
-    by: UserID,
+    family: Account.Event,
     payload: Payload
 end

@@ -63,12 +63,18 @@ defmodule Core.EventFixture do
   defmodule Event do
     @moduledoc """
     События фейкового агрегата: с нагрузкой (`Created`), без неё (`Closed`) и с ПДн двух субъектов
-    (`ContactSet`).
+    (`ContactSet`). Владелец потока — state-stored `Core.StateStoredFixture.Entity`.
     """
 
     alias Core.EventFixture.Event.Closed
     alias Core.EventFixture.Event.ContactSet
     alias Core.EventFixture.Event.Created
+
+    use Core.Es.Event.Family,
+      aggregate: Core.StateStoredFixture.Entity,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      codec: Core.EventFixture.Event.Codec
 
     @type t :: Created.t() | Closed.t() | ContactSet.t()
 

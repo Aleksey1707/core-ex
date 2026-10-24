@@ -111,7 +111,7 @@ defmodule Core.MacroConfigTest do
           to_entity: &Function.identity/1,
           to_model: &Function.identity/1,
           id: Core.EventFixture.AggID,
-          entity: Core.MacroConfigTest.Entity,
+          entity: Core.StateStoredFixture.Entity,
           errors: Core.MacroConfigTest.Errors,
           event_codec: Core.EventFixture.Event.Codec,
           outbox: Core.StateStoredFixture.Outbox

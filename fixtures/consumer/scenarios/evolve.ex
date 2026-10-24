@@ -106,20 +106,28 @@ defmodule ConsumerTest.LongName.Event do
 
   alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.Values.UserID
+  alias ConsumerTest.LongName.Event.Closed
+  alias ConsumerTest.LongName.Event.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotelIndia.JulietKiloLimaMikeNovemberOscarPapaQuebecRomeo.SierraTangoUniformVictorWhiskeyXrayYankeeZulu.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotel.IndiaJulietKiloLimaMikeNovember
 
-  defmodule AlphaBravoCharlieDeltaEchoFoxtrotGolfHotelIndia.JulietKiloLimaMikeNovemberOscarPapaQuebecRomeo.SierraTangoUniformVictorWhiskeyXrayYankeeZulu.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotel.IndiaJulietKiloLimaMikeNovember do
-    use Core.Es.Event,
-      aggregate_id: Account.ID,
-      by: UserID,
-      payload: nil
-  end
+  use Core.Es.Event.Family,
+    aggregate: ConsumerTest.LongName,
+    aggregate_id: Account.ID,
+    by: UserID,
+    codec: ConsumerTest.LongName.Event.Codec
 
-  defmodule Closed do
-    use Core.Es.Event,
-      aggregate_id: Account.ID,
-      by: UserID,
-      payload: nil
-  end
+  @type t :: IndiaJulietKiloLimaMikeNovember.t() | Closed.t()
+end
+
+defmodule ConsumerTest.LongName.Event.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotelIndia.JulietKiloLimaMikeNovemberOscarPapaQuebecRomeo.SierraTangoUniformVictorWhiskeyXrayYankeeZulu.AlphaBravoCharlieDeltaEchoFoxtrotGolfHotel.IndiaJulietKiloLimaMikeNovember do
+  use Core.Es.Event,
+    family: ConsumerTest.LongName.Event,
+    payload: nil
+end
+
+defmodule ConsumerTest.LongName.Event.Closed do
+  use Core.Es.Event,
+    family: ConsumerTest.LongName.Event,
+    payload: nil
 end
 
 defmodule ConsumerTest.LongName.Event.Codec do

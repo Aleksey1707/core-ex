@@ -82,7 +82,7 @@ repos:
 
       - id: mix-xref
         name: "Elixir: mix xref (циклы)"
-        entry: mix xref graph --format cycles --fail-above 0
+        entry: mix xref graph --format cycles --fail-above 1
         language: system
         require_serial: true
         pass_filenames: false

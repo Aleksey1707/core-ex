@@ -2,7 +2,6 @@ defmodule Core.EsFixture.Account.Event.HolderSet do
   @moduledoc "Владелец счёта указан: ПДн-значение под ключом субъекта — самого счёта."
 
   alias Core.EsFixture.Account
-  alias Core.EsFixture.UserID
 
   defmodule Payload do
     @moduledoc "Нагрузка `HolderSet` — ПДн-поле с `subject: :aggregate_id`."
@@ -12,7 +11,6 @@ defmodule Core.EsFixture.Account.Event.HolderSet do
   end
 
   use Core.Es.Event,
-    aggregate_id: Account.ID,
-    by: UserID,
+    family: Account.Event,
     payload: Payload
 end

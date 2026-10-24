@@ -5,8 +5,7 @@ defmodule Core.Labels.Event do
   Подключается в модуле события после `use Core.Es.Event`:
 
       use Core.Es.Event,
-        aggregate_id: MyApp.Domain.Sales.Account.ID,
-        by: MyApp.Domain.Sales.Values.UserID,
+        family: MyApp.Domain.Sales.Account.Event,
         payload: Payload
 
       use Core.Labels.Event, title: "Счёт переименован"
@@ -16,8 +15,7 @@ defmodule Core.Labels.Event do
   нагрузки-Prim своих полей нет, и её подпись — `payload:` события:
 
       use Core.Es.Event,
-        aggregate_id: MyApp.Domain.Sales.Account.ID,
-        by: MyApp.Domain.Sales.Values.UserID,
+        family: MyApp.Domain.Sales.Account.Event,
         payload: MyApp.Domain.Sales.Account.Name
 
       use Core.Labels.Event,

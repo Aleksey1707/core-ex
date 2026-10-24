@@ -9,6 +9,6 @@ defmodule Core.EsFixture.Catalog.Repo.Pg do
     aggregate: Catalog,
     id: EventFixture.AggID,
     errors: EventFixture.Errors,
-    outbox: Core.StateStoredFixture.Outbox,
+    outbox: :none,
     key_reservations: [Catalog.PathKey]
 end

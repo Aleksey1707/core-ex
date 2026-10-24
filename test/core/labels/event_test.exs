@@ -82,8 +82,7 @@ defmodule Core.Labels.EventTest do
       quote do
         defmodule unquote(module) do
           use Core.Es.Event,
-            aggregate_id: Core.EventFixture.AggID,
-            by: Core.EventFixture.ActorID,
+            family: Core.EventFixture.Event,
             payload: unquote(payload)
 
           use Core.Labels.Event, unquote(opts)

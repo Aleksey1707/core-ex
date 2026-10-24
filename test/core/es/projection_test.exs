@@ -32,8 +32,7 @@ defmodule Core.Es.ProjectionTest do
     @moduledoc false
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.EventFixture.Event,
       payload: nil
   end
 
@@ -41,8 +40,7 @@ defmodule Core.Es.ProjectionTest do
     @moduledoc false
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.EventFixture.Event,
       payload: nil
   end
 
@@ -57,8 +55,7 @@ defmodule Core.Es.ProjectionTest do
       @moduledoc false
 
       use Core.Es.Event,
-        aggregate_id: Core.EventFixture.AggID,
-        by: Core.EventFixture.ActorID,
+        family: Core.EventFixture.Event,
         payload: nil
     end
 
@@ -66,8 +63,7 @@ defmodule Core.Es.ProjectionTest do
       @moduledoc false
 
       use Core.Es.Event,
-        aggregate_id: Core.EventFixture.AggID,
-        by: Core.EventFixture.ActorID,
+        family: Core.EventFixture.Event,
         payload: nil
     end
   end
@@ -88,8 +84,7 @@ defmodule Core.Es.ProjectionTest do
       @moduledoc false
 
       use Core.Es.Event,
-        aggregate_id: Core.EventFixture.AggID,
-        by: Core.EventFixture.ActorID,
+        family: Core.EventFixture.Event,
         payload: nil
     end
   end

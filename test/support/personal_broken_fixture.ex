@@ -31,6 +31,12 @@ defmodule Core.PersonalBrokenFixture do
     alias Core.PersonalBrokenFixture.Event.ContactAdded
     alias Core.PersonalBrokenFixture.Event.Named
 
+    use Core.Es.Event.Family,
+      aggregate: Core.PersonalBrokenFixture,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      codec: Core.PersonalBrokenFixture.Event.Codec
+
     @type t :: ContactAdded.t() | Named.t()
   end
 
@@ -45,8 +51,7 @@ defmodule Core.PersonalBrokenFixture do
     end
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.PersonalBrokenFixture.Event,
       payload: Payload
   end
 
@@ -61,8 +66,7 @@ defmodule Core.PersonalBrokenFixture do
     end
 
     use Core.Es.Event,
-      aggregate_id: Core.EventFixture.AggID,
-      by: Core.EventFixture.ActorID,
+      family: Core.PersonalBrokenFixture.Event,
       payload: Payload
   end
 

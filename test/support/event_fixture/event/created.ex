@@ -1,9 +1,6 @@
 defmodule Core.EventFixture.Event.Created do
   @moduledoc "Агрегат создан."
 
-  alias Core.EventFixture.ActorID
-  alias Core.EventFixture.AggID
-
   defmodule Payload do
     @moduledoc "Нагрузка `Created`."
 
@@ -12,7 +9,6 @@ defmodule Core.EventFixture.Event.Created do
   end
 
   use Core.Es.Event,
-    aggregate_id: AggID,
-    by: ActorID,
+    family: Core.EventFixture.Event,
     payload: Payload
 end

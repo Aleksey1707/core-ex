@@ -35,12 +35,20 @@ defmodule Core.WebEventFixture do
   defmodule Event do
     @moduledoc false
 
-    @type t :: struct()
+    defmodule Family do
+      @moduledoc "Семейство событий страницы событий: объявлено раньше событий, вложенных в `Event`."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.WebEventFixture,
+        aggregate_id: Core.WebEventFixture.AggID,
+        by: Core.WebEventFixture.UserID,
+        codec: Core.WebEventFixture.Event.Codec
+
+      @type t :: struct()
+    end
 
     defmodule Noted do
       @moduledoc "Событие с нагрузкой: многословные поля и свободная map."
-
-      alias Core.WebEventFixture
 
       defmodule Payload do
         @moduledoc "Нагрузка `Noted`."
@@ -53,8 +61,7 @@ defmodule Core.WebEventFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: WebEventFixture.AggID,
-        by: WebEventFixture.UserID,
+        family: Family,
         payload: Payload
     end
 
@@ -75,19 +82,15 @@ defmodule Core.WebEventFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: WebEventFixture.AggID,
-        by: WebEventFixture.UserID,
+        family: Family,
         payload: Payload
     end
 
     defmodule Closed do
       @moduledoc "Событие без нагрузки."
 
-      alias Core.WebEventFixture
-
       use Core.Es.Event,
-        aggregate_id: WebEventFixture.AggID,
-        by: WebEventFixture.UserID,
+        family: Family,
         payload: nil
     end
   end
@@ -104,7 +107,7 @@ defmodule Core.WebEventFixture do
     }
 
     use Core.Es.Event.Codec,
-      event: Event,
+      event: Event.Family,
       type: "web_event",
       tags: @tag_by_mod
   end

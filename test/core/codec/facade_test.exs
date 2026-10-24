@@ -231,8 +231,7 @@ defmodule Core.Codec.FacadeTest do
           defmodule Core.Codec.FacadeTest.DupTypeEvent do
             defmodule Opened do
               use Core.Es.Event,
-                aggregate_id: Core.EventFixture.AggID,
-                by: Core.EventFixture.ActorID,
+                family: Core.EventFixture.Event,
                 payload: nil
             end
           end

@@ -1,6 +1,5 @@
 defmodule Consumer.Domain.Sales.Parcel.Event.Sent do
   alias Consumer.Domain.Sales.Parcel
-  alias Consumer.Domain.Sales.Values.UserID
 
   defmodule Payload do
     @enforce_keys ~w(note)a
@@ -10,7 +9,6 @@ defmodule Consumer.Domain.Sales.Parcel.Event.Sent do
   end
 
   use Core.Es.Event,
-    aggregate_id: Parcel.ID,
-    by: UserID,
+    family: Parcel.Event,
     payload: Payload
 end

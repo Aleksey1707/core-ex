@@ -12,35 +12,45 @@
 
 **Blocked by:** 14.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Core.Es.Event.Family`: опции обязательны, `Opts.validate!`; `aggregate_id:` / `by:` — `Helper.Opts.module!`;
+- [x] `Core.Es.Event.Family`: опции обязательны, `Opts.validate!`; `aggregate_id:` / `by:` — `Helper.Opts.module!`;
   `aggregate:` / `codec:` — `Helper.Opts.atom!` без загрузки, алиас раскрывается в контексте функции (ребро xref —
   runtime, цикла семейство ↔ кодек / агрегат нет). Генерирует `__es_aggregate__/0`, `__es_aggregate_id__/0`,
   `__es_by__/0`, `__es_codec__/0`.
-- [ ] `@before_compile`: нет `@type t` — `CompileError`.
-- [ ] `@after_verify` — `IO.warn` с файлом семейства, не `raise`: `aggregate:` не найден; `codec:` не кодек этого
+- [x] `@before_compile`: нет `@type t` — `CompileError`.
+- [x] `@after_verify` — `IO.warn` с файлом семейства, не `raise`: `aggregate:` не найден; `codec:` не кодек этого
   семейства (`__codec_union__/0`); у event-sourced владельца `event_codec:` не равен `codec:`. У state-stored сущности
   и `Core.Es.Personal` — только существование.
-- [ ] `Core.Es.Event`: `family:` обязательна (`module!` с `exports: [__es_aggregate_id__: 0, __es_by__: 0]`),
+- [x] `Core.Es.Event`: `family:` обязательна (`module!` с `exports: [__es_aggregate_id__: 0, __es_by__: 0]`),
   `aggregate_id:` / `by:` ушли. Значения семейства запекаются в головы `new/5,6`, `@type t`, `@spec`, `check_subject!`.
   `__es_aggregate_id__/0`, `__es_by__/0` остались, добавлен `__es_family__/0`.
-- [ ] `Core.Es.Personal.Event` — семейство с владельцем `Core.Es.Personal`, `KeyDestroyed` — `family:`;
+- [x] `Core.Es.Personal.Event` — семейство с владельцем `Core.Es.Personal`, `KeyDestroyed` — `family:`;
   `await(Core.Es.Personal, %SubjectID{}, timeout)` не изменился.
-- [ ] Все `use Core.Es.Event` и модули семейств в `lib/`, `test/`, фикстуре переведены, включая семейства без
+- [x] Все `use Core.Es.Event` и модули семейств в `lib/`, `test/`, фикстуре переведены, включая семейства без
   проекций (`Ping`, `Grants`, `Parcel`).
-- [ ] `test/support`: у кодека `Core.EventFixture.Event.Codec` один владелец потока — `Core.EsFixture.Catalog` получает
+- [x] `test/support`: у кодека `Core.EventFixture.Event.Codec` один владелец потока — `Core.EsFixture.Catalog` получает
   своё семейство, кодек и события; `MacroConfigTest` (тест «без dao») переходит на `StateStoredFixture.Entity`.
-- [ ] Тесты библиотеки: семейство без `@type t` — `CompileError`; старая форма опций события — одно сообщение с
+- [x] Тесты библиотеки: семейство без `@type t` — `CompileError`; старая форма опций события — одно сообщение с
   недостающими и неизвестными. Предупреждение `@after_verify` — тестом, если `Code.compile_string` его вызывает, иначе
   сценарием фикстуры с маркером `# expect:`.
-- [ ] `make consumer-check`: сценарий `event_new.ex` (чужой ID и автор в `new`) даёт те же предупреждения.
-- [ ] `@moduledoc` `Core.Es.Event.Family` (опции, интроспекция, сверки, «одно семейство — один владелец потока») и
+- [x] `make consumer-check`: сценарий `event_new.ex` (чужой ID и автор в `new`) даёт те же предупреждения.
+- [x] `@moduledoc` `Core.Es.Event.Family` (опции, интроспекция, сверки, «одно семейство — один владелец потока») и
   `Core.Es.Event`.
-- [ ] Своды: `11-domain.md` («Es.Event»: семейство, `family:`), `19-testing.md` (примеры с `aggregate_id:`),
+- [x] Своды: `11-domain.md` («Es.Event»: семейство, `family:`), `19-testing.md` (примеры с `aggregate_id:`),
   `23-personal-data.md` (`subject: :aggregate_id` — по `aggregate_id:` семейства), `app/11-domain.md`,
   `app/13-repos.md` (раскладка семейства). `make rules-check`.
-- [ ] CHANGELOG: пункт «Связи event-sourced агрегата называет один владелец…» в «Не выпущено» → «Изменения контракта
+- [x] CHANGELOG: пункт «Связи event-sourced агрегата называет один владелец…» в «Не выпущено» → «Изменения контракта
   макросов» (текст — спека) со строками семейства и `use Core.Es.Event`; строка 1 таблицы «Версия библиотеки» в
   `docs/rules/app/00-index.md` тем же коммитом.
-- [ ] Приёмка: `make` целиком.
+- [x] Приёмка: `make` целиком.
+
+## Comments
+
+- Семейство `Core.Es.Personal.Event` даёт первый цикл библиотеки (семейство ⇢ владелец / кодек → событие →
+  семейство): храповик `xref` поднят до `--fail-above 1` (решение пользователя), строка — ADR-0084, «Цена».
+- Семейства `test/support` без владельца потока (`LabelsFixture`, `LabelsBrokenFixture`, `WebEventFixture`,
+  `DerivedFixture`, `PersonalBrokenFixture`) называют `aggregate:` корневой модуль фикстуры. События,
+  вложенные в модуль-контейнер `Event`, ссылаются на вложенное семейство `Event.Family`: контейнер
+  собирается после своих событий. У `LabelsFixture.Event.Family` два кодека (`Event.Codec` и
+  `WebEvent.Codec` с общими событиями) — тикету 16 (сверка `__es_codec__`) нужно их развести.

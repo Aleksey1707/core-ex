@@ -1,6 +1,5 @@
 defmodule Consumer.Domain.Sales.Order.Event.Placed do
   alias Consumer.Domain.Sales.Order
-  alias Consumer.Domain.Sales.Values.UserID
 
   defmodule Payload do
     use Core.Es.Event.Payload,
@@ -8,7 +7,6 @@ defmodule Consumer.Domain.Sales.Order.Event.Placed do
   end
 
   use Core.Es.Event,
-    aggregate_id: Order.ID,
-    by: UserID,
+    family: Order.Event,
     payload: Payload
 end

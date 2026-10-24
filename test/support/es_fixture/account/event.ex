@@ -10,6 +10,13 @@ defmodule Core.EsFixture.Account.Event do
   alias Core.EsFixture.Account.Event.Opened
   alias Core.EsFixture.Account.Event.Renamed
   alias Core.EsFixture.Account.Event.Verified
+  alias Core.EsFixture.UserID
+
+  use Core.Es.Event.Family,
+    aggregate: Core.EsFixture.Account,
+    aggregate_id: Core.EsFixture.Account.ID,
+    by: UserID,
+    codec: Core.EsFixture.Account.Event.Codec
 
   @type t :: Opened.t() | Renamed.t() | HolderSet.t() | Frozen.t() | Closed.t() | Verified.t()
 end

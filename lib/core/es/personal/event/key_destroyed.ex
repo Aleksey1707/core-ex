@@ -7,11 +7,7 @@ defmodule Core.Es.Personal.Event.KeyDestroyed do
   субъекта.
   """
 
-  alias Core.Es.Personal.ActorID
-  alias Core.Es.Personal.SubjectID
-
   use Core.Es.Event,
-    aggregate_id: SubjectID,
-    by: ActorID,
+    family: Core.Es.Personal.Event,
     payload: nil
 end

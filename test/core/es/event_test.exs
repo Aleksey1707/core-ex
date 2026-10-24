@@ -2,17 +2,9 @@ defmodule Core.Es.EventTest do
   use ExUnit.Case, async: true
 
   alias Core.Es.Event
+  alias Core.EventFixture.ActorID
+  alias Core.EventFixture.AggID
   alias Core.Version
-
-  defmodule AggID do
-    @moduledoc false
-    use Core.Prim.UUID, name: "agg id", version: 7
-  end
-
-  defmodule ActorID do
-    @moduledoc false
-    use Core.Prim.UUID, name: "actor id", version: 7
-  end
 
   defmodule ValuePayload do
     @moduledoc false
@@ -24,14 +16,13 @@ defmodule Core.Es.EventTest do
   defmodule EventWithPayload do
     @moduledoc false
     use Event,
-      aggregate_id: AggID,
-      by: ActorID,
+      family: Core.EventFixture.Event,
       payload: ValuePayload
   end
 
   defmodule EmptyEvent do
     @moduledoc false
-    use Event, aggregate_id: AggID, by: ActorID, payload: nil
+    use Event, family: Core.EventFixture.Event, payload: nil
   end
 
   test "new создаёт событие с нагрузкой" do
@@ -92,11 +83,17 @@ defmodule Core.Es.EventTest do
     assert EmptyEvent.draft() == EmptyEvent
   end
 
+  test "Prim агрегата и автора — у семейства family:" do
+    assert EmptyEvent.__es_family__() == Core.EventFixture.Event
+    assert EmptyEvent.__es_aggregate_id__() == AggID
+    assert EmptyEvent.__es_by__() == ActorID
+  end
+
   describe "declared?/1" do
     test "событие, которое ещё собирается, — да; модуль без use — нет" do
       defmodule DeclaredEvent do
         @moduledoc false
-        use Core.Es.Event, aggregate_id: AggID, by: ActorID, payload: nil
+        use Core.Es.Event, family: Core.EventFixture.Event, payload: nil
 
         @declared Core.Es.Event.declared?(__MODULE__)
 
@@ -118,20 +115,36 @@ defmodule Core.Es.EventTest do
 
   describe "отказ сборки use" do
     test "неизвестная опция" do
-      assert_raise CompileError, ~r/Es.Event: неизвестные опции: \[:codec\]/, fn ->
-        compile_event(:UnknownOpt, aggregate_id: AggID, by: ActorID, payload: nil, codec: AggID)
+      assert_raise CompileError, ~r/Es.Event: неизвестные опции: \[:codec\]$/, fn ->
+        compile_event(:UnknownOpt, family: Core.EventFixture.Event, payload: nil, codec: AggID)
       end
     end
 
     test "нет обязательной опции" do
-      assert_raise CompileError, ~r/Es.Event: нет обязательных опций: \[:payload\]/, fn ->
-        compile_event(:NoPayloadOpt, aggregate_id: AggID, by: ActorID)
+      assert_raise CompileError, ~r/Es.Event: нет обязательных опций: \[:payload\]$/, fn ->
+        compile_event(:NoPayloadOpt, family: Core.EventFixture.Event)
+      end
+    end
+
+    test "старая форма aggregate_id: / by: — недостающая и неизвестные опции одним сообщением" do
+      message = ~r/Es.Event: нет обязательных опций: \[:family\]; неизвестные опции: \[:aggregate_id, :by\]$/
+
+      assert_raise CompileError, message, fn ->
+        compile_event(:OldForm, aggregate_id: AggID, by: ActorID, payload: nil)
+      end
+    end
+
+    test "family: — не семейство" do
+      message = ~r/Es.Event: family: модуль Core\.EventFixture\.AggID должен экспортировать __es_aggregate_id__\/0/
+
+      assert_raise CompileError, message, fn ->
+        compile_event(:NotFamily, family: AggID, payload: nil)
       end
     end
 
     test ":payload — не модуль и не nil" do
       assert_raise CompileError, ~r/Es.Event: :payload должен быть модулем или nil/, fn ->
-        compile_event(:StringPayload, aggregate_id: AggID, by: ActorID, payload: "ValuePayload")
+        compile_event(:StringPayload, family: Core.EventFixture.Event, payload: "ValuePayload")
       end
     end
   end

@@ -1,9 +1,7 @@
 defmodule Consumer.Domain.Sales.Grants.Event.Granted do
   alias Consumer.Domain.Sales.Grants
-  alias Consumer.Domain.Sales.Values.UserID
 
   use Core.Es.Event,
-    aggregate_id: Grants.ID,
-    by: UserID,
+    family: Grants.Event,
     payload: Grants.RoleID
 end

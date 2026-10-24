@@ -348,7 +348,29 @@ defmodule Core.LabelsFixture do
   defmodule Event do
     @moduledoc false
 
-    @type t :: struct()
+    defmodule Family do
+      @moduledoc "Семейство событий с подписями: объявлено раньше событий, вложенных в `Event`."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsFixture,
+        aggregate_id: AggID,
+        by: UserID,
+        codec: Core.LabelsFixture.Event.Codec
+
+      @type t :: struct()
+    end
+
+    defmodule ItemFamily do
+      @moduledoc "Семейство события другого агрегата — позиции `Assigned`."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsFixture,
+        aggregate_id: Core.LabelsFixture.ItemID,
+        by: UserID,
+        codec: Core.LabelsFixture.Event.ItemFamily.Codec
+
+      @type t :: Core.LabelsFixture.Event.Assigned.t()
+    end
 
     defmodule Updated do
       @moduledoc "Событие с нагрузкой по полям: поле каждого вида, необязательное и скрытое."
@@ -386,8 +408,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Запись изменена"
@@ -413,8 +434,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Статус сменён"
@@ -450,8 +470,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Заказ отправлен"
@@ -482,8 +501,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Метки расставлены"
@@ -502,8 +520,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Название изменено"
@@ -523,8 +540,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Статус переключён"
@@ -544,8 +560,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Источник изменён"
@@ -565,8 +580,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Метки изменены"
@@ -608,8 +622,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция связана"
@@ -643,8 +656,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: LabelsFixture.ItemID,
-        by: LabelsFixture.UserID,
+        family: ItemFamily,
         payload: Payload
 
       use Core.Labels.Event, title: "Исполнитель назначен"
@@ -682,8 +694,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция опломбирована"
@@ -702,8 +713,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Позиция перенесена"
@@ -731,8 +741,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Источник процитирован"
@@ -752,8 +761,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Цитата изменена"
@@ -773,8 +781,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Цитаты изменены"
@@ -792,8 +799,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Ссылка без вида"
@@ -813,8 +819,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Лимиты заданы"
@@ -848,8 +853,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Контакт указан"
@@ -875,8 +879,7 @@ defmodule Core.LabelsFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Владелец сменён"
@@ -886,8 +889,7 @@ defmodule Core.LabelsFixture do
       @moduledoc "Событие с нагрузкой-Prim."
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: Core.LabelsFixture.Name
 
       use Core.Labels.Event,
@@ -899,8 +901,7 @@ defmodule Core.LabelsFixture do
       @moduledoc "Событие без нагрузки."
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: UserID,
+        family: Family,
         payload: nil
 
       use Core.Labels.Event, title: "Запись закрыта"
@@ -927,9 +928,20 @@ defmodule Core.LabelsFixture do
     }
 
     use Core.Es.Event.Codec,
-      event: Event,
+      event: Event.Family,
       type: "labels",
       tags: @tag_by_mod
+  end
+
+  defmodule Event.ItemFamily.Codec do
+    @moduledoc "Кодек события другого агрегата; в ратчет и фасад не входит."
+
+    alias Core.LabelsFixture.Event
+
+    use Core.Es.Event.Codec,
+      event: Event.ItemFamily,
+      type: "labels_item",
+      tags: %{Event.Assigned => "labels_item.assigned"}
   end
 
   defmodule Codec do
@@ -998,7 +1010,7 @@ defmodule Core.LabelsFixture do
     }
 
     use Core.Es.Event.Codec,
-      event: Event,
+      event: Event.Family,
       type: "labels_web",
       tags: @tag_by_mod
   end

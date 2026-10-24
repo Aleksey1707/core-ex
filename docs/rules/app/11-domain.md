@@ -152,8 +152,7 @@ use Core.Codec.Plugin,
 
 # хорошо — нагрузка-value object: событие объявляет её тип, кодек события клауз не пишет
 use Core.Es.Event,
-  aggregate_id: Agg.ID,
-  by: User.ID,
+  family: Agg.Event,
   payload: Address
 ```
 

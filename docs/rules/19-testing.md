@@ -139,8 +139,7 @@ golden-фикстурой, как событие ручного кодека (`1
 # плохо — свой case: его проверки расходятся с кодеком библиотеки молча
 use MyApp.EventCompatCase,
   codec: MyApp.Codec.Internal,
-  event: Delivery.Event,
-  aggregate_id: Delivery.ID
+  family: Delivery.Event
 
 # хорошо — test/my_app/domain/<bc>/delivery/event_compat_test.exs
 defmodule MyApp.Domain.<BC>.Delivery.EventCompatTest do

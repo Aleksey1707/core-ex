@@ -169,10 +169,19 @@ defmodule Core.Es.Event.PayloadPersonalTest do
                    fn ->
                      compile(
                        quote do
-                         defmodule Core.Es.Event.PayloadPersonalTest.NameStream do
-                           use Core.Es.Event,
+                         defmodule Core.Es.Event.PayloadPersonalTest.NameStream.Event do
+                           use Core.Es.Event.Family,
+                             aggregate: Account,
                              aggregate_id: Account.Name,
                              by: Core.EsFixture.UserID,
+                             codec: Account.Event.Codec
+
+                           @type t :: struct()
+                         end
+
+                         defmodule Core.Es.Event.PayloadPersonalTest.NameStream do
+                           use Core.Es.Event,
+                             family: Core.Es.Event.PayloadPersonalTest.NameStream.Event,
                              payload: Account.Event.HolderSet.Payload
                          end
                        end

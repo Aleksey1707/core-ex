@@ -793,7 +793,10 @@ end
 
 ## Es.Event
 
-`use Es.Event, aggregate_id:, by:, payload:` — builder события версионированного агрегата.
+`use Es.Event, family:, payload:` — builder события версионированного агрегата. `family:` —
+семейство событий агрегата («Семейство событий (`Core.Es.Event.Family`)»): Prim агрегата и
+автора событие берёт у него. `aggregate_id:` / `by:` у события — `CompileError` с недостающими и
+неизвестными опциями (решение — ADR-0084).
 
 Сгенерированные поля: `id`, `payload`, `aggregate_id`, `aggregate_version`, `at`, `by`.
 
@@ -810,18 +813,52 @@ defmodule Created do
   end
 
   use Es.Event,
-    aggregate_id: Agg.ID,
-    by: User.ID,
+    family: Agg.Event,
     payload: Payload
 end
 ```
 
 `use Es.Event` дополнительно генерирует интроспекцию (`__es_payload__/0`, `__es_aggregate_id__/0`,
-`__es_by__/0`) — по ней `<Aggregate>.Event.Codec` выводит Prim агрегата и автора и обслуживает
-события без нагрузки сам. Черновик события для `decide/2` агрегата — тоже `use Es.Event`:
-`draft/1` у события с нагрузкой, `draft/0` без неё («Event-sourced»).
+`__es_by__/0`, `__es_family__/0`) — по ней `<Aggregate>.Event.Codec` выводит Prim агрегата и
+автора и обслуживает события без нагрузки сам. Черновик события для `decide/2` агрегата — тоже
+`use Es.Event`: `draft/1` у события с нагрузкой, `draft/0` без неё («Event-sourced»).
 
 Dump/load событий — только через фасад («Dump/load только через фасад»).
+
+### Семейство событий (`Core.Es.Event.Family`)
+
+Семейство `<Aggregate>.Event` — union событий одного владельца потока — объявляет связи агрегата
+один раз, событие ссылается на него `family:`:
+
+```elixir
+defmodule Agg.Event do
+  use Core.Es.Event.Family,
+    aggregate: Agg,
+    aggregate_id: Agg.ID,
+    by: User.ID,
+    codec: Agg.Event.Codec
+
+  @type t :: Agg.Event.Created.t() | Agg.Event.Closed.t()
+end
+```
+
+- Опции обязательны. `aggregate_id:` / `by:` — Prim, их значения событие запекает в головы
+  `new/5,6`, `@type t` и `@spec`: чужой ID или автор в `Event.X.new` — предупреждение при сборке
+  вызывающего (`make consumer-check`)
+- `aggregate:` — владелец потока: event-sourced агрегат, state-stored сущность или
+  `Core.Es.Personal`; `codec:` — кодек событий семейства. Обе — атомы без загрузки (runtime-ссылка):
+  цикла семейство ↔ кодек / агрегат нет
+- `@type t` пишет автор; без него — `CompileError`
+- Ссылки сверяются после сборки всех модулей — предупреждение сборки с файлом семейства:
+  `aggregate:` не найден; `codec:` — не кодек этого семейства; event-sourced владелец объявляет
+  другой `event_codec:`. С `--warnings-as-errors` сборка падает
+- Одно семейство — один владелец потока: семейство, которое делят два агрегата с репозиториями,
+  разделяется
+
+Интроспекция — `__es_aggregate__/0`, `__es_aggregate_id__/0`, `__es_by__/0`, `__es_codec__/0`.
+Раскладка семейства у потребителя — `deps/core/docs/rules/app/13-repos.md`, «Событие и команда».
+
+Проверяется: `test/core/es/event/family_test.exs`.
 
 ### Нагрузка по полям (`Core.Es.Event.Payload`)
 
@@ -836,8 +873,7 @@ defmodule Renamed do
   end
 
   use Es.Event,
-    aggregate_id: Agg.ID,
-    by: User.ID,
+    family: Agg.Event,
     payload: Payload
 end
 ```
@@ -906,8 +942,7 @@ defmodule Renamed do
   end
 
   use Es.Event,
-    aggregate_id: Agg.ID,
-    by: User.ID,
+    family: Agg.Event,
     payload: Payload
 
   use Core.Labels.Event, title: "Запись переименована"
@@ -1272,7 +1307,7 @@ end
   плагины с `union:`: новый кодек попадает под проверку без новой строки теста
 - Обход идёт от событий кодеков по спеке нагрузки: во вложенные struct'ы, списки и варианты
   семейства
-- Автор события в сведения не выходит, но от его Prim (`by:` события) требуется
+- Автор события в сведения не выходит, но от его Prim (`by:` семейства) требуется
   `use Core.Labels.ID, kind: :user` с `resolver:`: событие страницы событий с подписями
   (`labels: true` требует `user_ref:`) дампит автора ссылкой на учётную запись с именем из словаря
   ссылок, а словарь находит только id с резолвером; автор вне словаря — `ArgumentError` на первом

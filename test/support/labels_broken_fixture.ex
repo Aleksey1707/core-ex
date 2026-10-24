@@ -73,7 +73,41 @@ defmodule Core.LabelsBrokenFixture do
   defmodule Event do
     @moduledoc false
 
-    @type t :: struct()
+    defmodule Family do
+      @moduledoc "Семейство событий кодека `Event.Codec`: объявлено раньше событий, вложенных в `Event`."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsBrokenFixture,
+        aggregate_id: AggID,
+        by: ActorID,
+        codec: Core.LabelsBrokenFixture.Event.Codec
+
+      @type t :: struct()
+    end
+
+    defmodule ByRefFamily do
+      @moduledoc "Семейство события с автором-ссылкой на запись."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsBrokenFixture,
+        aggregate_id: AggID,
+        by: Core.LabelsFixture.ItemID,
+        codec: Core.LabelsBrokenFixture.Event.ByRef.Codec
+
+      @type t :: struct()
+    end
+
+    defmodule ByIDFamily do
+      @moduledoc "Семейство события с автором без резолвера."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsBrokenFixture,
+        aggregate_id: AggID,
+        by: Core.LabelsFixture.SnapshotID,
+        codec: Core.LabelsBrokenFixture.Event.ByID.Codec
+
+      @type t :: struct()
+    end
 
     defmodule Unlabelled do
       @moduledoc "Событие без названия: нагрузка без решения по полям."
@@ -85,8 +119,7 @@ defmodule Core.LabelsBrokenFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: ActorID,
+        family: Family,
         payload: Payload
     end
 
@@ -120,8 +153,7 @@ defmodule Core.LabelsBrokenFixture do
       end
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: ActorID,
+        family: Family,
         payload: Payload
 
       use Core.Labels.Event, title: "Метка поставлена"
@@ -131,8 +163,7 @@ defmodule Core.LabelsBrokenFixture do
       @moduledoc "Событие от записи: автор — ссылка `kind: :ref`, а не учётная запись."
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: Core.LabelsFixture.ItemID,
+        family: ByRefFamily,
         payload: nil
 
       use Core.Labels.Event, title: "Отмечено записью"
@@ -142,8 +173,7 @@ defmodule Core.LabelsBrokenFixture do
       @moduledoc "Событие от автора `kind: :id`: резолвера нет, имени человеку не называют."
 
       use Core.Es.Event,
-        aggregate_id: AggID,
-        by: Core.LabelsFixture.SnapshotID,
+        family: ByIDFamily,
         payload: nil
 
       use Core.Labels.Event, title: "Отмечено без имени"
@@ -161,7 +191,7 @@ defmodule Core.LabelsBrokenFixture do
     }
 
     use Core.Es.Event.Codec,
-      event: Event,
+      event: Event.Family,
       type: "labels_broken",
       tags: @tag_by_mod
   end
@@ -174,7 +204,7 @@ defmodule Core.LabelsBrokenFixture do
     @tag_by_mod %{Event.ByRef => "labels_broken_by_ref.marked"}
 
     use Core.Es.Event.Codec,
-      event: Event,
+      event: Event.ByRefFamily,
       type: "labels_broken_by_ref",
       tags: @tag_by_mod
   end
@@ -187,7 +217,7 @@ defmodule Core.LabelsBrokenFixture do
     @tag_by_mod %{Event.ByID => "labels_broken_by_id.marked"}
 
     use Core.Es.Event.Codec,
-      event: Event,
+      event: Event.ByIDFamily,
       type: "labels_broken_by_id",
       tags: @tag_by_mod
   end

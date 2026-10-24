@@ -1,6 +1,5 @@
 defmodule Consumer.Domain.Sales.Grants.Event.Replaced do
   alias Consumer.Domain.Sales.Grants
-  alias Consumer.Domain.Sales.Values.UserID
 
   defmodule Payload do
     use Core.Es.ValueChanged,
@@ -10,8 +9,7 @@ defmodule Consumer.Domain.Sales.Grants.Event.Replaced do
   end
 
   use Core.Es.Event,
-    aggregate_id: Grants.ID,
-    by: UserID,
+    family: Grants.Event,
     payload: Payload
 
   use Core.Labels.Event, title: "Роль заменена"
