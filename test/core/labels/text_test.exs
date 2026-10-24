@@ -17,13 +17,13 @@ defmodule Core.Labels.TextTest do
 
   describe "отказ сборки" do
     test "with: не захват — CompileError" do
-      assert_raise CompileError, ~r/NotCapture: with: захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/^Labels.Text: with: ожидается захват функции арности 1/, fn ->
         compile_text(:NotCapture, with: "Текст")
       end
     end
 
     test "захват другой арности — CompileError" do
-      assert_raise CompileError, ~r/Arity: with: захват функции арности 1/, fn ->
+      assert_raise CompileError, ~r/^Labels.Text: with: ожидается захват функции арности 1/, fn ->
         compile_text(:Arity, with: &Kernel.max/2)
       end
     end
@@ -34,8 +34,35 @@ defmodule Core.Labels.TextTest do
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError,
+                   ~r/^Labels.Text: нет обязательных опций: \[:with\]; неизвестные опции: \[:wiht\]$/,
+                   fn ->
+                     {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Labels.Text)
+                     Macro.expand(quote(do: Core.Labels.Text.__using__(wiht: &Kernel.inspect/1)), env)
+                   end
+    end
+
+    test "неверное выражение в with: — в теле, с меткой" do
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Labels.Text)
+      assert Macro.expand(quote(do: Core.Labels.Text.__using__(with: @text)), env)
+
+      assert_raise CompileError, ~r/^Labels.Text: with: ожидается захват функции арности 1 .*получено "Текст"$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.TextTest.AttrWith do
+              use Core.Prim.String, name: "Код", min_len: 1, max_len: 10
+
+              @text "Текст"
+              use Core.Labels.Text, with: @text
+            end
+          end
+        )
+      end
+    end
+
     test "модуль без use Core.Prim — CompileError" do
-      assert_raise CompileError, ~r/NotPrim: не Prim: `use Core.Labels.Text` подключается после/, fn ->
+      assert_raise CompileError, ~r/^Labels.Text: не Prim: `use Core.Labels.Text` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.TextTest.NotPrim do
@@ -47,7 +74,7 @@ defmodule Core.Labels.TextTest do
     end
 
     test "вместе с Core.Labels.ID — CompileError" do
-      assert_raise CompileError, ~r/WithID: `use Core.Labels.ID` и `use Core.Labels.Text` вместе/, fn ->
+      assert_raise CompileError, ~r/^Labels.Text: `use Core.Labels.ID` и `use Core.Labels.Text` вместе/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.TextTest.WithID do

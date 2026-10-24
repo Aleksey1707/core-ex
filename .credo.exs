@@ -236,13 +236,6 @@
                  "lib/core/prim/string.ex",
                  "lib/core/prim/uuid.ex",
                  "lib/core/prim/wrapper.ex",
-                 # 13 — Labels
-                 "lib/core/labels/event.ex",
-                 "lib/core/labels/fields.ex",
-                 "lib/core/labels/id.ex",
-                 "lib/core/labels/text.ex",
-                 "lib/core/labels/values.ex",
-                 "lib/core/web/event.ex",
                  # 14 — тело-мелкие
                  "lib/core/context/accessor.ex",
                  "lib/core/enum.ex",

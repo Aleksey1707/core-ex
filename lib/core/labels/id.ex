@@ -24,6 +24,9 @@ defmodule Core.Labels.ID do
   Вид записи — атом: camelCase на wire делает wire, а не домен. Резолвер — модуль, который отдаёт
   текущее имя по id: его вызывает словарь ссылок страницы событий.
 
+  Опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов функции в
+  опции — `CompileError` «ожидается литерал».
+
   Сборку ломают: `kind:` вне `~w(ref user id)a`, `entity:` не атомом или не у `:ref`, `resolver:` не
   модулем или у `:id`, отсутствие обязательной опции своего вида, `use` не после `use Core.Prim.*` и
   `use Core.Labels.Text` в том же Prim — у значения один способ выйти в сведения.
@@ -39,31 +42,32 @@ defmodule Core.Labels.ID do
   @typedoc "Объявление вида id."
   @type t :: %{kind: kind(), entity: atom() | nil, resolver: module() | nil}
 
+  alias Core.Helper
+
   @label "Labels.ID"
   @kinds ~w(ref user id)a
   @required_keys ~w(kind)a
   @optional_keys ~w(entity resolver)a
+  @expression_keys []
 
   # ===== объявление =====
 
   @doc "Объявить вид id в сведениях (`kind:`), вид записи (`entity:`) и резолвер имён (`resolver:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Core.Helper.Opts.validate!(
-        opts,
-        Core.Labels.ID.required_keys(),
-        Core.Labels.ID.optional_keys(),
-        "Labels.ID"
-      )
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    label_id = kind!(opts[:kind], opts[:entity], opts[:resolver])
 
+    quote do
       Core.Labels.Check.prim!(
         Core.Prim.declared?(__MODULE__),
         Core.Labels.ID.declared?(__MODULE__) or Core.Labels.Text.declared?(__MODULE__),
         "Core.Labels.ID",
-        "Labels.ID #{inspect(__MODULE__)}"
+        unquote(@label)
       )
 
-      @label_id Core.Labels.ID.declare!(__MODULE__, opts)
+      @label_id unquote(Macro.escape(label_id))
 
       @doc false
       @spec __label_id__() :: Core.Labels.ID.t()
@@ -72,59 +76,42 @@ defmodule Core.Labels.ID do
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
-
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec declare!(module(), keyword()) :: t()
-
-  def declare!(module, opts) when is_atom(module) and is_list(opts),
-    do: kind!(module, Keyword.fetch!(opts, :kind), Keyword.get(opts, :entity), Keyword.get(opts, :resolver))
-
   # ---
 
-  defp kind!(module, :ref, entity, resolver),
-    do: %{kind: :ref, entity: entity!(module, entity), resolver: resolver!(module, resolver)}
+  defp kind!(:ref, entity, resolver), do: %{kind: :ref, entity: entity!(entity), resolver: resolver!(resolver)}
 
-  defp kind!(module, :user, entity, resolver) do
-    forbid!(module, :user, :entity, entity)
-    %{kind: :user, entity: nil, resolver: resolver!(module, resolver)}
+  defp kind!(:user, entity, resolver) do
+    forbid!(:user, :entity, entity)
+    %{kind: :user, entity: nil, resolver: resolver!(resolver)}
   end
 
-  defp kind!(module, :id, entity, resolver) do
-    forbid!(module, :id, :entity, entity)
-    forbid!(module, :id, :resolver, resolver)
+  defp kind!(:id, entity, resolver) do
+    forbid!(:id, :entity, entity)
+    forbid!(:id, :resolver, resolver)
     %{kind: :id, entity: nil, resolver: nil}
   end
 
-  defp kind!(module, kind, _entity, _resolver),
-    do: reject!(module, "kind: один из #{inspect(@kinds)}, задано #{inspect(kind)}")
+  defp kind!(kind, _entity, _resolver),
+    do: Helper.Opts.reject!("#{@label}: kind", "ожидается один из #{inspect(@kinds)}, получено #{inspect(kind)}")
 
-  defp entity!(module, nil), do: reject!(module, "`kind: :ref` без `entity:` — вид записи атомом")
-  defp entity!(_module, entity) when is_atom(entity) and not is_boolean(entity), do: entity
-  defp entity!(module, entity), do: reject!(module, "entity: атом вида записи, задано #{inspect(entity)}")
+  defp entity!(nil), do: Helper.Opts.reject!(@label, "`kind: :ref` без `entity:` — вид записи атомом")
+  defp entity!(entity) when is_atom(entity) and not is_boolean(entity), do: entity
 
-  defp resolver!(module, nil), do: reject!(module, "вид id со ссылкой без `resolver:` — модуль резолвера имён")
+  defp entity!(entity),
+    do: Helper.Opts.reject!("#{@label}: entity", "ожидается атом вида записи, получено #{inspect(entity)}")
 
-  defp resolver!(module, resolver) do
+  defp resolver!(nil), do: Helper.Opts.reject!(@label, "вид id со ссылкой без `resolver:` — модуль резолвера имён")
+
+  defp resolver!(resolver) do
     if is_atom(resolver) and String.starts_with?(Atom.to_string(resolver), "Elixir."),
       do: resolver,
-      else: reject!(module, "resolver: модуль, задано #{inspect(resolver)}")
+      else: Helper.Opts.reject!("#{@label}: resolver", "ожидается модуль, получено #{inspect(resolver)}")
   end
 
-  defp forbid!(_module, _kind, _key, nil), do: :ok
-  defp forbid!(module, kind, key, _value), do: reject!(module, "`#{key}:` у `kind: #{inspect(kind)}` не задаётся")
+  defp forbid!(_kind, _key, nil), do: :ok
 
-  defp reject!(module, message), do: raise(CompileError, description: "#{where(module)}: #{message}")
-
-  defp where(module), do: "#{@label} #{inspect(module)}"
+  defp forbid!(kind, key, _value),
+    do: Helper.Opts.reject!("#{@label}: #{key}", "у `kind: #{inspect(kind)}` не задаётся")
 
   # ===== интроспекция =====
 

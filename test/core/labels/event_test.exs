@@ -11,13 +11,13 @@ defmodule Core.Labels.EventTest do
     end
 
     test "пустое название — CompileError" do
-      assert_raise CompileError, ~r/NoText: title: непустая строка, задано " "/, fn ->
+      assert_raise CompileError, ~r/^Labels.Event: title: ожидается непустая строка, получено " "$/, fn ->
         compile_event(:NoText, Updated.Payload, title: " ")
       end
     end
 
     test "не строковое название — CompileError" do
-      assert_raise CompileError, ~r/AtomTitle: title: непустая строка, задано :closed/, fn ->
+      assert_raise CompileError, ~r/^Labels.Event: title: ожидается непустая строка, получено :closed$/, fn ->
         compile_event(:AtomTitle, Updated.Payload, title: :closed)
       end
     end
@@ -28,8 +28,30 @@ defmodule Core.Labels.EventTest do
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Labels.Event: неизвестные опции: \[:titel\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Labels.Event)
+        Macro.expand(quote(do: Core.Labels.Event.__using__(title: "Событие", titel: "Событие")), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Labels.Event: title: ожидается литерал, получено @title$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.EventTest.AttrTitle do
+              use Core.Es.Event, family: Core.EventFixture.Event, payload: nil
+
+              @title "Событие"
+              use Core.Labels.Event, title: @title
+            end
+          end
+        )
+      end
+    end
+
     test "модуль без use Core.Es.Event — CompileError" do
-      assert_raise CompileError, ~r/NotEvent: не событие: `use Core.Labels.Event` подключается после/, fn ->
+      assert_raise CompileError, ~r/^Labels.Event: не событие: `use Core.Labels.Event` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.EventTest.NotEvent do
@@ -47,7 +69,7 @@ defmodule Core.Labels.EventTest do
     end
 
     test "пустая подпись нагрузки-Prim — CompileError" do
-      assert_raise CompileError, ~r/PrimEmpty: payload: непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/^Labels.Event: payload: ожидается непустая строка, получено ""$/, fn ->
         compile_event(:PrimEmpty, Core.LabelsFixture.Name, title: "Событие", payload: "")
       end
     end

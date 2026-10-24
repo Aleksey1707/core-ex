@@ -22,6 +22,9 @@ defmodule Core.Labels.Event do
         title: "Счёт переименован",
         payload: "Название"
 
+  Опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов функции в
+  опции — `CompileError` «ожидается литерал».
+
   Сборку ломают: модуль без `use Core.Es.Event`, пустое или не строковое название, нагрузка-Prim
   без `payload:`, `payload:` у события без нагрузки или с нагрузкой-struct'ом и нагрузка-struct
   без `use Core.Labels.Fields`.
@@ -29,29 +32,30 @@ defmodule Core.Labels.Event do
   Макрос занимает в модуле события имена `__label_title__/0` и `__label_payload__/0`.
   """
 
+  alias Core.Helper
   alias Core.Labels.Check
   alias Core.Labels.Fields
 
   @label "Labels.Event"
   @required_keys ~w(title)a
   @optional_keys ~w(payload)a
+  @expression_keys []
 
   # ===== объявление =====
 
   @doc "Объявить название события (`title:`) и подпись нагрузки-Prim (`payload:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Core.Helper.Opts.validate!(
-        opts,
-        Core.Labels.Event.required_keys(),
-        Core.Labels.Event.optional_keys(),
-        "Labels.Event"
-      )
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    title = Check.text!(opts[:title], "#{@label}: title")
+    payload = if Keyword.has_key?(opts, :payload), do: Check.text!(opts[:payload], "#{@label}: payload")
 
-      {title, payload} = Core.Labels.Event.declaration!(__MODULE__, opts)
+    quote do
+      Core.Labels.Event.host!(__MODULE__)
 
-      @label_title title
-      @label_payload payload
+      @label_title unquote(title)
+      @label_payload unquote(payload)
       @after_compile Core.Labels.Event
 
       @doc false
@@ -67,30 +71,12 @@ defmodule Core.Labels.Event do
   end
 
   @doc false
-  @spec required_keys() :: [atom()]
+  @spec host!(module()) :: :ok
 
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec declaration!(module(), keyword()) :: {String.t(), String.t() | nil}
-
-  def declaration!(module, opts) when is_atom(module) and is_list(opts) do
-    if not Core.Es.Event.declared?(module) do
-      raise CompileError,
-        description: "#{where(module)}: не событие: `use Core.Labels.Event` подключается после `use Core.Es.Event`"
-    end
-
-    title = Check.text!(Keyword.fetch!(opts, :title), "#{where(module)}: title")
-
-    case Keyword.fetch(opts, :payload) do
-      {:ok, payload} -> {title, Check.text!(payload, "#{where(module)}: payload")}
-      :error -> {title, nil}
-    end
+  def host!(module) when is_atom(module) do
+    if Core.Es.Event.declared?(module),
+      do: :ok,
+      else: Helper.Opts.reject!(@label, "не событие: `use Core.Labels.Event` подключается после `use Core.Es.Event`")
   end
 
   # ===== проверка нагрузки =====
@@ -139,10 +125,6 @@ defmodule Core.Labels.Event do
   end
 
   defp fail!(env, message) do
-    raise CompileError, description: "#{where(env.module)}: #{message}", file: env.file, line: env.line
+    raise CompileError, description: "#{@label} #{inspect(env.module)}: #{message}", file: env.file, line: env.line
   end
-
-  # ===== общее =====
-
-  defp where(module), do: "#{@label} #{inspect(module)}"
 end

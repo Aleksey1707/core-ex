@@ -204,7 +204,7 @@ defmodule Core.Web.EventTest do
     end
 
     test "codec: без dump/1 — CompileError" do
-      assert_raise CompileError, ~r/Web.Event: codec: модуль URI должен экспортировать dump\/1/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: codec: модуль URI должен экспортировать dump\/1$/, fn ->
         compile_event(:BadCodec, codec: URI)
       end
     end
@@ -215,58 +215,97 @@ defmodule Core.Web.EventTest do
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Web.Event: неизвестные опции: \[:user_rf\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Web.Event)
+        Macro.expand(quote(do: Core.Web.Event.__using__(codec: External, user_rf: [])), env)
+      end
+    end
+
+    test "атрибут в опции-литерале — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Web.Event: codec: ожидается литерал, получено @codec$/, fn ->
+        compile_event(:AttrCodec, quote(do: [codec: @codec]))
+      end
+    end
+
+    test "неверное выражение в user_ref: — в теле, с меткой" do
+      assert_raise CompileError, ~r/^Web.Event: user_ref: ожидается keyword opts, получено "ref"$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Web.EventTest.AttrUserRef do
+              @user_ref "ref"
+              use Core.Web.Event, codec: Core.CodecFixture.External, user_ref: @user_ref
+            end
+          end
+        )
+      end
+    end
+
     test "labels: true без user_ref: — CompileError" do
-      assert_raise CompileError, ~r/LabelsNoUserRef: labels: true требует user_ref:/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: labels: true требует user_ref:/, fn ->
         compile_event(:LabelsNoUserRef, codec: External, labels: true)
       end
 
-      assert_raise CompileError, ~r/LabelsNilUserRef: labels: true требует user_ref:/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: labels: true требует user_ref:/, fn ->
         compile_event(:LabelsNilUserRef, codec: External, user_ref: nil, labels: true)
       end
     end
 
+    test "labels: true при user_ref: выражением со значением nil — в теле, с меткой" do
+      assert_raise CompileError, ~r/^Web.Event: labels: true требует user_ref:/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Web.EventTest.AttrNilUserRef do
+              @user_ref nil
+              use Core.Web.Event, codec: Core.CodecFixture.External, user_ref: @user_ref, labels: true
+            end
+          end
+        )
+      end
+    end
+
     test "labels: не boolean — CompileError" do
-      assert_raise CompileError, ~r/LabelsNotBoolean: labels: ожидается boolean, получено :yes/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: labels: ожидается boolean, получено :yes$/, fn ->
         compile_event(:LabelsNotBoolean, codec: External, user_ref: user_ref(), labels: :yes)
       end
     end
 
     test "user_ref: без dump: — CompileError" do
-      assert_raise CompileError, ~r/NoDump: user_ref: нет обязательных опций: \[:dump\]/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: user_ref: нет обязательных опций: \[:dump\]$/, fn ->
         compile_event(:NoDump, codec: External, user_ref: [schema: UserRef])
       end
     end
 
     test "user_ref: с неизвестной опцией — CompileError" do
-      assert_raise CompileError, ~r/UnknownRef: user_ref: неизвестные опции: \[:login\]/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: user_ref: неизвестные опции: \[:login\]$/, fn ->
         compile_event(:UnknownRef, codec: External, user_ref: [login: true] ++ user_ref())
       end
     end
 
     test "dump: не захват функции арности 2 — CompileError" do
-      assert_raise CompileError, ~r/Arity: user_ref: dump: захват функции арности 2/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: user_ref: dump: ожидается захват функции арности 2/, fn ->
         compile_event(:Arity, codec: External, user_ref: [dump: &Kernel.inspect/1, schema: UserRef])
       end
     end
 
     test "user_ref: без schema: при open_api_spex — CompileError" do
-      assert_raise CompileError, ~r/NoSchema: user_ref: нет обязательных опций: \[:schema\]/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: user_ref: нет обязательных опций: \[:schema\]$/, fn ->
         compile_event(:NoSchema, codec: External, user_ref: [dump: &WithUser.user_ref/2])
       end
     end
 
     test "schema: не схема OpenApiSpex — CompileError" do
-      assert_raise CompileError, ~r/BadSchema: user_ref: schema: модуль URI должен экспортировать schema\/0/, fn ->
+      assert_raise CompileError, ~r/^Web.Event: user_ref: schema: модуль URI должен экспортировать schema\/0$/, fn ->
         compile_event(:BadSchema, codec: External, user_ref: [dump: &WithUser.user_ref/2, schema: URI])
       end
     end
 
     test "open_api_spex у приложения, core собран без него — CompileError с подсказкой пересборки" do
-      message = ~r/Stale: open_api_spex есть, но core собран без него.*mix deps.compile core --force/
+      message = ~r/^Web.Event: open_api_spex есть, но core собран без него.*mix deps.compile core --force$/
 
-      assert_raise CompileError, message, fn -> Core.Web.Event.schema_built!(Stale, {:error, :nofile}) end
+      assert_raise CompileError, message, fn -> Core.Web.Event.schema_built!({:error, :nofile}) end
 
-      assert Core.Web.Event.schema_built!(Built, Code.ensure_compiled(Core.Web.Event.Schema)) == :ok
+      assert Core.Web.Event.schema_built!(Code.ensure_compiled(Core.Web.Event.Schema)) == :ok
     end
   end
 

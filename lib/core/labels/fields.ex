@@ -56,6 +56,9 @@ defmodule Core.Labels.Fields do
   результата; так подписывается значение без собственного модуля. `text:` и `list: [text: …]` — без
   других ключей.
 
+  `fields:` и `value:` — опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): захваты в
+  них проверяются в теле модуля; `labels:` и `change:` — литералы, проверяются при раскрытии `use`.
+
   Полнота проверяется на `@after_compile`, где уже есть struct и спека нагрузки. Сборку ломают:
   поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, свободная
   map'а (`type: :map`) с подписью строкой, видимый список map'ов (`list: [type: :map]`, решение у него
@@ -95,6 +98,7 @@ defmodule Core.Labels.Fields do
   alias Core.Codec.Field
   alias Core.Es.Event.Payload
   alias Core.Es.ValueChanged
+  alias Core.Helper
   alias Core.Labels.Check
 
   @typedoc "Решение по полю: подпись, подписи map'ы с id в ключах или скрыто."
@@ -120,6 +124,7 @@ defmodule Core.Labels.Fields do
   @label "Labels.Fields"
   @required_keys []
   @optional_keys ~w(labels change fields value)a
+  @expression_keys ~w(fields value)a
   @map_keys ~w(label key value)a
   @change_fields ~w(old_value new_value)a
 
@@ -130,15 +135,25 @@ defmodule Core.Labels.Fields do
   подпись изменения (`change:`) и вид его значения у ручного struct'а (`value:`).
   """
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Core.Helper.Opts.validate!(
-        opts,
-        Core.Labels.Fields.required_keys(),
-        Core.Labels.Fields.optional_keys(),
-        "Labels.Fields"
-      )
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-      declared = Core.Labels.Fields.declare!(__MODULE__, opts)
+    decision = decision!(opts)
+
+    spec =
+      case decision do
+        {:labels, _labels} -> quote(do: Core.Labels.Fields.fields!(unquote(opts[:fields])))
+        {:change, _label} -> quote(do: Core.Labels.Fields.value!(unquote(opts[:value])))
+      end
+
+    quote do
+      declared =
+        Core.Labels.Fields.declare!(
+          Core.Labels.Fields.host(__MODULE__),
+          unquote(Macro.escape(decision)),
+          unquote(spec)
+        )
 
       @label_specs declared.specs
       @label_fields declared.fields
@@ -162,123 +177,75 @@ defmodule Core.Labels.Fields do
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
+  # ---
 
-  def required_keys, do: @required_keys
-
-  @doc false
-  @spec optional_keys() :: [atom()]
-
-  def optional_keys, do: @optional_keys
-
-  # Объявление модуля известно уже при раскрытии `use`: `use Core.Es.Event.Payload` или
-  # `use Core.Es.ValueChanged` выше отдаёт его своим читателем. Struct нужен уже здесь: без него `use`
-  # выше `use Core.Es.ValueChanged` сошёл бы за ручной struct.
-  @doc false
-  @spec declare!(module(), keyword()) :: declared()
-
-  def declare!(module, opts) when is_atom(module) and is_list(opts),
-    do: declare!(host(module), opts, where(module))
-
-  @doc false
-  @spec declare!(host(), keyword(), String.t()) :: declared()
-
-  def declare!(host, opts, where) when is_list(opts) and is_binary(where) do
+  defp decision!(opts) do
     case {Keyword.fetch(opts, :labels), Keyword.fetch(opts, :change)} do
       {{:ok, labels}, :error} ->
-        if Keyword.has_key?(opts, :value), do: reject!(where, "`value:` без `change:` — вид значения задаёт изменение")
+        if Keyword.has_key?(opts, :value),
+          do: Helper.Opts.reject!("#{@label}: value", "без `change:` — вид значения задаёт изменение")
 
-        %{specs: specs!(host, Keyword.get(opts, :fields), where), fields: labels!(labels, where), change: nil}
+        {:labels, labels!(labels)}
 
       {:error, {:ok, label}} ->
         if Keyword.has_key?(opts, :fields),
-          do: reject!(where, "`fields:` вместе с `change:` — вид значения изменения задаёт `value:`")
+          do: Helper.Opts.reject!("#{@label}: fields", "вместе с `change:` — вид значения изменения задаёт `value:`")
 
-        %{specs: [], fields: [], change: change!(host, label, Keyword.get(opts, :value), where)}
+        {:change, Check.text!(label, "#{@label}: change")}
 
       {:error, :error} ->
-        reject!(where, "одна из опций `labels:` / `change:`, задано ни одной")
+        Helper.Opts.reject!(@label, "ожидается одна из опций `labels:` / `change:`, получено ни одной")
 
       {{:ok, _labels}, {:ok, _label}} ->
-        reject!(where, "одна из опций `labels:` / `change:`, задано обе")
+        Helper.Opts.reject!(@label, "ожидается одна из опций `labels:` / `change:`, получено обе")
     end
   end
 
-  # ---
+  defp labels!(labels) do
+    where = "#{@label}: labels"
 
-  defp host(module) do
-    case {Payload.declared_fields(module), ValueChanged.declared(module)} do
-      {nil, nil} -> if Module.defines?(module, {:__struct__, 0}), do: :struct, else: :none
-      {nil, changed} -> {:change, changed}
-      {fields, nil} -> {:payload, fields}
-    end
+    for {field, label} <- Check.keyword!(labels, where), do: {field, label!(label, "#{where}: #{field}")}
   end
 
-  defp specs!(host, fields, where) do
-    case {host, fields} do
-      {{:payload, payload}, nil} ->
-        pairs(payload)
+  defp label!(:hidden, _where), do: :hidden
 
-      {{:payload, _payload}, fields} ->
-        raise CompileError,
-          description:
-            "#{where}: спека поля и у нагрузки события, и в `fields:` — вид поля нагрузки " <>
-              "задаёт её спека: #{inspect(Keyword.keys(fields))}"
+  defp label!([_ | _] = map, where) do
+    Helper.Opts.validate!(map, @map_keys, [], where)
 
-      {_host, nil} ->
-        raise CompileError,
-          description:
-            "#{where}: не нагрузка: `use Core.Labels.Fields` подключается после " <>
-              "`use Core.Es.Event.Payload` или объявляет спеку видимых полей `fields:`"
-
-      {_host, fields} ->
-        fields!(fields, where)
-    end
+    for key <- @map_keys, do: {key, Check.text!(Keyword.fetch!(map, key), "#{where}: #{key}")}
   end
 
-  defp labels!(labels, where) do
-    where = "#{where}: labels"
+  defp label!(text, where), do: Check.text!(text, where)
 
-    for {field, label} <- Check.keyword!(labels, where), do: {field, label!(label, "#{where}, поле #{field}")}
-  end
+  # ===== выражения в теле =====
 
-  defp change!(host, label, value, where) do
-    label = Check.text!(label, "#{where}: change")
+  @doc false
+  @spec fields!(term()) :: [{atom(), spec()}] | nil
 
-    case {host, value} do
-      {:none, _value} ->
-        reject!(
-          where,
-          "`use Core.Labels.Fields, change:` подключается после `use Core.Es.ValueChanged` или `defstruct`"
-        )
+  def fields!(nil), do: nil
 
-      {{:change, changed}, nil} ->
-        {label, Field.value_spec(Keyword.fetch!(changed, :type), "#{where}: change")}
-
-      {{:change, _changed}, _value} ->
-        reject!(where, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
-
-      {_struct, nil} ->
-        reject!(where, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
-
-      {_struct, value} ->
-        [value: spec] = parse!([value: value], "#{where}: value")
-        {label, spec}
-    end
-  end
-
-  defp reject!(where, message), do: raise(CompileError, description: "#{where}: #{message}")
-
-  defp fields!(fields, where) do
-    where = "#{where}: fields"
+  def fields!(fields) do
+    where = "#{@label}: fields"
 
     parse!(Check.keyword!(fields, where), where)
   end
 
+  @doc false
+  @spec value!(term()) :: spec() | nil
+
+  def value!(nil), do: nil
+
+  def value!(value) do
+    where = "#{@label}: value"
+
+    if text?(value), do: text_spec!(value, where), else: normalize!([value: value], where).value
+  end
+
+  # ---
+
   defp parse!(fields, where) do
     {texts, rest} = Enum.split_with(fields, fn {_name, opts} -> text?(opts) end)
-    texts = Map.new(texts, fn {name, opts} -> {name, text_spec!(opts, "#{where}, поле #{name}")} end)
+    texts = Map.new(texts, fn {name, opts} -> {name, text_spec!(opts, "#{where}: #{name}")} end)
     specs = Map.merge(texts, normalize!(rest, where))
 
     for {name, _opts} <- fields, do: {name, Map.fetch!(specs, name)}
@@ -294,26 +261,78 @@ defmodule Core.Labels.Fields do
     do: {:list, {:text, Check.capture!(fun, 1, "#{where}: list: text")}}
 
   defp text_spec!(opts, where) do
-    raise CompileError,
-      description:
-        "#{where}: `text:` без других ключей: [text: &f/1] или [list: [text: &f/1]], " <>
-          "задано #{inspect(opts)}"
+    Helper.Opts.reject!(
+      where,
+      "`text:` без других ключей: [text: &f/1] или [list: [text: &f/1]], получено #{inspect(opts)}"
+    )
   end
 
   defp normalize!([], _where), do: %{}
   defp normalize!(fields, where), do: Map.new(pairs(Field.normalize!(fields, :labels, where)))
 
-  defp pairs(fields), do: for(%Field{name: name, spec: spec} <- fields, do: {name, spec})
+  # ===== решение по объявлению модуля =====
 
-  defp label!(:hidden, _where), do: :hidden
+  # Объявление модуля известно только телу: `use Core.Es.Event.Payload` или `use Core.Es.ValueChanged`
+  # выше пишет его атрибутом. Struct нужен уже здесь: без него `use` выше `use Core.Es.ValueChanged`
+  # сошёл бы за ручной struct.
+  @doc false
+  @spec host(module()) :: host()
 
-  defp label!([_ | _] = map, where) do
-    Core.Helper.Opts.validate!(map, @map_keys, [], where)
-
-    for key <- @map_keys, do: {key, Check.text!(Keyword.fetch!(map, key), "#{where}: #{key}")}
+  def host(module) when is_atom(module) do
+    case {Payload.declared_fields(module), ValueChanged.declared(module)} do
+      {nil, nil} -> if Module.defines?(module, {:__struct__, 0}), do: :struct, else: :none
+      {nil, changed} -> {:change, changed}
+      {fields, nil} -> {:payload, fields}
+    end
   end
 
-  defp label!(text, where), do: Check.text!(text, where)
+  @doc false
+  @spec declare!(host(), {:labels, [{atom(), label()}]} | {:change, String.t()}, [{atom(), spec()}] | spec() | nil) ::
+          declared()
+
+  def declare!(host, {:labels, labels}, specs),
+    do: %{specs: specs!(host, specs), fields: labels, change: nil}
+
+  def declare!(host, {:change, label}, value), do: %{specs: [], fields: [], change: change!(host, label, value)}
+
+  # ---
+
+  defp specs!({:payload, payload}, nil), do: pairs(payload)
+
+  defp specs!({:payload, _payload}, specs) do
+    Helper.Opts.reject!(
+      "#{@label}: fields",
+      "спека поля и у нагрузки события — вид поля нагрузки задаёт её спека: #{inspect(Keyword.keys(specs))}"
+    )
+  end
+
+  defp specs!(_host, nil) do
+    Helper.Opts.reject!(
+      @label,
+      "не нагрузка: `use Core.Labels.Fields` подключается после `use Core.Es.Event.Payload` " <>
+        "или объявляет спеку видимых полей `fields:`"
+    )
+  end
+
+  defp specs!(_host, specs), do: specs
+
+  defp change!(:none, _label, _value) do
+    Helper.Opts.reject!(
+      @label,
+      "`use Core.Labels.Fields, change:` подключается после `use Core.Es.ValueChanged` или `defstruct`"
+    )
+  end
+
+  defp change!({:change, changed}, label, nil),
+    do: {label, Field.value_spec(Keyword.fetch!(changed, :type), "#{@label}: change")}
+
+  defp change!({:change, _changed}, _label, _value),
+    do: Helper.Opts.reject!(@label, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
+
+  defp change!(_struct, _label, nil),
+    do: Helper.Opts.reject!(@label, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
+
+  defp change!(_struct, label, value), do: {label, value}
 
   # ===== проверка полноты =====
 
@@ -397,7 +416,7 @@ defmodule Core.Labels.Fields do
   defp ensure_none!(env, fields, message), do: fail!(env, "#{message}: #{inspect(fields)}")
 
   defp fail!(env, message) do
-    raise CompileError, description: "#{where(env.module)}: #{message}", file: env.file, line: env.line
+    raise CompileError, description: "#{@label} #{inspect(env.module)}: #{message}", file: env.file, line: env.line
   end
 
   # ===== интроспекция =====
@@ -474,5 +493,5 @@ defmodule Core.Labels.Fields do
 
   # ===== общее =====
 
-  defp where(module), do: "#{@label} #{inspect(module)}"
+  defp pairs(fields), do: for(%Field{name: name, spec: spec} <- fields, do: {name, spec})
 end

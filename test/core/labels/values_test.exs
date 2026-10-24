@@ -18,66 +18,68 @@ defmodule Core.Labels.ValuesTest do
     assert Keyword.keys(Status.labels()) == Status.values()
   end
 
-  describe "labels!/3 — разбор по значениям Enum" do
+  describe "labels!/2 — разбор по значениям Enum" do
     test "пары в порядке значений Enum, а не labels:" do
-      assert Values.labels!(~w(new done)a, [done: "Готов", new: "Новый"], "Labels.Values X") ==
+      assert Values.labels!(~w(new done)a, done: "Готов", new: "Новый") ==
                [new: "Новый", done: "Готов"]
     end
 
     test "значение без подписи — CompileError" do
-      assert_raise CompileError, "Labels.Values X: значения без подписи: [:done]", fn ->
-        Values.labels!(~w(new done)a, [new: "Новый"], "Labels.Values X")
+      assert_raise CompileError, "Labels.Values: значения без подписи: [:done]", fn ->
+        Values.labels!(~w(new done)a, new: "Новый")
       end
     end
 
     test "подпись вне Enum — CompileError" do
-      assert_raise CompileError, "Labels.Values X: подписи значений вне Enum: [:lost]", fn ->
-        Values.labels!(~w(new)a, [new: "Новый", lost: "Потерян"], "Labels.Values X")
+      assert_raise CompileError, "Labels.Values: подписи значений вне Enum: [:lost]", fn ->
+        Values.labels!(~w(new)a, new: "Новый", lost: "Потерян")
       end
     end
 
     test "не Enum — CompileError" do
-      assert_raise CompileError, ~r/^Labels.Values X: не Enum: `use Core.Labels.Values` подключается после/, fn ->
-        Values.labels!(nil, [new: "Новый"], "Labels.Values X")
+      assert_raise CompileError, ~r/^Labels.Values: не Enum: `use Core.Labels.Values` подключается после/, fn ->
+        Values.labels!(nil, new: "Новый")
       end
     end
   end
 
   describe "отказ сборки" do
     test "значение без подписи — CompileError" do
-      assert_raise CompileError, ~r/Missing: значения без подписи: \[:done\]/, fn ->
+      assert_raise CompileError, ~r/^Labels.Values: значения без подписи: \[:done\]$/, fn ->
         compile_enum(:Missing, labels: [new: "Новый"])
       end
     end
 
     test "подпись вне Enum — CompileError" do
-      assert_raise CompileError, ~r/Extra: подписи значений вне Enum: \[:lost\]/, fn ->
+      assert_raise CompileError, ~r/^Labels.Values: подписи значений вне Enum: \[:lost\]$/, fn ->
         compile_enum(:Extra, labels: [new: "Новый", done: "Готов", lost: "Потерян"])
       end
     end
 
     test "повтор значения — CompileError" do
-      assert_raise CompileError, ~r/Twice: labels: повторяются \[:new\]/, fn ->
+      assert_raise CompileError, ~r/^Labels.Values: labels: повторяются \[:new\]$/, fn ->
         compile_enum(:Twice, labels: [new: "Новый", new: "Свежий", done: "Готов"])
       end
     end
 
     test "пустая подпись — CompileError" do
-      assert_raise CompileError, ~r/Blank: labels, значение done: непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/^Labels.Values: labels: done: ожидается непустая строка, получено ""$/, fn ->
         compile_enum(:Blank, labels: [new: "Новый", done: ""])
       end
     end
 
     test "не строковая подпись — CompileError" do
-      assert_raise CompileError, ~r/NotText: labels, значение done: непустая строка, задано :hidden/, fn ->
+      assert_raise CompileError, ~r/^Labels.Values: labels: done: ожидается непустая строка, получено :hidden$/, fn ->
         compile_enum(:NotText, labels: [new: "Новый", done: :hidden])
       end
     end
 
     test "labels: не keyword-список — CompileError" do
-      assert_raise CompileError, ~r/List: labels: непустой keyword-список, задано \["Новый"\]/, fn ->
-        compile_enum(:List, labels: ["Новый"])
-      end
+      assert_raise CompileError,
+                   ~r/^Labels.Values: labels: ожидается непустой keyword-список, получено \["Новый"\]$/,
+                   fn ->
+                     compile_enum(:List, labels: ["Новый"])
+                   end
     end
 
     test "без labels: — CompileError" do
@@ -86,8 +88,32 @@ defmodule Core.Labels.ValuesTest do
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError,
+                   ~r/^Labels.Values: нет обязательных опций: \[:labels\]; неизвестные опции: \[:lables\]$/,
+                   fn ->
+                     {:ok, env} = Macro.Env.define_require(__ENV__, [], Values)
+                     Macro.expand(quote(do: Core.Labels.Values.__using__(lables: [new: "Новый"])), env)
+                   end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Labels.Values: labels: ожидается литерал, получено @labels$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.ValuesTest.AttrLabels do
+              use Core.Enum, name: "Статус", values: ~w(new done)a
+
+              @labels [new: "Новый", done: "Готов"]
+              use Core.Labels.Values, labels: @labels
+            end
+          end
+        )
+      end
+    end
+
     test "модуль без use Core.Enum — CompileError" do
-      assert_raise CompileError, ~r/NotEnum: не Enum: `use Core.Labels.Values` подключается после/, fn ->
+      assert_raise CompileError, ~r/^Labels.Values: не Enum: `use Core.Labels.Values` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.ValuesTest.NotEnum do

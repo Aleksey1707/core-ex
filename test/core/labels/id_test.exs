@@ -22,7 +22,7 @@ defmodule Core.Labels.IDTest do
 
   describe "отказ сборки" do
     test "kind: вне ~w(ref user id)a — CompileError" do
-      assert_raise CompileError, ~r/Labels.ID .*Other: kind: один из \[:ref, :user, :id\], задано :link/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: kind: ожидается один из \[:ref, :user, :id\], получено :link$/, fn ->
         compile_id(:Other, kind: :link)
       end
     end
@@ -34,49 +34,49 @@ defmodule Core.Labels.IDTest do
     end
 
     test ":ref без entity: — CompileError" do
-      assert_raise CompileError, ~r/NoEntity: `kind: :ref` без `entity:`/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: `kind: :ref` без `entity:`/, fn ->
         compile_id(:NoEntity, kind: :ref, resolver: ItemQuery)
       end
     end
 
     test ":ref с entity: не атомом — CompileError" do
-      assert_raise CompileError, ~r/StringEntity: entity: атом вида записи, задано "stockItem"/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: entity: ожидается атом вида записи, получено "stockItem"$/, fn ->
         compile_id(:StringEntity, kind: :ref, entity: "stockItem", resolver: ItemQuery)
       end
     end
 
     test ":ref без resolver: — CompileError" do
-      assert_raise CompileError, ~r/NoResolver: вид id со ссылкой без `resolver:`/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: вид id со ссылкой без `resolver:`/, fn ->
         compile_id(:NoResolver, kind: :ref, entity: :item)
       end
     end
 
     test ":user без resolver: — CompileError" do
-      assert_raise CompileError, ~r/UserNoResolver: вид id со ссылкой без `resolver:`/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: вид id со ссылкой без `resolver:`/, fn ->
         compile_id(:UserNoResolver, kind: :user)
       end
     end
 
     test "resolver: не модулем — CompileError" do
-      assert_raise CompileError, ~r/AtomResolver: resolver: модуль, задано :names/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: resolver: ожидается модуль, получено :names$/, fn ->
         compile_id(:AtomResolver, kind: :user, resolver: :names)
       end
     end
 
     test ":user с entity: — CompileError" do
-      assert_raise CompileError, ~r/UserEntity: `entity:` у `kind: :user` не задаётся/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: entity: у `kind: :user` не задаётся$/, fn ->
         compile_id(:UserEntity, kind: :user, entity: :item, resolver: UserQuery)
       end
     end
 
     test ":id с resolver: — CompileError" do
-      assert_raise CompileError, ~r/IdResolver: `resolver:` у `kind: :id` не задаётся/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: resolver: у `kind: :id` не задаётся$/, fn ->
         compile_id(:IdResolver, kind: :id, resolver: ItemQuery)
       end
     end
 
     test ":id с entity: — CompileError" do
-      assert_raise CompileError, ~r/IdEntity: `entity:` у `kind: :id` не задаётся/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: entity: у `kind: :id` не задаётся$/, fn ->
         compile_id(:IdEntity, kind: :id, entity: :item)
       end
     end
@@ -87,8 +87,30 @@ defmodule Core.Labels.IDTest do
       end
     end
 
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Labels.ID: неизвестные опции: \[:entiy\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], ID)
+        Macro.expand(quote(do: Core.Labels.ID.__using__(kind: :ref, entiy: :item)), env)
+      end
+    end
+
+    test "атрибут в опции — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Labels.ID: entity: ожидается литерал, получено @entity$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.IDTest.AttrEntity do
+              use Core.Prim.UUID, name: "Id", version: 7
+
+              @entity :item
+              use Core.Labels.ID, kind: :ref, entity: @entity, resolver: Core.LabelsFixture.ItemQuery
+            end
+          end
+        )
+      end
+    end
+
     test "модуль без use Core.Prim — CompileError" do
-      assert_raise CompileError, ~r/NotPrim: не Prim: `use Core.Labels.ID` подключается после/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: не Prim: `use Core.Labels.ID` подключается после/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.IDTest.NotPrim do
@@ -100,7 +122,7 @@ defmodule Core.Labels.IDTest do
     end
 
     test "вместе с Core.Labels.Text — CompileError" do
-      assert_raise CompileError, ~r/WithText: `use Core.Labels.ID` и `use Core.Labels.Text` вместе/, fn ->
+      assert_raise CompileError, ~r/^Labels.ID: `use Core.Labels.ID` и `use Core.Labels.Text` вместе/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.IDTest.WithText do

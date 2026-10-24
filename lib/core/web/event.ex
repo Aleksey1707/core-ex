@@ -21,6 +21,10 @@ defmodule Core.Web.Event do
   | `user_ref:` | необязательна | ссылку на учётную запись: `dump:` — захват функции «дамп id, имя → map» арности 2; `schema:` — модуль OpenApiSpex-схемы map'ы от `dump:`, обязателен при `open_api_spex` (см. «Схема») |
   | `labels:` | необязательна, `false` | `true` — название и сведения события (`Core.Labels.Details`) в `title` и `details`; требует `user_ref:` |
 
+  `user_ref:` — опция-выражение (`docs/rules/20-agreements.md`, «Опции `use`»): её форма, `dump:`,
+  модуль `schema:` и требование `user_ref:` при `labels: true` проверяются в теле модуля; `codec:` и
+  `labels:` — литералы, проверяются при раскрытии `use`.
+
   Порождает `to_wire/2`: событие и словарь ссылок страницы (`Core.Labels.Refs.get/2`) → map.
 
   | Поле | На wire |
@@ -131,6 +135,7 @@ defmodule Core.Web.Event do
   @label "Web.Event"
   @required_keys ~w(codec)a
   @optional_keys ~w(user_ref labels)a
+  @expression_keys ~w(user_ref)a
   @user_ref_required_keys ~w(dump)a
   @user_ref_optional_keys []
   @user_ref_schema_keys ~w(schema)a
@@ -161,49 +166,52 @@ defmodule Core.Web.Event do
   (`user_ref:`) и подписи (`labels:`); при `open_api_spex` у приложения — и его схему.
   """
   defmacro __using__(opts) do
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    codec = Helper.Opts.module!(opts, :codec, @label, exports: [dump: 1])
+    labels? = labels!(Keyword.get(opts, :labels, false))
+
     case Code.ensure_loaded?(OpenApiSpex) do
       true ->
-        schema_built!(__CALLER__.module, Code.ensure_compiled(__MODULE__.Schema))
+        schema_built!(Code.ensure_compiled(__MODULE__.Schema))
 
         quote do
-          unquote(wire(opts, true))
-          unquote(schemas(opts))
+          unquote(wire(codec, opts[:user_ref], labels?, true))
+          unquote(schemas())
         end
 
       false ->
-        wire(opts, false)
+        wire(codec, opts[:user_ref], labels?, false)
     end
   end
 
   @doc false
-  @spec schema_built!(module(), {:module, module()} | {:error, atom()}) :: :ok
+  @spec schema_built!({:module, module()} | {:error, atom()}) :: :ok
 
-  def schema_built!(module, {:module, _schema}) when is_atom(module), do: :ok
+  def schema_built!({:module, _schema}), do: :ok
 
-  def schema_built!(module, {:error, _reason}) when is_atom(module) do
-    raise CompileError,
-      description:
-        "#{@label} #{inspect(module)}: open_api_spex есть, но core собран без него — схемы события нет; " <>
-          "пересоберите: mix deps.compile core --force"
+  def schema_built!({:error, _reason}) do
+    Helper.Opts.reject!(
+      @label,
+      "open_api_spex есть, но core собран без него — схемы события нет; пересоберите: mix deps.compile core --force"
+    )
   end
 
   @doc false
-  @spec required_keys() :: [atom()]
+  @spec user_ref!(term(), boolean(), boolean()) :: keyword() | nil
 
-  def required_keys, do: @required_keys
+  def user_ref!(nil, schema?, false = _labels?) when is_boolean(schema?), do: nil
 
-  @doc false
-  @spec optional_keys() :: [atom()]
+  def user_ref!(nil, schema?, true = _labels?) when is_boolean(schema?) do
+    Helper.Opts.reject!(
+      "#{@label}: labels",
+      "true требует user_ref: — автор события и учётная запись в сведениях выходят одной формой"
+    )
+  end
 
-  def optional_keys, do: @optional_keys
-
-  @doc false
-  @spec user_dump!(module(), keyword() | nil, boolean()) :: user_dump() | nil
-
-  def user_dump!(module, nil, schema?) when is_atom(module) and is_boolean(schema?), do: nil
-
-  def user_dump!(module, user_ref, schema?) when is_atom(module) and is_boolean(schema?) do
-    where = "#{@label} #{inspect(module)}: user_ref"
+  def user_ref!(user_ref, schema?, labels?) when is_boolean(schema?) and is_boolean(labels?) do
+    where = "#{@label}: user_ref"
 
     {required, optional} =
       case schema? do
@@ -213,64 +221,34 @@ defmodule Core.Web.Event do
 
     Helper.Opts.validate!(user_ref, required, optional, where)
     Check.capture!(Keyword.fetch!(user_ref, :dump), 2, "#{where}: dump")
+
+    user_ref
   end
 
   @doc false
-  @spec user_schema!(module(), keyword() | nil) :: module() | nil
+  @spec user_schema!(keyword() | nil) :: module() | nil
 
-  def user_schema!(module, nil) when is_atom(module), do: nil
+  def user_schema!(nil), do: nil
 
-  def user_schema!(module, user_ref) when is_atom(module) and is_list(user_ref),
-    do: Helper.Opts.module!(user_ref, :schema, "#{@label} #{inspect(module)}: user_ref", exports: [schema: 0])
-
-  @doc false
-  @spec labels!(module(), keyword()) :: boolean()
-
-  def labels!(module, opts) when is_atom(module) and is_list(opts) do
-    where = "#{@label} #{inspect(module)}: labels:"
-
-    case {Keyword.get(opts, :labels, false), Keyword.get(opts, :user_ref) != nil} do
-      {false, _user_ref?} ->
-        false
-
-      {true, true} ->
-        true
-
-      {true, false} ->
-        raise CompileError,
-          description:
-            "#{where} true требует user_ref: — автор события и учётная запись в сведениях выходят одной формой"
-
-      {other, _user_ref?} ->
-        raise CompileError, description: "#{where} ожидается boolean, получено #{inspect(other)}"
-    end
-  end
+  def user_schema!(user_ref) when is_list(user_ref),
+    do: Helper.Opts.module!(user_ref, :schema, "#{@label}: user_ref", exports: [schema: 0])
 
   # ---
 
-  defp wire(opts, schema?) do
+  defp labels!(labels?) when is_boolean(labels?), do: labels?
+  defp labels!(other), do: Helper.Opts.reject!("#{@label}: labels", "ожидается boolean, получено #{inspect(other)}")
+
+  defp wire(codec, user_ref, labels?, schema?) do
     quote generated: true do
-      unquote(declaration(opts, schema?))
+      @web_event_codec unquote(codec)
+      @web_event_user_ref Core.Web.Event.user_ref!(unquote(user_ref), unquote(schema?), unquote(labels?))
+      @web_event_user_dump @web_event_user_ref[:dump]
+      @web_event_labels unquote(labels?)
 
       case @web_event_labels do
         false -> unquote(plain())
         true -> unquote(labelled())
       end
-    end
-  end
-
-  defp declaration(opts, schema?) do
-    quote bind_quoted: [opts: opts, schema?: schema?], generated: true do
-      Core.Helper.Opts.validate!(
-        opts,
-        Core.Web.Event.required_keys(),
-        Core.Web.Event.optional_keys(),
-        "Web.Event"
-      )
-
-      @web_event_codec Core.Helper.Opts.module!(opts, :codec, "Web.Event", exports: [dump: 1])
-      @web_event_user_dump Core.Web.Event.user_dump!(__MODULE__, Keyword.get(opts, :user_ref), schema?)
-      @web_event_labels Core.Web.Event.labels!(__MODULE__, opts)
     end
   end
 
@@ -311,10 +289,10 @@ defmodule Core.Web.Event do
   # Модули схем — только в `quote`: тела строит `Core.Web.Event.Schema`, который есть, только если
   # `core` собран с `open_api_spex` (ADR-0064). Не `OpenApiSpex.schema/2`: тот выключает
   # предупреждения всего модуля, а с ним — и порождённой `to_wire/2`.
-  defp schemas(opts) do
+  defp schemas do
     quote generated: true do
       web_event_title = List.last(Module.split(__MODULE__))
-      web_event_user = Core.Web.Event.user_schema!(__MODULE__, Keyword.get(unquote(opts), :user_ref))
+      web_event_user = Core.Web.Event.user_schema!(@web_event_user_ref)
 
       web_event_detail =
         case @web_event_labels do

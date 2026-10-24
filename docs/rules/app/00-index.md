@@ -132,6 +132,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | `event:` у `use Core.Es.Event.Codec` и `use Core.Es.Outbox` | `family:` (`deps/core/docs/rules/14-events-outbox.md`) |
 | `id:` у `use Core.Es.Aggregate.Repo`; `aggregate:` / `id:` у `use Core.Es.Aggregate.Repo.Pg` | `aggregate:` у `Repo`, у `Repo.Pg` — `behaviour:` (`deps/core/docs/rules/13-repos.md`, «Write event-sourced агрегата») |
 | `event:` / `id:` у `use Core.Es.KeyReservation` | `aggregate:` (`deps/core/docs/rules/13-repos.md`, «Резервы ключей») |
+| опция builder'а атрибутом или выражением (`values: @values`) | литерал в вызове; выражение — только у опций, названных в `@moduledoc` builder'а (`deps/core/docs/rules/20-agreements.md`, «Опции `use`») |
 
 Встреченная в приложении устаревшая форма — не повод для точечной правки посреди чужой задачи:
 это либо отдельная задача, либо строка в `DEBT.md` с условием снятия.

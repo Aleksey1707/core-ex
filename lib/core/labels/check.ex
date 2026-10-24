@@ -3,24 +3,21 @@ defmodule Core.Labels.Check do
   Compile-time проверки объявлений подписей (`Core.Labels.*`): текст подписи, keyword-список
   решений без повторов, захват функции и Prim — хост объявления вида значения.
 
-  Общие для всех `use Core.Labels.*`: опции `use` проверяет `Core.Helper.Opts.validate!/4`, а
-  значения опций — эти функции. `where` — префикс текста ошибки, по которому видно место отказа;
-  текст ошибки — `"<where>: <текст>"`. `where` — объявление (`"Labels.ID MyApp.ID"`), за ним через
-  `: ` опция без двоеточия и через `, ` элемент (`"Labels.Fields MyApp.Payload: labels, поле note"`):
-  двоеточие после `where` ставит сама проверка.
+  Общие для всех `use Core.Labels.*`: опции `use` проверяет пролог `Core.Helper.Opts`, а значения
+  опций — эти функции. Отказ — `Core.Helper.Opts.reject!/2`: `where` — метка builder'а и путь до
+  опции через `: ` (`"Labels.Fields: labels: note"`), двоеточие после `where` ставит сама проверка.
   """
 
+  alias Core.Helper
   alias Core.Helper.FieldCheck
 
   @doc "Проверить текст подписи: непустая строка; строка из одних пробелов — пустая."
   @spec text!(term(), String.t()) :: String.t()
 
   def text!(text, where) when is_binary(where) do
-    if is_binary(text) and String.trim(text) != "" do
-      text
-    else
-      raise CompileError, description: "#{where}: непустая строка, задано #{inspect(text)}"
-    end
+    if is_binary(text) and String.trim(text) != "",
+      do: text,
+      else: Helper.Opts.reject!(where, "ожидается непустая строка, получено #{inspect(text)}")
   end
 
   @doc """
@@ -33,8 +30,10 @@ defmodule Core.Labels.Check do
     if is_function(fun, arity) and Function.info(fun, :type) == {:type, :external} do
       fun
     else
-      raise CompileError,
-        description: "#{where}: захват функции арности #{arity} (`&Mod.fun/#{arity}`), задано #{inspect(fun)}"
+      Helper.Opts.reject!(
+        where,
+        "ожидается захват функции арности #{arity} (`&Mod.fun/#{arity}`), получено #{inspect(fun)}"
+      )
     end
   end
 
@@ -51,13 +50,13 @@ defmodule Core.Labels.Check do
       when is_boolean(prim?) and is_boolean(kinded?) and is_binary(macro) and is_binary(where) do
     cond do
       not prim? ->
-        raise CompileError, description: "#{where}: не Prim: `use #{macro}` подключается после `use Core.Prim.*`"
+        Helper.Opts.reject!(where, "не Prim: `use #{macro}` подключается после `use Core.Prim.*`")
 
       kinded? ->
-        raise CompileError,
-          description:
-            "#{where}: `use Core.Labels.ID` и `use Core.Labels.Text` вместе — " <>
-              "значение выходит в сведения одним способом"
+        Helper.Opts.reject!(
+          where,
+          "`use Core.Labels.ID` и `use Core.Labels.Text` вместе — значение выходит в сведения одним способом"
+        )
 
       true ->
         :ok
@@ -69,7 +68,7 @@ defmodule Core.Labels.Check do
 
   def keyword!(list, where) when is_binary(where) do
     if not (is_list(list) and list != [] and Keyword.keyword?(list)) do
-      raise CompileError, description: "#{where}: непустой keyword-список, задано #{inspect(list)}"
+      Helper.Opts.reject!(where, "ожидается непустой keyword-список, получено #{inspect(list)}")
     end
 
     FieldCheck.unique!(Keyword.keys(list), where)
