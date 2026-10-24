@@ -54,7 +54,7 @@ defmodule Core.Helper.OptsTest do
   end
 
   test "validate! отклоняет неизвестные ключи с label" do
-    assert_raise CompileError, ~r/WithValidate: неизвестные опции: \[:foo\]/, fn ->
+    assert_raise CompileError, ~r/^WithValidate: неизвестные опции: \[:foo\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Helper.OptsTest.ValidateUnknown do
@@ -63,6 +63,26 @@ defmodule Core.Helper.OptsTest do
         end
       )
     end
+  end
+
+  test "validate! сообщает о недостающих без неизвестных прежним текстом" do
+    assert_raise CompileError, ~r/^WithValidate: нет обязательных опций: \[:name\]$/, fn ->
+      Opts.validate!([min_len: 1], ~w(name)a, ~w(min_len)a, "WithValidate")
+    end
+  end
+
+  test "validate! называет недостающие и неизвестные одной ошибкой" do
+    assert_raise CompileError,
+                 ~r/^WithValidate: нет обязательных опций: \[:name\]; неизвестные опции: \[:foo\]$/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Helper.OptsTest.ValidateBoth do
+                         use Core.Helper.OptsTest.WithValidate, foo: 1
+                       end
+                     end
+                   )
+                 end
   end
 
   test "validate! отклоняет не-keyword" do

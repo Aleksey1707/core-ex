@@ -19,7 +19,7 @@ defmodule Core.Helper.Opts do
   @spec validate!(keyword(), [atom()], [atom()], String.t()) :: :ok
 
   def validate!(opts, required, optional, label) do
-    require!(opts, required, label)
+    keyword!(opts, label)
 
     allowed = required ++ optional
 
@@ -29,11 +29,12 @@ defmodule Core.Helper.Opts do
       |> Enum.uniq()
       |> Enum.reject(&(&1 in allowed))
 
-    if unknown != [] do
-      raise CompileError, description: "#{label}: неизвестные опции: #{inspect(unknown)}"
-    end
+    missing = Enum.reject(required, &Keyword.has_key?(opts, &1))
 
-    :ok
+    case {missing, unknown} do
+      {[], []} -> :ok
+      {missing, unknown} -> raise CompileError, description: options_error(missing, unknown, label)
+    end
   end
 
   @doc """
@@ -132,6 +133,15 @@ defmodule Core.Helper.Opts do
   end
 
   # ---
+
+  defp options_error(missing, unknown, label) do
+    parts =
+      for {keys, text} <- [{missing, "нет обязательных опций"}, {unknown, "неизвестные опции"}],
+          keys != [],
+          do: "#{text}: #{inspect(keys)}"
+
+    "#{label}: #{Enum.join(parts, "; ")}"
+  end
 
   defp fetch!(opts, key, label, checks) do
     keyword!(opts, label)
