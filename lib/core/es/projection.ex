@@ -46,8 +46,8 @@ defmodule Core.Es.Projection do
 
   ## События
 
-  Кодек модуля события `<Aggregate>.Event.<Name>` — `<Aggregate>.Event.Codec`, тип агрегата —
-  его `type:`. Пачка читает события типов агрегатов из `events:` и решает по тегу, прошедшему
+  Кодек модуля события — `codec:` его семейства (`family:` у `use Core.Es.Event`), тип агрегата —
+  `type:` кодека. Пачка читает события типов агрегатов из `events:` и решает по тегу, прошедшему
   цепочку `upcasts:` кодека:
 
   - тег модуля из `events:` — событие грузится кодеком с апкастом и уходит в `project/1`;
@@ -113,17 +113,19 @@ defmodule Core.Es.Projection do
 
   `await(Agg, %Agg.ID{} = aggregate_id, timeout)` → `Result.unit()` модуля проекции
   после commit записи ждёт, пока проекция обработает последнее событие потока агрегата, —
-  read-after-write. Агрегат — модуль, в котором лежит кодек событий `<Aggregate>.Event.Codec`:
-  по раскладке потребителя (`docs/rules/app/13-repos.md`, «Раскладка») это сам агрегат любого вида.
+  read-after-write. Агрегат — владелец потока, которого называет `aggregate:` семейства событий
+  (`use Core.Es.Event.Family`): event-sourced агрегат, state-stored сущность или `Core.Es.Personal`.
 
   `await(Agg, %Agg.ID{} = aggregate_id, %Core.Version{} = version, timeout)` ждёт событие этой
   версии потока, в том числе ещё не записанное: следующее событие, которое запишет реакция другого
   контекста, когда его версия известна по модели агрегата (ADR-0080).
 
   Функции генерирует `use` — clause на каждый агрегат, чьи события есть в `events:`: голова —
-  литерал агрегата и закрытый struct его ID (`__es_aggregate_id__/0` кодека), у `await/4` — и
-  `%Core.Version{}`, результат сужен до `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`,
-  ID другого агрегата и невозможная clause по результату — предупреждение при сборке вызывающего.
+  литерал агрегата (`__es_aggregate__/0` семейства) и закрытый struct его ID
+  (`__es_aggregate_id__/0` кодека), у `await/4` — и `%Core.Version{}`, результат сужен до
+  `:ok | {:error, %Core.Error{}}`. Агрегат не из `events:`, ID другого агрегата и невозможная
+  clause по результату — предупреждение при сборке вызывающего. Два владельца потока с общим ID в
+  `events:` собираются: clauses различаются агрегатом.
 
   Цель `await/3` — позиция последнего события потока на момент вызова, `await/4` — позиция
   события версии `version`, даже если поток ушёл дальше:
@@ -184,10 +186,11 @@ defmodule Core.Es.Projection do
 
   На компиляции `CompileError`: нет `project/1` или `clear/0`; `name:` не непустая строка;
   `version:` не целое ≥ 1; `events:` пустой, с повтором, с модулем, который не событие, с
-  семейством `<Aggregate>.Event`, с событием вне семейства `<Aggregate>.Event`, с событием без
-  кодека `<Aggregate>.Event.Codec`, с кодеком без `type:` или не объявившим событие в `tags:`, с
-  двумя кодеками одного типа агрегата; событие с полем `subject:` без события уничтожения ключа и
-  без `personal: false` или с обоими; `personal:` не `false` или без событий с полями `subject:`.
+  семейством событий, с событием, чей `family:` не семейство (`use Core.Es.Event.Family`), с
+  событием, у семейства которого `codec:` не найден, не кодек с `type:` или кодек другого
+  семейства, с событием, не объявленным в `tags:` кодека, с двумя кодеками одного типа агрегата;
+  событие с полем `subject:` без события уничтожения ключа и без `personal: false` или с обоими;
+  `personal:` не `false` или без событий с полями `subject:`.
 
   Макрос занимает в вызывающем модуле имена `@es_projection`, `@es_use_line`, `await/3` и
   функций-проверок, по одному на модуль `events:`.
@@ -312,17 +315,12 @@ defmodule Core.Es.Projection do
     end
   end
 
-  # Агрегат — модуль, в котором лежит кодек `<Aggregate>.Event.Codec`: семейство каждого события
-  # проверено при сборке объявления (`event_family!/1`).
+  # Агрегат — владелец потока `aggregate:` семейства кодека: семейство кодека и события сверено при
+  # сборке объявления (`codec!/2`).
   defp aggregates(streams) do
     for {type, %{codec: codec}} <- streams,
-        do: {aggregate_name(Enum.drop(Module.split(codec), -2)), codec.__es_aggregate_id__(), type}
+        do: {codec.__codec_union__().__es_aggregate__(), codec.__es_aggregate_id__(), type}
   end
-
-  # Имя агрегата вычисляется на компиляции: `safe_concat` непригоден — у событий без модуля
-  # агрегата атома его имени может не быть.
-  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
-  defp aggregate_name(parts), do: Module.concat(parts)
 
   defp union(types), do: Enum.reduce(types, &quote(do: unquote(&2) | unquote(&1)))
 
@@ -441,7 +439,7 @@ defmodule Core.Es.Projection do
         raise CompileError, description: "#{@label}: events: модуль #{inspect(mod)} не найден"
 
       Helper.Module.exports?(mod, :__es_payload__, 0) ->
-        codec!(mod, codec_name(event_family!(mod)))
+        codec!(mod, family!(mod))
 
       family?(mod) ->
         raise CompileError,
@@ -458,33 +456,41 @@ defmodule Core.Es.Projection do
       description: "#{@label}: events: ожидается модуль события, получено #{inspect(other)}"
   end
 
-  # Родитель события — семейство `<Aggregate>.Event`: по нему находятся кодек и агрегат `await/3`.
-  defp event_family!(mod) do
-    case Enum.reverse(Module.split(mod)) do
-      [_name | ["Event", _aggregate | _] = family] ->
-        Enum.reverse(family)
+  # Семейство события — его ссылка `family:`: по нему находятся кодек и агрегат `await/3`.
+  defp family!(mod) do
+    family = mod.__es_family__()
 
-      _parts ->
-        raise CompileError,
-          description:
-            "#{@label}: events: #{inspect(mod)} — событие вне семейства <Aggregate>.Event, ожидается " <>
-              "<Aggregate>.Event.<Name>"
+    if family?(family) do
+      family
+    else
+      raise CompileError,
+        description:
+          "#{@label}: events: #{inspect(mod)} — событие вне семейства: family: #{inspect(family)} — " <>
+            "не семейство событий (use Core.Es.Event.Family)"
     end
   end
 
-  defp codec!(mod, codec) do
+  defp codec!(mod, family) do
+    codec = family.__es_codec__()
+
     cond do
       not compiled?(codec) ->
         raise CompileError,
           description:
             "#{@label}: events: кодек #{inspect(codec)} события #{inspect(mod)} не найден — " <>
-              "кодек событий <Aggregate>.Event.<Name> — <Aggregate>.Event.Codec"
+              "codec: семейства #{inspect(family)}"
 
       not Es.Event.Codec.codec?(codec) ->
         raise CompileError,
           description:
             "#{@label}: events: #{inspect(codec)} события #{inspect(mod)} — не кодек событий " <>
-              "с type: (use Core.Es.Event.Codec)"
+              "с type: (use Core.Es.Event.Codec), codec: семейства #{inspect(family)}"
+
+      codec.__codec_union__() != family ->
+        raise CompileError,
+          description:
+            "#{@label}: events: семейство #{inspect(family)} события #{inspect(mod)} объявляет " <>
+              "codec: #{inspect(codec)} — кодек семейства #{inspect(codec.__codec_union__())}"
 
       mod not in codec.__es_mods__() ->
         raise CompileError,
@@ -495,18 +501,7 @@ defmodule Core.Es.Projection do
     end
   end
 
-  defp family?(mod) do
-    codec = codec_name(Module.split(mod))
-
-    Es.Event.Codec.codec?(codec) and codec.__es_family__() == mod
-  end
-
-  # Кодек событий агрегата — `<Aggregate>.Event.Codec` рядом с модулями событий (раскладка
-  # потребителя — `docs/rules/app/13-repos.md`, «Раскладка»).
-  # Имя вычисляется на компиляции: `safe_concat` непригоден — атома имени модуля, которого нет,
-  # ещё может не быть, а отсутствие кодека — ошибка компиляции с внятным текстом.
-  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
-  defp codec_name(parts), do: Module.concat(parts ++ ["Codec"])
+  defp family?(mod), do: Helper.Module.exports?(mod, :__es_codec__, 0)
 
   defp compiled?(mod), do: match?({:module, _}, Code.ensure_compiled(mod))
 

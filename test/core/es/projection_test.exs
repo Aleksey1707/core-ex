@@ -4,6 +4,7 @@ defmodule Core.Es.ProjectionTest do
   use Core.DataCase, async: false
 
   import Core.EsAggregateRepoContract, only: [close: 0, dump: 1, freeze: 0, open: 1, write!: 3]
+  import ExUnit.CaptureIO
   import ExUnit.CaptureLog
 
   alias Core.Config
@@ -28,24 +29,24 @@ defmodule Core.Es.ProjectionTest do
   @account_repo Config.repo!(Account.Repo)
   @entity_repo Config.repo!(StateStoredFixture.Repo)
 
-  defmodule Lone.Event.Done do
+  defmodule Stranger.Event.Done do
     @moduledoc false
 
     use Core.Es.Event,
-      family: Core.EventFixture.Event,
+      family: Core.EsFixture.Account.Event.Opened,
       payload: nil
   end
 
-  defmodule Untyped.Event.Done do
+  defmodule Twin.Family do
     @moduledoc false
 
-    use Core.Es.Event,
-      family: Core.EventFixture.Event,
-      payload: nil
-  end
+    use Core.Es.Event.Family,
+      aggregate: Core.StateStoredFixture.Entity,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      codec: Core.Es.ProjectionTest.Twin.Event.Codec
 
-  defmodule Untyped.Event.Codec do
-    @moduledoc false
+    @type t :: Core.Es.ProjectionTest.Twin.Event.Done.t() | Core.Es.ProjectionTest.Twin.Event.Stray.t()
   end
 
   defmodule Twin.Event do
@@ -55,7 +56,7 @@ defmodule Core.Es.ProjectionTest do
       @moduledoc false
 
       use Core.Es.Event,
-        family: Core.EventFixture.Event,
+        family: Core.Es.ProjectionTest.Twin.Family,
         payload: nil
     end
 
@@ -63,7 +64,7 @@ defmodule Core.Es.ProjectionTest do
       @moduledoc false
 
       use Core.Es.Event,
-        family: Core.EventFixture.Event,
+        family: Core.Es.ProjectionTest.Twin.Family,
         payload: nil
     end
   end
@@ -72,9 +73,27 @@ defmodule Core.Es.ProjectionTest do
     @moduledoc false
 
     use Core.Es.Event.Codec,
-      event: Core.Es.ProjectionTest.Twin.Event,
+      event: Core.Es.ProjectionTest.Twin.Family,
       type: "account",
       tags: %{Core.Es.ProjectionTest.Twin.Event.Done => "twin.done"}
+  end
+
+  defmodule Loose.Owner do
+    @moduledoc false
+
+    defstruct [:id]
+  end
+
+  defmodule Loose.Family do
+    @moduledoc false
+
+    use Core.Es.Event.Family,
+      aggregate: Core.Es.ProjectionTest.Loose.Owner,
+      aggregate_id: Core.EsFixture.Account.ID,
+      by: Core.EsFixture.UserID,
+      codec: Core.Es.ProjectionTest.Loose.Events.Codec
+
+    @type t :: Core.Es.ProjectionTest.Loose.Events.Done.t()
   end
 
   defmodule Loose.Events do
@@ -84,7 +103,7 @@ defmodule Core.Es.ProjectionTest do
       @moduledoc false
 
       use Core.Es.Event,
-        family: Core.EventFixture.Event,
+        family: Core.Es.ProjectionTest.Loose.Family,
         payload: nil
     end
   end
@@ -93,7 +112,7 @@ defmodule Core.Es.ProjectionTest do
     @moduledoc false
 
     use Core.Es.Event.Codec,
-      event: Core.Es.ProjectionTest.Loose.Events,
+      event: Core.Es.ProjectionTest.Loose.Family,
       type: "loose",
       tags: %{Core.Es.ProjectionTest.Loose.Events.Done => "loose.done"}
   end
@@ -232,26 +251,65 @@ defmodule Core.Es.ProjectionTest do
       end
     end
 
-    test "событие вне семейства <Aggregate>.Event — CompileError" do
+    test "событие, чей family: не семейство, — CompileError" do
       assert_raise CompileError,
-                   ~r/Loose\.Events\.Done — событие вне семейства <Aggregate>\.Event, ожидается <Aggregate>\.Event\.<Name>/,
+                   ~r/Stranger\.Event\.Done — событие вне семейства: family: .*Opened — не семейство событий/,
                    fn ->
-                     compile!(Loose, events: [Loose.Events.Done])
+                     compile!(Stranger, events: [Stranger.Event.Done])
                    end
     end
 
-    test "модуль события, у кодека которого нет type:, — CompileError" do
-      assert_raise CompileError,
-                   ~r/Untyped\.Event\.Codec события .* не кодек событий с type:/,
-                   fn ->
-                     compile!(Untyped, events: [Untyped.Event.Done])
-                   end
+    test "кодек и агрегат — ссылками семейства, а не по имени модуля" do
+      {{:module, loose, _binary, _term}, _binding} =
+        compile!(LooseLayout, events: [Account.Event.Opened, Loose.Events.Done])
+
+      assert %{"loose" => %{codec: Loose.Events.Codec}} = loose.__es_projection__().streams
     end
 
-    test "событие без кодека <Aggregate>.Event.Codec — CompileError" do
-      assert_raise CompileError, ~r/кодек .*Lone\.Event\.Codec события .* не найден/, fn ->
-        compile!(Lone, events: [Lone.Event.Done])
+    test "два владельца потока с общим ID — clauses await различаются агрегатом" do
+      {{:module, shared, _binary, _term}, _binding} =
+        compile!(SharedID, events: [Account.Event.Opened, Loose.Events.Done])
+
+      id = Account.ID.new()
+
+      for aggregate <- [Account, Loose.Owner] do
+        assert_raise RuntimeError, ~r/дерево проекций не запущено/, fn -> shared.await(aggregate, id, 100) end
       end
+
+      assert_raise FunctionClauseError, fn -> shared.await(EventFixture, id, 100) end
+    end
+
+    test "codec: семейства не кодек с type: — CompileError" do
+      compile_family!(Untyped, "Core.Es.ProjectionTest.Untyped.Codec")
+      Code.compile_string("defmodule Core.Es.ProjectionTest.Untyped.Codec, do: nil", __ENV__.file)
+
+      assert_raise CompileError,
+                   ~r/Untyped\.Codec события .* не кодек событий с type: .*codec: семейства .*Untyped\.Family/,
+                   fn ->
+                     compile!(Untyped, events: [Core.Es.ProjectionTest.Untyped.Done])
+                   end
+    end
+
+    test "codec: семейства не найден — CompileError" do
+      compile_family!(Lone, "Core.Es.ProjectionTest.Lone.Codec")
+
+      assert_raise CompileError,
+                   ~r/кодек .*Lone\.Codec события .*Lone\.Done не найден — codec: семейства .*Lone\.Family/,
+                   fn ->
+                     compile!(Lone, events: [Core.Es.ProjectionTest.Lone.Done])
+                   end
+    end
+
+    test "codec: семейства — кодек другого семейства — CompileError" do
+      compile_family!(Alien, "Core.EventFixture.Event.Codec")
+
+      error =
+        assert_raise CompileError, fn ->
+          compile!(Alien, events: [Core.Es.ProjectionTest.Alien.Done])
+        end
+
+      assert error.description =~ ~r/семейство .*Alien\.Family события .*Alien\.Done объявляет codec: /
+      assert error.description =~ ~r/EventFixture\.Event\.Codec — кодек семейства Core\.EventFixture\.Event$/
     end
 
     test "событие не из tags: своего кодека — CompileError" do
@@ -915,6 +973,35 @@ defmodule Core.Es.ProjectionTest do
 
       assert OtelFixture.drain(50) == []
     end
+  end
+
+  # Семейство со ссылкой `codec:` мимо своего кодека: предупреждение его сверки после сборки
+  # (`Core.Es.Event.Family`) остаётся в выводе компиляции, а не теста.
+  defp compile_family!(name, codec) do
+    namespace = inspect(Module.concat(__MODULE__, name))
+
+    capture_io(:stderr, fn ->
+      Code.compile_string(
+        """
+        defmodule #{namespace}.Family do
+          use Core.Es.Event.Family,
+            aggregate: Core.StateStoredFixture.Entity,
+            aggregate_id: Core.EventFixture.AggID,
+            by: Core.EventFixture.ActorID,
+            codec: #{codec}
+
+          @type t :: struct()
+        end
+
+        defmodule #{namespace}.Done do
+          use Core.Es.Event,
+            family: #{namespace}.Family,
+            payload: nil
+        end
+        """,
+        __ENV__.file
+      )
+    end)
   end
 
   defp compile!(name, overrides, body \\ nil) do

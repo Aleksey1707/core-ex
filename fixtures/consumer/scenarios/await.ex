@@ -63,3 +63,82 @@ defmodule ConsumerTest.Await do
     end
   end
 end
+
+defmodule ConsumerTest.Shipment do
+  @moduledoc "Владелец потока с ID заказа: соседний поток с общим ID."
+
+  alias Consumer.Domain.Sales.Order
+
+  defstruct id: nil
+
+  @type t :: %__MODULE__{id: Order.ID.t() | nil}
+end
+
+defmodule ConsumerTest.Shipment.Event do
+  @moduledoc "События отгрузки заказа."
+
+  alias Consumer.Domain.Sales.Order
+  alias Consumer.Domain.Sales.Values.UserID
+  alias ConsumerTest.Shipment
+
+  use Core.Es.Event.Family,
+    aggregate: Shipment,
+    aggregate_id: Order.ID,
+    by: UserID,
+    codec: Shipment.Event.Codec
+
+  @type t :: Shipment.Event.Shipped.t()
+end
+
+defmodule ConsumerTest.Shipment.Event.Shipped do
+  use Core.Es.Event,
+    family: ConsumerTest.Shipment.Event,
+    payload: nil
+end
+
+defmodule ConsumerTest.Shipment.Event.Codec do
+  @moduledoc "Кодек событий отгрузки."
+
+  alias ConsumerTest.Shipment.Event
+
+  use Core.Es.Event.Codec,
+    event: Event,
+    type: "shipment",
+    tags: %{Event.Shipped => "shipment.shipped"}
+end
+
+defmodule ConsumerTest.SharedID.Projection do
+  @moduledoc "Проекция на событиях двух владельцев потока с общим ID заказа."
+
+  alias Consumer.Domain.Sales.Order
+  alias ConsumerTest.Shipment
+
+  use Core.Es.Projection,
+    name: "consumer_shared_id",
+    events: [Order.Event.Placed, Shipment.Event.Shipped]
+
+  @impl true
+  def project(%Order.Event.Placed{}), do: :ok
+  def project(%Shipment.Event.Shipped{}), do: :ok
+
+  @impl true
+  def clear, do: :ok
+end
+
+defmodule ConsumerTest.SharedID do
+  @moduledoc "`await/3` проекции с общим ID заказа: поток выбирает агрегат."
+
+  alias Consumer.Domain.Sales.Account
+  alias Consumer.Domain.Sales.Order
+  alias ConsumerTest.SharedID.Projection
+  alias ConsumerTest.Shipment
+
+  # G4g — общий ID: оба владельца потока ждутся по своему агрегату
+  def g4g_order(%Order.ID{} = id), do: Projection.await(Order, id, 100)
+  def g4g_shipment(%Order.ID{} = id), do: Projection.await(Shipment, id, 100)
+
+  # G4ga — общий ID: агрегат не из `events:`
+  def g4ga_foreign_aggregate(%Order.ID{} = id),
+    # expect: incompatible types given to ConsumerTest.SharedID.Projection.await/3
+    do: Projection.await(Account, id, 100)
+end

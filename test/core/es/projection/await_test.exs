@@ -123,7 +123,7 @@ defmodule Core.Es.Projection.AwaitTest do
 
       close_entity!(entity, "Агрегат")
 
-      assert :ok = @projection.await(EventFixture, entity, 1_000)
+      assert :ok = @projection.await(Entity, entity, 1_000)
       assert {"fixture", _id, "Агрегат", true} = List.last(rows())
       assert_receive {:await, %{projection: "es_fixture", result: :ok}, _measurements}
     end
