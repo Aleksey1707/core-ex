@@ -142,14 +142,35 @@ defmodule Core.Es.EventTest do
       end
     end
 
-    test ":payload — не модуль и не nil" do
-      assert_raise CompileError, ~r/Es.Event: :payload должен быть модулем или nil/, fn ->
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es.Event: неизвестные опции: \[:paylaod\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.Event)
+        opts = [family: Core.EventFixture.Event, payload: nil, paylaod: nil]
+        Macro.expand(quote(do: Core.Es.Event.__using__(unquote(opts))), env)
+      end
+    end
+
+    test "атрибут в payload: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es.Event: payload: ожидается литерал, получено @payload$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.EventTest.AttrPayload do
+              @payload Core.Es.EventTest.ValuePayload
+              use Core.Es.Event, family: Core.EventFixture.Event, payload: @payload
+            end
+          end
+        )
+      end
+    end
+
+    test "payload: — не модуль и не nil" do
+      assert_raise CompileError, ~r/^Es.Event: payload: ожидается модуль или nil, получено "ValuePayload"$/, fn ->
         compile_event(:StringPayload, family: Core.EventFixture.Event, payload: "ValuePayload")
       end
     end
 
     test "payload: вложен ниже use — модуль недоступен, а не тихий пропуск проверок" do
-      assert_raise CompileError, ~r/Es.Event: payload: .*LatePayload\.Payload недоступен/, fn ->
+      assert_raise CompileError, ~r/^Es.Event: payload: .*LatePayload\.Payload недоступен/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Es.EventTest.LatePayload do

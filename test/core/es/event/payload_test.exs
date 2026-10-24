@@ -52,24 +52,48 @@ defmodule Core.Es.Event.PayloadTest do
     end
 
     test "default: — CompileError" do
-      assert_raise CompileError, ~r/Es.Event.Payload .*Defaulted: fields: default: у нагрузки события нет/, fn ->
+      assert_raise CompileError,
+                   ~r/^Es.Event.Payload: fields: default: у нагрузки события нет \(поля \[:name\]\)/,
+                   fn ->
+                     Code.eval_quoted(
+                       quote do
+                         defmodule Core.Es.Event.PayloadTest.Defaulted do
+                           use Core.Es.Event.Payload,
+                             fields: [name: [prim: Core.EsFixture.Account.Name, default: "без имени"]]
+                         end
+                       end
+                     )
+                   end
+    end
+
+    test "ошибка спеки называет поле" do
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: name: .*Status не Prim/, fn ->
         Code.eval_quoted(
           quote do
-            defmodule Core.Es.Event.PayloadTest.Defaulted do
-              use Core.Es.Event.Payload,
-                fields: [name: [prim: Core.EsFixture.Account.Name, default: "без имени"]]
+            defmodule Core.Es.Event.PayloadTest.NotPrim do
+              use Core.Es.Event.Payload, fields: [name: [prim: Core.Es.Event.PayloadTest.Status]]
             end
           end
         )
       end
     end
 
-    test "ошибка спеки называет нагрузку и поле" do
-      assert_raise CompileError, ~r/Es.Event.Payload .*NotPrim: fields: name: .*Status не Prim/, fn ->
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError,
+                   ~r/^Es.Event.Payload: нет обязательных опций: \[:fields\]; неизвестные опции: \[:field\]$/,
+                   fn ->
+                     {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.Event.Payload)
+                     Macro.expand(quote(do: Core.Es.Event.Payload.__using__(field: [name: [prim: Account.Name]])), env)
+                   end
+    end
+
+    test "атрибут в fields: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: ожидается литерал, получено @fields$/, fn ->
         Code.eval_quoted(
           quote do
-            defmodule Core.Es.Event.PayloadTest.NotPrim do
-              use Core.Es.Event.Payload, fields: [name: [prim: Core.Es.Event.PayloadTest.Status]]
+            defmodule Core.Es.Event.PayloadTest.AttrFields do
+              @fields [name: [prim: Core.EsFixture.Account.Name]]
+              use Core.Es.Event.Payload, fields: @fields
             end
           end
         )

@@ -16,6 +16,9 @@ defmodule Core.Es.Event do
     проверки по нему (`subject: :aggregate_id` у поля нагрузки) идут в теле события. Вложенный модуль
     MUST быть объявлен выше `use` — ниже он ещё не собран, и сборка падает `CompileError` «недоступен».
 
+  Обе опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов функции —
+  `CompileError` «ожидается литерал».
+
   Wire-имя события задаётся в `<Aggregate>.Event.Codec`, не здесь. Оттуда же читается
   интроспекция события — `__es_payload__/0`, `__es_aggregate_id__/0`, `__es_by__/0`,
   `__es_family__/0`. Prim агрегата и автора кодек берёт у семейства `family:`, а `__es_family__/0`
@@ -111,23 +114,21 @@ defmodule Core.Es.Event do
   @label "Es.Event"
   @required_keys ~w(family payload)a
   @optional_keys ~w()a
+  @expression_keys ~w()a
+  @payload_where "#{@label}: payload"
 
   # ===== объявление =====
 
   @doc "Объявить событие агрегата (`family:` / `payload:`)."
   defmacro __using__(opts) do
-    lit = Macro.expand_literals(opts, __CALLER__)
-    Helper.Opts.validate!(lit, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-    payload_mod = Keyword.fetch!(lit, :payload)
-    family_mod = Helper.Opts.module!(lit, :family, @label, exports: [__es_aggregate_id__: 0, __es_by__: 0])
+    payload_mod = payload_form!(Keyword.fetch!(opts, :payload))
+    family_mod = Helper.Opts.module!(opts, :family, @label, exports: [__es_aggregate_id__: 0, __es_by__: 0])
     aggregate_id_mod = family_mod.__es_aggregate_id__()
     by_mod = family_mod.__es_by__()
-
-    unless is_nil(payload_mod) or is_atom(payload_mod) do
-      raise CompileError, description: "#{@label}: :payload должен быть модулем или nil"
-    end
-
     payload = payload_parts(payload_mod)
 
     quote do
@@ -215,6 +216,11 @@ defmodule Core.Es.Event do
 
   # ---
 
+  defp payload_form!(payload) when is_atom(payload), do: payload
+
+  defp payload_form!(payload),
+    do: Helper.Opts.reject!(@payload_where, "ожидается модуль или nil, получено #{inspect(payload)}")
+
   defp payload_parts(nil) do
     %{
       type: nil,
@@ -260,7 +266,7 @@ defmodule Core.Es.Event do
   def payload!(nil, _aggregate_id), do: nil
 
   def payload!(payload, aggregate_id) when is_atom(payload) and is_atom(aggregate_id) do
-    FieldCheck.module!(payload, "#{@label}: payload")
+    FieldCheck.module!(payload, @payload_where)
     check_subject!(payload, aggregate_id)
     payload
   end
@@ -271,10 +277,11 @@ defmodule Core.Es.Event do
     with true <- Helper.Module.exports?(payload, :__es_payload_fields__, 0),
          [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
          false <- Payload.uuid_prim?(aggregate_id) do
-      raise CompileError,
-        description:
-          "#{@label}: поле #{name} нагрузки #{inspect(payload)} объявлено с subject: :aggregate_id, " <>
-            "а aggregate_id: #{inspect(aggregate_id)} — не Prim.UUID и не Prim.Compose над ним"
+      Helper.Opts.reject!(
+        @payload_where,
+        "поле #{name} нагрузки #{inspect(payload)} объявлено с subject: :aggregate_id, " <>
+          "а aggregate_id: #{inspect(aggregate_id)} — не Prim.UUID и не Prim.Compose над ним"
+      )
     end
 
     :ok

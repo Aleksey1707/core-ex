@@ -225,7 +225,8 @@
   | `use Core.Web.Event` | `user_ref:` |
   | `use Core.Es.Event.Codec` | `tags:`, `upcasts:` |
 
-  Опции `use Core.Es.Event.TagsCase` (`except_tags:`, `except_types:`) — только литералы.
+  Опции `use Core.Es.Event.TagsCase` (`except_tags:`, `except_types:`) и `fields:` у
+  `use Core.Es.Event.Payload` — только литералы.
 
 ## 0.16.0
 

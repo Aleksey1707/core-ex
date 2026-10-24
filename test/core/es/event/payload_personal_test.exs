@@ -55,25 +55,27 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
   describe "CompileError" do
     test "персональный Prim на прямом поле без subject:" do
-      assert_raise CompileError, ~r/поле phone: персональный Prim .*Personal без subject:/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: персональный Prim .*Personal без subject:/, fn ->
         payload(:Bare, phone: [prim: PrimFixture.Personal])
       end
     end
 
     test "персональный Prim элементом list: без subject:" do
-      assert_raise CompileError, ~r/поле phones: персональный Prim .*Personal без subject:/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phones: персональный Prim .*Personal без subject:/, fn ->
         payload(:BareList, phones: [list: [prim: PrimFixture.Personal]])
       end
     end
 
     test "персональный композит без subject:" do
-      assert_raise CompileError, ~r/поле phone: персональный Prim .*PersonalRef без subject:/, fn ->
-        payload(:BareRef, phone: [prim: PrimFixture.PersonalRef])
-      end
+      assert_raise CompileError,
+                   ~r/^Es.Event.Payload: fields: phone: персональный Prim .*PersonalRef без subject:/,
+                   fn ->
+                     payload(:BareRef, phone: [prim: PrimFixture.PersonalRef])
+                   end
     end
 
     test "субъект — не Prim.UUID" do
-      assert_raise CompileError, ~r/поле phone: субъект name — не Prim.UUID/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: субъект name — не Prim.UUID/, fn ->
         payload(:NotUUID,
           name: [prim: Account.Name],
           phone: [prim: PrimFixture.Personal, subject: :name]
@@ -82,7 +84,7 @@ defmodule Core.Es.Event.PayloadPersonalTest do
     end
 
     test "субъект — список UUID" do
-      assert_raise CompileError, ~r/поле phone: субъект ids — не Prim.UUID/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: субъект ids — не Prim.UUID/, fn ->
         payload(:ListUUID,
           ids: [list: [prim: Account.ID]],
           phone: [prim: PrimFixture.Personal, subject: :ids]
@@ -118,28 +120,30 @@ defmodule Core.Es.Event.PayloadPersonalTest do
     end
 
     test "обязательное ПДн-поле при необязательном субъекте" do
-      assert_raise CompileError, ~r/поле phone: обязательное при необязательном субъекте person_id/, fn ->
-        payload(:OptionalSubject,
-          person_id: [prim: Account.ID, optional: true],
-          phone: [prim: PrimFixture.Personal, subject: :person_id]
-        )
-      end
+      assert_raise CompileError,
+                   ~r/^Es.Event.Payload: fields: phone: обязательное при необязательном субъекте person_id/,
+                   fn ->
+                     payload(:OptionalSubject,
+                       person_id: [prim: Account.ID, optional: true],
+                       phone: [prim: PrimFixture.Personal, subject: :person_id]
+                     )
+                   end
     end
 
     test "subject: на несуществующее поле" do
-      assert_raise CompileError, ~r/поле phone: subject: :person_id — нет такого поля/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: subject: :person_id — нет такого поля/, fn ->
         payload(:MissingSubject, phone: [prim: PrimFixture.Personal, subject: :person_id])
       end
     end
 
     test "subject: на само себя" do
-      assert_raise CompileError, ~r/поле id: subject: :id — поле не бывает своим субъектом/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: id: subject: :id — поле не бывает своим субъектом/, fn ->
         payload(:SelfSubject, id: [prim: Account.ID, subject: :id])
       end
     end
 
     test "субъект с subject: сам" do
-      assert_raise CompileError, ~r/поле phone: субъект person_id сам объявлен с subject:/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: субъект person_id сам объявлен с subject:/, fn ->
         payload(:SubjectOfSubject,
           person_id: [prim: Account.ID, subject: :aggregate_id],
           phone: [prim: PrimFixture.Personal, subject: :person_id]
@@ -165,7 +169,7 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
     test "subject: :aggregate_id при не-UUID aggregate_id: проверяет use Core.Es.Event" do
       assert_raise CompileError,
-                   ~r/Es.Event: поле holder нагрузки .* subject: :aggregate_id, а aggregate_id: .*Name — не Prim.UUID/,
+                   ~r/^Es.Event: payload: поле holder .* subject: :aggregate_id, а aggregate_id: .*Name — не Prim.UUID/,
                    fn ->
                      compile(
                        quote do
@@ -191,7 +195,7 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
     test "subject: :aggregate_id при не-UUID aggregate_id: — и у Payload, вложенного в событие" do
       assert_raise CompileError,
-                   ~r/Es.Event: поле holder нагрузки .*Nested\.Payload объявлено с subject: :aggregate_id/,
+                   ~r/^Es.Event: payload: поле holder нагрузки .*Nested\.Payload объявлено с subject: :aggregate_id/,
                    fn ->
                      compile(
                        quote do

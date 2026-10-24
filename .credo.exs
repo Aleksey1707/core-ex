@@ -214,9 +214,6 @@
              files: %{
                included: ["lib/"],
                excluded: [
-                 # 17 — Es-событие
-                 "lib/core/es/event.ex",
-                 "lib/core/es/event/payload.ex",
                  # 20 — проекция
                  "lib/core/es/projection.ex"
                ]

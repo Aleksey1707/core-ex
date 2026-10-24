@@ -14,7 +14,9 @@ defmodule Core.Es.Event.Payload do
 
   Спека полей — та же, что у Codec-плагина (`Core.Codec.Field`), без `default:`:
   событие развивается новым тегом и апкастом (ADR-0010, ADR-0020), а не дефолтом —
-  `default:` даёт `CompileError`.
+  `default:` даёт `CompileError`. `fields:` — литерал (`docs/rules/20-agreements.md`, «Опции `use`»):
+  атрибут или вызов функции — `CompileError` «ожидается литерал». Модули спеки проверяются в теле
+  нагрузки (`fields!/1`), поэтому MAY быть вложены в неё — выше `use`.
 
   `subject:` — субъект ПДн-значения поля (ADR-0073): `:aggregate_id` или имя поля той же нагрузки
   с `Prim.UUID` / `Prim.Compose` над ним. `CompileError`:
@@ -54,37 +56,47 @@ defmodule Core.Es.Event.Payload do
 
   require Error
 
+  @label "Es.Event.Payload"
+  @required_keys ~w(fields)a
+  @optional_keys ~w()a
+  @expression_keys ~w()a
+
   # ===== спека =====
 
   @doc "Объявить нагрузку события по полям (`fields:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(opts, ~w(fields)a, [], "Es.Event.Payload")
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-      @es_payload_fields Core.Es.Event.Payload.fields!(__MODULE__, Keyword.fetch!(opts, :fields))
+    [
+      quote do
+        @es_payload_fields Core.Es.Event.Payload.fields!(unquote(Macro.escape(Keyword.fetch!(opts, :fields))))
+      end,
+      quote unquote: false do
+        case Keyword.keys(Core.Codec.Field.subjects(@es_payload_fields)) do
+          [] -> :ok
+          hidden -> @derive {Inspect, except: hidden}
+        end
 
-      case Keyword.keys(Core.Codec.Field.subjects(@es_payload_fields)) do
-        [] -> :ok
-        hidden -> @derive {Inspect, except: hidden}
+        @enforce_keys for %Core.Codec.Field{name: name, optional?: false} <- @es_payload_fields, do: name
+        defstruct for %Core.Codec.Field{name: name} <- @es_payload_fields, do: name
+
+        @type t :: %__MODULE__{unquote_splicing(Core.Es.Event.Payload.typespec(@es_payload_fields))}
+
+        @doc false
+        @spec __es_payload_fields__() :: [Core.Codec.Field.t()]
+
+        def __es_payload_fields__, do: @es_payload_fields
+
+        @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
+        @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(@es_payload_fields)))) :: t()
+
+        def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(@es_payload_fields)))
+            when unquote(Core.Es.Event.Payload.new_guard(@es_payload_fields)),
+            do: unquote(Core.Codec.Plugin.Fields.new_body(__MODULE__, @es_payload_fields))
       end
-
-      @enforce_keys for %Core.Codec.Field{name: name, optional?: false} <- @es_payload_fields, do: name
-      defstruct for %Core.Codec.Field{name: name} <- @es_payload_fields, do: name
-
-      @type t :: %__MODULE__{unquote_splicing(Core.Es.Event.Payload.typespec(@es_payload_fields))}
-
-      @doc false
-      @spec __es_payload_fields__() :: [Core.Codec.Field.t()]
-
-      def __es_payload_fields__, do: @es_payload_fields
-
-      @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
-      @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(@es_payload_fields)))) :: t()
-
-      def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(@es_payload_fields)))
-          when unquote(Core.Es.Event.Payload.new_guard(@es_payload_fields)),
-          do: unquote(Core.Codec.Plugin.Fields.new_body(__MODULE__, @es_payload_fields))
-    end
+    ]
   end
 
   @doc false
@@ -95,14 +107,14 @@ defmodule Core.Es.Event.Payload do
   # Грамматику проверяет `Core.Codec.Field`, смысл `subject:` — эта функция: ПДн без субъекта ушло бы
   # в неизменяемую историю открытым (ADR-0073).
   @doc false
-  @spec fields!(module(), term()) :: [Field.t()]
+  @spec fields!(term()) :: [Field.t()]
 
-  def fields!(payload, spec) when is_atom(payload) do
-    where = "Es.Event.Payload #{inspect(payload)}: fields"
+  def fields!(spec) do
+    where = "#{@label}: fields"
     fields = Field.normalize!(spec, :payload, where)
     by_name = Map.new(fields, fn %Field{name: name} = field -> {name, field} end)
 
-    Enum.each(fields, fn %Field{name: name} = field -> check_subject!(field, by_name, "#{where}, поле #{name}") end)
+    Enum.each(fields, fn %Field{name: name} = field -> check_subject!(field, by_name, "#{where}: #{name}") end)
 
     fields
   end
@@ -115,49 +127,44 @@ defmodule Core.Es.Event.Payload do
         :ok
 
       prim ->
-        raise CompileError,
-          description:
-            "#{where}: персональный Prim #{inspect(prim)} без subject: — объявите субъекта " <>
-              "(subject: :aggregate_id или поле нагрузки)"
+        Helper.Opts.reject!(
+          where,
+          "персональный Prim #{inspect(prim)} без subject: — объявите субъекта " <>
+            "(subject: :aggregate_id или поле нагрузки)"
+        )
     end
   end
 
   defp check_subject!(%Field{subject: :aggregate_id}, _by_name, _where), do: :ok
 
   defp check_subject!(%Field{name: name, subject: name}, _by_name, where) do
-    raise CompileError, description: "#{where}: subject: #{inspect(name)} — поле не бывает своим субъектом"
+    Helper.Opts.reject!(where, "subject: #{inspect(name)} — поле не бывает своим субъектом")
   end
 
   defp check_subject!(%Field{optional?: optional?, subject: subject}, by_name, where) do
     case Map.fetch(by_name, subject) do
       :error ->
-        raise CompileError, description: "#{where}: subject: #{inspect(subject)} — нет такого поля нагрузки"
+        Helper.Opts.reject!(where, "subject: #{inspect(subject)} — нет такого поля нагрузки")
 
       {:ok, %Field{spec: spec, optional?: subject_optional?, subject: nil}} ->
-        check_subject_spec!(spec, subject, where)
+        if not uuid_spec?(spec),
+          do: Helper.Opts.reject!(where, "субъект #{subject} — не Prim.UUID и не Prim.Compose над ним")
+
         check_subject_optional!(optional?, subject_optional?, subject, where)
 
       {:ok, _outer} ->
-        raise CompileError, description: "#{where}: субъект #{subject} сам объявлен с subject:"
+        Helper.Opts.reject!(where, "субъект #{subject} сам объявлен с subject:")
     end
   end
 
-  defp check_subject_spec!({:prim, mod}, subject, where) do
-    if not uuid_prim?(mod), do: not_uuid!(subject, where)
-    :ok
-  end
-
-  defp check_subject_spec!(_spec, subject, where), do: not_uuid!(subject, where)
-
-  defp not_uuid!(subject, where) do
-    raise CompileError, description: "#{where}: субъект #{subject} — не Prim.UUID и не Prim.Compose над ним"
-  end
+  defp uuid_spec?({:prim, mod}), do: uuid_prim?(mod)
+  defp uuid_spec?(_spec), do: false
 
   defp check_subject_optional!(false, true, subject, where) do
-    raise CompileError,
-      description:
-        "#{where}: обязательное при необязательном субъекте #{subject} — " <>
-          "непустое ПДн-значение осталось бы без субъекта"
+    Helper.Opts.reject!(
+      where,
+      "обязательное при необязательном субъекте #{subject} — непустое ПДн-значение осталось бы без субъекта"
+    )
   end
 
   defp check_subject_optional!(_optional?, _subject_optional?, _subject, _where), do: :ok
