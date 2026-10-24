@@ -238,7 +238,7 @@ defmodule Core.Codec.PluginTest do
 
   test "вложенный модуль ниже use — «недоступен»" do
     assert_raise CompileError,
-                 ~r/^Codec\.Plugin .*NestedBelow: fields, тип .*NestedBelow\.X: .*NestedBelow\.X недоступен/,
+                 ~r/^Codec\.Plugin: fields: .*NestedBelow\.X: .*NestedBelow\.X недоступен/,
                  fn ->
                    Code.eval_quoted(
                      quote do
@@ -254,7 +254,7 @@ defmodule Core.Codec.PluginTest do
                  end
 
     assert_raise CompileError,
-                 ~r/^Codec\.Plugin .*NestedVariant: variants, вариант .*NestedVariant\.X: .* недоступен/,
+                 ~r/^Codec\.Plugin: variants: .*NestedVariant\.X: .* недоступен/,
                  fn ->
                    Code.eval_quoted(
                      quote do

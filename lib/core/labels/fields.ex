@@ -238,7 +238,7 @@ defmodule Core.Labels.Fields do
   def value!(value) do
     where = "#{@label}: value"
 
-    if text?(value), do: text_spec!(value, where), else: normalize!([value: value], where).value
+    if text?(value), do: text_spec!(value, where), else: normalize!([value: value], @label).value
   end
 
   # ---

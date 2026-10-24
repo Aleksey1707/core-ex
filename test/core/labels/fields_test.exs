@@ -259,7 +259,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "спека разбирается нормализатором плагина по полям — его отказ" do
-      assert_raise CompileError, ~r/^Labels.Fields: fields, поле city: Core.LabelsFixture.Count.*не Core.Enum/, fn ->
+      assert_raise CompileError, ~r/^Labels.Fields: fields: city: Core.LabelsFixture.Count.*не Core.Enum/, fn ->
         compile_struct(:NotPrim,
           fields: [city: [enum: Core.LabelsFixture.Count], zip: [type: :string]],
           labels: [city: "Город", zip: "Индекс"]
@@ -562,7 +562,7 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "value: разбирается нормализатором плагина по полям — его отказ" do
-      assert_raise CompileError, ~r/^Labels.Fields: value, .*Core.LabelsFixture.Count.*не Core.Enum/, fn ->
+      assert_raise CompileError, ~r/^Labels.Fields: value: Core.LabelsFixture.Count не Core.Enum$/, fn ->
         compile_change(:NotEnum, [:old_value, :new_value], change: "Значение", value: [enum: Core.LabelsFixture.Count])
       end
     end

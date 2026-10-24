@@ -323,7 +323,7 @@ defmodule Core.Codec.PluginVariantsTest do
     end
 
     test "тип в variants: дважды — CompileError" do
-      assert_raise CompileError, ~r/DupVariant: variants: повторяются \[.*DupVariant.T\]$/, fn ->
+      assert_raise CompileError, ~r/^Codec.Plugin: variants: повторяются \[.*DupVariant.T\]$/, fn ->
         compile(:DupVariant, quote(do: [{T, "t", a: [type: :string]}, {T, "u", a: [type: :string]}]))
       end
     end
@@ -388,7 +388,7 @@ defmodule Core.Codec.PluginVariantsTest do
     end
 
     test "дискриминатор не одна пара ключ: значение — CompileError" do
-      assert_raise CompileError, ~r/variants, вариант .*: дискриминатор — одна пара ключ: значение/, fn ->
+      assert_raise CompileError, ~r/variants: .*: дискриминатор: ожидается одна пара ключ: значение/, fn ->
         compile(:Pair, quote(do: [{T, {"t", k: :t, j: :t}, a: [type: :string]}]))
       end
     end

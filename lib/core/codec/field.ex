@@ -11,6 +11,7 @@ defmodule Core.Codec.Field do
   Модуль внутренний для библиотеки.
   """
 
+  alias Core.Helper
   alias Core.Helper.FieldCheck
   alias Core.Prim
 
@@ -61,24 +62,22 @@ defmodule Core.Codec.Field do
   # ===== спека =====
 
   @doc false
-  @spec fields!(module(), term(), boolean()) :: [{module(), [t()]}]
+  @spec fields!(term(), boolean()) :: [{module(), [t()]}]
 
-  def fields!(_plugin, nil, _loadable?), do: []
+  def fields!(nil, _loadable?), do: []
 
-  def fields!(plugin, fields, loadable?) when is_list(fields) do
-    pairs = Enum.map(fields, &pair!(plugin, &1))
-    FieldCheck.unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: fields")
+  def fields!(fields, loadable?) when is_list(fields) do
+    pairs = Enum.map(fields, &pair!/1)
+    FieldCheck.unique!(Enum.map(pairs, &elem(&1, 0)), "#{@label}: fields")
     mode = if loadable?, do: :plugin, else: :dump_only
 
     Enum.map(pairs, fn {type, spec} ->
-      {type, type_fields!(type, spec, [], mode, "#{@label} #{inspect(plugin)}: fields, тип #{inspect(type)}")}
+      {type, type_fields!(type, spec, [], mode, "#{@label}: fields: #{inspect(type)}")}
     end)
   end
 
-  def fields!(plugin, other, _loadable?) do
-    raise CompileError,
-      description: "#{@label} #{inspect(plugin)}: fields: список пар {Тип, спека}, задано #{inspect(other)}"
-  end
+  def fields!(other, _loadable?),
+    do: Helper.Opts.reject!("#{@label}: fields", "ожидается список пар {Тип, спека}, получено #{inspect(other)}")
 
   @doc false
   @spec normalize!(term(), mode(), String.t()) :: [t()]
@@ -91,10 +90,10 @@ defmodule Core.Codec.Field do
         |> check_payload_wires!(where)
 
       names ->
-        raise CompileError,
-          description:
-            "#{where}: default: у нагрузки события нет (поля #{inspect(names)}): " <>
-              "развитие события — новый тег и апкаст"
+        Helper.Opts.reject!(
+          where,
+          "default: у нагрузки события нет (поля #{inspect(names)}): развитие события — новый тег и апкаст"
+        )
     end
   end
 
@@ -114,7 +113,7 @@ defmodule Core.Codec.Field do
     FieldCheck.module!(mod, where)
 
     if not Core.Helper.Module.exports?(mod, :__struct__, 0) do
-      raise CompileError, description: "#{where}: #{inspect(mod)} не struct"
+      Helper.Opts.reject!(where, "#{inspect(mod)} не struct")
     end
 
     :ok
@@ -135,12 +134,10 @@ defmodule Core.Codec.Field do
 
   # ---
 
-  defp pair!(_plugin, {type, spec}) when is_atom(type) and not is_nil(type), do: {type, spec}
+  defp pair!({type, spec}) when is_atom(type) and not is_nil(type), do: {type, spec}
 
-  defp pair!(plugin, other) do
-    raise CompileError,
-      description: "#{@label} #{inspect(plugin)}: fields: ожидается пара {Тип, спека}, задано #{inspect(other)}"
-  end
+  defp pair!(other),
+    do: Helper.Opts.reject!("#{@label}: fields", "ожидается пара {Тип, спека}, получено #{inspect(other)}")
 
   defp defaults(spec) do
     if Keyword.keyword?(spec),
@@ -165,33 +162,34 @@ defmodule Core.Codec.Field do
         :ok
 
       {missing, extra} ->
-        raise CompileError,
-          description:
-            "#{where}: спека расходится со struct — поля struct без спеки #{inspect(Enum.sort(missing))}, " <>
-              "поля спеки без struct #{inspect(Enum.sort(extra))}"
+        Helper.Opts.reject!(
+          where,
+          "спека расходится со struct — поля struct без спеки #{inspect(Enum.sort(missing))}, " <>
+            "поля спеки без struct #{inspect(Enum.sort(extra))}"
+        )
     end
   end
 
   defp spec_fields!(spec, mode, where) do
     if not Keyword.keyword?(spec) or spec == [] do
-      raise CompileError, description: "#{where}: непустой keyword-список полей"
+      Helper.Opts.reject!(where, "ожидается непустой keyword-список полей, получено #{inspect(spec)}")
     end
 
     FieldCheck.unique!(Keyword.keys(spec), where)
-    fields = Enum.map(spec, fn {name, opts} -> field!(name, opts, mode, "#{where}, поле #{name}") end)
-    FieldCheck.unique!(Enum.map(fields, fn %__MODULE__{wire: wire} -> wire end), "#{where}, wire-ключи")
+    fields = Enum.map(spec, fn {name, opts} -> field!(name, opts, mode, "#{where}: #{name}") end)
+    FieldCheck.unique!(Enum.map(fields, fn %__MODULE__{wire: wire} -> wire end), "#{where}: wire")
 
     fields
   end
 
   defp field!(name, opts, mode, where) do
     if not Keyword.keyword?(opts) do
-      raise CompileError, description: "#{where}: keyword-спека"
+      Helper.Opts.reject!(where, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
     case Keyword.keys(opts) -- (@kind_keys ++ @extra_keys ++ if(mode == :payload, do: [:subject], else: [])) do
       [] -> :ok
-      unknown -> raise CompileError, description: "#{where}: неизвестные ключи #{inspect(unknown)}"
+      unknown -> Helper.Opts.reject!(where, "неизвестные ключи #{inspect(unknown)}")
     end
 
     spec = spec!(opts, where)
@@ -213,9 +211,10 @@ defmodule Core.Codec.Field do
         kind_spec!(kind, value, where)
 
       other ->
-        raise CompileError,
-          description:
-            "#{where}: нужен ровно один из #{Enum.map_join(@kind_keys, "/", &"#{&1}:")}, задано #{inspect(other)}"
+        Helper.Opts.reject!(
+          where,
+          "ожидается ровно один из #{Enum.map_join(@kind_keys, "/", &"#{&1}:")}, получено #{inspect(other)}"
+        )
     end
   end
 
@@ -241,11 +240,10 @@ defmodule Core.Codec.Field do
 
     cond do
       Core.Helper.Module.exports?(mod, :__struct__, 0) ->
-        raise CompileError,
-          description: "#{where}: union: #{inspect(mod)} — struct, а не семейство; нужен entity: или prim:"
+        Helper.Opts.reject!(where, "union: #{inspect(mod)} — struct, а не семейство; нужен entity: или prim:")
 
       Core.Enum.enum?(mod) ->
-        raise CompileError, description: "#{where}: union: #{inspect(mod)} — Core.Enum, а не семейство; нужен enum:"
+        Helper.Opts.reject!(where, "union: #{inspect(mod)} — Core.Enum, а не семейство; нужен enum:")
 
       true ->
         {:union, mod}
@@ -254,30 +252,29 @@ defmodule Core.Codec.Field do
 
   defp kind_spec!(:list, inner, where) do
     if not Keyword.keyword?(inner) do
-      raise CompileError, description: "#{where}: list: keyword-спека элемента"
+      Helper.Opts.reject!(where, "list: ожидается keyword-спека элемента, получено #{inspect(inner)}")
     end
 
     if Keyword.has_key?(inner, :optional) do
-      raise CompileError, description: "#{where}: optional: задаётся у самого поля, не в list:"
+      Helper.Opts.reject!(where, "optional: задаётся у самого поля, не в list:")
     end
 
     case Keyword.keys(inner) -- @kind_keys do
       [] -> {:list, spec!(inner, where)}
-      unknown -> raise CompileError, description: "#{where}: list: неизвестные ключи #{inspect(unknown)}"
+      unknown -> Helper.Opts.reject!(where, "list: неизвестные ключи #{inspect(unknown)}")
     end
   end
 
   defp kind_spec!(:type, type, _where) when type in @type_values, do: {:type, type}
 
   defp kind_spec!(:type, type, where) do
-    raise CompileError,
-      description: "#{where}: неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@type_values)}"
+    Helper.Opts.reject!(where, "неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@type_values)}")
   end
 
   defp optional!(opts, where) do
     case Keyword.get(opts, :optional, false) do
       optional? when is_boolean(optional?) -> optional?
-      other -> raise CompileError, description: "#{where}: optional: boolean, задано #{inspect(other)}"
+      other -> Helper.Opts.reject!(where, "optional: ожидается boolean, получено #{inspect(other)}")
     end
   end
 
@@ -285,7 +282,7 @@ defmodule Core.Codec.Field do
     case Keyword.fetch(opts, :wire) do
       :error -> Atom.to_string(name)
       {:ok, wire} when is_binary(wire) and wire != "" -> wire
-      {:ok, other} -> raise CompileError, description: "#{where}: wire: непустая строка, задано #{inspect(other)}"
+      {:ok, other} -> Helper.Opts.reject!(where, "wire: ожидается непустая строка, получено #{inspect(other)}")
     end
   end
 
@@ -295,10 +292,10 @@ defmodule Core.Codec.Field do
         :none
 
       {{:ok, _default}, true, _loadable?} ->
-        raise CompileError, description: "#{where}: default: и optional: true — два ответа на один nil"
+        Helper.Opts.reject!(where, "default: и optional: true — два ответа на один nil")
 
       {{:ok, _default}, false, false} ->
-        raise CompileError, description: "#{where}: default: при loadable: false не применяется — загрузки нет"
+        Helper.Opts.reject!(where, "default: при loadable: false не применяется — загрузки нет")
 
       {{:ok, default}, false, true} ->
         check_default!(spec, default, where)
@@ -315,21 +312,19 @@ defmodule Core.Codec.Field do
         subject
 
       {:ok, other} ->
-        raise CompileError,
-          description: "#{where}: subject: атом — :aggregate_id или имя поля нагрузки, задано #{inspect(other)}"
+        Helper.Opts.reject!(where, "subject: ожидается :aggregate_id или имя поля нагрузки, получено #{inspect(other)}")
     end
   end
 
   # Нагрузка события: wire-ключ на `$` совпал бы с зарезервированной формой `{"$pd": …}` (ADR-0073).
   defp check_payload_wires!(fields, where) do
-    Enum.each(fields, fn %__MODULE__{name: name, wire: wire} -> check_wire!(wire, "#{where}, поле #{name}") end)
+    Enum.each(fields, fn %__MODULE__{name: name, wire: wire} -> check_wire!(wire, "#{where}: #{name}") end)
 
     fields
   end
 
   defp check_wire!("$" <> _rest = wire, where) do
-    raise CompileError,
-      description: "#{where}: wire-ключ #{inspect(wire)} начинается с $ — форма {\"$pd\": …} зарезервирована"
+    Helper.Opts.reject!(where, "wire-ключ #{inspect(wire)} начинается с $ — форма {\"$pd\": …} зарезервирована")
   end
 
   defp check_wire!(_wire, _where), do: :ok
@@ -342,7 +337,7 @@ defmodule Core.Codec.Field do
         :ok
 
       {:error, _reason} ->
-        raise CompileError, description: "#{where}: default: #{inspect(default)} не загружается #{inspect(mod)}"
+        Helper.Opts.reject!(where, "default: #{inspect(default)} не загружается #{inspect(mod)}")
     end
   end
 

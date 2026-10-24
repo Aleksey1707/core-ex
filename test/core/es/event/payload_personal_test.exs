@@ -148,17 +148,17 @@ defmodule Core.Es.Event.PayloadPersonalTest do
     end
 
     test "subject: — не атом и не nil" do
-      assert_raise CompileError, ~r/поле phone: subject: атом/, fn ->
+      assert_raise CompileError, ~r/: phone: subject: ожидается :aggregate_id или имя поля нагрузки/, fn ->
         payload(:StringSubject, phone: [prim: PrimFixture.Personal, subject: "aggregate_id"])
       end
 
-      assert_raise CompileError, ~r/поле phone: subject: атом/, fn ->
+      assert_raise CompileError, ~r/: phone: subject: ожидается :aggregate_id или имя поля нагрузки/, fn ->
         payload(:NilSubject, phone: [prim: PrimFixture.Personal, subject: nil])
       end
     end
 
     test "wire-ключ на $ — у любой нагрузки" do
-      assert_raise CompileError, ~r/поле name: wire-ключ "\$pd" начинается с \$/, fn ->
+      assert_raise CompileError, ~r/name: wire-ключ "\$pd" начинается с \$/, fn ->
         payload(:DollarWire, name: [prim: Account.Name, wire: "$pd"])
       end
     end

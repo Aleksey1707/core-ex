@@ -26,7 +26,7 @@ defmodule Core.Codec.Plugin.Variants do
 
   require Error
 
-  @label "Codec.Plugin"
+  @where "Codec.Plugin: variants"
   @tag_key :type
   @fields_key :fields
 
@@ -59,27 +59,21 @@ defmodule Core.Codec.Plugin.Variants do
   # ===== спека =====
 
   @doc false
-  @spec variants!(module(), term(), module() | nil) :: [variant()]
+  @spec variants!(term(), module() | nil) :: [variant()]
 
-  def variants!(_plugin, nil, _union), do: []
+  def variants!(nil, _union), do: []
+  def variants!(_variants, nil), do: Helper.Opts.reject!(@where, "требует union: — модуль-семейство")
 
-  def variants!(plugin, _variants, nil) do
-    raise CompileError, description: "#{@label} #{inspect(plugin)}: variants: требует union: — модуль-семейство"
-  end
-
-  def variants!(plugin, variants, _union) when is_list(variants) and variants != [] do
-    parsed = Enum.map(variants, &variant!(plugin, &1))
-    Helper.FieldCheck.unique!(Enum.map(parsed, &elem(&1, 0)), "#{@label} #{inspect(plugin)}: variants")
-    check_places!(plugin, parsed)
+  def variants!(variants, _union) when is_list(variants) and variants != [] do
+    parsed = Enum.map(variants, &variant!/1)
+    Helper.FieldCheck.unique!(Enum.map(parsed, &elem(&1, 0)), @where)
+    check_places!(parsed)
 
     parsed
   end
 
-  def variants!(plugin, other, _union) do
-    raise CompileError,
-      description:
-        "#{@label} #{inspect(plugin)}: variants: непустой список {Тип, адрес, спека}, задано #{inspect(other)}"
-  end
+  def variants!(other, _union),
+    do: Helper.Opts.reject!(@where, "ожидается непустой список {Тип, адрес, спека}, получено #{inspect(other)}")
 
   @doc false
   @spec index([variant()]) :: index()
@@ -109,8 +103,8 @@ defmodule Core.Codec.Plugin.Variants do
 
   # ---
 
-  defp variant!(plugin, {mod, address, spec}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@label} #{inspect(plugin)}: variants, вариант #{inspect(mod)}"
+  defp variant!({mod, address, spec}) when is_atom(mod) and not is_nil(mod) do
+    where = "#{@where}: #{inspect(mod)}"
     place = place!(address, where)
     disc = disc(place)
     Field.struct_module!(mod, where)
@@ -122,8 +116,8 @@ defmodule Core.Codec.Plugin.Variants do
     {mod, address, place, fields}
   end
 
-  defp variant!(plugin, {mod, address}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@label} #{inspect(plugin)}: variants, вариант #{inspect(mod)}"
+  defp variant!({mod, address}) when is_atom(mod) and not is_nil(mod) do
+    where = "#{@where}: #{inspect(mod)}"
     place = place!(address, where)
     Field.struct_module!(mod, where)
     check_default!(mod, disc(place), where)
@@ -131,12 +125,8 @@ defmodule Core.Codec.Plugin.Variants do
     {mod, address, place, :manual}
   end
 
-  defp variant!(plugin, other) do
-    raise CompileError,
-      description:
-        "#{@label} #{inspect(plugin)}: variants: ожидается {Тип, адрес, спека} или {Тип, адрес}, " <>
-          "задано #{inspect(other)}"
-  end
+  defp variant!(other),
+    do: Helper.Opts.reject!(@where, "ожидается {Тип, адрес, спека} или {Тип, адрес}, получено #{inspect(other)}")
 
   defp place!(tag, _where) when is_binary(tag) and tag != "", do: {:tagged, tag, nil}
 
@@ -146,12 +136,14 @@ defmodule Core.Codec.Plugin.Variants do
   defp place!([{key, value}], where), do: {:inline, disc!({key, value}, where)}
 
   defp place!({tag, disc}, where) when is_binary(tag) and is_list(disc) do
-    raise CompileError, description: "#{where}: дискриминатор — одна пара ключ: значение, задано #{inspect(disc)}"
+    Helper.Opts.reject!(where, "дискриминатор: ожидается одна пара ключ: значение, получено #{inspect(disc)}")
   end
 
   defp place!(other, where) do
-    raise CompileError,
-      description: "#{where}: адрес — \"тег\", {\"тег\", ключ: значение} или [ключ: значение], задано #{inspect(other)}"
+    Helper.Opts.reject!(
+      where,
+      "адрес: ожидается \"тег\", {\"тег\", ключ: значение} или [ключ: значение], получено #{inspect(other)}"
+    )
   end
 
   defp disc!({key, value} = disc, _where)
@@ -160,8 +152,10 @@ defmodule Core.Codec.Plugin.Variants do
        do: disc
 
   defp disc!(other, where) do
-    raise CompileError,
-      description: "#{where}: дискриминатор — ключ-атом и значение атомом или строкой, задано #{inspect(other)}"
+    Helper.Opts.reject!(
+      where,
+      "дискриминатор: ожидается ключ-атом и значение атомом или строкой, получено #{inspect(other)}"
+    )
   end
 
   defp check_default!(_mod, nil, _where), do: :ok
@@ -175,9 +169,10 @@ defmodule Core.Codec.Plugin.Variants do
         :ok
 
       {:ok, default} ->
-        raise CompileError,
-          description:
-            "#{where}: поле #{inspect(key)} по умолчанию #{inspect(default)}, а дискриминатор — #{inspect(value)}"
+        Helper.Opts.reject!(
+          where,
+          "поле #{inspect(key)} по умолчанию #{inspect(default)}, а дискриминатор — #{inspect(value)}"
+        )
     end
   end
 
@@ -187,25 +182,22 @@ defmodule Core.Codec.Plugin.Variants do
     wire = Atom.to_string(key)
 
     if Enum.any?(fields, &match?(%Field{wire: ^wire}, &1)) do
-      raise CompileError, description: "#{where}: wire-ключ #{inspect(wire)} занят дискриминатором"
+      Helper.Opts.reject!(where, "wire-ключ #{inspect(wire)} занят дискриминатором")
     end
   end
 
-  defp check_places!(plugin, variants) do
-    where = "#{@label} #{inspect(plugin)}: variants"
-
+  defp check_places!(variants) do
     forms = Enum.map(variants, &elem(elem(&1, 2), 0))
 
     case Enum.uniq(forms) do
       [:tagged] ->
-        check_tags!(variants, where)
+        check_tags!(variants, @where)
 
       [:inline] ->
-        check_discs!(variants, where)
+        check_discs!(variants, @where)
 
       _mixed ->
-        raise CompileError,
-          description: "#{where}: адреса одной формы: тегированная или без обёртки, варианты #{names(variants)}"
+        Helper.Opts.reject!(@where, "адреса одной формы: тегированная или без обёртки, варианты #{names(variants)}")
     end
   end
 
@@ -219,13 +211,10 @@ defmodule Core.Codec.Plugin.Variants do
 
   defp check_shared!(tag, members, where) do
     if Enum.any?(members, &is_nil(disc(elem(&1, 2)))) do
-      raise CompileError,
-        description:
-          "#{where}: тег #{inspect(tag)} общий у #{names(members)} " <>
-            "без дискриминатора у каждого"
+      Helper.Opts.reject!(where, "тег #{inspect(tag)} общий у #{names(members)} без дискриминатора у каждого")
     end
 
-    check_discs!(members, "#{where}, тег #{inspect(tag)}")
+    check_discs!(members, "#{where}: #{inspect(tag)}")
   end
 
   defp check_discs!(members, where) do
@@ -234,7 +223,7 @@ defmodule Core.Codec.Plugin.Variants do
     keys = Enum.map(discs, &elem(&1, 0))
 
     if length(Enum.uniq(keys)) > 1 do
-      raise CompileError, description: "#{where}: разные ключи дискриминатора у #{names(members)}: #{inspect(discs)}"
+      Helper.Opts.reject!(where, "разные ключи дискриминатора у #{names(members)}: #{inspect(discs)}")
     end
 
     values = Enum.map(discs, &string(elem(&1, 1)))
@@ -244,7 +233,7 @@ defmodule Core.Codec.Plugin.Variants do
         :ok
 
       dupes ->
-        raise CompileError, description: "#{where}: повтор адреса #{inspect(Enum.uniq(dupes))} у #{names(members)}"
+        Helper.Opts.reject!(where, "повтор адреса #{inspect(Enum.uniq(dupes))} у #{names(members)}")
     end
   end
 

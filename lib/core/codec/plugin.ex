@@ -167,13 +167,8 @@ defmodule Core.Codec.Plugin do
 
         @codec_loadable unquote(loadable)
         @codec_union unquote(union)
-        @codec_fields Core.Codec.Field.fields!(
-                        __MODULE__,
-                        unquote(Macro.escape(Keyword.get(opts, :fields))),
-                        @codec_loadable
-                      )
+        @codec_fields Core.Codec.Field.fields!(unquote(Macro.escape(Keyword.get(opts, :fields))), @codec_loadable)
         @codec_variants Core.Codec.Plugin.Variants.variants!(
-                          __MODULE__,
                           unquote(Macro.escape(Keyword.get(opts, :variants))),
                           @codec_union
                         )

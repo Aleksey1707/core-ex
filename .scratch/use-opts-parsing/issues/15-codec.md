@@ -9,24 +9,29 @@ ADR-0085.
 **Blocked by:** 10; `.scratch/aggregate-wiring/issues/16-family-codec-outbox.md` (меняет вложенный `use` в
 `Es.Event.Codec`).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Codec`, `Codec.Facade`, `Codec.Plugin` (`Codec.Plugin.Opts`, `Codec.Plugin.Variants`, `Codec.Field`):
+- [x] `Codec`, `Codec.Facade`, `Codec.Plugin` (`Codec.Plugin.Opts`, `Codec.Plugin.Variants`, `Codec.Field`):
   `bind_quoted` → пролог при раскрытии. Выражения: `Codec.Facade` `plugins:`, `Codec.Plugin` `types:`.
-- [ ] Форма `types:` / `fields:` / `variants:` проверяется при раскрытии (`literal!`); проверки по модулям
+- [x] Форма `types:` / `fields:` / `variants:` проверяется при раскрытии (`literal!`); проверки по модулям
   (`fields!` / `variants!`, struct, Prim) — в теле через `<key>!` на `unquote(Macro.escape(lit))`, отказ на несобранном
   модуле громкий (`Code.ensure_compiled!`).
-- [ ] Генерация клауз по `fields:` / `variants:` — в месте `use`, вторым `quote unquote: false`.
-- [ ] `Es.Event.Codec` передаёт `union:` модулем через `unquote`.
-- [ ] Тексты `types:` / `union:` / `loadable:` — с меткой `Codec.Plugin:`, тексты `Codec.Facade` — с меткой
+- [x] Генерация клауз по `fields:` / `variants:` — в месте `use`, вторым `quote unquote: false`.
+- [x] `Es.Event.Codec` передаёт `union:` модулем через `unquote`.
+- [x] Тексты `types:` / `union:` / `loadable:` — с меткой `Codec.Plugin:`, тексты `Codec.Facade` — с меткой
   `Codec.Facade:`. `View.Dumper.codec_ast/3` не изменён.
-- [ ] `@moduledoc` называет опции-выражения и опции, чей модуль MAY быть вложен в вызывающего (`types:` / `fields:` /
+- [x] `@moduledoc` называет опции-выражения и опции, чей модуль MAY быть вложен в вызывающего (`types:` / `fields:` /
   `variants:`).
-- [ ] Тесты: опечатка в ключе — при раскрытии, с меткой; нелитерал в опции-литерале — «ожидается литерал»; неверное
+- [x] Тесты: опечатка в ключе — при раскрытии, с меткой; нелитерал в опции-литерале — «ожидается литерал»; неверное
   выражение — в теле, с меткой; вложенный модуль ниже `use` — «модуль недоступен».
-- [ ] CHANGELOG: накопительный пункт (текст — спека). Нет — завести вместе со строкой «Версия библиотеки» в
+- [x] CHANGELOG: накопительный пункт (текст — спека). Нет — завести вместе со строкой «Версия библиотеки» в
   `docs/rules/app/00-index.md`; есть — дописать строки `use Core.Codec.Facade`, `use Core.Codec.Plugin`.
-- [ ] Файлы тикета сняты с храповика `excluded`; список опустел — `files: %{excluded: …}` удалён.
-- [ ] Приёмка: `make` целиком; `make consumer-check` без новых предупреждений; `mix xref graph --label compile`
+- [x] Файлы тикета сняты с храповика `excluded`; список опустел — `files: %{excluded: …}` удалён.
+- [x] Приёмка: `make` целиком; `make consumer-check` без новых предупреждений; `mix xref graph --label compile`
   фикстуры не изменился, у библиотеки compile-рёбра только уходят.
 - [ ] После влития ветка `prototype/use-opts-mode` удаляется.
+
+**Заметка:** тексты `Codec.Field` и `Codec.Plugin.Variants` переведены на путь через `: ` вместе с остальными
+(`Codec.Plugin: fields: <Тип>: <поле>: …`, `Codec.Plugin: variants: <Тип>: …`, хвост «задано» → «получено»), без
+модуля плагина; у нагрузки события и подписей через `: ` идёт часть пути, которую строит `Codec.Field` (свои
+проверки `Es.Event.Payload` — срез 17). Ветка `prototype/use-opts-mode` не удалена: её читают параллельные срезы.

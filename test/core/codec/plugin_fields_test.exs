@@ -455,7 +455,7 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "тип объявлен дважды — CompileError" do
-      assert_raise CompileError, ~r/Twice: fields: повторяются \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
+      assert_raise CompileError, ~r/^Codec.Plugin: fields: повторяются \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Codec.PluginFieldsTest.Twice do
@@ -471,7 +471,7 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "не Prim в prim: — CompileError с именем плагина, типа и поля" do
-      message = ~r/Codec.Plugin .*NotPrim: fields, тип .*NotPrim.T, поле b: .*Tag не Prim/
+      message = ~r/Codec.Plugin: fields: .*NotPrim.T: b: .*Tag не Prim/
 
       assert_raise CompileError, message, fn ->
         compile_plugin(:NotPrim, a: [prim: Name], b: [prim: Core.Codec.PluginFieldsTest.Tag])
@@ -483,79 +483,79 @@ defmodule Core.Codec.PluginFieldsTest do
         compile_plugin(:DupField, a: [prim: Name], a: [prim: Name, wire: "b"])
       end
 
-      assert_raise CompileError, ~r/wire-ключи: повторяются \["b"\]/, fn ->
+      assert_raise CompileError, ~r/wire: повторяются \["b"\]/, fn ->
         compile_plugin(:DupWire, a: [prim: Name, wire: "b"], b: [prim: Name])
       end
     end
 
     test "неизвестный ключ спеки — CompileError" do
-      assert_raise CompileError, ~r/поле a: неизвестные ключи \[:default_value\]/, fn ->
+      assert_raise CompileError, ~r/\.T: a: неизвестные ключи \[:default_value\]/, fn ->
         compile_plugin(:UnknownKey, a: [prim: Name, default_value: 1], b: [prim: Name])
       end
     end
 
     test "не enum в enum: — CompileError" do
-      assert_raise CompileError, ~r/поле a: .*Name не Core.Enum/, fn ->
+      assert_raise CompileError, ~r/\.T: a: .*Name не Core.Enum/, fn ->
         compile_plugin(:NotEnum, a: [enum: Name], b: [prim: Name])
       end
     end
 
     test "не struct в entity: — CompileError" do
-      assert_raise CompileError, ~r/поле a: .*Status не struct/, fn ->
+      assert_raise CompileError, ~r/\.T: a: .*Status не struct/, fn ->
         compile_plugin(:NotEntity, a: [entity: Core.Codec.PluginFieldsTest.Status], b: [prim: Name])
       end
     end
 
     test "union: — не модуль, struct или Core.Enum, в том числе в list: — CompileError с подсказкой вида" do
-      assert_raise CompileError, ~r/поле a: .*NoSuchFamily недоступен/, fn ->
+      assert_raise CompileError, ~r/\.T: a: .*NoSuchFamily недоступен/, fn ->
         compile_plugin(:UnionMissing, a: [union: Core.Codec.PluginFieldsTest.NoSuchFamily], b: [prim: Name])
       end
 
-      assert_raise CompileError, ~r/поле a: union: .*Tag — struct, а не семейство; нужен entity:/, fn ->
+      assert_raise CompileError, ~r/\.T: a: union: .*Tag — struct, а не семейство; нужен entity:/, fn ->
         compile_plugin(:UnionStruct, a: [union: Core.Codec.PluginFieldsTest.Tag], b: [prim: Name])
       end
 
-      assert_raise CompileError, ~r/поле a: union: .*Name — struct, а не семейство; нужен entity: или prim:/, fn ->
+      assert_raise CompileError, ~r/\.T: a: union: .*Name — struct, а не семейство; нужен entity: или prim:/, fn ->
         compile_plugin(:UnionPrim, a: [union: Core.Codec.PluginFieldsTest.Name], b: [prim: Name])
       end
 
-      assert_raise CompileError, ~r/поле a: union: .*Status — Core.Enum, а не семейство; нужен enum:/, fn ->
+      assert_raise CompileError, ~r/\.T: a: union: .*Status — Core.Enum, а не семейство; нужен enum:/, fn ->
         compile_plugin(:UnionEnum, a: [list: [union: Core.Codec.PluginFieldsTest.Status]], b: [prim: Name])
       end
     end
 
     test "неизвестный type: — CompileError" do
-      assert_raise CompileError, ~r/поле a: неизвестный type: :atom/, fn ->
+      assert_raise CompileError, ~r/\.T: a: неизвестный type: :atom/, fn ->
         compile_plugin(:UnknownType, a: [type: :atom], b: [prim: Name])
       end
     end
 
     test "два вида в поле — CompileError" do
-      assert_raise CompileError, ~r/поле a: нужен ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
+      assert_raise CompileError, ~r/\.T: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
         compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
       end
     end
 
     test "optional: внутри list: — CompileError" do
-      assert_raise CompileError, ~r/поле a: optional: задаётся у самого поля, не в list:/, fn ->
+      assert_raise CompileError, ~r/\.T: a: optional: задаётся у самого поля, не в list:/, fn ->
         compile_plugin(:ListOptional, a: [list: [prim: Name, optional: true]], b: [prim: Name])
       end
     end
 
     test "default: с optional: true — CompileError" do
-      assert_raise CompileError, ~r/поле a: default: и optional: true/, fn ->
+      assert_raise CompileError, ~r/\.T: a: default: и optional: true/, fn ->
         compile_plugin(:DefaultOptional, a: [prim: Name, optional: true, default: "x"], b: [prim: Name])
       end
     end
 
     test "default: enum: вне значений enum — CompileError" do
-      assert_raise CompileError, ~r/поле a: default: "nwe" не загружается .*Status/, fn ->
+      assert_raise CompileError, ~r/\.T: a: default: "nwe" не загружается .*Status/, fn ->
         compile_plugin(:DefaultEnum, a: [enum: Core.Codec.PluginFieldsTest.Status, default: "nwe"], b: [prim: Name])
       end
     end
 
     test "default: при loadable: false — CompileError" do
-      assert_raise CompileError, ~r/поле a: default: при loadable: false/, fn ->
+      assert_raise CompileError, ~r/\.T: a: default: при loadable: false/, fn ->
         compile_plugin(:DefaultDumpOnly, [a: [prim: Name, default: "x"], b: [prim: Name]], loadable: false)
       end
     end

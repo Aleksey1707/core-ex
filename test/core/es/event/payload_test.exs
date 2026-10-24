@@ -65,7 +65,7 @@ defmodule Core.Es.Event.PayloadTest do
     end
 
     test "ошибка спеки называет нагрузку и поле" do
-      assert_raise CompileError, ~r/Es.Event.Payload .*NotPrim: fields, поле name: .*Status не Prim/, fn ->
+      assert_raise CompileError, ~r/Es.Event.Payload .*NotPrim: fields: name: .*Status не Prim/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Es.Event.PayloadTest.NotPrim do

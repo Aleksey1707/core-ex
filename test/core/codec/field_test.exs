@@ -63,18 +63,18 @@ defmodule Core.Codec.FieldTest do
 
   describe "спека плагина" do
     test "пары {Тип, спека} — поля типа" do
-      assert [{Tag, [%Field{name: :name, spec: {:prim, Name}}]}] = Field.fields!(P, [{Tag, name: [prim: Name]}], true)
+      assert [{Tag, [%Field{name: :name, spec: {:prim, Name}}]}] = Field.fields!([{Tag, name: [prim: Name]}], true)
     end
 
     test "тип объявлен дважды" do
-      assert_raise CompileError, ~r/Codec.Plugin P: fields: повторяются \[Core.Codec.FieldTest.Tag\]/, fn ->
-        Field.fields!(P, [{Tag, name: [prim: Name]}, {Tag, name: [prim: Name]}], true)
+      assert_raise CompileError, ~r/Codec.Plugin: fields: повторяются \[Core.Codec.FieldTest.Tag\]/, fn ->
+        Field.fields!([{Tag, name: [prim: Name]}, {Tag, name: [prim: Name]}], true)
       end
     end
 
     test "не пара {Тип, спека}" do
-      assert_raise CompileError, ~r/Codec.Plugin P: fields: ожидается пара \{Тип, спека\}, задано :x/, fn ->
-        Field.fields!(P, [:x], true)
+      assert_raise CompileError, ~r/Codec.Plugin: fields: ожидается пара \{Тип, спека\}, получено :x/, fn ->
+        Field.fields!([:x], true)
       end
     end
 
@@ -87,19 +87,19 @@ defmodule Core.Codec.FieldTest do
 
   describe "kind-ключ" do
     test "ровно один" do
-      assert_raise CompileError, ~r/W, поле a: нужен ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
+      assert_raise CompileError, ~r/W: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
         Field.normalize!([a: [prim: Name, enum: Status]], :plugin, @where)
       end
     end
 
     test "неизвестный ключ" do
-      assert_raise CompileError, ~r/W, поле a: неизвестные ключи \[:default_value\]/, fn ->
+      assert_raise CompileError, ~r/W: a: неизвестные ключи \[:default_value\]/, fn ->
         Field.normalize!([a: [prim: Name, default_value: 1]], :plugin, @where)
       end
     end
 
     test "неизвестный type:" do
-      assert_raise CompileError, ~r/W, поле a: неизвестный type: :atom/, fn ->
+      assert_raise CompileError, ~r/W: a: неизвестный type: :atom/, fn ->
         Field.normalize!([a: [type: :atom]], :plugin, @where)
       end
     end
@@ -107,19 +107,19 @@ defmodule Core.Codec.FieldTest do
 
   describe "optional: и list:" do
     test "optional: — boolean" do
-      assert_raise CompileError, ~r/W, поле a: optional: boolean, задано :yes/, fn ->
+      assert_raise CompileError, ~r/W: a: optional: ожидается boolean, получено :yes/, fn ->
         Field.normalize!([a: [prim: Name, optional: :yes]], :plugin, @where)
       end
     end
 
     test "optional: не внутри list:" do
-      assert_raise CompileError, ~r/W, поле a: optional: задаётся у самого поля, не в list:/, fn ->
+      assert_raise CompileError, ~r/W: a: optional: задаётся у самого поля, не в list:/, fn ->
         Field.normalize!([a: [list: [prim: Name, optional: true]]], :plugin, @where)
       end
     end
 
     test "list: — keyword-спека элемента без лишних ключей" do
-      assert_raise CompileError, ~r/W, поле a: list: неизвестные ключи \[:wire\]/, fn ->
+      assert_raise CompileError, ~r/W: a: list: неизвестные ключи \[:wire\]/, fn ->
         Field.normalize!([a: [list: [prim: Name, wire: "x"]]], :plugin, @where)
       end
     end
@@ -127,13 +127,13 @@ defmodule Core.Codec.FieldTest do
 
   describe "wire:" do
     test "непустая строка" do
-      assert_raise CompileError, ~r/W, поле a: wire: непустая строка, задано ""/, fn ->
+      assert_raise CompileError, ~r/W: a: wire: ожидается непустая строка, получено ""/, fn ->
         Field.normalize!([a: [prim: Name, wire: ""]], :plugin, @where)
       end
     end
 
     test "в нагрузке не начинается с $" do
-      assert_raise CompileError, ~r/W, поле a: wire-ключ "\$pd" начинается с \$/, fn ->
+      assert_raise CompileError, ~r/W: a: wire-ключ "\$pd" начинается с \$/, fn ->
         Field.normalize!([a: [prim: Name, wire: "$pd"]], :payload, @where)
       end
     end
@@ -147,7 +147,7 @@ defmodule Core.Codec.FieldTest do
     end
 
     test "wire-ключей" do
-      assert_raise CompileError, ~r/W, wire-ключи: повторяются \["b"\]/, fn ->
+      assert_raise CompileError, ~r/W: wire: повторяются \["b"\]/, fn ->
         Field.normalize!([a: [prim: Name, wire: "b"], b: [prim: Name]], :plugin, @where)
       end
     end
@@ -155,19 +155,19 @@ defmodule Core.Codec.FieldTest do
 
   describe "default: по режиму" do
     test "плагин проверяет default: у enum:" do
-      assert_raise CompileError, ~r/W, поле a: default: "nwe" не загружается .*Status/, fn ->
+      assert_raise CompileError, ~r/W: a: default: "nwe" не загружается .*Status/, fn ->
         Field.normalize!([a: [enum: Status, default: "nwe"]], :plugin, @where)
       end
     end
 
     test "default: и optional: true" do
-      assert_raise CompileError, ~r/W, поле a: default: и optional: true/, fn ->
+      assert_raise CompileError, ~r/W: a: default: и optional: true/, fn ->
         Field.normalize!([a: [prim: Name, default: "x", optional: true]], :plugin, @where)
       end
     end
 
     test "плагин без загрузки default: не принимает" do
-      assert_raise CompileError, ~r/W, поле a: default: при loadable: false/, fn ->
+      assert_raise CompileError, ~r/W: a: default: при loadable: false/, fn ->
         Field.normalize!([a: [prim: Name, default: "x"]], :dump_only, @where)
       end
     end
@@ -181,19 +181,19 @@ defmodule Core.Codec.FieldTest do
 
   describe "subject: по режиму" do
     test "плагин subject: не принимает" do
-      assert_raise CompileError, ~r/W, поле a: неизвестные ключи \[:subject\]/, fn ->
+      assert_raise CompileError, ~r/W: a: неизвестные ключи \[:subject\]/, fn ->
         Field.normalize!([a: [prim: Name, subject: :aggregate_id]], :plugin, @where)
       end
     end
 
     test "подписи subject: не принимают" do
-      assert_raise CompileError, ~r/W, поле a: неизвестные ключи \[:subject\]/, fn ->
+      assert_raise CompileError, ~r/W: a: неизвестные ключи \[:subject\]/, fn ->
         Field.normalize!([a: [prim: Name, subject: :aggregate_id]], :labels, @where)
       end
     end
 
     test "в нагрузке subject: — атом" do
-      assert_raise CompileError, ~r/W, поле a: subject: атом .*задано "b"/, fn ->
+      assert_raise CompileError, ~r/W: a: subject: ожидается .*получено "b"/, fn ->
         Field.normalize!([a: [prim: Name, subject: "b"]], :payload, @where)
       end
     end
