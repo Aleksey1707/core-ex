@@ -449,6 +449,23 @@ defmodule Core.Es.Event.CodecTest do
       end
     end
 
+    test "несобранный модуль в tags — CompileError" do
+      message = ~r/^Es\.Event\.Codec: tags: модуль Core\.Es\.Event\.CodecTest\.NoSuchEvent недоступен/
+
+      assert_raise CompileError, message, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.CodecTest.NoSuchEventCodec do
+              use Core.Es.Event.Codec,
+                family: Core.EventFixture.Event,
+                type: "codec_test",
+                tags: %{Core.Es.Event.CodecTest.NoSuchEvent => "no_such.event"}
+            end
+          end
+        )
+      end
+    end
+
     test "кодек событий без нагрузки клоуз не требует" do
       {mod, _} =
         Code.eval_quoted(

@@ -18,7 +18,7 @@ defmodule Core.Helper.FieldCheckTest do
     end
 
     test "не модуль — CompileError" do
-      assert_raise CompileError, ~r/Декларация, поле x: ожидался модуль, задано "name"/, fn ->
+      assert_raise CompileError, ~r/Декларация, поле x: ожидается модуль, получено "name"/, fn ->
         FieldCheck.module!("name", @where)
       end
     end

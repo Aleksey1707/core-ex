@@ -612,7 +612,7 @@ Builder — модуль с `defmacro __using__`. Его опции объявл
 - Проверка по другому модулю SHOULD идти при раскрытии (`Core.Helper.Opts.module!`). У опции,
   чей модуль MAY быть вложен в вызывающего, — в теле через `<key>!` на
   `unquote(Macro.escape(value))`; `@moduledoc` называет такие опции. Проверка MUST падать на
-  несобранном модуле (`Code.ensure_compiled!`); `exports?` — только после неё.
+  несобранном модуле (`Code.ensure_compiled/1` + `reject!`); `exports?` — только после неё.
 - Код, генерируемый по проверке в теле, MUST стоять в месте `use` вторым
   `quote unquote: false`, а не в `@before_compile`.
 - Builder, собранный из другого, MUST подключать его вложенным `use`. Ключ проверяет тот, кто

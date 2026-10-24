@@ -46,20 +46,6 @@ defmodule Core.Prim.Opts do
     Enum.map(opts, fn {key, value} -> {key, if(key in expression_keys, do: value, else: Macro.escape(value))} end)
   end
 
-  @doc "Резолв и проверка `kind:`: свой атом либо native обёртки."
-  @spec kind!(keyword(), atom(), String.t()) :: atom()
-
-  def kind!(opts, native, label) when is_list(opts) and is_atom(native) do
-    case Keyword.get(opts, :kind, native) do
-      kind when is_atom(kind) ->
-        Prim.validate_kind!(native, kind, label)
-        kind
-
-      other ->
-        bad!(label, :kind, "атом", other)
-    end
-  end
-
   @doc "Проверить boolean-опции (`nil` — опция не задана)."
   @spec boolean!(keyword(), [atom()], String.t()) :: :ok
 
@@ -156,6 +142,18 @@ defmodule Core.Prim.Opts do
   def to_decimal(value) when is_binary(value), do: Decimal.new(value)
 
   # ---
+
+  # Резолв и проверка `kind:`: свой атом либо native обёртки.
+  defp kind!(opts, native, label) when is_list(opts) and is_atom(native) do
+    case Keyword.get(opts, :kind, native) do
+      kind when is_atom(kind) ->
+        Prim.validate_kind!(native, kind, label)
+        kind
+
+      other ->
+        bad!(label, :kind, "атом", other)
+    end
+  end
 
   defp known_tz!(tz, label, key) do
     case DateTime.shift_zone(DateTime.utc_now(), tz) do

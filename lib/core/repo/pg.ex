@@ -100,8 +100,7 @@ defmodule Core.Repo.Pg do
       |> Enum.map(fn {name, _arity} -> name end)
       |> Enum.uniq()
 
-    errors = Keyword.fetch!(opts, :errors)
-    validate_errors_module!(errors)
+    errors = errors!(opts)
 
     constraint_errors = normalize_constraint_errors!(Keyword.get(opts, :constraint_errors, []))
     validate_constraint_error_codes!(errors, constraint_errors, "#{@label}: constraint_errors")
@@ -307,23 +306,6 @@ defmodule Core.Repo.Pg do
       else: Helper.Opts.reject!("#{@label}: query", "ожидается Ecto-запрос или схема, получено #{inspect(query)}")
   end
 
-  @doc """
-  Проверить пару декодер/энкодер строки против набора методов behaviour.
-
-  `to_view:` — декодер read-пути: у behaviour с записью его быть не может, а `to_model:`
-  наоборот обязателен (без него нечем собрать строку). Read-only behaviour `to_model:`
-  принимает и игнорирует.
-  """
-  @spec validate_mappers!(keyword(), [atom()]) :: :ok
-
-  def validate_mappers!(opts, only) do
-    write? = Enum.any?(only, &(&1 in Repo.write_methods()))
-
-    validate_decoder!(opts)
-    validate_encoder!(opts, write?)
-    validate_shadow_copy!(opts)
-  end
-
   # ---
 
   defp shadow_copy!(shadow_copy?) when is_boolean(shadow_copy?), do: shadow_copy?
@@ -343,6 +325,17 @@ defmodule Core.Repo.Pg do
       {:ok, fun} -> quote(do: Core.Repo.Pg.mapper!(unquote(fun), unquote(key)))
       :error -> default
     end
+  end
+
+  # Пара декодер/энкодер строки против набора методов behaviour. `to_view:` — декодер read-пути:
+  # у behaviour с записью его быть не может, а `to_model:` наоборот обязателен (без него нечем
+  # собрать строку). Read-only behaviour `to_model:` принимает и игнорирует.
+  defp validate_mappers!(opts, only) do
+    write? = Enum.any?(only, &(&1 in Repo.write_methods()))
+
+    validate_decoder!(opts)
+    validate_encoder!(opts, write?)
+    validate_shadow_copy!(opts)
   end
 
   defp validate_decoder!(opts) do
@@ -393,41 +386,13 @@ defmodule Core.Repo.Pg do
 
   defp validate_encoder!(_opts, false), do: :ok
 
+  defp errors!(opts) do
+    errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
+    Enum.each(@known_error_codes, &Helper.Opts.error_code!(errors, &1, "#{@label}: errors"))
+    errors
+  end
+
   # ===== ошибки ограничений =====
-
-  @doc false
-  @spec validate_errors_module!(module()) :: :ok
-
-  def validate_errors_module!(errors) when is_list(errors) do
-    Helper.Opts.reject!("#{@label}: errors", "ожидается модуль Errors, получен keyword")
-  end
-
-  def validate_errors_module!(errors) when is_atom(errors) do
-    Code.ensure_compiled!(errors)
-
-    unless Helper.Module.exports?(errors, :domain, 3) do
-      Helper.Opts.reject!("#{@label}: errors", "модуль #{inspect(errors)} должен экспортировать domain/3")
-    end
-
-    Enum.each(@known_error_codes, fn code ->
-      try do
-        errors.domain(__MODULE__, code, nil)
-      rescue
-        FunctionClauseError ->
-          reraise CompileError,
-                  [
-                    description: "#{@label}: errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"
-                  ],
-                  __STACKTRACE__
-      end
-    end)
-
-    :ok
-  end
-
-  def validate_errors_module!(other) do
-    Helper.Opts.reject!("#{@label}: errors", "ожидается модуль Errors, получено #{inspect(other)}")
-  end
 
   @doc false
   # Ключ результата — `{error_type, field}`, а не `{тип ограничения, field}`: сверка идёт с
@@ -453,7 +418,7 @@ defmodule Core.Repo.Pg do
     mapping
     |> Map.values()
     |> Enum.uniq()
-    |> Enum.each(&ensure_constraint_error_code!(errors, &1, where))
+    |> Enum.each(&Helper.Opts.error_code!(errors, &1, where))
 
     :ok
   end
@@ -531,15 +496,6 @@ defmodule Core.Repo.Pg do
     end
 
     Map.put(acc, key, code)
-  end
-
-  defp ensure_constraint_error_code!(errors, code, where) do
-    errors.domain(__MODULE__, code, nil)
-  rescue
-    FunctionClauseError ->
-      reraise CompileError,
-              [description: "#{where}: отсутствует clause для #{inspect(code)} в #{inspect(errors)}"],
-              __STACKTRACE__
   end
 
   # ===== CRUD =====

@@ -335,18 +335,8 @@ defmodule Core.Es.KeyReservation do
     declaration
   end
 
-  defp ensure_code!(errors, %{module: module, code: code}, label) do
-    errors.domain(__MODULE__, code, nil)
-  rescue
-    FunctionClauseError ->
-      reraise CompileError,
-              [
-                description:
-                  "#{label}: errors: отсутствует clause для #{inspect(code)} в #{inspect(errors)} " <>
-                    "(code: у #{inspect(module)})"
-              ],
-              __STACKTRACE__
-  end
+  defp ensure_code!(errors, %{module: module, code: code}, label),
+    do: Helper.Opts.error_code!(errors, code, "#{label}: key_reservations: #{inspect(module)}: code")
 
   defp ensure_unique_scopes!(declarations, label) do
     declarations

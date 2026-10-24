@@ -49,9 +49,13 @@
   удалена: `precision:` проверяет `use Core.Prim.DateTime`. Правка потребителя: было
   `Core.Prim.validate_kind!(native, kind)`, стало `Core.Prim.validate_kind!(native, kind, label)`;
   ожидание `ArgumentError` на чужой встроенный `kind:` или неизвестный `precision:` → `CompileError`.
-  Протокол обёрток библиотеки сменился вместе с прологом: `Core.Prim.Opts.prepare!/3` (опции AST и
-  `__CALLER__`, возврат — разобранные опции) вместо `prepare!/2`, `Core.Prim.Wrapper.base_opts/2` вместо
-  макроса `use_prim/3` и `flags/0`; своей обёртки Prim вне библиотеки контракт не предусматривает.
+
+- **Ошибки опций профиля `use Core.Codec` — `CompileError` с меткой `Codec:`.** Опции профиля
+  разбираются при раскрытии `use` (ADR-0085). Раньше неизвестный формат `uuid:` / `datetime:` /
+  `date:` / `decimal:` и неверная `datetime_tz:` отказывали `ArgumentError` «неизвестное значение …» /
+  «неизвестная зона datetime_tz: …»; теперь — `CompileError` «Codec: <ключ>: ожидается одно из […],
+  получено …» и «Codec: datetime_tz: неизвестная зона …». Правка потребителя: ожидание
+  `ArgumentError` на опции профиля → `CompileError`.
 
 ### Новое
 
@@ -208,13 +212,15 @@
   ключи и опции-литералы проверяются при раскрытии `use`, а выражение принимают только опции, названные в
   `@moduledoc` builder'а. Атрибут или выражение в опции-литерале — `CompileError` «<метка>: <ключ>: ожидается
   литерал, получено …». Список опций выражением целиком — `CompileError` «ожидается литеральный keyword».
+  Несобранный модуль в опции-модуле — `CompileError` «<метка>: <ключ>: модуль … недоступен», а не
+  `ArgumentError` из `Code.ensure_compiled!/1`.
   `async:` у `use Core.Es.Personal.KeyStoreCase` раньше уходил в `ExUnit.Case` без проверки; теперь — литерал
   boolean, иначе `CompileError` «Es.Personal.KeyStoreCase: async: …». Правка потребителя: атрибут или
   выражение → литерал в вызове; было `values: @values`, стало `values: ~w(a b)a`. Опции, принимающие выражение:
 
   | Builder | Опции-выражения |
   |---|---|
-  | `use Core.Prim` | `name:`, `cast:`, `mutate:`, `validate:`, `custom_mutate:`, `custom_validate:`, `type_opts:`, `pipeline_opts:`, `value_type:` |
+  | `use Core.Prim` | `name:`, `cast:`, `mutate:`, `validate:`, `custom_mutate:`, `custom_validate:`, `value_type:` |
   | `use Core.Prim.String` и другие обёртки | `name:`, `mutate:`, `validate:` и свои: `re:`, `max_len:`, `namespace:`, `min:` / `max:` у `Prim.Decimal` |
   | `use Core.Enum` | `name:` |
   | `use Core.Codec.Facade` | `plugins:` |

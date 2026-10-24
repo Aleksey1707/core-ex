@@ -275,7 +275,7 @@ defmodule Core.Es.KeyReservationTest do
       compile_key!(UnknownCodeKey, code: :login_taken)
 
       message =
-        ~r/errors: отсутствует clause для :login_taken в Core\.EsFixture\.Account\.Errors \(code: у .*UnknownCodeKey\)/
+        ~r/key_reservations: .*UnknownCodeKey: code: отсутствует clause для :login_taken в .*Account\.Errors$/
 
       assert_raise CompileError, message, fn ->
         compile_repo!(UnknownCode, [Module.concat(__MODULE__, UnknownCodeKey)])

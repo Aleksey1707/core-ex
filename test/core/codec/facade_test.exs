@@ -334,6 +334,22 @@ defmodule Core.Codec.FacadeTest do
     end
   end
 
+  test "несобранный модуль в plugins — CompileError" do
+    assert_raise CompileError,
+                 ~r/^Codec\.Facade: plugins: модуль Core\.Codec\.FacadeTest\.NoSuchPlugin недоступен/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Codec.FacadeTest.NoSuchPluginFacade do
+                         use Core.Codec.Facade,
+                           prim: Core.CodecFixture.Prim.Internal,
+                           plugins: [Core.Codec.FacadeTest.NoSuchPlugin]
+                       end
+                     end
+                   )
+                 end
+  end
+
   test "non-plugin in plugins list raises CompileError" do
     assert_raise CompileError, ~r/^Codec\.Facade: plugins: плагин String должен реализовывать Codec\.Plugin$/, fn ->
       Code.eval_quoted(

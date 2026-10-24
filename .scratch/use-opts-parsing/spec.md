@@ -256,7 +256,7 @@ case-модулей (`Enum.DocsCase`, `Es.EventCompatCase`, `Es.ProjectionCase`,
   - Проверка по другому модулю SHOULD идти при раскрытии (`Core.Helper.Opts.module!`). У опции,
     чей модуль MAY быть вложен в вызывающего, — в теле через `<key>!` на
     `unquote(Macro.escape(value))`; `@moduledoc` называет такие опции. Проверка MUST падать на
-    несобранном модуле (`Code.ensure_compiled!`); `exports?` — только после неё.
+    несобранном модуле (`Code.ensure_compiled/1` + `reject!`); `exports?` — только после неё.
   - Код, генерируемый по проверке в теле, MUST стоять в месте `use` вторым
     `quote unquote: false`, а не в `@before_compile`.
   - Builder, собранный из другого, MUST подключать его вложенным `use`. Ключ проверяет тот, кто
@@ -395,3 +395,14 @@ case-модулей (`Enum.DocsCase`, `Es.EventCompatCase`, `Es.ProjectionCase`,
   Codec.
 - Счёт builder'ов и групп — `inventory.md`, сверено на `a09f4a1`. После срезов AW состав опций Es-builder'ов другой:
   срез Es-* сверяется с кодом после своего AW-среза.
+- Принятые отступления реализации от срезов выше (сверено на ревью интеграционной ветки):
+  - `Helper.Opts.expand!/4` с четвёртым аргументом `refs`: опции-ссылки (`aggregate:` / `codec:` у
+    `Es.Event.Family`) раскрываются в контексте функции — ребро xref остаётся runtime, граф
+    `mix xref graph --label compile` фикстуры не меняется.
+  - `StateStored` сохраняет `exports: [domain: 3]` у `errors:` (тикет 16): отказ идёт до вложенного `use Core.Repo.Pg`
+    с меткой `Repo.Pg.StateStored:`, а не уходит в `Repo.Pg`.
+  - Таблица накопительного пункта CHANGELOG по факту: у `use Core.Prim` — `value_type:` (без внутренних `type_opts:` /
+    `pipeline_opts:`), у обёрток — `min:` / `max:` `Prim.Decimal`; литералы — `async:` у
+    `Es.Personal.KeyStoreCase` и `fields:` у `Es.Event.Payload`.
+  - Несобранный модуль: `Code.ensure_compiled/1` + `reject!` — `CompileError` «<метка>: <ключ>: модуль … недоступен»,
+    а не `ArgumentError` из `Code.ensure_compiled!/1`; так же в своде.

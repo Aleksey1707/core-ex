@@ -394,8 +394,29 @@ defmodule Core.Repo.PgTest do
     end
   end
 
+  test "несобранный модуль errors: — CompileError" do
+    assert_raise CompileError, ~r/^Repo\.Pg: errors: модуль Core\.Repo\.PgTest\.NoSuchErrors недоступен/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Repo.PgTest.NoSuchErrorsBehaviour do
+            use Core.Repo, only: :read
+          end
+
+          defmodule Core.Repo.PgTest.NoSuchErrorsRepo do
+            use Core.Repo.Pg,
+              behaviour: Core.Repo.PgTest.NoSuchErrorsBehaviour,
+              schema: Core.Repo.PgTest.FakeSchema,
+              to_entity: &Function.identity/1,
+              default_filters: &Core.Repo.PgTest.always_true/1,
+              errors: Core.Repo.PgTest.NoSuchErrors
+          end
+        end
+      )
+    end
+  end
+
   test "отклоняет keyword вместо модуля Errors" do
-    assert_raise CompileError, ~r/ожидается модуль Errors/, fn ->
+    assert_raise CompileError, ~r/^Repo\.Pg: errors: ожидается модуль, получено \[not_found: "Запись не найдена"/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.PgTest.KeywordErrorsBehaviour do

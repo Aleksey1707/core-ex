@@ -321,7 +321,7 @@ defmodule Core.ViewTest do
     end
 
     test "не-модуль в prim: не допускается" do
-      assert_raise CompileError, ~r/^View: fields: id: prim: ожидался модуль, задано "Core\.ViewFixture\.ID"$/, fn ->
+      assert_raise CompileError, ~r/^View: fields: id: prim: ожидается модуль, получено "Core\.ViewFixture\.ID"$/, fn ->
         define(fields: [id: [prim: "Core.ViewFixture.ID"]])
       end
     end

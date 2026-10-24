@@ -146,9 +146,9 @@ defmodule Core.Repo.Pg.StateStoredTest do
     end
 
     test "требует behaviour с insert/update/save" do
-      assert_raise CompileError, ~r/должен объявлять \[:insert, :update, :save\]/, fn ->
-        compile!(ReadOnly, behaviour: ReadOnlyBehaviour)
-      end
+      message = ~r/^Repo\.Pg\.StateStored: behaviour: .*ReadOnlyBehaviour должен объявлять \[:insert, :update, :save\]$/
+
+      assert_raise CompileError, message, fn -> compile!(ReadOnly, behaviour: ReadOnlyBehaviour) end
     end
 
     test "валидирует описание дочерней таблицы" do

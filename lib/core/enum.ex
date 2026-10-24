@@ -174,44 +174,15 @@ defmodule Core.Enum do
     end
   end
 
-  # ===== интроспекция и значения =====
+  # Список значений enum: из `values:` либо из ключей `codes:`. У enum с внешними кодами карта
+  # `codes:` уже перечисляет все значения — отдельный `values:` был бы вторым списком тех же атомов,
+  # который приходится держать в синхронности. Поэтому задаётся ровно одно из двух. Выведенные
+  # значения упорядочены по коду: так `values/0` читается рядом с выгрузкой источника, а порядок не
+  # зависит от внутреннего устройства map.
+  defp values!(nil, nil), do: Helper.Opts.reject!(@label, "требуется values: либо codes:")
+  defp values!(values, nil), do: validate_values!(values)
 
-  @doc false
-  @spec declared_values(module()) :: [atom()] | nil
-
-  def declared_values(module) when is_atom(module), do: Module.get_attribute(module, :enum_values)
-
-  @doc """
-  Модуль объявлен через `use Core.Enum` (есть `values/0` и `name/0`).
-
-  При необходимости загружает модуль (`Core.Helper.Module.exports?/3`).
-  """
-  @spec enum?(module()) :: boolean()
-
-  def enum?(mod) when is_atom(mod) do
-    Helper.Module.exports?(mod, :values, 0) and Helper.Module.exports?(mod, :name, 0)
-  end
-
-  @typedoc "Тип внешних кодов enum: целые или строки."
-  @type code_kind :: :integer | :string
-
-  @doc """
-  Список значений enum: из `values:` либо из ключей `codes:`.
-
-  У enum с внешними кодами карта `codes:` уже перечисляет все значения — отдельный
-  `values:` был бы вторым списком тех же атомов, который приходится держать в
-  синхронности. Поэтому задаётся ровно одно из двух.
-
-  Выведенные значения упорядочены по коду: так `values/0` читается рядом с выгрузкой
-  источника, а порядок не зависит от внутреннего устройства map.
-  """
-  @spec values!(term(), term()) :: [atom()]
-
-  def values!(nil, nil), do: Helper.Opts.reject!(@label, "требуется values: либо codes:")
-
-  def values!(values, nil), do: validate_values!(values)
-
-  def values!(nil, codes) do
+  defp values!(nil, codes) do
     validate_codes!(codes)
 
     codes
@@ -219,34 +190,8 @@ defmodule Core.Enum do
     |> Elixir.Enum.sort_by(&Map.fetch!(codes, &1))
   end
 
-  def values!(_values, _codes),
+  defp values!(_values, _codes),
     do: Helper.Opts.reject!("#{@label}: values", "не задаётся вместе с codes: — выводится из ключей карты")
-
-  @doc """
-  Проверить карту `codes:` и определить тип кодов.
-
-  Коды обязаны быть одного типа и не повторяться; иначе — `CompileError`.
-  """
-  @spec validate_codes!(term()) :: code_kind()
-
-  def validate_codes!(codes) do
-    kind = code_kind!(codes)
-
-    validate_unique!(codes)
-
-    kind
-  end
-
-  @doc false
-  @spec type_union([atom()]) :: Macro.t()
-
-  def type_union([first | rest]) do
-    Elixir.Enum.reduce(rest, first, fn atom, acc ->
-      {:|, [], [atom, acc]}
-    end)
-  end
-
-  # ---
 
   defp validate_values!(values) do
     unless is_list(values) and values != [] and Elixir.Enum.all?(values, &is_atom/1) do
@@ -258,6 +203,15 @@ defmodule Core.Enum do
     end
 
     values
+  end
+
+  # Карта `codes:`: коды одного типа и без повторов; результат — тип кодов.
+  defp validate_codes!(codes) do
+    kind = code_kind!(codes)
+
+    validate_unique!(codes)
+
+    kind
   end
 
   defp code_kind!(codes) when is_map(codes) and map_size(codes) > 0 do
@@ -293,6 +247,33 @@ defmodule Core.Enum do
 
     :ok
   end
+
+  defp type_union([first | rest]) do
+    Elixir.Enum.reduce(rest, first, fn atom, acc ->
+      {:|, [], [atom, acc]}
+    end)
+  end
+
+  # ===== интроспекция =====
+
+  @doc false
+  @spec declared_values(module()) :: [atom()] | nil
+
+  def declared_values(module) when is_atom(module), do: Module.get_attribute(module, :enum_values)
+
+  @doc """
+  Модуль объявлен через `use Core.Enum` (есть `values/0` и `name/0`).
+
+  При необходимости загружает модуль (`Core.Helper.Module.exports?/3`).
+  """
+  @spec enum?(module()) :: boolean()
+
+  def enum?(mod) when is_atom(mod) do
+    Helper.Module.exports?(mod, :values, 0) and Helper.Module.exports?(mod, :name, 0)
+  end
+
+  @typedoc "Тип внешних кодов enum: целые или строки."
+  @type code_kind :: :integer | :string
 
   # ===== разбор кода =====
 

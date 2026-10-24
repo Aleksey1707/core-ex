@@ -132,6 +132,8 @@ defmodule Core.Es.Event.Codec do
   require Error
 
   @label "Es.Event.Codec"
+  # Сверку с плагинами фасада зовёт `use Core.Codec.Facade`: отказ — о его опции `plugins:`.
+  @facade_where "Codec.Facade: plugins"
   @required_keys ~w(family tags type)a
   @optional_keys ~w(upcasts)a
   @expression_keys ~w(tags upcasts)a
@@ -667,24 +669,27 @@ defmodule Core.Es.Event.Codec do
         :ok
 
       other ->
-        raise CompileError,
-          description: "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(codec)} и #{inspect(other)}"
+        Helper.Opts.reject!(
+          @facade_where,
+          "тип агрегата #{inspect(type)} объявлен дважды: в #{inspect(codec)} и #{inspect(other)}"
+        )
     end
   end
 
   defp ensure_payloads_served!(codec, served) do
     for {event, payload} <- plugin_payloads(codec.__es_mods__()), not MapSet.member?(served, payload) do
-      raise CompileError,
-        description:
-          "нагрузку #{inspect(payload)} события #{inspect(event)} (#{inspect(codec)}) " <>
-            "не обслуживает ни один плагин фасада: объявите её тип в Codec-плагине и добавьте его в plugins:"
+      Helper.Opts.reject!(
+        @facade_where,
+        "нагрузку #{inspect(payload)} события #{inspect(event)} (#{inspect(codec)}) " <>
+          "не обслуживает ни один плагин фасада: объявите её тип в Codec-плагине и добавьте его в plugins:"
+      )
     end
 
     :ok
   end
 
   defp validate_tag!({mod, tag}, family) when is_atom(mod) and is_binary(tag) and tag != "" do
-    Code.ensure_compiled!(mod)
+    Helper.Opts.module!([tags: mod], :tags, @label)
 
     unless Helper.Module.exports?(mod, :__es_payload__, 0),
       do: Helper.Opts.reject!("#{@label}: tags", "#{inspect(mod)} не объявлен через `use Core.Es.Event`")
@@ -749,7 +754,7 @@ defmodule Core.Es.Event.Codec do
   end
 
   defp derivation(payload) do
-    Code.ensure_compiled!(payload)
+    Helper.Opts.module!([payload: payload], :payload, "#{@label}: tags")
 
     cond do
       Helper.Module.exports?(payload, :__es_payload_fields__, 0) -> {:fields, payload.__es_payload_fields__()}

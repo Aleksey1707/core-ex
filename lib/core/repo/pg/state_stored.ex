@@ -293,8 +293,7 @@ defmodule Core.Repo.Pg.StateStored do
     missing = Enum.reject(@required_callbacks, &List.keymember?(callbacks, &1, 0))
 
     if missing != [] do
-      raise CompileError,
-        description: "#{@label}: behaviour #{inspect(behaviour)} должен объявлять #{inspect(missing)}"
+      Helper.Opts.reject!("#{@label}: behaviour", "#{inspect(behaviour)} должен объявлять #{inspect(missing)}")
     end
 
     behaviour

@@ -19,10 +19,10 @@ defmodule Core.Es.Store.Opts do
 
   def event_codec!(event_codec, label) when is_atom(event_codec) and is_binary(label) do
     unless Es.Event.Codec.codec?(event_codec) do
-      raise CompileError,
-        description:
-          "#{label}: event_codec: #{inspect(event_codec)} — не кодек событий с type: " <>
-            "(use Core.Es.Event.Codec)"
+      Helper.Opts.reject!(
+        "#{label}: event_codec",
+        "#{inspect(event_codec)} — не кодек событий с type: (use Core.Es.Event.Codec)"
+      )
     end
 
     event_codec
@@ -36,10 +36,10 @@ defmodule Core.Es.Store.Opts do
     aggregate_id = event_codec.__es_aggregate_id__()
 
     if aggregate_id != id do
-      raise CompileError,
-        description:
-          "#{label}: event_codec: Prim агрегата #{inspect(aggregate_id)} у " <>
-            "#{inspect(event_codec)} не равен id: #{inspect(id)}"
+      Helper.Opts.reject!(
+        "#{label}: event_codec",
+        "Prim агрегата #{inspect(aggregate_id)} у #{inspect(event_codec)} не равен id: #{inspect(id)}"
+      )
     end
 
     :ok
@@ -57,10 +57,10 @@ defmodule Core.Es.Store.Opts do
     aggregate = family.__es_aggregate__()
 
     if aggregate != owner do
-      raise CompileError,
-        description:
-          "#{label}: event_codec: семейство #{inspect(family)} объявляет aggregate: " <>
-            "#{inspect(aggregate)}, а не #{inspect(owner)}"
+      Helper.Opts.reject!(
+        "#{label}: event_codec",
+        "семейство #{inspect(family)} объявляет aggregate: #{inspect(aggregate)}, а не #{inspect(owner)}"
+      )
     end
 
     :ok
@@ -97,10 +97,10 @@ defmodule Core.Es.Store.Opts do
     family = event_codec.__es_family__()
 
     if event != family do
-      raise CompileError,
-        description:
-          "#{label}: outbox: событие #{inspect(event)} у #{inspect(outbox)} " <>
-            "не равно семейству кодека #{inspect(family)}"
+      Helper.Opts.reject!(
+        "#{label}: outbox",
+        "событие #{inspect(event)} у #{inspect(outbox)} не равно семейству кодека #{inspect(family)}"
+      )
     end
 
     :ok
@@ -109,15 +109,6 @@ defmodule Core.Es.Store.Opts do
   @doc "Clause `:version_mismatch` в каталоге ошибок — ошибка отказа `Core.Es.Store.append/5`."
   @spec ensure_version_mismatch!(module(), String.t()) :: :ok
 
-  def ensure_version_mismatch!(errors, label) when is_atom(errors) and is_binary(label) do
-    errors.domain(__MODULE__, :version_mismatch, nil)
-    :ok
-  rescue
-    FunctionClauseError ->
-      reraise CompileError,
-              [
-                description: "#{label}: errors: отсутствует clause для :version_mismatch в #{inspect(errors)}"
-              ],
-              __STACKTRACE__
-  end
+  def ensure_version_mismatch!(errors, label) when is_atom(errors) and is_binary(label),
+    do: Helper.Opts.error_code!(errors, :version_mismatch, "#{label}: errors")
 end

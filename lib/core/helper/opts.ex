@@ -138,7 +138,8 @@ defmodule Core.Helper.Opts do
   end
 
   @doc """
-  Прочитать опцию-модуль: скомпилирован и экспортирует всё требуемое.
+  Прочитать опцию-модуль: скомпилирован и экспортирует всё требуемое. Несобранный модуль —
+  `CompileError` «модуль … недоступен».
 
   `checks` — `default:` (иначе опция обязательна) и `exports:` (список `{name, arity}`).
   """
@@ -167,6 +168,20 @@ defmodule Core.Helper.Opts do
       nil -> quote(do: Core.Config.unquote(config_fun)())
       _module -> module!(opts, key, label)
     end
+  end
+
+  @doc """
+  Проверить, что каталог ошибок `errors` знает код `code`: у `errors.domain/3` есть clause для него.
+
+  `where` — метка builder'а с путём до опции, которая объявила код.
+  """
+  @spec error_code!(module(), atom(), String.t()) :: :ok
+
+  def error_code!(errors, code, where) when is_atom(errors) and is_atom(code) do
+    errors.domain(__MODULE__, code, nil)
+    :ok
+  rescue
+    FunctionClauseError -> reject!(where, "отсутствует clause для #{inspect(code)} в #{inspect(errors)}")
   end
 
   @doc "Прочитать опцию-строку."
@@ -258,7 +273,10 @@ defmodule Core.Helper.Opts do
   end
 
   defp ensure_module!(value, label, exports) when is_atom(value) and not is_nil(value) do
-    Code.ensure_compiled!(value)
+    with {:error, reason} <- Code.ensure_compiled(value) do
+      reject!(label, "модуль #{inspect(value)} недоступен (#{reason})")
+    end
+
     Enum.each(exports, &ensure_exported!(value, &1, label))
     value
   end

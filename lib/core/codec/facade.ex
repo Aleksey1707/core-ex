@@ -296,16 +296,13 @@ defmodule Core.Codec.Facade do
     plugins
   end
 
-  # `ensure_compiled!` отделяет «модуль ещё не собран» от «собран, но не плагин»: без него
-  # обе причины приходили бы одной `UndefinedFunctionError` на `__codec_types__/0`.
-  defp ensure_plugin!(plugin) when is_atom(plugin) and not is_nil(plugin) do
-    Code.ensure_compiled!(plugin)
+  # `module!` отделяет «модуль ещё не собран» от «собран, но не плагин»: без него обе причины
+  # приходили бы одной `UndefinedFunctionError` на `__codec_types__/0`.
+  defp ensure_plugin!(plugin) do
+    Helper.Opts.module!([plugins: plugin], :plugins, @label)
 
     if not Helper.Module.exports?(plugin, :__codec_types__, 0) do
       Helper.Opts.reject!("#{@label}: plugins", "плагин #{inspect(plugin)} должен реализовывать Codec.Plugin")
     end
   end
-
-  defp ensure_plugin!(plugin),
-    do: Helper.Opts.reject!("#{@label}: plugins", "ожидается модуль, получено #{inspect(plugin)}")
 end

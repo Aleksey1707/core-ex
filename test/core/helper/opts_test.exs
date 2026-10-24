@@ -111,6 +111,10 @@ defmodule Core.Helper.OptsTest do
       Opts.module!([mod: "x"], :mod, "T")
     end
 
+    assert_raise CompileError, ~r/^T: mod: модуль Core\.Helper\.OptsTest\.Nope недоступен/, fn ->
+      Opts.module!([mod: Core.Helper.OptsTest.Nope], :mod, "T")
+    end
+
     assert_raise CompileError, ~r/T: нет обязательных опций: \[:mod\]/, fn ->
       Opts.module!([], :mod, "T")
     end
