@@ -71,6 +71,52 @@ defmodule Core.Es.ValueChangedTest do
     assert NilableSample.__es_value_changed__() == [type: SamplePrice, nilable: true]
   end
 
+  describe "опции use" do
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Es.ValueChanged: неизвестные опции: \[:nilabel\]$/, fn ->
+        {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Es.ValueChanged)
+        Macro.expand(quote(do: Core.Es.ValueChanged.__using__(type: SampleName, nilabel: true)), env)
+      end
+    end
+
+    test "атрибут в type: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Es.ValueChanged: type: ожидается литерал, получено @type_mod$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.ValueChangedTest.AttrType do
+              @type_mod Core.Es.ValueChangedTest.SampleName
+              use Core.Es.ValueChanged, type: @type_mod
+            end
+          end
+        )
+      end
+    end
+
+    test "type: — только модуль" do
+      assert_raise CompileError, ~r/^Es.ValueChanged: type: ожидается модуль, получено "x"$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.ValueChangedTest.StringType do
+              use Core.Es.ValueChanged, type: "x"
+            end
+          end
+        )
+      end
+    end
+
+    test "nilable: — только boolean" do
+      assert_raise CompileError, ~r/^Es.ValueChanged: nilable: ожидается boolean, получено :yes$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.ValueChangedTest.AtomNilable do
+              use Core.Es.ValueChanged, type: Core.Es.ValueChangedTest.SampleName, nilable: :yes
+            end
+          end
+        )
+      end
+    end
+  end
+
   describe "declared/1" do
     test "type: и nilable: модуля, который ещё собирается; модуль без use — nil" do
       defmodule DeclaredChange do

@@ -6,16 +6,16 @@
 
 **Blocked by:** 10.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `quote bind_quoted` → пролог при раскрытии у `Enum`, `Context.Accessor`, `Es.ValueChanged`.
-- [ ] Выражение — только `Enum` `name:`; `values:` (`~w()a`) и остальные опции — литералы.
-- [ ] `required_keys/0` / `optional_keys/0` удалены.
-- [ ] `@moduledoc` `Enum` называет `name:` опцией-выражением.
-- [ ] Тесты: опечатка в ключе — при раскрытии, с меткой; `values: @values` — «ожидается литерал»; `name: @n` при
+- [x] `quote bind_quoted` → пролог при раскрытии у `Enum`, `Context.Accessor`, `Es.ValueChanged`.
+- [x] Выражение — только `Enum` `name:`; `values:` (`~w()a`) и остальные опции — литералы.
+- [x] `required_keys/0` / `optional_keys/0` удалены.
+- [x] `@moduledoc` `Enum` называет `name:` опцией-выражением.
+- [x] Тесты: опечатка в ключе — при раскрытии, с меткой; `values: @values` — «ожидается литерал»; `name: @n` при
   `@n 1` — в теле, с меткой. Вызовы с нелитеральным `values:` в `test/` и фикстуре переведены на литерал.
-- [ ] CHANGELOG: накопительный пункт (текст — спека). Нет — завести вместе со строкой «Версия библиотеки» в
+- [x] CHANGELOG: накопительный пункт (текст — спека). Нет — завести вместе со строкой «Версия библиотеки» в
   `docs/rules/app/00-index.md`; есть — дописать строку `use Core.Enum`.
-- [ ] Файлы тикета сняты с храповика `excluded`; список опустел — `files: %{excluded: …}` удалён.
-- [ ] Приёмка: `make` целиком; `make consumer-check` без новых предупреждений; `mix xref graph --label compile`
+- [x] Файлы тикета сняты с храповика `excluded`; список опустел — `files: %{excluded: …}` удалён.
+- [x] Приёмка: `make` целиком; `make consumer-check` без новых предупреждений; `mix xref graph --label compile`
   фикстуры не изменился, у библиотеки compile-рёбра только уходят.

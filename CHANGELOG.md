@@ -190,6 +190,7 @@
 
   | Builder | Опции-выражения |
   |---|---|
+  | `use Core.Enum` | `name:` |
   | `use Core.Labels.Text` | `with:` |
   | `use Core.Labels.Fields` | `fields:`, `value:` |
   | `use Core.Web.Event` | `user_ref:` |

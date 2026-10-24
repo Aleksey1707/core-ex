@@ -17,37 +17,36 @@ defmodule Core.Context.Accessor do
           key: :current_user_id,
           type: User.ID
       end
+
+  ## Опции
+
+  Все опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов
+  функции в опции — `CompileError` «ожидается литерал». Модуль `type:` проверяется при раскрытии
+  и MUST NOT быть вложен в вызывающего.
   """
 
   alias Core.Helper
 
+  @label "Context.Accessor"
   @required_keys ~w(key)a
   @optional_keys ~w(type)a
+  @expression_keys ~w()a
 
   @doc "Типизированный accessor ключа Context (`key:` + опциональный `type:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Context.Accessor.required_keys(),
-        Core.Context.Accessor.optional_keys(),
-        "Context.Accessor"
-      )
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
+    key = Helper.Opts.atom!(opts, :key, @label)
+    type = if Keyword.has_key?(opts, :type), do: Helper.Opts.module!(opts, :type, @label)
+    value = if is_nil(type), do: quote(do: term()), else: quote(do: unquote(type).t())
+
+    quote do
       alias Core.Context
       alias Core.Error
 
-      @context_accessor_key Helper.Opts.atom!(opts, :key, "Context.Accessor")
-
-      context_accessor_type =
-        if Keyword.has_key?(opts, :type),
-          do: Helper.Opts.module!(opts, :type, "Context.Accessor"),
-          else: nil
-
-      context_accessor_value =
-        if is_nil(context_accessor_type),
-          do: quote(do: term()),
-          else: quote(do: unquote(context_accessor_type).t())
+      @context_accessor_key unquote(key)
 
       @doc "Есть ли значение по ключу."
       @spec exists?(Context.t()) :: boolean()
@@ -55,33 +54,21 @@ defmodule Core.Context.Accessor do
       def exists?(%Context{} = context), do: Context.exists?(context, @context_accessor_key)
 
       @doc "Найти значение или `nil`."
-      @spec find(Context.t()) :: unquote(context_accessor_value) | nil
+      @spec find(Context.t()) :: unquote(value) | nil
 
       def find(%Context{} = context), do: Context.find(context, @context_accessor_key)
 
       @doc "Получить значение; при отсутствии — ошибка."
-      @spec get(Context.t()) :: Core.Result.t(unquote(context_accessor_value))
+      @spec get(Context.t()) :: Core.Result.t(unquote(value))
 
       def get(%Context{} = context), do: Context.get(context, @context_accessor_key)
 
       @doc "Получить значение; при отсутствии — raise."
-      @spec get!(Context.t()) :: unquote(context_accessor_value)
+      @spec get!(Context.t()) :: unquote(value)
 
       def get!(%Context{} = context), do: Context.get!(context, @context_accessor_key)
 
-      if is_nil(context_accessor_type) do
-        @doc "Записать значение по ключу."
-        @spec put(Context.t(), term()) :: Context.t()
-
-        def put(%Context{} = context, value),
-          do: Context.put(context, @context_accessor_key, value)
-      else
-        @doc "Записать значение по ключу."
-        @spec put(Context.t(), unquote(context_accessor_type).t()) :: Context.t()
-
-        def put(%Context{} = context, %unquote(context_accessor_type){} = value),
-          do: Context.put(context, @context_accessor_key, value)
-      end
+      unquote(put_function(type))
 
       @doc "Удалить значение по ключу."
       @spec delete(Context.t()) :: Context.t()
@@ -92,13 +79,25 @@ defmodule Core.Context.Accessor do
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
+  # ---
 
-  def required_keys, do: @required_keys
+  defp put_function(nil) do
+    quote do
+      @doc "Записать значение по ключу."
+      @spec put(Context.t(), term()) :: Context.t()
 
-  @doc false
-  @spec optional_keys() :: [atom()]
+      def put(%Context{} = context, value),
+        do: Context.put(context, @context_accessor_key, value)
+    end
+  end
 
-  def optional_keys, do: @optional_keys
+  defp put_function(type) do
+    quote do
+      @doc "Записать значение по ключу."
+      @spec put(Context.t(), unquote(type).t()) :: Context.t()
+
+      def put(%Context{} = context, %unquote(type){} = value),
+        do: Context.put(context, @context_accessor_key, value)
+    end
+  end
 end

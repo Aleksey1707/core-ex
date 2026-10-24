@@ -80,12 +80,20 @@ defmodule Core.Context.AccessorTest do
     assert Shouted.find(ctx) == "ACTOR"
   end
 
-  test "rejects unknown options at compile time" do
-    assert_raise CompileError, ~r/неизвестные опции: \[:foo\]/, fn ->
+  test "опечатка в ключе — при раскрытии, с меткой" do
+    assert_raise CompileError, ~r/^Context.Accessor: неизвестные опции: \[:foo\]$/, fn ->
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Context.Accessor)
+      Macro.expand(quote(do: Core.Context.Accessor.__using__(key: :x, foo: 1)), env)
+    end
+  end
+
+  test "атрибут в key: — «ожидается литерал»" do
+    assert_raise CompileError, ~r/^Context.Accessor: key: ожидается литерал, получено @key$/, fn ->
       Code.eval_quoted(
         quote do
-          defmodule Core.Context.AccessorTest.Bad do
-            use Core.Context.Accessor, key: :x, foo: 1
+          defmodule Core.Context.AccessorTest.AttrKey do
+            @key :x
+            use Core.Context.Accessor, key: @key
           end
         end
       )
@@ -93,7 +101,7 @@ defmodule Core.Context.AccessorTest do
   end
 
   test "требует key:" do
-    assert_raise CompileError, ~r/нет обязательных опций: \[:key\]/, fn ->
+    assert_raise CompileError, ~r/^Context.Accessor: нет обязательных опций: \[:key\]$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Context.AccessorTest.NoKey do
@@ -105,7 +113,7 @@ defmodule Core.Context.AccessorTest do
   end
 
   test "key: — только атом" do
-    assert_raise CompileError, ~r/key: ожидается атом, получено "x"/, fn ->
+    assert_raise CompileError, ~r/^Context.Accessor: key: ожидается атом, получено "x"$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Context.AccessorTest.StringKey do
@@ -117,7 +125,7 @@ defmodule Core.Context.AccessorTest do
   end
 
   test "type: — только модуль" do
-    assert_raise CompileError, ~r/type: ожидается модуль, получено "x"/, fn ->
+    assert_raise CompileError, ~r/^Context.Accessor: type: ожидается модуль, получено "x"$/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Context.AccessorTest.StringType do

@@ -236,10 +236,6 @@
                  "lib/core/prim/string.ex",
                  "lib/core/prim/uuid.ex",
                  "lib/core/prim/wrapper.ex",
-                 # 14 — тело-мелкие
-                 "lib/core/context/accessor.ex",
-                 "lib/core/enum.ex",
-                 "lib/core/es/value_changed.ex",
                  # 15 — Codec
                  "lib/core/codec.ex",
                  "lib/core/codec/facade.ex",

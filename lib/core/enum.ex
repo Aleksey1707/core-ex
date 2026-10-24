@@ -13,6 +13,12 @@ defmodule Core.Enum do
 
   Макрос занимает в модуле имя `@enum_values`: значения модуля, который ещё собирается, отдаёт
   `declared_values/1` — по нему `use Core.Labels.Values` ниже берёт значения.
+
+  ## Опции
+
+  `name:` — опция-выражение (`name: first_line(@moduledoc)`): проверяется строкой в теле
+  модуля. Остальные опции — литералы (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут
+  или вызов функции в `values:` / `codes:` — `CompileError` «ожидается литерал».
   """
 
   alias Core.Error
@@ -21,38 +27,31 @@ defmodule Core.Enum do
 
   require Error
 
+  @label "Enum"
   @required_keys ~w(name)a
   @optional_keys ~w(values codes)a
+  @expression_keys ~w(name)a
 
   # ===== объявление =====
 
   @doc "Объявить закрытый enum (`name:` + `values:` либо `codes:`)."
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
-      Helper.Opts.validate!(
-        opts,
-        Core.Enum.required_keys(),
-        Core.Enum.optional_keys(),
-        "Enum"
-      )
+    opts = Helper.Opts.expand!(opts, __CALLER__, @label)
+    Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
-      name = Keyword.fetch!(opts, :name)
-      codes = Keyword.get(opts, :codes)
-      values = Core.Enum.values!(Keyword.get(opts, :values), codes)
+    codes = Keyword.get(opts, :codes)
+    values = values!(Keyword.get(opts, :values), codes)
 
-      unless is_binary(name) do
-        raise CompileError, description: "Enum: :name должен быть строкой"
-      end
-
+    quote do
       alias Core.Error
       alias Core.Result
 
-      @enum_name name
-      @enum_values values
-      @enum_by_string Map.new(values, fn atom -> {Atom.to_string(atom), atom} end)
+      @enum_name Core.Helper.Opts.binary_value!(unquote(opts[:name]), :name, unquote(@label))
+      @enum_values unquote(values)
+      @enum_by_string Map.new(@enum_values, fn atom -> {Atom.to_string(atom), atom} end)
 
-      type_ast = Core.Enum.type_union(values)
-      @type t :: unquote(type_ast)
+      @type t :: unquote(type_union(values))
 
       @doc "Допустимые значения enum."
       @spec values() :: [t()]
@@ -105,77 +104,77 @@ defmodule Core.Enum do
       def dump(nil), do: nil
       def dump(value) when value in @enum_values, do: Atom.to_string(value)
 
-      if codes do
-        @enum_code_kind Core.Enum.validate_codes!(codes)
-        @enum_code_by_value codes
-        @enum_value_by_code Map.new(codes, fn {value, code} -> {code, value} end)
-
-        @typedoc "Внешний код значения enum."
-        if @enum_code_kind == :integer do
-          @type code :: integer()
-        else
-          @type code :: String.t()
-        end
-
-        @doc "Карта `значение => внешний код`."
-        @spec codes() :: %{t() => code()}
-
-        def codes, do: @enum_code_by_value
-
-        @doc "Внешний код значения enum."
-        @spec to_code(t()) :: code()
-
-        def to_code(value) when value in @enum_values do
-          Map.fetch!(@enum_code_by_value, value)
-        end
-
-        @doc """
-        Внешний код → значение enum.
-
-        Целочисленный код принимается и строкой (`"20"`): внешние источники отдают
-        числа текстом. У строкового кода такого приведения нет — иначе `"5"` и `5`
-        стали бы одним значением, а строковый код `"5"` перестал бы отличаться от
-        целочисленного.
-        """
-        @spec from_code(term()) :: Core.Result.t(t())
-
-        def from_code(code) when is_map_key(@enum_value_by_code, code) do
-          {:ok, Map.fetch!(@enum_value_by_code, code)}
-        end
-
-        def from_code(code) when is_binary(code) do
-          Core.Enum.from_binary_code(
-            __MODULE__,
-            @enum_name,
-            @enum_value_by_code,
-            @enum_code_kind,
-            code
-          )
-        end
-
-        if @enum_code_kind == :integer do
-          def from_code(code) when is_integer(code) do
-            Core.Enum.invalid(__MODULE__, @enum_name, code)
-          end
-        end
-
-        @doc "Как `from_code/1`, при ошибке — `raise Exc`."
-        @spec from_code!(term()) :: t()
-
-        def from_code!(code), do: Result.unwrap!(from_code(code))
-      end
+      unquote(codes_functions(codes))
     end
   end
 
-  @doc false
-  @spec required_keys() :: [atom()]
+  # ---
 
-  def required_keys, do: @required_keys
+  defp codes_functions(nil), do: nil
 
-  @doc false
-  @spec optional_keys() :: [atom()]
+  defp codes_functions(codes) do
+    quote do
+      @enum_code_kind unquote(validate_codes!(codes))
+      @enum_code_by_value unquote(Macro.escape(codes))
+      @enum_value_by_code Map.new(@enum_code_by_value, fn {value, code} -> {code, value} end)
 
-  def optional_keys, do: @optional_keys
+      @typedoc "Внешний код значения enum."
+      if @enum_code_kind == :integer do
+        @type code :: integer()
+      else
+        @type code :: String.t()
+      end
+
+      @doc "Карта `значение => внешний код`."
+      @spec codes() :: %{t() => code()}
+
+      def codes, do: @enum_code_by_value
+
+      @doc "Внешний код значения enum."
+      @spec to_code(t()) :: code()
+
+      def to_code(value) when value in @enum_values do
+        Map.fetch!(@enum_code_by_value, value)
+      end
+
+      @doc """
+      Внешний код → значение enum.
+
+      Целочисленный код принимается и строкой (`"20"`): внешние источники отдают
+      числа текстом. У строкового кода такого приведения нет — иначе `"5"` и `5`
+      стали бы одним значением, а строковый код `"5"` перестал бы отличаться от
+      целочисленного.
+      """
+      @spec from_code(term()) :: Core.Result.t(t())
+
+      def from_code(code) when is_map_key(@enum_value_by_code, code) do
+        {:ok, Map.fetch!(@enum_value_by_code, code)}
+      end
+
+      def from_code(code) when is_binary(code) do
+        Core.Enum.from_binary_code(
+          __MODULE__,
+          @enum_name,
+          @enum_value_by_code,
+          @enum_code_kind,
+          code
+        )
+      end
+
+      if @enum_code_kind == :integer do
+        def from_code(code) when is_integer(code) do
+          Core.Enum.invalid(__MODULE__, @enum_name, code)
+        end
+      end
+
+      @doc "Как `from_code/1`, при ошибке — `raise Exc`."
+      @spec from_code!(term()) :: t()
+
+      def from_code!(code), do: Result.unwrap!(from_code(code))
+    end
+  end
+
+  # ===== интроспекция и значения =====
 
   @doc false
   @spec declared_values(module()) :: [atom()] | nil
@@ -208,9 +207,7 @@ defmodule Core.Enum do
   """
   @spec values!(term(), term()) :: [atom()]
 
-  def values!(nil, nil) do
-    raise CompileError, description: "Enum: требуется :values либо :codes"
-  end
+  def values!(nil, nil), do: Helper.Opts.reject!(@label, "требуется values: либо codes:")
 
   def values!(values, nil), do: validate_values!(values)
 
@@ -222,10 +219,8 @@ defmodule Core.Enum do
     |> Elixir.Enum.sort_by(&Map.fetch!(codes, &1))
   end
 
-  def values!(_values, _codes) do
-    raise CompileError,
-      description: "Enum: :values не задаётся вместе с :codes — выводится из ключей карты"
-  end
+  def values!(_values, _codes),
+    do: Helper.Opts.reject!("#{@label}: values", "не задаётся вместе с codes: — выводится из ключей карты")
 
   @doc """
   Проверить карту `codes:` и определить тип кодов.
@@ -255,11 +250,11 @@ defmodule Core.Enum do
 
   defp validate_values!(values) do
     unless is_list(values) and values != [] and Elixir.Enum.all?(values, &is_atom/1) do
-      raise CompileError, description: "Enum: :values должен быть непустым списком атомов"
+      Helper.Opts.reject!("#{@label}: values", "ожидается непустой список атомов, получено #{inspect(values)}")
     end
 
     unless length(values) == length(Elixir.Enum.uniq(values)) do
-      raise CompileError, description: "Enum: :values не должен содержать дублей"
+      Helper.Opts.reject!("#{@label}: values", "не должен содержать дублей")
     end
 
     values
@@ -269,14 +264,12 @@ defmodule Core.Enum do
     cond do
       Elixir.Enum.all?(codes, &valid_pair?(&1, :integer)) -> :integer
       Elixir.Enum.all?(codes, &valid_pair?(&1, :string)) -> :string
-      true -> raise CompileError, description: code_kind_error(codes)
+      true -> Helper.Opts.reject!("#{@label}: codes", code_kind_error(codes))
     end
   end
 
-  defp code_kind!(codes) do
-    raise CompileError,
-      description: "Enum: :codes должен быть непустой картой, получено: #{inspect(codes)}"
-  end
+  defp code_kind!(codes),
+    do: Helper.Opts.reject!("#{@label}: codes", "ожидается непустая карта, получено #{inspect(codes)}")
 
   # Коды одного типа: карта, где часть значений целые, а часть строки, делает
   # `from_code/1` неоднозначным — `"5"` пришлось бы искать и как строку, и как число.
@@ -284,8 +277,8 @@ defmodule Core.Enum do
   defp valid_pair?({value, code}, :string), do: is_atom(value) and is_binary(code) and code != ""
 
   defp code_kind_error(codes) do
-    "Enum: :codes должен сопоставлять атомам коды одного типа — либо все целые, либо все " <>
-      "непустые строки, получено: #{inspect(codes)}"
+    "ожидается карта атомов в коды одного типа — либо все целые, либо все непустые строки, " <>
+      "получено #{inspect(codes)}"
   end
 
   defp validate_unique!(codes) do
@@ -295,7 +288,7 @@ defmodule Core.Enum do
       |> Elixir.Enum.uniq()
 
     unless length(unique) == map_size(codes) do
-      raise CompileError, description: "Enum: :codes не должен содержать повторяющихся кодов"
+      Helper.Opts.reject!("#{@label}: codes", "не должен содержать повторяющихся кодов")
     end
 
     :ok

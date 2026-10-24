@@ -84,7 +84,7 @@ defmodule Core.EnumTest do
   end
 
   test "compile-time: пустой values" do
-    assert_raise CompileError, ~r/непустым списком атомов/, fn ->
+    assert_raise CompileError, ~r/^Enum: values: ожидается непустой список атомов, получено \[\]$/, fn ->
       Code.compile_quoted(
         quote do
           defmodule Core.EnumTest.EmptyValues do
@@ -98,7 +98,7 @@ defmodule Core.EnumTest do
   end
 
   test "compile-time: дубликаты в values" do
-    assert_raise CompileError, ~r/дублей/, fn ->
+    assert_raise CompileError, ~r/^Enum: values: не должен содержать дублей$/, fn ->
       Code.compile_quoted(
         quote do
           defmodule Core.EnumTest.DupValues do
@@ -152,7 +152,7 @@ defmodule Core.EnumTest do
   end
 
   test "compile-time: дубликаты кодов" do
-    assert_raise CompileError, ~r/повторяющихся кодов/, fn ->
+    assert_raise CompileError, ~r/^Enum: codes: не должен содержать повторяющихся кодов$/, fn ->
       Code.compile_quoted(
         quote do
           defmodule Core.EnumTest.DupCodes do
@@ -238,7 +238,7 @@ defmodule Core.EnumTest do
     end
 
     test "compile-time: ни values, ни codes" do
-      assert_raise CompileError, ~r/требуется :values либо :codes/, fn ->
+      assert_raise CompileError, ~r/^Enum: требуется values: либо codes:$/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.NoSource do
@@ -250,7 +250,7 @@ defmodule Core.EnumTest do
     end
 
     test "compile-time: values вместе с codes" do
-      assert_raise CompileError, ~r/не задаётся вместе с :codes/, fn ->
+      assert_raise CompileError, ~r/^Enum: values: не задаётся вместе с codes: — выводится из ключей карты$/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.BothSources do
@@ -267,7 +267,7 @@ defmodule Core.EnumTest do
 
   describe "compile-time проверки codes:" do
     test "смешанные типы кодов" do
-      assert_raise CompileError, ~r/коды одного типа/, fn ->
+      assert_raise CompileError, ~r/^Enum: codes: ожидается карта атомов в коды одного типа/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.MixedCodes do
@@ -281,7 +281,7 @@ defmodule Core.EnumTest do
     end
 
     test "пустая строка как код" do
-      assert_raise CompileError, ~r/коды одного типа/, fn ->
+      assert_raise CompileError, ~r/^Enum: codes: ожидается карта атомов в коды одного типа/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.EmptyStringCode do
@@ -295,7 +295,7 @@ defmodule Core.EnumTest do
     end
 
     test "код неподходящего типа" do
-      assert_raise CompileError, ~r/коды одного типа/, fn ->
+      assert_raise CompileError, ~r/^Enum: codes: ожидается карта атомов в коды одного типа/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.AtomCode do
@@ -309,7 +309,7 @@ defmodule Core.EnumTest do
     end
 
     test "дубликаты строковых кодов" do
-      assert_raise CompileError, ~r/повторяющихся кодов/, fn ->
+      assert_raise CompileError, ~r/^Enum: codes: не должен содержать повторяющихся кодов$/, fn ->
         Code.compile_quoted(
           quote do
             defmodule Core.EnumTest.DupStringCodes do
@@ -348,5 +348,60 @@ defmodule Core.EnumTest do
       assert Declared.declared() == ~w(new done)a
       assert Undeclared.declared() == nil
     end
+  end
+
+  describe "опции use" do
+    test "опечатка в ключе — при раскрытии, с меткой" do
+      assert_raise CompileError, ~r/^Enum: неизвестные опции: \[:vlaues\]$/, fn ->
+        expand_using(name: "x", vlaues: [:a])
+      end
+    end
+
+    test "атрибут в values: — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Enum: values: ожидается литерал, получено @values$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.EnumTest.AttrValues do
+              @values ~w(a b)a
+              use Core.Enum, name: "x", values: @values
+            end
+          end
+        )
+      end
+    end
+
+    test "name: — выражение, проверяется в теле, с меткой" do
+      assert {:__block__, _, _} = expand_using(name: quote(do: @n), values: [:a])
+
+      assert_raise CompileError, ~r/^Enum: name: ожидается строка, получено 1$/, fn ->
+        Code.compile_quoted(
+          quote do
+            defmodule Core.EnumTest.IntName do
+              @n 1
+              use Core.Enum, name: @n, values: ~w(a)a
+            end
+          end
+        )
+      end
+    end
+
+    test "name: выражением над @moduledoc" do
+      defmodule DocNamed do
+        @moduledoc "Статус по документации.\n\nПодробности."
+
+        use Core.Enum,
+          name: hd(String.split(@moduledoc, "\n")),
+          values: ~w(a)a
+      end
+
+      assert DocNamed.name() == "Статус по документации."
+    end
+  end
+
+  # ---
+
+  defp expand_using(opts) do
+    {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Enum)
+    Macro.expand(quote(do: Core.Enum.__using__(unquote(opts))), env)
   end
 end
