@@ -169,14 +169,17 @@
   | `use Core.Es.Outbox` | `event:` | `family:` |
   | `use Core.Es.Aggregate.Repo` | `aggregate:`, `id:` | `aggregate:` |
   | `use Core.Es.Aggregate.Repo.Pg` | `behaviour:`, `aggregate:`, `id:`, … | `behaviour:`, … |
+  | `use Core.Es.KeyReservation` | `event:`, `id:` | `aggregate:` |
 
   Новые проверки сборки: семейство без `@type t` — `CompileError`; событие из `tags:` не из
   семейства кодека и `codec:` семейства на чужой кодек — `CompileError` в кодеке; семейство кодека
   называет владельцем не агрегат репозитория — `CompileError` в `Es.Aggregate.Repo.Pg` и
-  `Repo.Pg.StateStored`; `aggregate:` / `codec:` семейства на несуществующий или чужой модуль —
-  предупреждение сборки семейства. Семейство с одним владельцем потока: общее семейство двух
-  агрегатов с репозиториями разделяется, событие входит в один кодек. `Projection.await` не
-  меняется.
+  `Repo.Pg.StateStored`; ключ чужого агрегата в `key_reservations:` и `aggregate:` ключа не
+  event-sourced агрегат — `CompileError` в `Es.Aggregate.Repo.Pg` и `Es.KeyReservation`;
+  `aggregate:` / `codec:` семейства на несуществующий или чужой модуль — предупреждение сборки
+  семейства. Неполный `reservation/1` предупреждает на строке `use` ключа, а не репозитория.
+  Семейство с одним владельцем потока: общее семейство двух агрегатов с репозиториями разделяется,
+  событие входит в один кодек. `Projection.await` не меняется.
 
 ## 0.16.0
 

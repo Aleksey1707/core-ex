@@ -102,7 +102,7 @@ defmodule Core.Es.Personal.KeyReservationTest do
 
   defp compile_key!(name, opts \\ []) do
     module = Module.concat(__MODULE__, name)
-    opts = [scope: "fixture.open_holder.#{name}", event: Account.Event, id: Account.ID, code: :holder_taken] ++ opts
+    opts = [scope: "fixture.open_holder.#{name}", aggregate: Account, code: :holder_taken] ++ opts
 
     Code.eval_quoted(
       quote do

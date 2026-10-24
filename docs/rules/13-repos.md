@@ -838,8 +838,7 @@ defmodule MyApp.Domain.<BC>.User.LoginKey do
 
   use Core.Es.KeyReservation,
     scope: "user.login",
-    event: User.Event,
-    id: User.ID,
+    aggregate: User,
     code: :login_taken
 
   @impl true
@@ -859,6 +858,9 @@ use Core.Es.Aggregate.Repo.Pg,
   key_reservations: [User.LoginKey]
 ```
 
+- Модуль ключа называет агрегат одной опцией `aggregate:`: кодек событий и Prim идентификатора
+  в `find/2` сборка берёт у агрегата. В `key_reservations:` репозитория MUST стоять ключи его
+  агрегата.
 - `append` пишет события → резервы → outbox одной транзакцией: конкурентная команда того же потока
   получает `:version_mismatch`, до резервов не доходя.
 - На каждое событие пачки в её порядке: `{:reserve, value}` занимает `to_key(value)` за агрегатом
@@ -896,12 +898,12 @@ case User.LoginKey.find(login, context) do
 end
 ```
 
-Проверяется: `CompileError` в `use Core.Es.KeyReservation` — опции, `code: :version_mismatch`; в
-`use Core.Es.Aggregate.Repo.Pg` — событие модуля ключа не из семейства кодека, его `id:` не равен
-`id:` репозитория, в `errors:` нет clause `code:`, область повторяется; предупреждение на строке
-`use` репозитория — событие кодека без clause `reservation/1`, опечатка в поле несуженной нагрузки
-(`make consumer-check`); порядок шагов пачки — `test/core/es/key_reservation_test.exs`, describe
-«резерв».
+Проверяется: `CompileError` в `use Core.Es.KeyReservation` — опции, `aggregate:` не event-sourced
+агрегат, `code: :version_mismatch`; в `use Core.Es.Aggregate.Repo.Pg` — `aggregate:` модуля ключа
+не агрегат репозитория, в `errors:` нет clause `code:`, область повторяется; предупреждение на
+строке `use` модуля ключа — событие кодека агрегата без clause `reservation/1`, опечатка в поле
+несуженной нагрузки (`make consumer-check`); порядок шагов пачки —
+`test/core/es/key_reservation_test.exs`, describe «резерв».
 
 Ключ, значение которого — ПДн (email, телефон), MUST объявляться модулем ключа `personal: true`
 (`23-personal-data.md`; решение — ADR-0077): в `key` строки ложится индекс, который считает порт
@@ -925,15 +927,13 @@ end
 # плохо — email в резерве открытым: остаётся в копиях и WAL-архиве и после снятия
 use Core.Es.KeyReservation,
   scope: "user.email",
-  event: User.Event,
-  id: User.ID,
+  aggregate: User,
   code: :email_taken
 
 # хорошо
 use Core.Es.KeyReservation,
   scope: "user.email",
-  event: User.Event,
-  id: User.ID,
+  aggregate: User,
   code: :email_taken,
   personal: true
 ```

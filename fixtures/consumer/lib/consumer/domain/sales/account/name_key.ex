@@ -4,8 +4,7 @@ defmodule Consumer.Domain.Sales.Account.NameKey do
 
   use Core.Es.KeyReservation,
     scope: "account.name",
-    event: Account.Event,
-    id: Account.ID,
+    aggregate: Account,
     code: :name_taken
 
   @impl true

@@ -4,8 +4,7 @@ defmodule Consumer.Domain.Sales.Account.HolderKey do
 
   use Core.Es.KeyReservation,
     scope: "account.holder",
-    event: Account.Event,
-    id: Account.ID,
+    aggregate: Account,
     code: :holder_taken,
     personal: true
 

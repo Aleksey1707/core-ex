@@ -9,8 +9,7 @@ defmodule Core.EsFixture.Account.NameKey do
 
   use Core.Es.KeyReservation,
     scope: "fixture.name",
-    event: Account.Event,
-    id: Account.ID,
+    aggregate: Account,
     code: :name_taken
 
   @doc "Открытие и переименование занимают название, закрытие снимает."

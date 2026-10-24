@@ -9,8 +9,7 @@ defmodule Core.Es.KeyReservation do
 
         use Core.Es.KeyReservation,
           scope: "user.login",
-          event: User.Event,
-          id: User.ID,
+          aggregate: User,
           code: :login_taken
 
         @impl true
@@ -31,7 +30,7 @@ defmodule Core.Es.KeyReservation do
 
   - `reservation(event)` → `{:reserve, value} | :release | :keep` — что событие агрегата делает с
     его ключом в области: занимает ключ значения `value`, снимает ключ агрегата, не трогает ключ.
-    Полноту по событиям кодека проверяет сборка репозитория.
+    Полноту по событиям кодека агрегата проверяет сборка модуля ключа («Opts»).
   - `to_key(value)` → `String.t() | [String.t(), ...]` — каноническая форма ключа: ключи
     сравниваются побайтно. Строка равна списку из одной части; составной ключ — список частей, и
     `["x:y", "z"]` не равен `["x", "y:z"]`.
@@ -85,8 +84,8 @@ defmodule Core.Es.KeyReservation do
   следующая попытка доводит запись до конца.
 
   Владелец резерва — `aggregate_id` без типа агрегата. В области, общей у агрегатов разных видов,
-  ключи сталкиваются независимо от вида, а `find/2` отдаёт id владельца в Prim `id:` своего модуля
-  ключа, даже если ключ занял агрегат другого вида.
+  ключи сталкиваются независимо от вида, а `find/2` отдаёт id владельца в Prim идентификатора
+  агрегата своего модуля ключа, даже если ключ занял агрегат другого вида.
 
   Резервы пишутся и читаются через `Core.Config.dao/0`, id агрегата дампит и грузит
   `Core.Config.codec/0` — как у `Core.Es.Store`.
@@ -133,20 +132,25 @@ defmodule Core.Es.KeyReservation do
   ## Opts
 
   - `scope:` — область ключа, непустая строка
-  - `event:` — семейство событий агрегата (`family:` его кодека)
-  - `id:` — Prim идентификатора агрегата
+  - `aggregate:` — event-sourced агрегат (`use Core.Es.Aggregate`); кодек событий и Prim
+    идентификатора (литерал в `find/2`) — из его кодека
   - `code:` — код отказа в каталоге ошибок репозитория, атом
   - `personal:` — ключ из ПДн («Ключ из ПДн»), boolean, по умолчанию `false`; ставится только на
     область без записанных резервов
 
   На компиляции `CompileError`: нет обязательной или неизвестная опция, `scope:` — не непустая
-  строка, `event:` или `id:` — не модуль, `code:` — не атом или `:version_mismatch` (конфликт
-  записи, который процесс агрегата повторяет), `personal:` — не boolean. Сверку с агрегатом — семейство
-  событий, `id:`, clause `code:` в `errors:`, полноту `reservation/1` — делает сборка репозитория
-  (`Core.Es.Aggregate.Repo.Pg`).
+  строка, `aggregate:` — не event-sourced агрегат, `code:` — не атом или `:version_mismatch`
+  (конфликт записи, который процесс агрегата повторяет), `personal:` — не boolean. Сборка
+  репозитория (`Core.Es.Aggregate.Repo.Pg`) сверяет `aggregate:` ключа со своим агрегатом и clause
+  `code:` в `errors:`.
 
-  Макрос занимает в вызывающем модуле имена `@es_key_reservation`, `find/2` и
-  `__es_key_reservation__/0`.
+  Сборка проверяет `reservation/1` по кодеку агрегата: на каждое событие макрос генерирует
+  функцию-проверку (`Core.Es.Check`) `"reservation/1 принимает <Event>"` — литеральный вызов
+  `reservation(%Event.Mod{payload: %Payload{}} = event)`. Событие без clause и опечатка в поле
+  нагрузки, не суженной паттерном, — предупреждение на строке `use` модуля ключа.
+
+  Макрос занимает в вызывающем модуле имена `@es_key_reservation`, `find/2`,
+  `__es_key_reservation__/0` и функций-проверок `"reservation/1 принимает <Event>"/1`.
   """
 
   import Ecto.Query
@@ -166,7 +170,7 @@ defmodule Core.Es.KeyReservation do
   require Error
 
   @label "Es.KeyReservation"
-  @required_keys ~w(scope event id code)a
+  @required_keys ~w(scope aggregate code)a
   @optional_keys ~w(personal)a
 
   # Предел повторов резерва: обе причины отказа снимаются одной следующей попыткой — чужую строку
@@ -178,7 +182,8 @@ defmodule Core.Es.KeyReservation do
   @type declaration :: %{
           module: module(),
           scope: String.t(),
-          event: module(),
+          aggregate: module(),
+          event_codec: module(),
           id: module(),
           code: atom(),
           personal: boolean()
@@ -203,7 +208,11 @@ defmodule Core.Es.KeyReservation do
       |> validate_opts!()
       |> Map.put(:module, __CALLER__.module)
 
+    checks = checks(declaration, __CALLER__.line)
+
     quote generated: true do
+      unquote_splicing(checks)
+
       @behaviour Core.Es.KeyReservation
 
       @es_key_reservation unquote(Macro.escape(declaration))
@@ -229,14 +238,25 @@ defmodule Core.Es.KeyReservation do
 
   defp validate_opts!(opts) do
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
+    aggregate = Helper.Opts.module!(opts, :aggregate, @label, exports: [__es_event_codec__: 0])
+    event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
 
     %{
       scope: scope!(opts),
-      event: Helper.Opts.module!(opts, :event, @label),
-      id: Helper.Opts.module!(opts, :id, @label),
+      aggregate: aggregate,
+      event_codec: event_codec,
+      id: event_codec.__es_aggregate_id__(),
       code: code!(opts),
       personal: personal!(opts)
     }
+  end
+
+  # Функции-проверки полноты `reservation/1` (`Core.Es.Check`) по событиям кодека агрегата.
+  defp checks(%{event_codec: event_codec}, line) do
+    for event <- Enum.sort(event_codec.__es_mods__()) do
+      args = [quote(do: unquote(Es.Check.event_pattern(event)) = event)]
+      Es.Check.define("reservation/1 принимает", event, args, quote(do: reservation(event)), line)
+    end
   end
 
   defp scope!(opts) do
@@ -271,41 +291,24 @@ defmodule Core.Es.KeyReservation do
 
   # Объявления модулей `key_reservations:`, сверенные с репозиторием; `label` — имя его builder'а.
   @doc false
-  @spec declarations!(term(), module(), module(), module(), String.t()) :: [declaration()]
+  @spec declarations!(term(), module(), module(), String.t()) :: [declaration()]
 
-  def declarations!(keys, event_codec, id, errors, label)
-      when is_atom(event_codec) and is_atom(id) and is_atom(errors) and is_binary(label) do
+  def declarations!(keys, aggregate, errors, label)
+      when is_atom(aggregate) and is_atom(errors) and is_binary(label) do
     declarations =
       keys
       |> modules!(label)
-      |> Enum.map(&declaration!(&1, event_codec, id, errors, label))
+      |> Enum.map(&declaration!(&1, aggregate, errors, label))
 
     ensure_unique_scopes!(declarations, label)
     declarations
-  end
-
-  # Функции-проверки полноты `reservation/1` (`Core.Es.Check`): на каждое событие кодека тело зовёт
-  # `reservation/1` каждого модуля ключа.
-  @doc false
-  @spec checks([declaration()], module(), pos_integer()) :: [Macro.t()]
-
-  def checks([], event_codec, line) when is_atom(event_codec) and is_integer(line), do: []
-
-  def checks([_ | _] = declarations, event_codec, line) when is_atom(event_codec) and is_integer(line) do
-    for event <- Enum.sort(event_codec.__es_mods__()) do
-      args = [quote(do: unquote(Es.Check.event_pattern(event)) = event)]
-      body = for %{module: module} <- declarations, do: quote(do: unquote(module).reservation(event))
-      Es.Check.define("reservation/1 принимает", event, args, body, line)
-    end
   end
 
   # ---
 
   defp modules!(keys, label) when is_list(keys) do
     Enum.map(keys, fn key ->
-      Helper.Opts.module!([key_reservations: key], :key_reservations, label,
-        exports: [__es_key_reservation__: 0, reservation: 1]
-      )
+      Helper.Opts.module!([key_reservations: key], :key_reservations, label, exports: [__es_key_reservation__: 0])
     end)
   end
 
@@ -314,22 +317,14 @@ defmodule Core.Es.KeyReservation do
       description: "#{label}: key_reservations: ожидается список модулей ключа, получено #{inspect(keys)}"
   end
 
-  defp declaration!(module, event_codec, id, errors, label) do
+  defp declaration!(module, aggregate, errors, label) do
     declaration = module.__es_key_reservation__()
-    family = event_codec.__es_family__()
 
-    if declaration.event != family do
+    if declaration.aggregate != aggregate do
       raise CompileError,
         description:
-          "#{label}: key_reservations: событие #{inspect(declaration.event)} у #{inspect(module)} " <>
-            "не равно семейству кодека #{inspect(family)}"
-    end
-
-    if declaration.id != id do
-      raise CompileError,
-        description:
-          "#{label}: key_reservations: id: #{inspect(declaration.id)} у #{inspect(module)} " <>
-            "не равен id: #{inspect(id)}"
+          "#{label}: key_reservations: aggregate: #{inspect(declaration.aggregate)} у #{inspect(module)} " <>
+            "не равен агрегату репозитория #{inspect(aggregate)}"
     end
 
     ensure_code!(errors, declaration, label)

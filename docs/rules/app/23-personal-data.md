@@ -38,7 +38,7 @@
   транзакции событием агрегата-владельца, на которое `reservation/1` модуля ключа отвечает
   `:release`. `destroy_key/3` резервы не трогает: без такого события индекс остаётся навсегда,
   `find/2` находит агрегат уничтоженного субъекта, а то же лицо по новому согласию не получит свой
-  email. Clause `reservation/1` на это событие требует сборка репозитория.
+  email. Clause `reservation/1` на это событие требует сборка модуля ключа.
 - Отказ `:subject_destroyed` (`ns: :key_store`, `:domain`) на записи ПДн уничтоженного субъекта
   usecase записи MUST отображать сам — доменным ответом клиенту; повторять команду по нему MUST
   NOT: отказ окончательный.
@@ -98,8 +98,7 @@ id = <Aggregate>.ID.new()
 
 use Core.Es.KeyReservation,
   scope: "<aggregate>.phone",
-  event: <Aggregate>.Event,
-  id: <Aggregate>.ID,
+  aggregate: <Aggregate>,
   code: :phone_taken,
   personal: true
 ```

@@ -131,6 +131,7 @@ MUST NOT — копия расходится с оригиналом на пер
 | `use Core.Es.Event, aggregate_id:, by:`; семейство `<Aggregate>.Event` — модуль с `@type t` | `use Core.Es.Event, family:` и `use Core.Es.Event.Family, aggregate:, aggregate_id:, by:, codec:` (`deps/core/docs/rules/11-domain.md`, «Es.Event») |
 | `event:` у `use Core.Es.Event.Codec` и `use Core.Es.Outbox` | `family:` (`deps/core/docs/rules/14-events-outbox.md`) |
 | `id:` у `use Core.Es.Aggregate.Repo`; `aggregate:` / `id:` у `use Core.Es.Aggregate.Repo.Pg` | `aggregate:` у `Repo`, у `Repo.Pg` — `behaviour:` (`deps/core/docs/rules/13-repos.md`, «Write event-sourced агрегата») |
+| `event:` / `id:` у `use Core.Es.KeyReservation` | `aggregate:` (`deps/core/docs/rules/13-repos.md`, «Резервы ключей») |
 
 Встреченная в приложении устаревшая форма — не повод для точечной правки посреди чужой задачи:
 это либо отдельная задача, либо строка в `DEBT.md` с условием снятия.

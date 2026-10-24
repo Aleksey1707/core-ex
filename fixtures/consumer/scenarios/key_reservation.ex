@@ -4,10 +4,11 @@ defmodule ConsumerTest.BadKey do
   alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.Account.Event
 
+  # нет clause `reservation/1` для `Closed`: проверка полноты на строке `use` ключа
+  # expect: incompatible types given to reservation/1
   use Core.Es.KeyReservation,
     scope: "scenario.bad_key",
-    event: Account.Event,
-    id: Account.ID,
+    aggregate: Account,
     code: :name_taken
 
   @impl true
@@ -20,30 +21,17 @@ defmodule ConsumerTest.BadKey do
   def to_key(%Account.Name{} = name), do: Account.Name.value(name)
 end
 
-defmodule ConsumerTest.BadKey.Repo.Pg do
-  @moduledoc "Репозиторий с модулем ключа без clause `reservation/1` для `Closed`."
-
-  alias Consumer.Domain.Sales.Account
-
-  # нет clause `reservation/1` для `Closed`: проверка полноты на строке `use`
-  # expect: incompatible types given to ConsumerTest.BadKey.reservation/1
-  use Core.Es.Aggregate.Repo.Pg,
-    behaviour: Consumer.Domain.Sales.Account.Repo,
-    errors: Account.Errors,
-    outbox: Account.Outbox,
-    key_reservations: [ConsumerTest.BadKey]
-end
-
 defmodule ConsumerTest.BadKeyPayload do
   @moduledoc "Модуль ключа с опечаткой в поле нагрузки, не суженной паттерном."
 
   alias Consumer.Domain.Sales.Account
   alias Consumer.Domain.Sales.Account.Event
 
+  # опечатка в поле нагрузки без паттерна `%Payload{}`: при определении молчит
+  # expect: incompatible types given to reservation/1
   use Core.Es.KeyReservation,
     scope: "scenario.bad_key_payload",
-    event: Account.Event,
-    id: Account.ID,
+    aggregate: Account,
     code: :name_taken
 
   @impl true
@@ -55,20 +43,6 @@ defmodule ConsumerTest.BadKeyPayload do
 
   @impl true
   def to_key(%Account.Name{} = name), do: Account.Name.value(name)
-end
-
-defmodule ConsumerTest.BadKeyPayload.Repo.Pg do
-  @moduledoc "Репозиторий с модулем ключа с опечаткой в поле нагрузки."
-
-  alias Consumer.Domain.Sales.Account
-
-  # опечатка в поле нагрузки без паттерна `%Payload{}`: при определении молчит
-  # expect: incompatible types given to ConsumerTest.BadKeyPayload.reservation/1
-  use Core.Es.Aggregate.Repo.Pg,
-    behaviour: Consumer.Domain.Sales.Account.Repo,
-    errors: Account.Errors,
-    outbox: Account.Outbox,
-    key_reservations: [ConsumerTest.BadKeyPayload]
 end
 
 defmodule ConsumerTest.KeyFind do

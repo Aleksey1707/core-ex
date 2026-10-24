@@ -212,14 +212,22 @@ defmodule Core.Es.KeyReservationTest do
       end
     end
 
-    test "event: и id: — модули, code: — атом" do
-      assert_raise CompileError, ~r/Es\.KeyReservation: event: ожидается модуль, получено "event"/, fn ->
-        compile_key!(StringEvent, event: "event")
+    test "старая форма event: / id: — одно сообщение" do
+      message = ~r/Es\.KeyReservation: нет обязательных опций: \[:aggregate\]; неизвестные опции: \[:event, :id\]$/
+
+      assert_raise CompileError, message, fn ->
+        compile_key!(OldForm, aggregate: :__drop__, event: Account.Event, id: Account.ID)
+      end
+    end
+
+    test "aggregate: — event-sourced агрегат, code: — атом" do
+      assert_raise CompileError, ~r/Es\.KeyReservation: aggregate: ожидается модуль, получено "account"/, fn ->
+        compile_key!(StringAggregate, aggregate: "account")
       end
 
-      assert_raise CompileError, ~r/Es\.KeyReservation: id: ожидается модуль, получено 1/, fn ->
-        compile_key!(IntegerId, id: 1)
-      end
+      message = ~r/Es\.KeyReservation: aggregate: модуль .*Account\.Errors должен экспортировать __es_event_codec__\/0/
+
+      assert_raise CompileError, message, fn -> compile_key!(NotAggregate, aggregate: Account.Errors) end
 
       assert_raise CompileError, ~r/Es\.KeyReservation: code: ожидается атом, получено "name_taken"/, fn ->
         compile_key!(StringCode, code: "name_taken")
@@ -242,22 +250,11 @@ defmodule Core.Es.KeyReservationTest do
       assert_raise CompileError, message, fn -> compile_repo!(NotKey, [Account.Errors]) end
     end
 
-    test "событие модуля ключа — семейство кодека агрегата" do
+    test "ключ другого агрегата" do
       message =
-        ~r/key_reservations: событие Core\.EsFixture\.Catalog\.Event у .*PathKey не равно семейству кодека .*Account\.Event$/
+        ~r/key_reservations: aggregate: .*\.Catalog у .*\.Catalog\.PathKey не равен агрегату репозитория .*\.Account$/
 
-      assert_raise CompileError, message, fn -> compile_repo!(ForeignEvent, [Catalog.PathKey]) end
-    end
-
-    test "id: модуля ключа — id: репозитория" do
-      compile_key!(ForeignIdKey, id: UserID)
-
-      message =
-        ~r/key_reservations: id: Core\.EsFixture\.UserID у .*ForeignIdKey не равен id: Core\.EsFixture\.Account\.ID/
-
-      assert_raise CompileError, message, fn ->
-        compile_repo!(ForeignId, [Module.concat(__MODULE__, ForeignIdKey)])
-      end
+      assert_raise CompileError, message, fn -> compile_repo!(ForeignAggregate, [Catalog.PathKey]) end
     end
 
     test "clause code: модуля ключа в errors:" do
@@ -312,7 +309,7 @@ defmodule Core.Es.KeyReservationTest do
 
   defp compile_key!(name, overrides) do
     opts =
-      [scope: @scope, event: Account.Event, id: Account.ID, code: :name_taken]
+      [scope: @scope, aggregate: Account, code: :name_taken]
       |> Keyword.merge(overrides)
       |> Enum.reject(&match?({_, :__drop__}, &1))
 

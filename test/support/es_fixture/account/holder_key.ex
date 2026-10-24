@@ -9,8 +9,7 @@ defmodule Core.EsFixture.Account.HolderKey do
 
   use Core.Es.KeyReservation,
     scope: "fixture.holder",
-    event: Account.Event,
-    id: Account.ID,
+    aggregate: Account,
     code: :holder_taken,
     personal: true
 

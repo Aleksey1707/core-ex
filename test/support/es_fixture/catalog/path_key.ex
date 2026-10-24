@@ -4,14 +4,13 @@ defmodule Core.EsFixture.Catalog.PathKey do
   названия счёта `Core.EsFixture.Account.NameKey`.
   """
 
+  alias Core.EsFixture.Catalog
   alias Core.EsFixture.Catalog.Event
-  alias Core.EventFixture.AggID
   alias Core.EventFixture.Name
 
   use Core.Es.KeyReservation,
     scope: "fixture.name",
-    event: Event,
-    id: AggID,
+    aggregate: Catalog,
     code: :name_taken
 
   @doc "Заведение занимает путь, закрытие снимает."

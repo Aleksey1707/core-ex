@@ -76,11 +76,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   Исходы резерва — `Core.Es.KeyReservation`, «Резерв»; модуль ключа из ПДн (`personal: true`) —
   там же, «Ключ из ПДн»: сбой хранилища ключей на его индексе — `{:error, _}` без записи.
 
-  Сборка проверяет `reservation/1` модулей ключа по кодеку агрегата: на каждое событие макрос
-  генерирует функцию-проверку (`Core.Es.Check`) `"reservation/1 принимает <Event>"` — литеральный
-  вызов `Key.reservation(%Event.Mod{payload: %Payload{}} = event)` каждого модуля ключа.
-  Событие без clause и опечатка в поле нагрузки, не суженной паттерном, — предупреждение на строке
-  `use`.
+  Модуль ключа MUST объявлять тот же агрегат, что репозиторий: `aggregate:` ключа сверяет сборка.
+  Полноту `reservation/1` по событиям агрегата проверяет сборка самого модуля ключа
+  (`Core.Es.KeyReservation`, «Opts»).
 
   ## Снапшоты
 
@@ -148,11 +146,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   равно семейству кодека, в `errors:` нет clause `:version_mismatch`; `snapshot:` —
   не keyword, без `every:`, с неизвестной опцией, `every:` не целое больше нуля, `version:` не
   целое или у ПДн-поля события субъект — поле нагрузки, а не `:aggregate_id`; `key_reservations:`
-  — не список модулей ключа, у модуля ключа событие не равно семейству кодека или `id:` — `id:`
-  репозитория, в `errors:` нет clause его `code:`, область повторяется.
+  — не список модулей ключа, у модуля ключа `aggregate:` не равен агрегату behaviour, в `errors:`
+  нет clause его `code:`, область повторяется.
 
-  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0` и,
-  с `key_reservations:`, имена функций-проверок `"reservation/1 принимает <Event>"/1`.
+  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo` и приватную `es_aggregate_repo/0`.
   """
 
   import Core.Version, only: [is_version: 1]
@@ -183,11 +180,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     cfg = validate_opts!(lit)
     dao = Helper.Opts.module_or_config!(lit, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(lit, :codec, :codec, @label)
-    checks = Es.KeyReservation.checks(cfg.key_reservations, cfg.event_codec, __CALLER__.line)
 
     quote generated: true do
-      unquote_splicing(checks)
-
       @behaviour unquote(cfg.behaviour)
 
       @es_aggregate_repo unquote(Macro.escape(cfg))
@@ -305,7 +299,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       outbox: outbox,
       snapshot: snapshot!(opts, event_codec),
       key_reservations:
-        Es.KeyReservation.declarations!(Keyword.get(opts, :key_reservations, []), event_codec, id, errors, @label)
+        Es.KeyReservation.declarations!(Keyword.get(opts, :key_reservations, []), aggregate, errors, @label)
     }
   end
 
