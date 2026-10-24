@@ -281,7 +281,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
     behaviour = behaviour!(opts)
     %{aggregate: aggregate, id: id} = behaviour.__es_aggregate_repo__()
-    event_codec = Es.Store.Opts.event_codec!(aggregate.__es_event_codec__(), @label)
+    event_codec = aggregate.__es_event_codec__()
     Es.Store.Opts.ensure_family_aggregate!(event_codec, aggregate, @label)
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
 

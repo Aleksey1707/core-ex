@@ -104,7 +104,8 @@ credo:
 audit:
 	mix deps.audit
 
-# Храповик на циклы компиляции: новые добавлять нельзя.
+# Храповик на циклы компиляции: новые добавлять нельзя. Порог 1 держит принятый цикл семейства
+# Core.Es.Personal.Event (ADR-0084).
 .PHONY: xref
 xref:
 	mix xref graph --format cycles --fail-above 1
