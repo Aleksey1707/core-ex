@@ -679,6 +679,10 @@ SHOULD. В `lib/` библиотеки `Keyword.validate!` и ручная кл�
   env, ETS, процессов и часов. У схемы без обязательных ключей вызов с `[]` NimbleOptions не
   проходит, а получает умолчания, проверенные при сборке: зависящий от рантайма валидатор ответил бы
   на `[]` по состоянию сборки, а на непустых опциях — по текущему.
+- Ключ-Prim — `{:struct, Mod}` либо custom-тип `Core.Options.Type` (`prim/2`; обязательный ключ —
+  `prim_option/2`). Сырое значение в Prim custom-тип MUST NOT переводить (`Mod.new/1`): отказ
+  схемы — `ArgumentError`, ошибка программиста, а невалидный ввод — `{:error, %Error{}}` («Safe vs
+  bang»). Переводит вызывающий либо тело функции через `with`, схема тогда проверяет базовый тип.
 - Функция, передающая `opts` насквозь (в Ecto, в `Core.Helper.Transact.run/3`), схему MUST NOT:
   ключи проверяет тот, кому они переданы.
 - Опции в голове функции со схемой MUST быть переменной; guard на них — только `is_list/1`.
@@ -718,6 +722,13 @@ def run_once(projection, opts \\ []) when is_atom(projection) and is_list(opts) 
   batch_size = Keyword.fetch!(opts, :batch_size)
   ...
 end
+
+# плохо — невалидный внешний ввод становится ArgumentError, а не {:error, %Error{}}
+@opts_schema [owner_id: [type: {:custom, __MODULE__, :owner_id, []}, doc: "Владелец."]]
+def owner_id(raw), do: Result.map_error(Owner.ID.new(raw), &to_string/1)
+
+# хорошо — схема проверяет Prim, сырое значение переводит вызывающий
+@opts_schema [owner_id: [type: {:struct, Owner.ID}, doc: "Владелец."]]
 ```
 
 Отказ вызова — `ArgumentError` `"<Mod.fun/n>: <сообщение NimbleOptions>"` до входа в тело. Почему
