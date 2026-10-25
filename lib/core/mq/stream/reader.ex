@@ -3,32 +3,6 @@
 # просто нет — вместо ошибки компиляции библиотеки вызов даст UndefinedFunctionError.
 if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
   defmodule Core.Mq.Stream.Reader do
-    @shutdown_ms 15_000
-
-    @init_opts_schema [
-      connection: [
-        type: {:custom, Core.Options.Type, :module, []},
-        type_doc: "`t:module/0`",
-        required: true,
-        doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
-      ],
-      topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Stream, который читает reader."),
-      subscriber_name:
-        Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Имя подписчика — `offset_reference` курсора."),
-      reliable?: [type: :boolean, default: true, doc: "Сохранять курсор; при `false` `commit` недоступен."],
-      credit: [type: :pos_integer, default: 2, doc: "Начальный credit — число in-flight чанков."],
-      initial_offset: [
-        type: {:or, [{:in, ~w(stored first next last)a}, {:tuple, [{:in, [:offset]}, :non_neg_integer]}]},
-        type_doc: "`:stored`, `:first`, `:next`, `:last` или `{:offset, non_neg_integer()}`",
-        default: :stored,
-        doc: "Откуда читать stream: `:stored` — с сохранённого offset, без него — с начала."
-      ],
-      retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
-      retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
-      name: Core.Helper.StartOpts.name_option(),
-      shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
-    ]
-
     @moduledoc """
     `Mq.ReaderReliable` для RabbitMQ Stream.
 
@@ -57,11 +31,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     (`:first`): новый подписчик на живом топике получит всю его историю. Нужен другой
     старт — задать `:next` или `:last` явно.
 
-    ## Опции старта
-
     Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-    #{Core.Options.docs(@init_opts_schema)}
     """
 
     @behaviour Core.Mq.ReaderReliable
@@ -83,6 +53,32 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     require Logger
 
     @call_timeout 5_000
+
+    @shutdown_ms 15_000
+
+    @init_opts_schema [
+      connection: [
+        type: {:custom, Core.Options.Type, :module, []},
+        type_doc: "`t:module/0`",
+        required: true,
+        doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
+      ],
+      topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Stream, который читает reader."),
+      subscriber_name:
+        Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Имя подписчика — `offset_reference` курсора."),
+      reliable?: [type: :boolean, default: true, doc: "Сохранять курсор; при `false` `commit` недоступен."],
+      credit: [type: :pos_integer, default: 2, doc: "Начальный credit — число in-flight чанков."],
+      initial_offset: [
+        type: {:or, [{:in, ~w(stored first next last)a}, {:tuple, [{:in, [:offset]}, :non_neg_integer]}]},
+        type_doc: "`:stored`, `:first`, `:next`, `:last` или `{:offset, non_neg_integer()}`",
+        default: :stored,
+        doc: "Откуда читать stream: `:stored` — с сохранённого offset, без него — с начала."
+      ],
+      retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
+      retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
+      name: Core.Helper.StartOpts.name_option(),
+      shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
+    ]
 
     defstruct [
       :connection,

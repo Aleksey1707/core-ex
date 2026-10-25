@@ -35,8 +35,8 @@ defmodule Core.Outbox.Supervisor do
 
   ## Опции
 
-  Состав, типы и умолчания — раздел «Опции» у `start_link/1`; те же опции принимает `watch_list/1`.
-  Выключенному дереву нужна только `enabled:`, остальные обязательные — при `enabled: true`; `nil`
+  Состав, типы и умолчания — схема `@tree_opts_schema` над `start_link/1`; те же опции принимает
+  `watch_list/1`. Выключенному дереву нужна только `enabled:`, остальные обязательные — при `enabled: true`; `nil`
   у числовой опции — то же, что её отсутствие (незаданный env выключенной очереди).
   Репозиторий очереди у поллеров и cleaner — тот же, которым пишут записи,
   `Core.Config.outbox_repo/0`: второй источник разошёлся бы с ним молча.
@@ -142,7 +142,7 @@ defmodule Core.Outbox.Supervisor do
     pollers: [
       type: {:list, {:keyword_list, @poller_opts_schema}},
       default: [],
-      doc: "При `enabled: true` — непустой; поллеры, элемент — keyword:\n\n" <> Core.Options.docs(@poller_opts_schema)
+      doc: "При `enabled: true` — непустой; поллеры, элемент — keyword по схеме `@poller_opts_schema`."
     ],
     connection: [
       type: {:or, [{:tuple, [{:custom, Core.Options.Type, :module, []}, :keyword_list]}, nil]},

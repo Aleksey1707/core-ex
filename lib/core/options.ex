@@ -44,10 +44,8 @@ defmodule Core.Options do
 
   ## Документация
 
-  `@doc` функции со схемой дописывается разделом «Опции» — ключ, тип, умолчание и `doc:` каждого
-  (`NimbleOptions.docs/1`) — после текста автора. Функция без `@doc` получает `@doc` из одного
-  раздела. При `@doc false` и у `@impl` без `@doc` раздел не дописывается: функция остаётся скрытой.
-  Описание опций для `@moduledoc` (OTP-процесс со схемой над `init/1`) — `docs/1`.
+  Документацию схема не трогает: состав, типы и умолчания опций читаются в самой схеме над
+  функцией, в `@doc` и `@moduledoc` их нет.
 
   ## Ошибки объявления
 
@@ -120,7 +118,7 @@ defmodule Core.Options do
 
   @doc """
   Голова без тела — `Kernel.def/1`. В модуле с `use Core.Options` схема над головой объявляется на
-  ней: `@doc` головы получает раздел «Опции».
+  ней.
   """
   # Credo читает `defmacro def(…)` как `def` без `@spec`, а `@spec def(…)` разобрать не может.
   # credo:disable-for-next-line Credo.Check.Readability.Specs
@@ -128,7 +126,7 @@ defmodule Core.Options do
     case options_module?(__CALLER__) and head_fun(call) do
       {_name, _arity} = fun ->
         quote do
-          Core.Options.__head__(__MODULE__, unquote(fun), unquote(__CALLER__.line))
+          Core.Options.__head__(__MODULE__, unquote(fun))
           Kernel.def(unquote(call))
         end
 
@@ -212,12 +210,12 @@ defmodule Core.Options do
   # ===== схема функции =====
 
   @doc false
-  @spec __head__(module(), {atom(), arity()}, pos_integer()) :: :ok
+  @spec __head__(module(), {atom(), arity()}) :: :ok
 
-  def __head__(module, {name, arity} = fun, line) when is_atom(module) and is_integer(line) do
+  def __head__(module, {name, arity} = fun) when is_atom(module) do
     case Module.get_attribute(module, :opts_schema) do
       nil -> :ok
-      raw -> declare!(module, fun, raw, line, "#{@label}: #{name}/#{arity}")
+      raw -> declare!(module, fun, raw, "#{@label}: #{name}/#{arity}")
     end
 
     :ok
@@ -225,10 +223,10 @@ defmodule Core.Options do
 
   @doc false
   defmacro __body__(var, problem, body) do
-    %Macro.Env{module: module, function: {name, arity} = fun, line: line} = __CALLER__
+    %Macro.Env{module: module, function: {name, arity} = fun} = __CALLER__
     where = "#{@label}: #{name}/#{arity}"
 
-    case schema!(module, fun, line, where) do
+    case schema!(module, fun, where) do
       nil ->
         body
 
@@ -241,14 +239,14 @@ defmodule Core.Options do
 
   # ---
 
-  defp schema!(module, fun, line, where) do
+  defp schema!(module, fun, where) do
     case Module.get_attribute(module, :opts_schema) do
       nil -> Map.get(schemas(module), fun)
-      raw -> declare!(module, fun, raw, line, where)
+      raw -> declare!(module, fun, raw, where)
     end
   end
 
-  defp declare!(module, fun, raw, line, where) do
+  defp declare!(module, fun, raw, where) do
     case Module.get_definition(module, fun) do
       nil -> :ok
       {:v1, _kind, _meta, []} -> Helper.Opts.reject!(where, "@opts_schema ставится перед головой функции")
@@ -257,7 +255,6 @@ defmodule Core.Options do
 
     Module.delete_attribute(module, :opts_schema)
     entry = compile!(raw, where)
-    document(module, entry.schema, line)
     Module.put_attribute(module, :core_options_schemas, Map.put(schemas(module), fun, entry))
     entry
   end
@@ -293,22 +290,6 @@ defmodule Core.Options do
     end
   end
 
-  defp document(module, schema, line) do
-    case Module.get_attribute(module, :doc) do
-      {_line, false} ->
-        :ok
-
-      {doc_line, text} when is_binary(text) ->
-        Module.put_attribute(module, :doc, {doc_line, String.trim_trailing(text) <> "\n\n" <> section(schema)})
-
-      _none ->
-        if Module.get_attribute(module, :impl) in [nil, false],
-          do: Module.put_attribute(module, :doc, {line, section(schema)})
-    end
-  end
-
-  defp section(schema), do: "## Опции\n\n" <> describe(schema)
-
   defp generated({name, meta, context}), do: {name, Keyword.put(meta, :generated, true), context}
 
   defp checked(var, %{schema: schema, defaults: :none}, label, body, where) do
@@ -342,18 +323,7 @@ defmodule Core.Options do
   @doc """
   Описание опций схемы `schema` (`NimbleOptions.docs/1`): ключ, тип, умолчание и `doc:` каждого.
 
-  Тот же текст функция со схемой получает разделом «Опции» в `@doc`. Явный вызов нужен там, где
-  `@doc` скрыт, — в `@moduledoc` OTP-процесса со схемой над `init/1`:
-
-      @init_opts_schema [name: [type: :atom, required: true, doc: "Имя процесса."]]
-
-      @moduledoc \"""
-      ...
-
-      ## Опции старта
-
-      \#{Core.Options.docs(@init_opts_schema)}
-      \"""
+  В документацию модуля и функции текст не вставляется: опции читаются в самой схеме.
 
   Некорректная схема — `ArgumentError` NimbleOptions; ключ без `doc:` строкой — `ArgumentError`, как
   и у `@opts_schema`: неописанная опция не попадает в контракт.
@@ -364,7 +334,7 @@ defmodule Core.Options do
     %NimbleOptions{schema: keys} = compiled = NimbleOptions.new!(schema)
 
     case undocumented(keys, []) do
-      [] -> describe(compiled)
+      [] -> NimbleOptions.docs(compiled)
       missing -> raise ArgumentError, "Core.Options.docs/1: ключи без doc: строкой: #{inspect(missing)}"
     end
   end
@@ -417,8 +387,6 @@ defmodule Core.Options do
   end
 
   # ===== общее =====
-
-  defp describe(%NimbleOptions{} = schema), do: NimbleOptions.docs(schema)
 
   defp undocumented(schema, path) do
     Enum.flat_map(schema, fn {key, spec} ->

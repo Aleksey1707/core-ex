@@ -1,31 +1,4 @@
 defmodule Core.Es.Projection.Reader do
-  @init_opts_schema [
-    projection: [
-      type: {:custom, Core.Options.Type, :module, []},
-      type_doc: "`t:module/0`",
-      required: true,
-      doc: "Модуль `use Core.Es.Projection` (проверяет дерево); он же имя процесса и `:id` в `child_spec/1`."
-    ],
-    batch_size: [type: :pos_integer, required: true, doc: "Событий в пачке."],
-    idle_min_ms: [
-      type: :pos_integer,
-      required: true,
-      doc: "Первая задержка после холостой или заблокированной пачки, мс."
-    ],
-    poll_interval_ms: [
-      type: :pos_integer,
-      required: true,
-      doc: "Предел удвоения `idle_min_ms` и интервал при `:outdated`, мс."
-    ],
-    retry_min_ms: [type: :pos_integer, required: true, doc: "Первая задержка повтора после отказа пачки, мс."],
-    retry_max_ms: [type: :pos_integer, required: true, doc: "Предел её удвоения, мс."],
-    shutdown: [
-      type: :pos_integer,
-      required: true,
-      doc: "`:shutdown` в `child_spec/1`: сколько супервизор ждёт конца пачки при остановке, мс."
-    ]
-  ]
-
   @moduledoc """
   Читатель проекции — процесс дерева `Core.Es.Projection.Supervisor`, по одному на проекцию под
   именем её модуля: гоняет пачки проекции (`Core.Es.Projection`, «Пачка») по таймеру, по `wake`
@@ -81,11 +54,7 @@ defmodule Core.Es.Projection.Reader do
   `[:es, :projection, :signal, :sent]` после commit пачки с исходом `:processed` —
   `Core.Es.Projection.Listener`, «Telemetry».
 
-  ## Опции старта
-
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   use GenServer
@@ -158,7 +127,32 @@ defmodule Core.Es.Projection.Reader do
   def start_link(opts) when is_list(opts),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :projection))
 
-  @opts_schema @init_opts_schema
+  @opts_schema [
+    projection: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль `use Core.Es.Projection` (проверяет дерево); он же имя процесса и `:id` в `child_spec/1`."
+    ],
+    batch_size: [type: :pos_integer, required: true, doc: "Событий в пачке."],
+    idle_min_ms: [
+      type: :pos_integer,
+      required: true,
+      doc: "Первая задержка после холостой или заблокированной пачки, мс."
+    ],
+    poll_interval_ms: [
+      type: :pos_integer,
+      required: true,
+      doc: "Предел удвоения `idle_min_ms` и интервал при `:outdated`, мс."
+    ],
+    retry_min_ms: [type: :pos_integer, required: true, doc: "Первая задержка повтора после отказа пачки, мс."],
+    retry_max_ms: [type: :pos_integer, required: true, doc: "Предел её удвоения, мс."],
+    shutdown: [
+      type: :pos_integer,
+      required: true,
+      doc: "`:shutdown` в `child_spec/1`: сколько супервизор ждёт конца пачки при остановке, мс."
+    ]
+  ]
   @doc false
   @spec init(keyword()) :: {:ok, t()}
 

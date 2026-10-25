@@ -1,4 +1,39 @@
 defmodule Core.Outbox.Poller do
+  @moduledoc """
+  Polling delivery worker: reserve → publish_many → save_results.
+
+  Один sequential publisher: порядок в брокере = `order_by: created_at` reserve.
+  При ошибке в середине батча — fail-stop (хвост `release` без attempts).
+
+  После `:processed` — drain (`schedule(0)`). При `:retry` (хоть одна запись пачки не
+  опубликована), idle или ошибке цикла — adaptive backoff от `idle_min_ms` до
+  `poll_interval_ms`. `wake/1` будит цикл досрочно (после commit `append`); входящие
+  `:wake` coalesce'ятся (`flush_wakes/0`).
+
+  Поллер стартует только из `Core.Outbox.Supervisor`: его опции собирает дерево, а wake после
+  вставки адресует поллеры по отметке дерева. Не найдя своего `:name` в отметке, `init/1`
+  отказывает `ArgumentError`.
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  """
+
+  use GenServer
+  use Core.Options
+
+  alias Core.Context
+  alias Core.Error
+  alias Core.Exc
+  alias Core.Outbox
+  alias Core.Outbox.Delivery
+  alias Core.Outbox.Record
+  alias Core.Outbox.Supervisor.Mark
+  alias Core.Telemetry
+
+  require Logger
+  require Error
+
+  @init_label "#{inspect(__MODULE__)}.init/1"
+
   @shutdown_ms 30_000
 
   @init_opts_schema [
@@ -45,45 +80,6 @@ defmodule Core.Outbox.Poller do
     shutdown:
       Core.Helper.StartOpts.shutdown_option(@shutdown_ms, "`shutdown` в `child_spec/1`: запас на текущую пачку.")
   ]
-
-  @moduledoc """
-  Polling delivery worker: reserve → publish_many → save_results.
-
-  Один sequential publisher: порядок в брокере = `order_by: created_at` reserve.
-  При ошибке в середине батча — fail-stop (хвост `release` без attempts).
-
-  После `:processed` — drain (`schedule(0)`). При `:retry` (хоть одна запись пачки не
-  опубликована), idle или ошибке цикла — adaptive backoff от `idle_min_ms` до
-  `poll_interval_ms`. `wake/1` будит цикл досрочно (после commit `append`); входящие
-  `:wake` coalesce'ятся (`flush_wakes/0`).
-
-  Поллер стартует только из `Core.Outbox.Supervisor`: его опции собирает дерево, а wake после
-  вставки адресует поллеры по отметке дерева. Не найдя своего `:name` в отметке, `init/1`
-  отказывает `ArgumentError`.
-
-  ## Опции старта
-
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
-  """
-
-  use GenServer
-  use Core.Options
-
-  alias Core.Context
-  alias Core.Error
-  alias Core.Exc
-  alias Core.Outbox
-  alias Core.Outbox.Delivery
-  alias Core.Outbox.Record
-  alias Core.Outbox.Supervisor.Mark
-  alias Core.Telemetry
-
-  require Logger
-  require Error
-
-  @init_label "#{inspect(__MODULE__)}.init/1"
 
   defstruct [
     :repo,

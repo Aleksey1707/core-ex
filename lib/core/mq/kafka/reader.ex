@@ -3,39 +3,6 @@
 # просто нет — вместо ошибки компиляции библиотеки вызов даст UndefinedFunctionError.
 if Code.ensure_loaded?(:brod) do
   defmodule Core.Mq.Kafka.Reader do
-    @shutdown_ms 15_000
-
-    @init_opts_schema [
-      client: [
-        type: {:custom, Core.Options.Type, :atom, []},
-        type_doc: "`t:atom/0`",
-        required: true,
-        doc: "Id клиента `:brod`, как handle `Core.Mq.Kafka.Writer`."
-      ],
-      topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Топик, который читает читатель."),
-      subscriber_name:
-        Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Имя подписчика — ключ смещений и аренды."),
-      repo: [
-        type: {:custom, Core.Options.Type, :module, []},
-        type_doc: "`t:module/0`",
-        required: true,
-        doc: "Ecto-репозиторий с таблицами `Core.Mq.Kafka.Migration`."
-      ],
-      initial_offset: [
-        type: {:in, ~w(earliest latest)a},
-        type_doc: "`:earliest` или `:latest`",
-        default: :earliest,
-        doc: "Стартовая позиция партиции без сохранённого смещения."
-      ],
-      prefetch_count: [type: :pos_integer, default: 10, doc: "Потолок неподтверждённых сообщений партиции."],
-      lease_ttl_ms: [type: :pos_integer, default: 30_000, doc: "Срок аренды топика, мс."],
-      partitions_interval_ms: [type: :pos_integer, default: 60_000, doc: "Интервал перечитывания числа партиций, мс."],
-      retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
-      retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
-      name: Core.Helper.StartOpts.name_option(),
-      shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
-    ]
-
     @moduledoc """
     `Mq.ReaderReliable` для Kafka через клиент `:brod`, без consumer group (ADR-0033).
 
@@ -78,14 +45,10 @@ if Code.ensure_loaded?(:brod) do
       `:brod` заводит при старте топика, поэтому выросший топик перезапускается целиком
       (`:brod_client.stop_consumer/2`), и чтение всех партиций продолжается с зафиксированных смещений.
 
-    ## Опции старта
-
-    Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-    #{Core.Options.docs(@init_opts_schema)}
-
     Консьюмер партиции у `:brod` принимает одного подписчика: читатели одного топика с разными
     `subscriber_name` требуют разных клиентов.
+
+    Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
 
     ## Wire-формат
 
@@ -140,6 +103,39 @@ if Code.ensure_loaded?(:brod) do
     @call_timeout 20_000
     @read_error_reasons ~w(subscribe consumer_down lease)a
     @commit_error_reasons ~w(lease_lost failed)a
+
+    @shutdown_ms 15_000
+
+    @init_opts_schema [
+      client: [
+        type: {:custom, Core.Options.Type, :atom, []},
+        type_doc: "`t:atom/0`",
+        required: true,
+        doc: "Id клиента `:brod`, как handle `Core.Mq.Kafka.Writer`."
+      ],
+      topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Топик, который читает читатель."),
+      subscriber_name:
+        Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Имя подписчика — ключ смещений и аренды."),
+      repo: [
+        type: {:custom, Core.Options.Type, :module, []},
+        type_doc: "`t:module/0`",
+        required: true,
+        doc: "Ecto-репозиторий с таблицами `Core.Mq.Kafka.Migration`."
+      ],
+      initial_offset: [
+        type: {:in, ~w(earliest latest)a},
+        type_doc: "`:earliest` или `:latest`",
+        default: :earliest,
+        doc: "Стартовая позиция партиции без сохранённого смещения."
+      ],
+      prefetch_count: [type: :pos_integer, default: 10, doc: "Потолок неподтверждённых сообщений партиции."],
+      lease_ttl_ms: [type: :pos_integer, default: 30_000, doc: "Срок аренды топика, мс."],
+      partitions_interval_ms: [type: :pos_integer, default: 60_000, doc: "Интервал перечитывания числа партиций, мс."],
+      retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
+      retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
+      name: Core.Helper.StartOpts.name_option(),
+      shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
+    ]
 
     defstruct [
       :client,

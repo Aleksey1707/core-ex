@@ -65,8 +65,8 @@ defmodule Core.Es.Projection.Supervisor do
 
   ## Опции
 
-  Опции дерева — раздел «Опции» у `start_link/1`, те же опции принимает `watch_list/1`. Опции
-  общие на все проекции; config и env библиотека не читает.
+  Опции дерева — схема `@tree_opts_schema` над `start_link/1`, те же опции принимает
+  `watch_list/1`. Опции общие на все проекции; config и env библиотека не читает.
 
   ## Старт
 

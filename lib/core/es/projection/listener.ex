@@ -1,18 +1,4 @@
 defmodule Core.Es.Projection.Listener do
-  @init_opts_schema [
-    repo: [
-      type: {:custom, Core.Options.Type, :module, []},
-      type_doc: "`t:module/0`",
-      required: true,
-      doc: "Repo проекций: из его `config()` — соединение слушателя; он же `:id` в `child_spec/1`."
-    ],
-    connection: [
-      type: :keyword_list,
-      required: true,
-      doc: "Опции соединения Postgrex поверх `repo.config()` — keyword из `notifications:` дерева."
-    ]
-  ]
-
   @moduledoc """
   Слушатель канала сигнала чекпоинта — процесс дерева `Core.Es.Projection.Supervisor`, по одному на
   каждый различный `repo:` проекций. Уведомление пачки любой ноды он переводит в сигнал чекпоинта
@@ -61,11 +47,7 @@ defmodule Core.Es.Projection.Listener do
   Метрики — `es_projection_signal_sent_total` и `es_projection_signal_received_total`
   (`Core.Es.PromEx`), алерт `EsProjectionSignalLost` — `22-projections.md`, «Эксплуатация».
 
-  ## Опции старта
-
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   use GenServer
@@ -95,7 +77,19 @@ defmodule Core.Es.Projection.Listener do
 
   def start_link(opts) when is_list(opts), do: GenServer.start_link(__MODULE__, opts)
 
-  @opts_schema @init_opts_schema
+  @opts_schema [
+    repo: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Repo проекций: из его `config()` — соединение слушателя; он же `:id` в `child_spec/1`."
+    ],
+    connection: [
+      type: :keyword_list,
+      required: true,
+      doc: "Опции соединения Postgrex поверх `repo.config()` — keyword из `notifications:` дерева."
+    ]
+  ]
   @doc false
   @spec init(keyword()) :: {:ok, state(), {:continue, :listen}}
 

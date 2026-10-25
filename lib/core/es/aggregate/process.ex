@@ -1,32 +1,4 @@
 defmodule Core.Es.Aggregate.Process do
-  @execute_opts_schema [
-    timeout: [
-      type: :pos_integer,
-      default: 5_000,
-      doc: "Дедлайн команды процесса на id, мс; в вызывающем процессе (`enabled: false`) не действует."
-    ]
-  ]
-
-  @start_opts_schema [
-    enabled: [
-      type: :boolean,
-      required: true,
-      doc:
-        "`true` — команды идут в процессы на id, `false` — `:ignore`, и `execute` исполняет команду в " <>
-          "вызывающем процессе."
-    ],
-    retries: [type: :pos_integer, default: 3, doc: "Повторов после отказа записи."],
-    idle_timeout: [type: :pos_integer, default: 60_000, doc: "Простой процесса на id до ухода, мс."],
-    state_max_age: [
-      type: {:or, [:pos_integer, {:in, [:infinity]}]},
-      type_doc: "`t:pos_integer/0` или `:infinity`",
-      doc:
-        "Предельный возраст состояния процесса на id, мс. У агрегата с ПДн в событиях (поле с `subject:` " <>
-          "у кодека, `__es_subjects__/0`) — по умолчанию 300 000, `:infinity` — `ArgumentError`; у агрегата " <>
-          "без ПДн — по умолчанию `:infinity`. При `enabled: false` не действует: кеша нет."
-    ]
-  ]
-
   @moduledoc """
   Билдер процесса агрегата (`use`): кэш состояния и очередь команд одного event-sourced агрегата
   на ноде; команда — с повтором после отказа записи.
@@ -86,10 +58,6 @@ defmodule Core.Es.Aggregate.Process do
   - Нет отметки старта — `RuntimeError`: `{Agg.Process, opts}` не стоит в дереве супервизии.
   - Неизвестная опция `opts` или недопустимое значение — `ArgumentError`.
 
-  ### Опции команды
-
-  #{Core.Options.docs(@execute_opts_schema)}
-
   ## Процесс на id
 
   При `enabled: true` команды агрегата идут по одной в его процесс
@@ -137,10 +105,6 @@ defmodule Core.Es.Aggregate.Process do
   `watch_list(opts)` — элементы `watch:` плагина `Core.Workers.PromEx` по опциям старта: верхний
   супервизор, `%{component: "es_aggregate_process:<тип агрегата>", name: Agg.Process}`. При
   `enabled: false` элементов нет: дерева на ноде нет, и `up=0` был бы ложной тревогой.
-
-  ### Опции старта
-
-  #{Core.Options.docs(@start_opts_schema)}
 
   ## Наблюдаемость
 
@@ -190,6 +154,26 @@ defmodule Core.Es.Aggregate.Process do
   @optional_keys ~w()a
   @expression_keys ~w()a
   @personal_state_max_age 300_000
+
+  @start_opts_schema [
+    enabled: [
+      type: :boolean,
+      required: true,
+      doc:
+        "`true` — команды идут в процессы на id, `false` — `:ignore`, и `execute` исполняет команду в " <>
+          "вызывающем процессе."
+    ],
+    retries: [type: :pos_integer, default: 3, doc: "Повторов после отказа записи."],
+    idle_timeout: [type: :pos_integer, default: 60_000, doc: "Простой процесса на id до ухода, мс."],
+    state_max_age: [
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
+      type_doc: "`t:pos_integer/0` или `:infinity`",
+      doc:
+        "Предельный возраст состояния процесса на id, мс. У агрегата с ПДн в событиях (поле с `subject:` " <>
+          "у кодека, `__es_subjects__/0`) — по умолчанию 300 000, `:infinity` — `ArgumentError`; у агрегата " <>
+          "без ПДн — по умолчанию `:infinity`. При `enabled: false` не действует: кеша нет."
+    ]
+  ]
 
   @typedoc "Проверенные опции старта — они же отметка."
   @type options :: %{
@@ -313,7 +297,13 @@ defmodule Core.Es.Aggregate.Process do
 
   # ===== команда =====
 
-  @opts_schema @execute_opts_schema
+  @opts_schema [
+    timeout: [
+      type: :pos_integer,
+      default: 5_000,
+      doc: "Дедлайн команды процесса на id, мс; в вызывающем процессе (`enabled: false`) не действует."
+    ]
+  ]
   @doc false
   @spec execute(module(), cfg(), call(), keyword()) ::
           Result.t(Version.t() | nil)

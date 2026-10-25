@@ -1,20 +1,4 @@
 defmodule Core.Mq.Dlq.Reader do
-  @shutdown_ms 15_000
-
-  @init_opts_schema [
-    repo: [
-      type: {:custom, Core.Options.Type, :module, []},
-      type_doc: "`t:module/0`",
-      required: true,
-      doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
-    ],
-    topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Исходный топик."),
-    subscriber_name: Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Тот же, что у `Core.Mq.Dlq.Writer`."),
-    lease_ttl_ms: [type: :pos_integer, default: 60_000, doc: "На сколько `get` захватывает запись, мс."],
-    name: Core.Helper.StartOpts.name_option(),
-    shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
-  ]
-
   @moduledoc """
   `Mq.ReaderReliable` из таблицы `mq_dlq` (`Core.Mq.Dlq`): отдаёт записи `requeued` одного
   топика одного подписчика по возрастанию `id`.
@@ -38,11 +22,7 @@ defmodule Core.Mq.Dlq.Reader do
   подписчик без `poll_interval_ms:` опрашивает этот читатель раз в 5 с
   (`default_poll_interval_ms/0`), а не раз в 100 мс, как читатели брокеров.
 
-  ## Опции старта
-
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.Mq.ReaderReliable
@@ -63,6 +43,22 @@ defmodule Core.Mq.Dlq.Reader do
   @call_timeout 20_000
   @poll_ms 100
   @default_poll_interval_ms 5_000
+
+  @shutdown_ms 15_000
+
+  @init_opts_schema [
+    repo: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
+    ],
+    topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Исходный топик."),
+    subscriber_name: Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Тот же, что у `Core.Mq.Dlq.Writer`."),
+    lease_ttl_ms: [type: :pos_integer, default: 60_000, doc: "На сколько `get` захватывает запись, мс."],
+    name: Core.Helper.StartOpts.name_option(),
+    shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
+  ]
 
   defstruct [:repo, :topic, :topic_name, :subscriber, :lease, :lease_ttl_ms, pending: nil]
 

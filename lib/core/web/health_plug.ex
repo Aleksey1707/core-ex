@@ -1,25 +1,4 @@
 defmodule Core.Web.HealthPlug do
-  @init_opts_schema [
-    repos: [
-      type: {:custom, Core.Web.HealthPlug, :repos, []},
-      type_doc: "список `t:module/0`",
-      doc:
-        "Непустой список модулей с `use Ecto.Repo`, которые проверяет readiness. Без опции — " <>
-          "`Core.Config.ecto_repos/0`, прочитанный на каждой пробе."
-    ],
-    health_path: [
-      type: :string,
-      default: "/health",
-      doc: "Путь liveness от корня."
-    ],
-    ready_path: [
-      type: :string,
-      default: "/ready",
-      doc: "Путь readiness от корня, отличный от `health_path:`."
-    ],
-    timeout: [type: :pos_integer, default: 1000, doc: "Таймаут запроса `SELECT 1` к репозиторию, мс."]
-  ]
-
   @moduledoc """
   Плаг проверок живости и готовности: liveness на `health_path:`, readiness на `ready_path:`.
 
@@ -41,11 +20,7 @@ defmodule Core.Web.HealthPlug do
   После ответа `conn` останавливается (`halt`); на прочих путях плаг пропускает `conn` дальше без
   изменений. Метод запроса не проверяется.
 
-  ## Опции
-
   Неверные опции — `ArgumentError` на `init/1`: в эндпоинте Phoenix — при сборке.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Plug
@@ -64,7 +39,26 @@ defmodule Core.Web.HealthPlug do
 
   # ===== опции =====
 
-  @opts_schema @init_opts_schema
+  @opts_schema [
+    repos: [
+      type: {:custom, Core.Web.HealthPlug, :repos, []},
+      type_doc: "список `t:module/0`",
+      doc:
+        "Непустой список модулей с `use Ecto.Repo`, которые проверяет readiness. Без опции — " <>
+          "`Core.Config.ecto_repos/0`, прочитанный на каждой пробе."
+    ],
+    health_path: [
+      type: :string,
+      default: "/health",
+      doc: "Путь liveness от корня."
+    ],
+    ready_path: [
+      type: :string,
+      default: "/ready",
+      doc: "Путь readiness от корня, отличный от `health_path:`."
+    ],
+    timeout: [type: :pos_integer, default: 1000, doc: "Таймаут запроса `SELECT 1` к репозиторию, мс."]
+  ]
   @doc false
   @spec init(keyword()) :: Plug.opts()
 

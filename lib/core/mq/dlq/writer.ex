@@ -1,19 +1,4 @@
 defmodule Core.Mq.Dlq.Writer do
-  @init_opts_schema [
-    repo: [
-      type: {:custom, Core.Options.Type, :module, []},
-      type_doc: "`t:module/0`",
-      required: true,
-      doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
-    ],
-    subscriber_name:
-      Core.Options.Type.prim_option(
-        Core.Mq.SubscriberName,
-        "Чей это DLQ: читатель перечитывания берёт записи по нему."
-      ),
-    name: Core.Helper.StartOpts.name_option("Имя процесса — handle writer'а.")
-  ]
-
   @moduledoc """
   `Mq.Writer` в таблицу `mq_dlq` (`Core.Mq.Dlq`): подключается `dlq_writer:` подписчика
   `Core.PubSub.MqSubscriberReliable`.
@@ -26,11 +11,7 @@ defmodule Core.Mq.Dlq.Writer do
   Handle — процесс writer'а (`name:`), как у `Mq.Stream.Writer`: он держит репозиторий и
   `subscriber_name`. Сбой Postgres — `{:error, %Error{code: :dlq_write_failed}}`.
 
-  ## Опции старта
-
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.Mq.Writer
@@ -85,7 +66,20 @@ defmodule Core.Mq.Dlq.Writer do
     GenServer.call(server, {:put_many, messages}, @call_timeout)
   end
 
-  @opts_schema @init_opts_schema
+  @opts_schema [
+    repo: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
+    ],
+    subscriber_name:
+      Core.Options.Type.prim_option(
+        Core.Mq.SubscriberName,
+        "Чей это DLQ: читатель перечитывания берёт записи по нему."
+      ),
+    name: Core.Helper.StartOpts.name_option("Имя процесса — handle writer'а.")
+  ]
   @doc false
   @spec init(keyword()) :: {:ok, %__MODULE__{}}
 

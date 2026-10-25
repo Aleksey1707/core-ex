@@ -5,9 +5,7 @@ defmodule Core.OptionsDocsTest do
   alias Core.OptionsDocsTest.Server
   alias Core.OptionsDocsTest.Subject
 
-  @section """
-  ## Опции
-
+  @options """
   * `:size` (`t:pos_integer/0`) - Размер. The default value is `10`.
 
   * `:mode` - Required. Режим.
@@ -54,23 +52,12 @@ defmodule Core.OptionsDocsTest do
   end
 
   defmodule Core.OptionsDocsTest.Server do
-    @init_opts_schema [
-      size: [type: :pos_integer, default: 10, doc: "Размер."],
-      mode: [type: {:in, ~w(fast slow)a}, required: true, doc: "Режим."]
-    ]
-
-    @moduledoc """
-    Процесс со скрытым `init/1`.
-
-    ## Опции
-
-    #{Core.Options.docs(@init_opts_schema)}
-    """
+    @moduledoc "Процесс со скрытым `init/1`."
 
     use GenServer
     use Core.Options
 
-    @opts_schema @init_opts_schema
+    @opts_schema [size: [type: :pos_integer, default: 10, doc: "Размер."]]
     @impl true
     def init(opts), do: {:ok, opts}
   end
@@ -98,25 +85,21 @@ defmodule Core.OptionsDocsTest do
     end)
   end
 
-  describe "раздел «Опции» в @doc" do
-    test "дописывается после текста автора" do
-      assert doc(Subject, :documented, 1) == "Текст автора.\n\nВторой абзац.\n\n" <> @section
+  describe "@doc функции со схемой" do
+    test "текст автора как есть, без описания опций" do
+      assert doc(Subject, :documented, 1) == "Текст автора.\n\nВторой абзац.\n"
     end
 
-    test "функция без @doc получает @doc из одного раздела" do
-      assert doc(Subject, :bare, 1) == @section
+    test "функция без @doc остаётся без @doc" do
+      assert doc(Subject, :bare, 1) == :none
     end
 
-    test "при @doc false не дописывается" do
+    test "@doc false остаётся скрытым" do
       assert doc(Subject, :hidden, 1) == :hidden
     end
 
-    test "голова без тела несёт текст автора и раздел" do
-      assert doc(Subject, :head, 2) == "Голова без тела.\n\n" <> @section
-    end
-
-    test "функция без схемы — @doc автора как есть" do
-      assert doc(Subject, :plain, 1) == "Без схемы."
+    test "голова без тела несёт текст автора" do
+      assert doc(Subject, :head, 2) == "Голова без тела."
     end
 
     test "@impl без @doc остаётся скрытым" do
@@ -125,8 +108,17 @@ defmodule Core.OptionsDocsTest do
   end
 
   describe "docs/1" do
-    test "описание опций для @moduledoc" do
-      assert moduledoc(Server) == "Процесс со скрытым `init/1`.\n\n" <> @section <> "\n"
+    test "описание опций схемы" do
+      schema = [
+        size: [type: :pos_integer, default: 10, doc: "Размер."],
+        mode: [type: {:in, ~w(fast slow)a}, required: true, doc: "Режим."]
+      ]
+
+      assert Core.Options.docs(schema) == @options
+    end
+
+    test "@moduledoc схема не трогает" do
+      assert moduledoc(Server) == "Процесс со скрытым `init/1`."
     end
 
     test "некорректная схема — ArgumentError" do
@@ -150,6 +142,7 @@ defmodule Core.OptionsDocsTest do
     case List.keyfind(docs, {:function, name, arity}, 0) do
       {_key, _anno, _signature, %{"en" => text}, _meta} -> text
       {_key, _anno, _signature, :hidden, _meta} -> :hidden
+      {_key, _anno, _signature, :none, _meta} -> :none
     end
   end
 

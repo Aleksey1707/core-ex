@@ -1,26 +1,4 @@
 defmodule Core.Mq.Stream.Writer do
-  @shutdown_ms 30_000
-
-  @init_opts_schema [
-    connection: [
-      type: {:custom, Core.Options.Type, :module, []},
-      type_doc: "`t:module/0`",
-      required: true,
-      doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
-    ],
-    reference_prefix: [
-      type: {:custom, Core.Options.Type, :binary, []},
-      type_doc: "`t:String.t/0`",
-      required: true,
-      doc: "Уникальный префикс producer reference, непустой."
-    ],
-    confirm_timeout_ms: [type: :pos_integer, default: 5_000, doc: "Дедлайн подтверждения пачки, мс."],
-    confirm_poll_ms: [type: :pos_integer, default: 20, doc: "Интервал сверки `producer_sequence`, мс."],
-    max_producers: [type: :pos_integer, default: 256, doc: "Потолок кеша producers."],
-    name: Core.Helper.StartOpts.name_option(),
-    shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
-  ]
-
   @moduledoc """
   `Mq.Writer` для RabbitMQ Stream: create_stream + declare_producer на topic.
 
@@ -45,11 +23,7 @@ defmodule Core.Mq.Stream.Writer do
   пачки, а не по ходу: внутри неё кеш только растёт, иначе вытеснение сняло бы producer
   топика, который эта же пачка ещё подтверждает.
 
-  ## Опции старта
-
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.Mq.Writer
@@ -67,6 +41,28 @@ defmodule Core.Mq.Stream.Writer do
 
   require Error
   require Logger
+
+  @shutdown_ms 30_000
+
+  @init_opts_schema [
+    connection: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
+    ],
+    reference_prefix: [
+      type: {:custom, Core.Options.Type, :binary, []},
+      type_doc: "`t:String.t/0`",
+      required: true,
+      doc: "Уникальный префикс producer reference, непустой."
+    ],
+    confirm_timeout_ms: [type: :pos_integer, default: 5_000, doc: "Дедлайн подтверждения пачки, мс."],
+    confirm_poll_ms: [type: :pos_integer, default: 20, doc: "Интервал сверки `producer_sequence`, мс."],
+    max_producers: [type: :pos_integer, default: 256, doc: "Потолок кеша producers."],
+    name: Core.Helper.StartOpts.name_option(),
+    shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
+  ]
 
   defstruct [
     :connection,

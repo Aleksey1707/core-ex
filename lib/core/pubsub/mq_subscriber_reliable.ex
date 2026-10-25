@@ -1,4 +1,84 @@
 defmodule Core.PubSub.MqSubscriberReliable do
+  @moduledoc """
+  `PubSub.Subscriber` поверх `Mq.ReaderReliable`.
+
+  Успех / `{:skip, _}` → `commit`. Ошибка handler/decode → без commit (redelivery).
+  Цикл не останавливается на ошибках handler. Необработанное исключение внутри
+  `on_message`/`from_message` перехватывается и превращается в `{:error, %Error{}}`
+  (без commit, redelivery) — не роняет подписчик в crash-loop на «ядовитом» сообщении.
+
+  Фильтр `filter` решает по сырому `Mq.Message` (заголовки, ключ, топик) до `from_message`:
+  отвергнутое сообщение коммитится без декодирования тела, span'а не открывает и даёт исход
+  цикла `:filtered` — отдельный от `{:skip, _}` обработчика. Исключение или не-boolean из
+  фильтра — ошибка обработки: без commit, с тем же счётом попыток и выходом в DLQ.
+
+  Повторы одного и того же сообщения считаются: интервал растёт от `poll_interval_ms`
+  до `retry_max_ms`, а после `max_attempts` неудач сообщение уходит в DLQ-топик
+  (`dlq_topic`, по умолчанию `"<topic>.dlq"`) и коммитится — иначе оно блокировало бы
+  топик навсегда. Без настроенного `dlq_writer` выброса не происходит: подписчик
+  продолжает повторы на `retry_max_ms` и пишет `error` в лог. В DLQ уходит сырое сообщение с
+  его ключом, телом и позицией источника (`Message.position`); DLQ в Postgres — `Core.Mq.Dlq`.
+
+  Отказ без повторов — `{:reject, %Error{}}` из `on_message` или `from_message`
+  (`Core.PubSub`): сообщение, которое не обработать никогда, уходит в DLQ сразу, без
+  `max_attempts` попыток, и коммитится. Причина выброса — заголовок `x-dlq-reason`
+  (`rejected` / `exhausted`), метка `reason` события `[:mq, :subscriber, :dlq]` и атрибут
+  `core.pubsub.dlq_reason` span'а. Без `dlq_writer` отказ ведёт себя как исчерпание попыток
+  без DLQ: `error` в лог, без commit, повторы с растущим интервалом.
+
+  После `:processed` / `:filtered` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
+  После `:error` — текущий backoff. После `:idle` — `poll_interval_ms`, если reader не принимает
+  заявку на готовность (`Core.Mq.ReaderReliable.notify_when_ready/2`). Reader с заявкой в простое
+  не опрашивается: подписчик оставляет ему заявку и читает дальше по `{:mq_ready, ref}`; от
+  `poll_interval_ms` у него остаётся только начальная пауза повтора. Страховочного опроса нет:
+  заявку reader проверяет по своему буферу в своём же процессе, и разминуться с сообщением она не
+  может, а потерять её может только упавший reader — за ним подписчик следит монитором и после
+  `:DOWN` уходит в backoff. Поэтому handle такого reader'а — процесс (`GenServer.whereis/1`
+  находит pid). Не принятая заявка — тоже backoff.
+
+  Первый `:idle` после работы уводит процесс в `:hibernate`: полная сборка освобождает кучу,
+  раздутую пачкой сообщений. На холостом опросе мусора почти нет, и без этого куча держала бы
+  пиковый размер до рестарта. Повторный `:idle` процесс не усыпляет: полная сборка на каждый
+  опрос стоила бы больше, чем экономит. Работой считаются только прочитанные сообщения
+  (`:processed` / `:filtered` / `:dlq`); старт подписки работой не считается. `:error` счёт не
+  меняет: `:idle` после ошибки усыпит процесс, только если до неё были прочитанные сообщения.
+  Цикл `run_once/1` считается так же.
+
+  Обработка сообщения идёт в span'е `"process <topic>"` (`kind: :consumer`),
+  родитель которого извлекается из заголовков сообщения (`Core.Otel.Messaging`):
+  трейс команды, записавшей событие в outbox, продолжается здесь, а не начинается
+  заново.
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  """
+
+  @behaviour Core.PubSub.Subscriber
+
+  use GenServer
+  use Core.Options
+
+  alias Core.Context
+  alias Core.Error
+  alias Core.Mq
+  alias Core.Mq.Message
+  alias Core.Otel
+  alias Core.PubSub
+  alias Core.PubSub.MqSubscriberReliable.Step
+  alias Core.Result
+  alias Core.Telemetry
+
+  require Logger
+  require Error
+
+  @attr_dlq_topic "core.pubsub.dlq_topic"
+  @attr_dlq_reason "core.pubsub.dlq_reason"
+
+  @init_label "Core.PubSub.MqSubscriberReliable.init/1"
+
+  @call_timeout 5_000
+  @fallback_poll_interval_ms 100
+  @worked ~w(processed filtered dlq)a
+
   @own_opts_schema [
     reader_module: [
       type: {:custom, Core.Options.Type, :module, []},
@@ -60,91 +140,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
           "переотправила бы уже обработанное сообщение."
       )
   ]
+
   @init_opts_schema @own_opts_schema ++ Core.PubSub.MqSubscriberReliable.Step.schema()
-
-  @moduledoc """
-  `PubSub.Subscriber` поверх `Mq.ReaderReliable`.
-
-  Успех / `{:skip, _}` → `commit`. Ошибка handler/decode → без commit (redelivery).
-  Цикл не останавливается на ошибках handler. Необработанное исключение внутри
-  `on_message`/`from_message` перехватывается и превращается в `{:error, %Error{}}`
-  (без commit, redelivery) — не роняет подписчик в crash-loop на «ядовитом» сообщении.
-
-  Фильтр `filter` решает по сырому `Mq.Message` (заголовки, ключ, топик) до `from_message`:
-  отвергнутое сообщение коммитится без декодирования тела, span'а не открывает и даёт исход
-  цикла `:filtered` — отдельный от `{:skip, _}` обработчика. Исключение или не-boolean из
-  фильтра — ошибка обработки: без commit, с тем же счётом попыток и выходом в DLQ.
-
-  Повторы одного и того же сообщения считаются: интервал растёт от `poll_interval_ms`
-  до `retry_max_ms`, а после `max_attempts` неудач сообщение уходит в DLQ-топик
-  (`dlq_topic`, по умолчанию `"<topic>.dlq"`) и коммитится — иначе оно блокировало бы
-  топик навсегда. Без настроенного `dlq_writer` выброса не происходит: подписчик
-  продолжает повторы на `retry_max_ms` и пишет `error` в лог. В DLQ уходит сырое сообщение с
-  его ключом, телом и позицией источника (`Message.position`); DLQ в Postgres — `Core.Mq.Dlq`.
-
-  Отказ без повторов — `{:reject, %Error{}}` из `on_message` или `from_message`
-  (`Core.PubSub`): сообщение, которое не обработать никогда, уходит в DLQ сразу, без
-  `max_attempts` попыток, и коммитится. Причина выброса — заголовок `x-dlq-reason`
-  (`rejected` / `exhausted`), метка `reason` события `[:mq, :subscriber, :dlq]` и атрибут
-  `core.pubsub.dlq_reason` span'а. Без `dlq_writer` отказ ведёт себя как исчерпание попыток
-  без DLQ: `error` в лог, без commit, повторы с растущим интервалом.
-
-  После `:processed` / `:filtered` / `:dlq` — немедленный следующий tick (`schedule(0)`, drain).
-  После `:error` — текущий backoff. После `:idle` — `poll_interval_ms`, если reader не принимает
-  заявку на готовность (`Core.Mq.ReaderReliable.notify_when_ready/2`). Reader с заявкой в простое
-  не опрашивается: подписчик оставляет ему заявку и читает дальше по `{:mq_ready, ref}`; от
-  `poll_interval_ms` у него остаётся только начальная пауза повтора. Страховочного опроса нет:
-  заявку reader проверяет по своему буферу в своём же процессе, и разминуться с сообщением она не
-  может, а потерять её может только упавший reader — за ним подписчик следит монитором и после
-  `:DOWN` уходит в backoff. Поэтому handle такого reader'а — процесс (`GenServer.whereis/1`
-  находит pid). Не принятая заявка — тоже backoff.
-
-  Первый `:idle` после работы уводит процесс в `:hibernate`: полная сборка освобождает кучу,
-  раздутую пачкой сообщений. На холостом опросе мусора почти нет, и без этого куча держала бы
-  пиковый размер до рестарта. Повторный `:idle` процесс не усыпляет: полная сборка на каждый
-  опрос стоила бы больше, чем экономит. Работой считаются только прочитанные сообщения
-  (`:processed` / `:filtered` / `:dlq`); старт подписки работой не считается. `:error` счёт не
-  меняет: `:idle` после ошибки усыпит процесс, только если до неё были прочитанные сообщения.
-  Цикл `run_once/1` считается так же.
-
-  Обработка сообщения идёт в span'е `"process <topic>"` (`kind: :consumer`),
-  родитель которого извлекается из заголовков сообщения (`Core.Otel.Messaging`):
-  трейс команды, записавшей событие в outbox, продолжается здесь, а не начинается
-  заново.
-
-  ## Опции старта
-
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
-  """
-
-  @behaviour Core.PubSub.Subscriber
-
-  use GenServer
-  use Core.Options
-
-  alias Core.Context
-  alias Core.Error
-  alias Core.Mq
-  alias Core.Mq.Message
-  alias Core.Otel
-  alias Core.PubSub
-  alias Core.PubSub.MqSubscriberReliable.Step
-  alias Core.Result
-  alias Core.Telemetry
-
-  require Logger
-  require Error
-
-  @attr_dlq_topic "core.pubsub.dlq_topic"
-  @attr_dlq_reason "core.pubsub.dlq_reason"
-
-  @init_label "Core.PubSub.MqSubscriberReliable.init/1"
-
-  @call_timeout 5_000
-  @fallback_poll_interval_ms 100
-  @worked ~w(processed filtered dlq)a
 
   defstruct [
     :reader_module,

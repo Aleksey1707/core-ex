@@ -1,20 +1,4 @@
 defmodule Core.Outbox.Test.Reactor do
-  @init_opts_schema [
-    subscribers: [
-      type: {:list, :keyword_list},
-      required: true,
-      doc: "Подписчики в форме `Core.Outbox.Test`; недопустимый подписчик — `ArgumentError` при старте."
-    ],
-    owner: [
-      type: :pid,
-      required: true,
-      doc:
-        "Владелец; `child_spec/1` по умолчанию берёт процесс, который строит спецификацию ребёнка: тест, " <>
-          "если он зовёт `start_supervised` сам; из `setup_all` или чужого процесса `owner:` MUST " <>
-          "передаваться явно."
-    ]
-  ]
-
   @moduledoc """
   Реактор дублёра доставки: `Core.Outbox.Test.drain/2` в фоне, раз в 10 мс.
 
@@ -31,11 +15,7 @@ defmodule Core.Outbox.Test.Reactor do
   нём. Исключение прохода останавливает опрос, и `settle/2` валит тест с его текстом. С выходом
   владельца реактор останавливается сам: sandbox теста ему больше не доступен.
 
-  ## Опции старта
-
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
   """
 
   use GenServer
@@ -70,7 +50,21 @@ defmodule Core.Outbox.Test.Reactor do
 
   def start_link(opts) when is_list(opts), do: GenServer.start_link(__MODULE__, opts)
 
-  @opts_schema @init_opts_schema
+  @opts_schema [
+    subscribers: [
+      type: {:list, :keyword_list},
+      required: true,
+      doc: "Подписчики в форме `Core.Outbox.Test`; недопустимый подписчик — `ArgumentError` при старте."
+    ],
+    owner: [
+      type: :pid,
+      required: true,
+      doc:
+        "Владелец; `child_spec/1` по умолчанию берёт процесс, который строит спецификацию ребёнка: тест, " <>
+          "если он зовёт `start_supervised` сам; из `setup_all` или чужого процесса `owner:` MUST " <>
+          "передаваться явно."
+    ]
+  ]
   @doc false
   @spec init(keyword()) :: {:ok, %{subscribers: [keyword()], owner: pid(), crash: String.t() | nil}}
 

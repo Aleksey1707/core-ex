@@ -77,9 +77,9 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   ## Опции
 
-  Опции дерева — раздел «Опции» у `start_link/1`; те же опции принимают `watch_list/1`,
-  `stream_readers/1` и `kafka_readers/1`. Неизвестная опция, отсутствие обязательной и значение не
-  той формы — `ArgumentError`.
+  Опции дерева — схема `@tree_opts_schema` над `start_link/1`; те же опции принимают
+  `watch_list/1`, `stream_readers/1` и `kafka_readers/1`. Неизвестная опция, отсутствие
+  обязательной и значение не той формы — `ArgumentError`.
 
   Опции писателя и читателя MUST содержать `name:` — атом; имена всех процессов дерева MUST
   различаться: имя — `id` ребёнка. Опции подписчика MUST содержать `name:`

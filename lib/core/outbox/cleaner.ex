@@ -1,4 +1,27 @@
 defmodule Core.Outbox.Cleaner do
+  @moduledoc """
+  Удаление `published` записей outbox старше TTL.
+
+  При сбое цикла (недоступная БД) интервал не сохраняется: следующая попытка идёт
+  через backoff от `retry_min_ms` с удвоением до `interval_ms` — иначе лежащая база
+  опрашивалась бы с полной частотой и заливала лог.
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  """
+
+  use GenServer
+  use Core.Options
+
+  alias Core.Context
+  alias Core.Error
+  alias Core.Exc
+  alias Core.Outbox
+  alias Core.Result
+  alias Core.Telemetry
+
+  require Logger
+  require Error
+
   @init_opts_schema [
     repo: [
       type: {:custom, Core.Options.Type, :module, []},
@@ -20,33 +43,6 @@ defmodule Core.Outbox.Cleaner do
     ],
     name: Core.Helper.StartOpts.name_option()
   ]
-
-  @moduledoc """
-  Удаление `published` записей outbox старше TTL.
-
-  При сбое цикла (недоступная БД) интервал не сохраняется: следующая попытка идёт
-  через backoff от `retry_min_ms` с удвоением до `interval_ms` — иначе лежащая база
-  опрашивалась бы с полной частотой и заливала лог.
-
-  ## Опции старта
-
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
-
-  #{Core.Options.docs(@init_opts_schema)}
-  """
-
-  use GenServer
-  use Core.Options
-
-  alias Core.Context
-  alias Core.Error
-  alias Core.Exc
-  alias Core.Outbox
-  alias Core.Result
-  alias Core.Telemetry
-
-  require Logger
-  require Error
 
   defstruct [:repo, :published_ttl, :interval_ms, :retry_min_ms, :retry_ms, :timer_ref, :context]
 
