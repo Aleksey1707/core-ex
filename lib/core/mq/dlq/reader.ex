@@ -1,4 +1,39 @@
 defmodule Core.Mq.Dlq.Reader do
+  @shutdown_ms 15_000
+
+  @init_opts_schema [
+    repo: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
+    ],
+    topic: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.Topic]},
+      type_doc: "`t:Core.Mq.Topic.t/0`",
+      required: true,
+      doc: "Исходный топик."
+    ],
+    subscriber_name: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.SubscriberName]},
+      type_doc: "`t:Core.Mq.SubscriberName.t/0`",
+      required: true,
+      doc: "Тот же, что у `Core.Mq.Dlq.Writer`."
+    ],
+    lease_ttl_ms: [type: :pos_integer, default: 60_000, doc: "На сколько `get` захватывает запись, мс."],
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :name, []},
+      type_doc: "`t:GenServer.name/0`",
+      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
+    ],
+    shutdown: [
+      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
+      type_doc: "`t:timeout/0` или `:brutal_kill`",
+      default: @shutdown_ms,
+      doc: "`shutdown` ребёнка супервизора в `child_spec/1`."
+    ]
+  ]
+
   @moduledoc """
   `Mq.ReaderReliable` из таблицы `mq_dlq` (`Core.Mq.Dlq`): отдаёт записи `requeued` одного
   топика одного подписчика по возрастанию `id`.
@@ -22,19 +57,19 @@ defmodule Core.Mq.Dlq.Reader do
   подписчик без `poll_interval_ms:` опрашивает этот читатель раз в 5 с
   (`default_poll_interval_ms/0`), а не раз в 100 мс, как читатели брокеров.
 
-  ## Опции
+  ## Опции старта
 
-  Обязательные: `repo:` (Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`), `topic:`
-  (`Mq.Topic` — исходный топик), `subscriber_name:` (`Mq.SubscriberName` — тот же, что у
-  `Core.Mq.Dlq.Writer`). Необязательные: `lease_ttl_ms:` (default 60 000), `name:`, `shutdown:`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.Mq.ReaderReliable
 
   use GenServer
+  use Core.Options
 
   alias Core.Error
-  alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Dlq.Store
   alias Core.Mq.Message
@@ -43,12 +78,8 @@ defmodule Core.Mq.Dlq.Reader do
   require Error
   require Logger
 
-  @label "Mq.Dlq.Reader"
-  @keys ~w(repo topic subscriber_name lease_ttl_ms name shutdown)a
-  @shutdown_ms 15_000
   # `get` и `commit` — запросы в базу: запас на таймаут запроса Ecto.
   @call_timeout 20_000
-  @lease_ttl_ms 60_000
   @poll_ms 100
   @default_poll_interval_ms 5_000
 
@@ -66,9 +97,9 @@ defmodule Core.Mq.Dlq.Reader do
 
   def child_spec(opts) when is_list(opts) do
     %{
-      id: StartOpts.name!(@label, opts, :name) || __MODULE__,
+      id: Keyword.get(opts, :name) || __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: StartOpts.shutdown!(@label, opts, :shutdown, @shutdown_ms)
+      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
     }
   end
 
@@ -102,22 +133,24 @@ defmodule Core.Mq.Dlq.Reader do
   @impl true
   def default_poll_interval_ms, do: @default_poll_interval_ms
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, %__MODULE__{}}
+
   @impl true
   def init(opts) do
     # Захват записи — внешний ресурс: без trap_exit штатная остановка супервизором не вызывает
     # terminate/2, и следующий читатель ждёт истечения захвата.
     Process.flag(:trap_exit, true)
-    StartOpts.keys!(@label, opts, @keys)
-    topic = StartOpts.prim!(@label, opts, :topic, Mq.Topic)
+    topic = Keyword.fetch!(opts, :topic)
 
     state = %__MODULE__{
-      repo: StartOpts.module!(@label, opts, :repo),
+      repo: Keyword.fetch!(opts, :repo),
       topic: topic,
       topic_name: Mq.Topic.value(topic),
-      subscriber: Mq.SubscriberName.value(StartOpts.prim!(@label, opts, :subscriber_name, Mq.SubscriberName)),
+      subscriber: Mq.SubscriberName.value(Keyword.fetch!(opts, :subscriber_name)),
       lease: Store.new_lease(),
-      lease_ttl_ms: StartOpts.pos_integer!(@label, opts, :lease_ttl_ms, @lease_ttl_ms)
+      lease_ttl_ms: Keyword.fetch!(opts, :lease_ttl_ms)
     }
 
     {:ok, state}

@@ -404,8 +404,15 @@ defmodule Core.Mq.Kafka.ReaderTest do
   test "мусор в опциях — ArgumentError на старте", %{client: client} do
     Process.flag(:trap_exit, true)
 
-    for opts <- [[initial_offset: :first], [prefetch_count: 0], [repo: "TestRepo"]] do
-      assert {:error, {%ArgumentError{}, _}} = Reader.start_link(reader_opts(client, opts))
+    for {opts, expected} <- [
+          {[initial_offset: :first], "invalid value for :initial_offset option"},
+          {[prefetch_count: 0], "invalid value for :prefetch_count option"},
+          {[repo: "TestRepo"], "invalid value for :repo option"},
+          {[client: nil], "invalid value for :client option: ожидается атом, получено nil"},
+          {[lease_ttl: 1_000], "unknown options [:lease_ttl]"}
+        ] do
+      assert {:error, {%ArgumentError{message: message}, _}} = Reader.start_link(reader_opts(client, opts))
+      assert message =~ "Core.Mq.Kafka.Reader.init/1: #{expected}"
     end
   end
 

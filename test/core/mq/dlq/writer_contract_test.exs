@@ -3,6 +3,8 @@ defmodule Core.Mq.Dlq.WriterContractTest do
   use Core.DataCase, async: false
   use Core.MqWriterContract, impl: Core.Mq.Dlq.Writer
 
+  import ExUnit.CaptureLog
+
   alias Core.Mq
 
   # Отказ записи с заданного индекса — триггер на подписчика `contract-fail-<индекс>`: DDL живёт
@@ -25,6 +27,22 @@ defmodule Core.Mq.Dlq.WriterContractTest do
     )
 
     :ok
+  end
+
+  test "неверные опции — ArgumentError на старте с именем опции" do
+    Process.flag(:trap_exit, true)
+    opts = [repo: TestRepo, subscriber_name: Mq.SubscriberName.new!("contract-opts")]
+
+    for {opts, expected} <- [
+          {Keyword.put(opts, :shutdown, 5_000), "unknown options [:shutdown]"},
+          {Keyword.delete(opts, :subscriber_name), "required :subscriber_name option not found"},
+          {Keyword.put(opts, :repo, nil), "invalid value for :repo option: ожидается модуль, получено nil"}
+        ] do
+      assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
+               with_log(fn -> Mq.Dlq.Writer.start_link(opts) end)
+
+      assert message =~ "Core.Mq.Dlq.Writer.init/1: #{expected}"
+    end
   end
 
   # ---

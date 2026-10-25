@@ -328,7 +328,12 @@ defmodule Core.Mq.Stream.WriterTest do
       assert {:error, {%ArgumentError{message: message}, _stack}} =
                Stream.Writer.start_link(connection: FakeConn, reference_prefix: 42)
 
-      assert message =~ ":reference_prefix"
+      assert message =~ "Core.Mq.Stream.Writer.init/1: invalid value for :reference_prefix option"
+
+      assert {:error, {%ArgumentError{message: message}, _stack}} =
+               Stream.Writer.start_link(connection: FakeConn, reference_prefix: "")
+
+      assert message =~ ~s(invalid value for :reference_prefix option: ожидается непустая строка, получено "")
 
       assert {:error, {%ArgumentError{}, _stack}} =
                Stream.Writer.start_link(
@@ -336,6 +341,11 @@ defmodule Core.Mq.Stream.WriterTest do
                  reference_prefix: "test-writer",
                  confirm_timeout_ms: 0
                )
+
+      assert {:error, {%ArgumentError{message: message}, _stack}} =
+               Stream.Writer.start_link(connection: FakeConn, reference_prefix: "test-writer", max_producer: 8)
+
+      assert message =~ "Core.Mq.Stream.Writer.init/1: unknown options [:max_producer]"
     end)
   end
 

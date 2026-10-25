@@ -319,7 +319,24 @@ defmodule Core.Mq.Stream.ReaderTest do
                  initial_offset: :bogus
                )
 
-      assert message =~ ":initial_offset"
+      assert message =~ "Core.Mq.Stream.Reader.init/1: "
+      assert message =~ "invalid value for :initial_offset option"
+    end)
+  end
+
+  test "опечатка в опции — ArgumentError на старте с её именем", %{topic: topic} do
+    Process.flag(:trap_exit, true)
+
+    capture_log(fn ->
+      assert {:error, {%ArgumentError{message: message}, _stack}} =
+               Stream.Reader.start_link(
+                 connection: FakeConn,
+                 topic: topic,
+                 subscriber_name: Mq.SubscriberName.new!("sub"),
+                 retry_max: 5_000
+               )
+
+      assert message =~ "Core.Mq.Stream.Reader.init/1: unknown options [:retry_max]"
     end)
   end
 

@@ -1,4 +1,24 @@
 defmodule Core.Mq.Dlq.Writer do
+  @init_opts_schema [
+    repo: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
+    ],
+    subscriber_name: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.SubscriberName]},
+      type_doc: "`t:Core.Mq.SubscriberName.t/0`",
+      required: true,
+      doc: "Чей это DLQ: читатель перечитывания берёт записи по нему."
+    ],
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :name, []},
+      type_doc: "`t:GenServer.name/0`",
+      doc: "Имя процесса — handle writer'а."
+    ]
+  ]
+
   @moduledoc """
   `Mq.Writer` в таблицу `mq_dlq` (`Core.Mq.Dlq`): подключается `dlq_writer:` подписчика
   `Core.PubSub.MqSubscriberReliable`.
@@ -11,19 +31,19 @@ defmodule Core.Mq.Dlq.Writer do
   Handle — процесс writer'а (`name:`), как у `Mq.Stream.Writer`: он держит репозиторий и
   `subscriber_name`. Сбой Postgres — `{:error, %Error{code: :dlq_write_failed}}`.
 
-  ## Опции
+  ## Опции старта
 
-  Обязательные: `repo:` (Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`),
-  `subscriber_name:` (`Mq.SubscriberName` — чей это DLQ: читатель перечитывания берёт записи
-  по нему). Необязательные: `name:`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.Mq.Writer
 
   use GenServer
+  use Core.Options
 
   alias Core.Error
-  alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Dlq.Store
   alias Core.Mq.Message
@@ -31,8 +51,6 @@ defmodule Core.Mq.Dlq.Writer do
 
   require Error
 
-  @label "Mq.Dlq.Writer"
-  @keys ~w(repo subscriber_name name)a
   # Запись — запрос в базу: запас на таймаут запроса Ecto.
   @call_timeout 20_000
 
@@ -72,14 +90,15 @@ defmodule Core.Mq.Dlq.Writer do
     GenServer.call(server, {:put_many, messages}, @call_timeout)
   end
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, %__MODULE__{}}
+
   @impl true
   def init(opts) do
-    StartOpts.keys!(@label, opts, @keys)
-
     state = %__MODULE__{
-      repo: StartOpts.module!(@label, opts, :repo),
-      subscriber: Mq.SubscriberName.value(StartOpts.prim!(@label, opts, :subscriber_name, Mq.SubscriberName))
+      repo: Keyword.fetch!(opts, :repo),
+      subscriber: Mq.SubscriberName.value(Keyword.fetch!(opts, :subscriber_name))
     }
 
     {:ok, state}

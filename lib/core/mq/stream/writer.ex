@@ -1,4 +1,35 @@
 defmodule Core.Mq.Stream.Writer do
+  @shutdown_ms 30_000
+
+  @init_opts_schema [
+    connection: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
+    ],
+    reference_prefix: [
+      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type_doc: "`t:String.t/0`",
+      required: true,
+      doc: "Уникальный префикс producer reference, непустой."
+    ],
+    confirm_timeout_ms: [type: :pos_integer, default: 5_000, doc: "Дедлайн подтверждения пачки, мс."],
+    confirm_poll_ms: [type: :pos_integer, default: 20, doc: "Интервал сверки `producer_sequence`, мс."],
+    max_producers: [type: :pos_integer, default: 256, doc: "Потолок кеша producers."],
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :name, []},
+      type_doc: "`t:GenServer.name/0`",
+      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
+    ],
+    shutdown: [
+      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
+      type_doc: "`t:timeout/0` или `:brutal_kill`",
+      default: @shutdown_ms,
+      doc: "`shutdown` ребёнка супервизора в `child_spec/1`."
+    ]
+  ]
+
   @moduledoc """
   `Mq.Writer` для RabbitMQ Stream: create_stream + declare_producer на topic.
 
@@ -23,17 +54,19 @@ defmodule Core.Mq.Stream.Writer do
   пачки, а не по ходу: внутри неё кеш только растёт, иначе вытеснение сняло бы producer
   топика, который эта же пачка ещё подтверждает.
 
-  Обязательные opts: `:connection` (модуль `use RabbitMQStream.Connection`),
-  `:reference_prefix` (уникальный префикс producer reference). Опциональные:
-  `:confirm_timeout_ms`, `:confirm_poll_ms`, `:max_producers`, `:name`, `:shutdown`.
+  ## Опции старта
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.Mq.Writer
 
   use GenServer
+  use Core.Options
 
   alias Core.Error
-  alias Core.Helper.StartOpts
   alias Core.Helper.Transact
   alias Core.Mq
   alias Core.Mq.Message
@@ -43,12 +76,6 @@ defmodule Core.Mq.Stream.Writer do
 
   require Error
   require Logger
-
-  @shutdown_ms 30_000
-  @confirm_timeout_ms 5_000
-  @confirm_poll_ms 20
-  @max_producers 256
-  @label "Mq.Stream.Writer"
 
   defstruct [
     :connection,
@@ -107,7 +134,10 @@ defmodule Core.Mq.Stream.Writer do
     GenServer.call(server, {:put_many, messages}, :infinity)
   end
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, %__MODULE__{}}
+
   @impl true
   def init(opts) do
     # Producer'ы объявлены в брокере — внешний ресурс: без trap_exit штатная
@@ -157,12 +187,12 @@ defmodule Core.Mq.Stream.Writer do
 
   defp build_state(opts) do
     %__MODULE__{
-      connection: StartOpts.module!(@label, opts, :connection),
-      reference_prefix: StartOpts.binary!(@label, opts, :reference_prefix),
+      connection: Keyword.fetch!(opts, :connection),
+      reference_prefix: Keyword.fetch!(opts, :reference_prefix),
       conn_ref: nil,
-      confirm_timeout_ms: StartOpts.pos_integer!(@label, opts, :confirm_timeout_ms, @confirm_timeout_ms),
-      confirm_poll_ms: StartOpts.pos_integer!(@label, opts, :confirm_poll_ms, @confirm_poll_ms),
-      max_producers: StartOpts.pos_integer!(@label, opts, :max_producers, @max_producers),
+      confirm_timeout_ms: Keyword.fetch!(opts, :confirm_timeout_ms),
+      confirm_poll_ms: Keyword.fetch!(opts, :confirm_poll_ms),
+      max_producers: Keyword.fetch!(opts, :max_producers),
       producers: %{},
       usage_tick: 0
     }

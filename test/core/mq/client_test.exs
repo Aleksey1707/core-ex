@@ -32,8 +32,12 @@ defmodule Core.Mq.ClientTest do
   end
 
   test "опечатка в собственных опциях названа по имени" do
-    assert_raise ArgumentError, ~r/нет обязательной опции :dep/, fn ->
+    assert_raise ArgumentError, ~r/^Core.Mq.Client.ensure_available!\/1: required :dep option not found/, fn ->
       Mq.Client.ensure_available!(Keyword.delete(@opts, :dep))
+    end
+
+    assert_raise ArgumentError, ~r/^Core.Mq.Client.ensure_available!\/1: unknown options \[:requirment\]/, fn ->
+      Mq.Client.ensure_available!(Keyword.put(@opts, :requirment, "~> 0.4"))
     end
   end
 end

@@ -3,6 +3,57 @@
 # просто нет — вместо ошибки компиляции библиотеки вызов даст UndefinedFunctionError.
 if Code.ensure_loaded?(:brod) do
   defmodule Core.Mq.Kafka.Reader do
+    @shutdown_ms 15_000
+
+    @init_opts_schema [
+      client: [
+        type: {:custom, Core.Helper.StartOpts, :atom, []},
+        type_doc: "`t:atom/0`",
+        required: true,
+        doc: "Id клиента `:brod`, как handle `Core.Mq.Kafka.Writer`."
+      ],
+      topic: [
+        type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.Topic]},
+        type_doc: "`t:Core.Mq.Topic.t/0`",
+        required: true,
+        doc: "Топик, который читает читатель."
+      ],
+      subscriber_name: [
+        type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.SubscriberName]},
+        type_doc: "`t:Core.Mq.SubscriberName.t/0`",
+        required: true,
+        doc: "Имя подписчика — ключ смещений и аренды."
+      ],
+      repo: [
+        type: {:custom, Core.Helper.StartOpts, :module, []},
+        type_doc: "`t:module/0`",
+        required: true,
+        doc: "Ecto-репозиторий с таблицами `Core.Mq.Kafka.Migration`."
+      ],
+      initial_offset: [
+        type: {:in, ~w(earliest latest)a},
+        type_doc: "`:earliest` или `:latest`",
+        default: :earliest,
+        doc: "Стартовая позиция партиции без сохранённого смещения."
+      ],
+      prefetch_count: [type: :pos_integer, default: 10, doc: "Потолок неподтверждённых сообщений партиции."],
+      lease_ttl_ms: [type: :pos_integer, default: 30_000, doc: "Срок аренды топика, мс."],
+      partitions_interval_ms: [type: :pos_integer, default: 60_000, doc: "Интервал перечитывания числа партиций, мс."],
+      retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
+      retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
+      name: [
+        type: {:custom, Core.Helper.StartOpts, :name, []},
+        type_doc: "`t:GenServer.name/0`",
+        doc: "Имя процесса; оно же `:id` в `child_spec/1`."
+      ],
+      shutdown: [
+        type: {:custom, Core.Helper.StartOpts, :shutdown, []},
+        type_doc: "`t:timeout/0` или `:brutal_kill`",
+        default: @shutdown_ms,
+        doc: "`shutdown` ребёнка супервизора в `child_spec/1`."
+      ]
+    ]
+
     @moduledoc """
     `Mq.ReaderReliable` для Kafka через клиент `:brod`, без consumer group (ADR-0033).
 
@@ -45,14 +96,11 @@ if Code.ensure_loaded?(:brod) do
       `:brod` заводит при старте топика, поэтому выросший топик перезапускается целиком
       (`:brod_client.stop_consumer/2`), и чтение всех партиций продолжается с зафиксированных смещений.
 
-    ## Опции
+    ## Опции старта
 
-    Обязательные: `client:` (id клиента `:brod`, как handle `Kafka.Writer`), `topic:`
-    (`Mq.Topic`), `subscriber_name:` (`Mq.SubscriberName`), `repo:` (Ecto-репозиторий с
-    таблицами `Core.Mq.Kafka.Migration`). Необязательные: `initial_offset:` (`:earliest` |
-    `:latest`), `prefetch_count:` (default 10), `lease_ttl_ms:` (default 30 000),
-    `partitions_interval_ms:` (default 60 000), `retry_min_ms:`, `retry_max_ms:`, `name:`,
-    `shutdown:`.
+    Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+    #{Core.Options.docs(@init_opts_schema)}
 
     Консьюмер партиции у `:brod` принимает одного подписчика: читатели одного топика с разными
     `subscriber_name` требуют разных клиентов.
@@ -85,9 +133,9 @@ if Code.ensure_loaded?(:brod) do
     @behaviour Core.Mq.ReaderReliable
 
     use GenServer
+    use Core.Options
 
     alias Core.Error
-    alias Core.Helper.StartOpts
     alias Core.Mq
     alias Core.Mq.Kafka.Reader.Store
     alias Core.Mq.Message
@@ -106,16 +154,8 @@ if Code.ensure_loaded?(:brod) do
     Record.defrecordp(:kafka_message_set, Record.extract(:kafka_message_set, from_lib: "brod/include/brod.hrl"))
     Record.defrecordp(:kafka_fetch_error, Record.extract(:kafka_fetch_error, from_lib: "brod/include/brod.hrl"))
 
-    @label "Mq.Kafka.Reader"
-    @shutdown_ms 15_000
     # `commit` и пропуск нечитаемой записи в `get` пишут в базу: запас на таймаут запроса Ecto.
     @call_timeout 20_000
-    @prefetch_count 10
-    @lease_ttl_ms 30_000
-    @partitions_interval_ms 60_000
-    @retry_min_ms 1_000
-    @retry_max_ms 30_000
-    @initial_offsets ~w(earliest latest)a
     @read_error_reasons ~w(subscribe consumer_down lease)a
     @commit_error_reasons ~w(lease_lost failed)a
 
@@ -163,9 +203,9 @@ if Code.ensure_loaded?(:brod) do
 
     def child_spec(opts) when is_list(opts) do
       %{
-        id: StartOpts.name!(@label, opts, :name) || __MODULE__,
+        id: Keyword.get(opts, :name) || __MODULE__,
         start: {__MODULE__, :start_link, [opts]},
-        shutdown: StartOpts.shutdown!(@label, opts, :shutdown, @shutdown_ms)
+        shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
       }
     end
 
@@ -214,7 +254,10 @@ if Code.ensure_loaded?(:brod) do
 
     def info(server), do: GenServer.call(server, :info, @call_timeout)
 
+    @opts_schema @init_opts_schema
     @doc false
+    @spec init(keyword()) :: {:ok, %__MODULE__{}, {:continue, :lease}}
+
     @impl true
     def init(opts) do
       # Подписки и аренда — внешние ресурсы: без trap_exit штатная остановка супервизором не
@@ -323,21 +366,21 @@ if Code.ensure_loaded?(:brod) do
     # ---
 
     defp build_state(opts) do
-      retry_min_ms = StartOpts.pos_integer!(@label, opts, :retry_min_ms, @retry_min_ms)
-      topic = StartOpts.prim!(@label, opts, :topic, Mq.Topic)
+      retry_min_ms = Keyword.fetch!(opts, :retry_min_ms)
+      topic = Keyword.fetch!(opts, :topic)
 
       %__MODULE__{
-        client: StartOpts.atom!(@label, opts, :client),
+        client: Keyword.fetch!(opts, :client),
         topic: topic,
         topic_name: Mq.Topic.value(topic),
-        subscriber: Mq.SubscriberName.value(StartOpts.prim!(@label, opts, :subscriber_name, Mq.SubscriberName)),
-        repo: StartOpts.module!(@label, opts, :repo),
-        initial_offset: StartOpts.one_of!(@label, opts, :initial_offset, @initial_offsets, :earliest),
-        prefetch_count: StartOpts.pos_integer!(@label, opts, :prefetch_count, @prefetch_count),
-        lease_ttl_ms: StartOpts.pos_integer!(@label, opts, :lease_ttl_ms, @lease_ttl_ms),
-        partitions_interval_ms: StartOpts.pos_integer!(@label, opts, :partitions_interval_ms, @partitions_interval_ms),
+        subscriber: Mq.SubscriberName.value(Keyword.fetch!(opts, :subscriber_name)),
+        repo: Keyword.fetch!(opts, :repo),
+        initial_offset: Keyword.fetch!(opts, :initial_offset),
+        prefetch_count: Keyword.fetch!(opts, :prefetch_count),
+        lease_ttl_ms: Keyword.fetch!(opts, :lease_ttl_ms),
+        partitions_interval_ms: Keyword.fetch!(opts, :partitions_interval_ms),
         retry_min_ms: retry_min_ms,
-        retry_max_ms: StartOpts.pos_integer!(@label, opts, :retry_max_ms, @retry_max_ms),
+        retry_max_ms: Keyword.fetch!(opts, :retry_max_ms),
         retry_ms: retry_min_ms
       }
     end

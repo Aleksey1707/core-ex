@@ -3,6 +3,50 @@
 # просто нет — вместо ошибки компиляции библиотеки вызов даст UndefinedFunctionError.
 if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
   defmodule Core.Mq.Stream.Reader do
+    @shutdown_ms 15_000
+
+    @init_opts_schema [
+      connection: [
+        type: {:custom, Core.Helper.StartOpts, :module, []},
+        type_doc: "`t:module/0`",
+        required: true,
+        doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
+      ],
+      topic: [
+        type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.Topic]},
+        type_doc: "`t:Core.Mq.Topic.t/0`",
+        required: true,
+        doc: "Stream, который читает reader."
+      ],
+      subscriber_name: [
+        type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.SubscriberName]},
+        type_doc: "`t:Core.Mq.SubscriberName.t/0`",
+        required: true,
+        doc: "Имя подписчика — `offset_reference` курсора."
+      ],
+      reliable?: [type: :boolean, default: true, doc: "Сохранять курсор; при `false` `commit` недоступен."],
+      credit: [type: :pos_integer, default: 2, doc: "Начальный credit — число in-flight чанков."],
+      initial_offset: [
+        type: {:or, [{:in, ~w(stored first next last)a}, {:tuple, [{:in, [:offset]}, :non_neg_integer]}]},
+        type_doc: "`:stored`, `:first`, `:next`, `:last` или `{:offset, non_neg_integer()}`",
+        default: :stored,
+        doc: "Откуда читать stream: `:stored` — с сохранённого offset, без него — с начала."
+      ],
+      retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
+      retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
+      name: [
+        type: {:custom, Core.Helper.StartOpts, :name, []},
+        type_doc: "`t:GenServer.name/0`",
+        doc: "Имя процесса; оно же `:id` в `child_spec/1`."
+      ],
+      shutdown: [
+        type: {:custom, Core.Helper.StartOpts, :shutdown, []},
+        type_doc: "`t:timeout/0` или `:brutal_kill`",
+        default: @shutdown_ms,
+        doc: "`shutdown` ребёнка супервизора в `child_spec/1`."
+      ]
+    ]
+
     @moduledoc """
     `Mq.ReaderReliable` для RabbitMQ Stream.
 
@@ -27,22 +71,23 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     по `warning` самого reader'а (их частота ограничена backoff'ом) и по `subscribed?`
     в `info/1` (уходит в метрику).
 
-    Обязательные opts: `:connection`, `:topic`, `:subscriber_name`. Опциональные:
-    `:reliable?` (default `true`), `:credit`, `:initial_offset`, `:retry_min_ms`,
-    `:retry_max_ms`, `:name`, `:shutdown`. При `reliable?: false` cursor не сохраняется
-    (`commit` недоступен).
-
     `initial_offset: :stored` (default) без сохранённого offset читает stream с начала
     (`:first`): новый подписчик на живом топике получит всю его историю. Нужен другой
     старт — задать `:next` или `:last` явно.
+
+    ## Опции старта
+
+    Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+    #{Core.Options.docs(@init_opts_schema)}
     """
 
     @behaviour Core.Mq.ReaderReliable
 
     use GenServer
+    use Core.Options
 
     alias Core.Error
-    alias Core.Helper.StartOpts
     alias Core.Mq
     alias Core.Mq.Message
     alias Core.Mq.Stream.Buffer
@@ -55,12 +100,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     require Error
     require Logger
 
-    @shutdown_ms 15_000
     @call_timeout 5_000
-    @retry_min_ms 1_000
-    @retry_max_ms 30_000
-    @initial_offsets ~w(stored first next last)a
-    @label "Mq.Stream.Reader"
 
     defstruct [
       :connection,
@@ -162,7 +202,10 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       GenServer.call(server, :info, @call_timeout)
     end
 
+    @opts_schema @init_opts_schema
     @doc false
+    @spec init(keyword()) :: {:ok, %__MODULE__{}, {:continue, :subscribe}}
+
     @impl true
     def init(opts) do
       # Подписка в брокере — внешний ресурс: без trap_exit штатная остановка
@@ -309,47 +352,26 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     # ---
 
     defp build_state(opts) do
-      retry_min_ms = StartOpts.pos_integer!(@label, opts, :retry_min_ms, @retry_min_ms)
-      topic = StartOpts.prim!(@label, opts, :topic, Mq.Topic)
-      subscriber_name = StartOpts.prim!(@label, opts, :subscriber_name, Mq.SubscriberName)
+      retry_min_ms = Keyword.fetch!(opts, :retry_min_ms)
+      topic = Keyword.fetch!(opts, :topic)
+      subscriber_name = Keyword.fetch!(opts, :subscriber_name)
 
       %__MODULE__{
-        connection: StartOpts.module!(@label, opts, :connection),
+        connection: Keyword.fetch!(opts, :connection),
         topic: topic,
         topic_name: Mq.Topic.value(topic),
         subscriber_name: subscriber_name,
         subscriber: Mq.SubscriberName.value(subscriber_name),
         subscription_id: nil,
         conn_ref: nil,
-        reliable?: StartOpts.boolean!(@label, opts, :reliable?, true),
-        credit: StartOpts.pos_integer!(@label, opts, :credit, 2),
-        initial_offset: initial_offset!(opts),
+        reliable?: Keyword.fetch!(opts, :reliable?),
+        credit: Keyword.fetch!(opts, :credit),
+        initial_offset: Keyword.fetch!(opts, :initial_offset),
         retry_min_ms: retry_min_ms,
-        retry_max_ms: StartOpts.pos_integer!(@label, opts, :retry_max_ms, @retry_max_ms),
+        retry_max_ms: Keyword.fetch!(opts, :retry_max_ms),
         retry_ms: retry_min_ms,
         buffer: Buffer.new()
       }
-    end
-
-    # `{:offset, n}` не перечислить множеством, поэтому клоза, а не `StartOpts.one_of!/5`:
-    # без проверки такой offset доходит до `resolve_offset/4` и роняет `handle_continue/2`
-    # `FunctionClauseError` — процесс не стартует ни с одной попытки.
-    defp initial_offset!(opts) do
-      case Keyword.get(opts, :initial_offset, :stored) do
-        {:offset, n} = offset when is_integer(n) and n >= 0 ->
-          offset
-
-        named when named in @initial_offsets ->
-          named
-
-        other ->
-          StartOpts.raise_invalid!(
-            @label,
-            :initial_offset,
-            "одно из #{inspect(@initial_offsets)} или {:offset, n}",
-            other
-          )
-      end
     end
 
     defp subscribe(%__MODULE__{} = state) do

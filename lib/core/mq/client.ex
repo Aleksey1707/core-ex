@@ -9,26 +9,54 @@ defmodule Core.Mq.Client do
   старте, а не `UndefinedFunctionError` на первом вызове.
   """
 
-  alias Core.Helper.StartOpts
-
-  @label "Core.Mq.Client"
+  use Core.Options
 
   @doc """
   Проверить пару «клиент → адаптер».
 
-  Опции: `:label` (имя проверяющего модуля для текста), `:client` (модуль клиента),
-  `:adapter` (модуль адаптера), `:dep` (atom зависимости), `:requirement` (её версия).
   Различает два случая: клиента нет в сборке вовсе, и клиент есть, но библиотека была
   собрана без него и не пересобрана.
   """
+  @opts_schema [
+    label: [
+      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type_doc: "`t:String.t/0`",
+      required: true,
+      doc: "Имя проверяющего модуля для текста ошибки."
+    ],
+    client: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль клиента."
+    ],
+    adapter: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль адаптера."
+    ],
+    dep: [
+      type: {:custom, Core.Helper.StartOpts, :atom, []},
+      type_doc: "`t:atom/0`",
+      required: true,
+      doc: "Имя зависимости клиента."
+    ],
+    requirement: [
+      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type_doc: "`t:String.t/0`",
+      required: true,
+      doc: "Требование к версии зависимости."
+    ]
+  ]
   @spec ensure_available!(keyword()) :: :ok
 
   def ensure_available!(opts) when is_list(opts) do
-    label = StartOpts.binary!(@label, opts, :label)
-    dep = StartOpts.atom!(@label, opts, :dep)
-    client = StartOpts.module!(@label, opts, :client)
-    adapter = StartOpts.module!(@label, opts, :adapter)
-    requirement = StartOpts.binary!(@label, opts, :requirement)
+    label = Keyword.fetch!(opts, :label)
+    dep = Keyword.fetch!(opts, :dep)
+    client = Keyword.fetch!(opts, :client)
+    adapter = Keyword.fetch!(opts, :adapter)
+    requirement = Keyword.fetch!(opts, :requirement)
 
     cond do
       not Code.ensure_loaded?(client) ->

@@ -60,6 +60,23 @@ defmodule Core.Mq.Dlq.ReaderTest do
              Store.claim(TestRepo, Mq.SubscriberName.value(subscriber), "orders", Store.new_lease(), 1_000)
   end
 
+  test "неверные опции — ArgumentError на старте с именем опции", %{subscriber: subscriber} do
+    Process.flag(:trap_exit, true)
+    opts = [repo: TestRepo, topic: @topic, subscriber_name: subscriber]
+
+    for {opts, expected} <- [
+          {Keyword.put(opts, :lease_ttl, 1_000), "unknown options [:lease_ttl]"},
+          {Keyword.delete(opts, :repo), "required :repo option not found"},
+          {Keyword.put(opts, :topic, "orders"), "invalid value for :topic option: ожидается %Core.Mq.Topic{}"},
+          {Keyword.put(opts, :lease_ttl_ms, 0), "invalid value for :lease_ttl_ms option"}
+        ] do
+      assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
+               with_log(fn -> Dlq.Reader.start_link(opts) end)
+
+      assert message =~ "Core.Mq.Dlq.Reader.init/1: #{expected}"
+    end
+  end
+
   # ---
 
   defp insert!(subscriber, body) do
