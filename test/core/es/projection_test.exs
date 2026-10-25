@@ -990,7 +990,7 @@ defmodule Core.Es.ProjectionTest do
       _spans = OtelFixture.drain()
 
       write!(@account_repo, account, [freeze()])
-      Otel.span("usecase", [], fn -> assert :processed = Es.Projection.run_once(@projection) end)
+      Otel.span("usecase", fn -> assert :processed = Es.Projection.run_once(@projection) end)
 
       spans = OtelFixture.drain()
       project = OtelFixture.find(spans, "project es_fixture")

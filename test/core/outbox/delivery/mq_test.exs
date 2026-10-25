@@ -153,7 +153,7 @@ defmodule Core.Outbox.Delivery.MqTest do
 
   describe "трассировка" do
     test "заголовки сообщения несут контекст create-span'а с родителем из записи" do
-      command_headers = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "created"}) end)
+      command_headers = Otel.span("cmd", fn -> Otel.inject(%{"name" => "created"}) end)
       {:ok, agent} = Agent.start_link(fn -> [] end)
       delivery = Delivery.Mq.new(RecordingWriter, agent)
 

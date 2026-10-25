@@ -61,7 +61,7 @@ defmodule Core.Otel.Es do
       @attr_projection_version => version
     }
 
-    Otel.root_span("project #{projection_name}", [attributes: attributes], fun)
+    Otel.root_span("project #{projection_name}", fun, attributes: attributes)
   end
 
   @doc """
@@ -131,7 +131,7 @@ defmodule Core.Otel.Es do
         version
       )
 
-    Otel.span("await #{projection_name}", [attributes: attributes], fn -> recorded(fun.()) end)
+    Otel.span("await #{projection_name}", fn -> recorded(fun.()) end, attributes: attributes)
   end
 
   # ---
@@ -166,7 +166,7 @@ defmodule Core.Otel.Es do
       @attr_command => inspect(command)
     }
 
-    Otel.span("execute #{type}", [attributes: attributes], fn -> app_recorded(fun.()) end)
+    Otel.span("execute #{type}", fn -> app_recorded(fun.()) end, attributes: attributes)
   end
 
   @doc "Отметить исполнение команды: режим и число повторов после отказа записи."

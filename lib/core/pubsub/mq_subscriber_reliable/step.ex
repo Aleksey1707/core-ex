@@ -133,11 +133,13 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   # а не начинает свой. Номер попытки — собственный атрибут подписчика: в semconv
   # его нет, а в пространство `messaging.*` чужие имена класть нельзя.
   defp process(step, raw, attempt, fun) do
-    opts = [attributes: %{@attr_attempt => attempt}]
-
-    Otel.Messaging.process(raw.headers, step.topic, message_id(raw), opts, fn ->
-      decode(step, raw, fun)
-    end)
+    Otel.Messaging.process(
+      raw.headers,
+      step.topic,
+      message_id(raw),
+      fn -> decode(step, raw, fun) end,
+      attributes: %{@attr_attempt => attempt}
+    )
   end
 
   # Ключ чужого топика — байты (ADR-0032): не-UTF-8 атрибутом span'а экспортёр не отдаст.

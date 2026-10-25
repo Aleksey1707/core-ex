@@ -48,20 +48,12 @@ defmodule Core.Otel.Messaging do
   @typedoc "Идентификатор сообщения в брокере; `nil` — сообщение без ключа."
   @type message_id :: String.t() | nil
 
-  @typedoc """
-  Опции операции.
-
-  - `system:` — `messaging.system` (`"rabbitmq"`, `"kafka"`); не задан — атрибут не ставится
-  - `operation_name:` — `messaging.operation.name`; по умолчанию совпадает с типом операции
-  - `attributes:` — собственные атрибуты вызывающего (вне пространства `messaging.*`)
-  - `scope:` — модуль instrumentation scope (см. `Core.Otel`)
-  """
-  @type opts :: [
-          system: String.t(),
-          operation_name: String.t(),
-          attributes: Otel.attributes(),
-          scope: module()
-        ]
+  @operation_opts_schema [
+    system: [type: :string, doc: "`messaging.system` (`\"rabbitmq\"`, `\"kafka\"`); не задан — атрибут не ставится."],
+    operation_name: [type: :string, doc: "`messaging.operation.name`; не задан — совпадает с типом операции."],
+    attributes: [type: {:map, :string, :any}, doc: "Собственные атрибуты вызывающего (вне `messaging.*`)."],
+    scope: [type: :atom, doc: "Модуль instrumentation scope (`Core.Otel`)."]
+  ]
 
   @doc """
   Отметить создание сообщения и записать контекст создания в carrier.
@@ -70,12 +62,7 @@ defmodule Core.Otel.Messaging do
   в запись outbox). Возвращает обновлённый carrier — его получает сообщение —
   и контекст create-span'а для `links:` у `send/5`.
   """
-  @opts_schema [
-    system: [type: :string, doc: "`messaging.system` (`\"rabbitmq\"`, `\"kafka\"`); не задан — атрибут не ставится."],
-    operation_name: [type: :string, doc: "`messaging.operation.name`; не задан — совпадает с типом операции."],
-    attributes: [type: {:map, :string, :any}, doc: "Собственные атрибуты вызывающего (вне `messaging.*`)."],
-    scope: [type: :atom, doc: "Модуль instrumentation scope (`Core.Otel`)."]
-  ]
+  @opts_schema @operation_opts_schema
   @spec create(Otel.carrier(), destination(), message_id(), keyword()) ::
           {Otel.carrier(), Otel.span_ctx() | :undefined}
 
@@ -87,9 +74,12 @@ defmodule Core.Otel.Messaging do
 
     span_opts = span_opts(opts, :producer, attributes)
 
-    Otel.with_span_from(carrier, name(@create, destination), span_opts, fn ->
-      {Otel.inject(carrier), Otel.current_span()}
-    end)
+    Otel.with_span_from(
+      carrier,
+      name(@create, destination),
+      fn -> {Otel.inject(carrier), Otel.current_span()} end,
+      span_opts
+    )
   end
 
   @doc """
@@ -98,10 +88,11 @@ defmodule Core.Otel.Messaging do
   `links` — контексты создания сообщений пачки (из `create/4`); `destination`
   задаётся, только когда у всей пачки он один.
   """
-  @spec send(destination(), pos_integer(), [Otel.span_ctx()], opts(), (-> result)) :: result
+  @opts_schema @operation_opts_schema
+  @spec send(destination(), pos_integer(), [Otel.span_ctx()], (-> result), keyword()) :: result
         when result: var
 
-  def send(destination, batch_count, links, opts, fun)
+  def send(destination, batch_count, links, fun, opts \\ [])
       when is_integer(batch_count) and batch_count > 0 and is_list(links) do
     attributes =
       opts
@@ -110,7 +101,7 @@ defmodule Core.Otel.Messaging do
 
     span_opts = [{:links, links} | span_opts(opts, :producer, attributes)]
 
-    Otel.span(name(@send, destination), span_opts, fun)
+    Otel.span(name(@send, destination), fun, span_opts)
   end
 
   @doc """
@@ -118,10 +109,11 @@ defmodule Core.Otel.Messaging do
 
   Родитель — creation context из заголовков сообщения.
   """
-  @spec process(Otel.carrier(), destination(), message_id(), opts(), (-> result)) :: result
+  @opts_schema @operation_opts_schema
+  @spec process(Otel.carrier(), destination(), message_id(), (-> result), keyword()) :: result
         when result: var
 
-  def process(carrier, destination, message_id, opts, fun) when is_map(carrier) do
+  def process(carrier, destination, message_id, fun, opts \\ []) when is_map(carrier) do
     attributes =
       opts
       |> attributes(@process, destination)
@@ -129,7 +121,7 @@ defmodule Core.Otel.Messaging do
 
     span_opts = span_opts(opts, :consumer, attributes)
 
-    Otel.with_span_from(carrier, name(@process, destination), span_opts, fun)
+    Otel.with_span_from(carrier, name(@process, destination), fun, span_opts)
   end
 
   # ---

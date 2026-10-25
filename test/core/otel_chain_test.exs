@@ -27,7 +27,7 @@ defmodule Core.OtelChainTest do
     writer = MqFake.Writer.new()
     delivery = Outbox.Delivery.Mq.new(MqFake.Writer, writer)
 
-    {:ok, record} = Otel.span("cmd", [], fn -> Fixture.from_event(EventFixture.created()) end)
+    {:ok, record} = Otel.span("cmd", fn -> Fixture.from_event(EventFixture.created()) end)
 
     assert :ok = Outbox.Delivery.Mq.publish_many(delivery, [record])
     assert [published] = MqFake.Writer.published(writer)

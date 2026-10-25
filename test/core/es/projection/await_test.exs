@@ -498,7 +498,7 @@ defmodule Core.Es.Projection.AwaitTest do
       write!(@account_repo, account, [open("Счёт")])
       _spans = OtelFixture.drain(0)
 
-      Otel.span("usecase", [], fn ->
+      Otel.span("usecase", fn ->
         assert :ok = @projection.await(Account, account, 1_000)
       end)
 

@@ -1039,7 +1039,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       :ok = Account.RacyRepo.Pg.race(id, 1)
       _spans = OtelFixture.drain(0)
 
-      Otel.span("usecase", [], fn ->
+      Otel.span("usecase", fn ->
         assert {:ok, _version} = Account.RacyProcess.execute(id, :current, rename("Отгрузка"), Context.new())
       end)
 
@@ -1088,11 +1088,11 @@ defmodule Core.Es.Aggregate.ProcessTest do
       test_pid = self()
       _spans = OtelFixture.drain(0)
 
-      Otel.span("usecase", [], fn ->
+      Otel.span("usecase", fn ->
         assert {:ok, _version} =
                  Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
                    send(test_pid, {:ran_in, self()})
-                   Otel.span("callback", [], fn -> :ok end)
+                   Otel.span("callback", fn -> :ok end)
                  end)
       end)
 

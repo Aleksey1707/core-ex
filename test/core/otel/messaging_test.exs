@@ -12,7 +12,7 @@ defmodule Core.Otel.MessagingTest do
 
   describe "create/4" do
     test "родитель — контекст из carrier, в carrier уходит контекст create-span'а" do
-      command_headers = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "created"}) end)
+      command_headers = Otel.span("cmd", fn -> Otel.inject(%{"name" => "created"}) end)
 
       {headers, _span_ctx} = Otel.Messaging.create(command_headers, "products", "agg-1")
 
@@ -65,7 +65,7 @@ defmodule Core.Otel.MessagingTest do
 
       creates = OtelFixture.drain()
 
-      assert :ok = Otel.Messaging.send("products", 2, [first, second], [], fn -> :ok end)
+      assert :ok = Otel.Messaging.send("products", 2, [first, second], fn -> :ok end)
 
       span = OtelFixture.drain() |> OtelFixture.find("send products")
 
@@ -77,12 +77,18 @@ defmodule Core.Otel.MessagingTest do
     end
 
     test "без общего назначения имя span'а — одна операция" do
-      Otel.Messaging.send(nil, 2, [], [operation_name: "publish"], fn -> :ok end)
+      Otel.Messaging.send(nil, 2, [], fn -> :ok end, operation_name: "publish")
 
       span = OtelFixture.drain() |> OtelFixture.find("send")
 
       assert span.attributes["messaging.operation.name"] == "publish"
       refute Map.has_key?(span.attributes, "messaging.destination.name")
+    end
+
+    test "неизвестный ключ опций — ArgumentError" do
+      assert_raise ArgumentError, ~r"^Core.Otel.Messaging.send/5: unknown options \[:kind\]", fn ->
+        Otel.Messaging.send(nil, 2, [], fn -> :ok end, kind: :client)
+      end
     end
   end
 
@@ -92,7 +98,7 @@ defmodule Core.Otel.MessagingTest do
       create = OtelFixture.drain() |> OtelFixture.find("create products")
 
       opts = [attributes: %{"core.pubsub.attempt" => 2}]
-      assert :ok = Otel.Messaging.process(headers, "products", "agg-1", opts, fn -> :ok end)
+      assert :ok = Otel.Messaging.process(headers, "products", "agg-1", fn -> :ok end, opts)
 
       span = OtelFixture.drain() |> OtelFixture.find("process products")
 

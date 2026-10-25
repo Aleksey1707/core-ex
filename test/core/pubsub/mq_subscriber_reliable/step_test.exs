@@ -193,7 +193,7 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
     end
 
     test "span обработки продолжает трейс из заголовков и несёт номер попытки" do
-      headers = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "product_created"}) end)
+      headers = Otel.span("cmd", fn -> Otel.inject(%{"name" => "product_created"}) end)
 
       assert :processed = Step.run(message(headers), step([]), 3)
 

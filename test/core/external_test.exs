@@ -60,7 +60,7 @@ defmodule Core.ExternalTest do
   end
 
   test "span вызова — дочерний span'у вызывающего" do
-    Core.Otel.span("usecase", [], fn ->
+    Core.Otel.span("usecase", fn ->
       External.call(:sms, :send, fn -> :ok end, outcome: fn :ok -> :ok end)
     end)
 

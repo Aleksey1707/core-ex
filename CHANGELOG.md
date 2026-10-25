@@ -58,6 +58,15 @@
     `limit_default: 20`.
   - `Core.Otel.Messaging.create/4` — `attributes:` с ключами-атомами — `ArgumentError`, раньше
     уходили в span: имена атрибутов — строки (`Core.Otel.attributes/0`).
+  - `Core.Otel.span/3`, `root_span/3`, `with_span_from/4`, `Core.Otel.Messaging.send/5`,
+    `process/5` — опции переехали после колбэка и стали необязательными (`…, fun, opts \\ []`,
+    `docs/rules/20-agreements.md`, «Context — последний из данных»): схема проверяет только
+    последний аргумент. Неизвестный ключ (у `span/3`, `root_span/3`, `with_span_from/4` — и `kind:`
+    вне видов span'а, `attributes:` с ключами-атомами) — `ArgumentError`, раньше уходил молча. Было:
+    `Core.Otel.span("charge", [kind: :client], fn -> … end)`, стало:
+    `Core.Otel.span("charge", fn -> … end, kind: :client)`; пустые опции не передаются:
+    `Core.Otel.span("charge", fn -> … end)`. В `bind` хвост после колбэка — маркер `_`:
+    `[] <- Core.Otel.span("charge", _, kind: :client)`.
   - `Core.External.call/4` — без `outcome:` по-прежнему `ArgumentError`, текст — NimbleOptions
     (`required :outcome option not found`).
   - `Core.Outbox.Supervisor.start_link/1`, `watch_list/1` — неизвестный ключ отклонялся и раньше;

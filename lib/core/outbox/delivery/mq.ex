@@ -123,8 +123,8 @@ defmodule Core.Outbox.Delivery.Mq do
       destination(messages),
       length(messages),
       links,
-      [operation_name: "publish"],
-      fn -> on_result.(put_many.()) end
+      fn -> on_result.(put_many.()) end,
+      operation_name: "publish"
     )
   end
 

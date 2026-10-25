@@ -6,7 +6,7 @@ defmodule Core.Otel.LogFilterTest do
   @event %{level: :info, meta: %{application: :core}, msg: {:string, "сообщение создано"}}
 
   test "внутри span'а в metadata появляются trace_id и span_id" do
-    event = Otel.span("cmd", [], fn -> Otel.LogFilter.filter(@event, []) end)
+    event = Otel.span("cmd", fn -> Otel.LogFilter.filter(@event, []) end)
 
     assert %{meta: %{trace_id: trace_id, span_id: span_id}} = event
     assert trace_id =~ ~r/^[0-9a-f]{32}$/
@@ -14,7 +14,7 @@ defmodule Core.Otel.LogFilterTest do
   end
 
   test "прочая metadata сохраняется" do
-    event = Otel.span("cmd", [], fn -> Otel.LogFilter.filter(@event, []) end)
+    event = Otel.span("cmd", fn -> Otel.LogFilter.filter(@event, []) end)
 
     assert event.meta.application == :core
     assert event.msg == @event.msg

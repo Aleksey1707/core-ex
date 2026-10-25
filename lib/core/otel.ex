@@ -29,6 +29,8 @@ defmodule Core.Otel do
 
   alias Core.Error
 
+  use Core.Options
+
   @attr_error_type "error.type"
   @attr_error_kind "core.error.kind"
 
@@ -44,20 +46,22 @@ defmodule Core.Otel do
   @typedoc "Контекст трейса процесса."
   @type ctx :: :otel_ctx.t()
 
-  @typedoc """
-  Опции старта span'а.
-
-  - `kind:` — `:internal` (по умолчанию), `:producer`, `:consumer`, `:client`, `:server`
-  - `attributes:` — карта атрибутов
-  - `links:` — контексты связанных span'ов (невалидные отбрасываются)
-  - `scope:` — модуль, по приложению которого выбирается tracer; по умолчанию `Core.Otel`
-  """
-  @type start_opts :: [
-          kind: :opentelemetry.span_kind(),
-          attributes: attributes(),
-          links: [span_ctx()],
-          scope: module()
-        ]
+  @span_opts_schema [
+    kind: [
+      type: {:in, ~w(internal producer consumer client server)a},
+      type_doc: "`t::opentelemetry.span_kind/0`",
+      default: :internal,
+      doc: "Вид span'а."
+    ],
+    attributes: [type: {:map, :string, :any}, default: %{}, doc: "Атрибуты span'а (`t:attributes/0`)."],
+    links: [
+      type: {:list, :any},
+      type_doc: "список `t:span_ctx/0`",
+      default: [],
+      doc: "Контексты связанных span'ов; невалидные отбрасываются."
+    ],
+    scope: [type: :atom, default: __MODULE__, doc: "Модуль, по приложению которого выбирается tracer."]
+  ]
 
   @doc """
   Записать в carrier контекст текущего трейса.
@@ -81,9 +85,10 @@ defmodule Core.Otel do
   end
 
   @doc "Выполнить `fun` в span'е внутри текущего контекста."
-  @spec span(String.t(), start_opts(), (-> result)) :: result when result: var
+  @opts_schema @span_opts_schema
+  @spec span(String.t(), (-> result), keyword()) :: result when result: var
 
-  def span(name, opts, fun) when is_binary(name) and is_list(opts) and is_function(fun, 0) do
+  def span(name, fun, opts \\ []) when is_binary(name) and is_function(fun, 0) and is_list(opts) do
     :otel_tracer.with_span(tracer(opts), name, start_opts(opts), fn _span -> fun.() end)
   end
 
@@ -91,12 +96,12 @@ defmodule Core.Otel do
   Выполнить `fun` в корневом span'е — без родителя, даже внутри span'а процесса.
 
   Нужен работе, которую не вызвал ни один трейс процесса: пачка несёт события разных команд.
-  Прежний контекст возвращается процессу по выходе.
+  Прежний контекст возвращается процессу по выходе. Опции — как у `span/3`, проверяет она.
   """
-  @spec root_span(String.t(), start_opts(), (-> result)) :: result when result: var
+  @spec root_span(String.t(), (-> result), keyword()) :: result when result: var
 
-  def root_span(name, opts, fun) when is_binary(name) and is_list(opts) and is_function(fun, 0),
-    do: with_ctx(:otel_ctx.new(), fn -> span(name, opts, fun) end)
+  def root_span(name, fun, opts \\ []) when is_binary(name) and is_function(fun, 0) and is_list(opts),
+    do: with_ctx(:otel_ctx.new(), fn -> span(name, fun, opts) end)
 
   @doc """
   Выполнить `fun` в span'е, родитель которого извлечён из carrier.
@@ -105,11 +110,12 @@ defmodule Core.Otel do
   поток чужих сообщений (подписчик), не имеет права унести контекст одного
   сообщения в обработку следующего.
   """
-  @spec with_span_from(carrier(), String.t(), start_opts(), (-> result)) :: result
+  @opts_schema @span_opts_schema
+  @spec with_span_from(carrier(), String.t(), (-> result), keyword()) :: result
         when result: var
 
-  def with_span_from(carrier, name, opts, fun)
-      when is_map(carrier) and is_binary(name) and is_list(opts) and is_function(fun, 0) do
+  def with_span_from(carrier, name, fun, opts \\ [])
+      when is_map(carrier) and is_binary(name) and is_function(fun, 0) and is_list(opts) do
     previous = :otel_ctx.get_current()
     parent = :otel_propagator_text_map.extract_to(previous, Map.to_list(carrier))
 
@@ -224,14 +230,14 @@ defmodule Core.Otel do
   defp exception_type(kind, _reason, _stacktrace), do: Atom.to_string(kind)
 
   defp tracer(opts) do
-    :opentelemetry.get_application_tracer(Keyword.get(opts, :scope, __MODULE__))
+    :opentelemetry.get_application_tracer(Keyword.fetch!(opts, :scope))
   end
 
   defp start_opts(opts) do
     %{
-      kind: Keyword.get(opts, :kind, :internal),
-      attributes: Keyword.get(opts, :attributes, %{}),
-      links: :opentelemetry.links(Keyword.get(opts, :links, []))
+      kind: Keyword.fetch!(opts, :kind),
+      attributes: Keyword.fetch!(opts, :attributes),
+      links: :opentelemetry.links(Keyword.fetch!(opts, :links))
     }
   end
 end

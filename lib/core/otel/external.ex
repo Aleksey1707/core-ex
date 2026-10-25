@@ -40,7 +40,7 @@ defmodule Core.Otel.External do
       @attr_peer_service => system
     }
 
-    Otel.span("#{system} #{operation}", [kind: :client, attributes: attributes], fun)
+    Otel.span("#{system} #{operation}", fun, kind: :client, attributes: attributes)
   end
 
   @doc "Отметить исход вызова; `timeout` и `down` — статус `:error`."

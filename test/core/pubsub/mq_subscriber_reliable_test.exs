@@ -840,7 +840,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
     end
 
     test "span обработки продолжает трейс из заголовков", %{topic: topic, context: context} do
-      headers = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "product_created"}) end)
+      headers = Otel.span("cmd", fn -> Otel.inject(%{"name" => "product_created"}) end)
       reader = MqFake.QueueReader.new([message(topic, "body", headers)])
 
       sub = start_sub(reader, topic, "sub-trace", fn _m, _d, _c -> :ok end)

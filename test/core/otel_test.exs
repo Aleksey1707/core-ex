@@ -15,7 +15,7 @@ defmodule Core.OtelTest do
 
   describe "inject/1" do
     test "добавляет traceparent внутри span'а" do
-      carrier = Otel.span("cmd", [], fn -> Otel.inject(%{"name" => "created"}) end)
+      carrier = Otel.span("cmd", fn -> Otel.inject(%{"name" => "created"}) end)
 
       assert %{"name" => "created", "traceparent" => traceparent} = carrier
       assert traceparent =~ ~r/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/
@@ -27,7 +27,7 @@ defmodule Core.OtelTest do
 
     test "снимает поля прежнего контекста" do
       stale = %{"name" => "created", "tracestate" => "vendor=stale", "baggage" => "k=v"}
-      carrier = Otel.span("cmd", [], fn -> Otel.inject(stale) end)
+      carrier = Otel.span("cmd", fn -> Otel.inject(stale) end)
 
       assert carrier["name"] == "created"
       refute Map.has_key?(carrier, "tracestate")
@@ -37,9 +37,9 @@ defmodule Core.OtelTest do
 
   describe "root_span/3" do
     test "без родителя внутри span'а процесса; прежний контекст возвращается" do
-      Otel.span("cmd", [], fn ->
+      Otel.span("cmd", fn ->
         outer = Otel.current_span()
-        Otel.root_span("пачка", [], fn -> :ok end)
+        Otel.root_span("пачка", fn -> :ok end)
 
         assert Otel.current_span() == outer
       end)
@@ -54,7 +54,7 @@ defmodule Core.OtelTest do
 
   describe "span/3" do
     test "kind и атрибуты уходят в span как есть" do
-      Otel.span("работа", [kind: :producer, attributes: %{"my.attr" => 3}], fn -> :ok end)
+      Otel.span("работа", fn -> :ok end, kind: :producer, attributes: %{"my.attr" => 3})
 
       span = OtelFixture.drain() |> OtelFixture.find("работа")
 
@@ -63,10 +63,10 @@ defmodule Core.OtelTest do
     end
 
     test "links ссылаются на переданные контексты, не делая их родителями" do
-      linked = Otel.span("linked", [], fn -> Otel.current_span() end)
+      linked = Otel.span("linked", fn -> Otel.current_span() end)
       first = OtelFixture.drain() |> OtelFixture.find("linked")
 
-      Otel.span("работа", [links: [linked]], fn -> :ok end)
+      Otel.span("работа", fn -> :ok end, links: [linked])
 
       span = OtelFixture.drain() |> OtelFixture.find("работа")
 
@@ -75,19 +75,27 @@ defmodule Core.OtelTest do
     end
 
     test "невалидный контекст в links отбрасывается" do
-      Otel.span("работа", [links: [:undefined]], fn -> :ok end)
+      Otel.span("работа", fn -> :ok end, links: [:undefined])
 
       span = OtelFixture.drain() |> OtelFixture.find("работа")
 
       assert span.links == []
     end
+
+    test "неизвестный ключ опций — ArgumentError до старта span'а" do
+      assert_raise ArgumentError, ~r"^Core.Otel.span/3: unknown options \[:attrs\]", fn ->
+        Otel.span("работа", fn -> :ok end, attrs: %{})
+      end
+
+      assert OtelFixture.drain() == []
+    end
   end
 
   describe "with_span_from/4" do
     test "продолжает трейс из carrier" do
-      carrier = Otel.span("cmd", [], fn -> Otel.inject(%{}) end)
+      carrier = Otel.span("cmd", fn -> Otel.inject(%{}) end)
 
-      Otel.with_span_from(carrier, "обработка", [kind: :consumer], fn -> :ok end)
+      Otel.with_span_from(carrier, "обработка", fn -> :ok end, kind: :consumer)
 
       spans = OtelFixture.drain()
       parent = OtelFixture.find(spans, "cmd")
@@ -99,17 +107,17 @@ defmodule Core.OtelTest do
     end
 
     test "возвращает процессу прежний контекст" do
-      carrier = Otel.span("cmd", [], fn -> Otel.inject(%{}) end)
+      carrier = Otel.span("cmd", fn -> Otel.inject(%{}) end)
       before = Otel.ctx()
 
-      Otel.with_span_from(carrier, "обработка", [], fn -> :ok end)
+      Otel.with_span_from(carrier, "обработка", fn -> :ok end)
 
       assert Otel.ctx() == before
     end
   end
 
   test "set_attributes дополняет текущий span" do
-    Otel.span("работа", [], fn -> Otel.set_attributes(%{"my.attr" => "поздно"}) end)
+    Otel.span("работа", fn -> Otel.set_attributes(%{"my.attr" => "поздно"}) end)
 
     span = OtelFixture.drain() |> OtelFixture.find("работа")
 
@@ -122,7 +130,7 @@ defmodule Core.OtelTest do
     error =
       Error.domain(code: :not_delivered, ns: :outbox, message: "не доставлено", parent: root)
 
-    Otel.span("работа", [], fn -> Otel.record_error(error) end)
+    Otel.span("работа", fn -> Otel.record_error(error) end)
 
     span = OtelFixture.drain() |> OtelFixture.find("работа")
 
@@ -132,11 +140,11 @@ defmodule Core.OtelTest do
   end
 
   test "with_ctx переносит контекст в порождённый процесс" do
-    ctx = Otel.span("cmd", [], fn -> Otel.ctx() end)
+    ctx = Otel.span("cmd", fn -> Otel.ctx() end)
     parent = OtelFixture.drain() |> OtelFixture.find("cmd")
 
     task =
-      Task.async(fn -> Otel.with_ctx(ctx, fn -> Otel.span("child", [], fn -> :ok end) end) end)
+      Task.async(fn -> Otel.with_ctx(ctx, fn -> Otel.span("child", fn -> :ok end) end) end)
 
     Task.await(task)
 

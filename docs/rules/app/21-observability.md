@@ -159,7 +159,7 @@ SDK и экспортёр подключает приложение. Пока о
 
 ```elixir
 # плохо — span и метрика своим кодом, исход неотличим от исключения
-Core.Otel.span("charge", [], fn -> Gateway.charge(payment) end)
+Core.Otel.span("charge", fn -> Gateway.charge(payment) end)
 
 # хорошо
 Core.External.call(:payment_gateway, :charge, fn -> Gateway.charge(payment) end,
