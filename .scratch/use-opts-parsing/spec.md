@@ -4,7 +4,8 @@ Type: spec
 Status: resolved
 
 Решение и отвергнутые варианты — ADR-0085 (`docs/adr/0085-use-opts-parsing.md`). Решения, замеры и инвентарь —
-`.scratch/use-opts-parsing/issues/`, `inventory.md`. Образец — ветка `prototype/use-opts-mode` (`1e1cd7d`).
+`.scratch/use-opts-parsing/issues/`, `inventory.md`. Образец — ветка `prototype/use-opts-mode` (`1e1cd7d`,
+удалена после влития).
 
 ## Problem Statement
 
@@ -388,11 +389,11 @@ case-модулей (`Enum.DocsCase`, `Es.EventCompatCase`, `Es.ProjectionCase`,
 
 ## Further Notes
 
-- Образец — ветка `prototype/use-opts-mode` (`1e1cd7d`, только локально): `Helper.Opts` (`expand!/3`, `literal!/3`,
-  `binary_value!/3`), `Core.Prim`, `Prim.String`, `Codec.Plugin`, `union:` в `Es.Event.Codec`. Скрипты текстов
-  ошибок — `.scratch/use-opts-parsing/prototype/` на ветке. Это не источник истины: инлайн-пролог `Prim.String` и
-  временные выражения `kind` / `sensitive` / `personal` у `Core.Prim` не переносятся. Ветка удаляется после среза
-  Codec.
+- Образец — ветка `prototype/use-opts-mode` (`1e1cd7d`, только локально, удалена после влития):
+  `Helper.Opts` (`expand!/3`, `literal!/3`, `binary_value!/3`), `Core.Prim`, `Prim.String`, `Codec.Plugin`,
+  `union:` в `Es.Event.Codec`. Скрипты текстов ошибок — `.scratch/use-opts-parsing/prototype/` на ветке. Это не
+  источник истины: инлайн-пролог `Prim.String` и временные выражения `kind` / `sensitive` / `personal` у
+  `Core.Prim` не переносятся. Ветка удаляется после среза Codec.
 - Счёт builder'ов и групп — `inventory.md`, сверено на `7b25900`. После срезов AW состав опций Es-builder'ов другой:
   срез Es-* сверяется с кодом после своего AW-среза.
 - Принятые отступления реализации от срезов выше (сверено на ревью интеграционной ветки):
