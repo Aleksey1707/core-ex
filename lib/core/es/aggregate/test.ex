@@ -17,17 +17,21 @@ defmodule Core.Es.Aggregate.Test do
 
   alias Core.Es
 
+  use Core.Options
+
   @doc """
   Состояние после результатов `decide/2` (`Event.Mod.draft(payload)` / `Event.Mod.draft()`).
 
   События собираются, как в `execute/2`: `id` — новый, `aggregate_id` — `state.id`, версии — по
-  порядку от `state.version`, `by` и `at` — из опций. `by:` и `at:` обязательны без значений по
-  умолчанию (`KeyError`), разные авторы — цепочкой вызовов; неизвестная опция — `ArgumentError`.
+  порядку от `state.version`, `by` и `at` — из опций. Разные авторы — цепочкой вызовов.
   """
+  @opts_schema [
+    by: [type: :any, required: true, doc: "Автор событий — Prim автора из кодека событий агрегата."],
+    at: [type: {:struct, Es.Event.At}, required: true, doc: "Время событий."]
+  ]
   @spec given(struct(), [Es.Aggregate.result()], keyword()) :: struct()
 
   def given(%aggregate{} = state, results, opts) when is_list(results) and is_list(opts) do
-    opts = Keyword.validate!(opts, ~w(by at)a)
     by = Keyword.fetch!(opts, :by)
     at = Keyword.fetch!(opts, :at)
 

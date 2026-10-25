@@ -813,6 +813,12 @@ defmodule Core.Es.ProjectionTest do
       assert {:error, :locked} =
                in_other_connection(fn -> Es.Projection.Test.run_until_idle(@projection) end)
     end
+
+    test "опции уходят в run_once/2: неизвестная — ArgumentError" do
+      assert_raise ArgumentError, ~r/^Core\.Es\.Projection\.run_once\/2: unknown options \[:batch\]/, fn ->
+        Es.Projection.Test.run_until_idle(@projection, batch: 2)
+      end
+    end
   end
 
   describe "Test.with_rebuilding/2" do

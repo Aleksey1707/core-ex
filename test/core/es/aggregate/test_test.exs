@@ -40,15 +40,24 @@ defmodule Core.Es.Aggregate.TestTest do
     test "by: и at: обязательны" do
       state = %Account{id: Account.ID.new()}
 
-      assert_raise KeyError, ~r/key :by not found/, fn -> given(state, [], at: @at) end
-      assert_raise KeyError, ~r/key :at not found/, fn -> given(state, [], by: UserID.new()) end
+      assert_raise ArgumentError, ~r/^Core\.Es\.Aggregate\.Test\.given\/3: required :by option not found/, fn ->
+        given(state, [], at: @at)
+      end
+
+      assert_raise ArgumentError, ~r/required :at option not found/, fn -> given(state, [], by: UserID.new()) end
     end
 
     test "неизвестная опция — ArgumentError" do
       state = %Account{id: Account.ID.new()}
 
-      assert_raise ArgumentError, ~r/unknown keys \[:version\]/, fn ->
+      assert_raise ArgumentError, ~r/^Core\.Es\.Aggregate\.Test\.given\/3: unknown options \[:version\]/, fn ->
         given(state, [], by: UserID.new(), at: @at, version: 1)
+      end
+    end
+
+    test "at: не Es.Event.At — ArgumentError" do
+      assert_raise ArgumentError, ~r/given\/3: invalid value for :at option: expected Core\.Es\.Event\.At/, fn ->
+        given(%Account{id: Account.ID.new()}, [], by: UserID.new(), at: ~U[2026-09-01 10:00:00Z])
       end
     end
 

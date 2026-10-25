@@ -11,6 +11,11 @@
   текста `Keyword.validate!` или ручной проверки. Функции:
   - `Core.Es.Projection.run_once/2` — неизвестный ключ отклонялся и раньше; теперь `batch_size:` не
     положительное целое — тоже `ArgumentError`, раньше значение уходило в пачку.
+  - `Core.Es.Aggregate.Test.given/3`, `Core.Es.Personal.Test.key_destroyed/2` — неизвестный ключ
+    отклонялся и раньше; теперь нет `by:` или `at:` — тоже `ArgumentError` (было — `KeyError`), и
+    `at:` не `Core.Es.Event.At` — `ArgumentError` до сборки события (было — у `key_destroyed/2`
+    `FunctionClauseError`, у `given/3` отказ конструктора события, а при пустом `results` — молча).
+    Правка: `assert_raise KeyError` / `FunctionClauseError` на такую опцию — `assert_raise ArgumentError`.
 
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на

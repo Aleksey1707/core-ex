@@ -108,8 +108,20 @@ defmodule Core.Es.Personal.DestroyKeyTest do
       assert %{built | id: written.id, operation_id: written.operation_id} == written
     end
 
-    test "нет by: или at: — KeyError" do
-      assert_raise KeyError, fn -> Personal.Test.key_destroyed(Account.ID.new(), by: UserID.new()) end
+    test "нет at: — ArgumentError" do
+      assert_raise ArgumentError, ~r/^Core\.Es\.Personal\.Test\.key_destroyed\/2: required :at option not found/, fn ->
+        Personal.Test.key_destroyed(Account.ID.new(), by: UserID.new())
+      end
+    end
+
+    test "неизвестная опция — ArgumentError" do
+      assert_raise ArgumentError, ~r/key_destroyed\/2: unknown options \[:version\]/, fn ->
+        Personal.Test.key_destroyed(Account.ID.new(),
+          by: UserID.new(),
+          at: Core.Es.Event.At.new!(~U[2026-03-01 10:00:00Z]),
+          version: 1
+        )
+      end
     end
   end
 

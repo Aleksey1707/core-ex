@@ -8,13 +8,30 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Классифицированы и переведены `Es.Projection.Test.run_until_idle`,
+- [x] Классифицированы и переведены `Es.Projection.Test.run_until_idle`,
       `Es.Aggregate.Test.given`, `Es.Personal.Test.key_destroyed`, `Outbox.Repo.Pg.append`; функция
       без схемы — с обоснованием в `## Comments`.
-- [ ] Ручные `Keyword.validate!` убраны; ручная проза об опциях в `@doc` убрана.
-- [ ] Тесты модулей: по одной проверке «неизвестный ключ → `ArgumentError`»; остальные зелёные.
-- [ ] CHANGELOG: переведённые публичные функции добавлены в список пункта «Ломающие изменения
+- [x] Ручные `Keyword.validate!` убраны; ручная проза об опциях в `@doc` убрана.
+- [x] Тесты модулей: по одной проверке «неизвестный ключ → `ArgumentError`»; остальные зелёные.
+- [x] CHANGELOG: переведённые публичные функции добавлены в список пункта «Ломающие изменения
       контракта».
-- [ ] `make` зелёный.
+- [x] `make` зелёный.
+
+## Comments
+
+- Свои ключи, схема: `Es.Aggregate.Test.given/3` и `Es.Personal.Test.key_destroyed/2` — `by:` и
+  `at:` обязательны (`required: true`), `at:` — `{:struct, Core.Es.Event.At}`. `by:` — `:any`:
+  проверку Prim делает тот, кто строит событие (`given` — кодек агрегата, `FunctionClauseError`;
+  `key_destroyed` — guard `is_prim/1` в `Personal.key_destroyed/3`). Перевести `by:` на
+  custom-валидатор Prim из тикета 07 — после его слияния (валидатор проверяет конкретный модуль, а
+  здесь допустим любой UUID-Prim).
+  Пропуск опции теперь `ArgumentError` вместо `KeyError` — в списке CHANGELOG.
+- Без схемы, опции насквозь:
+  - `Es.Projection.Test.run_until_idle/2` — `opts` целиком уходят в `Es.Projection.run_once/2`,
+    у которой схема: опечатка падает `ArgumentError` с префиксом `run_once/2` (тест в
+    `projection_test.exs`). Своя схема повторила бы чужую и разошлась бы с ней.
+  - `Outbox.Repo.Pg.append/3` — `opts` целиком уходят в `insert_all` Ecto (`:prefix`, `:timeout`
+    по `@callback` `Core.Outbox.Repo`); перечисление ключей Ecto — вне объёма спеки. Это ещё и
+    обратный вызов behaviour (`@impl`).
