@@ -3,13 +3,13 @@ defmodule Core.Mq.Dlq.Reader do
 
   @init_opts_schema [
     repo: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
     ],
-    topic: Core.Helper.StartOpts.prim_option(Core.Mq.Topic, "Исходный топик."),
-    subscriber_name: Core.Helper.StartOpts.prim_option(Core.Mq.SubscriberName, "Тот же, что у `Core.Mq.Dlq.Writer`."),
+    topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Исходный топик."),
+    subscriber_name: Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Тот же, что у `Core.Mq.Dlq.Writer`."),
     lease_ttl_ms: [type: :pos_integer, default: 60_000, doc: "На сколько `get` захватывает запись, мс."],
     name: Core.Helper.StartOpts.name_option(),
     shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)

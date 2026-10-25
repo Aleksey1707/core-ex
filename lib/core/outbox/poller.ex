@@ -3,19 +3,19 @@ defmodule Core.Outbox.Poller do
 
   @init_opts_schema [
     name: [
-      type: {:custom, Core.Helper.StartOpts, :atom, []},
+      type: {:custom, Core.Options.Type, :atom, []},
       type_doc: "`t:atom/0`",
       required: true,
       doc: "Имя процесса поллера; оно же `:id` в `child_spec/1`. MUST быть в отметке дерева очереди."
     ],
     repo: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Репозиторий outbox (`Core.Outbox.Repo`): резерв пачки и запись результатов."
     ],
     delivery_module: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Модуль доставки (`Core.Outbox.Delivery`)."
@@ -28,11 +28,11 @@ defmodule Core.Outbox.Poller do
     ],
     poll_interval_ms: [type: :pos_integer, required: true, doc: "Верхняя граница backoff опроса, мс."],
     idle_min_ms: [type: :pos_integer, required: true, doc: "Первая пауза backoff, мс."],
-    batch_size: Core.Helper.StartOpts.prim_option(Core.Outbox.BatchSize, "Сколько записей резервирует цикл."),
-    lock_duration: Core.Helper.StartOpts.prim_option(Core.Outbox.LockDuration, "Аренда зарезервированной пачки."),
-    max_attempts: Core.Helper.StartOpts.prim_option(Core.Outbox.Attempts, "Попытки доставки записи до `:failed`."),
+    batch_size: Core.Options.Type.prim_option(Core.Outbox.BatchSize, "Сколько записей резервирует цикл."),
+    lock_duration: Core.Options.Type.prim_option(Core.Outbox.LockDuration, "Аренда зарезервированной пачки."),
+    max_attempts: Core.Options.Type.prim_option(Core.Outbox.Attempts, "Попытки доставки записи до `:failed`."),
     topics: [
-      type: {:custom, Core.Helper.StartOpts, :topics_filter, []},
+      type: {:custom, Core.Outbox, :topics_filter, []},
       type_doc: "`t:Core.Outbox.topics_filter/0`",
       default: :all,
       doc: "Топики записей, которые резервирует поллер."

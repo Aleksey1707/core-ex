@@ -7,16 +7,16 @@ if Code.ensure_loaded?(:brod) do
 
     @init_opts_schema [
       client: [
-        type: {:custom, Core.Helper.StartOpts, :atom, []},
+        type: {:custom, Core.Options.Type, :atom, []},
         type_doc: "`t:atom/0`",
         required: true,
         doc: "Id клиента `:brod`, как handle `Core.Mq.Kafka.Writer`."
       ],
-      topic: Core.Helper.StartOpts.prim_option(Core.Mq.Topic, "Топик, который читает читатель."),
+      topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Топик, который читает читатель."),
       subscriber_name:
-        Core.Helper.StartOpts.prim_option(Core.Mq.SubscriberName, "Имя подписчика — ключ смещений и аренды."),
+        Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Имя подписчика — ключ смещений и аренды."),
       repo: [
-        type: {:custom, Core.Helper.StartOpts, :module, []},
+        type: {:custom, Core.Options.Type, :module, []},
         type_doc: "`t:module/0`",
         required: true,
         doc: "Ecto-репозиторий с таблицами `Core.Mq.Kafka.Migration`."

@@ -52,7 +52,7 @@ defmodule Core.Outbox.Test do
     reader_module reader poll_interval_ms retry_max_ms dlq_writer dlq_handle dlq_topic subscribe shutdown
   )a
   @subscriber_keys [
-    name: [type: {:custom, Core.Helper.StartOpts, :atom, []}, required: true, doc: "Имя курсора подписчика."],
+    name: [type: {:custom, Core.Options.Type, :atom, []}, required: true, doc: "Имя курсора подписчика."],
     max_attempts: [type: :pos_integer, default: 5, doc: "Попыток до мёртвого письма."],
     subscribe_data: [type: :any, doc: "Данные подписки для `on_message`."]
   ]

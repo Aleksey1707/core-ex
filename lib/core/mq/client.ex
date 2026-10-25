@@ -19,31 +19,31 @@ defmodule Core.Mq.Client do
   """
   @opts_schema [
     label: [
-      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type: {:custom, Core.Options.Type, :binary, []},
       type_doc: "`t:String.t/0`",
       required: true,
       doc: "Имя проверяющего модуля для текста ошибки."
     ],
     client: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Модуль клиента."
     ],
     adapter: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Модуль адаптера."
     ],
     dep: [
-      type: {:custom, Core.Helper.StartOpts, :atom, []},
+      type: {:custom, Core.Options.Type, :atom, []},
       type_doc: "`t:atom/0`",
       required: true,
       doc: "Имя зависимости клиента."
     ],
     requirement: [
-      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type: {:custom, Core.Options.Type, :binary, []},
       type_doc: "`t:String.t/0`",
       required: true,
       doc: "Требование к версии зависимости."

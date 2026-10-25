@@ -1,13 +1,13 @@
 defmodule Core.PubSub.MqSubscriberReliable do
   @own_opts_schema [
     reader_module: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Модуль `Core.Mq.ReaderReliable` читателя."
     ],
     reader: [
-      type: {:custom, Core.Helper.StartOpts, :term, []},
+      type: {:custom, Core.Options.Type, :term, []},
       type_doc: "`t:term/0`",
       required: true,
       doc: "Handle читателя: первый аргумент его `get/2`."
@@ -34,7 +34,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
       doc: "Handle DLQ-writer'а: обязателен при `dlq_writer:` и без него не задаётся."
     ],
     dlq_topic: [
-      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type: {:custom, Core.Options.Type, :binary, []},
       type_doc: "`t:String.t/0`",
       doc: "Топик DLQ; по умолчанию `\"<topic>.dlq\"`."
     ],

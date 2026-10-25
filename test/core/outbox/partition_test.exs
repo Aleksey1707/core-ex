@@ -3,6 +3,17 @@ defmodule Core.Outbox.PartitionTest do
 
   alias Core.Outbox
 
+  test "topics_filter/1: :all, {:only, строки} или {:except, строки}" do
+    for good <- [:all, {:only, ["orders"]}, {:except, []}] do
+      assert Outbox.topics_filter(good) == {:ok, good}
+    end
+
+    for bad <- [["orders"], {:only, "orders"}, {:only, [:orders]}, {:all, ["orders"]}, nil] do
+      assert {:error, "ожидается :all, {:only, [String.t()]} или {:except, [String.t()]}, получено " <> _} =
+               Outbox.topics_filter(bad)
+    end
+  end
+
   describe "topics_overlap?/2" do
     test ":all пересекается со всем, кроме пустого {:only, []}" do
       assert Outbox.topics_overlap?(:all, :all)

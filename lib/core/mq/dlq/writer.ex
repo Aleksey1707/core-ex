@@ -1,13 +1,13 @@
 defmodule Core.Mq.Dlq.Writer do
   @init_opts_schema [
     repo: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
     ],
     subscriber_name:
-      Core.Helper.StartOpts.prim_option(
+      Core.Options.Type.prim_option(
         Core.Mq.SubscriberName,
         "Чей это DLQ: читатель перечитывания берёт записи по нему."
       ),

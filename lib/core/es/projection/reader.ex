@@ -1,7 +1,7 @@
 defmodule Core.Es.Projection.Reader do
   @init_opts_schema [
     projection: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Модуль `use Core.Es.Projection` (проверяет дерево); он же имя процесса и `:id` в `child_spec/1`."

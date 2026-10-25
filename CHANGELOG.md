@@ -116,21 +116,22 @@
   `[] <- Core.Otel.span("charge", _, kind: :client)`; `Core.Otel.start_opts()` в спеке →
   `keyword()`.
 
-- **`Core.Helper.StartOpts` сведён к custom-валидаторам схемы и проверкам дерева.** Опции
-  OTP-процесса проверяет схема над `init/1` (`use Core.Options`, `@opts_schema`), поэтому функции
-  разбора по ключу удалены: `keys!/3`, `module!/3,4`, `atom!/3`, `prim!/4`, `binary!/3,4`,
-  `list!/3`, `term!/3`, `fun!/4,5`, `pos_integer!/3,4`, `boolean!/3,4`, `one_of!/5`,
-  `topics_filter!/4`, `name!/3`, `shutdown!/4`, `raise_invalid!/4`. Остаются custom-типы схемы
-  (`prim/2`, `module/1`, `atom/1`, `binary/1`, `term/1`, `name/1`, `topics_filter/1`,
-  `shutdown/1`), `process!/3` и `unique!/4`; добавлены фрагменты схемы `name_option/0,1`,
-  `shutdown_option/1,2`, `prim_option/2` и `child_spec/3` — спецификация ребёнка с умолчанием
-  `shutdown:` из схемы `init/1`. Метка `process!/3` и `unique!/4` — функция, отклонившая вызов
-  (`"MyApp.Tree.start_link/1"`), как в отказе схемы. Правка потребителя: было
-  `StartOpts.pos_integer!(label, opts, :interval_ms, 1_000)` в `init/1`, стало
-  `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000, doc: "…"]]` над `init/1` и
-  `Keyword.fetch!(opts, :interval_ms)`; доменное значение — `{:custom, Core.Helper.StartOpts, :prim,
-  [Mod]}` вместо `StartOpts.prim!/4`, свой отказ сложнее перечисления — `raise ArgumentError` вместо
-  `raise_invalid!/4`. Норма потребителя `docs/rules/app/17-otp-concurrency.md`, «Опции процессов»,
+- **`Core.Helper.StartOpts` сведён к опциям процесса и проверкам дерева; общие custom-типы схемы —
+  `Core.Options.Type`.** Опции OTP-процесса проверяет схема над `init/1` (`use Core.Options`,
+  `@opts_schema`), поэтому функции разбора по ключу удалены: `keys!/3`, `module!/3,4`, `atom!/3`,
+  `prim!/4`, `binary!/3,4`, `list!/3`, `term!/3`, `fun!/4,5`, `pos_integer!/3,4`, `boolean!/3,4`,
+  `one_of!/5`, `topics_filter!/4`, `name!/3`, `shutdown!/4`, `raise_invalid!/4`. Значения, которые
+  проверяет не только запуск процесса, — custom-типы `Core.Options.Type`: `prim/2`, `module/1`,
+  `atom/1`, `binary/1`, `term/1` и фрагмент обязательного Prim-ключа `prim_option/2`; фильтр
+  топиков — `Core.Outbox.topics_filter/1`. В `StartOpts` остаются типы опций процесса `name/1` и
+  `shutdown/1`, фрагменты `name_option/0,1` и `shutdown_option/1,2`, `child_spec/3` —
+  спецификация ребёнка с умолчанием `shutdown:` из схемы `init/1`, — `process!/3` и `unique!/4`.
+  Метка `process!/3` и `unique!/4` — функция, отклонившая вызов (`"MyApp.Tree.start_link/1"`), как
+  в отказе схемы. Правка потребителя: было `StartOpts.pos_integer!(label, opts, :interval_ms,
+  1_000)` в `init/1`, стало `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000,
+  doc: "…"]]` над `init/1` и `Keyword.fetch!(opts, :interval_ms)`; доменное значение —
+  `{:custom, Core.Options.Type, :prim, [Mod]}` вместо `StartOpts.prim!/4`, свой отказ сложнее
+  перечисления — `raise ArgumentError` вместо `raise_invalid!/4`. Норма потребителя `docs/rules/app/17-otp-concurrency.md`, «Опции процессов»,
   переписана так же: опции процесса проверяет схема над `init/1`, обязательная опция с умолчанием из
   `runtime.exs` — `required: true` без `default:`.
 

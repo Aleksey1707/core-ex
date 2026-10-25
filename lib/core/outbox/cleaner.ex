@@ -1,12 +1,12 @@
 defmodule Core.Outbox.Cleaner do
   @init_opts_schema [
     repo: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Репозиторий outbox (`Core.Outbox.Repo`): из него удаляются записи."
     ],
-    published_ttl: Core.Helper.StartOpts.prim_option(Core.Outbox.PublishedTTL, "Сколько хранится запись `published`."),
+    published_ttl: Core.Options.Type.prim_option(Core.Outbox.PublishedTTL, "Сколько хранится запись `published`."),
     interval_ms: [type: :pos_integer, required: true, doc: "Интервал между очистками, мс."],
     retry_min_ms: [
       type: :pos_integer,

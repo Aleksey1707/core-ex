@@ -289,7 +289,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @spec component(term()) :: Result.t(String.t(), String.t())
 
   def component(value) do
-    case StartOpts.binary(value) do
+    case Core.Options.Type.binary(value) do
       {:ok, component} ->
         if String.contains?(component, ":"),
           do: {:error, "ожидается строка без `:` — разделителя метки, получено #{inspect(component)}"},
@@ -319,7 +319,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   # ---
 
   defp subscriber_ids(subscriber) do
-    case {Keyword.get(subscriber, :name), StartOpts.binary(Keyword.get(subscriber, :topic))} do
+    case {Keyword.get(subscriber, :name), Core.Options.Type.binary(Keyword.get(subscriber, :topic))} do
       {name, {:ok, _topic}} when is_atom(name) and not is_nil(name) -> {:ok, subscriber}
       {name, {:ok, _topic}} -> {:error, "ожидается name: подписчика атомом, получено #{inspect(name)}"}
       {_name, {:error, message}} -> {:error, "topic: подписчика — #{message}"}

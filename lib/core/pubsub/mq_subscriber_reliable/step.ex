@@ -26,7 +26,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
 
   @schema [
     topic: [
-      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type: {:custom, Core.Options.Type, :binary, []},
       type_doc: "`t:String.t/0`",
       default: "unknown",
       doc: "Топик: метка метрик и span'а обработки."

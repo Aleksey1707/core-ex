@@ -359,8 +359,9 @@ end
 
 Опции приходят из `config/runtime.exs` через корень компонента и проверяются в `init/1` схемой
 опций над ним (`use Core.Options`, `@opts_schema`; `deps/core/docs/rules/20-agreements.md`, «Схема
-опций функции»). Доменные значения — Prim, фильтр топиков, имя процесса, `shutdown` — проверяют
-custom-валидаторы `Core.Helper.StartOpts` (`{:custom, Core.Helper.StartOpts, :prim, [Mod]}`).
+опций функции»). Доменные значения проверяют custom-типы схемы: Prim — `Core.Options.Type`
+(`{:custom, Core.Options.Type, :prim, [Mod]}`), фильтр топиков — `Core.Outbox.topics_filter/1`, имя
+процесса и `shutdown` — `Core.Helper.StartOpts`.
 
 - Опция, дефолт которой задаёт `runtime.exs`, объявляется в схеме `required: true` **без**
   `default:`: иначе у значения два источника, и они разойдутся.

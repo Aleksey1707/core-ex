@@ -3,13 +3,13 @@ defmodule Core.Mq.Stream.Writer do
 
   @init_opts_schema [
     connection: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
     ],
     reference_prefix: [
-      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type: {:custom, Core.Options.Type, :binary, []},
       type_doc: "`t:String.t/0`",
       required: true,
       doc: "Уникальный префикс producer reference, непустой."

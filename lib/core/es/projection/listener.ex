@@ -1,7 +1,7 @@
 defmodule Core.Es.Projection.Listener do
   @init_opts_schema [
     repo: [
-      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
       required: true,
       doc: "Repo проекций: из его `config()` — соединение слушателя; он же `:id` в `child_spec/1`."

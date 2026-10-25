@@ -8,16 +8,13 @@ defmodule Core.Helper.StartOpts do
   `handle_continue/2` (супервизор уходит в цикл рестартов) или молчаливый backoff, в
   котором опечатка неотличима от недоступного брокера (`17-otp-concurrency.md`).
 
-  Опции процесса проверяет схема над `init/1` (`use Core.Options`, `@opts_schema`), а доменные
-  значения — custom-типы схемы `{:custom, Core.Helper.StartOpts, fun, args}`: `prim/2`,
-  `module/1`, `atom/1`, `binary/1`, `term/1`, `name/1`, `topics_filter/1`, `shutdown/1`. Они
-  возвращают `{:ok, value}` или `{:error, "ожидается …, получено …"}`; ключ в текст отказа
-  добавляет NimbleOptions. Простые значения (целое, булево, функция, атом, где допустим `nil`) —
-  встроенные типы NimbleOptions.
+  Опции процесса проверяет схема над `init/1` (`use Core.Options`, `@opts_schema`). Значения, общие
+  для любой схемы (Prim, модуль, атом, строка), — custom-типы `Core.Options.Type`; здесь — типы
+  опций процесса `{:custom, Core.Helper.StartOpts, fun, []}`: `name/1` и `shutdown/1`.
 
-  Повторяющиеся ключи схемы — фрагменты: `name_option/0,1`, `shutdown_option/1,2` и
-  `prim_option/2` дают описание ключа целиком (тип, `type_doc:`, `doc:`), его ставят в атрибут
-  схемы: `name: Core.Helper.StartOpts.name_option()`. `child_spec/3` строит спецификацию ребёнка
+  Повторяющиеся ключи схемы — фрагменты: `name_option/0,1` и `shutdown_option/1,2` дают описание
+  ключа целиком (тип, `type_doc:`, `doc:`), его ставят в атрибут схемы:
+  `name: Core.Helper.StartOpts.name_option()`. `child_spec/3` строит спецификацию ребёнка
   процесса из той же схемы: умолчание `shutdown:` у неё одно с `init/1`.
 
   `process!/3` и `unique!/4` — для готовых деревьев: они проверяют значение, а не достают его из
@@ -34,42 +31,11 @@ defmodule Core.Helper.StartOpts do
 
   @process_expected "{модуль, опции с name: атомом}"
   @name_expected "имя процесса (атом, {:global, term} или {:via, module, term})"
-  @topics_filter_expected ":all, {:only, [String.t()]} или {:except, [String.t()]}"
   @shutdown_expected "неотрицательное целое, :infinity или :brutal_kill"
   @name_doc "Имя процесса; оно же `:id` в `child_spec/1`."
   @shutdown_doc "`shutdown` ребёнка супервизора в `child_spec/1`."
 
-  # ===== custom-валидаторы схемы =====
-
-  @doc "Значение — структура `mod` (Prim): `{:custom, Core.Helper.StartOpts, :prim, [mod]}`."
-  @spec prim(term(), module()) :: Result.t(struct(), String.t())
-
-  def prim(%{__struct__: mod} = value, mod) when is_atom(mod), do: {:ok, value}
-  def prim(value, mod) when is_atom(mod), do: invalid("%#{inspect(mod)}{}", value)
-
-  @doc "Значение — модуль: атом, кроме `nil`; `{:custom, Core.Helper.StartOpts, :module, []}`."
-  @spec module(term()) :: Result.t(module(), String.t())
-
-  def module(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
-  def module(value), do: invalid("модуль", value)
-
-  @doc "Значение — атом, кроме `nil` (имя, ключ, тег): `{:custom, Core.Helper.StartOpts, :atom, []}`."
-  @spec atom(term()) :: Result.t(atom(), String.t())
-
-  def atom(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
-  def atom(value), do: invalid("атом", value)
-
-  @doc "Значение — непустая строка: `{:custom, Core.Helper.StartOpts, :binary, []}`."
-  @spec binary(term()) :: Result.t(String.t(), String.t())
-
-  def binary(value) when is_binary(value) and value != "", do: {:ok, value}
-  def binary(value), do: invalid("непустая строка", value)
-
-  @doc "Значение — любое, кроме `nil` (handle процесса); `{:custom, Core.Helper.StartOpts, :term, []}`."
-  @spec term(term()) :: Result.t(term(), String.t())
-
-  def term(nil), do: invalid("значение", nil)
-  def term(value), do: {:ok, value}
+  # ===== custom-типы схемы =====
 
   @doc """
   Значение — имя процесса (`GenServer.name()`) или `nil` — процесс без имени;
@@ -81,22 +47,6 @@ defmodule Core.Helper.StartOpts do
   def name({:global, _term} = value), do: {:ok, value}
   def name({:via, mod, _term} = value) when is_atom(mod), do: {:ok, value}
   def name(value), do: invalid(@name_expected, value)
-
-  @doc """
-  Значение — фильтр топиков `Core.Outbox.topics_filter()`;
-  `{:custom, Core.Helper.StartOpts, :topics_filter, []}`.
-  """
-  @spec topics_filter(term()) :: Result.t(Core.Outbox.topics_filter(), String.t())
-
-  def topics_filter(:all), do: {:ok, :all}
-
-  def topics_filter({mode, topics} = value) when mode in ~w(only except)a and is_list(topics) do
-    if Enum.all?(topics, &is_binary/1),
-      do: {:ok, value},
-      else: invalid(@topics_filter_expected, value)
-  end
-
-  def topics_filter(value), do: invalid(@topics_filter_expected, value)
 
   @doc "Значение — `shutdown` ребёнка супервизора; `{:custom, Core.Helper.StartOpts, :shutdown, []}`."
   @spec shutdown(term()) :: Result.t(timeout() | :brutal_kill, String.t())
@@ -128,12 +78,6 @@ defmodule Core.Helper.StartOpts do
       doc: doc
     ]
   end
-
-  @doc "Обязательный ключ схемы — структура `mod` (`prim/2`); `doc` — его описание."
-  @spec prim_option(module(), String.t()) :: keyword()
-
-  def prim_option(mod, doc) when is_atom(mod) and is_binary(doc),
-    do: [type: {:custom, __MODULE__, :prim, [mod]}, type_doc: "`t:#{inspect(mod)}.t/0`", required: true, doc: doc]
 
   @doc """
   Спецификация ребёнка процесса `module` со схемой `schema` над `init/1`: `:id` — `name:` из `opts`,

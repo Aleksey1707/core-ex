@@ -7,14 +7,14 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     @init_opts_schema [
       connection: [
-        type: {:custom, Core.Helper.StartOpts, :module, []},
+        type: {:custom, Core.Options.Type, :module, []},
         type_doc: "`t:module/0`",
         required: true,
         doc: "Модуль соединения (`use RabbitMQStream.Connection`)."
       ],
-      topic: Core.Helper.StartOpts.prim_option(Core.Mq.Topic, "Stream, который читает reader."),
+      topic: Core.Options.Type.prim_option(Core.Mq.Topic, "Stream, который читает reader."),
       subscriber_name:
-        Core.Helper.StartOpts.prim_option(Core.Mq.SubscriberName, "Имя подписчика — `offset_reference` курсора."),
+        Core.Options.Type.prim_option(Core.Mq.SubscriberName, "Имя подписчика — `offset_reference` курсора."),
       reliable?: [type: :boolean, default: true, doc: "Сохранять курсор; при `false` `commit` недоступен."],
       credit: [type: :pos_integer, default: 2, doc: "Начальный credit — число in-flight чанков."],
       initial_offset: [

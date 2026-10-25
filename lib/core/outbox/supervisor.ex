@@ -98,32 +98,32 @@ defmodule Core.Outbox.Supervisor do
 
   @poller_opts_schema [
     name: [
-      type: {:custom, StartOpts, :atom, []},
+      type: {:custom, Core.Options.Type, :atom, []},
       type_doc: "`t:atom/0`",
       required: true,
       doc: "Имя процесса поллера."
     ],
     label: [
-      type: {:custom, StartOpts, :binary, []},
+      type: {:custom, Core.Options.Type, :binary, []},
       type_doc: "`t:String.t/0`",
       required: true,
       doc: "Непустая метка компонента в `watch_list/1`."
     ],
     topics: [
-      type: {:custom, StartOpts, :topics_filter, []},
+      type: {:custom, Outbox, :topics_filter, []},
       type_doc: "`t:Core.Outbox.topics_filter/0`",
       default: :all,
       doc: "Топики записей, которые доставляет поллер."
     ],
     writer: [
-      type: {:tuple, [{:custom, StartOpts, :module, []}, :keyword_list]},
+      type: {:tuple, [{:custom, Core.Options.Type, :module, []}, :keyword_list]},
       type_doc: "`{module(), keyword()}`",
       doc:
         "Writer-процесс `{модуль Mq.Writer, опции с name: атомом}`: дерево поднимает его перед поллером, " <>
           "поллер пишет через его `name:`. Ровно один из `writer:` и `via:`."
     ],
     via: [
-      type: {:tuple, [{:custom, StartOpts, :module, []}, {:custom, StartOpts, :term, []}]},
+      type: {:tuple, [{:custom, Core.Options.Type, :module, []}, {:custom, Core.Options.Type, :term, []}]},
       type_doc: "`{module(), term()}`",
       doc:
         "`{модуль Mq.Writer, handle}` — процесс, которым владеет приложение (клиент Kafka): дерево его не " <>
@@ -145,7 +145,7 @@ defmodule Core.Outbox.Supervisor do
       doc: "При `enabled: true` — непустой; поллеры, элемент — keyword:\n\n" <> Core.Options.docs(@poller_opts_schema)
     ],
     connection: [
-      type: {:or, [{:tuple, [{:custom, StartOpts, :module, []}, :keyword_list]}, nil]},
+      type: {:or, [{:tuple, [{:custom, Core.Options.Type, :module, []}, :keyword_list]}, nil]},
       type_doc: "`{module(), keyword()}` или `nil`",
       default: nil,
       doc: "`{модуль, опции с name: атомом}`, первый ребёнок дерева: соединение, других пользователей у которого нет."

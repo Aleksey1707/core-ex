@@ -11,6 +11,28 @@ defmodule Core.Outbox do
   @typedoc "Фильтр топиков при reserve: все / только / кроме."
   @type topics_filter :: :all | {:only, [String.t()]} | {:except, [String.t()]}
 
+  # ===== схема опций =====
+
+  @doc "Значение — фильтр топиков; custom-тип схемы опций `{:custom, Core.Outbox, :topics_filter, []}`."
+  @spec topics_filter(term()) :: Result.t(topics_filter(), String.t())
+
+  def topics_filter(:all), do: {:ok, :all}
+
+  def topics_filter({mode, topics} = value) when mode in ~w(only except)a and is_list(topics) do
+    if Enum.all?(topics, &is_binary/1),
+      do: {:ok, value},
+      else: invalid_topics_filter(value)
+  end
+
+  def topics_filter(value), do: invalid_topics_filter(value)
+
+  # ---
+
+  defp invalid_topics_filter(value),
+    do: {:error, "ожидается :all, {:only, [String.t()]} или {:except, [String.t()]}, получено #{inspect(value)}"}
+
+  # ===== сопоставление =====
+
   @doc "Пересекается ли набор топиков с фильтром поллера."
   @spec topics_match?(MapSet.t(String.t()), topics_filter()) :: boolean()
 
