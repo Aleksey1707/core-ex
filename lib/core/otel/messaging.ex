@@ -51,7 +51,11 @@ defmodule Core.Otel.Messaging do
   @operation_opts_schema [
     system: [type: :string, doc: "`messaging.system` (`\"rabbitmq\"`, `\"kafka\"`); не задан — атрибут не ставится."],
     operation_name: [type: :string, doc: "`messaging.operation.name`; не задан — совпадает с типом операции."],
-    attributes: [type: {:map, :string, :any}, doc: "Собственные атрибуты вызывающего (вне `messaging.*`)."],
+    attributes: [
+      type: {:map, :string, :any},
+      default: %{},
+      doc: "Собственные атрибуты вызывающего (вне `messaging.*`)."
+    ],
     scope: [type: :atom, doc: "Модуль instrumentation scope (`Core.Otel`)."]
   ]
 
@@ -133,9 +137,9 @@ defmodule Core.Otel.Messaging do
 
   defp attributes(opts, operation, destination) do
     opts
-    |> Keyword.get(:attributes, %{})
+    |> Keyword.fetch!(:attributes)
     |> Map.put(@attr_operation_type, operation)
-    |> Map.put(@attr_operation_name, Keyword.get(opts, :operation_name, operation))
+    |> Map.put(@attr_operation_name, Keyword.get(opts, :operation_name) || operation)
     |> put_optional(@attr_destination, destination)
     |> put_optional(@attr_system, Keyword.get(opts, :system))
   end

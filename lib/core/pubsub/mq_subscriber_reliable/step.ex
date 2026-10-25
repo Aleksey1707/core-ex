@@ -6,7 +6,8 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   # исключение обработчика — `{:error, %Error{}}`.
   # Чтение, `commit`, счёт попыток, backoff, DLQ и telemetry цикла — у вызывающего: исход
   # он получает в `fun`, внутри span'а обработки, и может дополнить span (причина выброса в DLQ).
-  # Ключи шага — `schema/0`: вызывающий включает её в свою схему, `new!/2` берёт и проверяет только их.
+  # Ключи шага — `schema/0`: вызывающий включает её в свою схему и отдаёт `new!/1` только их
+  # (`Keyword.take(opts, Keyword.keys(Step.schema()))`).
 
   alias Core.Config
   alias Core.Context
@@ -14,13 +15,14 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   alias Core.Es
   alias Core.Mq
   alias Core.Mq.Message
-  alias Core.Options
   alias Core.Otel
   alias Core.PubSub
   alias Core.Repo
 
   require Logger
   require Error
+
+  use Core.Options
 
   @attr_attempt "core.pubsub.attempt"
 
@@ -52,7 +54,6 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
       doc: "Фабрика `Core.Context`; вызывается на каждое сообщение."
     ]
   ]
-  @compiled NimbleOptions.new!(@schema)
 
   @enforce_keys ~w(topic filter from_message on_message context_factory data)a
   defstruct @enforce_keys
@@ -80,13 +81,10 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   def schema, do: @schema
 
   @doc false
-  @spec new!(String.t(), keyword()) :: t()
+  @opts_schema @schema
+  @spec new!(keyword()) :: t()
 
-  def new!(label, opts) when is_binary(label) and is_list(opts) do
-    valid = Options.__validate__!(Keyword.take(opts, Keyword.keys(@schema)), @compiled, label)
-
-    struct!(__MODULE__, [data: nil] ++ valid)
-  end
+  def new!(opts) when is_list(opts), do: struct!(__MODULE__, [data: nil] ++ opts)
 
   @doc false
   @spec accept_all(Message.t()) :: true

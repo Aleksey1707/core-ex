@@ -59,8 +59,8 @@ defmodule Core.Prim.Integer do
   @doc "Байтовая граница строкового ввода: явная `sec_max_len:` либо выведенная из границ."
   @spec sec_max_len(keyword()) :: pos_integer()
 
-  def sec_max_len(opts) do
-    Keyword.get(opts, :sec_max_len) || derived_sec_max_len(opts)
+  def sec_max_len(type_opts) do
+    Keyword.get(type_opts, :sec_max_len) || derived_sec_max_len(type_opts)
   end
 
   @doc false
@@ -72,16 +72,16 @@ defmodule Core.Prim.Integer do
   @doc false
   @spec cast(term(), keyword()) :: Result.t(integer(), {:invalid_integer, String.t()})
 
-  def cast(value, _opts) when is_integer(value), do: {:ok, value}
+  def cast(value, _pipeline_opts) when is_integer(value), do: {:ok, value}
 
-  def cast(value, opts) when is_binary(value) do
+  def cast(value, pipeline_opts) when is_binary(value) do
     with :ok <-
-           Prim.check_byte_limit(value, Keyword.get(opts, :sec_max_len), :invalid_integer) do
+           Prim.check_byte_limit(value, Keyword.get(pipeline_opts, :sec_max_len), :invalid_integer) do
       parse(value)
     end
   end
 
-  def cast(_value, _opts), do: invalid()
+  def cast(_value, _pipeline_opts), do: invalid()
 
   # ---
 

@@ -86,9 +86,9 @@ defmodule Core.Prim.String do
   @doc "Байтовая граница Prim: явная `sec_max_len:` либо выведенная из `max_len:`."
   @spec sec_max_len(keyword()) :: pos_integer()
 
-  def sec_max_len(opts) do
-    Keyword.get(opts, :sec_max_len) ||
-      Keyword.fetch!(opts, :max_len) * @max_utf8_bytes_per_char + @sec_max_len_slack
+  def sec_max_len(type_opts) do
+    Keyword.get(type_opts, :sec_max_len) ||
+      Keyword.fetch!(type_opts, :max_len) * @max_utf8_bytes_per_char + @sec_max_len_slack
   end
 
   @doc false
@@ -96,15 +96,15 @@ defmodule Core.Prim.String do
 
   # Невалидный UTF-8 иначе уезжал бы в БД и JSON: `String.trim/1` его не роняет,
   # `Regex.match?/2` просто отвечает false, а `re:` объявлен не у каждого Prim.
-  def cast(value, opts) when is_binary(value) do
-    with :ok <- Prim.check_byte_limit(value, Keyword.get(opts, :sec_max_len), :invalid_string) do
+  def cast(value, pipeline_opts) when is_binary(value) do
+    with :ok <- Prim.check_byte_limit(value, Keyword.get(pipeline_opts, :sec_max_len), :invalid_string) do
       if String.valid?(value),
         do: {:ok, value},
         else: {:error, {:invalid_string, "невалидная UTF-8 строка"}}
     end
   end
 
-  def cast(_value, _opts), do: {:error, {:invalid_string, "невалидное значение"}}
+  def cast(_value, _pipeline_opts), do: {:error, {:invalid_string, "невалидное значение"}}
 
   @doc false
   @spec mutate(String.t(), keyword()) :: {:ok, String.t()}

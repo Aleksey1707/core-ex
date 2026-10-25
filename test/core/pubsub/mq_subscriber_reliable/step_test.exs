@@ -41,7 +41,7 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
       :ok
     end
 
-    step = Step.new!("test", topic: "products", from_message: &{:ok, &1}, on_message: on)
+    step = Step.new!(topic: "products", from_message: &{:ok, &1}, on_message: on)
 
     assert :processed = Step.run(message(), step, 1)
     assert_received {:got, nil, %Context{}}

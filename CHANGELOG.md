@@ -59,14 +59,9 @@
   - `Core.Otel.Messaging.create/4` — `attributes:` с ключами-атомами — `ArgumentError`, раньше
     уходили в span: имена атрибутов — строки (`Core.Otel.attributes/0`).
   - `Core.Otel.span/3`, `root_span/3`, `with_span_from/4`, `Core.Otel.Messaging.send/5`,
-    `process/5` — опции переехали после колбэка и стали необязательными (`…, fun, opts \\ []`,
-    `docs/rules/20-agreements.md`, «Context — последний из данных»): схема проверяет только
-    последний аргумент. Неизвестный ключ (у `span/3`, `root_span/3`, `with_span_from/4` — и `kind:`
-    вне видов span'а, `attributes:` с ключами-атомами) — `ArgumentError`, раньше уходил молча. Было:
-    `Core.Otel.span("charge", [kind: :client], fn -> … end)`, стало:
-    `Core.Otel.span("charge", fn -> … end, kind: :client)`; пустые опции не передаются:
-    `Core.Otel.span("charge", fn -> … end)`. В `bind` хвост после колбэка — маркер `_`:
-    `[] <- Core.Otel.span("charge", _, kind: :client)`.
+    `process/5` — неизвестный ключ (у `span/3`, `root_span/3`, `with_span_from/4` — и `kind:` вне
+    видов span'а, `attributes:` с ключами-атомами) — `ArgumentError`, раньше уходил молча. Порядок
+    их аргументов — отдельный пункт ниже.
   - `Core.External.call/4` — без `outcome:` по-прежнему `ArgumentError`, текст — NimbleOptions
     (`required :outcome option not found`).
   - `Core.Outbox.Supervisor.start_link/1`, `watch_list/1` — неизвестный ключ отклонялся и раньше;
@@ -98,6 +93,31 @@
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на
   `unknown options`.
+
+- **Опции `Core.Otel.span/3`, `root_span/3`, `with_span_from/4`, `Core.Otel.Messaging.send/5`,
+  `process/5` — после колбэка.** Опции стали последним аргументом и необязательными
+  (`…, fun, opts \\ []`, `docs/rules/20-agreements.md`, «Context — последний из данных»): схема
+  опций проверяет только последний аргумент функции. Типы `Core.Otel.start_opts/0` и
+  `Core.Otel.Messaging.opts/0` удалены: тип опций в спеке — `keyword()`, состав — раздел «Опции»
+  документации функции. Правка потребителя: было
+  `Core.Otel.span("charge", [kind: :client], fn -> … end)`, стало
+  `Core.Otel.span("charge", fn -> … end, kind: :client)`; пустые опции не передаются:
+  `Core.Otel.span("charge", fn -> … end)`; в `bind` хвост после колбэка — маркер `_`:
+  `[] <- Core.Otel.span("charge", _, kind: :client)`; `Core.Otel.start_opts()` в спеке →
+  `keyword()`.
+
+- **`Core.Helper.StartOpts` сведён к custom-валидаторам схемы и проверкам дерева.** Опции
+  OTP-процесса проверяет схема над `init/1` (`use Core.Options`, `@opts_schema`), поэтому функции
+  разбора по ключу удалены: `keys!/3`, `module!/3,4`, `atom!/3`, `prim!/4`, `binary!/3,4`,
+  `list!/3`, `term!/3`, `fun!/4,5`, `pos_integer!/3,4`, `boolean!/3,4`, `one_of!/5`,
+  `topics_filter!/4`, `name!/3`, `shutdown!/4`, `raise_invalid!/4`. Остаются custom-типы схемы
+  (`prim/2`, `module/1`, `atom/1`, `binary/1`, `term/1`, `name/1`, `topics_filter/1`,
+  `shutdown/1`), `process!/3` и `unique!/4`. Правка потребителя: было
+  `StartOpts.pos_integer!(label, opts, :interval_ms, 1_000)` в `init/1`, стало
+  `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000, doc: "…"]]` над `init/1` и
+  `Keyword.fetch!(opts, :interval_ms)`; доменное значение — `{:custom, Core.Helper.StartOpts, :prim,
+  [Mod]}` вместо `StartOpts.prim!/4`, свой отказ сложнее перечисления — `raise ArgumentError` вместо
+  `raise_invalid!/4`.
 
 - **RabbitMQ Stream: соединение перезапускается, когда исчерпаны номера подписок и producer'ов.**
   Клиент `:rabbitmq_stream` выдаёт номера подписок и producer'ов счётчиком на процесс соединения,

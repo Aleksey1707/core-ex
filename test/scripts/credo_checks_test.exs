@@ -247,3 +247,194 @@ defmodule CredoChecks.UseOptsTest do
     assert Enum.reject(issues, fn issue -> Enum.any?(comments, &ConfigComment.ignores_issue?(&1, issue)) end) == []
   end
 end
+
+defmodule CredoChecks.OptsSchemaTest do
+  use Credo.Test.Case, async: true
+
+  alias CredoChecks.OptsSchema
+
+  setup_all do
+    {:ok, _apps} = Application.ensure_all_started(:credo)
+    :ok
+  end
+
+  test "Keyword.get(opts, …) в публичной функции без схемы — нарушение" do
+    """
+    defmodule A do
+      def run(source, opts \\\\ []) do
+        size = Keyword.get(opts, :batch_size, 100)
+        {source, size}
+      end
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issue(fn issue ->
+      assert issue.line_no == 3
+      assert issue.trigger == "opts"
+      assert issue.message =~ "@opts_schema"
+    end)
+  end
+
+  test "схема над первой клаузой снимает нарушение со всех клауз функции, но не с соседней" do
+    """
+    defmodule A do
+      use Core.Options
+
+      @opts_schema [size: [type: :pos_integer, default: 1, doc: "Размер."]]
+      @spec run(term(), keyword()) :: term()
+
+      def run(source, opts \\\\ [])
+      def run(nil, opts), do: Keyword.fetch!(opts, :size)
+      def run(source, opts), do: {source, Keyword.fetch!(opts, :size)}
+
+      def other(opts), do: Keyword.fetch!(opts, :size)
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issue(fn issue -> assert issue.line_no == 11 end)
+  end
+
+  test "opts[:…], Keyword.fetch/2 и Keyword.validate!/2 — нарушения" do
+    """
+    defmodule A do
+      def a(opts), do: opts[:size]
+      def b(opts), do: Keyword.fetch(opts, :size)
+      def c(opts), do: Keyword.validate!(opts, size: 1)
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issues(fn issues -> assert Enum.map(issues, & &1.line_no) == [2, 3, 4] end)
+  end
+
+  test "обратный вызов с @impl, defp и defmacro — без нарушений" do
+    """
+    defmodule A do
+      @behaviour Plug
+
+      @impl true
+      def init(opts), do: Keyword.get(opts, :path)
+
+      @impl Plug
+      def call(conn, opts), do: {conn, opts[:path]}
+
+      defp size(opts), do: Keyword.fetch!(opts, :size)
+      defmacro build(opts), do: Keyword.get(opts, :name)
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> refute_issues()
+  end
+
+  test "@impl false обратного вызова не делает — нарушение" do
+    """
+    defmodule A do
+      @impl false
+      def init(opts), do: Keyword.get(opts, :path)
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issue(fn issue -> assert issue.line_no == 3 end)
+  end
+
+  test "опции целиком уходят дальше — вызовом, в спецификации ребёнка, после правки — без нарушений" do
+    """
+    defmodule A do
+      def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
+
+      def child_spec(opts) do
+        %{id: Keyword.get(opts, :name) || __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+      end
+
+      def run(source, opts) do
+        if Keyword.get(opts, :dry?), do: :ok, else: opts |> Keyword.delete(:dry?) |> Other.run(source)
+      end
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> refute_issues()
+  end
+
+  test "правка опций без передачи дальше и Keyword.validate! при передаче — нарушения" do
+    """
+    defmodule A do
+      def run(opts) do
+        merged = Keyword.merge([size: 1], opts)
+        {merged, Keyword.get(opts, :size)}
+      end
+
+      def other(opts) do
+        opts = Keyword.validate!(opts, size: 1)
+        Other.run(opts)
+      end
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issues(fn issues -> assert Enum.map(issues, & &1.line_no) == [4, 8] end)
+  end
+
+  test "def внутри quote — генерируемый код, схема там MUST NOT — без нарушений" do
+    """
+    defmodule A do
+      def build(name, opts) do
+        quote do
+          def unquote(name)(opts), do: Keyword.get(opts, :size)
+          @opts unquote(opts)
+        end
+      end
+
+      quote do
+        def run(opts), do: opts[:size]
+      end
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> refute_issues()
+  end
+
+  test "опции в приватный хелпер модуля не уходят дальше: его чтение — чтение функции" do
+    """
+    defmodule A do
+      def run(source, opts), do: {source, size(opts)}
+      def other(opts), do: Other.run(limit(opts))
+
+      defp size(options), do: options |> Keyword.get(:size) |> bounded(options)
+      defp bounded(size, options), do: min(size, Keyword.fetch!(options, :max))
+      defp limit(opts), do: opts
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issue(fn issue -> assert {issue.line_no, issue.column} == {2, 44} end)
+  end
+
+  test "модуль разбора опций как данных — без нарушений, его соседи и вложенные — проверяются" do
+    """
+    defmodule Core.Prim.Opts do
+      def boolean!(opts, keys), do: Enum.map(keys, &Keyword.get(opts, &1))
+
+      defmodule Inner do
+        def run(opts), do: opts[:size]
+      end
+    end
+
+    defmodule Core.Codec.Plugin do
+      defmodule Opts do
+        def fields!(opts), do: Keyword.fetch!(opts, :fields)
+      end
+
+      def run(opts), do: opts[:size]
+    end
+    """
+    |> to_source_file()
+    |> run_check(OptsSchema)
+    |> assert_issues(fn issues -> assert Enum.map(issues, & &1.line_no) == [5, 14] end)
+  end
+end

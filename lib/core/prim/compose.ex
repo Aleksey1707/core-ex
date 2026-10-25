@@ -85,8 +85,8 @@ defmodule Core.Prim.Compose do
   """
   @spec sensitive?(keyword(), module()) :: boolean()
 
-  def sensitive?(opts, base) when is_list(opts) and is_atom(base) do
-    inherit(opts, base, :sensitive, "чувствительного")
+  def sensitive?(use_opts, base) when is_list(use_opts) and is_atom(base) do
+    inherit(use_opts, base, :sensitive, "чувствительного")
   end
 
   @doc """
@@ -97,8 +97,8 @@ defmodule Core.Prim.Compose do
   """
   @spec personal?(keyword(), module()) :: boolean()
 
-  def personal?(opts, base) when is_list(opts) and is_atom(base) do
-    inherit(opts, base, :personal, "персонального")
+  def personal?(use_opts, base) when is_list(use_opts) and is_atom(base) do
+    inherit(use_opts, base, :personal, "персонального")
   end
 
   # ---

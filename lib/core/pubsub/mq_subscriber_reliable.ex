@@ -146,7 +146,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @attr_dlq_topic "core.pubsub.dlq_topic"
   @attr_dlq_reason "core.pubsub.dlq_reason"
 
-  @label "PubSub.MqSubscriberReliable"
   @init_label "Core.PubSub.MqSubscriberReliable.init/1"
 
   @shutdown_ms 30_000
@@ -242,7 +241,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
     Process.flag(:trap_exit, true)
     reader_module = Keyword.fetch!(opts, :reader_module)
     poll_interval_ms = Keyword.get(opts, :poll_interval_ms) || default_poll_interval_ms(reader_module)
-    step = Step.new!(@label, opts)
+    step = Step.new!(Keyword.take(opts, Keyword.keys(Step.schema())))
     dlq_writer = Keyword.fetch!(opts, :dlq_writer)
 
     state = %__MODULE__{

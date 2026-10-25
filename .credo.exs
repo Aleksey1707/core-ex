@@ -192,6 +192,7 @@
           #   UnsafeToAtom — 20-agreements.md («Атомы из внешних данных»)
           #   CredoChecks.FunctionExported — 20-agreements.md («Экспорт модуля»), scripts/credo_checks.exs
           #   CredoChecks.UseOpts — 20-agreements.md («Опции `use`»), scripts/credo_checks.exs
+          #   CredoChecks.OptsSchema — 20-agreements.md («Схема опций функции»), scripts/credo_checks.exs
           #   LeakyEnvironment — утечка окружения в подпроцессы
           #   MixEnv — runtime-конфиг вместо `Mix.env/0`
           #   PassAsyncInTestCases — 19-testing.md
@@ -207,7 +208,8 @@
            [ignore: ~w/use module_attribute module defstruct type typep opaque callback/a]},
           {Credo.Check.Warning.UnsafeToAtom, [files: %{excluded: ["test/"]}]},
           {CredoChecks.FunctionExported, [files: %{excluded: ["lib/core/helper/module.ex"]}]},
-          {CredoChecks.UseOpts, [files: %{included: ["lib/"]}]}
+          {CredoChecks.UseOpts, [files: %{included: ["lib/"]}]},
+          {CredoChecks.OptsSchema, [files: %{included: ["lib/"]}]}
         ],
         disabled: [
           # `_` и `_name` несут разный смысл: первое — «значение не важно вообще»

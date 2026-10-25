@@ -420,7 +420,7 @@ defmodule Core.Outbox.Test do
 
   defp parse_subscriber!(opts) when is_list(opts) do
     valid = Core.Options.__validate__!(opts, @subscriber_schema, "#{@label}: подписчик")
-    step = Step.new!(@label, valid)
+    step = Step.new!(Keyword.take(valid, Keyword.keys(Step.schema())))
 
     %{
       name: Keyword.fetch!(valid, :name),

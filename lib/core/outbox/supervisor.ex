@@ -457,7 +457,7 @@ defmodule Core.Outbox.Supervisor do
 
     case mod.new(value) do
       {:ok, prim} -> prim
-      {:error, _reason} -> StartOpts.raise_invalid!(@label, key, "значение #{inspect(mod)}", value)
+      {:error, _reason} -> invalid!(key, "значение #{inspect(mod)}", value)
     end
   end
 
@@ -491,12 +491,12 @@ defmodule Core.Outbox.Supervisor do
         {nil, via!(via)}
 
       _both_or_none ->
-        StartOpts.raise_invalid!(@label, :pollers, "ровно один из writer: и via: у поллера", poller)
+        invalid!(:pollers, "ровно один из writer: и via: у поллера", poller)
     end
   end
 
   defp via!({module, handle} = via) when is_atom(module) and not is_nil(module) and not is_nil(handle), do: via
-  defp via!(other), do: StartOpts.raise_invalid!(@label, :via, "{модуль Mq.Writer, handle процесса}", other)
+  defp via!(other), do: invalid!(:via, "{модуль Mq.Writer, handle процесса}", other)
 
   defp connection!(nil), do: nil
   defp connection!(spec), do: StartOpts.process!(@label, :connection, spec)
@@ -504,5 +504,9 @@ defmodule Core.Outbox.Supervisor do
   defp process_names(connection, pollers) do
     processes = [connection | Enum.map(pollers, & &1.writer)]
     [Cleaner | for(%{name: name} <- processes, do: name)] ++ Enum.map(pollers, & &1.name)
+  end
+
+  defp invalid!(key, expected, value) do
+    raise ArgumentError, "#{@label}: опция #{inspect(key)} — ожидается #{expected}, получено #{inspect(value)}"
   end
 end

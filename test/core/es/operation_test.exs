@@ -153,7 +153,7 @@ defmodule Core.Es.OperationTest do
   end
 
   defp reacting_step(id) do
-    Step.new!("test",
+    Step.new!(
       topic: Account.Outbox.topic(),
       from_message: &{:ok, &1},
       on_message: fn _message, _data, context -> open!(id, context) end

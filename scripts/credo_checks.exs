@@ -4,6 +4,8 @@
 # `docs/rules/20-agreements.md`, «Экспорт модуля».
 #
 # `UseOpts` — разбор опций `use` при раскрытии: `docs/rules/20-agreements.md`, «Опции `use`».
+#
+# `OptsSchema` — опции функции читает схема: `docs/rules/20-agreements.md`, «Схема опций функции».
 
 defmodule CredoChecks.FunctionExported do
   @moduledoc false
@@ -244,6 +246,240 @@ defmodule CredoChecks.UseOpts do
     format_issue(ctx,
       message: "#{name}/0 — функция ключей builder'а: ключи — атрибуты модуля (кроме Core.Prim.Wrapper)",
       trigger: Atom.to_string(name),
+      line_no: meta[:line],
+      column: meta[:column]
+    )
+  end
+end
+
+defmodule CredoChecks.OptsSchema do
+  @moduledoc false
+
+  use Credo.Check,
+    base_priority: :high,
+    category: :warning,
+    explanations: [
+      check: """
+      Функция, которая сама читает свои опции, объявляет схему `@opts_schema` над `def` в модуле с
+      `use Core.Options`: тогда опечатка в ключе — `ArgumentError`, а не молчаливое умолчание
+      (`docs/rules/20-agreements.md`, «Схема опций функции»). Проверка срабатывает на
+      `Keyword.validate!(opts, …)` и на чтение `Keyword.get/fetch/fetch!(opts, …)` / `opts[:…]` в
+      теле публичной функции без схемы.
+
+      Не срабатывает на обратных вызовах с `@impl`, на функциях, отдающих `opts` целиком дальше, и в
+      модулях, которые разбирают опции как данные (`parsers:`).
+      """,
+      params: [parsers: "Модули разбора опций как данных: опции `use` и объявления, не опции вызова."]
+    ],
+    param_defaults: [
+      parsers: ~w(Core.Helper.Opts Core.Prim.Opts Core.Prim.Wrapper Core.Codec.Plugin.Opts Core.Es.Store.Opts
+           Core.Es.Aggregate.Repo.Pg.Snapshot)
+    ]
+
+  @reads ~w(get get_lazy fetch fetch! validate validate! has_key?)a
+  @transparent ~w(__block__ case cond if unless with fn try receive when and or not ! && || == != === !== ++ -- in)a
+  @blocks ~w(do else after rescue catch)a
+
+  @impl true
+  def run(%SourceFile{} = source_file, params) do
+    ctx = Context.build(source_file, params, __MODULE__)
+    parsers = Params.get(params, :parsers, __MODULE__)
+
+    source_file
+    |> SourceFile.ast()
+    |> modules([])
+    |> Enum.reject(fn {name, _body} -> name in parsers end)
+    |> Enum.flat_map(fn {_name, body} -> module_issues(body, ctx) end)
+    |> Enum.sort_by(& &1.line_no)
+  end
+
+  # ---
+
+  defp modules(ast, parent) do
+    {_ast, modules} =
+      Macro.prewalk(ast, [], fn
+        {:defmodule, _meta, [{:__aliases__, _alias, segments}, [do: body]]}, acc ->
+          name = parent ++ Enum.map(segments, &segment/1)
+          {nil, acc ++ [{Enum.join(name, "."), own_body(body)} | modules(body, name)]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    modules
+  end
+
+  defp segment(segment) when is_atom(segment), do: Atom.to_string(segment)
+  defp segment(segment), do: Macro.to_string(segment)
+
+  defp own_body(body) do
+    Macro.prewalk(body, fn
+      {:defmodule, _meta, _args} -> nil
+      node -> node
+    end)
+  end
+
+  defp module_issues(body, ctx) do
+    state = %{exempt?: false, exempt: MapSet.new(), helpers: helpers(body), issues: []}
+    {_ast, state} = Macro.prewalk(body, state, &form(&1, &2, ctx))
+    state.issues
+  end
+
+  # Приватные функции модуля: опции, отданные им, остаются в модуле, и их чтение — чтение
+  # вызывающего.
+  defp helpers(body) do
+    {_ast, helpers} =
+      Macro.prewalk(body, %{}, fn
+        {:quote, _meta, _args}, helpers ->
+          {nil, helpers}
+
+        {:defp, _meta, [head, blocks]}, helpers when is_list(blocks) ->
+          {nil, Map.update(helpers, fun(head), [{args(head), blocks}], &(&1 ++ [{args(head), blocks}]))}
+
+        node, helpers ->
+          {node, helpers}
+      end)
+
+    helpers
+  end
+
+  # Схема и `@impl` относятся к функции (имя и арность), а не к клаузе: стоят над первой. `def` внутри
+  # `quote` — генерируемый код, схема в нём MUST NOT.
+  defp form({:quote, _meta, _args}, state, _ctx), do: {nil, state}
+  defp form({:@, _meta, [{:opts_schema, _attr, _value}]}, state, _ctx), do: {nil, %{state | exempt?: true}}
+  defp form({:@, _meta, [{:impl, _attr, [false]}]} = node, state, _ctx), do: {node, state}
+  defp form({:@, _meta, [{:impl, _attr, [_value]}]}, state, _ctx), do: {nil, %{state | exempt?: true}}
+
+  defp form({kind, _meta, [head | blocks]}, state, ctx) when kind in ~w(def defp defmacro defmacrop)a do
+    fun = fun(head)
+    exempt = if state.exempt?, do: MapSet.put(state.exempt, fun), else: state.exempt
+    state = %{state | exempt?: false, exempt: exempt}
+
+    case blocks do
+      [blocks] when kind == :def and is_list(blocks) ->
+        if MapSet.member?(exempt, fun),
+          do: {nil, state},
+          else: {nil, %{state | issues: clause_issues(head, blocks, state.helpers, ctx) ++ state.issues}}
+
+      _private_or_head ->
+        {nil, state}
+    end
+  end
+
+  defp form(node, state, _ctx), do: {node, state}
+
+  defp fun({:when, _meta, [head, _guards]}), do: fun(head)
+  defp fun({name, _meta, args}) when is_list(args), do: {name, length(args)}
+  defp fun({name, _meta, _context}), do: {name, 0}
+
+  defp args({:when, _meta, [head, _guards]}), do: args(head)
+  defp args({_name, _meta, args}) when is_list(args), do: Enum.map(args, &param/1)
+  defp args(_head), do: []
+
+  defp param({:\\, _meta, [param, _default]}), do: param(param)
+  defp param({name, _meta, context}) when is_atom(name) and is_atom(context), do: name
+  defp param(_pattern), do: nil
+
+  # Функция, отдающая `opts` целиком дальше (аргументом вызова, в данных результата), опции не
+  # читает: ключи проверяет получатель. `Keyword.validate!` — проверка своих ключей и при передаче.
+  defp clause_issues(head, blocks, helpers, ctx) do
+    if :opts in args(head) do
+      env = %{var: :opts, consumer?: false, helpers: helpers, seen: MapSet.new(), site: nil}
+      uses = walk_each(Keyword.values(blocks), env, %{reads: [], passed?: false})
+
+      uses.reads
+      |> Enum.reverse()
+      |> Enum.filter(fn {_meta, fun} -> not uses.passed? or fun in ~w(validate validate!)a end)
+      |> Enum.take(1)
+      |> Enum.map(fn {meta, _fun} -> issue(ctx, meta) end)
+    else
+      []
+    end
+  end
+
+  # `consumer?` — узел стоит внутри аргументов вызова или литерала данных: голая переменная опций
+  # здесь уходит дальше целиком. Управляющие формы и правка через `Keyword.*` её не отдают. `site` —
+  # место передачи опций в приватную функцию: чтение внутри неё отмечается там.
+  defp walk({:|>, _meta, [left, {call, meta, args}]}, env, acc) when is_list(args),
+    do: walk({call, meta, [left | args]}, env, acc)
+
+  defp walk({{:., _dot, [{:__aliases__, _alias, [:Keyword]}, fun]}, _call, [{var, meta, context} | rest]}, env, acc)
+       when var == env.var and fun in @reads and is_atom(context),
+       do: walk_each(rest, env, read(acc, env, meta, fun))
+
+  defp walk({{:., _dot, [Access, :get]}, _call, [{var, meta, context} | rest]}, env, acc)
+       when var == env.var and is_atom(context),
+       do: walk_each(rest, env, read(acc, env, meta, :get))
+
+  defp walk({{:., _dot, [{:__aliases__, _alias, [:Keyword]}, _fun]}, _call, args}, env, acc),
+    do: walk_each(args, env, acc)
+
+  defp walk({var, _meta, context}, env, acc) when var == env.var and is_atom(context),
+    do: %{acc | passed?: acc.passed? or env.consumer?}
+
+  defp walk({:quote, _meta, args}, env, acc) do
+    {_ast, unquoted} =
+      Macro.prewalk(args, [], fn
+        {:unquote, _meta, [value]}, unquoted -> {nil, [value | unquoted]}
+        node, unquoted -> {node, unquoted}
+      end)
+
+    walk_each(unquoted, %{env | consumer?: true}, acc)
+  end
+
+  defp walk({form, _meta, [_pattern, value]}, env, acc) when form in ~w(= <- ->)a, do: walk(value, env, acc)
+
+  defp walk({form, _meta, args}, env, acc) when form in @transparent and is_list(args),
+    do: Enum.reduce(args, acc, &walk_control(&1, env, &2))
+
+  defp walk({name, _meta, args} = call, env, acc) when is_atom(name) and is_list(args) do
+    case Map.fetch(env.helpers, {name, length(args)}) do
+      {:ok, clauses} -> walk_helper(call, clauses, env, acc)
+      :error -> walk_each(args, %{env | consumer?: true}, acc)
+    end
+  end
+
+  defp walk({_form, _meta, args}, env, acc) when is_list(args), do: walk_each(args, %{env | consumer?: true}, acc)
+  defp walk({left, right}, env, acc), do: walk_each([left, right], %{env | consumer?: true}, acc)
+  defp walk(list, env, acc) when is_list(list), do: walk_each(list, %{env | consumer?: true}, acc)
+  defp walk(_ast, _env, acc), do: acc
+
+  defp walk_control(list, env, acc) when is_list(list), do: Enum.reduce(list, acc, &walk_control(&1, env, &2))
+  defp walk_control({key, value}, env, acc) when key in @blocks, do: walk_control(value, env, acc)
+  defp walk_control(ast, env, acc), do: walk(ast, env, acc)
+
+  defp walk_each(nodes, env, acc), do: Enum.reduce(nodes, acc, &walk(&1, env, &2))
+
+  # Опции, отданные приватной функции голой переменной, читаются её телом: оно разбирается с
+  # переменной её параметра, а результат вызова уходит туда же, куда уходил бы сам вызов.
+  defp walk_helper({name, _meta, args}, clauses, env, acc) do
+    fun = {name, length(args)}
+    {given, rest} = args |> Enum.with_index() |> Enum.split_with(fn {arg, _index} -> var?(arg, env.var) end)
+    acc = walk_each(Enum.map(rest, &elem(&1, 0)), %{env | consumer?: true}, acc)
+
+    if MapSet.member?(env.seen, fun) do
+      acc
+    else
+      env = %{env | seen: MapSet.put(env.seen, fun)}
+
+      for {{_var, meta, _context}, index} <- given,
+          {params, blocks} <- clauses,
+          param = Enum.at(params, index),
+          param != nil,
+          reduce: acc,
+          do: (acc -> walk_each(Keyword.values(blocks), %{env | var: param, site: env.site || meta}, acc))
+    end
+  end
+
+  defp var?({var, _meta, context}, var) when is_atom(context), do: true
+  defp var?(_ast, _var), do: false
+
+  defp read(acc, env, meta, fun), do: %{acc | reads: [{env.site || meta, fun} | acc.reads]}
+
+  defp issue(ctx, meta) do
+    format_issue(ctx,
+      message: "opts читается мимо схемы — @opts_schema над def (use Core.Options) либо опции насквозь",
+      trigger: "opts",
       line_no: meta[:line],
       column: meta[:column]
     )
