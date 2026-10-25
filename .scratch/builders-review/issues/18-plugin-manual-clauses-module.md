@@ -1,6 +1,6 @@
 # 18: Разбор ручных клауз плагина — свой module
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Blocked by:** None (can start immediately)
 

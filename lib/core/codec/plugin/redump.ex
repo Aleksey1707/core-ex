@@ -27,8 +27,8 @@ defmodule Core.Codec.Plugin.Redump do
 
   alias Core.Codec
   alias Core.Codec.Field
+  alias Core.Codec.Plugin.Clauses
   alias Core.Codec.Plugin.Fields
-  alias Core.Codec.Plugin.Opts
   alias Core.Codec.Plugin.Variants
 
   @label "Codec.Plugin"
@@ -49,7 +49,7 @@ defmodule Core.Codec.Plugin.Redump do
     manual =
       (Module.get_attribute(plugin, :codec_types) -- (field_types ++ Enum.map(variants, &elem(&1, 0)))) ++ manual_unions
 
-    targets = Opts.manual_targets(plugin, @callback_fun, 0, :module)
+    targets = Clauses.manual_targets(plugin, @callback_fun, 0, :module)
     covered = Enum.map(targets, &elem(&1, 1))
     covered? = &(:any in covered or &1 in covered)
 
@@ -95,7 +95,7 @@ defmodule Core.Codec.Plugin.Redump do
           type in derived,
           do: {@callback_fun, line, type}
 
-    Opts.raise_never_match!(env, dead, "спеку redump этого типа выводит плагин")
+    Clauses.raise_never_match!(env, dead, "спеку redump этого типа выводит плагин")
   end
 
   defp check_merge!(plugin, variants) do
