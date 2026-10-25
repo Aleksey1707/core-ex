@@ -53,12 +53,18 @@ defmodule Core.Mq.Stream.Credentials do
     }
   end
 
-  @doc "Credentials из `Application.get_env(otp_app, key)`."
+  @doc """
+  Credentials из `Application.get_env(otp_app, key)`.
+
+  Из секции берутся только ключи `new/1`: секция — данные приложения, и настройки соединения рядом
+  с credentials (`lazy:`) её не ломают.
+  """
   @spec from_env(atom(), module() | atom()) :: t()
 
   def from_env(otp_app, key) when is_atom(otp_app) and is_atom(key) do
     otp_app
     |> Application.get_env(key, [])
+    |> Keyword.take(@enforce_keys)
     |> new()
   end
 

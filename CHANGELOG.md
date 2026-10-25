@@ -36,13 +36,13 @@
   - `Core.Helper.Lock.advisory_xact!/3`, `with_advisory!/4` (`lock_timeout:` строкой, `timeout:`)
     и `try_advisory_xact/3` (только `timeout:`: блокировку она не ждёт).
   - `Core.Helper.Keys.camelize/2`, `snakify/2` (`except:` — список atom или строк).
-  - `Core.Mq.Stream.Credentials.new/1` и через неё `from_env/2`: ключ вне `host` / `port` / `vhost`
-    / `username` / `password` — `ArgumentError`, поэтому секция app-env под `from_env/2` несёт
-    только их. Настройки соединения рядом с ними (`lazy:`) вынимаются до вызова:
-    `{lazy, creds} = Keyword.pop!(env, :lazy)` → `Credentials.new(creds)`. Значения тоже
-    проверяются: `host` / `vhost` / `username` / `password` — строки, `port` — положительное целое;
-    charlist и `nil` (`System.get_env/1` без переменной) раньше уходили в struct, теперь —
-    `ArgumentError`. Пароль не строкой отклоняется без значения в тексте.
+  - `Core.Mq.Stream.Credentials.new/1`: ключ вне `host` / `port` / `vhost` / `username` /
+    `password` — `ArgumentError`. Настройки соединения рядом с ними (`lazy:`) вынимаются до вызова
+    `new/1`: `{lazy, creds} = Keyword.pop!(env, :lazy)` → `Credentials.new(creds)`. `from_env/2`
+    чужие ключи секции не отклоняет: берёт из неё только эти пять, правка у её вызывающих не нужна.
+    Значения проверяются у обеих: `host` / `vhost` / `username` / `password` — строки, `port` —
+    положительное целое; charlist и `nil` (`System.get_env/1` без переменной) раньше уходили в
+    struct, теперь — `ArgumentError`. Пароль не строкой отклоняется без значения в тексте.
   - `Core.Web.ErrorMapper.map/2`, `unauthorized/1`, `critical/1`, `by_status/2`, `cast_errors/2` —
     у каждой функции свой состав ключей (`docs/rules/10-architecture.md`, «Граница HTTP»), и общий
     список опций маппера приложения, переданный целиком, теперь отклоняется: `auth_codes:` — у

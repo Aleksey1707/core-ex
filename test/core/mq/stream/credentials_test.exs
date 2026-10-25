@@ -25,6 +25,13 @@ defmodule Core.Mq.Stream.CredentialsTest do
     assert creds.vhost == "/"
   end
 
+  test "from_env берёт из секции только свои ключи: настройки соединения рядом не мешают" do
+    Application.put_env(:core, __MODULE__, host: "broker", lazy: true)
+    on_exit(fn -> Application.delete_env(:core, __MODULE__) end)
+
+    assert %Credentials{host: "broker", port: 5552} = Credentials.from_env(:core, __MODULE__)
+  end
+
   test "to_connection_opts отдаёт keyword для клиента" do
     opts = Credentials.to_connection_opts(Credentials.new(host: "broker", password: "s3cret"))
 
