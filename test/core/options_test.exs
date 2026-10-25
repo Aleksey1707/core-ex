@@ -133,6 +133,21 @@ defmodule Core.OptionsTest do
     test "def из quote такого модуля в модуле без use Core.Options — обычный def" do
       assert Plain.generated(any: 1) == [any: 1]
     end
+
+    test "голова без тела с unquote-фрагментом — Kernel.def как есть" do
+      [{module, _binary}] =
+        Code.compile_string("""
+        defmodule Core.OptionsTest.Fragment#{System.unique_integer([:positive])} do
+          use Core.Options
+
+          name = :f
+          def unquote(name)(subject, opts \\\\ [])
+          def unquote(name)(subject, opts), do: {subject, opts}
+        end
+        """)
+
+      assert module.f(:a) == {:a, []}
+    end
   end
 
   describe "ошибки объявления — CompileError" do
@@ -192,6 +207,14 @@ defmodule Core.OptionsTest do
       def f(:a, opts), do: opts
       @opts_schema [size: [type: :integer, doc: "Размер."]]
       def f(:b, opts), do: opts
+      """)
+    end
+
+    test "атрибут между головой без тела и первой клаузой" do
+      assert_compile_error(~r/^Options: f\/2: @opts_schema ставится перед головой функции$/, """
+      def f(subject, opts \\\\ [])
+      @opts_schema [size: [type: :integer, doc: "Размер."]]
+      def f(:a, opts), do: opts
       """)
     end
 

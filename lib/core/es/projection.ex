@@ -547,8 +547,7 @@ defmodule Core.Es.Projection do
   @doc """
   Прогнать одну пачку проекции `projection` в вызывающем процессе.
 
-  `batch_size:` — сколько событий читает пачка, по умолчанию #{@default_batch_size}. Шаги и
-  исходы — в `@moduledoc`. Вызов внутри транзакции `repo:` проекции — `ArgumentError`: пачка
+  Шаги и исходы — в `@moduledoc`. Вызов внутри транзакции `repo:` проекции — `ArgumentError`: пачка
   открывает свою.
   """
   @opts_schema [
