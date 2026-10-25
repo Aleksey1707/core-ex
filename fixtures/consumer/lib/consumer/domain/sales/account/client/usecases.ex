@@ -33,6 +33,16 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
     end)
   end
 
+  @spec change(Account.ID.t(), Version.t(), [Account.Cmd.t()], Context.t()) :: Result.unit()
+
+  def change(%Account.ID{} = id, %Version{} = version, commands, %Context{} = context) when is_list(commands) do
+    Es.Transact.run(fn ->
+      with {:ok, {events, %Account{}}} <- @repo.get_decision(id, version, context, &Account.execute(&1, commands)) do
+        @repo.append(events, context)
+      end
+    end)
+  end
+
   def rename(%Account{} = state, %Account.Cmd.Rename{} = command) do
     case Account.execute(state, command) do
       {:ok, {[], executed}} -> {:unchanged, executed.name}

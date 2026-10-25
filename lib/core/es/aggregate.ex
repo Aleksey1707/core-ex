@@ -48,12 +48,18 @@ defmodule Core.Es.Aggregate do
     предыдущего;
   - `execute(state, command)` → `Result.t({[Es.Event], %Agg{}})` — чистый шаг
     «`decide/2` → события → `fold/2`»; `{:ok, []}` даёт `{:ok, {[], state}}` без роста версии;
+  - `execute(state, commands)` — то же над списком команд, цепочкой (ADR-0087): каждая следующая
+    решает от состояния после предыдущей, итог — события всех команд по порядку и состояние после
+    последней; первый отказ — `{:error, _}` этой команды как есть, пустой список —
+    `{:ok, {[], state}}`; элемент — команда, вложенный список — `FunctionClauseError`;
   - `__es_event_codec__/0` — кодек событий агрегата.
 
   Головы принимают только `%Agg{}`, результат сужен до формы выше: компилятор у вызывающего знает
   состояние агрегата, и опечатка в его поле или невозможная clause по результату — предупреждение
   при сборке. `execute/2` зовёт `decide(command, state)` в модуле агрегата, поэтому домен команды
   — clauses `decide/2`: команда другого агрегата или без clause в `decide` ловится при сборке.
+  У цепочки сборка сверяет только состояние: команда другого агрегата в списке — `FunctionClauseError`
+  в рантайме.
 
   События результата `decide/2` собираются так: `id` — новый, `aggregate_id` — `state.id`,
   `aggregate_version` — по порядку от `state.version` (от `nil` — с 1), `by` и `at` — поля
@@ -126,12 +132,23 @@ defmodule Core.Es.Aggregate do
         folded
       end
 
-      @doc "Исполнить команду: события решения `decide/2` и состояние после них."
-      @spec execute(%__MODULE__{}, struct()) ::
+      @doc """
+      Исполнить команду или цепочку команд: события решений `decide/2` и состояние после них.
+
+      Команда цепочки решает от состояния после предыдущей, первый отказ обрывает цепочку.
+      """
+      @spec execute(%__MODULE__{}, struct() | [struct()]) ::
               Core.Result.t({[Core.Es.Event.t()], %__MODULE__{}})
 
       def execute(%__MODULE__{} = state, command) when is_struct(command) do
         case Core.Es.Aggregate.apply_decision(__MODULE__, state, command, decide(command, state)) do
+          {:ok, {events, %__MODULE__{} = executed}} when is_list(events) -> {:ok, {events, executed}}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+
+      def execute(%__MODULE__{} = state, commands) when is_list(commands) do
+        case Core.Es.Aggregate.execute_chain(__MODULE__, state, commands) do
           {:ok, {events, %__MODULE__{} = executed}} when is_list(events) -> {:ok, {events, executed}}
           {:error, reason} -> {:error, reason}
         end
@@ -160,6 +177,18 @@ defmodule Core.Es.Aggregate do
   end
 
   # ===== команда =====
+
+  @doc false
+  @spec execute_chain(module(), struct(), [struct()]) :: Result.t({[Es.Event.t()], struct()})
+
+  def execute_chain(aggregate, state, commands) when is_struct(state, aggregate) and is_list(commands) do
+    Enum.reduce_while(commands, {:ok, {[], state}}, fn command, {:ok, {events, acc}} when is_struct(command) ->
+      case apply_decision(aggregate, acc, command, aggregate.decide(command, acc)) do
+        {:ok, {step_events, next}} -> {:cont, {:ok, {events ++ step_events, next}}}
+        {:error, %Error{}} = error -> {:halt, error}
+      end
+    end)
+  end
 
   @doc false
   @spec apply_decision(module(), struct(), struct(), Result.t([result()])) ::

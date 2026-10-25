@@ -673,6 +673,17 @@ InCodec.dump(item)
 - `decide(команда, состояние)` → `{:ok, [черновик]} | {:error, _}`: `id` события,
   `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без изменений —
   `{:ok, []}`.
+- Цепочку команд одного агрегата (`CONTEXT.md`, «Цепочка команд») исполняет один
+  `Agg.execute(state, commands)` над списком. Своя свёртка через `agg.execute(acc, command)` над
+  модулем-переменной — MUST NOT: состояние чужого агрегата сборка у неё не видит (ADR-0087).
+
+  ```elixir
+  # плохо — `execute_all(Account, %Order{}, commands)` сборка пропускает
+  def execute_all(agg, state, commands), do: Enum.reduce_while(commands, ..., &agg.execute(...))
+
+  # хорошо — голова закрывает состояние агрегата
+  @repo.get_decision(id, version, context, &Account.execute(&1, commands))
+  ```
 - Элемент результата — черновик события (`CONTEXT.md`, «Черновик события»); он MUST строиться
   только самим событием: `Event.Mod.draft(payload)` у события с нагрузкой, `Event.Mod.draft()` —
   без неё. Кортеж `{Event.Mod, payload}`, собранный вручную, библиотека примет, но нагрузку в нём

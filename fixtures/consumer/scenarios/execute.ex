@@ -43,6 +43,16 @@ defmodule ConsumerTest.Execute do
     # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
     do: Account.execute(state, command)
 
+  # A3c — состояние другого агрегата у цепочки команд (ADR-0087)
+  def a3c_chain_foreign_state(%Order{} = state, %Account.Cmd.Open{} = command),
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.execute/2
+    do: Account.execute(state, [command])
+
+  # A1c — команда другого агрегата в цепочке: молчит — элементы списка сборка не сверяет с `decide/2`,
+  # в рантайме `FunctionClauseError` (ADR-0087)
+  def a1c_chain_foreign_command(%Account{} = state, %Order.Cmd.Place{} = command),
+    do: Account.execute(state, [command])
+
   # A4a — `{:ok, events}` вместо `{:ok, {events, state}}`
   def a4a_case_events_list(%Account{} = state, %Account.Cmd.Open{} = command) do
     case Account.execute(state, command) do

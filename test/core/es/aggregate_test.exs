@@ -88,6 +88,39 @@ defmodule Core.Es.AggregateTest do
     end
   end
 
+  describe "execute/2 — цепочка команд" do
+    test "события всех команд по порядку, версии подряд, состояние после последней" do
+      opened = opened()
+      name = Account.Name.new!("Отгрузка")
+      rename = %Cmd.Rename{name: name, by: UserID.new(), at: @at}
+
+      assert {:ok, {[%Event.Renamed{} = renamed, %Event.Frozen{} = frozen], state}} =
+               Account.execute(opened, [rename, %Cmd.Freeze{by: UserID.new(), at: @at}])
+
+      assert [2, 3] == Enum.map([renamed, frozen], &Version.value(&1.aggregate_version))
+      assert %Account{name: ^name, status: :frozen} = state
+      assert state.version == Version.new!(3)
+    end
+
+    test "отказ команды от состояния после предыдущей — отказ всей цепочки как есть" do
+      rename = %Cmd.Rename{name: Account.Name.new!("Отгрузка"), by: UserID.new(), at: @at}
+      freeze = %Cmd.Freeze{by: UserID.new(), at: @at}
+
+      assert {:error, %Error{kind: :domain, code: :invalid_status, detail: %{status: :frozen}}} =
+               Account.execute(opened(), [freeze, rename, close()])
+    end
+
+    test "пустая цепочка — без событий, состояние прежнее" do
+      opened = opened()
+
+      assert {:ok, {[], ^opened}} = Account.execute(opened, [])
+    end
+
+    test "вложенный список — не команда: FunctionClauseError" do
+      assert_raise FunctionClauseError, fn -> Account.execute(opened(), [[close()]]) end
+    end
+  end
+
   describe "fold/2" do
     test "свёртка от любого состояния продолжает версии от state.version" do
       opened = opened()
