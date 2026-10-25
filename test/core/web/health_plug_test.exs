@@ -27,6 +27,13 @@ defmodule Core.Web.HealthPlugTest do
     assert conn.halted
   end
 
+  test "/ready без repos: — репозитории из :ecto_repos приложения" do
+    conn = Plug.Test.conn(:get, "/ready") |> call([])
+
+    assert {conn.status, conn.resp_body} == {200, "ok"}
+    assert conn.halted
+  end
+
   test "/ready при недоступном репозитории — 503 unavailable и warning в лог" do
     log =
       capture_log([level: :warning], fn ->
@@ -53,7 +60,6 @@ defmodule Core.Web.HealthPlugTest do
   end
 
   test "неверные опции — ошибка на init/1" do
-    assert_raise ArgumentError, fn -> Web.HealthPlug.init([]) end
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: []) end
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [Core.Web.HealthPlugTest.NoRepo]) end
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [Core.Web]) end

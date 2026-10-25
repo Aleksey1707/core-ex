@@ -179,7 +179,7 @@ Sentry (ADR-0071): то, что в таблице помечено «при `ope
 | `Core.Web.Params.Schema` | OpenAPI-описание параметров запроса, только при `open_api_spex`: `page(opts)` — query-параметры `limit` / `offset` с границами `Core.Pagination` и опциями `Core.Web.Params.page/2` |
 | `Core.Web.CriticalError` | отчёт о критической ошибке в службу учёта ошибок и идентификатор ошибки для обёртки 500 (`report/2`), только при `:sentry` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
-| `Core.Web.HealthPlug` | liveness (`/health`, `200` без проверок) и readiness (`/ready`, `SELECT 1` по каждому из `repos:` с пределом `timeout:`, `200` либо `503` с `warning` в лог) в эндпоинте приложения |
+| `Core.Web.HealthPlug` | liveness (`/health`, `200` без проверок) и readiness (`/ready`, `SELECT 1` по каждому репозиторию из `:ecto_repos` приложения с пределом `timeout:`, `200` либо `503` с `warning` в лог) в эндпоинте приложения |
 | `Core.Web.Event` | событие страницы событий на wire: `use` в модуле приложения порождает `to_wire/2` — событие и словарь ссылок → map для JSON, при `labels: true` — с названием и сведениями, при `open_api_spex` — и схема этого JSON (ADR-0066; `11-domain.md`, «Wire сведений») |
 | `Core.Helper.Keys` | camelCase ↔ snake_case ключей (`camelize/1` / `snakify/1` — рекурсивно; `camelize_key/1` / `snakify_key/1` — один ключ) |
 

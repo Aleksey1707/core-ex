@@ -569,8 +569,10 @@ Liveness и readiness отдаёт `Core.Web.HealthPlug` в эндпоинте �
 
 - Плаг MUST стоять в `MyAppWeb.Endpoint` до `Plug.Telemetry` и `Plug.Parsers`: проба раз в
   несколько секунд не идёт в request-лог и не проходит пайплайны роутера с аутентификацией.
-- `repos:` MUST перечислять все репозитории из `:ecto_repos` приложения: без одного из них
-  readiness пустит трафик к приложению, которое не может писать.
+- `repos:` эндпоинт MUST NOT передавать: репозитории плаг берёт из `:ecto_repos` приложения сам.
+  Список в эндпоинте — ссылка web на `DAO` (`20-agreements.md`, «Алиасы приложения») и копия
+  `:ecto_repos`: без одного из репозиториев readiness пустит трафик к приложению, которое не может
+  писать.
 - Проба, которая перезапускает контейнер (liveness), — `/health`; проба, по которой пускают трафик
   и ждут готовности соседи (`depends_on: condition: service_healthy` у compose, балансировщик), —
   `/ready`. Liveness на `/ready` MUST NOT: недоступная база перезапускала бы здоровое приложение
@@ -583,7 +585,7 @@ Liveness и readiness отдаёт `Core.Web.HealthPlug` в эндпоинте �
 get "/health", HealthController, :show
 
 # хорошо — lib/my_app_web/endpoint.ex
-plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]
+plug Core.Web.HealthPlug
 plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 ```
 

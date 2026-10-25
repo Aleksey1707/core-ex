@@ -80,6 +80,12 @@ defmodule Core.ConfigTest do
     end
   end
 
+  describe "ecto_repos/0" do
+    test "`:ecto_repos` приложения otp_app" do
+      assert Config.ecto_repos() == [Core.TestRepo]
+    end
+  end
+
   describe "repo!/1" do
     test "без ключа — реализация по конвенции `<Behaviour>.Pg`" do
       Application.delete_env(:core, Behaviour)

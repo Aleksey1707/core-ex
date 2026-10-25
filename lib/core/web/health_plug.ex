@@ -3,18 +3,17 @@ defmodule Core.Web.HealthPlug do
     repos: [
       type: {:custom, Core.Web.HealthPlug, :repos, []},
       type_doc: "список `t:module/0`",
-      required: true,
-      doc: "Непустой список модулей с `use Ecto.Repo`, которые проверяет readiness."
+      doc:
+        "Непустой список модулей с `use Ecto.Repo`, которые проверяет readiness. Без опции — " <>
+          "`Core.Config.ecto_repos/0`, прочитанный на каждой пробе."
     ],
     health_path: [
-      type: {:custom, Core.Web.HealthPlug, :path, []},
-      type_doc: "`t:String.t/0`",
+      type: :string,
       default: "/health",
       doc: "Путь liveness от корня."
     ],
     ready_path: [
-      type: {:custom, Core.Web.HealthPlug, :path, []},
-      type_doc: "`t:String.t/0`",
+      type: :string,
       default: "/ready",
       doc: "Путь readiness от корня, отличный от `health_path:`."
     ],
@@ -26,10 +25,14 @@ defmodule Core.Web.HealthPlug do
 
   - `health_path:` (`/health`) — `200` `ok` без проверок: liveness не должен перезапускать
     приложение из-за недоступной базы.
-  - `ready_path:` (`/ready`) — `SELECT 1` по каждому репозиторию из `repos:` параллельно, запрос с
-    таймаутом `timeout:` (1000 мс): `200` `ok`, если ответили все, иначе `503` `unavailable` и
-    `warning` в лог на каждый неготовый репозиторий. По readiness compose и балансировщик не шлют
-    трафик приложению без базы.
+  - `ready_path:` (`/ready`) — `SELECT 1` по каждому репозиторию приложения (`:ecto_repos` либо
+    `repos:`) параллельно, запрос с таймаутом `timeout:` (1000 мс): `200` `ok`, если ответили все,
+    иначе `503` `unavailable` и `warning` в лог на каждый неготовый репозиторий. По readiness
+    compose и балансировщик не шлют трафик приложению без базы.
+
+  Список репозиториев плаг берёт сам: эндпоинт не называет `DAO` приложения, а readiness не
+  расходится с `:ecto_repos`. `:ecto_repos` читается на пробе, а не на `init/1`: эндпоинт Phoenix
+  вызывает `init/1` при сборке, и конфигурация приложения оказалась бы зашита в его байткод.
 
   Таймаут запроса отдаёт причину драйвера и соединение пулу. Проверку, которая не уложилась в
   `timeout:` с запасом (ожидание соединения в очереди пула), плаг снимает сам: ответ не виснет
@@ -51,6 +54,7 @@ defmodule Core.Web.HealthPlug do
 
   import Plug.Conn
 
+  alias Core.Config
   alias Core.Result
   alias Plug.Conn
 
@@ -66,8 +70,8 @@ defmodule Core.Web.HealthPlug do
 
   @impl true
   def init(opts) when is_list(opts) do
-    health = segments(Keyword.fetch!(opts, :health_path))
-    ready = segments(Keyword.fetch!(opts, :ready_path))
+    health = segments(path!(opts, :health_path))
+    ready = segments(path!(opts, :ready_path))
 
     if health == ready do
       raise ArgumentError,
@@ -75,7 +79,7 @@ defmodule Core.Web.HealthPlug do
               "получено #{inspect(Keyword.fetch!(opts, :ready_path))}"
     end
 
-    %{repos: Keyword.fetch!(opts, :repos), health: health, ready: ready, timeout: Keyword.fetch!(opts, :timeout)}
+    %{repos: Keyword.get(opts, :repos), health: health, ready: ready, timeout: Keyword.fetch!(opts, :timeout)}
   end
 
   @doc false
@@ -87,16 +91,21 @@ defmodule Core.Web.HealthPlug do
       else: {:error, "ожидается непустой список модулей с `use Ecto.Repo`, получено #{inspect(value)}"}
   end
 
-  @doc false
-  @spec path(term()) :: Result.t(String.t(), String.t())
-
-  def path("/" <> _ = path), do: {:ok, path}
-  def path(other), do: {:error, "ожидается путь от корня, получено #{inspect(other)}"}
-
   # ---
 
   defp repo?(repo) do
     is_atom(repo) and Core.Helper.Module.exports?(repo, :__adapter__, 0)
+  end
+
+  defp path!(opts, key) do
+    case Keyword.fetch!(opts, key) do
+      "/" <> _ = path ->
+        path
+
+      other ->
+        raise ArgumentError,
+              "#{inspect(__MODULE__)}.init/1: опция #{inspect(key)} — ожидается путь от корня, получено #{inspect(other)}"
+    end
   end
 
   defp segments(path), do: String.split(path, "/", trim: true)
@@ -114,7 +123,7 @@ defmodule Core.Web.HealthPlug do
   # ---
 
   defp ready(conn, %{repos: repos, timeout: timeout}) do
-    case Enum.reject(check(repos, timeout), &match?({_repo, :ok}, &1)) do
+    case Enum.reject(check(repos || Config.ecto_repos(), timeout), &match?({_repo, :ok}, &1)) do
       [] ->
         respond(conn, 200, "ok")
 

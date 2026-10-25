@@ -330,6 +330,16 @@
   `current_function` как `:erlang.hibernate/3`, с OTP 29 — `:gen_server.loop_hibernate/4`. Код
   потребителя не меняется.
 
+- **`Core.Web.HealthPlug` берёт репозитории из `:ecto_repos` сам, `repos:` — необязательная**
+  (норма — `docs/rules/app/15-web-api.md`, «Проверки живости и готовности»). Раньше `repos:` была
+  обязательной, и эндпоинт перечислял репозитории сам: пример нормы `repos: [MyApp.Infra.DAO]` —
+  ссылка web на `DAO`, которую тот же ярус запрещает и ловит boundary сборки, а список — копия
+  `:ecto_repos`, расходящаяся с ним молча. Теперь без `repos:` readiness проверяет репозитории
+  `Core.Config.ecto_repos/0` (новая функция — `:ecto_repos` приложения), прочитанные на каждой
+  пробе; `repos:` остаётся подменой.
+  Правка потребителя: было — `plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]`, стало —
+  `plug Core.Web.HealthPlug`.
+
 ### Изменения контракта макросов
 
 - **Базовый `use Core.Prim` отклоняет неизвестные ключи.** Раньше база проверяла только
