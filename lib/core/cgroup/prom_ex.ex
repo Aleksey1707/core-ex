@@ -71,24 +71,26 @@ defmodule Core.Cgroup.PromEx do
   # ---
 
   defp emit_current(memory_opts) do
-    case Cgroup.memory_current(memory_opts) do
+    case Cgroup.memory_current(opts_for(memory_opts, :current_path)) do
       {:ok, bytes} -> :telemetry.execute(@memory_event, %{bytes: bytes}, %{})
       :unavailable -> :ok
     end
   end
 
   defp emit_anon(memory_opts) do
-    case Cgroup.memory_anon(memory_opts) do
+    case Cgroup.memory_anon(opts_for(memory_opts, :stat_path)) do
       {:ok, bytes} -> :telemetry.execute(@memory_anon_event, %{bytes: bytes}, %{})
       :unavailable -> :ok
     end
   end
 
   defp emit_max(memory_opts) do
-    case Cgroup.memory_max(memory_opts) do
+    case Cgroup.memory_max(opts_for(memory_opts, :max_path)) do
       {:ok, bytes} -> :telemetry.execute(@memory_max_event, %{bytes: bytes}, %{})
       :unlimited -> :ok
       :unavailable -> :ok
     end
   end
+
+  defp opts_for(memory_opts, path_key), do: Keyword.take(memory_opts, [path_key, :mount_point])
 end

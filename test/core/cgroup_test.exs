@@ -25,6 +25,12 @@ defmodule Core.CgroupTest do
     assert :unavailable = Cgroup.memory_current(current_path: path)
   end
 
+  test "ключ соседней функции → ArgumentError", %{path: path} do
+    assert_raise ArgumentError, ~r/^Core.Cgroup.memory_current\/1: unknown options \[:stat_path\]/, fn ->
+      Cgroup.memory_current(stat_path: path)
+    end
+  end
+
   describe "memory_max/1" do
     test "читает лимит", %{path: path} do
       File.write!(path, "2097152\n")

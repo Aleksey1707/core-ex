@@ -12,6 +12,8 @@ defmodule Core.Cgroup do
   Вне контейнера обычно `:unavailable`.
   """
 
+  use Core.Options
+
   @mount_point "/sys/fs/cgroup"
   @self_cgroup_path "/proc/self/cgroup"
 
@@ -28,14 +30,21 @@ defmodule Core.Cgroup do
   # Анонимная память в memory.stat: имя v2, затем иерархическое и локальное имена v1.
   @anon_keys ~w(anon total_rss rss)
 
+  @location_schema [
+    mount_point: [type: :string, default: @mount_point, doc: "Точка монтирования cgroupfs."],
+    self_cgroup_path: [
+      type: :string,
+      default: @self_cgroup_path,
+      doc: "Файл cgroup процесса, из которого берётся его относительный путь."
+    ]
+  ]
+
   @doc """
   Текущее потребление ОЗУ cgroup в байтах.
 
   Считает вместе со страничным кешем; память приложения — `memory_anon/1`.
-
-  Opts: `:current_path` — явный путь к файлу (тесты / DI), `:mount_point`,
-  `:self_cgroup_path`.
   """
+  @opts_schema [current_path: [type: :string, doc: "Явный путь к `memory.current` (тесты / DI)."]] ++ @location_schema
   @spec memory_current() :: {:ok, non_neg_integer()} | :unavailable
   @spec memory_current(keyword()) :: {:ok, non_neg_integer()} | :unavailable
 
@@ -53,10 +62,8 @@ defmodule Core.Cgroup do
   в отличие от `memory.current`. То же значение показывает `podman stats`.
 
   Имя ключа у v2 (`anon`) и v1 (`total_rss` / `rss`) разное, наружу отдаются байты.
-
-  Opts: `:stat_path` — явный путь к файлу (тесты / DI), `:mount_point`,
-  `:self_cgroup_path`.
   """
+  @opts_schema [stat_path: [type: :string, doc: "Явный путь к `memory.stat` (тесты / DI)."]] ++ @location_schema
   @spec memory_anon() :: {:ok, non_neg_integer()} | :unavailable
   @spec memory_anon(keyword()) :: {:ok, non_neg_integer()} | :unavailable
 
@@ -72,9 +79,8 @@ defmodule Core.Cgroup do
 
   `:unlimited` — лимит не задан (v2 `max`, v1 «бесконечное» значение); без него
   утилизацию (`current / max`) посчитать не из чего.
-
-  Opts: `:max_path` — явный путь к файлу, `:mount_point`, `:self_cgroup_path`.
   """
+  @opts_schema [max_path: [type: :string, doc: "Явный путь к `memory.max` (тесты / DI)."]] ++ @location_schema
   @spec memory_max() :: {:ok, pos_integer()} | :unlimited | :unavailable
   @spec memory_max(keyword()) :: {:ok, pos_integer()} | :unlimited | :unavailable
 
@@ -161,7 +167,7 @@ defmodule Core.Cgroup do
   end
 
   defp path_for(opts, file) do
-    mount = Keyword.get(opts, :mount_point, @mount_point)
+    mount = Keyword.fetch!(opts, :mount_point)
 
     case self_cgroup(opts) do
       {:ok, relative} -> Path.join([mount, relative, file])
@@ -172,7 +178,7 @@ defmodule Core.Cgroup do
   # v2-строка `/proc/self/cgroup`: `0::<relative-path>`. Корень (`/`) даёт тот же путь,
   # что и раньше, поэтому отдельной ветки не требует.
   defp self_cgroup(opts) do
-    path = Keyword.get(opts, :self_cgroup_path, @self_cgroup_path)
+    path = Keyword.fetch!(opts, :self_cgroup_path)
 
     with {:ok, contents} <- read_raw(path),
          [_ | _] = lines <- String.split(contents, "\n", trim: true),

@@ -30,6 +30,12 @@ defmodule Core.Helper.LockTest do
              end)
   end
 
+  test "advisory_xact! отклоняет опечатку в опциях до запроса" do
+    assert_raise ArgumentError, ~r/^Core.Helper.Lock.advisory_xact!\/3: unknown options \[:lock_timout\]/, fn ->
+      Helper.Lock.advisory_xact!(TestRepo, @key + 7, lock_timout: "250ms")
+    end
+  end
+
   describe "with_advisory!/4" do
     test "держит блокировку через несколько транзакций и снимает её после" do
       key = @key + 3

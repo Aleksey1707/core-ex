@@ -26,6 +26,23 @@
     `at:` не `Core.Es.Event.At` — `ArgumentError` до сборки события (было — у `key_destroyed/2`
     `FunctionClauseError`, у `given/3` отказ конструктора события, а при пустом `results` — молча).
     Правка: `assert_raise KeyError` / `FunctionClauseError` на такую опцию — `assert_raise ArgumentError`.
+  - `Core.DurationParser.parse/3`, `to_duration/2`, `to_timeout/2` и их bang-варианты (опции
+    передаются в safe-функцию) — неизвестный ключ отклонялся и раньше; неизвестная политика
+    `rounding:` теперь `ArgumentError`, а не `FunctionClauseError`.
+  - `Core.Cgroup.memory_current/1`, `memory_anon/1`, `memory_max/1` — каждая принимает только свой
+    явный путь (`current_path:` / `stat_path:` / `max_path:`) и `mount_point:` /
+    `self_cgroup_path:`; путь соседней функции — `ArgumentError`. `Core.Cgroup.PromEx` раздаёт
+    функциям их пути сам.
+  - `Core.Helper.Lock.advisory_xact!/3`, `with_advisory!/4` (`lock_timeout:` строкой, `timeout:`)
+    и `try_advisory_xact/3` (только `timeout:`: блокировку она не ждёт).
+  - `Core.Helper.Keys.camelize/2`, `snakify/2` (`except:` — список atom или строк).
+  - `Core.Mq.Stream.Credentials.new/1` и через неё `from_env/2`: ключ вне `host` / `port` / `vhost`
+    / `username` / `password` — `ArgumentError`, поэтому секция app-env под `from_env/2` несёт
+    только их. Настройки соединения рядом с ними (`lazy:`) вынимаются до вызова:
+    `{lazy, creds} = Keyword.pop!(env, :lazy)` → `Credentials.new(creds)`. Значения тоже
+    проверяются: `host` / `vhost` / `username` / `password` — строки, `port` — положительное целое;
+    charlist и `nil` (`System.get_env/1` без переменной) раньше уходили в struct, теперь —
+    `ArgumentError`. Пароль не строкой отклоняется без значения в тексте.
 
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на

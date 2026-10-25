@@ -42,4 +42,17 @@ defmodule Core.Mq.Stream.CredentialsTest do
     refute printed =~ "s3cret"
     assert printed =~ "broker"
   end
+
+  test "опечатка в ключе → ArgumentError" do
+    assert_raise ArgumentError, ~r/^Core.Mq.Stream.Credentials.new\/1: unknown options \[:hots\]/, fn ->
+      Credentials.new(hots: "broker")
+    end
+  end
+
+  test "отказ по паролю не печатает его значение" do
+    error = assert_raise ArgumentError, fn -> Credentials.new(password: ~c"s3cret") end
+
+    assert Exception.message(error) =~ ":password"
+    refute Exception.message(error) =~ "s3cret"
+  end
 end

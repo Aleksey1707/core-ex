@@ -20,10 +20,10 @@ defmodule Core.Mq.Stream.ConnectionIdsTest do
   end
 
   setup do
-    env = Application.fetch_env!(:core, Core.Mq.Stream)
-
     opts =
-      env
+      :core
+      |> Application.fetch_env!(Core.Mq.Stream)
+      |> Keyword.delete(:lazy)
       |> Mq.Stream.Credentials.new()
       |> Mq.Stream.Credentials.to_connection_opts()
 

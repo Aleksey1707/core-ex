@@ -12,8 +12,7 @@ defmodule Core.DurationParser do
     токенами допустимы); голое число без единицы — `:invalid_format`;
   - арифметика точная (целые наносекунды), округление применяется однажды — к итоговой сумме,
     а не к отдельным токенам;
-  - политика округления — опция `rounding: :no | :trunc | :ceil | :round` (по умолчанию `:no`:
-    неточная конвертация даёт `%Error{code: :precision_loss}`).
+  - политика округления — опция `rounding:` (`Rounding`, раздел «Опции» функции).
 
   Отличие от `Kernel.to_timeout/1`: `to_timeout("500us")` возвращает ошибку, а не `0` —
   усечение запрашивается явным `rounding: :trunc`. По входу `to_timeout/2` — надмножество
@@ -28,6 +27,8 @@ defmodule Core.DurationParser do
   alias Core.Result
 
   require Error
+
+  use Core.Options
 
   @token_regex ~r/(\d+)(?:\.(\d+))?\s*(ms|us|ns|d|h|m|s)/
   @format_regex ~r/^(?:\s*\d+(?:\.\d+)?\s*(?:ms|us|ns|d|h|m|s))+\s*$/
@@ -82,22 +83,29 @@ defmodule Core.DurationParser do
       values: ~w(no trunc ceil round)a
   end
 
+  @rounding_schema [
+    rounding: [
+      type: {:in, Rounding.values()},
+      default: :no,
+      doc:
+        "Политика округления итоговой суммы (`Core.DurationParser.Rounding`); `:no` — неточная " <>
+          "конвертация даёт `%Error{code: :precision_loss}`."
+    ]
+  ]
+
   @typedoc "Вход `to_timeout/2`: надмножество `Kernel.to_timeout/1`."
   @type timeout_input ::
           String.t() | non_neg_integer() | :infinity | Duration.t() | keyword(integer())
 
   @doc """
   Парсит строку длительности, возвращает целое значение в единице `unit` (по умолчанию `:s`).
-
-  Опции: `rounding: :no | :trunc | :ceil | :round` (по умолчанию `:no`).
   """
+  @opts_schema @rounding_schema
   @spec parse(String.t(), Unit.t(), keyword()) :: Result.t(non_neg_integer())
 
   def parse(str, unit \\ :s, opts \\ []) when is_binary(str) and is_enum(unit, Unit) do
-    rounding = rounding!(opts)
-
     with {:ok, ns} <- string_to_ns(str),
-         do: convert(ns, unit, rounding, str)
+         do: convert(ns, unit, Keyword.fetch!(opts, :rounding), str)
   end
 
   @doc "Как `parse/3`, но поднимает исключение при ошибке."
@@ -108,15 +116,14 @@ defmodule Core.DurationParser do
   @doc """
   Парсит строку длительности в `Duration.t()` (day / hour / minute / second / microsecond).
 
-  Опции — как у `parse/3`; точность `Duration` — микросекунда.
+  Точность `Duration` — микросекунда.
   """
+  @opts_schema @rounding_schema
   @spec to_duration(String.t(), keyword()) :: Result.t(Duration.t())
 
   def to_duration(str, opts \\ []) when is_binary(str) do
-    rounding = rounding!(opts)
-
     with {:ok, {num, den}} <- string_to_ns(str),
-         {:ok, us} <- divide(num, den * @ns_per_us, rounding, str, :us) do
+         {:ok, us} <- divide(num, den * @ns_per_us, Keyword.fetch!(opts, :rounding), str, :us) do
       {:ok, microseconds_to_duration(us)}
     end
   end
@@ -133,13 +140,12 @@ defmodule Core.DurationParser do
   keyword-компоненты (`week` / `day` / `hour` / `minute` / `second` / `millisecond` /
   `microsecond` / `nanosecond`). Повторяющиеся компоненты keyword суммируются (у
   `Kernel.to_timeout/1` — `ArgumentError`).
-
-  Опции — как у `parse/3`.
   """
+  @opts_schema @rounding_schema
   @spec to_timeout(timeout_input(), keyword()) ::
           Result.t(non_neg_integer() | :infinity)
 
-  def to_timeout(input, opts \\ []), do: timeout(input, rounding!(opts))
+  def to_timeout(input, opts \\ []), do: timeout(input, Keyword.fetch!(opts, :rounding))
 
   @doc "Как `to_timeout/2`, но поднимает исключение при ошибке."
   @spec to_timeout!(timeout_input(), keyword()) :: non_neg_integer() | :infinity
@@ -176,15 +182,6 @@ defmodule Core.DurationParser do
     with {:ok, ns} <- components_to_ns(components),
          do: convert({ns, 1}, :ms, rounding, components)
   end
-
-  defp rounding!(opts) do
-    opts
-    |> Keyword.validate!(rounding: :no)
-    |> Keyword.fetch!(:rounding)
-    |> checked_rounding()
-  end
-
-  defp checked_rounding(rounding) when is_enum(rounding, Rounding), do: rounding
 
   defp string_to_ns(str) do
     downcased = String.downcase(str)

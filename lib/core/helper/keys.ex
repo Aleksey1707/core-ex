@@ -13,28 +13,32 @@ defmodule Core.Helper.Keys do
   map: разбирать `%DateTime{}` на ключи бессмысленно, а `Map.new/2` на нём падает
   (`Enumerable` не реализован ни у `DateTime`, ни у `Decimal`).
 
-  Опция `except:` — список ключей (atom или строка), которые не преобразуются: регистр ключа
-  сохраняется как есть, значение под ним не обходится вовсе. Так проходит free-form нагрузка
-  (`metadata`, `payload`), где ключи задаёт не контракт API. Ключ сравнивается со своим
-  строковым видом, поэтому `:metadata` в `except:` покрывает и `"metadata"` в данных.
+  Опция `except:` — ключи, которые не преобразуются: регистр ключа сохраняется как есть,
+  значение под ним не обходится вовсе. Так проходит free-form нагрузка (`metadata`, `payload`),
+  где ключи задаёт не контракт API. Ключ сравнивается со своим строковым видом, поэтому
+  `:metadata` в `except:` покрывает и `"metadata"` в данных.
 
   Перевод atom-ключей в строки без смены регистра — `Core.Helper.Map.stringify_keys/1`.
   """
 
-  @doc """
-  Рекурсивно перевести ключи map в camelCase.
+  use Core.Options
 
-  Опции: `except:` — ключи, чьи поддеревья проходят нетронутыми.
-  """
+  @except_schema [
+    except: [
+      type: {:list, {:or, [:atom, :string]}},
+      default: [],
+      doc: "Ключи (atom или строка), чьи поддеревья проходят нетронутыми."
+    ]
+  ]
+
+  @doc "Рекурсивно перевести ключи map в camelCase."
+  @opts_schema @except_schema
   @spec camelize(term(), keyword()) :: term()
 
   def camelize(term, opts \\ []), do: convert(term, &camelize_key/1, except(opts))
 
-  @doc """
-  Рекурсивно перевести ключи map в snake_case.
-
-  Опции: `except:` — ключи, чьи поддеревья проходят нетронутыми.
-  """
+  @doc "Рекурсивно перевести ключи map в snake_case."
+  @opts_schema @except_schema
   @spec snakify(term(), keyword()) :: term()
 
   def snakify(term, opts \\ []), do: convert(term, &snakify_key/1, except(opts))
@@ -93,7 +97,7 @@ defmodule Core.Helper.Keys do
 
   defp except(opts) do
     opts
-    |> Keyword.get(:except, [])
+    |> Keyword.fetch!(:except)
     |> MapSet.new(&to_string/1)
   end
 end

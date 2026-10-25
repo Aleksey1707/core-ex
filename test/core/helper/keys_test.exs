@@ -71,6 +71,12 @@ defmodule Core.Helper.KeysTest do
            ) == %{"aggregate_id" => 1, "rawData" => %{"userName" => 2}}
   end
 
+  test "опечатка в ключе опций → ArgumentError" do
+    assert_raise ArgumentError, ~r/^Core.Helper.Keys.camelize\/2: unknown options \[:excpt\]/, fn ->
+      Helper.Keys.camelize(%{"raw_data" => 1}, excpt: ["raw_data"])
+    end
+  end
+
   test "преобразование одного ключа принимает atom и строку" do
     assert Helper.Keys.camelize_key(:aggregate_id) == "aggregateId"
     assert Helper.Keys.camelize_key("aggregate_id") == "aggregateId"

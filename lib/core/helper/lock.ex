@@ -6,18 +6,31 @@ defmodule Core.Helper.Lock do
   (инициализация системы при старте контейнера и т.п.).
   """
 
+  use Core.Options
+
   @default_lock_timeout "5s"
+
+  @timeout_schema [
+    timeout: [type: :timeout, doc: "Таймаут каждого запроса блокировки (`Ecto.Adapters.SQL.query!/4`)."]
+  ]
+  @lock_timeout_schema [
+    lock_timeout: [
+      type: :string,
+      default: @default_lock_timeout,
+      doc: "Предел ожидания блокировки — значение `lock_timeout` PostgreSQL (`\"250ms\"`)."
+    ]
+  ]
 
   @doc """
   Взять исключительную advisory-блокировку на время транзакции.
 
   Снимается автоматически на commit / rollback. Вызывать только внутри транзакции.
 
-  Ожидание ограничено `lock_timeout` (default `#{@default_lock_timeout}`, `:lock_timeout`
-  в opts): зависший держатель иначе блокирует старт всех узлов бесконечно. Превышение —
-  `Postgrex.Error` (`lock_not_available`), то есть падение старта с внятной причиной,
-  а не тихое зависание. `:timeout` — таймаут самого запроса.
+  Ожидание ограничено `lock_timeout`: зависший держатель иначе блокирует старт всех узлов
+  бесконечно. Превышение — `Postgrex.Error` (`lock_not_available`), то есть падение старта
+  с внятной причиной, а не тихое зависание.
   """
+  @opts_schema @lock_timeout_schema ++ @timeout_schema
   @spec advisory_xact!(Ecto.Repo.t(), integer(), keyword()) :: :ok
 
   def advisory_xact!(repo, key, opts \\ []) when is_integer(key) and is_list(opts) do
@@ -33,6 +46,7 @@ defmodule Core.Helper.Lock do
   `true` — блокировка взята (до конца транзакции), `false` — её держит кто-то другой.
   Для операций, которые незанятый узел просто пропускает вместо того, чтобы ждать.
   """
+  @opts_schema @timeout_schema
   @spec try_advisory_xact(Ecto.Repo.t(), integer(), keyword()) :: boolean()
 
   def try_advisory_xact(repo, key, opts \\ []) when is_integer(key) and is_list(opts) do
@@ -57,9 +71,9 @@ defmodule Core.Helper.Lock do
   в том числе при исключении в `fun`.
 
   Вызывать вне транзакции: внутри неё сессионная блокировка пережила бы откат.
-  `lock_timeout` и `:timeout` — как у `advisory_xact!/3`; `lock_timeout` ставится на сессию
-  только на время взятия и сбрасывается сразу после.
+  `lock_timeout` ставится на сессию только на время взятия и сбрасывается сразу после.
   """
+  @opts_schema @lock_timeout_schema ++ @timeout_schema
   @spec with_advisory!(Ecto.Repo.t(), integer(), (-> result), keyword()) :: result when result: term()
 
   def with_advisory!(repo, key, fun, opts \\ [])
@@ -89,7 +103,7 @@ defmodule Core.Helper.Lock do
   end
 
   defp lock_session!(repo, key, opts) do
-    timeout = Keyword.get(opts, :lock_timeout, @default_lock_timeout)
+    timeout = Keyword.fetch!(opts, :lock_timeout)
     Ecto.Adapters.SQL.query!(repo, "SELECT set_config('lock_timeout', $1, false)", [timeout], query_opts(opts))
 
     try do
@@ -102,7 +116,7 @@ defmodule Core.Helper.Lock do
   # `SET LOCAL` не принимает bind-параметры, а склейка значения в SQL — инъекция;
   # `set_config(..., true)` даёт тот же transaction-local эффект через параметр.
   defp set_lock_timeout!(repo, opts) do
-    timeout = Keyword.get(opts, :lock_timeout, @default_lock_timeout)
+    timeout = Keyword.fetch!(opts, :lock_timeout)
 
     Ecto.Adapters.SQL.query!(
       repo,

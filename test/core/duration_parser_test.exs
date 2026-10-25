@@ -93,11 +93,15 @@ defmodule Core.DurationParserTest do
     end
 
     test "неизвестный ключ opts — ошибка программиста" do
-      assert_raise ArgumentError, fn -> DurationParser.parse("1s", :s, timeout: 1) end
+      assert_raise ArgumentError, ~r/^Core.DurationParser.parse\/3: unknown options \[:roundng\]/, fn ->
+        DurationParser.parse("1s", :s, roundng: :up)
+      end
     end
 
     test "неизвестная политика округления — ошибка программиста" do
-      assert_raise FunctionClauseError, fn -> DurationParser.parse("1s", :s, rounding: :floor) end
+      assert_raise ArgumentError, ~r/^Core.DurationParser.parse\/3: invalid value for :rounding/, fn ->
+        DurationParser.parse("1s", :s, rounding: :floor)
+      end
     end
   end
 
