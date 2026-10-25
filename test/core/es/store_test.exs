@@ -37,6 +37,12 @@ defmodule Core.Es.StoreTest do
       assert :ok = append([])
     end
 
+    test "неизвестная опция — ArgumentError" do
+      assert_raise ArgumentError, ~r/^Core\.Es\.Store\.append\/5: unknown options \[:continuous\]/, fn ->
+        append([event(AggID.new(), 1)], continuous: true)
+      end
+    end
+
     test "без continuous? поток начинается не с 1 и имеет разрывы" do
       id = AggID.new()
 

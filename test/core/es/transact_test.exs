@@ -108,13 +108,17 @@ defmodule Core.Es.TransactTest do
     end
 
     test "retries: не положительное целое — ArgumentError" do
-      assert_raise ArgumentError, ~r/:retries — ожидается положительное целое, получено 0/, fn ->
-        Es.Transact.run(fn -> :ok end, retries: 0)
-      end
+      error =
+        assert_raise ArgumentError, fn -> Es.Transact.run_counted(fn -> :ok end, retries: 0) end
+
+      assert Exception.message(error) =~ ~r/^Core\.Es\.Transact\.run_counted\/2: invalid value for :retries option/
+      assert Exception.message(error) =~ "expected positive integer, got: 0"
     end
 
     test "неизвестная опция — ArgumentError" do
-      assert_raise ArgumentError, fn -> Es.Transact.run(fn -> :ok end, limit: 1) end
+      assert_raise ArgumentError, ~r/^Core\.Es\.Transact\.run\/2: unknown options \[:limit\]/, fn ->
+        Es.Transact.run(fn -> :ok end, limit: 1)
+      end
     end
   end
 

@@ -117,6 +117,8 @@ defmodule Core.Es.Store do
 
   require Error
 
+  use Core.Options
+
   @chunk_size 500
 
   # Колонки `VALUES` чанка: строка `es_events` без типа агрегата (он один на пачку и уходит
@@ -180,9 +182,15 @@ defmodule Core.Es.Store do
   @doc """
   Записать события потоков одного типа агрегата — `type:` кодека `event_codec`.
 
-  `mismatch` строит ошибку отказа из `t:mismatch_detail/0`. Опция `continuous?:` —
-  непрерывность потока, по умолчанию `false`. Проверки и исходы — в `@moduledoc`.
+  `mismatch` строит ошибку отказа из `t:mismatch_detail/0`. Проверки и исходы — в `@moduledoc`.
   """
+  @opts_schema [
+    continuous?: [
+      type: :boolean,
+      default: false,
+      doc: "Непрерывность потока: первая версия потока в пачке — наибольшая версия потока + 1."
+    ]
+  ]
   @spec append(
           module(),
           [Es.Event.t()],
@@ -199,7 +207,7 @@ defmodule Core.Es.Store do
 
   def append(event_codec, [_ | _] = events, %Context{}, mismatch, opts)
       when is_atom(event_codec) and is_function(mismatch, 1) and is_list(opts) do
-    continuous? = Keyword.fetch!(Keyword.validate!(opts, continuous?: false), :continuous?)
+    continuous? = Keyword.fetch!(opts, :continuous?)
     type = event_codec.__es_type__()
     rows = to_rows(events, event_codec)
     ensure_ordered!(rows, continuous?)

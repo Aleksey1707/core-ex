@@ -72,6 +72,12 @@ defmodule Core.Es.Personal.KeyStore.RewrapTest do
       assert {:ok, ^before} = Pg.status()
     end
 
+    test "неизвестная опция — ArgumentError" do
+      assert_raise ArgumentError, ~r/^Core\.Es\.Personal\.KeyStore\.Pg\.rewrap\/1: unknown options \[:batch\]/, fn ->
+        Pg.rewrap(batch: 1)
+      end
+    end
+
     test "внутри транзакции — ArgumentError", %{env: env} do
       rotate(env)
 

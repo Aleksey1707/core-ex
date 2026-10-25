@@ -62,6 +62,8 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
   require Error
 
+  use Core.Options
+
   @schema 1
   @key_size 32
   @nonce_size 12
@@ -287,24 +289,29 @@ defmodule Core.Es.Personal.KeyStore.Pg do
   @doc """
   Перевернуть обёртки живых ключей под нетекущими версиями KEK на `current_kek:` — шаг ротации KEK.
 
-  Пачка — до `batch_size:` (по умолчанию #{@rewrap_batch_size}) живых ключей под нетекущей
-  версией, в своей транзакции, `FOR UPDATE` в порядке идентификатора, без `SKIP LOCKED`: запись
-  и уничтожение субъектов пачки ждут её commit. Каждый ключ оборачивается текущим KEK с новым
-  nonce, AAD — идентификатор ключа и новая версия. Цикл идёт до пустой пачки, повторный запуск
-  продолжает с места остановки.
-
-  `on_batch:` — функция от числа ключей, перевёрнутых с начала прогона; зовётся после commit
-  каждой непустой пачки (прогресс оператору).
+  Пачка — до `batch_size:` живых ключей под нетекущей версией, в своей транзакции, `FOR UPDATE` в
+  порядке идентификатора, без `SKIP LOCKED`: запись и уничтожение субъектов пачки ждут её commit.
+  Каждый ключ оборачивается текущим KEK с новым nonce, AAD — идентификатор ключа и новая версия.
+  Цикл идёт до пустой пачки, повторный запуск продолжает с места остановки.
 
   Возвращает число перевёрнутых ключей. Обрыв пачки — `{:error, _}` без повтора: пачка
   откатывается, закоммиченные остаются; ключ под версией вне `keks:` — `:kek_unknown`, обёртка,
   которая не разворачивается, — `:key_unresolved`. Внутри транзакции — `ArgumentError`: пачки
   стали бы точками сохранения, и блокировки держались бы до чужого commit.
   """
+  @opts_schema [
+    batch_size: [type: :pos_integer, default: @rewrap_batch_size, doc: "Сколько живых ключей берёт пачка."],
+    on_batch: [
+      type: {:fun, 1},
+      default: &Function.identity/1,
+      doc:
+        "Функция от числа ключей, перевёрнутых с начала прогона; зовётся после commit каждой " <>
+          "непустой пачки (прогресс оператору)."
+    ]
+  ]
   @spec rewrap(keyword()) :: Result.t(non_neg_integer())
 
   def rewrap(opts) when is_list(opts) do
-    opts = Keyword.validate!(opts, batch_size: @rewrap_batch_size, on_batch: fn _count -> :ok end)
     ensure_outside_transaction!(Config.dao().in_transaction?())
 
     rewrap_batches(config!(), Keyword.fetch!(opts, :batch_size), Keyword.fetch!(opts, :on_batch), 0)
@@ -320,8 +327,7 @@ defmodule Core.Es.Personal.KeyStore.Pg do
             "держались бы до её commit"
   end
 
-  defp rewrap_batches(config, batch_size, on_batch, total)
-       when is_integer(batch_size) and batch_size > 0 and is_function(on_batch, 1) do
+  defp rewrap_batches(config, batch_size, on_batch, total) do
     case Transact.run(Config.dao(), fn -> rewrap_batch(config, batch_size) end) do
       {:ok, 0} ->
         {:ok, total}

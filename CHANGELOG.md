@@ -11,6 +11,16 @@
   текста `Keyword.validate!` или ручной проверки. Функции:
   - `Core.Es.Projection.run_once/2` — неизвестный ключ отклонялся и раньше; теперь `batch_size:` не
     положительное целое — тоже `ArgumentError`, раньше значение уходило в пачку.
+  - `Core.Es.Transact.run/2`, `Core.Es.Transact.run_counted/2` — неизвестный ключ и `retries:` не
+    положительное целое отклонялись и раньше; меняется только текст: вместо
+    `"Es.Transact: опция :retries — ожидается положительное целое…"` —
+    `"Core.Es.Transact.run/2: invalid value for :retries option: expected positive integer…"`
+    (у `run_counted/2` — префикс `Core.Es.Transact.run_counted/2:`).
+  - `Core.Es.Store.append/5` — неизвестный ключ отклонялся и раньше, кроме пустой пачки: теперь
+    опции проверяются и у неё, а `continuous?:` не `boolean` — тоже `ArgumentError`.
+  - `Core.Es.Personal.KeyStore.Pg.rewrap/1` — неизвестный ключ отклонялся и раньше; `batch_size:`
+    не положительное целое и `on_batch:` не функция одного аргумента — `ArgumentError` вместо
+    `FunctionClauseError`.
   - `Core.Es.Aggregate.Test.given/3`, `Core.Es.Personal.Test.key_destroyed/2` — неизвестный ключ
     отклонялся и раньше; теперь нет `by:` или `at:` — тоже `ArgumentError` (было — `KeyError`), и
     `at:` не `Core.Es.Event.At` — `ArgumentError` до сборки события (было — у `key_destroyed/2`

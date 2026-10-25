@@ -43,11 +43,6 @@ defmodule Core.Es.Transact do
     Паузы между попытками нет: отказ снимается чужим commit'ом, который уже произошёл.
   - Вызов внутри открытой транзакции — `ArgumentError`: повтор идёт новой транзакцией, и откат
     попытки отменил бы внешнюю.
-
-  ## Opts
-
-  - `retries:` — предел повторов, положительное целое, по умолчанию 3; неизвестная опция или
-    недопустимое значение — `ArgumentError`
   """
 
   alias Core.Config
@@ -56,41 +51,36 @@ defmodule Core.Es.Transact do
 
   require Logger
 
+  use Core.Options
+
   @label "Es.Transact"
-  @defaults [retries: 3]
+  @retries_schema [retries: [type: :pos_integer, default: 3, doc: "Предел повторов после отказа хранилища."]]
 
   @doc """
   Исполнить `fun` в транзакции команды с повтором после отказа хранилища: результат `fun`.
   """
+  @opts_schema @retries_schema
   @spec run((-> result), keyword()) :: result when result: var
 
   def run(fun, opts \\ []) when is_function(fun, 0) and is_list(opts) do
-    {result, _retries} = run_counted(fun, opts)
+    {result, _retries} = retrying(fun, Keyword.fetch!(opts, :retries))
     result
   end
 
   @doc """
   То же, что `run/2`, плюс число повторов — измерение telemetry вызывающего.
   """
+  @opts_schema @retries_schema
   @spec run_counted((-> result), keyword()) :: {result, non_neg_integer()} when result: var
 
-  def run_counted(fun, opts \\ []) when is_function(fun, 0) and is_list(opts) do
-    ensure_outside_transaction!(Config.dao().in_transaction?())
-    attempt(fun, retries!(opts), 0)
-  end
+  def run_counted(fun, opts \\ []) when is_function(fun, 0) and is_list(opts),
+    do: retrying(fun, Keyword.fetch!(opts, :retries))
 
   # ---
 
-  defp retries!(opts) do
-    case Keyword.validate!(opts, @defaults) do
-      [retries: retries] when is_integer(retries) and retries > 0 ->
-        retries
-
-      [retries: retries] ->
-        raise ArgumentError,
-              "#{@label}: опция :retries — ожидается положительное целое, получено " <>
-                inspect(retries)
-    end
+  defp retrying(fun, limit) do
+    ensure_outside_transaction!(Config.dao().in_transaction?())
+    attempt(fun, limit, 0)
   end
 
   defp ensure_outside_transaction!(false), do: :ok
