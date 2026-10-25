@@ -393,7 +393,7 @@ case-модулей (`Enum.DocsCase`, `Es.EventCompatCase`, `Es.ProjectionCase`,
   ошибок — `.scratch/use-opts-parsing/prototype/` на ветке. Это не источник истины: инлайн-пролог `Prim.String` и
   временные выражения `kind` / `sensitive` / `personal` у `Core.Prim` не переносятся. Ветка удаляется после среза
   Codec.
-- Счёт builder'ов и групп — `inventory.md`, сверено на `a09f4a1`. После срезов AW состав опций Es-builder'ов другой:
+- Счёт builder'ов и групп — `inventory.md`, сверено на `7b25900`. После срезов AW состав опций Es-builder'ов другой:
   срез Es-* сверяется с кодом после своего AW-среза.
 - Принятые отступления реализации от срезов выше (сверено на ревью интеграционной ветки):
   - `Helper.Opts.expand!/4` с четвёртым аргументом `refs`: опции-ссылки (`aggregate:` / `codec:` у

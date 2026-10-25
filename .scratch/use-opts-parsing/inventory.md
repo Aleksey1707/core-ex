@@ -1,7 +1,7 @@
 # Опции `use` сейчас — инвентаризация
 
 Ответ тикета «Опции `use` сейчас» (`issues/01-opts-inventory.md`). Сверено с кодом `develop` на 2026-10-24
-(`a09f4a1`). Литеральность значений — по всем вызовам `use Core.*` в `lib/`, `test/`, `fixtures/consumer/`:
+(`7b25900`). Литеральность значений — по всем вызовам `use Core.*` в `lib/`, `test/`, `fixtures/consumer/`:
 значение считается литералом, если после подстановки алиасов и `__MODULE__` (то, что делает
 `Macro.expand_literals`) оно `Macro.quoted_literal?/1`.
 
