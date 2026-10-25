@@ -749,7 +749,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
         assert {:error, {%ArgumentError{message: message}, _stack}} =
                  MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe: "yes"))
 
-        assert message =~ ":subscribe — ожидается true или false"
+        assert message =~ "invalid value for :subscribe option: expected boolean"
       end)
     end
 
@@ -763,63 +763,64 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
         assert {:error, {%ArgumentError{message: message}, _stack}} =
                  MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe_data: :boot))
 
-        assert message =~ ":subscribe_data — ожидается её отсутствие без subscribe: true"
+        assert message =~ "опция :subscribe_data задаётся только с subscribe: true"
       end)
     end
   end
 
   describe "опции старта" do
-    test "child_spec: :name и :shutdown не той формы — ArgumentError" do
-      assert_raise ArgumentError, ~r/PubSub.MqSubscriberReliable: опция :name — ожидается имя процесса/, fn ->
-        MqSubscriberReliable.child_spec(name: "subscriber")
+    test "start_link: :name не той формы — ArgumentError до init/1", %{reader: reader, topic: topic} do
+      assert_raise ArgumentError, ~r/expected :name option/, fn ->
+        MqSubscriberReliable.start_link(sub_opts(reader, topic, name: "subscriber"))
       end
+    end
 
-      assert_raise ArgumentError, ~r/PubSub.MqSubscriberReliable: опция :shutdown — ожидается неотрицательное/, fn ->
-        MqSubscriberReliable.child_spec(shutdown: :kill)
-      end
+    test "child_spec: :shutdown — опция shutdown:, по умолчанию 30 000" do
+      assert %{shutdown: 30_000} = MqSubscriberReliable.child_spec([])
+      assert %{shutdown: :brutal_kill} = MqSubscriberReliable.child_spec(shutdown: :brutal_kill)
     end
 
     test "неизвестная опция — ArgumentError", %{reader: reader, topic: topic} do
       assert start_error(sub_opts(reader, topic, dlq: "products.dlq")) =~
-               "PubSub.MqSubscriberReliable: неизвестные опции [:dlq]"
+               "Core.PubSub.MqSubscriberReliable.init/1: unknown options [:dlq]"
     end
 
     test "нет обязательной опции — ArgumentError", %{reader: reader, topic: topic} do
       for key <- ~w(reader_module reader from_message on_message)a do
         assert start_error(Keyword.delete(sub_opts(reader, topic, []), key)) =~
-                 "PubSub.MqSubscriberReliable: нет обязательной опции #{inspect(key)}"
+                 "Core.PubSub.MqSubscriberReliable.init/1: required #{inspect(key)} option not found"
       end
     end
 
     test "значение не той формы — ArgumentError с именем опции", %{reader: reader, topic: topic} do
       for {key, value, expected} <- [
-            {:reader_module, "MqFake.QueueReader", "модуль"},
-            {:reader, nil, "значение"},
-            {:from_message, fn _m, _d -> :ok end, "функция арности 1"},
-            {:on_message, fn _m -> :ok end, "функция арности 3"},
-            {:context_factory, fn _ -> Context.new() end, "функция арности 0"},
-            {:filter, fn _m, _d -> true end, "функция арности 1"},
-            {:poll_interval_ms, 0, "положительное целое"},
-            {:retry_max_ms, -1, "положительное целое"},
-            {:max_attempts, 0, "положительное целое"},
-            {:dlq_writer, "MqFake.Writer", "модуль"},
-            {:dlq_topic, "", "непустую строку"},
-            {:topic, topic, "непустую строку"}
+            {:reader_module, "MqFake.QueueReader", "ожидается модуль"},
+            {:reader, nil, "ожидается значение"},
+            {:from_message, fn _m, _d -> :ok end, "expected function of arity 1"},
+            {:on_message, fn _m -> :ok end, "expected function of arity 3"},
+            {:context_factory, fn _ -> Context.new() end, "expected function of arity 0"},
+            {:filter, fn _m, _d -> true end, "expected function of arity 1"},
+            {:poll_interval_ms, 0, "expected positive integer"},
+            {:retry_max_ms, -1, "expected positive integer"},
+            {:max_attempts, 0, "expected positive integer"},
+            {:dlq_writer, "MqFake.Writer", "expected atom"},
+            {:dlq_topic, "", "ожидается непустая строка"},
+            {:topic, topic, "ожидается непустая строка"},
+            {:shutdown, :kill, "ожидается неотрицательное целое"}
           ] do
         assert start_error(sub_opts(reader, topic, [{key, value}])) =~
-                 "PubSub.MqSubscriberReliable: опция #{inspect(key)} — ожидается #{expected}"
+                 "Core.PubSub.MqSubscriberReliable.init/1: invalid value for #{inspect(key)} option: #{expected}"
       end
     end
 
     test "dlq_handle: обязателен с dlq_writer и только с ним", %{reader: reader, topic: topic} do
-      assert start_error(sub_opts(reader, topic, dlq_writer: MqFake.Writer)) =~
-               "PubSub.MqSubscriberReliable: нет обязательной опции :dlq_handle"
-
-      assert start_error(sub_opts(reader, topic, dlq_writer: MqFake.Writer, dlq_handle: nil)) =~
-               "PubSub.MqSubscriberReliable: опция :dlq_handle — ожидается значение, получено nil"
+      for opts <- [[dlq_writer: MqFake.Writer], [dlq_writer: MqFake.Writer, dlq_handle: nil]] do
+        assert start_error(sub_opts(reader, topic, opts)) =~
+                 "Core.PubSub.MqSubscriberReliable.init/1: нет обязательной при :dlq_writer опции :dlq_handle"
+      end
 
       assert start_error(sub_opts(reader, topic, dlq_handle: MqFake.Writer.new())) =~
-               "PubSub.MqSubscriberReliable: опция :dlq_handle — ожидается её отсутствие без :dlq_writer"
+               "Core.PubSub.MqSubscriberReliable.init/1: опция :dlq_handle задаётся только с :dlq_writer"
     end
 
     test "nil в name:, dlq_writer: и dlq_handle: — как их отсутствие", %{reader: reader, topic: topic} do

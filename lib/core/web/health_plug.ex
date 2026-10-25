@@ -1,4 +1,26 @@
 defmodule Core.Web.HealthPlug do
+  @init_opts_schema [
+    repos: [
+      type: {:custom, Core.Web.HealthPlug, :repos, []},
+      type_doc: "список `t:module/0`",
+      required: true,
+      doc: "Непустой список модулей с `use Ecto.Repo`, которые проверяет readiness."
+    ],
+    health_path: [
+      type: {:custom, Core.Web.HealthPlug, :path, []},
+      type_doc: "`t:String.t/0`",
+      default: "/health",
+      doc: "Путь liveness от корня."
+    ],
+    ready_path: [
+      type: {:custom, Core.Web.HealthPlug, :path, []},
+      type_doc: "`t:String.t/0`",
+      default: "/ready",
+      doc: "Путь readiness от корня, отличный от `health_path:`."
+    ],
+    timeout: [type: :pos_integer, default: 1000, doc: "Таймаут запроса `SELECT 1` к репозиторию, мс."]
+  ]
+
   @moduledoc """
   Плаг проверок живости и готовности: liveness на `health_path:`, readiness на `ready_path:`.
 
@@ -16,66 +38,68 @@ defmodule Core.Web.HealthPlug do
   После ответа `conn` останавливается (`halt`); на прочих путях плаг пропускает `conn` дальше без
   изменений. Метод запроса не проверяется.
 
-  Неверные опции — `ArgumentError` на `init/1`: в эндпоинте Phoenix — при сборке. Репозиторий —
-  модуль с `use Ecto.Repo`, пути — разные и от корня.
+  ## Опции
+
+  Неверные опции — `ArgumentError` на `init/1`: в эндпоинте Phoenix — при сборке.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Plug
 
+  use Core.Options
+
   import Plug.Conn
 
-  alias Core.Helper.StartOpts
+  alias Core.Result
   alias Plug.Conn
 
   require Logger
 
-  @label "Web.HealthPlug"
-  @keys ~w(repos health_path ready_path timeout)a
   @grace 100
 
   # ===== опции =====
 
+  @opts_schema @init_opts_schema
   @doc false
   @spec init(keyword()) :: Plug.opts()
 
   @impl true
   def init(opts) when is_list(opts) do
-    StartOpts.keys!(@label, opts, @keys)
+    health = segments(Keyword.fetch!(opts, :health_path))
+    ready = segments(Keyword.fetch!(opts, :ready_path))
 
-    health = path!(opts, :health_path, "/health")
-    ready = path!(opts, :ready_path, "/ready")
+    if health == ready do
+      raise ArgumentError,
+            "#{inspect(__MODULE__)}.init/1: опция :ready_path — ожидается путь, отличный от health_path:, " <>
+              "получено #{inspect(Keyword.fetch!(opts, :ready_path))}"
+    end
 
-    if health == ready,
-      do: StartOpts.raise_invalid!(@label, :ready_path, "путь, отличный от health_path:", ready)
-
-    %{
-      repos: repos!(opts),
-      health: health,
-      ready: ready,
-      timeout: StartOpts.pos_integer!(@label, opts, :timeout, 1000)
-    }
+    %{repos: Keyword.fetch!(opts, :repos), health: health, ready: ready, timeout: Keyword.fetch!(opts, :timeout)}
   end
+
+  @doc false
+  @spec repos(term()) :: Result.t([module()], String.t())
+
+  def repos(value) do
+    if is_list(value) and value != [] and Enum.all?(value, &repo?/1),
+      do: {:ok, value},
+      else: {:error, "ожидается непустой список модулей с `use Ecto.Repo`, получено #{inspect(value)}"}
+  end
+
+  @doc false
+  @spec path(term()) :: Result.t(String.t(), String.t())
+
+  def path("/" <> _ = path), do: {:ok, path}
+  def path(other), do: {:error, "ожидается путь от корня, получено #{inspect(other)}"}
 
   # ---
-
-  defp repos!(opts) do
-    repos = StartOpts.list!(@label, opts, :repos)
-
-    if repos != [] and Enum.all?(repos, &repo?/1),
-      do: repos,
-      else: StartOpts.raise_invalid!(@label, :repos, "непустой список модулей с `use Ecto.Repo`", repos)
-  end
 
   defp repo?(repo) do
     is_atom(repo) and Core.Helper.Module.exports?(repo, :__adapter__, 0)
   end
 
-  defp path!(opts, key, default) do
-    case StartOpts.binary!(@label, opts, key, default) do
-      "/" <> _ = path -> String.split(path, "/", trim: true)
-      path -> StartOpts.raise_invalid!(@label, key, "путь от корня", path)
-    end
-  end
+  defp segments(path), do: String.split(path, "/", trim: true)
 
   # ===== ответ =====
 

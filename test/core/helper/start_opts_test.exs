@@ -21,6 +21,12 @@ defmodule Core.Helper.StartOptsTest do
       assert StartOpts.module("MyConn") == {:error, ~s(ожидается модуль, получено "MyConn")}
     end
 
+    test "term: любое значение, кроме nil" do
+      assert StartOpts.term(:reader) == {:ok, :reader}
+      assert StartOpts.term(false) == {:ok, false}
+      assert StartOpts.term(nil) == {:error, "ожидается значение, получено nil"}
+    end
+
     test "atom: атом, кроме nil" do
       assert StartOpts.atom(:poller) == {:ok, :poller}
       assert StartOpts.atom(nil) == {:error, "ожидается атом, получено nil"}

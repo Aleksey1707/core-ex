@@ -1,4 +1,32 @@
 defmodule Core.Es.Aggregate.Process do
+  @execute_opts_schema [
+    timeout: [
+      type: :pos_integer,
+      default: 5_000,
+      doc: "Дедлайн команды процесса на id, мс; в вызывающем процессе (`enabled: false`) не действует."
+    ]
+  ]
+
+  @start_opts_schema [
+    enabled: [
+      type: :boolean,
+      required: true,
+      doc:
+        "`true` — команды идут в процессы на id, `false` — `:ignore`, и `execute` исполняет команду в " <>
+          "вызывающем процессе."
+    ],
+    retries: [type: :pos_integer, default: 3, doc: "Повторов после отказа записи."],
+    idle_timeout: [type: :pos_integer, default: 60_000, doc: "Простой процесса на id до ухода, мс."],
+    state_max_age: [
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
+      type_doc: "`t:pos_integer/0` или `:infinity`",
+      doc:
+        "Предельный возраст состояния процесса на id, мс. У агрегата с ПДн в событиях (поле с `subject:` " <>
+          "у кодека, `__es_subjects__/0`) — по умолчанию 300 000, `:infinity` — `ArgumentError`; у агрегата " <>
+          "без ПДн — по умолчанию `:infinity`. При `enabled: false` не действует: кеша нет."
+    ]
+  ]
+
   @moduledoc """
   Билдер процесса агрегата (`use`): кэш состояния и очередь команд одного event-sourced агрегата
   на ноде; команда — с повтором после отказа записи.
@@ -56,9 +84,11 @@ defmodule Core.Es.Aggregate.Process do
   - Вызов внутри транзакции — `ArgumentError`: команда идёт своей транзакцией, и откат попытки
     отменил бы внешнюю.
   - Нет отметки старта — `RuntimeError`: `{Agg.Process, opts}` не стоит в дереве супервизии.
-  - `opts` — `timeout:`, положительное целое, по умолчанию 5 000 мс: дедлайн команды процесса на
-    id, в вызывающем процессе не действует; неизвестная опция или недопустимое значение —
-    `ArgumentError`.
+  - Неизвестная опция `opts` или недопустимое значение — `ArgumentError`.
+
+  ### Опции команды
+
+  #{Core.Options.docs(@execute_opts_schema)}
 
   ## Процесс на id
 
@@ -98,25 +128,19 @@ defmodule Core.Es.Aggregate.Process do
 
   ## Старт
 
-  `child_spec(opts)` — элемент дерева потребителя; опции проверяются при старте
-  (`Core.Helper.StartOpts`), недопустимая — `ArgumentError`.
-
-  - `enabled:` — обязательна. `true` — `Supervisor` под именем модуля процесса, `rest_for_one`:
-    `Registry` процессов на id (единственность — на ноду) и их `DynamicSupervisor`; `info`
-    «запущен» и отметка опций в `:persistent_term`. `false` — `:ignore`, `info` «отключён» и
-    отметка: `execute` исполняет команду в вызывающем процессе.
-  - `retries:` — повторов после отказа записи, по умолчанию 3
-  - `idle_timeout:` — мс простоя процесса на id до ухода, по умолчанию 60 000
-  - `state_max_age:` — мс предельного возраста состояния процесса на id. У агрегата с ПДн в
-    событиях (поле с `subject:` у кодека, `__es_subjects__/0`) — по умолчанию 300 000,
-    `:infinity` — `ArgumentError`; у агрегата без ПДн — по умолчанию `:infinity`. При
-    `enabled: false` не действует: кеша нет.
-
-  Числа — положительные целые.
+  `child_spec(opts)` — элемент дерева потребителя; опции проверяются при старте, недопустимая —
+  `ArgumentError`. При `enabled: true` — `Supervisor` под именем модуля процесса, `rest_for_one`:
+  `Registry` процессов на id (единственность — на ноду) и их `DynamicSupervisor`; `info` «запущен»
+  и отметка опций в `:persistent_term`. При `enabled: false` — `:ignore`, `info` «отключён» и
+  отметка.
 
   `watch_list(opts)` — элементы `watch:` плагина `Core.Workers.PromEx` по опциям старта: верхний
   супервизор, `%{component: "es_aggregate_process:<тип агрегата>", name: Agg.Process}`. При
   `enabled: false` элементов нет: дерева на ноде нет, и `up=0` был бы ложной тревогой.
+
+  ### Опции старта
+
+  #{Core.Options.docs(@start_opts_schema)}
 
   ## Наблюдаемость
 
@@ -145,6 +169,8 @@ defmodule Core.Es.Aggregate.Process do
 
   import Core.Version, only: [is_version: 1]
 
+  use Core.Options
+
   alias Core.Config
   alias Core.Context
   alias Core.Error
@@ -152,7 +178,6 @@ defmodule Core.Es.Aggregate.Process do
   alias Core.Es.Aggregate.Process.Execution
   alias Core.Es.Aggregate.Process.Server
   alias Core.Helper
-  alias Core.Helper.StartOpts
   alias Core.Otel
   alias Core.Result
   alias Core.Telemetry
@@ -164,8 +189,6 @@ defmodule Core.Es.Aggregate.Process do
   @required_keys ~w(repo)a
   @optional_keys ~w()a
   @expression_keys ~w()a
-  @execute_defaults [timeout: 5_000]
-  @start_defaults [retries: 3, idle_timeout: 60_000]
   @personal_state_max_age 300_000
 
   @typedoc "Проверенные опции старта — они же отметка."
@@ -290,12 +313,13 @@ defmodule Core.Es.Aggregate.Process do
 
   # ===== команда =====
 
+  @opts_schema @execute_opts_schema
   @doc false
   @spec execute(module(), cfg(), call(), keyword()) ::
           Result.t(Version.t() | nil)
 
   def execute(process, cfg, call, opts) when is_atom(process) and is_list(opts) do
-    timeout = timeout!(opts)
+    timeout = Keyword.fetch!(opts, :timeout)
     ensure_outside_transaction!(Config.dao().in_transaction?(), process)
     options = started!(mark(process), process)
     mode = mode(options)
@@ -312,18 +336,6 @@ defmodule Core.Es.Aggregate.Process do
   end
 
   # ---
-
-  defp timeout!(opts) do
-    case Keyword.validate!(opts, @execute_defaults) do
-      [timeout: timeout] when is_integer(timeout) and timeout > 0 ->
-        timeout
-
-      [timeout: timeout] ->
-        raise ArgumentError,
-              "#{@label}: опция :timeout — ожидается положительное целое, получено " <>
-                inspect(timeout)
-    end
-  end
 
   defp ensure_outside_transaction!(false, _process), do: :ok
 
@@ -395,12 +407,14 @@ defmodule Core.Es.Aggregate.Process do
   def child_spec(process, cfg, opts) when is_atom(process) and is_list(opts),
     do: %{id: process, start: {__MODULE__, :start_link, [process, cfg, opts]}, type: :supervisor}
 
+  @opts_schema @start_opts_schema
   @doc false
   @spec start_link(module(), cfg(), keyword()) :: Supervisor.on_start()
 
   def start_link(process, cfg, opts) when is_atom(process) and is_list(opts),
     do: start(process, cfg, options!(cfg, opts))
 
+  @opts_schema @start_opts_schema
   @doc false
   @spec watch_list(module(), cfg(), keyword()) :: [watch_item()]
 
@@ -419,30 +433,25 @@ defmodule Core.Es.Aggregate.Process do
   # ---
 
   defp options!(cfg, opts) do
-    enabled = StartOpts.boolean!(@label, opts, :enabled)
-
-    @start_defaults
-    |> Map.new(fn {key, default} -> {key, StartOpts.pos_integer!(@label, opts, key, default)} end)
-    |> Map.put(:enabled, enabled)
-    |> Map.put(:state_max_age, state_max_age!(cfg.personal, opts))
+    %{
+      enabled: Keyword.fetch!(opts, :enabled),
+      retries: Keyword.fetch!(opts, :retries),
+      idle_timeout: Keyword.fetch!(opts, :idle_timeout),
+      state_max_age: state_max_age!(cfg.personal, Keyword.get(opts, :state_max_age))
+    }
   end
 
   # Кеш состояния агрегата с ПДн в событиях держит ПДн субъекта и после уничтожения его ключа:
   # без предела возраста он жил бы, пока идут команды.
-  defp state_max_age!(true, opts) do
-    case Keyword.get(opts, :state_max_age, @personal_state_max_age) do
-      value when is_integer(value) and value > 0 -> value
-      other -> StartOpts.raise_invalid!(@label, :state_max_age, "положительное целое (в событиях агрегата ПДн)", other)
-    end
+  defp state_max_age!(true, :infinity) do
+    raise ArgumentError,
+          "#{@label}: опция :state_max_age — ожидается положительное целое (в событиях агрегата ПДн), " <>
+            "получено :infinity"
   end
 
-  defp state_max_age!(false, opts) do
-    case Keyword.get(opts, :state_max_age, :infinity) do
-      :infinity -> :infinity
-      value when is_integer(value) and value > 0 -> value
-      other -> StartOpts.raise_invalid!(@label, :state_max_age, "положительное целое или :infinity", other)
-    end
-  end
+  defp state_max_age!(true, nil), do: @personal_state_max_age
+  defp state_max_age!(false, nil), do: :infinity
+  defp state_max_age!(_personal, value), do: value
 
   defp start(process, cfg, %{enabled: false} = options) do
     :persistent_term.put(mark_key(process), options)

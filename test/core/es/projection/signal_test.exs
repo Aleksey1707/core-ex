@@ -118,7 +118,7 @@ defmodule Core.Es.Projection.SignalTest do
   end
 
   defp start_tree!(projections, opts \\ []) do
-    opts = [projections: projections, enabled: true] ++ opts ++ @quiet
+    opts = [projections: projections, enabled: true] ++ Keyword.merge(@quiet, opts)
     {:ok, pid} = start_supervised({Es.Projection.Supervisor, opts})
     pid
   end

@@ -72,6 +72,19 @@
     `init/1` (`"Core.Mq.Stream.Reader.init/1: unknown options […]"`), а не backoff, неотличимый от
     недоступного брокера. `Core.Mq.Client.ensure_available!/1` — так же: неизвестный ключ —
     `ArgumentError`. Значения не той формы отклонялись и раньше, меняется текст.
+  - `Core.Es.Projection.Supervisor.start_link/1` (и через неё `child_spec/1`), `watch_list/1`;
+    опции старта процесса агрегата `{Agg.Process, opts}` (`use Core.Es.Aggregate.Process`) и
+    `Agg.Process.watch_list/1` — неизвестный ключ раньше молча пропускался, теперь `ArgumentError`.
+    `Agg.Process.execute/6` — неизвестный ключ и `timeout:` не положительное целое отклонялись и
+    раньше, сменился текст (`Core.Es.Aggregate.Process.execute/4: …`).
+  - `Core.PubSub.MqSubscriberReliable` (опции старта), `Core.PubSub.MqSubscriberReliable.Supervisor`
+    (`start_link/1`, `watch_list/1`, `stream_readers/1`, `kafka_readers/1`), `Core.Web.HealthPlug.init/1`
+    — неизвестный ключ отклонялся и раньше. `child_spec/1` подписчика и дерева больше не проверяет
+    `name:` (подписчика — и `shutdown:`): неверное имя отклоняет `start_link/1`, неверный
+    `shutdown:` — проверка спецификации ребёнка супервизором, а не `ArgumentError` из `child_spec/1`.
+  - У функций двух пунктов выше повтор ключа в опциях (`[batch_size: 10, batch_size: 50]`) —
+    `ArgumentError` (`unknown options [:batch_size]`); раньше бралось первое значение. Правка:
+    собирать опции `Keyword.merge/2`, а не `++`.
 
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на

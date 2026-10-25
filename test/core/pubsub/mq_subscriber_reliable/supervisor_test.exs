@@ -104,24 +104,26 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
   describe "опции" do
     test "проверяются при любом enabled:" do
       for enabled <- [true, false] do
-        assert_raise ArgumentError, ~r/нет обязательной опции :topics/, fn ->
+        assert_raise ArgumentError, ~r/start_link\/1: required :topics option not found/, fn ->
           MqSubscriberReliable.Supervisor.start_link(enabled: enabled, component: "catalog")
         end
       end
     end
 
     test "component: — обязательная непустая строка" do
-      assert_raise ArgumentError, ~r/нет обязательной опции :component/, fn ->
+      assert_raise ArgumentError, ~r/start_link\/1: required :component option not found/, fn ->
         MqSubscriberReliable.Supervisor.start_link(Keyword.delete(tree_opts(), :component))
       end
 
-      assert_raise ArgumentError, ~r/опция :component — ожидается непустую строку/, fn ->
-        MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :component, ""))
-      end
+      assert_raise ArgumentError,
+                   ~r/watch_list\/1: invalid value for :component option: ожидается непустая строка/,
+                   fn ->
+                     MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :component, ""))
+                   end
     end
 
     test "component: с `:` — ArgumentError: `:` — разделитель метки" do
-      assert_raise ArgumentError, ~r/опция :component — ожидается строку без `:`/, fn ->
+      assert_raise ArgumentError, ~r/invalid value for :component option: ожидается строка без `:`/, fn ->
         MqSubscriberReliable.Supervisor.watch_list(Keyword.put(tree_opts(), :component, "cat:alog"))
       end
     end
@@ -154,16 +156,18 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
     end
 
     test "неизвестная опция и опция, которую задаёт дерево, — ArgumentError" do
-      assert_raise ArgumentError, ~r/неизвестные опции \[:dlq\]/, fn ->
+      assert_raise ArgumentError, ~r/start_link\/1: unknown options \[:dlq\]/, fn ->
         MqSubscriberReliable.Supervisor.start_link(Keyword.put(tree_opts(), :dlq, @dlq))
       end
 
       for key <- ~w(reader_module reader dlq_writer dlq_handle subscribe)a do
         opts = tree_opts(subscriber: [{key, :x}])
 
-        assert_raise ArgumentError, ~r/опция :subscriber — ожидается .*без #{inspect(key)}/, fn ->
-          MqSubscriberReliable.Supervisor.start_link(opts)
-        end
+        assert_raise ArgumentError,
+                     ~r/invalid value for :subscriber option: ожидаются опции подписчика без #{inspect(key)}/,
+                     fn ->
+                       MqSubscriberReliable.Supervisor.start_link(opts)
+                     end
       end
     end
 
@@ -172,19 +176,25 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
         MqSubscriberReliable.Supervisor.start_link(Keyword.put(tree_opts(), :dlq_writer, {MqFake.Writer, []}))
       end
 
+      [topic | _] = Keyword.fetch!(tree_opts(), :topics)
+
       assert_raise ArgumentError, ~r/опция :reader — ожидается \{модуль, опции с name: атомом\}/, fn ->
-        MqSubscriberReliable.Supervisor.start_link(
-          enabled: true,
-          component: "catalog",
-          topics: [[reader: MqFake.QueueReader, subscriber: []]]
-        )
+        topic = Keyword.put(topic, :reader, {MqFake.QueueReader, []})
+        MqSubscriberReliable.Supervisor.start_link(enabled: true, component: "catalog", topics: [topic])
       end
 
-      for key <- ~w(name topic)a do
-        [topic | _] = Keyword.fetch!(tree_opts(), :topics)
+      assert_raise ArgumentError, ~r/invalid value for :reader option: expected tuple/, fn ->
+        topic = Keyword.put(topic, :reader, MqFake.QueueReader)
+        MqSubscriberReliable.Supervisor.start_link(enabled: true, component: "catalog", topics: [topic])
+      end
+
+      for {key, expected} <- [
+            name: "ожидается name: подписчика атомом",
+            topic: "topic: подписчика — ожидается непустая"
+          ] do
         topic = Keyword.update!(topic, :subscriber, &Keyword.delete(&1, key))
 
-        assert_raise ArgumentError, ~r/нет обязательной опции #{inspect(key)}/, fn ->
+        assert_raise ArgumentError, ~r/invalid value for :subscriber option: #{expected}/, fn ->
           MqSubscriberReliable.Supervisor.start_link(enabled: true, component: "catalog", topics: [topic])
         end
       end

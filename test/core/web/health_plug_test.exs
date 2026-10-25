@@ -57,10 +57,17 @@ defmodule Core.Web.HealthPlugTest do
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: []) end
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [Core.Web.HealthPlugTest.NoRepo]) end
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [Core.Web]) end
-    assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [TestRepo], ready_path: "/health") end
+
+    assert_raise ArgumentError, ~r/отличный от health_path:/, fn ->
+      Web.HealthPlug.init(repos: [TestRepo], ready_path: "/health/")
+    end
+
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [TestRepo], timeout: 0) end
     assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [TestRepo], ready_path: "ready") end
-    assert_raise ArgumentError, fn -> Web.HealthPlug.init(repos: [TestRepo], unknown: 1) end
+
+    assert_raise ArgumentError, ~r/init\/1: unknown options \[:unknown\]/, fn ->
+      Web.HealthPlug.init(repos: [TestRepo], unknown: 1)
+    end
   end
 
   # ---

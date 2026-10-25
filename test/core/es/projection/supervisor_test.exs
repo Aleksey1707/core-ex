@@ -248,16 +248,16 @@ defmodule Core.Es.Projection.SupervisorTest do
     end
 
     test "опции — ArgumentError при любом enabled:" do
-      assert_raise ArgumentError, ~r/нет обязательной опции :projections/, fn ->
+      assert_raise ArgumentError, ~r/start_link\/1: required :projections option not found/, fn ->
         Es.Projection.Supervisor.start_link(enabled: true)
       end
 
-      assert_raise ArgumentError, ~r/нет обязательной опции :enabled/, fn ->
+      assert_raise ArgumentError, ~r/start_link\/1: required :enabled option not found/, fn ->
         Es.Projection.Supervisor.start_link(projections: [@projection])
       end
 
       assert_raise ArgumentError,
-                   ~r/:projections — ожидается модуль use Core.Es.Projection/,
+                   ~r/:projections option: .*ожидается модуль use Core.Es.Projection, получено .*Plain/,
                    fn ->
                      Es.Projection.Supervisor.start_link(projections: [Plain], enabled: false)
                    end
@@ -267,7 +267,7 @@ defmodule Core.Es.Projection.SupervisorTest do
       end
 
       assert_raise ArgumentError,
-                   ~r/:batch_size — ожидается положительное целое, получено 0/,
+                   ~r/invalid value for :batch_size option: expected positive integer, got: 0/,
                    fn ->
                      Es.Projection.Supervisor.start_link(
                        projections: [],
@@ -277,7 +277,7 @@ defmodule Core.Es.Projection.SupervisorTest do
                    end
 
       assert_raise ArgumentError,
-                   ~r/:await_min_ms — ожидается положительное целое, получено 0/,
+                   ~r/invalid value for :await_min_ms option: expected positive integer, got: 0/,
                    fn ->
                      Es.Projection.Supervisor.start_link(
                        projections: [],
@@ -287,7 +287,7 @@ defmodule Core.Es.Projection.SupervisorTest do
                    end
 
       assert_raise ArgumentError,
-                   ~r/:await_max_ms — ожидается положительное целое, получено -1/,
+                   ~r/invalid value for :await_max_ms option: expected positive integer, got: -1/,
                    fn ->
                      Es.Projection.Supervisor.start_link(
                        projections: [],
@@ -297,7 +297,7 @@ defmodule Core.Es.Projection.SupervisorTest do
                    end
 
       assert_raise ArgumentError,
-                   ~r/:await — ожидается одно из \[:poll, :inline\], получено :sync/,
+                   ~r/invalid value for :await option: expected one of \[:poll, :inline\], got: :sync/,
                    fn ->
                      Es.Projection.Supervisor.start_link(
                        projections: [],
@@ -306,12 +306,16 @@ defmodule Core.Es.Projection.SupervisorTest do
                      )
                    end
 
+      assert_raise ArgumentError, ~r/start_link\/1: unknown options \[:batchsize\]/, fn ->
+        Es.Projection.Supervisor.start_link(projections: [], enabled: false, batchsize: 10)
+      end
+
       assert_raise ArgumentError, ~r/await: :inline — только при enabled: false/, fn ->
         Es.Projection.Supervisor.start_link(projections: [], enabled: true, await: :inline)
       end
 
       assert_raise ArgumentError,
-                   ~r/:notifications — ожидается true, false или keyword, получено :yes/,
+                   ~r/:notifications option to match at least one given type.*got: :yes/s,
                    fn ->
                      Es.Projection.Supervisor.start_link(
                        projections: [],
@@ -321,7 +325,7 @@ defmodule Core.Es.Projection.SupervisorTest do
                    end
 
       assert_raise ArgumentError,
-                   ~r/:notifications — ожидается .*, получено \["db-direct"\]/,
+                   ~r/:notifications option to match at least one given type.*got: \["db-direct"\]/s,
                    fn ->
                      Es.Projection.Supervisor.start_link(
                        projections: [],

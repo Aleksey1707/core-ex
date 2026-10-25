@@ -78,21 +78,25 @@ defmodule Core.Es.Aggregate.ProcessTest do
     end
 
     test "опции — ArgumentError без отметки" do
-      assert_raise ArgumentError, ~r/нет обязательной опции :enabled/, fn ->
+      assert_raise ArgumentError, ~r/start_link\/3: required :enabled option not found/, fn ->
         start(Account.Process, [])
       end
 
-      assert_raise ArgumentError, ~r/:enabled — ожидается true или false, получено "false"/, fn ->
+      assert_raise ArgumentError, ~r/invalid value for :enabled option: expected boolean, got: "false"/, fn ->
         start(Account.Process, enabled: "false")
       end
 
-      assert_raise ArgumentError, ~r/:retries — ожидается положительное целое, получено 0/, fn ->
+      assert_raise ArgumentError, ~r/invalid value for :retries option: expected positive integer, got: 0/, fn ->
         start(Account.Process, enabled: false, retries: 0)
       end
 
       assert_raise ArgumentError,
-                   ~r/:idle_timeout — ожидается положительное целое, получено :infinity/,
+                   ~r/invalid value for :idle_timeout option: expected positive integer, got: :infinity/,
                    fn -> start(Account.Process, enabled: false, idle_timeout: :infinity) end
+
+      assert_raise ArgumentError, ~r/start_link\/3: unknown options \[:retrys\]/, fn ->
+        start(Account.Process, enabled: false, retrys: 1)
+      end
 
       assert Es.Aggregate.Process.mark(Account.Process) == nil
     end
@@ -107,7 +111,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
                    fn -> start(Account.Process, enabled: false, state_max_age: :infinity) end
 
       assert_raise ArgumentError,
-                   ~r/:state_max_age — ожидается положительное целое \(в событиях агрегата ПДн\), получено 0/,
+                   ~r/watch_list\/3: expected :state_max_age option to match at least one given type/,
                    fn -> Account.Process.watch_list(enabled: true, state_max_age: 0) end
 
       assert Es.Aggregate.Process.mark(Account.Process) == nil
@@ -123,7 +127,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert %{state_max_age: 1_000} = Es.Aggregate.Process.mark(Account.RacyProcess)
 
       assert_raise ArgumentError,
-                   ~r/:state_max_age — ожидается положительное целое или :infinity, получено 0/,
+                   ~r/start_link\/3: expected :state_max_age option to match at least one given type/,
                    fn -> Es.Aggregate.Process.start_link(Account.RacyProcess, cfg, enabled: false, state_max_age: 0) end
     end
   end
@@ -299,7 +303,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
 
       assert Account.Process.watch_list(enabled: false, idle_timeout: 1_000) == []
 
-      assert_raise ArgumentError, ~r/нет обязательной опции :enabled/, fn ->
+      assert_raise ArgumentError, ~r/watch_list\/3: required :enabled option not found/, fn ->
         Account.Process.watch_list(retries: 1)
       end
     end
@@ -977,7 +981,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       opts = [timeout: :infinity]
 
       assert_raise ArgumentError,
-                   ~r/:timeout — ожидается положительное целое, получено :infinity/,
+                   ~r/execute\/4: invalid value for :timeout option: expected positive integer, got: :infinity/,
                    fn ->
                      Account.Process.execute(
                        Account.ID.new(),
@@ -993,7 +997,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
     test "неизвестная опция вызова — ArgumentError" do
       start!(Account.Process)
 
-      assert_raise ArgumentError, ~r/unknown keys \[:retries\]/, fn ->
+      assert_raise ArgumentError, ~r/execute\/4: unknown options \[:retries\]/, fn ->
         Account.Process.execute(Account.ID.new(), :current, open("Счёт"), Context.new(), nil, retries: 5)
       end
     end

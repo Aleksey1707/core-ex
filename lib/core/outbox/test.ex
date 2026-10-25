@@ -48,12 +48,19 @@ defmodule Core.Outbox.Test do
   @label "Outbox.Test"
   @state_key {__MODULE__, :state}
 
-  @subscriber_keys ~w(
-    reader_module reader filter from_message on_message context_factory poll_interval_ms retry_max_ms
-    max_attempts dlq_writer dlq_handle dlq_topic topic subscribe subscribe_data name shutdown
+  @network_keys ~w(
+    reader_module reader poll_interval_ms retry_max_ms dlq_writer dlq_handle dlq_topic subscribe shutdown
   )a
-
-  @default_max_attempts 5
+  @subscriber_keys [
+    name: [type: {:custom, Core.Helper.StartOpts, :atom, []}, required: true, doc: "Имя курсора подписчика."],
+    max_attempts: [type: :pos_integer, default: 5, doc: "Попыток до мёртвого письма."],
+    subscribe_data: [type: :any, doc: "Данные подписки для `on_message`."]
+  ]
+  @subscriber_schema Step.schema()
+                     |> Keyword.update!(:topic, &Keyword.put(Keyword.delete(&1, :default), :required, true))
+                     |> Kernel.++(@subscriber_keys)
+                     |> Kernel.++(Enum.map(@network_keys, &{&1, [type: :any, doc: "Сетевой ключ: игнорируется."]}))
+                     |> NimbleOptions.new!()
   @batch_size Outbox.BatchSize.new!(100)
   @lock_duration Outbox.LockDuration.new!(60)
   @cursor %{position: 0, attempts: 0, error: nil}
@@ -412,15 +419,14 @@ defmodule Core.Outbox.Test do
   end
 
   defp parse_subscriber!(opts) when is_list(opts) do
-    StartOpts.keys!(@label, opts, @subscriber_keys)
-    if not Keyword.has_key?(opts, :topic), do: StartOpts.raise_invalid!(@label, :topic, "непустую строку", nil)
-    step = Step.new!(@label, opts)
+    valid = Core.Options.__validate__!(opts, @subscriber_schema, "#{@label}: подписчик")
+    step = Step.new!(@label, valid)
 
     %{
-      name: StartOpts.atom!(@label, opts, :name),
+      name: Keyword.fetch!(valid, :name),
       topic: step.topic,
-      step: %{step | data: Keyword.get(opts, :subscribe_data)},
-      max_attempts: StartOpts.pos_integer!(@label, opts, :max_attempts, @default_max_attempts)
+      step: %{step | data: Keyword.get(valid, :subscribe_data)},
+      max_attempts: Keyword.fetch!(valid, :max_attempts)
     }
   end
 

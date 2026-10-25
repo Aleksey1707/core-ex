@@ -1,4 +1,73 @@
 defmodule Core.PubSub.MqSubscriberReliable do
+  @own_opts_schema [
+    reader_module: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль `Core.Mq.ReaderReliable` читателя."
+    ],
+    reader: [
+      type: {:custom, Core.Helper.StartOpts, :term, []},
+      type_doc: "`t:term/0`",
+      required: true,
+      doc: "Handle читателя: первый аргумент его `get/2`."
+    ],
+    poll_interval_ms: [
+      type: :pos_integer,
+      doc:
+        "Пауза опроса в простое и первая пауза повтора, мс; по умолчанию — " <>
+          "`default_poll_interval_ms/0` читателя, если он его объявил, иначе 100."
+    ],
+    retry_max_ms: [
+      type: :pos_integer,
+      default: 30_000,
+      doc: "Предел удвоения паузы повтора, мс; меньше `poll_interval_ms` — поднимается до него."
+    ],
+    max_attempts: [type: :pos_integer, default: 5, doc: "Попыток сообщения до выброса в DLQ."],
+    dlq_writer: [
+      type: :atom,
+      default: nil,
+      doc: "Модуль `Core.Mq.Writer` DLQ; `nil` — после `max_attempts` повторы продолжаются."
+    ],
+    dlq_handle: [
+      type: :any,
+      doc: "Handle DLQ-writer'а: обязателен при `dlq_writer:` и без него не задаётся."
+    ],
+    dlq_topic: [
+      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type_doc: "`t:String.t/0`",
+      doc: "Топик DLQ; по умолчанию `\"<topic>.dlq\"`."
+    ],
+    subscribe: [
+      type: :boolean,
+      default: false,
+      doc:
+        "`true` — процесс подписан сразу после `init/1`, и `subscribe/3` снаружи не нужен " <>
+          "(повторный вызов вернёт `:already_subscribed`)."
+    ],
+    subscribe_data: [
+      type: :any,
+      doc:
+        "Данные подписки для `on_message`, как `data` у `subscribe/3`; задаются только " <>
+          "вместе с `subscribe: true`, по умолчанию `nil`."
+    ],
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :name, []},
+      type_doc: "`t:GenServer.name/0`",
+      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
+    ],
+    shutdown: [
+      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
+      type_doc: "`t:timeout/0` или `:brutal_kill`",
+      default: 30_000,
+      doc:
+        "`:shutdown` в `child_spec/1` — запас на единицу работы: обработка сообщения и commit " <>
+          "offset идут целиком в одном колбэке под `trap_exit`, и остановка на середине " <>
+          "переотправила бы уже обработанное сообщение."
+    ]
+  ]
+  @init_opts_schema @own_opts_schema ++ Core.PubSub.MqSubscriberReliable.Step.schema()
+
   @moduledoc """
   `PubSub.Subscriber` поверх `Mq.ReaderReliable`.
 
@@ -48,15 +117,21 @@ defmodule Core.PubSub.MqSubscriberReliable do
   родитель которого извлекается из заголовков сообщения (`Core.Otel.Messaging`):
   трейс команды, записавшей событие в outbox, продолжается здесь, а не начинается
   заново.
+
+  ## Опции старта
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   @behaviour Core.PubSub.Subscriber
 
   use GenServer
+  use Core.Options
 
   alias Core.Context
   alias Core.Error
-  alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.Otel
@@ -72,17 +147,11 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @attr_dlq_reason "core.pubsub.dlq_reason"
 
   @label "PubSub.MqSubscriberReliable"
-
-  @keys ~w(
-    reader_module reader filter from_message on_message context_factory poll_interval_ms retry_max_ms
-    max_attempts dlq_writer dlq_handle dlq_topic topic subscribe subscribe_data name shutdown
-  )a
+  @init_label "Core.PubSub.MqSubscriberReliable.init/1"
 
   @shutdown_ms 30_000
   @call_timeout 5_000
   @fallback_poll_interval_ms 100
-  @default_max_attempts 5
-  @default_retry_max_ms 30_000
   @worked ~w(processed filtered dlq)a
 
   defstruct [
@@ -121,44 +190,18 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @typedoc "Исход одного цикла чтения."
   @type cycle_result :: :processed | :filtered | :dlq | :idle | :error | :not_subscribed
 
-  @doc """
-  Спецификация ребёнка супервизора.
-
-  `:shutdown` (default #{@shutdown_ms} мс) — запас на единицу работы: обработка
-  сообщения и commit offset идут целиком в одном колбэке под `trap_exit`, и остановка
-  на середине переотправила бы уже обработанное сообщение.
-  """
+  @doc "Спецификация ребёнка супервизора: `:id` — `name:`, иначе модуль; `:shutdown` — опция `shutdown:`."
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts) do
     %{
-      id: StartOpts.name!(@label, opts, :name) || __MODULE__,
+      id: Keyword.get(opts, :name) || __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: StartOpts.shutdown!(@label, opts, :shutdown, @shutdown_ms)
+      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
     }
   end
 
-  @doc """
-  Запустить reliable subscriber.
-
-  Opts: `:reader_module`, `:reader`, `:from_message`, `:on_message`,
-  опционально `:filter` (предикат по сырому сообщению до `from_message`, по умолчанию
-  пропускает всё), `:context_factory` (вызывается на каждое сообщение), `:poll_interval_ms`
-  (по умолчанию — `default_poll_interval_ms/0` reader'а, если он его объявил, иначе 100),
-  `:topic` (string для метрик и имени DLQ), `:name`.
-
-  DLQ: `:dlq_writer` (модуль `Mq.Writer`), `:dlq_handle` (его handle — обязателен при
-  `:dlq_writer` и без него не задаётся), `:dlq_topic` (по умолчанию `"<topic>.dlq"`),
-  `:max_attempts`, `:retry_max_ms`.
-
-  Подписка при старте: `:subscribe` (по умолчанию `false`) — процесс подписан сразу после
-  `init/1`, и `subscribe/3` снаружи не нужен (повторный вызов вернёт `:already_subscribed`);
-  `:subscribe_data` (по умолчанию `nil`) — данные подписки для `on_message`, как `data` у
-  `subscribe/3`, задаются только вместе с `subscribe: true`.
-
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` при
-  старте (`Core.Helper.StartOpts`).
-  """
+  @doc "Запустить reliable subscriber; опции — «Опции старта»."
   @spec start_link(keyword()) :: GenServer.on_start()
 
   def start_link(opts) when is_list(opts) do
@@ -188,30 +231,32 @@ defmodule Core.PubSub.MqSubscriberReliable do
     GenServer.call(server, :run_once, @call_timeout)
   end
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, %__MODULE__{}}
+
   @impl true
   def init(opts) do
     # Обработка сообщения идёт целиком внутри одного handle_info: trap_exit даёт
     # ей завершиться и закоммитить offset вместо повторной доставки после рестарта.
     Process.flag(:trap_exit, true)
-    StartOpts.keys!(@label, opts, @keys)
-    reader_module = StartOpts.module!(@label, opts, :reader_module)
-    poll_interval_ms = StartOpts.pos_integer!(@label, opts, :poll_interval_ms, default_poll_interval_ms(reader_module))
+    reader_module = Keyword.fetch!(opts, :reader_module)
+    poll_interval_ms = Keyword.get(opts, :poll_interval_ms) || default_poll_interval_ms(reader_module)
     step = Step.new!(@label, opts)
-    dlq_writer = StartOpts.module!(@label, opts, :dlq_writer, nil)
+    dlq_writer = Keyword.fetch!(opts, :dlq_writer)
 
     state = %__MODULE__{
       reader_module: reader_module,
-      reader: StartOpts.term!(@label, opts, :reader),
+      reader: Keyword.fetch!(opts, :reader),
       ready_requests?: Core.Helper.Module.exports?(reader_module, :notify_when_ready, 2),
       step: step,
       poll_interval_ms: poll_interval_ms,
-      retry_max_ms: retry_max_ms(opts, poll_interval_ms),
+      retry_max_ms: max(Keyword.fetch!(opts, :retry_max_ms), poll_interval_ms),
       retry_ms: poll_interval_ms,
-      max_attempts: StartOpts.pos_integer!(@label, opts, :max_attempts, @default_max_attempts),
+      max_attempts: Keyword.fetch!(opts, :max_attempts),
       dlq_writer: dlq_writer,
       dlq_handle: dlq_handle!(opts, dlq_writer),
-      dlq_topic: StartOpts.binary!(@label, opts, :dlq_topic, step.topic <> ".dlq"),
+      dlq_topic: Keyword.get(opts, :dlq_topic) || step.topic <> ".dlq",
       topic: step.topic,
       timer_ref: nil,
       pending_raw: nil,
@@ -555,21 +600,26 @@ defmodule Core.PubSub.MqSubscriberReliable do
       else: @fallback_poll_interval_ms
   end
 
-  defp retry_max_ms(opts, poll_interval_ms) do
-    max(StartOpts.pos_integer!(@label, opts, :retry_max_ms, @default_retry_max_ms), poll_interval_ms)
-  end
-
   defp dlq_handle!(opts, nil) do
     case Keyword.get(opts, :dlq_handle) do
-      nil -> nil
-      handle -> StartOpts.raise_invalid!(@label, :dlq_handle, "её отсутствие без :dlq_writer", handle)
+      nil ->
+        nil
+
+      handle ->
+        raise ArgumentError,
+              "#{@init_label}: опция :dlq_handle задаётся только с :dlq_writer, получено #{inspect(handle)}"
     end
   end
 
-  defp dlq_handle!(opts, _dlq_writer), do: StartOpts.term!(@label, opts, :dlq_handle)
+  defp dlq_handle!(opts, _dlq_writer) do
+    case Keyword.get(opts, :dlq_handle) do
+      nil -> raise ArgumentError, "#{@init_label}: нет обязательной при :dlq_writer опции :dlq_handle"
+      handle -> handle
+    end
+  end
 
   defp subscribe_on_start!(state, opts) do
-    case {StartOpts.boolean!(@label, opts, :subscribe, false), Keyword.fetch(opts, :subscribe_data)} do
+    case {Keyword.fetch!(opts, :subscribe), Keyword.fetch(opts, :subscribe_data)} do
       {true, {:ok, data}} ->
         mark_subscribed(state, data)
 
@@ -580,7 +630,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
         state
 
       {false, {:ok, data}} ->
-        StartOpts.raise_invalid!(@label, :subscribe_data, "её отсутствие без subscribe: true", data)
+        raise ArgumentError,
+              "#{@init_label}: опция :subscribe_data задаётся только с subscribe: true, получено #{inspect(data)}"
     end
   end
 end

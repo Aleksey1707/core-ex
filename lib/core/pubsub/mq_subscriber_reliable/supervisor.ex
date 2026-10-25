@@ -1,4 +1,48 @@
 defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
+  @tree_opts_schema [
+    enabled: [type: :boolean, required: true, doc: "`false` — дерево не стартует."],
+    component: [
+      type: {:custom, Core.PubSub.MqSubscriberReliable.Supervisor, :component, []},
+      type_doc: "`t:String.t/0`",
+      required: true,
+      doc:
+        "Непустая строка без `:`; из неё и топика строятся метки `component` метрик (`watch_list/1`, " <>
+          "`stream_readers/1`), `:` — их разделитель."
+    ],
+    topics: [
+      type:
+        {:list,
+         {:keyword_list,
+          [
+            reader: [
+              type: {:tuple, [:atom, :keyword_list]},
+              required: true,
+              doc: "Читатель топика `{модуль Core.Mq.ReaderReliable, опции}`."
+            ],
+            subscriber: [
+              type: {:custom, Core.PubSub.MqSubscriberReliable.Supervisor, :subscriber, []},
+              required: true,
+              doc: "Опции `Core.PubSub.MqSubscriberReliable` подписчика топика."
+            ]
+          ]}},
+      type_doc: "список `[reader: {module(), keyword()}, subscriber: keyword()]`",
+      required: true,
+      doc: "По элементу на топик: читатель и опции его подписчика; топики подписчиков без повторов."
+    ],
+    dlq_writer: [
+      type: {:tuple, [:atom, :keyword_list]},
+      type_doc: "`{module(), keyword()}`",
+      doc:
+        "DLQ-writer `{модуль Core.Mq.Writer, опции}`; без него подписчик после `max_attempts` продолжает " <>
+          "повторы (`Core.PubSub.MqSubscriberReliable`, «DLQ»)."
+    ],
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :name, []},
+      type_doc: "`t:GenServer.name/0`",
+      doc: "Имя супервизора, оно же `id` в `child_spec/1`; без него `id` — модуль."
+    ]
+  ]
+
   @moduledoc """
   Дерево подписчиков брокера с DLQ: порядок детей из свода держится построением.
 
@@ -35,16 +79,11 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   Handle писателя и читателя — их `name:`: дерево передаёт подписчику `reader_module:` и `reader:`
   читателя своего топика, `dlq_writer:` и `dlq_handle:` DLQ-writer'а.
 
-  ## Opts
+  ## Опции
 
-  - `enabled:` — обязательна; `false` — дерево не стартует
-  - `component:` — обязательна, непустая строка без `:`; из неё и топика строятся метки `component`
-    метрик (`watch_list/1`, `stream_readers/1`), `:` — их разделитель
-  - `topics:` — обязательна; список `[reader: {модуль, опции}, subscriber: опции]` по топику, топики
-    подписчиков без повторов
-  - `dlq_writer:` — `{модуль Mq.Writer, опции}`; без него подписчик после `max_attempts` продолжает
-    повторы (`Core.PubSub.MqSubscriberReliable`, «DLQ»)
-  - `name:` — имя супервизора, оно же `id` в `child_spec/1`; по умолчанию без имени, `id` — модуль
+  Опции дерева — раздел «Опции» у `start_link/1`; те же опции принимают `watch_list/1`,
+  `stream_readers/1` и `kafka_readers/1`. Неизвестная опция, отсутствие обязательной и значение не
+  той формы — `ArgumentError`.
 
   Опции писателя и читателя MUST содержать `name:` — атом; имена всех процессов дерева MUST
   различаться: имя — `id` ребёнка. Опции подписчика MUST содержать `name:`
@@ -62,15 +101,15 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   """
 
   use Supervisor
+  use Core.Options
 
   alias Core.Helper.StartOpts
   alias Core.PubSub.MqSubscriberReliable
+  alias Core.Result
 
   require Logger
 
   @label "PubSub.MqSubscriberReliable.Supervisor"
-  @keys ~w(enabled component topics dlq_writer name)a
-  @topic_keys ~w(reader subscriber)a
   @owned_keys ~w(reader_module reader dlq_writer dlq_handle subscribe)a
   @stream_reader Core.Mq.Stream.Reader
   @kafka_reader Core.Mq.Kafka.Reader
@@ -103,13 +142,14 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   def child_spec(opts) when is_list(opts) do
     %{
-      id: StartOpts.name!(@label, opts, :name) || __MODULE__,
+      id: Keyword.get(opts, :name) || __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
       type: :supervisor
     }
   end
 
   @doc "Запустить дерево подписчиков; `:ignore` — дерево отключено или топиков нет."
+  @opts_schema @tree_opts_schema
   @spec start_link(keyword()) :: Supervisor.on_start()
 
   def start_link(opts) when is_list(opts), do: start(options!(opts))
@@ -174,10 +214,11 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   `"mq_subscriber:<component>:<топик>"`.
 
   Метка строится из `component:` дерева и `topic:` подписчика, а не из имени процесса: перенос
-  модуля компонента не меняет ряды метрик. `opts` — опции дерева, проверяются как в `start_link/1`.
+  модуля компонента не меняет ряды метрик. `opts` — опции дерева, как у `start_link/1`.
   Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет: процессов на ноде нет,
   и `up=0` был бы ложной тревогой.
   """
+  @opts_schema @tree_opts_schema
   @spec watch_list(keyword()) :: [watch_item()]
 
   def watch_list(opts) when is_list(opts) do
@@ -214,6 +255,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   Читатель другого модуля в список не попадает: у `Core.Mq.Kafka.Reader` своя группа метрик опроса
   (`kafka_readers/1`), у прочих её нет. Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет.
   """
+  @opts_schema @tree_opts_schema
   @spec stream_readers(keyword()) :: [watch_item()]
 
   def stream_readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader)
@@ -225,6 +267,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   Читатель другого модуля в список не попадает. Когда дерево не стартует (`enabled: false`,
   `topics: []`), элементов нет.
   """
+  @opts_schema @tree_opts_schema
   @spec kafka_readers(keyword()) :: [watch_item()]
 
   def kafka_readers(opts) when is_list(opts), do: reader_items(opts, @kafka_reader)
@@ -245,6 +288,49 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
     end
   end
 
+  # ===== проверка опций =====
+
+  @doc false
+  @spec component(term()) :: Result.t(String.t(), String.t())
+
+  def component(value) do
+    case StartOpts.binary(value) do
+      {:ok, component} ->
+        if String.contains?(component, ":"),
+          do: {:error, "ожидается строка без `:` — разделителя метки, получено #{inspect(component)}"},
+          else: {:ok, component}
+
+      {:error, _message} = error ->
+        error
+    end
+  end
+
+  @doc false
+  @spec subscriber(term()) :: Result.t(keyword(), String.t())
+
+  def subscriber(subscriber) do
+    cond do
+      not Keyword.keyword?(subscriber) ->
+        {:error, "ожидаются опции подписчика keyword-списком, получено #{inspect(subscriber)}"}
+
+      key = Enum.find(@owned_keys, &Keyword.has_key?(subscriber, &1)) ->
+        {:error, "ожидаются опции подписчика без #{inspect(key)}: её задаёт дерево, получено #{inspect(subscriber)}"}
+
+      true ->
+        subscriber_ids(subscriber)
+    end
+  end
+
+  # ---
+
+  defp subscriber_ids(subscriber) do
+    case {Keyword.get(subscriber, :name), StartOpts.binary(Keyword.get(subscriber, :topic))} do
+      {name, {:ok, _topic}} when is_atom(name) and not is_nil(name) -> {:ok, subscriber}
+      {name, {:ok, _topic}} -> {:error, "ожидается name: подписчика атомом, получено #{inspect(name)}"}
+      {_name, {:error, message}} -> {:error, "topic: подписчика — #{message}"}
+    end
+  end
+
   # ===== общее =====
 
   defp reader_item(%{reader: reader, subscriber: subscriber}, component),
@@ -253,26 +339,16 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   defp label(component, %{topic: topic}), do: "#{component}:#{topic}"
 
   defp options!(opts) do
-    StartOpts.keys!(@label, opts, @keys)
-
     options = %{
-      enabled: StartOpts.boolean!(@label, opts, :enabled),
-      component: component!(opts),
-      topics: topics!(StartOpts.list!(@label, opts, :topics)),
+      enabled: Keyword.fetch!(opts, :enabled),
+      component: Keyword.fetch!(opts, :component),
+      topics: topics!(Keyword.fetch!(opts, :topics)),
       dlq_writer: dlq_writer!(Keyword.get(opts, :dlq_writer)),
-      name: StartOpts.name!(@label, opts, :name)
+      name: Keyword.get(opts, :name)
     }
 
     StartOpts.unique!(@label, :topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
     options
-  end
-
-  defp component!(opts) do
-    component = StartOpts.binary!(@label, opts, :component)
-
-    if String.contains?(component, ":"),
-      do: StartOpts.raise_invalid!(@label, :component, "строку без `:` — разделителя метки", component),
-      else: component
   end
 
   defp process_names(%{dlq_writer: dlq_writer, topics: topics}) do
@@ -297,24 +373,15 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   end
 
   defp topic!(topic) do
-    unless Keyword.keyword?(topic),
-      do: StartOpts.raise_invalid!(@label, :topics, "список keyword [reader: …, subscriber: …]", topic)
-
-    StartOpts.keys!(@label, topic, @topic_keys)
+    subscriber = Keyword.fetch!(topic, :subscriber)
 
     %{
-      reader: StartOpts.process!(@label, :reader, StartOpts.term!(@label, topic, :reader)),
-      subscriber: subscriber!(StartOpts.list!(@label, topic, :subscriber))
+      reader: StartOpts.process!(@label, :reader, Keyword.fetch!(topic, :reader)),
+      subscriber: %{
+        opts: subscriber,
+        name: Keyword.fetch!(subscriber, :name),
+        topic: Keyword.fetch!(subscriber, :topic)
+      }
     }
-  end
-
-  defp subscriber!(opts) do
-    case Enum.find(@owned_keys, &Keyword.has_key?(opts, &1)) do
-      nil ->
-        %{opts: opts, name: StartOpts.atom!(@label, opts, :name), topic: StartOpts.binary!(@label, opts, :topic)}
-
-      key ->
-        StartOpts.raise_invalid!(@label, :subscriber, "опции подписчика без #{inspect(key)}: её задаёт дерево", opts)
-    end
   end
 end

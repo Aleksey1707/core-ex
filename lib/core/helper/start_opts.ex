@@ -10,10 +10,10 @@ defmodule Core.Helper.StartOpts do
 
   Процесс, переведённый на схему опций (`use Core.Options`, `@opts_schema` над `init/1`), проверяет
   доменные значения custom-типами схемы `{:custom, Core.Helper.StartOpts, fun, args}`: `prim/2`,
-  `module/1`, `atom/1`, `binary/1`, `name/1`, `topics_filter/1`, `shutdown/1`. Они возвращают
-  `{:ok, value}` или `{:error, "ожидается …, получено …"}`; ключ в текст отказа добавляет
-  NimbleOptions. Простые значения (целое, булево, функция, атом, где допустим `nil`) — встроенные
-  типы NimbleOptions.
+  `module/1`, `atom/1`, `binary/1`, `term/1`, `name/1`, `topics_filter/1`, `shutdown/1`. Они
+  возвращают `{:ok, value}` или `{:error, "ожидается …, получено …"}`; ключ в текст отказа
+  добавляет NimbleOptions. Простые значения (целое, булево, функция, атом, где допустим `nil`) —
+  встроенные типы NimbleOptions.
 
   Проверки опций с `!` — для процессов, ещё не переведённых на схему; `process!/3` и `unique!/4`
   проверяют значения внутри списков дерева и нужны и при схеме.
@@ -63,6 +63,12 @@ defmodule Core.Helper.StartOpts do
 
   def binary(value) when is_binary(value) and value != "", do: {:ok, value}
   def binary(value), do: invalid("непустая строка", value)
+
+  @doc "Значение — любое, кроме `nil` (handle процесса); `{:custom, Core.Helper.StartOpts, :term, []}`."
+  @spec term(term()) :: Result.t(term(), String.t())
+
+  def term(nil), do: invalid("значение", nil)
+  def term(value), do: {:ok, value}
 
   @doc """
   Значение — имя процесса (`GenServer.name()`) или `nil` — процесс без имени;

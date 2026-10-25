@@ -6,14 +6,15 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   # исключение обработчика — `{:error, %Error{}}`.
   # Чтение, `commit`, счёт попыток, backoff, DLQ и telemetry цикла — у вызывающего: исход
   # он получает в `fun`, внутри span'а обработки, и может дополнить span (причина выброса в DLQ).
+  # Ключи шага — `schema/0`: вызывающий включает её в свою схему, `new!/2` берёт и проверяет только их.
 
   alias Core.Config
   alias Core.Context
   alias Core.Error
   alias Core.Es
-  alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Message
+  alias Core.Options
   alias Core.Otel
   alias Core.PubSub
   alias Core.Repo
@@ -22,6 +23,36 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   require Error
 
   @attr_attempt "core.pubsub.attempt"
+
+  @schema [
+    topic: [
+      type: {:custom, Core.Helper.StartOpts, :binary, []},
+      type_doc: "`t:String.t/0`",
+      default: "unknown",
+      doc: "Топик: метка метрик и span'а обработки."
+    ],
+    filter: [
+      type: {:fun, 1},
+      default: &Core.PubSub.MqSubscriberReliable.Step.accept_all/1,
+      doc: "Предикат по сырому `Core.Mq.Message` до `from_message`; `false` — сообщение отфильтровано."
+    ],
+    from_message: [
+      type: {:fun, 1},
+      required: true,
+      doc: "Декодер сырого сообщения, результат — `t:Core.PubSub.decode_result/1`."
+    ],
+    on_message: [
+      type: {:fun, 3},
+      required: true,
+      doc: "Обработчик: сообщение, данные подписки и контекст; результат — `t:Core.PubSub.handler_result/0`."
+    ],
+    context_factory: [
+      type: {:fun, 0},
+      default: &Core.Context.new/0,
+      doc: "Фабрика `Core.Context`; вызывается на каждое сообщение."
+    ]
+  ]
+  @compiled NimbleOptions.new!(@schema)
 
   @enforce_keys ~w(topic filter from_message on_message context_factory data)a
   defstruct @enforce_keys
@@ -44,22 +75,23 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   # ===== опции =====
 
   @doc false
+  @spec schema() :: keyword()
+
+  def schema, do: @schema
+
+  @doc false
   @spec new!(String.t(), keyword()) :: t()
 
   def new!(label, opts) when is_binary(label) and is_list(opts) do
-    %__MODULE__{
-      topic: StartOpts.binary!(label, opts, :topic, "unknown"),
-      filter: StartOpts.fun!(label, opts, :filter, 1, &accept_all/1),
-      from_message: StartOpts.fun!(label, opts, :from_message, 1),
-      on_message: StartOpts.fun!(label, opts, :on_message, 3),
-      context_factory: StartOpts.fun!(label, opts, :context_factory, 0, &Context.new/0),
-      data: nil
-    }
+    valid = Options.__validate__!(Keyword.take(opts, Keyword.keys(@schema)), @compiled, label)
+
+    struct!(__MODULE__, [data: nil] ++ valid)
   end
 
-  # ---
+  @doc false
+  @spec accept_all(Message.t()) :: true
 
-  defp accept_all(%Message{}), do: true
+  def accept_all(%Message{}), do: true
 
   # ===== обработка =====
 
