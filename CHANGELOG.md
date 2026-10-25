@@ -189,6 +189,20 @@
 
 ### Новое
 
+- **Страница выборки — в query: `Core.Web.Params.Schema.page/1` и ратчет `Core.Web.ApiSpecCase`**
+  (норма — `docs/rules/app/15-web-api.md`, «Поверхности и версии», «Controller»). Свод говорил
+  только «выборка — `POST /<resource>/search` с телом», а `Core.Web.Params.page/2` разбирает любую
+  map, поэтому `limit` / `offset` уезжали в тело вместе с фильтром, и описание страницы в
+  `operation/2` каждое приложение писало своё. Теперь норма: тело несёт фильтр, страница — query у
+  любой выборки. `Core.Web.Params.Schema.page/1` (при `open_api_spex`) отдаёт query-параметры
+  `limit` / `offset` для `parameters:` с границами `Core.Pagination.Limit` / `Offset` и теми же
+  опциями и умолчаниями, что у `Params.page/2`. `use Core.Web.ApiSpecCase, otp_app: :my_app` —
+  ратчет на все `ApiSpec` приложения (модули с `@behaviour OpenApiSpex.OpenApi`): провал, если
+  схема тела запроса объявляет `limit` / `offset`. Правка потребителя: было — поля `limit` /
+  `offset` в схеме тела и `Params.page(OpenApiSpex.body_params(conn), opts)`, стало —
+  `parameters: Params.Schema.page(opts)` и `Params.page(params, opts)` из параметров экшена;
+  свой модуль описания страницы удаляется; ратчет — `test/my_app_web/api_spec_test.exs`.
+
 - **Схема опций функции: `use Core.Options` и `@opts_schema` над `def`** (норма —
   `docs/rules/20-agreements.md`, «Схема опций функции»; ADR-0086). Опции функции проверялись
   вручную (`Keyword.validate!`, клаузы с `raise ArgumentError`) или не проверялись вовсе, и опечатка

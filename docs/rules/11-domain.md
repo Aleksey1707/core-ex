@@ -1348,6 +1348,10 @@ end
 
 Repo-методы `page/4` возвращают `Pagination.Result`.
 
+На HTTP страница — query-параметры `limit` / `offset`: разбор — `Core.Web.Params.page/2`, описание
+в `operation/2` — `Core.Web.Params.Schema.page/1` (`deps/core/docs/rules/app/15-web-api.md`,
+«Поверхности и версии»).
+
 ## Result / Option
 
 Combinators под CQS (`Result.and_then/2`, `Option.map/2` и т.п.). Использовать на границах (web →

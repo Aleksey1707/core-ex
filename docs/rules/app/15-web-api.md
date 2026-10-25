@@ -24,8 +24,15 @@
   соседним каталогом со своим `ApiSpec`, а не флагом внутри существующих модулей. До первого
   релиза приложения несовместимая правка идёт в текущей версии на месте (`00-index.md`, «Первый
   релиз»).
-- Выборка с фильтрами — `POST /<resource>/search` с телом, чтение по идентификатору — `GET`,
-  действие над агрегатом — `POST /<resource>/:id/<action>`.
+- Выборка с фильтрами — `POST /<resource>/search`, чтение по идентификатору — `GET`, действие над
+  агрегатом — `POST /<resource>/:id/<action>`.
+- Тело выборки несёт фильтр, страница (`limit` / `offset`) MUST идти в query — и у
+  `POST /<resource>/search`, и у `GET`-коллекции. Страница — не условие выборки, а способ её
+  листать: фильтр задаёт набор записей, страница — окно в нём, и следующая страница — тот же запрос
+  с другим query. Разбор и описание в `operation/2` — «Controller».
+
+  Проверяется: `use Core.Web.ApiSpecCase` (`19-testing.md`, «Ратчеты») — свойства `limit` /
+  `offset` в схеме тела запроса.
 - Литеральный сегмент MUST объявляться раньше параметра (`/spec` до `/:id`): маршрутизатор
   берёт первый совпавший маршрут.
 
@@ -149,6 +156,11 @@ defmodule MyAppWeb.Accepted do
 - `%Context{}` берётся из `conn.assigns`.
 - Параметры → доменные Prim через `Core.Web.Params` и `Result.and_then/2`; разбор тела в
   `attrs` — отдельным модулем, а не россыпью в экшене.
+- Страница выборки — `Params.page(params, …)` из параметров экшена, фильтр — из
+  `OpenApiSpex.body_params(conn)`. В `operation/2` страницу MUST описывать
+  `parameters: Params.Schema.page/1` с теми же опциями, что у разбора: границы она берёт у
+  `Core.Pagination.Limit` / `Core.Pagination.Offset`, а своё описание `limit` / `offset`
+  разойдётся с ними молча.
 - Optimistic lock: заголовок `If-Match` → `Version` через `Core.Web.Params`, форма разбора — по
   экшену:
   - команда MUST — `explicit_version/2` (`*` отвергается 400 `:current_not_allowed`), кроме
@@ -187,6 +199,15 @@ def create(conn, _params) do
        {:ok, id} <- Agg.Client.Usecases.create(name, conn.assigns.context) do
     json(conn, Response.success(%{id: OutCodec.dump(id)}))
   end
+end
+
+# выборка — фильтр из тела, страница из query; в `operation/2`
+# `parameters: Params.Schema.page(limit_default: 20)`
+def search(conn, params) do
+  with {:ok, filter} <- MyAppWeb.Public.V1.Order.Params.Filter.parse(OpenApiSpex.body_params(conn)),
+       {:ok, {limit, offset}} <- Params.page(params, limit_default: 20),
+       {:ok, page} <- Agg.Client.Usecases.search(filter, limit, offset, conn.assigns.context),
+       do: json(conn, Response.success(Response.page_data(page, &MyAppWeb.Presenters.Order.to_map/1)))
 end
 ```
 

@@ -176,6 +176,7 @@ Sentry (ADR-0071): то, что в таблице помечено «при `ope
 | `Core.Web.Response` | обёртка ответа `%{status: "ok", data}` / `%{status: "error", data, code, message}` (ADR-0062) и данные страницы `%{items, total}` |
 | `Core.Web.ErrorMapper` | `%Error{}` → `{статус, обёртка ответа, уровень лога}` (`map/2`); обёртка 401 плага аутентификации (`unauthorized/1`); статус ошибки, не дошедшей до контроллера, → обёртка ответа (`by_status/2`); ошибки разбора запроса по OpenAPI → `{422, обёртка ответа, nil}` (`cast_errors/2`, только при `open_api_spex`) |
 | `Core.Web.Response.Schema` | OpenAPI-схемы обёртки ответа, только при `open_api_spex` (ADR-0065): `success(data)` / `success()` / `page(item)` — анонимные схемы успеха и страницы со схемой данных аргументом, `error()` — `ErrorResponse`, одна схема на все статусы ошибки |
+| `Core.Web.Params.Schema` | OpenAPI-описание параметров запроса, только при `open_api_spex`: `page(opts)` — query-параметры `limit` / `offset` с границами `Core.Pagination` и опциями `Core.Web.Params.page/2` |
 | `Core.Web.CriticalError` | отчёт о критической ошибке в службу учёта ошибок и идентификатор ошибки для обёртки 500 (`report/2`), только при `:sentry` |
 | `Core.Web.MetricsPlug` | standalone-сервер метрик поверх `PromEx.Plug` |
 | `Core.Web.HealthPlug` | liveness (`/health`, `200` без проверок) и readiness (`/ready`, `SELECT 1` по каждому из `repos:` с пределом `timeout:`, `200` либо `503` с `warning` в лог) в эндпоинте приложения |

@@ -16,6 +16,7 @@
 | `Core.Repo.ConstraintErrorsCase` | сверка `constraint_errors` с `changeset/2` и БД, один тест-модуль на приложение (см. «`constraint_errors`») |
 | `Core.Enum.DocsCase` | описание каждого значения `Core.Enum` в `@moduledoc`, один тест-модуль на приложение (см. «Enum: описания и внешние коды») |
 | `Core.Labels.CompletenessCase` | полнота подписей событий, один тест-модуль на приложение (`11-domain.md`, «Ратчет полноты») |
+| `Core.Web.ApiSpecCase` | спецификации OpenAPI: страница выборки — в query, один тест-модуль на приложение (`deps/core/docs/rules/app/15-web-api.md`, «Поверхности и версии») |
 
 Тестовая обвязка библиотеки живёт в `test/support`: `Core.DataCase`, `Core.TestRepo` (роль
 `MyApp.Infra.DAO`), `Core.CodecFixture.*` (роль `MyApp.Codec.*`); фикстуры `Core.*Fixture`, дублёр
