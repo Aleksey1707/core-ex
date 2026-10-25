@@ -6,6 +6,55 @@ defmodule Core.Helper.StartOptsTest do
 
   @label "Test.Process"
 
+  describe "custom-валидаторы схемы" do
+    test "prim: структура ожидаемого модуля" do
+      topic = Mq.Topic.new!("products")
+
+      assert StartOpts.prim(topic, Mq.Topic) == {:ok, topic}
+      assert StartOpts.prim("products", Mq.Topic) == {:error, ~s(ожидается %Core.Mq.Topic{}, получено "products")}
+      assert {:error, "ожидается %Core.Mq.Topic{}, получено " <> _} = StartOpts.prim(Mq.Key.new!("agg-1"), Mq.Topic)
+    end
+
+    test "module: атом, кроме nil" do
+      assert StartOpts.module(MyConn) == {:ok, MyConn}
+      assert StartOpts.module(nil) == {:error, "ожидается модуль, получено nil"}
+      assert StartOpts.module("MyConn") == {:error, ~s(ожидается модуль, получено "MyConn")}
+    end
+
+    test "name: имя процесса или nil" do
+      for good <- [nil, :poller, {:global, :poller}, {:via, Registry, {:r, 1}}] do
+        assert StartOpts.name(good) == {:ok, good}
+      end
+
+      for bad <- ["poller", {:via, "Registry", :poller}, {:local, :poller}] do
+        assert {:error, "ожидается имя процесса (атом, {:global, term} или {:via, module, term}), получено " <> _} =
+                 StartOpts.name(bad)
+      end
+    end
+
+    test "topics_filter: :all, {:only, строки} или {:except, строки}" do
+      for good <- [:all, {:only, ["orders"]}, {:except, []}] do
+        assert StartOpts.topics_filter(good) == {:ok, good}
+      end
+
+      for bad <- [["orders"], {:only, "orders"}, {:only, [:orders]}, {:all, ["orders"]}, nil] do
+        assert {:error, "ожидается :all, {:only, [String.t()]} или {:except, [String.t()]}, получено " <> _} =
+                 StartOpts.topics_filter(bad)
+      end
+    end
+
+    test "shutdown: неотрицательное целое, :infinity или :brutal_kill" do
+      for good <- [0, 5_000, :infinity, :brutal_kill] do
+        assert StartOpts.shutdown(good) == {:ok, good}
+      end
+
+      for bad <- [-1, "30s", :kill, nil] do
+        assert {:error, "ожидается неотрицательное целое, :infinity или :brutal_kill, получено " <> _} =
+                 StartOpts.shutdown(bad)
+      end
+    end
+  end
+
   test "module!: модуль, иначе ошибка с именем опции" do
     assert StartOpts.module!(@label, [connection: MyConn], :connection) == MyConn
 

@@ -8,8 +8,17 @@ defmodule Core.Helper.StartOpts do
   `handle_continue/2` (супервизор уходит в цикл рестартов) или молчаливый backoff, в
   котором опечатка неотличима от недоступного брокера (`17-otp-concurrency.md`).
 
+  Процесс, переведённый на схему опций (`use Core.Options`, `@opts_schema` над `init/1`), проверяет
+  доменные значения custom-типами схемы `{:custom, Core.Helper.StartOpts, fun, args}`: `prim/2`,
+  `module/1`, `name/1`, `topics_filter/1`, `shutdown/1`. Они возвращают `{:ok, value}` или
+  `{:error, "ожидается …, получено …"}`; ключ в текст отказа добавляет NimbleOptions. Простые
+  значения (целое, булево, функция, атом) — встроенные типы NimbleOptions.
+
+  Проверки опций с `!` — для процессов, ещё не переведённых на схему; `process!/3` и `unique!/4`
+  проверяют значения внутри списков дерева и нужны и при схеме.
+
   `Core.Helper.Opts` — про опции `use`-макросов и compile-time; здесь — рантайм.
-  `label` у всех функций — имя процесса для текста ошибки (`"Mq.Stream.Reader"`).
+  `label` у функций с `!` — имя процесса для текста ошибки (`"Mq.Stream.Reader"`).
 
   `keys!/3` ловит опечатку в имени необязательной опции: без него такая опция молча берёт
   значение по умолчанию.
@@ -18,10 +27,69 @@ defmodule Core.Helper.StartOpts do
   `opts`, потому что процессы дерева приходят вложенными в элементы его списков.
   """
 
+  alias Core.Result
+
   @typedoc "Процесс, который поднимает дерево: модуль, его опции и имя — оно же `id` ребёнка и handle."
   @type process :: %{module: module(), opts: keyword(), name: atom()}
 
   @process_expected "{модуль, опции с name: атомом}"
+  @name_expected "имя процесса (атом, {:global, term} или {:via, module, term})"
+  @topics_filter_expected ":all, {:only, [String.t()]} или {:except, [String.t()]}"
+  @shutdown_expected "неотрицательное целое, :infinity или :brutal_kill"
+
+  # ===== custom-валидаторы схемы =====
+
+  @doc "Значение — структура `mod` (Prim): `{:custom, Core.Helper.StartOpts, :prim, [mod]}`."
+  @spec prim(term(), module()) :: Result.t(struct(), String.t())
+
+  def prim(%{__struct__: mod} = value, mod) when is_atom(mod), do: {:ok, value}
+  def prim(value, mod) when is_atom(mod), do: invalid("%#{inspect(mod)}{}", value)
+
+  @doc "Значение — модуль: атом, кроме `nil`; `{:custom, Core.Helper.StartOpts, :module, []}`."
+  @spec module(term()) :: Result.t(module(), String.t())
+
+  def module(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
+  def module(value), do: invalid("модуль", value)
+
+  @doc """
+  Значение — имя процесса (`GenServer.name()`) или `nil` — процесс без имени;
+  `{:custom, Core.Helper.StartOpts, :name, []}`.
+  """
+  @spec name(term()) :: Result.t(GenServer.name() | nil, String.t())
+
+  def name(value) when is_atom(value), do: {:ok, value}
+  def name({:global, _term} = value), do: {:ok, value}
+  def name({:via, mod, _term} = value) when is_atom(mod), do: {:ok, value}
+  def name(value), do: invalid(@name_expected, value)
+
+  @doc """
+  Значение — фильтр топиков `Core.Outbox.topics_filter()`;
+  `{:custom, Core.Helper.StartOpts, :topics_filter, []}`.
+  """
+  @spec topics_filter(term()) :: Result.t(Core.Outbox.topics_filter(), String.t())
+
+  def topics_filter(:all), do: {:ok, :all}
+
+  def topics_filter({mode, topics} = value) when mode in ~w(only except)a and is_list(topics) do
+    if Enum.all?(topics, &is_binary/1),
+      do: {:ok, value},
+      else: invalid(@topics_filter_expected, value)
+  end
+
+  def topics_filter(value), do: invalid(@topics_filter_expected, value)
+
+  @doc "Значение — `shutdown` ребёнка супервизора; `{:custom, Core.Helper.StartOpts, :shutdown, []}`."
+  @spec shutdown(term()) :: Result.t(timeout() | :brutal_kill, String.t())
+
+  def shutdown(value) when is_integer(value) and value >= 0, do: {:ok, value}
+  def shutdown(value) when value in ~w(infinity brutal_kill)a, do: {:ok, value}
+  def shutdown(value), do: invalid(@shutdown_expected, value)
+
+  # ---
+
+  defp invalid(expected, value), do: {:error, "ожидается #{expected}, получено #{inspect(value)}"}
+
+  # ===== проверки с raise =====
 
   @doc "Опции — только из `allowed`; неизвестная — ошибка с её именем."
   @spec keys!(String.t(), keyword(), [atom()]) :: :ok
@@ -200,43 +268,19 @@ defmodule Core.Helper.StartOpts do
   @doc "Опция — фильтр топиков `Core.Outbox.topics_filter()`; `default` при отсутствии."
   @spec topics_filter!(String.t(), keyword(), atom(), Core.Outbox.topics_filter()) :: Core.Outbox.topics_filter()
 
-  def topics_filter!(label, opts, key, default) do
-    value = Keyword.get(opts, key, default)
-
-    valid? =
-      case value do
-        :all -> true
-        {mode, topics} when mode in ~w(only except)a and is_list(topics) -> Enum.all?(topics, &is_binary/1)
-        _other -> false
-      end
-
-    if valid?,
-      do: value,
-      else: raise_invalid!(label, key, ":all, {:only, [String.t()]} или {:except, [String.t()]}", value)
-  end
+  def topics_filter!(label, opts, key, default),
+    do: unwrap!(topics_filter(Keyword.get(opts, key, default)), label, key)
 
   @doc "Опция — имя процесса (`GenServer.name()`); `nil` — процесс без имени, он же при отсутствии."
   @spec name!(String.t(), keyword(), atom()) :: GenServer.name() | nil
 
-  def name!(label, opts, key) do
-    case Keyword.get(opts, key) do
-      value when is_atom(value) -> value
-      {:global, _term} = value -> value
-      {:via, mod, _term} = value when is_atom(mod) -> value
-      other -> raise_invalid!(label, key, "имя процесса (атом, {:global, term} или {:via, module, term})", other)
-    end
-  end
+  def name!(label, opts, key), do: unwrap!(name(Keyword.get(opts, key)), label, key)
 
   @doc "Опция — `shutdown` ребёнка супервизора; `default` при отсутствии."
   @spec shutdown!(String.t(), keyword(), atom(), timeout() | :brutal_kill) :: timeout() | :brutal_kill
 
-  def shutdown!(label, opts, key, default) do
-    case Keyword.get(opts, key, default) do
-      value when is_integer(value) and value >= 0 -> value
-      value when value in ~w(infinity brutal_kill)a -> value
-      other -> raise_invalid!(label, key, "неотрицательное целое, :infinity или :brutal_kill", other)
-    end
-  end
+  def shutdown!(label, opts, key, default),
+    do: unwrap!(shutdown(Keyword.get(opts, key, default)), label, key)
 
   @doc "Процесс дерева `{модуль, опции}` с `name:` — атомом в опциях; `key` — опция для текста ошибки."
   @spec process!(String.t(), atom(), term()) :: process()
@@ -269,6 +313,9 @@ defmodule Core.Helper.StartOpts do
   end
 
   # ---
+
+  defp unwrap!({:ok, value}, _label, _key), do: value
+  defp unwrap!({:error, message}, label, key), do: raise(ArgumentError, "#{label}: опция #{inspect(key)} — #{message}")
 
   defp raise_missing!(label, key) do
     raise ArgumentError, "#{label}: нет обязательной опции #{inspect(key)}"

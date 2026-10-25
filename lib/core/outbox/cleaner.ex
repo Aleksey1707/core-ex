@@ -1,35 +1,61 @@
 defmodule Core.Outbox.Cleaner do
+  @init_opts_schema [
+    repo: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Репозиторий outbox (`Core.Outbox.Repo`): из него удаляются записи."
+    ],
+    published_ttl: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.PublishedTTL]},
+      type_doc: "`t:Core.Outbox.PublishedTTL.t/0`",
+      required: true,
+      doc: "Сколько хранится запись `published`."
+    ],
+    interval_ms: [type: :pos_integer, required: true, doc: "Интервал между очистками, мс."],
+    retry_min_ms: [
+      type: :pos_integer,
+      default: 1_000,
+      doc: "Первая пауза backoff после сбоя цикла, мс; больше `interval_ms` — урезается до него."
+    ],
+    context_factory: [
+      type: {:fun, 0},
+      default: &Core.Context.new/0,
+      doc: "Фабрика `Core.Context`; вызывается один раз в `init/1`."
+    ],
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :name, []},
+      type_doc: "`t:GenServer.name/0`",
+      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
+    ]
+  ]
+
   @moduledoc """
   Удаление `published` записей outbox старше TTL.
-
-  Обязательные opts: `:repo`, `:published_ttl`, `:interval_ms`.
-  Опционально: `:context_factory` (`()-> Context.t()`, вызывается один раз в `init`,
-  default `Context.new/0`), `:name`, `:retry_min_ms`. Неизвестная опция, отсутствие обязательной и
-  значение не той формы — `ArgumentError` при старте (`Core.Helper.StartOpts`).
 
   При сбое цикла (недоступная БД) интервал не сохраняется: следующая попытка идёт
   через backoff от `retry_min_ms` с удвоением до `interval_ms` — иначе лежащая база
   опрашивалась бы с полной частотой и заливала лог.
+
+  ## Опции старта
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   use GenServer
+  use Core.Options
 
   alias Core.Context
   alias Core.Error
   alias Core.Exc
-  alias Core.Helper.StartOpts
   alias Core.Outbox
   alias Core.Result
   alias Core.Telemetry
 
   require Logger
   require Error
-
-  @label "Outbox.Cleaner"
-
-  @keys ~w(repo published_ttl interval_ms retry_min_ms context_factory name)a
-
-  @default_retry_min_ms 1_000
 
   defstruct [:repo, :published_ttl, :interval_ms, :retry_min_ms, :retry_ms, :timer_ref, :context]
 
@@ -59,13 +85,7 @@ defmodule Core.Outbox.Cleaner do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts) do
-    id =
-      case StartOpts.name!(@label, opts, :name) do
-        nil -> __MODULE__
-        name -> name
-      end
-
-    %{id: id, start: {__MODULE__, :start_link, [opts]}}
+    %{id: Keyword.get(opts, :name) || __MODULE__, start: {__MODULE__, :start_link, [opts]}}
   end
 
   @doc "Выполнить одну очистку (для тестов)."
@@ -75,21 +95,23 @@ defmodule Core.Outbox.Cleaner do
     GenServer.call(server, :run_once, 60_000)
   end
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, t()}
+
   @impl true
   def init(opts) do
-    StartOpts.keys!(@label, opts, @keys)
-    interval_ms = StartOpts.pos_integer!(@label, opts, :interval_ms)
-    retry_min_ms = min(StartOpts.pos_integer!(@label, opts, :retry_min_ms, @default_retry_min_ms), interval_ms)
+    interval_ms = Keyword.fetch!(opts, :interval_ms)
+    retry_min_ms = min(Keyword.fetch!(opts, :retry_min_ms), interval_ms)
 
     state = %__MODULE__{
-      repo: StartOpts.module!(@label, opts, :repo),
-      published_ttl: StartOpts.prim!(@label, opts, :published_ttl, Outbox.PublishedTTL),
+      repo: Keyword.fetch!(opts, :repo),
+      published_ttl: Keyword.fetch!(opts, :published_ttl),
       interval_ms: interval_ms,
       retry_min_ms: retry_min_ms,
       retry_ms: retry_min_ms,
       timer_ref: nil,
-      context: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0).()
+      context: Keyword.fetch!(opts, :context_factory).()
     }
 
     {:ok, schedule(state, interval_ms)}
