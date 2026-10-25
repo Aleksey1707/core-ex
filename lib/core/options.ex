@@ -396,6 +396,26 @@ defmodule Core.Options do
     end
   end
 
+  @doc """
+  Проверить, что в `values` нет повторов; повторы — `ArgumentError`
+  `"<label>: опция <key> — ожидается <expected>, получено <повторы>"`.
+
+  Проверка после схемы: значения собраны из уже проверенных опций (имена процессов дерева, имена
+  подписчиков), а `label` — функция, отклонившая вызов, как в отказе схемы.
+  """
+  @spec unique!(String.t(), atom(), String.t(), list()) :: :ok
+
+  def unique!(label, key, expected, values) when is_binary(label) and is_list(values) do
+    case Enum.uniq(values -- Enum.uniq(values)) do
+      [] ->
+        :ok
+
+      repeated ->
+        raise ArgumentError,
+              "#{label}: опция #{inspect(key)} — ожидается #{expected}, получено #{inspect(repeated)}"
+    end
+  end
+
   # ===== общее =====
 
   defp describe(%NimbleOptions{} = schema), do: NimbleOptions.docs(schema)

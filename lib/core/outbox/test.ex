@@ -34,7 +34,6 @@ defmodule Core.Outbox.Test do
   alias Core.Context
   alias Core.Error
   alias Core.Exc
-  alias Core.Helper.StartOpts
   alias Core.Mq
   alias Core.Mq.Message
   alias Core.Outbox
@@ -421,7 +420,7 @@ defmodule Core.Outbox.Test do
   defp parse_subscribers!(subscribers, label) do
     [subscribers: valid] = Core.Options.validate!([subscribers: subscribers], @subscribers_schema, label)
     parsed = Enum.map(valid, &parse_subscriber/1)
-    :ok = StartOpts.unique!(label, :name, "различные name подписчиков", Enum.map(parsed, & &1.name))
+    :ok = Core.Options.unique!(label, :name, "различные name подписчиков", Enum.map(parsed, & &1.name))
     parsed
   end
 

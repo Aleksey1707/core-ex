@@ -89,12 +89,4 @@ defmodule Core.Helper.StartOptsTest do
       end
     end
   end
-
-  test "unique!: повторы — ошибка с их списком" do
-    assert StartOpts.unique!(@label, :pollers, "имена без повторов", [:a, :b]) == :ok
-
-    assert_raise ArgumentError, ~r/:pollers — ожидается имена без повторов, получено \[:a\]/, fn ->
-      StartOpts.unique!(@label, :pollers, "имена без повторов", [:a, :b, :a, :a])
-    end
-  end
 end

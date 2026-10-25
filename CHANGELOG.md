@@ -123,11 +123,11 @@
   `one_of!/5`, `topics_filter!/4`, `name!/3`, `shutdown!/4`, `raise_invalid!/4`. Значения, которые
   проверяет не только запуск процесса, — custom-типы `Core.Options.Type`: `prim/2`, `module/1`,
   `atom/1`, `binary/1`, `term/1` и фрагмент обязательного Prim-ключа `prim_option/2`; фильтр
-  топиков — `Core.Outbox.topics_filter/1`. В `StartOpts` остаются типы опций процесса `name/1` и
-  `shutdown/1`, фрагменты `name_option/0,1` и `shutdown_option/1,2`, `child_spec/3` —
-  спецификация ребёнка с умолчанием `shutdown:` из схемы `init/1`, — `process!/3` и `unique!/4`.
-  Метка `process!/3` и `unique!/4` — функция, отклонившая вызов (`"MyApp.Tree.start_link/1"`), как
-  в отказе схемы. Правка потребителя: было `StartOpts.pos_integer!(label, opts, :interval_ms,
+  топиков — `Core.Outbox.topics_filter/1`; проверка после схемы «значения без повторов» —
+  `Core.Options.unique!/4`. В `StartOpts` остаются типы опций процесса `name/1` и `shutdown/1`,
+  фрагменты `name_option/0,1` и `shutdown_option/1,2`, `child_spec/3` — спецификация ребёнка с
+  умолчанием `shutdown:` из схемы `init/1`, — и `process!/3`. Метка `process!/3` и `unique!/4` —
+  функция, отклонившая вызов (`"MyApp.Tree.start_link/1"`), как в отказе схемы. Правка потребителя: было `StartOpts.pos_integer!(label, opts, :interval_ms,
   1_000)` в `init/1`, стало `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000,
   doc: "…"]]` над `init/1` и `Keyword.fetch!(opts, :interval_ms)`; доменное значение —
   `{:custom, Core.Options.Type, :prim, [Mod]}` вместо `StartOpts.prim!/4`, свой отказ сложнее

@@ -344,7 +344,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
       name: Keyword.get(opts, :name)
     }
 
-    StartOpts.unique!(label, :topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
+    Core.Options.unique!(label, :topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
     options
   end
 
@@ -359,7 +359,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   defp topics!(topics, label) do
     parsed = Enum.map(topics, &topic!(&1, label))
 
-    StartOpts.unique!(
+    Core.Options.unique!(
       label,
       :topics,
       "топики без повторов: по топику строится метка",

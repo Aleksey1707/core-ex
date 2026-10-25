@@ -175,6 +175,14 @@ defmodule Core.OptionsTest do
     end
   end
 
+  test "unique!/4: повторы — ArgumentError с меткой и их списком" do
+    assert Core.Options.unique!("Mod.fun/1", :pollers, "имена без повторов", [:a, :b]) == :ok
+
+    assert_raise ArgumentError, "Mod.fun/1: опция :pollers — ожидается имена без повторов, получено [:a]", fn ->
+      Core.Options.unique!("Mod.fun/1", :pollers, "имена без повторов", [:a, :b, :a, :a])
+    end
+  end
+
   describe "ошибки объявления — CompileError" do
     test "некорректная схема" do
       assert_compile_error(~r/^Options: f\/1: @opts_schema: invalid NimbleOptions schema/, """

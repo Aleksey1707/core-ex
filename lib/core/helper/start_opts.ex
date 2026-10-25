@@ -17,9 +17,10 @@ defmodule Core.Helper.StartOpts do
   `name: Core.Helper.StartOpts.name_option()`. `child_spec/3` строит спецификацию ребёнка
   процесса из той же схемы: умолчание `shutdown:` у неё одно с `init/1`.
 
-  `process!/3` и `unique!/4` — для готовых деревьев: они проверяют значение, а не достают его из
-  `opts`, потому что процессы дерева приходят вложенными в элементы его списков. `label` — функция,
-  отклонившая вызов, как в отказе схемы (`"Core.Outbox.Supervisor.start_link/1"`).
+  `process!/3` — для готовых деревьев: проверяет значение, а не достаёт его из `opts`, потому что
+  процессы дерева приходят вложенными в элементы его списков. `label` — функция, отклонившая вызов,
+  как в отказе схемы (`"Core.Outbox.Supervisor.start_link/1"`); повторы имён процессов —
+  `Core.Options.unique!/4`.
 
   `Core.Helper.Opts` — про опции `use`-макросов и compile-time; здесь — рантайм.
   """
@@ -110,16 +111,6 @@ defmodule Core.Helper.StartOpts do
   end
 
   def process!(label, key, spec), do: invalid!(label, key, @process_expected, spec)
-
-  @doc "Значения без повторов; повторы — ошибка с их списком, `expected` — правило для текста."
-  @spec unique!(String.t(), atom(), String.t(), list()) :: :ok
-
-  def unique!(label, key, expected, values) when is_list(values) do
-    case Enum.uniq(values -- Enum.uniq(values)) do
-      [] -> :ok
-      repeated -> invalid!(label, key, expected, repeated)
-    end
-  end
 
   # ---
 

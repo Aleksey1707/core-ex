@@ -430,14 +430,14 @@ defmodule Core.Outbox.Supervisor do
     connection = connection!(Keyword.fetch!(opts, :connection), label)
     ensure_pollers!(pollers, label)
 
-    StartOpts.unique!(
+    Core.Options.unique!(
       label,
       :pollers,
       "имена процессов без повторов: имя — id ребёнка",
       process_names(connection, pollers)
     )
 
-    StartOpts.unique!(
+    Core.Options.unique!(
       label,
       :pollers,
       "label: без повторов: по метке строится компонент",
