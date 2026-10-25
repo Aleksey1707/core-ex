@@ -108,7 +108,8 @@ defmodule Core.Es.Projection.Supervisor do
 
   require Logger
 
-  @label "Es.Projection.Supervisor"
+  @start_label "#{inspect(__MODULE__)}.start_link/1"
+  @watch_label "#{inspect(__MODULE__)}.watch_list/1"
   @reader_keys ~w(batch_size idle_min_ms poll_interval_ms retry_min_ms retry_max_ms shutdown)a
 
   @typedoc "Проверенные опции дерева — они же отметка старта."
@@ -136,7 +137,7 @@ defmodule Core.Es.Projection.Supervisor do
   @opts_schema @tree_opts_schema
   @spec start_link(keyword()) :: Supervisor.on_start()
 
-  def start_link(opts) when is_list(opts), do: start(options!(opts))
+  def start_link(opts) when is_list(opts), do: start(options!(opts, @start_label))
 
   @doc false
   @spec init(options()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
@@ -170,7 +171,7 @@ defmodule Core.Es.Projection.Supervisor do
   @spec watch_list(keyword()) :: [watch_item()]
 
   def watch_list(opts) when is_list(opts) do
-    case options!(opts) do
+    case options!(opts, @watch_label) do
       %{enabled: false} -> []
       %{projections: projections} -> Enum.map(projections, &watch_item/1)
     end
@@ -178,22 +179,22 @@ defmodule Core.Es.Projection.Supervisor do
 
   # ---
 
-  defp options!(opts) do
-    ensure_await!(Keyword.fetch!(opts, :enabled), Keyword.fetch!(opts, :await))
-    ensure_unique_names!(Enum.map(Keyword.fetch!(opts, :projections), &{&1, &1.__es_projection__()}))
+  defp options!(opts, label) do
+    ensure_await!(Keyword.fetch!(opts, :enabled), Keyword.fetch!(opts, :await), label)
+    ensure_unique_names!(Enum.map(Keyword.fetch!(opts, :projections), &{&1, &1.__es_projection__()}), label)
 
     Map.new(opts)
   end
 
-  defp ensure_await!(true, :inline) do
+  defp ensure_await!(true, :inline, label) do
     raise ArgumentError,
-          "#{@label}: await: :inline — только при enabled: false: пачки читателей и прогона " <>
+          "#{label}: await: :inline — только при enabled: false: пачки читателей и прогона " <>
             "в вызывающем процессе шли бы вперемешку"
   end
 
-  defp ensure_await!(_enabled, _await), do: :ok
+  defp ensure_await!(_enabled, _await, _label), do: :ok
 
-  defp ensure_unique_names!(declarations) do
+  defp ensure_unique_names!(declarations, label) do
     repeated =
       declarations
       |> Enum.group_by(fn {_mod, declaration} -> declaration.name end, &elem(&1, 0))
@@ -205,7 +206,7 @@ defmodule Core.Es.Projection.Supervisor do
 
       [{name, mods} | _] ->
         raise ArgumentError,
-              "#{@label}: name: #{inspect(name)} у нескольких проекций: #{inspect(mods)}"
+              "#{label}: name: #{inspect(name)} у нескольких проекций: #{inspect(mods)}"
     end
   end
 

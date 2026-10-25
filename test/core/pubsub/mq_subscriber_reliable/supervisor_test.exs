@@ -134,9 +134,15 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
           [products, put_in(orders, [:subscriber, :name], @products_reader)]
         end)
 
-      assert_raise ArgumentError, ~r/имена процессов без повторов.*ProductsReader/, fn ->
+      assert_raise ArgumentError, ~r/^Core.PubSub.MqSubscriberReliable.Supervisor.start_link\/1: .*без повторов/, fn ->
         MqSubscriberReliable.Supervisor.start_link(opts)
       end
+
+      assert_raise ArgumentError,
+                   ~r/^Core.PubSub.MqSubscriberReliable.Supervisor.watch_list\/1: .*ProductsReader/,
+                   fn ->
+                     MqSubscriberReliable.Supervisor.watch_list(opts)
+                   end
     end
 
     test "повтор топика в дереве — ArgumentError: по топику строится метка" do

@@ -6,17 +6,12 @@ defmodule Core.Mq.Dlq.Writer do
       required: true,
       doc: "Ecto-репозиторий с таблицей `Core.Mq.Dlq.Migration`."
     ],
-    subscriber_name: [
-      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.SubscriberName]},
-      type_doc: "`t:Core.Mq.SubscriberName.t/0`",
-      required: true,
-      doc: "Чей это DLQ: читатель перечитывания берёт записи по нему."
-    ],
-    name: [
-      type: {:custom, Core.Helper.StartOpts, :name, []},
-      type_doc: "`t:GenServer.name/0`",
-      doc: "Имя процесса — handle writer'а."
-    ]
+    subscriber_name:
+      Core.Helper.StartOpts.prim_option(
+        Core.Mq.SubscriberName,
+        "Чей это DLQ: читатель перечитывания берёт записи по нему."
+      ),
+    name: Core.Helper.StartOpts.name_option("Имя процесса — handle writer'а.")
   ]
 
   @moduledoc """

@@ -262,9 +262,11 @@ defmodule Core.Es.Projection.SupervisorTest do
                      Es.Projection.Supervisor.start_link(projections: [Plain], enabled: false)
                    end
 
-      assert_raise ArgumentError, ~r/name: "es_fixture" у нескольких проекций/, fn ->
-        Es.Projection.Supervisor.start_link(projections: [@projection, Twin], enabled: false)
-      end
+      assert_raise ArgumentError,
+                   ~r/^Core.Es.Projection.Supervisor.start_link\/1: name: "es_fixture" у нескольких/,
+                   fn ->
+                     Es.Projection.Supervisor.start_link(projections: [@projection, Twin], enabled: false)
+                   end
 
       assert_raise ArgumentError,
                    ~r/invalid value for :batch_size option: expected positive integer, got: 0/,
@@ -310,8 +312,12 @@ defmodule Core.Es.Projection.SupervisorTest do
         Es.Projection.Supervisor.start_link(projections: [], enabled: false, batchsize: 10)
       end
 
-      assert_raise ArgumentError, ~r/await: :inline — только при enabled: false/, fn ->
+      assert_raise ArgumentError, ~r/^Core.Es.Projection.Supervisor.start_link\/1: await: :inline — только/, fn ->
         Es.Projection.Supervisor.start_link(projections: [], enabled: true, await: :inline)
+      end
+
+      assert_raise ArgumentError, ~r/^Core.Es.Projection.Supervisor.watch_list\/1: await: :inline — только/, fn ->
+        Es.Projection.Supervisor.watch_list(projections: [], enabled: true, await: :inline)
       end
 
       assert_raise ArgumentError,

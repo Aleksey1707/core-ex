@@ -15,9 +15,14 @@ defmodule Core.Helper.StartOpts do
   добавляет NimbleOptions. Простые значения (целое, булево, функция, атом, где допустим `nil`) —
   встроенные типы NimbleOptions.
 
+  Повторяющиеся ключи схемы — фрагменты: `name_option/0,1`, `shutdown_option/1,2` и
+  `prim_option/2` дают описание ключа целиком (тип, `type_doc:`, `doc:`), его ставят в атрибут
+  схемы: `name: Core.Helper.StartOpts.name_option()`. `child_spec/3` строит спецификацию ребёнка
+  процесса из той же схемы: умолчание `shutdown:` у неё одно с `init/1`.
+
   `process!/3` и `unique!/4` — для готовых деревьев: они проверяют значение, а не достают его из
-  `opts`, потому что процессы дерева приходят вложенными в элементы его списков. `label` — имя
-  дерева для текста ошибки (`"Outbox.Supervisor"`).
+  `opts`, потому что процессы дерева приходят вложенными в элементы его списков. `label` — функция,
+  отклонившая вызов, как в отказе схемы (`"Core.Outbox.Supervisor.start_link/1"`).
 
   `Core.Helper.Opts` — про опции `use`-макросов и compile-time; здесь — рантайм.
   """
@@ -31,6 +36,8 @@ defmodule Core.Helper.StartOpts do
   @name_expected "имя процесса (атом, {:global, term} или {:via, module, term})"
   @topics_filter_expected ":all, {:only, [String.t()]} или {:except, [String.t()]}"
   @shutdown_expected "неотрицательное целое, :infinity или :brutal_kill"
+  @name_doc "Имя процесса; оно же `:id` в `child_spec/1`."
+  @shutdown_doc "`shutdown` ребёнка супервизора в `child_spec/1`."
 
   # ===== custom-валидаторы схемы =====
 
@@ -101,6 +108,50 @@ defmodule Core.Helper.StartOpts do
   # ---
 
   defp invalid(expected, value), do: {:error, "ожидается #{expected}, получено #{inspect(value)}"}
+
+  # ===== фрагменты схемы =====
+
+  @doc "Ключ `name:` схемы — имя процесса (`name/1`), без умолчания; `doc` — его описание."
+  @spec name_option(String.t()) :: keyword()
+
+  def name_option(doc \\ @name_doc) when is_binary(doc),
+    do: [type: {:custom, __MODULE__, :name, []}, type_doc: "`t:GenServer.name/0`", doc: doc]
+
+  @doc "Ключ `shutdown:` схемы (`shutdown/1`) с умолчанием `default`; `doc` — его описание."
+  @spec shutdown_option(timeout() | :brutal_kill, String.t()) :: keyword()
+
+  def shutdown_option(default, doc \\ @shutdown_doc) when is_binary(doc) do
+    [
+      type: {:custom, __MODULE__, :shutdown, []},
+      type_doc: "`t:timeout/0` или `:brutal_kill`",
+      default: default,
+      doc: doc
+    ]
+  end
+
+  @doc "Обязательный ключ схемы — структура `mod` (`prim/2`); `doc` — его описание."
+  @spec prim_option(module(), String.t()) :: keyword()
+
+  def prim_option(mod, doc) when is_atom(mod) and is_binary(doc),
+    do: [type: {:custom, __MODULE__, :prim, [mod]}, type_doc: "`t:#{inspect(mod)}.t/0`", required: true, doc: doc]
+
+  @doc """
+  Спецификация ребёнка процесса `module` со схемой `schema` над `init/1`: `:id` — `name:` из `opts`,
+  без него — `module`; `:shutdown` — `shutdown:` из `opts`, без него — `default:` ключа `shutdown:`
+  схемы, а без такого ключа в схеме `:shutdown` не задаётся.
+
+  Опции уходят в `start_link/1` насквозь: проверяет их схема `init/1`.
+  """
+  @spec child_spec(module(), keyword(), keyword()) :: Supervisor.child_spec()
+
+  def child_spec(module, opts, schema) when is_atom(module) and is_list(opts) and is_list(schema) do
+    spec = %{id: Keyword.get(opts, :name) || module, start: {module, :start_link, [opts]}}
+
+    case Keyword.fetch(schema, :shutdown) do
+      {:ok, shutdown} -> Map.put(spec, :shutdown, Keyword.get(opts, :shutdown, Keyword.fetch!(shutdown, :default)))
+      :error -> spec
+    end
+  end
 
   # ===== процессы дерева =====
 

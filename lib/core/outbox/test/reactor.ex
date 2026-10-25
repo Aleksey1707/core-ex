@@ -46,6 +46,7 @@ defmodule Core.Outbox.Test.Reactor do
   require Logger
 
   @label "Outbox.Test.Reactor"
+  @init_label "#{inspect(__MODULE__)}.init/1"
   @interval_ms 10
   @shutdown_ms 30_000
 
@@ -78,7 +79,7 @@ defmodule Core.Outbox.Test.Reactor do
     # Остановка ждёт конца прохода: убитый посреди запроса реактор рвёт соединение sandbox теста.
     Process.flag(:trap_exit, true)
     subscribers = Keyword.fetch!(opts, :subscribers)
-    :ok = Outbox.Test.check_subscribers!(subscribers)
+    :ok = Outbox.Test.check_subscribers!(subscribers, @init_label)
     owner = Keyword.fetch!(opts, :owner)
     Process.put(:"$callers", [owner])
     _ref = Process.monitor(owner)

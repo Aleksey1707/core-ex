@@ -77,3 +77,17 @@
   `max_attempts:`, `subscribe_data:` и сетевые ключи подписчика (`:any`, игнорируются); проверка —
   `Core.Options.__validate__!/3` с меткой `"Outbox.Test: подписчик"`, затем `Step.new!/2`. Из
   `StartOpts` там остался только `unique!/4`.
+- Исправления по ревью ветки:
+  - `Es.Projection.Reader` и `Es.Projection.Listener` получили схему над `init/1` по шаблону
+    `Outbox.Cleaner`: их `init/1` читает свои ключи, как у `Outbox.Poller` / `Cleaner`, детей своего
+    дерева. Умолчаний у схем нет (`required: true`): значения собирает
+    `Es.Projection.Supervisor`, второго источника умолчаний не появилось. Повторная проверка уже
+    проверенных деревом опций стоит микросекунды на старт читателя.
+  - Межключевые отказы деревьев (`Outbox.Supervisor`, `Es.Projection.Supervisor`,
+    `MqSubscriberReliable.Supervisor`, `Es.Aggregate.Process`, `Outbox.Poller`, `Outbox.Test`) — с
+    префиксом функции, как у схемы: разбор, общий для нескольких функций, получает метку
+    вызывающего аргументом. Метка builder'а `Es.Aggregate.Process` осталась у опций `use` и у отказов
+    `execute` вне опций (вызов внутри транзакции, процесс без отметки старта).
+  - `Step.new!/1` без своей схемы: принимает проверенные опции вызывающего целиком и берёт из них
+    свои ключи. Подписчики `Outbox.Test` проверяет публичная `Core.Options.validate!/3` по схеме
+    `subscribers: {:list, {:keyword_list, …}}`; `__validate__!/3` переименована в неё.

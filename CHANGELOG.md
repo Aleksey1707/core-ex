@@ -66,9 +66,13 @@
     (`required :outcome option not found`).
   - `Core.Outbox.Supervisor.start_link/1`, `watch_list/1` — неизвестный ключ отклонялся и раньше;
     теперь и выключенное дерево (`enabled: false`) отклоняет значение не той формы (раньше оно
-    читало только `pollers:`), `nil` у числовой опции по-прежнему проходит как незаданная.
-    Правка: убрать из опций выключенного дерева значение не той формы (числовые опции —
-    положительное целое или `nil`). Пропуски включённого дерева называются одним списком.
+    читало только `pollers:`), `nil` у числовой опции по-прежнему проходит как незаданная. Форму
+    `connection:` и `writer:` / `via:` поллера (`{модуль, keyword}` / `{модуль, handle}`) и границы
+    Prim у `batch_size:`, `lock_duration_seconds:`, `max_attempts:`, `published_ttl_seconds:`
+    (`batch_size: 10_000` — больше предела `Core.Outbox.BatchSize`) проверяет схема, тоже при
+    `enabled: false`. Правка: убрать из опций выключенного дерева значение не той формы (числовые
+    опции — положительное целое в границах Prim или `nil`). Пропуски включённого дерева называются
+    одним списком.
   - `Core.Outbox.Test.drain/2`, `settle/2` и старт `Core.Outbox.Test.Reactor` — неизвестный ключ и
     значение не той формы отклонялись и раньше; меняется только текст отказа.
   - Опции старта `Core.Mq.Stream.Reader`, `Core.Mq.Stream.Writer`, `Core.Mq.Kafka.Reader` (схема над
@@ -89,6 +93,12 @@
   - У функций двух пунктов выше повтор ключа в опциях (`[batch_size: 10, batch_size: 50]`) —
     `ArgumentError` (`unknown options [:batch_size]`); раньше бралось первое значение. Правка:
     собирать опции `Keyword.merge/2`, а не `++`.
+  - Отказы проверок деревьев после схемы (`Core.Outbox.Supervisor`, `Core.Es.Projection.Supervisor`,
+    `Core.PubSub.MqSubscriberReliable.Supervisor`, процесс агрегата, `Core.Outbox.Test`) называют
+    функцию, как и отказ схемы: было `"Outbox.Supervisor: enabled: true — нет обязательных опций …"`,
+    стало `"Core.Outbox.Supervisor.start_link/1: enabled: true — нет обязательных опций …"` (у
+    `watch_list/1` — её префикс). Правка: `assert_raise` с прежней меткой дерева — на префикс
+    функции.
 
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на
@@ -112,7 +122,10 @@
   `list!/3`, `term!/3`, `fun!/4,5`, `pos_integer!/3,4`, `boolean!/3,4`, `one_of!/5`,
   `topics_filter!/4`, `name!/3`, `shutdown!/4`, `raise_invalid!/4`. Остаются custom-типы схемы
   (`prim/2`, `module/1`, `atom/1`, `binary/1`, `term/1`, `name/1`, `topics_filter/1`,
-  `shutdown/1`), `process!/3` и `unique!/4`. Правка потребителя: было
+  `shutdown/1`), `process!/3` и `unique!/4`; добавлены фрагменты схемы `name_option/0,1`,
+  `shutdown_option/1,2`, `prim_option/2` и `child_spec/3` — спецификация ребёнка с умолчанием
+  `shutdown:` из схемы `init/1`. Метка `process!/3` и `unique!/4` — функция, отклонившая вызов
+  (`"MyApp.Tree.start_link/1"`), как в отказе схемы. Правка потребителя: было
   `StartOpts.pos_integer!(label, opts, :interval_ms, 1_000)` в `init/1`, стало
   `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000, doc: "…"]]` над `init/1` и
   `Keyword.fetch!(opts, :interval_ms)`; доменное значение — `{:custom, Core.Helper.StartOpts, :prim,
@@ -188,7 +201,9 @@
   (`NimbleOptions.docs/1`); при `@doc false` и у `@impl` без `@doc` раздел не дописывается, а для
   `@moduledoc` OTP-процесса со скрытым `init/1` описание опций даёт `Core.Options.docs/1`. Состав
   опций прозой в `@doc` после перевода функции на схему убирается: он повторил бы раздел.
-  `nimble_options` — прямая зависимость `:core`. Правка потребителя не обязательна (SHOULD);
+  Данные в форме опций, которые не последний аргумент функции (элементы позиционного списка),
+  проверяет `Core.Options.validate!/3` по схеме, собранной `NimbleOptions.new!/1`, с тем же форматом
+  отказа. `nimble_options` — прямая зависимость `:core`. Правка потребителя не обязательна (SHOULD);
   подключение:
 
   ```elixir

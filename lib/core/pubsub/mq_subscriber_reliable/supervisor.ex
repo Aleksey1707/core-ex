@@ -36,11 +36,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
         "DLQ-writer `{модуль Core.Mq.Writer, опции}`; без него подписчик после `max_attempts` продолжает " <>
           "повторы (`Core.PubSub.MqSubscriberReliable`, «DLQ»)."
     ],
-    name: [
-      type: {:custom, Core.Helper.StartOpts, :name, []},
-      type_doc: "`t:GenServer.name/0`",
-      doc: "Имя супервизора, оно же `id` в `child_spec/1`; без него `id` — модуль."
-    ]
+    name: Core.Helper.StartOpts.name_option("Имя супервизора, оно же `id` в `child_spec/1`; без него `id` — модуль.")
   ]
 
   @moduledoc """
@@ -109,7 +105,6 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   require Logger
 
-  @label "PubSub.MqSubscriberReliable.Supervisor"
   @owned_keys ~w(reader_module reader dlq_writer dlq_handle subscribe)a
   @stream_reader Core.Mq.Stream.Reader
   @kafka_reader Core.Mq.Kafka.Reader
@@ -152,7 +147,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @opts_schema @tree_opts_schema
   @spec start_link(keyword()) :: Supervisor.on_start()
 
-  def start_link(opts) when is_list(opts), do: start(options!(opts))
+  def start_link(opts) when is_list(opts), do: start(options!(opts, fun_label(:start_link)))
 
   # ---
 
@@ -222,7 +217,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @spec watch_list(keyword()) :: [watch_item()]
 
   def watch_list(opts) when is_list(opts) do
-    case options!(opts) do
+    case options!(opts, fun_label(:watch_list)) do
       %{enabled: false} ->
         []
 
@@ -258,7 +253,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @opts_schema @tree_opts_schema
   @spec stream_readers(keyword()) :: [watch_item()]
 
-  def stream_readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader)
+  def stream_readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader, fun_label(:stream_readers))
 
   @doc """
   Элементы `kafka_readers:` плагина `Core.Mq.PromEx` — читатели Kafka дерева с той же меткой, что
@@ -270,12 +265,12 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @opts_schema @tree_opts_schema
   @spec kafka_readers(keyword()) :: [watch_item()]
 
-  def kafka_readers(opts) when is_list(opts), do: reader_items(opts, @kafka_reader)
+  def kafka_readers(opts) when is_list(opts), do: reader_items(opts, @kafka_reader, fun_label(:kafka_readers))
 
   # ---
 
-  defp reader_items(opts, module) do
-    case options!(opts) do
+  defp reader_items(opts, module, label) do
+    case options!(opts, label) do
       %{enabled: false} ->
         []
 
@@ -338,16 +333,18 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   defp label(component, %{topic: topic}), do: "#{component}:#{topic}"
 
-  defp options!(opts) do
+  defp fun_label(fun), do: "#{inspect(__MODULE__)}.#{fun}/1"
+
+  defp options!(opts, label) do
     options = %{
       enabled: Keyword.fetch!(opts, :enabled),
       component: Keyword.fetch!(opts, :component),
-      topics: topics!(Keyword.fetch!(opts, :topics)),
-      dlq_writer: dlq_writer!(Keyword.get(opts, :dlq_writer)),
+      topics: topics!(Keyword.fetch!(opts, :topics), label),
+      dlq_writer: dlq_writer!(Keyword.get(opts, :dlq_writer), label),
       name: Keyword.get(opts, :name)
     }
 
-    StartOpts.unique!(@label, :topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
+    StartOpts.unique!(label, :topics, "имена процессов без повторов: имя — id ребёнка", process_names(options))
     options
   end
 
@@ -356,14 +353,14 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
     dlq ++ Enum.flat_map(topics, &[&1.reader.name, &1.subscriber.name])
   end
 
-  defp dlq_writer!(nil), do: nil
-  defp dlq_writer!(spec), do: StartOpts.process!(@label, :dlq_writer, spec)
+  defp dlq_writer!(nil, _label), do: nil
+  defp dlq_writer!(spec, label), do: StartOpts.process!(label, :dlq_writer, spec)
 
-  defp topics!(topics) do
-    parsed = Enum.map(topics, &topic!/1)
+  defp topics!(topics, label) do
+    parsed = Enum.map(topics, &topic!(&1, label))
 
     StartOpts.unique!(
-      @label,
+      label,
       :topics,
       "топики без повторов: по топику строится метка",
       Enum.map(parsed, & &1.subscriber.topic)
@@ -372,11 +369,11 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
     parsed
   end
 
-  defp topic!(topic) do
+  defp topic!(topic, label) do
     subscriber = Keyword.fetch!(topic, :subscriber)
 
     %{
-      reader: StartOpts.process!(@label, :reader, Keyword.fetch!(topic, :reader)),
+      reader: StartOpts.process!(label, :reader, Keyword.fetch!(topic, :reader)),
       subscriber: %{
         opts: subscriber,
         name: Keyword.fetch!(subscriber, :name),

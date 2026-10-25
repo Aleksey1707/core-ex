@@ -73,6 +73,65 @@ defmodule Core.Helper.StartOptsTest do
     end
   end
 
+  describe "фрагменты схемы" do
+    @schema [
+      topic: StartOpts.prim_option(Mq.Topic, "Топик."),
+      name: StartOpts.name_option(),
+      shutdown: StartOpts.shutdown_option(5_000)
+    ]
+
+    test "ключи проверяются своими custom-валидаторами, shutdown: — с умолчанием" do
+      topic = Mq.Topic.new!("products")
+
+      assert {:ok, opts} = NimbleOptions.validate([topic: topic], @schema)
+      assert opts[:shutdown] == 5_000
+
+      assert {:error, %NimbleOptions.ValidationError{message: message}} = NimbleOptions.validate([], @schema)
+      assert message =~ "required :topic option not found"
+
+      for {key, value, expected} <- [
+            {:topic, "products", "ожидается %Core.Mq.Topic{}"},
+            {:name, "proc", "ожидается имя процесса"},
+            {:shutdown, -1, "ожидается неотрицательное целое"}
+          ] do
+        assert {:error, %NimbleOptions.ValidationError{message: message}} =
+                 NimbleOptions.validate(Keyword.put([topic: topic], key, value), @schema)
+
+        assert message =~ "invalid value for #{inspect(key)} option: #{expected}"
+      end
+    end
+
+    test "описание: тип, doc по умолчанию и свой" do
+      docs = Core.Options.docs(@schema ++ [other: StartOpts.name_option("Имя соседа.")])
+
+      assert docs =~ "`:topic` (`t:Core.Mq.Topic.t/0`) - Required. Топик."
+      assert docs =~ "`:name` (`t:GenServer.name/0`) - Имя процесса; оно же `:id` в `child_spec/1`."
+
+      assert docs =~
+               "`:shutdown` (`t:timeout/0` или `:brutal_kill`) - `shutdown` ребёнка супервизора в " <>
+                 "`child_spec/1`. The default value is `5000`."
+
+      assert docs =~ "`:other` (`t:GenServer.name/0`) - Имя соседа."
+    end
+  end
+
+  describe "child_spec/3" do
+    test ":id — name:, без него модуль; :shutdown — опция, без неё default: схемы" do
+      schema = [name: StartOpts.name_option(), shutdown: StartOpts.shutdown_option(7_000)]
+
+      assert StartOpts.child_spec(MyProc, [name: :proc], schema) ==
+               %{id: :proc, start: {MyProc, :start_link, [[name: :proc]]}, shutdown: 7_000}
+
+      assert %{id: MyProc, shutdown: :brutal_kill} = StartOpts.child_spec(MyProc, [shutdown: :brutal_kill], schema)
+      assert %{id: MyProc} = StartOpts.child_spec(MyProc, [name: nil], schema)
+    end
+
+    test "схема без shutdown: — :shutdown не задаётся" do
+      assert StartOpts.child_spec(MyProc, [], name: StartOpts.name_option()) ==
+               %{id: MyProc, start: {MyProc, :start_link, [[]]}}
+    end
+  end
+
   test "process!: {модуль, опции} с name: атомом, иначе ошибка с именем опции" do
     assert StartOpts.process!(@label, :writer, {MyWriter, name: MyWriter.Name, prefix: "p"}) ==
              %{module: MyWriter, opts: [name: MyWriter.Name, prefix: "p"], name: MyWriter.Name}

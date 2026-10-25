@@ -48,4 +48,29 @@ defmodule Core.Es.Projection.ReaderTest do
       end
     end
   end
+
+  describe "опции старта" do
+    @opts [
+      projection: __MODULE__.Unstarted,
+      batch_size: 100,
+      idle_min_ms: 50,
+      poll_interval_ms: 1_000,
+      retry_min_ms: 1_000,
+      retry_max_ms: 30_000,
+      shutdown: 30_000
+    ]
+
+    test "неизвестная опция и projection: не модуль — ArgumentError в init/1" do
+      Process.flag(:trap_exit, true)
+
+      for {opts, expected} <- [
+            {Keyword.put(@opts, :batchsize, 10), "unknown options [:batchsize]"},
+            {Keyword.put(@opts, :projection, nil),
+             "invalid value for :projection option: ожидается модуль, получено nil"}
+          ] do
+        assert {:error, {%ArgumentError{message: message}, _stack}} = Reader.start_link(opts)
+        assert message =~ "Core.Es.Projection.Reader.init/1: #{expected}"
+      end
+    end
+  end
 end

@@ -85,10 +85,12 @@ defmodule Core.Outbox.Supervisor do
   alias Core.Outbox.Delivery
   alias Core.Outbox.Poller
   alias Core.Outbox.Supervisor.Mark
+  alias Core.Result
 
   require Logger
 
-  @label "Outbox.Supervisor"
+  @start_label "#{inspect(__MODULE__)}.start_link/1"
+  @watch_label "#{inspect(__MODULE__)}.watch_list/1"
   @required_when_enabled ~w(
     poll_interval_ms idle_min_ms batch_size lock_duration_seconds max_attempts published_ttl_seconds
     cleaner_interval_ms
@@ -114,14 +116,14 @@ defmodule Core.Outbox.Supervisor do
       doc: "Топики записей, которые доставляет поллер."
     ],
     writer: [
-      type: :any,
+      type: {:tuple, [{:custom, StartOpts, :module, []}, :keyword_list]},
       type_doc: "`{module(), keyword()}`",
       doc:
         "Writer-процесс `{модуль Mq.Writer, опции с name: атомом}`: дерево поднимает его перед поллером, " <>
           "поллер пишет через его `name:`. Ровно один из `writer:` и `via:`."
     ],
     via: [
-      type: :any,
+      type: {:tuple, [{:custom, StartOpts, :module, []}, {:custom, StartOpts, :term, []}]},
       type_doc: "`{module(), term()}`",
       doc:
         "`{модуль Mq.Writer, handle}` — процесс, которым владеет приложение (клиент Kafka): дерево его не " <>
@@ -143,8 +145,8 @@ defmodule Core.Outbox.Supervisor do
       doc: "При `enabled: true` — непустой; поллеры, элемент — keyword:\n\n" <> Core.Options.docs(@poller_opts_schema)
     ],
     connection: [
-      type: :any,
-      type_doc: "`{module(), keyword()}`",
+      type: {:or, [{:tuple, [{:custom, StartOpts, :module, []}, :keyword_list]}, nil]},
+      type_doc: "`{module(), keyword()}` или `nil`",
       default: nil,
       doc: "`{модуль, опции с name: атомом}`, первый ребёнок дерева: соединение, других пользователей у которого нет."
     ],
@@ -155,37 +157,37 @@ defmodule Core.Outbox.Supervisor do
     ],
     poll_interval_ms: [
       type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; потолок backoff поллера, мс."
     ],
     idle_min_ms: [
       type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; первая пауза backoff поллера, мс."
     ],
     batch_size: [
-      type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type: {:or, [{:custom, __MODULE__, :prim, [Outbox.BatchSize]}, nil]},
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; пачка поллера."
     ],
     lock_duration_seconds: [
-      type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type: {:or, [{:custom, __MODULE__, :prim, [Outbox.LockDuration]}, nil]},
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; аренда пачки, с."
     ],
     max_attempts: [
-      type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type: {:or, [{:custom, __MODULE__, :prim, [Outbox.Attempts]}, nil]},
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; попытки доставки записи."
     ],
     published_ttl_seconds: [
-      type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type: {:or, [{:custom, __MODULE__, :prim, [Outbox.PublishedTTL]}, nil]},
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; сколько хранится опубликованная запись, с."
     ],
     cleaner_interval_ms: [
       type: {:or, [:pos_integer, nil]},
-      type_doc: "`t:pos_integer/0`",
+      type_doc: "`t:pos_integer/0` или `nil`",
       doc: "При `enabled: true` обязательна; интервал cleaner, мс."
     ]
   ]
@@ -242,7 +244,7 @@ defmodule Core.Outbox.Supervisor do
   @spec start_link(keyword()) :: Supervisor.on_start()
 
   def start_link(opts) when is_list(opts) do
-    options = options!(opts)
+    options = options!(opts, @start_label)
     :ok = singleton!(options)
     :ok = partition!(options.pollers)
     start(options)
@@ -264,7 +266,7 @@ defmodule Core.Outbox.Supervisor do
 
   defp singleton!(%{cluster_query: query}) do
     raise ArgumentError,
-          "#{@label}: очередь включена вместе с кластеризацией cluster_query=#{inspect(query)}: " <>
+          "#{@start_label}: очередь включена вместе с кластеризацией cluster_query=#{inspect(query)}: " <>
             "каждая нода поднимет свои поллеры, и порядок доставки нарушится. " <>
             "Оставьте OUTBOX_ENABLED=true на одном инстансе без DNS_CLUSTER_QUERY либо, если порядок " <>
             "не важен, передайте allow_cluster: true (OUTBOX_ALLOW_CLUSTER=true) " <>
@@ -288,7 +290,7 @@ defmodule Core.Outbox.Supervisor do
   defp pairs([head | tail]), do: Enum.map(tail, &{head, &1}) ++ pairs(tail)
 
   defp partition_error(a, b) do
-    "#{@label}: фильтры топиков поллеров пересекаются, порядок доставки не гарантирован: " <>
+    "#{@start_label}: фильтры топиков поллеров пересекаются, порядок доставки не гарантирован: " <>
       "#{inspect(a.name)} #{inspect(a.topics)} и #{inspect(b.name)} #{inspect(b.topics)}. " <>
       "Разведите топики по поллерам через {:only, [...]} без общих элементов " <>
       "(deps/core/docs/rules/14-events-outbox.md, «Единственность поллера»)"
@@ -375,7 +377,7 @@ defmodule Core.Outbox.Supervisor do
   @spec watch_list(keyword()) :: [watch_item()]
 
   def watch_list(opts) when is_list(opts) do
-    case options!(opts) do
+    case options!(opts, @watch_label) do
       %{enabled: false} ->
         []
 
@@ -398,27 +400,45 @@ defmodule Core.Outbox.Supervisor do
 
   defp cleaner_item, do: %{component: "outbox_cleaner", name: Cleaner}
 
+  # ===== проверка опций =====
+
+  @doc false
+  @spec prim(term(), module()) :: Result.t(struct(), String.t())
+
+  def prim(value, mod) when is_integer(value) and is_atom(mod) do
+    case mod.new(value) do
+      {:ok, prim} -> {:ok, prim}
+      {:error, _reason} -> invalid_prim(value, mod)
+    end
+  end
+
+  def prim(value, mod) when is_atom(mod), do: invalid_prim(value, mod)
+
+  # ---
+
+  defp invalid_prim(value, mod), do: {:error, "ожидается целое значение #{inspect(mod)}, получено #{inspect(value)}"}
+
   # ===== общее =====
 
-  defp options!(opts), do: options!(Keyword.fetch!(opts, :enabled), opts)
+  defp options!(opts, label), do: options!(Keyword.fetch!(opts, :enabled), opts, label)
 
-  defp options!(false, opts), do: %{enabled: false, pollers: pollers!(Keyword.fetch!(opts, :pollers))}
+  defp options!(false, opts, label), do: %{enabled: false, pollers: pollers!(Keyword.fetch!(opts, :pollers), label)}
 
-  defp options!(true, opts) do
-    :ok = required!(opts)
-    pollers = pollers!(Keyword.fetch!(opts, :pollers))
-    connection = connection!(Keyword.fetch!(opts, :connection))
-    ensure_pollers!(pollers)
+  defp options!(true, opts, label) do
+    :ok = required!(opts, label)
+    pollers = pollers!(Keyword.fetch!(opts, :pollers), label)
+    connection = connection!(Keyword.fetch!(opts, :connection), label)
+    ensure_pollers!(pollers, label)
 
     StartOpts.unique!(
-      @label,
+      label,
       :pollers,
       "имена процессов без повторов: имя — id ребёнка",
       process_names(connection, pollers)
     )
 
     StartOpts.unique!(
-      @label,
+      label,
       :pollers,
       "label: без повторов: по метке строится компонент",
       Enum.map(pollers, & &1.label)
@@ -433,44 +453,35 @@ defmodule Core.Outbox.Supervisor do
       context_factory: Keyword.fetch!(opts, :context_factory),
       poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
       idle_min_ms: Keyword.fetch!(opts, :idle_min_ms),
-      batch_size: prim!(opts, :batch_size, Outbox.BatchSize),
-      lock_duration: prim!(opts, :lock_duration_seconds, Outbox.LockDuration),
-      max_attempts: prim!(opts, :max_attempts, Outbox.Attempts),
-      published_ttl: prim!(opts, :published_ttl_seconds, Outbox.PublishedTTL),
+      batch_size: Keyword.fetch!(opts, :batch_size),
+      lock_duration: Keyword.fetch!(opts, :lock_duration_seconds),
+      max_attempts: Keyword.fetch!(opts, :max_attempts),
+      published_ttl: Keyword.fetch!(opts, :published_ttl_seconds),
       cleaner_interval_ms: Keyword.fetch!(opts, :cleaner_interval_ms)
     }
   end
 
   # Незаданное значение (`nil` из пустого env) — то же, что отсутствие: выключенному дереву оно не
   # нужно, а включённому его недостаёт. У `cluster_query:` `nil` — значение, поэтому только наличие.
-  defp required!(opts) do
+  defp required!(opts, label) do
     query = if Keyword.has_key?(opts, :cluster_query), do: [], else: [:cluster_query]
 
     case query ++ Enum.filter(@required_when_enabled, &is_nil(Keyword.get(opts, &1))) do
       [] -> :ok
-      missing -> raise ArgumentError, "#{@label}: enabled: true — нет обязательных опций #{inspect(missing)}"
+      missing -> raise ArgumentError, "#{label}: enabled: true — нет обязательных опций #{inspect(missing)}"
     end
   end
 
-  defp prim!(opts, key, mod) do
-    value = Keyword.fetch!(opts, key)
-
-    case mod.new(value) do
-      {:ok, prim} -> prim
-      {:error, _reason} -> invalid!(key, "значение #{inspect(mod)}", value)
-    end
+  defp ensure_pollers!([], label) do
+    raise ArgumentError, "#{label}: enabled: true при pollers: [] — очереди нечем доставлять записи"
   end
 
-  defp ensure_pollers!([]) do
-    raise ArgumentError, "#{@label}: enabled: true при pollers: [] — очереди нечем доставлять записи"
-  end
+  defp ensure_pollers!(_pollers, _label), do: :ok
 
-  defp ensure_pollers!(_pollers), do: :ok
+  defp pollers!(pollers, label), do: Enum.map(pollers, &poller!(&1, label))
 
-  defp pollers!(pollers), do: Enum.map(pollers, &poller!/1)
-
-  defp poller!(poller) do
-    {writer, via} = transport!(poller)
+  defp poller!(poller, label) do
+    {writer, via} = transport!(poller, label)
 
     %{
       name: Keyword.fetch!(poller, :name),
@@ -481,32 +492,27 @@ defmodule Core.Outbox.Supervisor do
     }
   end
 
-  defp transport!(poller) do
+  defp transport!(poller, label) do
     case {Keyword.fetch(poller, :writer), Keyword.fetch(poller, :via)} do
       {{:ok, spec}, :error} ->
-        %{module: module, name: name} = writer = StartOpts.process!(@label, :writer, spec)
+        %{module: module, name: name} = writer = StartOpts.process!(label, :writer, spec)
         {writer, {module, name}}
 
       {:error, {:ok, via}} ->
-        {nil, via!(via)}
+        {nil, via}
 
       _both_or_none ->
-        invalid!(:pollers, "ровно один из writer: и via: у поллера", poller)
+        raise ArgumentError,
+              "#{label}: поллеру #{inspect(Keyword.fetch!(poller, :name))} нужен ровно один из writer: и via:, " <>
+                "получено #{inspect(poller)}"
     end
   end
 
-  defp via!({module, handle} = via) when is_atom(module) and not is_nil(module) and not is_nil(handle), do: via
-  defp via!(other), do: invalid!(:via, "{модуль Mq.Writer, handle процесса}", other)
-
-  defp connection!(nil), do: nil
-  defp connection!(spec), do: StartOpts.process!(@label, :connection, spec)
+  defp connection!(nil, _label), do: nil
+  defp connection!(spec, label), do: StartOpts.process!(label, :connection, spec)
 
   defp process_names(connection, pollers) do
     processes = [connection | Enum.map(pollers, & &1.writer)]
     [Cleaner | for(%{name: name} <- processes, do: name)] ++ Enum.map(pollers, & &1.name)
-  end
-
-  defp invalid!(key, expected, value) do
-    raise ArgumentError, "#{@label}: опция #{inspect(key)} — ожидается #{expected}, получено #{inspect(value)}"
   end
 end

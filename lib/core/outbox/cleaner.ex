@@ -6,12 +6,7 @@ defmodule Core.Outbox.Cleaner do
       required: true,
       doc: "Репозиторий outbox (`Core.Outbox.Repo`): из него удаляются записи."
     ],
-    published_ttl: [
-      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.PublishedTTL]},
-      type_doc: "`t:Core.Outbox.PublishedTTL.t/0`",
-      required: true,
-      doc: "Сколько хранится запись `published`."
-    ],
+    published_ttl: Core.Helper.StartOpts.prim_option(Core.Outbox.PublishedTTL, "Сколько хранится запись `published`."),
     interval_ms: [type: :pos_integer, required: true, doc: "Интервал между очистками, мс."],
     retry_min_ms: [
       type: :pos_integer,
@@ -23,11 +18,7 @@ defmodule Core.Outbox.Cleaner do
       default: &Core.Context.new/0,
       doc: "Фабрика `Core.Context`; вызывается один раз в `init/1`."
     ],
-    name: [
-      type: {:custom, Core.Helper.StartOpts, :name, []},
-      type_doc: "`t:GenServer.name/0`",
-      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
-    ]
+    name: Core.Helper.StartOpts.name_option()
   ]
 
   @moduledoc """
@@ -84,9 +75,8 @@ defmodule Core.Outbox.Cleaner do
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
-  def child_spec(opts) when is_list(opts) do
-    %{id: Keyword.get(opts, :name) || __MODULE__, start: {__MODULE__, :start_link, [opts]}}
-  end
+  def child_spec(opts) when is_list(opts),
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
 
   @doc "Выполнить одну очистку (для тестов)."
   @spec run_once(GenServer.server()) :: Result.unit()

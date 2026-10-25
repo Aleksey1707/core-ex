@@ -107,8 +107,12 @@ defmodule Core.Es.Aggregate.ProcessTest do
       erase_mark(Account.Process)
 
       assert_raise ArgumentError,
-                   ~r/:state_max_age — ожидается положительное целое \(в событиях агрегата ПДн\), получено :infinity/,
+                   ~r/^Core.Es.Aggregate.Process.start_link\/3: опция :state_max_age — ожидается положительное целое/,
                    fn -> start(Account.Process, enabled: false, state_max_age: :infinity) end
+
+      assert_raise ArgumentError,
+                   ~r/^Core.Es.Aggregate.Process.watch_list\/3: опция :state_max_age — .* получено :infinity$/,
+                   fn -> Account.Process.watch_list(enabled: true, state_max_age: :infinity) end
 
       assert_raise ArgumentError,
                    ~r/watch_list\/3: expected :state_max_age option to match at least one given type/,

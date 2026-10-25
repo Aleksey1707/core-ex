@@ -175,17 +175,21 @@ defmodule Core.Outbox.TestTest do
     end
 
     test "неизвестный ключ, подписчик без name или topic и повтор name — ArgumentError" do
-      assert_raise ArgumentError, ~r/filtr/, fn -> Outbox.Test.drain([subscriber(notify(:a), filtr: & &1)]) end
+      element = "Core.Outbox.Test.drain/2: invalid list element at position 0 in :subscribers option"
 
-      assert_raise ArgumentError, ~r/:topic/, fn ->
+      assert_raise ArgumentError, ~r/^#{element}: unknown options \[:filtr\]/, fn ->
+        Outbox.Test.drain([subscriber(notify(:a), filtr: & &1)])
+      end
+
+      assert_raise ArgumentError, ~r/^#{element}: required :topic option not found/, fn ->
         Outbox.Test.drain([Keyword.delete(subscriber(notify(:a)), :topic)])
       end
 
-      assert_raise ArgumentError, ~r/:name/, fn ->
+      assert_raise ArgumentError, ~r/^#{element}: required :name option not found/, fn ->
         Outbox.Test.drain([Keyword.delete(subscriber(notify(:a)), :name)])
       end
 
-      assert_raise ArgumentError, ~r/:name/, fn ->
+      assert_raise ArgumentError, ~r/^Core.Outbox.Test.drain\/2: опция :name — ожидается различные name/, fn ->
         Outbox.Test.drain([subscriber(notify(:a)), subscriber(notify(:b))])
       end
     end
@@ -213,7 +217,11 @@ defmodule Core.Outbox.TestTest do
       for {opts, expected} <- [
             {[subscribers: [], owner: self(), interval_ms: 10], "unknown options [:interval_ms]"},
             {[owner: self()], "required :subscribers option not found"},
-            {[subscribers: [], owner: :test], "invalid value for :owner option: expected pid, got: :test"}
+            {[subscribers: [], owner: :test], "invalid value for :owner option: expected pid, got: :test"},
+            {[subscribers: [[name: :a]], owner: self()],
+             "invalid list element at position 0 in :subscribers option: required :topic option not found"},
+            {[subscribers: [subscriber(notify(:a)), subscriber(notify(:b))], owner: self()],
+             "опция :name — ожидается различные name подписчиков"}
           ] do
         assert {:error, {%ArgumentError{message: message}, _stack}} = Outbox.Test.Reactor.start_link(opts)
         assert message =~ "Core.Outbox.Test.Reactor.init/1: #{expected}"

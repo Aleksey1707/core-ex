@@ -12,18 +12,9 @@ if Code.ensure_loaded?(:brod) do
         required: true,
         doc: "Id клиента `:brod`, как handle `Core.Mq.Kafka.Writer`."
       ],
-      topic: [
-        type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.Topic]},
-        type_doc: "`t:Core.Mq.Topic.t/0`",
-        required: true,
-        doc: "Топик, который читает читатель."
-      ],
-      subscriber_name: [
-        type: {:custom, Core.Helper.StartOpts, :prim, [Core.Mq.SubscriberName]},
-        type_doc: "`t:Core.Mq.SubscriberName.t/0`",
-        required: true,
-        doc: "Имя подписчика — ключ смещений и аренды."
-      ],
+      topic: Core.Helper.StartOpts.prim_option(Core.Mq.Topic, "Топик, который читает читатель."),
+      subscriber_name:
+        Core.Helper.StartOpts.prim_option(Core.Mq.SubscriberName, "Имя подписчика — ключ смещений и аренды."),
       repo: [
         type: {:custom, Core.Helper.StartOpts, :module, []},
         type_doc: "`t:module/0`",
@@ -41,17 +32,8 @@ if Code.ensure_loaded?(:brod) do
       partitions_interval_ms: [type: :pos_integer, default: 60_000, doc: "Интервал перечитывания числа партиций, мс."],
       retry_min_ms: [type: :pos_integer, default: 1_000, doc: "Первая пауза backoff переподписки, мс."],
       retry_max_ms: [type: :pos_integer, default: 30_000, doc: "Потолок паузы backoff переподписки, мс."],
-      name: [
-        type: {:custom, Core.Helper.StartOpts, :name, []},
-        type_doc: "`t:GenServer.name/0`",
-        doc: "Имя процесса; оно же `:id` в `child_spec/1`."
-      ],
-      shutdown: [
-        type: {:custom, Core.Helper.StartOpts, :shutdown, []},
-        type_doc: "`t:timeout/0` или `:brutal_kill`",
-        default: @shutdown_ms,
-        doc: "`shutdown` ребёнка супервизора в `child_spec/1`."
-      ]
+      name: Core.Helper.StartOpts.name_option(),
+      shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
     ]
 
     @moduledoc """
@@ -201,13 +183,8 @@ if Code.ensure_loaded?(:brod) do
     """
     @spec child_spec(keyword()) :: Supervisor.child_spec()
 
-    def child_spec(opts) when is_list(opts) do
-      %{
-        id: Keyword.get(opts, :name) || __MODULE__,
-        start: {__MODULE__, :start_link, [opts]},
-        shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
-      }
-    end
+    def child_spec(opts) when is_list(opts),
+      do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
 
     @doc "Запустить читатель."
     @spec start_link(keyword()) :: GenServer.on_start()

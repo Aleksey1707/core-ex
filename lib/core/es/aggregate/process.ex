@@ -412,14 +412,14 @@ defmodule Core.Es.Aggregate.Process do
   @spec start_link(module(), cfg(), keyword()) :: Supervisor.on_start()
 
   def start_link(process, cfg, opts) when is_atom(process) and is_list(opts),
-    do: start(process, cfg, options!(cfg, opts))
+    do: start(process, cfg, options!(cfg, opts, "#{inspect(__MODULE__)}.start_link/3"))
 
   @opts_schema @start_opts_schema
   @doc false
   @spec watch_list(module(), cfg(), keyword()) :: [watch_item()]
 
   def watch_list(process, cfg, opts) when is_atom(process) and is_list(opts) do
-    case options!(cfg, opts) do
+    case options!(cfg, opts, "#{inspect(__MODULE__)}.watch_list/3") do
       %{enabled: false} -> []
       %{enabled: true} -> [%{component: "es_aggregate_process:#{cfg.type}", name: process}]
     end
@@ -432,26 +432,26 @@ defmodule Core.Es.Aggregate.Process do
 
   # ---
 
-  defp options!(cfg, opts) do
+  defp options!(cfg, opts, label) do
     %{
       enabled: Keyword.fetch!(opts, :enabled),
       retries: Keyword.fetch!(opts, :retries),
       idle_timeout: Keyword.fetch!(opts, :idle_timeout),
-      state_max_age: state_max_age!(cfg.personal, Keyword.get(opts, :state_max_age))
+      state_max_age: state_max_age!(cfg.personal, Keyword.get(opts, :state_max_age), label)
     }
   end
 
   # Кеш состояния агрегата с ПДн в событиях держит ПДн субъекта и после уничтожения его ключа:
   # без предела возраста он жил бы, пока идут команды.
-  defp state_max_age!(true, :infinity) do
+  defp state_max_age!(true, :infinity, label) do
     raise ArgumentError,
-          "#{@label}: опция :state_max_age — ожидается положительное целое (в событиях агрегата ПДн), " <>
+          "#{label}: опция :state_max_age — ожидается положительное целое (в событиях агрегата ПДн), " <>
             "получено :infinity"
   end
 
-  defp state_max_age!(true, nil), do: @personal_state_max_age
-  defp state_max_age!(false, nil), do: :infinity
-  defp state_max_age!(_personal, value), do: value
+  defp state_max_age!(true, nil, _label), do: @personal_state_max_age
+  defp state_max_age!(false, nil, _label), do: :infinity
+  defp state_max_age!(_personal, value, _label), do: value
 
   defp start(process, cfg, %{enabled: false} = options) do
     :persistent_term.put(mark_key(process), options)

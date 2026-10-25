@@ -51,20 +51,14 @@ defmodule Core.PubSub.MqSubscriberReliable do
         "Данные подписки для `on_message`, как `data` у `subscribe/3`; задаются только " <>
           "вместе с `subscribe: true`, по умолчанию `nil`."
     ],
-    name: [
-      type: {:custom, Core.Helper.StartOpts, :name, []},
-      type_doc: "`t:GenServer.name/0`",
-      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
-    ],
-    shutdown: [
-      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
-      type_doc: "`t:timeout/0` или `:brutal_kill`",
-      default: 30_000,
-      doc:
+    name: Core.Helper.StartOpts.name_option(),
+    shutdown:
+      Core.Helper.StartOpts.shutdown_option(
+        30_000,
         "`:shutdown` в `child_spec/1` — запас на единицу работы: обработка сообщения и commit " <>
           "offset идут целиком в одном колбэке под `trap_exit`, и остановка на середине " <>
           "переотправила бы уже обработанное сообщение."
-    ]
+      )
   ]
   @init_opts_schema @own_opts_schema ++ Core.PubSub.MqSubscriberReliable.Step.schema()
 
@@ -148,7 +142,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
 
   @init_label "Core.PubSub.MqSubscriberReliable.init/1"
 
-  @shutdown_ms 30_000
   @call_timeout 5_000
   @fallback_poll_interval_ms 100
   @worked ~w(processed filtered dlq)a
@@ -192,13 +185,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @doc "Спецификация ребёнка супервизора: `:id` — `name:`, иначе модуль; `:shutdown` — опция `shutdown:`."
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
-  def child_spec(opts) when is_list(opts) do
-    %{
-      id: Keyword.get(opts, :name) || __MODULE__,
-      start: {__MODULE__, :start_link, [opts]},
-      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
-    }
-  end
+  def child_spec(opts) when is_list(opts),
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
 
   @doc "Запустить reliable subscriber; опции — «Опции старта»."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -241,7 +229,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
     Process.flag(:trap_exit, true)
     reader_module = Keyword.fetch!(opts, :reader_module)
     poll_interval_ms = Keyword.get(opts, :poll_interval_ms) || default_poll_interval_ms(reader_module)
-    step = Step.new!(Keyword.take(opts, Keyword.keys(Step.schema())))
+    step = Step.new!(opts)
     dlq_writer = Keyword.fetch!(opts, :dlq_writer)
 
     state = %__MODULE__{

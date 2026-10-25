@@ -28,24 +28,9 @@ defmodule Core.Outbox.Poller do
     ],
     poll_interval_ms: [type: :pos_integer, required: true, doc: "Верхняя граница backoff опроса, мс."],
     idle_min_ms: [type: :pos_integer, required: true, doc: "Первая пауза backoff, мс."],
-    batch_size: [
-      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.BatchSize]},
-      type_doc: "`t:Core.Outbox.BatchSize.t/0`",
-      required: true,
-      doc: "Сколько записей резервирует цикл."
-    ],
-    lock_duration: [
-      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.LockDuration]},
-      type_doc: "`t:Core.Outbox.LockDuration.t/0`",
-      required: true,
-      doc: "Аренда зарезервированной пачки."
-    ],
-    max_attempts: [
-      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.Attempts]},
-      type_doc: "`t:Core.Outbox.Attempts.t/0`",
-      required: true,
-      doc: "Попытки доставки записи до `:failed`."
-    ],
+    batch_size: Core.Helper.StartOpts.prim_option(Core.Outbox.BatchSize, "Сколько записей резервирует цикл."),
+    lock_duration: Core.Helper.StartOpts.prim_option(Core.Outbox.LockDuration, "Аренда зарезервированной пачки."),
+    max_attempts: Core.Helper.StartOpts.prim_option(Core.Outbox.Attempts, "Попытки доставки записи до `:failed`."),
     topics: [
       type: {:custom, Core.Helper.StartOpts, :topics_filter, []},
       type_doc: "`t:Core.Outbox.topics_filter/0`",
@@ -57,12 +42,8 @@ defmodule Core.Outbox.Poller do
       default: &Core.Context.new/0,
       doc: "Фабрика `Core.Context`; вызывается один раз в `init/1`."
     ],
-    shutdown: [
-      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
-      type_doc: "`t:timeout/0` или `:brutal_kill`",
-      default: @shutdown_ms,
-      doc: "`shutdown` в `child_spec/1`: запас на текущую пачку."
-    ]
+    shutdown:
+      Core.Helper.StartOpts.shutdown_option(@shutdown_ms, "`shutdown` в `child_spec/1`: запас на текущую пачку.")
   ]
 
   @moduledoc """
@@ -102,7 +83,7 @@ defmodule Core.Outbox.Poller do
   require Logger
   require Error
 
-  @label "Outbox.Poller"
+  @init_label "#{inspect(__MODULE__)}.init/1"
 
   defstruct [
     :repo,
@@ -157,13 +138,8 @@ defmodule Core.Outbox.Poller do
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
-  def child_spec(opts) when is_list(opts) do
-    %{
-      id: Keyword.get(opts, :name) || __MODULE__,
-      start: {__MODULE__, :start_link, [opts]},
-      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
-    }
-  end
+  def child_spec(opts) when is_list(opts),
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
 
   @doc """
   Разбудить poller (best-effort).
@@ -266,7 +242,7 @@ defmodule Core.Outbox.Poller do
 
       false ->
         raise ArgumentError,
-              "#{@label}: поллер #{inspect(name)} не из отметки дерева очереди — " <>
+              "#{@init_label}: поллер #{inspect(name)} не из отметки дерева очереди — " <>
                 "поллер стартует только из Core.Outbox.Supervisor"
     end
   end

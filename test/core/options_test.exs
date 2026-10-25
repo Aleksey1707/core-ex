@@ -150,6 +150,31 @@ defmodule Core.OptionsTest do
     end
   end
 
+  describe "validate!/3 — данные в форме опций" do
+    @schema NimbleOptions.new!(
+              size: [type: :pos_integer, default: 10, doc: "Размер."],
+              key: [type: :atom, required: true, doc: "Ключ."]
+            )
+
+    test "верные данные дополнены умолчаниями" do
+      assert Core.Options.validate!([key: :a], @schema, "Mod.fun/1: элемент") == [size: 10, key: :a]
+    end
+
+    test "неизвестный ключ, не тот тип и не keyword — ArgumentError с меткой" do
+      assert_raise ArgumentError, ~r/^Mod.fun\/1: элемент: unknown options \[:sise\]/, fn ->
+        Core.Options.validate!([key: :a, sise: 1], @schema, "Mod.fun/1: элемент")
+      end
+
+      assert_raise ArgumentError, ~r/^Mod.fun\/1: invalid value for :size option: expected positive integer/, fn ->
+        Core.Options.validate!([key: :a, size: 0], @schema, "Mod.fun/1")
+      end
+
+      assert_raise ArgumentError, "Mod.fun/1: ожидается keyword-список опций, получено [:a]", fn ->
+        Core.Options.validate!([:a], @schema, "Mod.fun/1")
+      end
+    end
+  end
+
   describe "ошибки объявления — CompileError" do
     test "некорректная схема" do
       assert_compile_error(~r/^Options: f\/1: @opts_schema: invalid NimbleOptions schema/, """

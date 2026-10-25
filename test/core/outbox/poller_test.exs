@@ -108,7 +108,7 @@ defmodule Core.Outbox.PollerTest do
   describe "опции старта" do
     test "вне дерева очереди поллер не стартует — ArgumentError" do
       assert start_error(poller_opts()) =~
-               "Outbox.Poller: поллер :outside_tree не из отметки дерева очереди — " <>
+               "Core.Outbox.Poller.init/1: поллер :outside_tree не из отметки дерева очереди — " <>
                  "поллер стартует только из Core.Outbox.Supervisor"
     end
 

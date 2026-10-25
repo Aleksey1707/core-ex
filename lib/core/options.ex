@@ -312,7 +312,7 @@ defmodule Core.Options do
 
   defp checked(var, %{schema: schema, defaults: :none}, label, body, where) do
     quote generated: true do
-      unquote(var) = Core.Options.__validate__!(unquote(var), unquote(escape!(schema, where)), unquote(label))
+      unquote(var) = Core.Options.validate!(unquote(var), unquote(escape!(schema, where)), unquote(label))
       unquote(body)
     end
   end
@@ -322,7 +322,7 @@ defmodule Core.Options do
       unquote(var) =
         case unquote(var) do
           [] -> unquote(escape!(defaults, where))
-          given -> Core.Options.__validate__!(given, unquote(escape!(schema, where)), unquote(label))
+          given -> Core.Options.validate!(given, unquote(escape!(schema, where)), unquote(label))
         end
 
       unquote(body)
@@ -368,16 +368,28 @@ defmodule Core.Options do
     end
   end
 
-  # ===== вызов =====
+  # ===== проверка =====
 
-  @doc false
-  @spec __validate__!(term(), NimbleOptions.t(), String.t()) :: keyword()
+  @doc """
+  Проверить `data` по схеме `schema` и вернуть их с умолчаниями; отказ — `ArgumentError`
+  `"<label>: <сообщение NimbleOptions>"`.
 
-  def __validate__!(opts, %NimbleOptions{} = schema, label) when is_binary(label) do
-    unless Keyword.keyword?(opts),
-      do: raise(ArgumentError, "#{label}: ожидается keyword-список опций, получено #{inspect(opts)}")
+  Тот же вызов функция со схемой делает над своими опциями. Явно он нужен для данных в форме опций,
+  которые не последний аргумент функции, — элементов позиционного списка; опции самой функции так
+  не проверяются: их проверяет `@opts_schema`. Схема собирается один раз — `NimbleOptions.new!/1` в
+  атрибуте модуля; `label` называет функцию, отклонившую вызов (`"Mod.fun/2"`).
 
-    case NimbleOptions.validate(opts, schema) do
+      @subscribers_schema NimbleOptions.new!(subscribers: [type: {:list, :keyword_list}, doc: "…"])
+
+      Core.Options.validate!([subscribers: subscribers], @subscribers_schema, "MyApp.Notify.drain/2")
+  """
+  @spec validate!(term(), NimbleOptions.t(), String.t()) :: keyword()
+
+  def validate!(data, %NimbleOptions{} = schema, label) when is_binary(label) do
+    unless Keyword.keyword?(data),
+      do: raise(ArgumentError, "#{label}: ожидается keyword-список опций, получено #{inspect(data)}")
+
+    case NimbleOptions.validate(data, schema) do
       {:ok, validated} when is_list(validated) -> validated
       {:error, error} -> raise ArgumentError, "#{label}: #{Exception.message(error)}"
     end

@@ -33,7 +33,7 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
     assert_received {:got, ^raw, :data, ^context}
   end
 
-  test "new!/2 по умолчанию пропускает всё и даёт свежий контекст на сообщение" do
+  test "умолчания schema/0: шаг пропускает всё и даёт свежий контекст на сообщение" do
     parent = self()
 
     on = fn _m, data, ctx ->
@@ -41,7 +41,7 @@ defmodule Core.PubSub.MqSubscriberReliable.StepTest do
       :ok
     end
 
-    step = Step.new!(topic: "products", from_message: &{:ok, &1}, on_message: on)
+    step = Step.new!(NimbleOptions.validate!([from_message: &{:ok, &1}, on_message: on], Step.schema()))
 
     assert :processed = Step.run(message(), step, 1)
     assert_received {:got, nil, %Context{}}

@@ -6,8 +6,8 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   # исключение обработчика — `{:error, %Error{}}`.
   # Чтение, `commit`, счёт попыток, backoff, DLQ и telemetry цикла — у вызывающего: исход
   # он получает в `fun`, внутри span'а обработки, и может дополнить span (причина выброса в DLQ).
-  # Ключи шага — `schema/0`: вызывающий включает её в свою схему и отдаёт `new!/1` только их
-  # (`Keyword.take(opts, Keyword.keys(Step.schema()))`).
+  # Ключи шага — `schema/0`: вызывающий включает её в свою схему и отдаёт `new!/1` свои проверенные
+  # опции целиком — шаг берёт из них только свои ключи и второй раз их не проверяет.
 
   alias Core.Config
   alias Core.Context
@@ -21,8 +21,6 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
 
   require Logger
   require Error
-
-  use Core.Options
 
   @attr_attempt "core.pubsub.attempt"
 
@@ -55,6 +53,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
     ]
   ]
 
+  @keys Keyword.keys(@schema)
   @enforce_keys ~w(topic filter from_message on_message context_factory data)a
   defstruct @enforce_keys
 
@@ -81,10 +80,10 @@ defmodule Core.PubSub.MqSubscriberReliable.Step do
   def schema, do: @schema
 
   @doc false
-  @opts_schema @schema
   @spec new!(keyword()) :: t()
 
-  def new!(opts) when is_list(opts), do: struct!(__MODULE__, [data: nil] ++ opts)
+  def new!(subscriber_opts) when is_list(subscriber_opts),
+    do: struct!(__MODULE__, [data: nil] ++ Keyword.take(subscriber_opts, @keys))
 
   @doc false
   @spec accept_all(Message.t()) :: true

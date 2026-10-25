@@ -60,7 +60,13 @@ defmodule Core.Outbox.Test do
                      |> Keyword.update!(:topic, &Keyword.put(Keyword.delete(&1, :default), :required, true))
                      |> Kernel.++(@subscriber_keys)
                      |> Kernel.++(Enum.map(@network_keys, &{&1, [type: :any, doc: "Сетевой ключ: игнорируется."]}))
-                     |> NimbleOptions.new!()
+  @subscribers_schema NimbleOptions.new!(
+                        subscribers: [
+                          type: {:list, {:keyword_list, @subscriber_schema}},
+                          required: true,
+                          doc: "Подписчики в форме `Core.PubSub.MqSubscriberReliable`."
+                        ]
+                      )
   @batch_size Outbox.BatchSize.new!(100)
   @lock_duration Outbox.LockDuration.new!(60)
   @cursor %{position: 0, attempts: 0, error: nil}
@@ -145,7 +151,7 @@ defmodule Core.Outbox.Test do
 
   def drain(subscribers, opts \\ []) when is_list(subscribers) and is_list(opts) do
     context = Keyword.fetch!(opts, :context_factory).()
-    subscribers = parse_subscribers!(subscribers)
+    subscribers = parse_subscribers!(subscribers, "#{inspect(__MODULE__)}.drain/2")
 
     state =
       Core.Config.outbox_repo()
@@ -368,10 +374,10 @@ defmodule Core.Outbox.Test do
   # ===== реактор =====
 
   @doc false
-  @spec check_subscribers!([keyword()]) :: :ok
+  @spec check_subscribers!([keyword()], String.t()) :: :ok
 
-  def check_subscribers!(subscribers) when is_list(subscribers) do
-    _parsed = parse_subscribers!(subscribers)
+  def check_subscribers!(subscribers, label) when is_list(subscribers) and is_binary(label) do
+    _parsed = parse_subscribers!(subscribers, label)
     :ok
   end
 
@@ -383,7 +389,7 @@ defmodule Core.Outbox.Test do
 
     %{
       new: Map.get(Core.Config.outbox_repo().queue_counts(), :new, 0),
-      stuck: Enum.flat_map(parse_subscribers!(subscribers), &stuck(state, &1)),
+      stuck: Enum.flat_map(parse_subscribers!(subscribers, "#{inspect(__MODULE__)}.report/1"), &stuck(state, &1)),
       dead_letters: state.dead_letters
     }
   end
@@ -412,21 +418,21 @@ defmodule Core.Outbox.Test do
 
   # ===== общее =====
 
-  defp parse_subscribers!(subscribers) do
-    parsed = Enum.map(subscribers, &parse_subscriber!/1)
-    :ok = StartOpts.unique!(@label, :name, "различные name подписчиков", Enum.map(parsed, & &1.name))
+  defp parse_subscribers!(subscribers, label) do
+    [subscribers: valid] = Core.Options.validate!([subscribers: subscribers], @subscribers_schema, label)
+    parsed = Enum.map(valid, &parse_subscriber/1)
+    :ok = StartOpts.unique!(label, :name, "различные name подписчиков", Enum.map(parsed, & &1.name))
     parsed
   end
 
-  defp parse_subscriber!(opts) when is_list(opts) do
-    valid = Core.Options.__validate__!(opts, @subscriber_schema, "#{@label}: подписчик")
-    step = Step.new!(Keyword.take(valid, Keyword.keys(Step.schema())))
+  defp parse_subscriber(subscriber) do
+    step = Step.new!(subscriber)
 
     %{
-      name: Keyword.fetch!(valid, :name),
+      name: Keyword.fetch!(subscriber, :name),
       topic: step.topic,
-      step: %{step | data: Keyword.get(valid, :subscribe_data)},
-      max_attempts: Keyword.fetch!(valid, :max_attempts)
+      step: %{step | data: Keyword.get(subscriber, :subscribe_data)},
+      max_attempts: Keyword.fetch!(subscriber, :max_attempts)
     }
   end
 

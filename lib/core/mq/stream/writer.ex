@@ -17,17 +17,8 @@ defmodule Core.Mq.Stream.Writer do
     confirm_timeout_ms: [type: :pos_integer, default: 5_000, doc: "Дедлайн подтверждения пачки, мс."],
     confirm_poll_ms: [type: :pos_integer, default: 20, doc: "Интервал сверки `producer_sequence`, мс."],
     max_producers: [type: :pos_integer, default: 256, doc: "Потолок кеша producers."],
-    name: [
-      type: {:custom, Core.Helper.StartOpts, :name, []},
-      type_doc: "`t:GenServer.name/0`",
-      doc: "Имя процесса; оно же `:id` в `child_spec/1`."
-    ],
-    shutdown: [
-      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
-      type_doc: "`t:timeout/0` или `:brutal_kill`",
-      default: @shutdown_ms,
-      doc: "`shutdown` ребёнка супервизора в `child_spec/1`."
-    ]
+    name: Core.Helper.StartOpts.name_option(),
+    shutdown: Core.Helper.StartOpts.shutdown_option(@shutdown_ms)
   ]
 
   @moduledoc """
@@ -97,13 +88,8 @@ defmodule Core.Mq.Stream.Writer do
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
-  def child_spec(opts) when is_list(opts) do
-    %{
-      id: Keyword.get(opts, :name, __MODULE__),
-      start: {__MODULE__, :start_link, [opts]},
-      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
-    }
-  end
+  def child_spec(opts) when is_list(opts),
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
 
   @doc "Запустить writer."
   @spec start_link(keyword()) :: GenServer.on_start()
