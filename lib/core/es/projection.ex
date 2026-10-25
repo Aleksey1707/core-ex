@@ -208,6 +208,8 @@ defmodule Core.Es.Projection do
   alias Core.Helper
   alias Core.Result
 
+  use Core.Options
+
   @label "Es.Projection"
   @required_keys ~w(name events)a
   @optional_keys ~w(version personal repo codec)a
@@ -549,13 +551,14 @@ defmodule Core.Es.Projection do
   исходы — в `@moduledoc`. Вызов внутри транзакции `repo:` проекции — `ArgumentError`: пачка
   открывает свою.
   """
+  @opts_schema [
+    batch_size: [type: :pos_integer, default: @default_batch_size, doc: "Сколько событий читает пачка."]
+  ]
   @spec run_once(module(), keyword()) :: outcome()
 
   def run_once(projection, opts \\ []) when is_atom(projection) and is_list(opts) do
-    [batch_size: batch_size] = Keyword.validate!(opts, batch_size: @default_batch_size)
-
     projection
-    |> Batch.run(projection.__es_projection__(), batch_size)
+    |> Batch.run(projection.__es_projection__(), Keyword.fetch!(opts, :batch_size))
     |> outcome()
   end
 

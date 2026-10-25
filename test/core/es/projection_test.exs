@@ -491,6 +491,12 @@ defmodule Core.Es.ProjectionTest do
       assert :idle = Es.Projection.run_once(@projection, batch_size: 2)
     end
 
+    test "неизвестная опция — ArgumentError до пачки" do
+      assert_raise ArgumentError, ~r/^Core\.Es\.Projection\.run_once\/2: unknown options \[:batch\]/, fn ->
+        Es.Projection.run_once(@projection, batch: 2)
+      end
+    end
+
     test "тег, известный кодеку, но не объявленный, — пропуск без загрузки, чекпоинт движется" do
       account = Account.ID.new()
       write!(@account_repo, account, [open("Счёт"), freeze()])

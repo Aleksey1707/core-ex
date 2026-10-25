@@ -41,6 +41,8 @@ defmodule Core.MixProject do
       {:uuidv7, "~> 1.0"},
       # Владение остановленным временем теста потребителя (`Core.Clock.Test`, ADR-0083)
       {:nimble_ownership, "~> 1.0"},
+      # Схема опций функции (`Core.Options`, ADR-0086)
+      {:nimble_options, "~> 1.1"},
       # Наблюдаемость
       {:telemetry, "~> 1.0"},
       {:telemetry_metrics, "~> 1.0"},

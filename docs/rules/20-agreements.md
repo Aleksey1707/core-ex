@@ -664,6 +664,46 @@ end
 в модуле с `__using__`, первое употребление `opts` в `__using__` мимо `Helper.Opts.expand!/3` /
 `Prim.Opts.prepare!`, функции ключей вне `Core.Prim.Wrapper`.
 
+### Схема опций функции
+
+Функция, которая сама читает свои опции (`CONTEXT.md`, «Опции функции»), объявляет схему опций
+`@opts_schema` над `def` в модуле с `use Core.Options`: в `lib/` библиотеки — MUST, у потребителя —
+SHOULD. `Keyword.validate!` и ручная клауза проверки типа опции у такой функции — MUST NOT.
+
+- Схема — NimbleOptions, у каждого ключа `doc:` строкой. Тело получает опции с умолчаниями и
+  читает их `Keyword.fetch!/2` без запасного значения.
+- Функция, передающая `opts` насквозь (в Ecto, в `Core.Helper.Transact.run/3`), схему MUST NOT:
+  ключи проверяет тот, кому они переданы.
+- Опции в голове функции со схемой MUST быть переменной; guard на них — только `is_list/1`.
+- `@spec` пишет автор, тип опций — `keyword()`.
+- `@opts_schema` над `defp` / `defmacro` и внутри `quote` генерируемого кода — MUST NOT. Опции
+  `use` разбирает `Core.Helper.Opts` («Опции `use`»).
+
+```elixir
+# плохо — опечатка в ключе проверяет только Keyword.validate!, тип значения — никто
+def run_once(projection, opts \\ []) when is_atom(projection) and is_list(opts) do
+  [batch_size: batch_size] = Keyword.validate!(opts, batch_size: 100)
+  ...
+end
+
+# хорошо
+use Core.Options
+
+@opts_schema [batch_size: [type: :pos_integer, default: 100, doc: "Сколько событий читает пачка."]]
+@spec run_once(module(), keyword()) :: outcome()
+
+def run_once(projection, opts \\ []) when is_atom(projection) and is_list(opts) do
+  batch_size = Keyword.fetch!(opts, :batch_size)
+  ...
+end
+```
+
+Отказ вызова — `ArgumentError` `"<Mod.fun/n>: <сообщение NimbleOptions>"` до входа в тело. Почему
+подмена `def`, а не обёртка, — ADR-0086 (`docs/adr/0086-function-opts-schema.md`).
+
+Проверяется: `CompileError` сборки (`Core.Options`) — ключ без `doc:`, атрибут над `defp` /
+`defmacro`, висячий атрибут, паттерн или guard кроме `is_list/1` на опциях.
+
 ### Однострочные клаузы
 
 Однострочные клаузы одной функции (одно имя и арность, `def name(…), do: …` в одной физической
