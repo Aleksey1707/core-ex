@@ -310,6 +310,11 @@ ExUnit.start()
   `OUTBOX_ENABLED` (`14-events-outbox.md`, «Конфигурация») в `:test` даёт `enabled: false`.
   Включённый поллер резервирует те же записи, что дублёр, и уводит их мимо подписчиков теста.
   Дублёр дерево не трогает и без него работает.
+- Приложение с реактором `Core.Outbox.Test.Reactor` MUST задать тестовому repo
+  `queue_target: 5_000` в `config/test.exs`. Реактор работает на соединении sandbox теста и ждёт,
+  пока тест или его HTTP-запрос держит это соединение. Ожидающего sandbox отбрасывает через
+  `queue_target * 2` — по умолчанию через 100 мс. Под нагрузкой CI запрос дольше этого роняет
+  проход реактора отказом соединения, и `settle/2` валит тест чужим отказом.
 
 ```elixir
 # плохо — список подписчиков переписан в тесте: новый подписчик дерева тестом не покрыт
@@ -327,6 +332,11 @@ topics: Enum.map(subscribers(), &[reader: reader(&1), subscriber: &1])
 # config/runtime.exs — в :test очередь выключена независимо от env
 config :my_app, Core.Outbox.Supervisor,
   enabled: config_env() != :test and System.get_env("OUTBOX_ENABLED") == "true"
+
+# config/test.exs — реактор дождётся соединения, которое держит тест
+config :my_app, MyApp.Infra.DAO,
+  pool: Ecto.Adapters.SQL.Sandbox,
+  queue_target: 5_000
 ```
 
 ## Пробелы

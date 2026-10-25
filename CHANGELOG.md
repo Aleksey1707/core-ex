@@ -189,6 +189,14 @@
 
 ### Новое
 
+- **Реактор дублёра outbox требует `queue_target: 5_000` у тестового repo** (норма —
+  `docs/rules/app/19-testing.md`, «Доставка outbox»). `Core.Outbox.Test.Reactor` работает на
+  соединении sandbox теста и ждёт, пока тест или его HTTP-запрос держит соединение, а sandbox
+  отбрасывает ожидающего через `queue_target * 2` — по умолчанию через 100 мс. Под нагрузкой CI
+  проход реактора падал `DBConnection.ConnectionError … dropped from queue`, и `settle/2` валил тест
+  чужим отказом. Правка потребителя с реактором: в `config/test.exs` у тестового repo добавить
+  `queue_target: 5_000`.
+
 - **Страница выборки — в query: `Core.Web.Params.Schema.page/1` и ратчет `Core.Web.ApiSpecCase`**
   (норма — `docs/rules/app/15-web-api.md`, «Поверхности и версии», «Controller»). Свод говорил
   только «выборка — `POST /<resource>/search` с телом», а `Core.Web.Params.page/2` разбирает любую

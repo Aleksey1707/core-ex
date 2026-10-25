@@ -21,7 +21,10 @@ config :core, Core.TestRepo,
   port: String.to_integer(System.get_env("POSTGRES_PORT", "5433")),
   database: "core_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size: System.schedulers_online() * 2,
+  # Ожидающий соединения теста sandbox отбрасывает через `queue_target * 2`: реактор дублёра outbox
+  # ждёт, пока тест держит соединение (`docs/rules/app/19-testing.md`, «Доставка outbox»).
+  queue_target: 5_000
 
 config :core, Core.Security.Secret, secret_key: "qI1uzVjrHlMCym8sO62o9uoRdqmqGQf_QmEo4o5uzmE="
 

@@ -285,6 +285,16 @@ defmodule Core.Outbox.TestTest do
       assert message =~ "сбой обработчика"
     end
 
+    test "реактор ждёт соединения, которое держит тест, дольше предела очереди по умолчанию" do
+      reactor = start_supervised!({Outbox.Test.Reactor, subscribers: [subscriber(notify(:a))]})
+      write!(Account.Repo.Pg, Account.ID.new(), [open()])
+
+      # Sandbox отбрасывает ожидающего на опросе очереди раз в `queue_interval` (1 с).
+      TestRepo.transaction(fn -> Process.sleep(1_200) end)
+
+      assert :ok = Outbox.Test.settle(reactor)
+    end
+
     test "упавший проход валит settle текстом исключения, лог — одной строкой" do
       crashing = subscriber(notify(:a), context_factory: fn -> raise "сбой контекста" end)
       reactor = start_supervised!({Outbox.Test.Reactor, subscribers: [crashing]})

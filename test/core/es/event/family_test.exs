@@ -83,9 +83,10 @@ defmodule Core.Es.Event.FamilyTest do
 
   describe "сверки ссылок после сборки" do
     test "верные ссылки — без предупреждений" do
-      assert capture_io(:stderr, fn -> Family.__after_verify__(EventFixture.Event) end) == ""
-      assert capture_io(:stderr, fn -> Family.__after_verify__(Core.EsFixture.Account.Event) end) == ""
-      assert capture_io(:stderr, fn -> Family.__after_verify__(Core.Es.Personal.Event) end) == ""
+      # Захват stderr общий для async-тестов: соседний тест пишет туда свои предупреждения.
+      for family <- [EventFixture.Event, Core.EsFixture.Account.Event, Core.Es.Personal.Event] do
+        refute capture_io(:stderr, fn -> Family.__after_verify__(family) end) =~ "Es.Event.Family: #{inspect(family)}:"
+      end
     end
 
     test "aggregate: не найден — предупреждение с файлом семейства" do
