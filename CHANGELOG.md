@@ -117,7 +117,9 @@
   `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000, doc: "…"]]` над `init/1` и
   `Keyword.fetch!(opts, :interval_ms)`; доменное значение — `{:custom, Core.Helper.StartOpts, :prim,
   [Mod]}` вместо `StartOpts.prim!/4`, свой отказ сложнее перечисления — `raise ArgumentError` вместо
-  `raise_invalid!/4`.
+  `raise_invalid!/4`. Норма потребителя `docs/rules/app/17-otp-concurrency.md`, «Опции процессов»,
+  переписана так же: опции процесса проверяет схема над `init/1`, обязательная опция с умолчанием из
+  `runtime.exs` — `required: true` без `default:`.
 
 - **RabbitMQ Stream: соединение перезапускается, когда исчерпаны номера подписок и producer'ов.**
   Клиент `:rabbitmq_stream` выдаёт номера подписок и producer'ов счётчиком на процесс соединения,

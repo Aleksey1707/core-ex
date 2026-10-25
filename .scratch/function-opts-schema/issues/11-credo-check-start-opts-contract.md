@@ -92,3 +92,7 @@ Credo; `StartOpts` больше не второй язык проверки оп
   оставшемся случае — `Repo.Pg.insert_many/4` (`chunk_size:` рядом с ключами Ecto).
 - `docs/rules/app/17-otp-concurrency.md` («разбираются в `init/1` (`Core.Helper.StartOpts`)») не
   тронут: спека — свод потребителя не меняется.
+- Исправления по ревью ветки: `app/17-otp-concurrency.md`, «Опции процессов», переписан под схему
+  над `init/1` (правка `app/**` идёт в CHANGELOG тем же коммитом); в `20-agreements.md` запрет
+  `Keyword.validate!` сужен до `lib/`, закреплено имя `opts` только для опций функции — проверка
+  видит лишь его.

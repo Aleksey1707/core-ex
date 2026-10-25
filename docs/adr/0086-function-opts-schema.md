@@ -4,7 +4,8 @@
 над обычным `def`. Модуль подключает `use Core.Options`. Он исключает `Kernel.def/1,2` из импорта и
 ставит свой `def`: тот оставляет голову клаузы автору и вставляет проверку последнего аргумента
 первой строкой тела. Функция, передающая опции насквозь, схемы не получает. Опции `use` по-прежнему
-разбирает `Core.Helper.Opts` (ADR-0085). OTP-процесс объявляет схему над `init/1`. Норма —
+разбирает `Core.Helper.Opts` (ADR-0085). OTP-процесс объявляет схему над `init/1`, готовое дерево —
+над `start_link/1` и `watch_list/1`. Норма —
 `docs/rules/20-agreements.md`, «Схема опций функции»; срезы перевода —
 `.scratch/function-opts-schema/spec.md`.
 
@@ -76,9 +77,18 @@ guards. Если механизм проверки меняет голову ф�
 
 ### OTP-процессы
 
-Опции старта проверяются в `init/1`, в процессе самого GenServer (`17-otp-concurrency.md`). Схема
-ставится над `init/1`, а `child_spec/1` и `start_link/1` передают опции насквозь. Доменные проверки
-`StartOpts` (`prim!`, `topics_filter!`, `name!`, `shutdown!`) становятся custom-типами схемы.
+Опции старта процесса проверяются в `init/1`, в процессе самого GenServer (`17-otp-concurrency.md`).
+Схема ставится над `init/1`, а `child_spec/1` и `start_link/1` передают опции насквозь.
+
+Готовое дерево (`Core.Outbox.Supervisor`, `Core.Es.Projection.Supervisor`,
+`Core.PubSub.MqSubscriberReliable.Supervisor`, `Core.Es.Aggregate.Process`) разбирало опции в
+`start_link` и до схемы: `:ignore` выключенного дерева и проверки старта (единственность на кластере,
+разбиение топиков) решаются до `Supervisor.start_link`, а `init/1` получает уже разобранную map.
+Поэтому схема дерева стоит над `start_link` и над каждой функцией, принимающей те же опции
+(`watch_list`, у подписчиков — `stream_readers/1`, `kafka_readers/1`), а не над `init/1`.
+
+Доменные проверки `StartOpts` (`prim!`, `topics_filter!`, `name!`, `shutdown!`) становятся
+custom-типами схемы (`prim/2`, `topics_filter/1`, `name/1`, `shutdown/1`).
 
 ## Решение
 
