@@ -212,6 +212,8 @@ MUST NOT: модуль проекции и тип агрегата в ней —
 в его `exports` не входит, так что web и другой контекст её не видят. Изменяющий usecase
 event-sourced агрегата принимает `wait: :none | pos_integer()` — не ждать или ждать не дольше
 стольких мс, по умолчанию `:none` — и после commit, вне транзакции, зовёт `await/3` литерально.
+Ключ в схеме опций usecase (`20-agreements.md`, «Схема опций функции») —
+`Core.Es.Projection.wait_option/0`; своё описание ключа MUST NOT: копия расходится с контрактом.
 Возвраты по `wait:` — `deps/core/docs/rules/app/10-architecture.md`, «Usecases»; HTTP-граница
 выводит `wait:` из `Prefer` клиента — `deps/core/docs/rules/app/15-web-api.md`, «Ожидание
 проекции»; почему ждёт usecase — ADR-0039. Вызывающий, который после записи читает read-модель,
@@ -270,8 +272,9 @@ histogram_quantile(0.5, sum by (le, projection)
 
 ```elixir
 # хорошо — Account.Query, его зовёт реакция другого контекста: ждёт до чтения
+@opts_schema [wait: Core.Es.Projection.wait_option()]
 def get(%Account.ID{} = id, %Context{} = context, opts \\ []) do
-  with :ok <- awaited_read(id, Keyword.get(opts, :wait, :none)),
+  with :ok <- awaited_read(id, Keyword.fetch!(opts, :wait)),
        do: @read_repo.get(id, :current, context)
 end
 
@@ -296,9 +299,13 @@ with {:ok, version} <- write(id, expected, context),
 # плохо — ID параметром defp без сужения: ID другого агрегата сборка не видит
 defp awaited(id, timeout), do: Account.Projection.await(Account, id, timeout)
 
-# хорошо — после commit ждёт по `wait:`, ID сужен в голове хелпера, исход ожидания — не ошибка
+# плохо — своё описание ключа: копия расходится с контрактом (`wait: 0` проходит)
+@opts_schema [wait: [type: {:or, [{:in, [:none]}, :non_neg_integer]}, default: :none, doc: "…"]]
+
+# хорошо — после commit ждёт по `wait:` (ключ — `wait_option/0`), ID сужен в голове хелпера, исход
+# ожидания — не ошибка
 with {:ok, version} <- write(id, expected, context) do
-  case awaited(id, Keyword.get(opts, :wait, :none)) do
+  case awaited(id, Keyword.fetch!(opts, :wait)) do
     :projected -> projected(id, version, context)
     :accepted -> {:ok, {:accepted, id, version}}
   end

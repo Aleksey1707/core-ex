@@ -120,6 +120,8 @@ defmodule Core.Es.Projection do
   версии потока, в том числе ещё не записанное: следующее событие, которое запишет реакция другого
   контекста, когда его версия известна по модели агрегата (ADR-0080).
 
+  Usecase зовёт `await` по опции `wait:`, её ключ в схеме — `wait_option/0`.
+
   Функции генерирует `use` — clause на каждый агрегат, чьи события есть в `events:`: голова —
   литерал агрегата (`__es_aggregate__/0` семейства) и закрытый struct его ID
   (`__es_aggregate_id__/0` кодека), у `await/4` — и `%Core.Version{}`, результат сужен до
@@ -566,4 +568,18 @@ defmodule Core.Es.Projection do
   defp outcome({:processed, _event_count}), do: :processed
   defp outcome({:error, %Error{} = error, _failure}), do: {:error, error}
   defp outcome(outcome) when outcome in ~w(idle locked outdated)a, do: outcome
+
+  # ===== ожидание =====
+
+  @doc "Ключ `wait:` usecase, который после commit ждёт проекцию: `@opts_schema [wait: wait_option()]`."
+  @spec wait_option() :: keyword()
+
+  def wait_option do
+    [
+      type: {:or, [{:in, [:none]}, :pos_integer]},
+      default: :none,
+      type_doc: "`:none | pos_integer()`",
+      doc: "Сколько ждать проекцию, мс; `:none` — не ждать."
+    ]
+  end
 end

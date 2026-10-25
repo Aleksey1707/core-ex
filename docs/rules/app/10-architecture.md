@@ -726,8 +726,9 @@ Read-модель по назначению держит свои модули �
   вокруг всех вызовов — не одна транзакция с `advisory_xact!/3`. Прерванный запуск доводит
   повторный: шаги задачи MUST быть идемпотентны (ADR-0048).
 - Команда event-sourced агрегата MUST принимать `wait: :none | pos_integer()` последней опцией
-  (`opts \\ []`, по умолчанию `:none`) и по ней после commit, вне транзакции, ждать проекцию
-  литеральным `Projection.await/3` — `deps/core/docs/rules/22-projections.md`, «Read-after-write»:
+  (`opts \\ []`, по умолчанию `:none`, ключ схемы — `Core.Es.Projection.wait_option/0`) и по ней
+  после commit, вне транзакции, ждать проекцию литеральным `Projection.await/3` —
+  `deps/core/docs/rules/22-projections.md`, «Read-after-write»:
   `Prefer` понимает каждая команда event-sourced агрегата (`15-web-api.md`, «Ожидание проекции»), а
   другой вызывающий, который после записи читает read-модель, — тем же `wait:`; вида вызывающего
   правило не различает. Команда агрегата без read-модели `wait:` не принимает: ждать нечего, и её
@@ -855,11 +856,12 @@ end
 # event-sourced создание — исходы команды; запись — `get_decision` и `append` под
 # `Es.Transact.run` в `write_open/3`, хелперы `awaited/2` и `projected/3` —
 # `deps/core/docs/rules/22-projections.md`, «Read-after-write»
+@opts_schema [wait: Core.Es.Projection.wait_option()]
 def open(%Agg.Name{} = name, %Context{} = context, opts \\ []) do
   with :ok <- check_user(~w(create)a, context),
        {:ok, by} <- CurrentUser.get(context),
        {:ok, {id, version}} <- write_open(name, by, context) do
-    case awaited(id, Keyword.get(opts, :wait, :none)) do
+    case awaited(id, Keyword.fetch!(opts, :wait)) do
       :projected -> projected(id, version, context)
       :accepted -> {:ok, {:accepted, id, version}}
     end

@@ -19,6 +19,8 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
 
   require Core.Config
 
+  use Core.Options
+
   @repo Core.Config.repo!(Account.Repo)
 
   @spec freeze(Account.ID.t(), Version.t(), Account.Cmd.Freeze.t(), Context.t()) :: Result.unit()
@@ -151,6 +153,7 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
   def fold_history(%Account{} = state, events) when is_list(events),
     do: Account.fold(state, events).status
 
+  @opts_schema [wait: Core.Es.Projection.wait_option()]
   def open(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context, opts \\ []) do
     written =
       Transact.run(DAO, fn ->
@@ -161,7 +164,7 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
       end)
 
     with {:ok, version} <- written,
-         do: {:ok, {awaited(id, Keyword.get(opts, :wait, :none)), id, version}}
+         do: {:ok, {awaited(id, Keyword.fetch!(opts, :wait)), id, version}}
   end
 
   # ---

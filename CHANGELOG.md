@@ -190,6 +190,17 @@
 
 ### Новое
 
+- **Ключ `wait:` в схеме опций usecase — `Core.Es.Projection.wait_option/0`** (норма —
+  `docs/rules/22-projections.md`, «Read-after-write»; `docs/rules/app/10-architecture.md`,
+  «Usecases»). Контракт `wait: :none | pos_integer()` задан сводом, а описание ключа каждое
+  приложение писало своё, и копии расходились с ним: `:non_neg_integer` пропускал `wait: 0`, а без
+  схемы опечатка в ключе молча давала `:none`. Теперь ключ описывает библиотека, своё описание —
+  MUST NOT. Правка потребителя со своей схемой: было — `[wait: [type: …, default: :none, doc: …]]`,
+  стало — `@opts_schema [wait: Core.Es.Projection.wait_option()]`; `wait: 0` теперь
+  `ArgumentError`, вызывающему — `:none`. Usecase без схемы (`Keyword.get(opts, :wait, :none)`)
+  переводится на неё по «Схема опций функции» (SHOULD): `use Core.Options`, тот же `@opts_schema`
+  и `Keyword.fetch!(opts, :wait)` в теле.
+
 - **`layout_lint.exs` проверяет блок приватного по его вызывающим** (норма —
   `docs/rules/20-agreements.md`, «Общие приватные»). Правило «приватный, вызываемый более чем из
   одного блока, живёт в `# ===== общее =====`, остальные — в блоке своего вызывающего» держалось
