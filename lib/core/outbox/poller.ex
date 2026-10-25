@@ -1,4 +1,70 @@
 defmodule Core.Outbox.Poller do
+  @shutdown_ms 30_000
+
+  @init_opts_schema [
+    name: [
+      type: {:custom, Core.Helper.StartOpts, :atom, []},
+      type_doc: "`t:atom/0`",
+      required: true,
+      doc: "Имя процесса поллера; оно же `:id` в `child_spec/1`. MUST быть в отметке дерева очереди."
+    ],
+    repo: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Репозиторий outbox (`Core.Outbox.Repo`): резерв пачки и запись результатов."
+    ],
+    delivery_module: [
+      type: {:custom, Core.Helper.StartOpts, :module, []},
+      type_doc: "`t:module/0`",
+      required: true,
+      doc: "Модуль доставки (`Core.Outbox.Delivery`)."
+    ],
+    delivery: [
+      type: :any,
+      type_doc: "`t:Core.Outbox.Delivery.t/0`",
+      required: true,
+      doc: "Доставка, которую принимает `delivery_module`."
+    ],
+    poll_interval_ms: [type: :pos_integer, required: true, doc: "Верхняя граница backoff опроса, мс."],
+    idle_min_ms: [type: :pos_integer, required: true, doc: "Первая пауза backoff, мс."],
+    batch_size: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.BatchSize]},
+      type_doc: "`t:Core.Outbox.BatchSize.t/0`",
+      required: true,
+      doc: "Сколько записей резервирует цикл."
+    ],
+    lock_duration: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.LockDuration]},
+      type_doc: "`t:Core.Outbox.LockDuration.t/0`",
+      required: true,
+      doc: "Аренда зарезервированной пачки."
+    ],
+    max_attempts: [
+      type: {:custom, Core.Helper.StartOpts, :prim, [Core.Outbox.Attempts]},
+      type_doc: "`t:Core.Outbox.Attempts.t/0`",
+      required: true,
+      doc: "Попытки доставки записи до `:failed`."
+    ],
+    topics: [
+      type: {:custom, Core.Helper.StartOpts, :topics_filter, []},
+      type_doc: "`t:Core.Outbox.topics_filter/0`",
+      default: :all,
+      doc: "Топики записей, которые резервирует поллер."
+    ],
+    context_factory: [
+      type: {:fun, 0},
+      default: &Core.Context.new/0,
+      doc: "Фабрика `Core.Context`; вызывается один раз в `init/1`."
+    ],
+    shutdown: [
+      type: {:custom, Core.Helper.StartOpts, :shutdown, []},
+      type_doc: "`t:timeout/0` или `:brutal_kill`",
+      default: @shutdown_ms,
+      doc: "`shutdown` в `child_spec/1`: запас на текущую пачку."
+    ]
+  ]
+
   @moduledoc """
   Polling delivery worker: reserve → publish_many → save_results.
 
@@ -10,24 +76,23 @@ defmodule Core.Outbox.Poller do
   `poll_interval_ms`. `wake/1` будит цикл досрочно (после commit `append`); входящие
   `:wake` coalesce'ятся (`flush_wakes/0`).
 
-  Обязательные opts: `:name`, `:repo`, `:delivery_module`, `:delivery`, `:poll_interval_ms`,
-  `:idle_min_ms`, `:batch_size`, `:lock_duration`, `:max_attempts`.
-  Опционально: `:topics` (`Outbox.topics_filter()`, default `:all`),
-  `:context_factory` (`()-> Context.t()`, вызывается один раз в `init`,
-  default `Context.new/0`), `:shutdown` (`child_spec/1`). Неизвестная опция, отсутствие
-  обязательной и значение не той формы — `ArgumentError` при старте (`Core.Helper.StartOpts`).
-
   Поллер стартует только из `Core.Outbox.Supervisor`: его опции собирает дерево, а wake после
   вставки адресует поллеры по отметке дерева. Не найдя своего `:name` в отметке, `init/1`
   отказывает `ArgumentError`.
+
+  ## Опции старта
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   use GenServer
+  use Core.Options
 
   alias Core.Context
   alias Core.Error
   alias Core.Exc
-  alias Core.Helper.StartOpts
   alias Core.Outbox
   alias Core.Outbox.Delivery
   alias Core.Outbox.Record
@@ -38,13 +103,6 @@ defmodule Core.Outbox.Poller do
   require Error
 
   @label "Outbox.Poller"
-
-  @keys ~w(
-    repo delivery_module delivery poll_interval_ms idle_min_ms batch_size lock_duration max_attempts
-    topics context_factory name shutdown
-  )a
-
-  @shutdown_ms 30_000
 
   defstruct [
     :repo,
@@ -100,16 +158,10 @@ defmodule Core.Outbox.Poller do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts) do
-    id =
-      case StartOpts.name!(@label, opts, :name) do
-        nil -> __MODULE__
-        name -> name
-      end
-
     %{
-      id: id,
+      id: Keyword.get(opts, :name) || __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: StartOpts.shutdown!(@label, opts, :shutdown, @shutdown_ms)
+      shutdown: Keyword.get(opts, :shutdown, @shutdown_ms)
     }
   end
 
@@ -140,32 +192,34 @@ defmodule Core.Outbox.Poller do
     GenServer.call(server, :run_once, 60_000)
   end
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, t()}
+
   @impl true
   def init(opts) do
     # Цикл (reserve → publish → save_results) выполняется целиком в одном
     # handle_info: trap_exit даёт ему дописать результат, иначе пачка осталась бы
     # `:in_work` до истечения аренды.
     Process.flag(:trap_exit, true)
-    StartOpts.keys!(@label, opts, @keys)
-    idle_min_ms = StartOpts.pos_integer!(@label, opts, :idle_min_ms)
+    idle_min_ms = Keyword.fetch!(opts, :idle_min_ms)
 
     state = %__MODULE__{
-      repo: StartOpts.module!(@label, opts, :repo),
-      delivery_module: StartOpts.module!(@label, opts, :delivery_module),
-      delivery: StartOpts.term!(@label, opts, :delivery),
-      context: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0).(),
-      poll_interval_ms: StartOpts.pos_integer!(@label, opts, :poll_interval_ms),
+      repo: Keyword.fetch!(opts, :repo),
+      delivery_module: Keyword.fetch!(opts, :delivery_module),
+      delivery: Keyword.fetch!(opts, :delivery),
+      context: Keyword.fetch!(opts, :context_factory).(),
+      poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
       idle_min_ms: idle_min_ms,
       idle_ms: idle_min_ms,
       timer_ref: nil,
-      batch_size: StartOpts.prim!(@label, opts, :batch_size, Outbox.BatchSize),
-      lock_duration: StartOpts.prim!(@label, opts, :lock_duration, Outbox.LockDuration),
-      max_attempts: StartOpts.prim!(@label, opts, :max_attempts, Outbox.Attempts),
-      topics: StartOpts.topics_filter!(@label, opts, :topics, :all)
+      batch_size: Keyword.fetch!(opts, :batch_size),
+      lock_duration: Keyword.fetch!(opts, :lock_duration),
+      max_attempts: Keyword.fetch!(opts, :max_attempts),
+      topics: Keyword.fetch!(opts, :topics)
     }
 
-    :ok = ensure_marked!(StartOpts.atom!(@label, opts, :name))
+    :ok = ensure_marked!(Keyword.fetch!(opts, :name))
     {:ok, schedule(state, idle_min_ms)}
   end
 

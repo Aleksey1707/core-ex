@@ -191,6 +191,36 @@ defmodule Core.Outbox.TestTest do
     end
   end
 
+  describe "опции" do
+    test "drain/2 и settle/2: неизвестный ключ и значение не той формы — ArgumentError" do
+      assert_raise ArgumentError, ~r/^Core.Outbox.Test.drain\/2: unknown options \[:context\]/, fn ->
+        Outbox.Test.drain([], context: Context.new())
+      end
+
+      assert_raise ArgumentError, ~r/^Core.Outbox.Test.settle\/2: unknown options \[:timeout_ms\]/, fn ->
+        Outbox.Test.settle(self(), timeout_ms: 100)
+      end
+
+      assert_raise ArgumentError, ~r/^Core.Outbox.Test.settle\/2: invalid value for :dead_letters option/, fn ->
+        Outbox.Test.settle(self(), dead_letters: :ignore)
+      end
+    end
+
+    @tag :capture_log
+    test "реактор: неизвестная опция, нет subscribers:, owner: не pid — ArgumentError при старте" do
+      Process.flag(:trap_exit, true)
+
+      for {opts, expected} <- [
+            {[subscribers: [], owner: self(), interval_ms: 10], "unknown options [:interval_ms]"},
+            {[owner: self()], "required :subscribers option not found"},
+            {[subscribers: [], owner: :test], "invalid value for :owner option: expected pid, got: :test"}
+          ] do
+        assert {:error, {%ArgumentError{message: message}, _stack}} = Outbox.Test.Reactor.start_link(opts)
+        assert message =~ "Core.Outbox.Test.Reactor.init/1: #{expected}"
+      end
+    end
+  end
+
   describe "реактор и settle/2" do
     test "реактор доставляет запись, сделанную после его старта" do
       start_supervised!({Outbox.Test.Reactor, subscribers: [subscriber(notify(:a))]})

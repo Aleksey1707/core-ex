@@ -10,9 +10,10 @@ defmodule Core.Helper.StartOpts do
 
   Процесс, переведённый на схему опций (`use Core.Options`, `@opts_schema` над `init/1`), проверяет
   доменные значения custom-типами схемы `{:custom, Core.Helper.StartOpts, fun, args}`: `prim/2`,
-  `module/1`, `name/1`, `topics_filter/1`, `shutdown/1`. Они возвращают `{:ok, value}` или
-  `{:error, "ожидается …, получено …"}`; ключ в текст отказа добавляет NimbleOptions. Простые
-  значения (целое, булево, функция, атом) — встроенные типы NimbleOptions.
+  `module/1`, `atom/1`, `binary/1`, `name/1`, `topics_filter/1`, `shutdown/1`. Они возвращают
+  `{:ok, value}` или `{:error, "ожидается …, получено …"}`; ключ в текст отказа добавляет
+  NimbleOptions. Простые значения (целое, булево, функция, атом, где допустим `nil`) — встроенные
+  типы NimbleOptions.
 
   Проверки опций с `!` — для процессов, ещё не переведённых на схему; `process!/3` и `unique!/4`
   проверяют значения внутри списков дерева и нужны и при схеме.
@@ -50,6 +51,18 @@ defmodule Core.Helper.StartOpts do
 
   def module(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
   def module(value), do: invalid("модуль", value)
+
+  @doc "Значение — атом, кроме `nil` (имя, ключ, тег): `{:custom, Core.Helper.StartOpts, :atom, []}`."
+  @spec atom(term()) :: Result.t(atom(), String.t())
+
+  def atom(value) when is_atom(value) and not is_nil(value), do: {:ok, value}
+  def atom(value), do: invalid("атом", value)
+
+  @doc "Значение — непустая строка: `{:custom, Core.Helper.StartOpts, :binary, []}`."
+  @spec binary(term()) :: Result.t(String.t(), String.t())
+
+  def binary(value) when is_binary(value) and value != "", do: {:ok, value}
+  def binary(value), do: invalid("непустая строка", value)
 
   @doc """
   Значение — имя процесса (`GenServer.name()`) или `nil` — процесс без имени;

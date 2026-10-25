@@ -33,31 +33,13 @@ defmodule Core.Outbox.Supervisor do
   writer-процесс (если задан `writer:`) и `Core.Outbox.Poller` → `Core.Outbox.Cleaner` под именем
   своего модуля. Падение writer'а перезапускает его поллер и всё, что стартовало позже.
 
-  ## Opts
+  ## Опции
 
-  - `enabled:` — обязательна; `false` — дерево не стартует, и прочие опции не нужны
-  - `cluster_query:` — обязательна, без дефолта: запрос кластеризации; `nil`, `:ignore` и `""` —
-    кластеризации нет
-  - `allow_cluster:` — разрешить старт включённой очереди в кластере, по умолчанию `false`
-  - `pollers:` — обязательна; список поллеров, элемент — keyword:
-    - `name:` — обязательна; атом, имя процесса поллера
-    - `label:` — обязательна; непустая строка, метка компонента в `watch_list/1`
-    - `topics:` — `Core.Outbox.topics_filter()`, по умолчанию `:all`
-    - ровно один из `writer: {модуль Mq.Writer, опции с name: атомом}` — writer-процесс, который
-      дерево поднимает перед поллером и через `name:` которого поллер пишет, — и
-      `via: {модуль Mq.Writer, handle}` — процесс, которым владеет приложение (клиент Kafka): дерево
-      его не поднимает и не наблюдает
-  - `connection:` — `{модуль, опции с name: атомом}`, первый ребёнок дерева: соединение, других
-    пользователей у которого нет
-  - `context_factory:` — `(-> Context.t())`, одна на поллеры и cleaner, по умолчанию `&Context.new/0`
-  - `poll_interval_ms:`, `idle_min_ms:` — обязательны; backoff поллера (`Core.Outbox.Poller`)
-  - `batch_size:`, `lock_duration_seconds:`, `max_attempts:` — обязательны; пачка, аренда и попытки
-    поллера
-  - `published_ttl_seconds:`, `cleaner_interval_ms:` — обязательны; TTL опубликованных записей и
-    интервал cleaner
-
-  «Обязательна» — при `enabled: true`. Репозиторий очереди у поллеров и cleaner — тот же, которым
-  пишут записи, `Core.Config.outbox_repo/0`: второй источник разошёлся бы с ним молча.
+  Состав, типы и умолчания — раздел «Опции» у `start_link/1`; те же опции принимает `watch_list/1`.
+  Выключенному дереву нужна только `enabled:`, остальные обязательные — при `enabled: true`; `nil`
+  у числовой опции — то же, что её отсутствие (незаданный env выключенной очереди).
+  Репозиторий очереди у поллеров и cleaner — тот же, которым пишут записи,
+  `Core.Config.outbox_repo/0`: второй источник разошёлся бы с ним молча.
 
   Числа — положительные целые; в Prim (`Core.Outbox.BatchSize`, `LockDuration`, `Attempts`,
   `PublishedTTL`) их оборачивает дерево. Имена процессов дерева и метки поллеров MUST различаться.
@@ -67,10 +49,10 @@ defmodule Core.Outbox.Supervisor do
 
   ## Старт
 
-  `start_link/1` проверяет опции: неизвестная опция — `ArgumentError` при любом `enabled:`;
-  отсутствующая или недопустимая опция, оба или ни одного из `writer:` / `via:`, повтор имени или
-  метки, `enabled: true` при `pollers: []` — `ArgumentError` включённого дерева. Выключенное
-  проверяет только переданные `pollers:`: их имена уходят в лог. Затем две проверки старта:
+  `start_link/1` проверяет опции: неизвестная опция и значение не той формы — `ArgumentError` при
+  любом `enabled:`; отсутствующая опция, оба или ни одного из `writer:` / `via:`, повтор имени или
+  метки, `enabled: true` при `pollers: []` — `ArgumentError` включённого дерева. Имена переданных
+  `pollers:` выключенного дерева уходят в лог. Затем две проверки старта:
 
   - единственность на кластере: включённая очередь вместе с кластеризацией — `ArgumentError`,
     каждая нода подняла бы свои поллеры; `allow_cluster: true` — старт с `warning`;
@@ -93,6 +75,7 @@ defmodule Core.Outbox.Supervisor do
   """
 
   use Supervisor
+  use Core.Options
 
   alias Core.Config
   alias Core.Context
@@ -106,11 +89,106 @@ defmodule Core.Outbox.Supervisor do
   require Logger
 
   @label "Outbox.Supervisor"
-  @keys ~w(
-    enabled cluster_query allow_cluster pollers connection context_factory poll_interval_ms idle_min_ms
-    batch_size lock_duration_seconds max_attempts published_ttl_seconds cleaner_interval_ms
+  @required_when_enabled ~w(
+    poll_interval_ms idle_min_ms batch_size lock_duration_seconds max_attempts published_ttl_seconds
+    cleaner_interval_ms
   )a
-  @poller_keys ~w(name label topics writer via)a
+
+  @poller_opts_schema [
+    name: [
+      type: {:custom, StartOpts, :atom, []},
+      type_doc: "`t:atom/0`",
+      required: true,
+      doc: "Имя процесса поллера."
+    ],
+    label: [
+      type: {:custom, StartOpts, :binary, []},
+      type_doc: "`t:String.t/0`",
+      required: true,
+      doc: "Непустая метка компонента в `watch_list/1`."
+    ],
+    topics: [
+      type: {:custom, StartOpts, :topics_filter, []},
+      type_doc: "`t:Core.Outbox.topics_filter/0`",
+      default: :all,
+      doc: "Топики записей, которые доставляет поллер."
+    ],
+    writer: [
+      type: :any,
+      type_doc: "`{module(), keyword()}`",
+      doc:
+        "Writer-процесс `{модуль Mq.Writer, опции с name: атомом}`: дерево поднимает его перед поллером, " <>
+          "поллер пишет через его `name:`. Ровно один из `writer:` и `via:`."
+    ],
+    via: [
+      type: :any,
+      type_doc: "`{module(), term()}`",
+      doc:
+        "`{модуль Mq.Writer, handle}` — процесс, которым владеет приложение (клиент Kafka): дерево его не " <>
+          "поднимает и не наблюдает."
+    ]
+  ]
+
+  @tree_opts_schema [
+    enabled: [type: :boolean, required: true, doc: "`false` — дерево не стартует, и прочие опции не нужны."],
+    cluster_query: [
+      type: {:or, [:string, {:in, [nil, :ignore]}]},
+      type_doc: "`t:cluster_query/0`",
+      doc: "При `enabled: true` обязательна, без умолчания: запрос кластеризации."
+    ],
+    allow_cluster: [type: :boolean, default: false, doc: "Разрешить старт включённой очереди в кластере."],
+    pollers: [
+      type: {:list, {:keyword_list, @poller_opts_schema}},
+      default: [],
+      doc: "При `enabled: true` — непустой; поллеры, элемент — keyword:\n\n" <> Core.Options.docs(@poller_opts_schema)
+    ],
+    connection: [
+      type: :any,
+      type_doc: "`{module(), keyword()}`",
+      default: nil,
+      doc: "`{модуль, опции с name: атомом}`, первый ребёнок дерева: соединение, других пользователей у которого нет."
+    ],
+    context_factory: [
+      type: {:fun, 0},
+      default: &Context.new/0,
+      doc: "Фабрика `Core.Context`, одна на поллеры и cleaner."
+    ],
+    poll_interval_ms: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; потолок backoff поллера, мс."
+    ],
+    idle_min_ms: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; первая пауза backoff поллера, мс."
+    ],
+    batch_size: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; пачка поллера."
+    ],
+    lock_duration_seconds: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; аренда пачки, с."
+    ],
+    max_attempts: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; попытки доставки записи."
+    ],
+    published_ttl_seconds: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; сколько хранится опубликованная запись, с."
+    ],
+    cleaner_interval_ms: [
+      type: {:or, [:pos_integer, nil]},
+      type_doc: "`t:pos_integer/0`",
+      doc: "При `enabled: true` обязательна; интервал cleaner, мс."
+    ]
+  ]
 
   @typedoc "DNS-запрос кластеризации: `nil`, `:ignore` и `\"\"` — кластеризации нет."
   @type cluster_query :: String.t() | :ignore | nil
@@ -159,6 +237,7 @@ defmodule Core.Outbox.Supervisor do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :supervisor}
   end
 
+  @opts_schema @tree_opts_schema
   @doc "Запустить дерево очереди; `:ignore` — дерево отключено."
   @spec start_link(keyword()) :: Supervisor.on_start()
 
@@ -283,6 +362,7 @@ defmodule Core.Outbox.Supervisor do
 
   # ===== watch_list =====
 
+  @opts_schema @tree_opts_schema
   @doc """
   Элементы `watch:` плагина `Core.Workers.PromEx` — процессы дерева в порядке старта:
   `component: "outbox_connection"`, `"outbox_writer:<label>"` (только у `writer:`),
@@ -320,16 +400,14 @@ defmodule Core.Outbox.Supervisor do
 
   # ===== общее =====
 
-  defp options!(opts) do
-    StartOpts.keys!(@label, opts, @keys)
-    options!(StartOpts.boolean!(@label, opts, :enabled), opts)
-  end
+  defp options!(opts), do: options!(Keyword.fetch!(opts, :enabled), opts)
 
-  defp options!(false, opts), do: %{enabled: false, pollers: pollers!(Keyword.put_new(opts, :pollers, []))}
+  defp options!(false, opts), do: %{enabled: false, pollers: pollers!(Keyword.fetch!(opts, :pollers))}
 
   defp options!(true, opts) do
-    pollers = pollers!(opts)
-    connection = connection!(Keyword.get(opts, :connection))
+    :ok = required!(opts)
+    pollers = pollers!(Keyword.fetch!(opts, :pollers))
+    connection = connection!(Keyword.fetch!(opts, :connection))
     ensure_pollers!(pollers)
 
     StartOpts.unique!(
@@ -348,31 +426,34 @@ defmodule Core.Outbox.Supervisor do
 
     %{
       enabled: true,
-      cluster_query: cluster_query!(opts),
-      allow_cluster: StartOpts.boolean!(@label, opts, :allow_cluster, false),
+      cluster_query: Keyword.fetch!(opts, :cluster_query),
+      allow_cluster: Keyword.fetch!(opts, :allow_cluster),
       pollers: pollers,
       connection: connection,
-      context_factory: StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0),
-      poll_interval_ms: StartOpts.pos_integer!(@label, opts, :poll_interval_ms),
-      idle_min_ms: StartOpts.pos_integer!(@label, opts, :idle_min_ms),
+      context_factory: Keyword.fetch!(opts, :context_factory),
+      poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
+      idle_min_ms: Keyword.fetch!(opts, :idle_min_ms),
       batch_size: prim!(opts, :batch_size, Outbox.BatchSize),
       lock_duration: prim!(opts, :lock_duration_seconds, Outbox.LockDuration),
       max_attempts: prim!(opts, :max_attempts, Outbox.Attempts),
       published_ttl: prim!(opts, :published_ttl_seconds, Outbox.PublishedTTL),
-      cleaner_interval_ms: StartOpts.pos_integer!(@label, opts, :cleaner_interval_ms)
+      cleaner_interval_ms: Keyword.fetch!(opts, :cleaner_interval_ms)
     }
   end
 
-  defp cluster_query!(opts) do
-    case Keyword.fetch(opts, :cluster_query) do
-      {:ok, query} when query in [nil, :ignore] or is_binary(query) -> query
-      {:ok, other} -> StartOpts.raise_invalid!(@label, :cluster_query, "строку, nil или :ignore", other)
-      :error -> raise ArgumentError, "#{@label}: нет обязательной опции :cluster_query"
+  # Незаданное значение (`nil` из пустого env) — то же, что отсутствие: выключенному дереву оно не
+  # нужно, а включённому его недостаёт. У `cluster_query:` `nil` — значение, поэтому только наличие.
+  defp required!(opts) do
+    query = if Keyword.has_key?(opts, :cluster_query), do: [], else: [:cluster_query]
+
+    case query ++ Enum.filter(@required_when_enabled, &is_nil(Keyword.get(opts, &1))) do
+      [] -> :ok
+      missing -> raise ArgumentError, "#{@label}: enabled: true — нет обязательных опций #{inspect(missing)}"
     end
   end
 
   defp prim!(opts, key, mod) do
-    value = StartOpts.pos_integer!(@label, opts, key)
+    value = Keyword.fetch!(opts, key)
 
     case mod.new(value) do
       {:ok, prim} -> prim
@@ -386,19 +467,15 @@ defmodule Core.Outbox.Supervisor do
 
   defp ensure_pollers!(_pollers), do: :ok
 
-  defp pollers!(opts), do: Enum.map(StartOpts.list!(@label, opts, :pollers), &poller!/1)
+  defp pollers!(pollers), do: Enum.map(pollers, &poller!/1)
 
   defp poller!(poller) do
-    unless Keyword.keyword?(poller),
-      do: StartOpts.raise_invalid!(@label, :pollers, "список keyword [name: …, label: …, writer: … | via: …]", poller)
-
-    StartOpts.keys!(@label, poller, @poller_keys)
     {writer, via} = transport!(poller)
 
     %{
-      name: StartOpts.atom!(@label, poller, :name),
-      label: StartOpts.binary!(@label, poller, :label),
-      topics: StartOpts.topics_filter!(@label, poller, :topics, :all),
+      name: Keyword.fetch!(poller, :name),
+      label: Keyword.fetch!(poller, :label),
+      topics: Keyword.fetch!(poller, :topics),
       writer: writer,
       via: via
     }

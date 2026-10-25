@@ -21,6 +21,18 @@ defmodule Core.Helper.StartOptsTest do
       assert StartOpts.module("MyConn") == {:error, ~s(ожидается модуль, получено "MyConn")}
     end
 
+    test "atom: атом, кроме nil" do
+      assert StartOpts.atom(:poller) == {:ok, :poller}
+      assert StartOpts.atom(nil) == {:error, "ожидается атом, получено nil"}
+      assert StartOpts.atom("poller") == {:error, ~s(ожидается атом, получено "poller")}
+    end
+
+    test "binary: непустая строка" do
+      assert StartOpts.binary("stream") == {:ok, "stream"}
+      assert StartOpts.binary("") == {:error, ~s(ожидается непустая строка, получено "")}
+      assert StartOpts.binary(:stream) == {:error, "ожидается непустая строка, получено :stream"}
+    end
+
     test "name: имя процесса или nil" do
       for good <- [nil, :poller, {:global, :poller}, {:via, Registry, {:r, 1}}] do
         assert StartOpts.name(good) == {:ok, good}

@@ -29,6 +29,8 @@ defmodule Core.Outbox.Test do
   не использует.
   """
 
+  use Core.Options
+
   alias Core.Context
   alias Core.Error
   alias Core.Exc
@@ -122,15 +124,20 @@ defmodule Core.Outbox.Test do
     (`dead_letters/1`) и сдвигают курсор.
   - Топик без подписчиков просто публикуется.
 
-  `opts`: `context_factory:` — контекст вызовов `Core.Outbox.Repo` (по умолчанию
-  `Core.Context.new/0`). Недопустимая опция или подписчик — `ArgumentError`; запись, которую
-  нельзя перевести в сообщение, — `Core.Exc`, зарезервированная пачка при этом возвращается в `:new`.
+  Недопустимая опция или подписчик — `ArgumentError`; запись, которую нельзя перевести в
+  сообщение, — `Core.Exc`, зарезервированная пачка при этом возвращается в `:new`.
   """
+  @opts_schema [
+    context_factory: [
+      type: {:fun, 0},
+      default: &Context.new/0,
+      doc: "Фабрика контекста вызовов `Core.Outbox.Repo`."
+    ]
+  ]
   @spec drain([keyword()], keyword()) :: :ok
 
   def drain(subscribers, opts \\ []) when is_list(subscribers) and is_list(opts) do
-    StartOpts.keys!(@label, opts, [:context_factory])
-    context = StartOpts.fun!(@label, opts, :context_factory, 0, &Context.new/0).()
+    context = Keyword.fetch!(opts, :context_factory).()
     subscribers = parse_subscribers!(subscribers)
 
     state =
@@ -261,21 +268,30 @@ defmodule Core.Outbox.Test do
   Тишина — три условия разом: в outbox нет записей `:new`, курсоры всех подписчиков в конце
   журналов и ни один подписчик не застрял на ошибке.
 
-  - `timeout:` — предел ожидания, мс (по умолчанию #{@settle_timeout_ms}). По пределу —
-    `Core.Outbox.Test.NotSettled` со списком застрявших: топик, тег, `event_id`, подписчик,
-    попытки, последняя ошибка.
-  - `dead_letters:` — `:fail` (по умолчанию): мёртвое письмо — сразу `NotSettled` со списком
-    писем; `:allow` — письма тишине не мешают, их читает `dead_letters/1`.
-
   Упавший проход реактора и реактор, не ответивший к пределу, — тоже `NotSettled`. Недопустимая
   опция — `ArgumentError`.
   """
+  @opts_schema [
+    timeout: [
+      type: :pos_integer,
+      default: @settle_timeout_ms,
+      doc:
+        "Предел ожидания, мс. По пределу — `Core.Outbox.Test.NotSettled` со списком застрявших: топик, тег, " <>
+          "`event_id`, подписчик, попытки, последняя ошибка."
+    ],
+    dead_letters: [
+      type: {:in, ~w(fail allow)a},
+      default: :fail,
+      doc:
+        "`:fail` — мёртвое письмо сразу даёт `NotSettled` со списком писем; `:allow` — письма тишине не " <>
+          "мешают, их читает `dead_letters/1`."
+    ]
+  ]
   @spec settle(GenServer.server(), keyword()) :: :ok
 
   def settle(reactor, opts \\ []) when is_list(opts) do
-    StartOpts.keys!(@label, opts, ~w(timeout dead_letters)a)
-    timeout = StartOpts.pos_integer!(@label, opts, :timeout, @settle_timeout_ms)
-    dead_letters = StartOpts.one_of!(@label, opts, :dead_letters, ~w(fail allow)a, :fail)
+    timeout = Keyword.fetch!(opts, :timeout)
+    dead_letters = Keyword.fetch!(opts, :dead_letters)
     await_settled(reactor, dead_letters, timeout, System.monotonic_time(:millisecond) + timeout)
   end
 

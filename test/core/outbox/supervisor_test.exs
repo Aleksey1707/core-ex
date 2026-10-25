@@ -104,47 +104,80 @@ defmodule Core.Outbox.SupervisorTest do
     test "неизвестная опция — ArgumentError, и при enabled: false" do
       for enabled <- [true, false] do
         assert start_error(tree_opts(enabled: enabled, delivery_module: Outbox.Delivery.Mq)) =~
-                 "Outbox.Supervisor: неизвестные опции [:delivery_module]"
+                 "Core.Outbox.Supervisor.start_link/1: unknown options [:delivery_module]"
       end
     end
 
     test "нет обязательной опции — ArgumentError" do
+      assert start_error(Keyword.delete(tree_opts(), :enabled)) =~
+               "Core.Outbox.Supervisor.start_link/1: required :enabled option not found"
+
       for key <- ~w(
-            enabled cluster_query pollers poll_interval_ms idle_min_ms batch_size lock_duration_seconds
+            cluster_query poll_interval_ms idle_min_ms batch_size lock_duration_seconds
             max_attempts published_ttl_seconds cleaner_interval_ms
           )a do
         assert start_error(Keyword.delete(tree_opts(), key)) =~
-                 "Outbox.Supervisor: нет обязательной опции #{inspect(key)}"
+                 "Outbox.Supervisor: enabled: true — нет обязательных опций [#{inspect(key)}]"
       end
+
+      assert start_error(tree_opts(batch_size: nil, max_attempts: nil)) =~
+               "Outbox.Supervisor: enabled: true — нет обязательных опций [:batch_size, :max_attempts]"
+
+      assert start_error(Keyword.delete(tree_opts(), :pollers)) =~ "enabled: true при pollers: []"
     end
 
     test "repo: — неизвестная опция: репозиторий очереди один, Core.Config.outbox_repo/0" do
-      assert start_error(tree_opts(repo: @repo)) =~ "Outbox.Supervisor: неизвестные опции [:repo]"
+      assert start_error(tree_opts(repo: @repo)) =~ "Core.Outbox.Supervisor.start_link/1: unknown options [:repo]"
     end
 
-    test "enabled: false — обязательна только enabled:, прочие опции не нужны" do
+    test "enabled: false — обязательна только enabled:, прочие опции не нужны, nil у числа — не задано" do
       assert :ignore = Core.Outbox.Supervisor.start_link(enabled: false)
       assert Core.Outbox.Supervisor.watch_list(enabled: false) == []
+
+      unset = [enabled: false, cluster_query: nil, batch_size: nil, poll_interval_ms: nil, cleaner_interval_ms: nil]
+      assert :ignore = Core.Outbox.Supervisor.start_link(unset)
+      assert Core.Outbox.Supervisor.watch_list(unset) == []
+
+      assert start_error(enabled: false, batch_size: "100") =~
+               "Core.Outbox.Supervisor.start_link/1: expected :batch_size option to match at least one given type"
     end
 
     test "enabled: false — переданные pollers: проверяются, не-список — ArgumentError" do
       assert start_error(enabled: false, pollers: :stream) =~
-               "Outbox.Supervisor: опция :pollers — ожидается список"
+               "Core.Outbox.Supervisor.start_link/1: invalid value for :pollers option: expected list, got: :stream"
     end
 
     test "значение не той формы — ArgumentError с именем опции" do
       for {key, value, expected} <- [
-            {:enabled, "true", "true или false"},
-            {:cluster_query, 1, "строку, nil или :ignore"},
-            {:allow_cluster, "true", "true или false"},
-            {:batch_size, 0, "положительное целое"},
+            {:enabled, "true", "invalid value for :enabled option: expected boolean"},
+            {:cluster_query, 1, "expected :cluster_query option to match at least one given type"},
+            {:allow_cluster, "true", "invalid value for :allow_cluster option: expected boolean"},
+            {:batch_size, 0, "expected :batch_size option to match at least one given type"},
+            {:lock_duration_seconds, "30", "expected :lock_duration_seconds option to match at least one given type"},
+            {:context_factory, fn _ -> Context.new() end, "invalid value for :context_factory option: expected"}
+          ] do
+        assert start_error(tree_opts([{key, value}])) =~ "Core.Outbox.Supervisor.start_link/1: #{expected}"
+      end
+
+      for {key, value, expected} <- [
             {:batch_size, 10_000, "значение Core.Outbox.BatchSize"},
-            {:lock_duration_seconds, "30", "положительное целое"},
-            {:connection, {MqFake.Writer, []}, "{модуль, опции с name: атомом}"},
-            {:context_factory, fn _ -> Context.new() end, "функция арности 0"}
+            {:connection, {MqFake.Writer, []}, "{модуль, опции с name: атомом}"}
           ] do
         assert start_error(tree_opts([{key, value}])) =~
                  "Outbox.Supervisor: опция #{inspect(key)} — ожидается #{expected}"
+      end
+    end
+
+    test "элемент pollers: — неизвестный ключ, нет name:, label: не той формы — ArgumentError" do
+      [orders, rest] = pollers()
+
+      for {poller, expected} <- [
+            {Keyword.put(rest, :lable, "rest"), "unknown options [:lable]"},
+            {Keyword.delete(rest, :name), "required :name option not found"},
+            {Keyword.put(rest, :label, ""), ~s(invalid value for :label option: ожидается непустая строка, получено "")}
+          ] do
+        assert start_error(tree_opts(pollers: [orders, poller])) =~
+                 "start_link/1: invalid list element at position 1 in :pollers option: #{expected}"
       end
     end
 
@@ -283,8 +316,12 @@ defmodule Core.Outbox.SupervisorTest do
     end
 
     test "опции проверяются как в start_link/1" do
-      assert_raise ArgumentError, ~r/нет обязательной опции :cluster_query/, fn ->
+      assert_raise ArgumentError, ~r/нет обязательных опций \[:cluster_query\]/, fn ->
         Core.Outbox.Supervisor.watch_list(Keyword.delete(tree_opts(), :cluster_query))
+      end
+
+      assert_raise ArgumentError, ~r/^Core.Outbox.Supervisor.watch_list\/1: unknown options \[:repo\]/, fn ->
+        Core.Outbox.Supervisor.watch_list(tree_opts(repo: @repo))
       end
     end
   end

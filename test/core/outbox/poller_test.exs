@@ -100,19 +100,14 @@ defmodule Core.Outbox.PollerTest do
     assert %{id: Poller} = Poller.child_spec(name: nil)
   end
 
-  test "child_spec: :name и :shutdown не той формы — ArgumentError" do
-    assert_raise ArgumentError, ~r/Outbox.Poller: опция :name — ожидается имя процесса/, fn ->
-      Poller.child_spec(name: "notifications")
-    end
-
-    assert_raise ArgumentError, ~r/Outbox.Poller: опция :shutdown — ожидается неотрицательное целое/, fn ->
-      Poller.child_spec(shutdown: "30s")
-    end
+  test "child_spec: :shutdown из опций, по умолчанию 30 000 мс" do
+    assert %{shutdown: 30_000} = Poller.child_spec([])
+    assert %{shutdown: :brutal_kill} = Poller.child_spec(shutdown: :brutal_kill)
   end
 
   describe "опции старта" do
     test "вне дерева очереди поллер не стартует — ArgumentError" do
-      assert start_error(Keyword.put(poller_opts(), :name, :outside_tree)) =~
+      assert start_error(poller_opts()) =~
                "Outbox.Poller: поллер :outside_tree не из отметки дерева очереди — " <>
                  "поллер стартует только из Core.Outbox.Supervisor"
     end
@@ -120,37 +115,41 @@ defmodule Core.Outbox.PollerTest do
     test "неизвестная опция — ArgumentError" do
       opts = Keyword.put(poller_opts(), :poll_interval, 1_000)
 
-      assert start_error(opts) =~ "Outbox.Poller: неизвестные опции [:poll_interval]"
+      assert start_error(opts) =~ "Core.Outbox.Poller.init/1: unknown options [:poll_interval]"
     end
 
     test "нет обязательной опции — ArgumentError" do
-      for key <- ~w(repo delivery_module delivery poll_interval_ms idle_min_ms batch_size lock_duration max_attempts)a do
+      for key <- ~w(
+            name repo delivery_module delivery poll_interval_ms idle_min_ms batch_size lock_duration max_attempts
+          )a do
         assert start_error(Keyword.delete(poller_opts(), key)) =~
-                 "Outbox.Poller: нет обязательной опции #{inspect(key)}"
+                 "Core.Outbox.Poller.init/1: required #{inspect(key)} option not found"
       end
     end
 
     test "значение не той формы — ArgumentError с именем опции" do
       for {key, value, expected} <- [
-            {:repo, "Repo", "модуль"},
-            {:delivery_module, nil, "модуль"},
-            {:delivery, nil, "значение"},
-            {:poll_interval_ms, 0, "положительное целое"},
-            {:idle_min_ms, "50", "положительное целое"},
-            {:batch_size, 10, "%Core.Outbox.BatchSize{}"},
-            {:lock_duration, 30, "%Core.Outbox.LockDuration{}"},
-            {:max_attempts, 3, "%Core.Outbox.Attempts{}"},
-            {:topics, ["orders"], ":all, {:only, [String.t()]} или {:except, [String.t()]}"},
-            {:context_factory, fn _ -> Context.new() end, "функция арности 0"}
+            {:name, nil, "ожидается атом, получено nil"},
+            {:repo, "Repo", ~s(ожидается модуль, получено "Repo")},
+            {:delivery_module, nil, "ожидается модуль, получено nil"},
+            {:poll_interval_ms, 0, "expected positive integer, got: 0"},
+            {:idle_min_ms, "50", ~s(expected positive integer, got: "50")},
+            {:batch_size, 10, "ожидается %Core.Outbox.BatchSize{}, получено 10"},
+            {:lock_duration, 30, "ожидается %Core.Outbox.LockDuration{}, получено 30"},
+            {:max_attempts, 3, "ожидается %Core.Outbox.Attempts{}, получено 3"},
+            {:topics, ["orders"], "ожидается :all, {:only, [String.t()]} или {:except, [String.t()]}"},
+            {:context_factory, fn _ -> Context.new() end, "expected function of arity 0"},
+            {:shutdown, "30s", "ожидается неотрицательное целое, :infinity или :brutal_kill"}
           ] do
         assert start_error(Keyword.put(poller_opts(), key, value)) =~
-                 "Outbox.Poller: опция #{inspect(key)} — ожидается #{expected}"
+                 "Core.Outbox.Poller.init/1: invalid value for #{inspect(key)} option: #{expected}"
       end
     end
   end
 
   defp poller_opts do
     [
+      name: :outside_tree,
       repo: @repo,
       delivery_module: Delivery.Mq,
       delivery: :delivery,

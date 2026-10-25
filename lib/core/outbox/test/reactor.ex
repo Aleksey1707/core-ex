@@ -1,4 +1,20 @@
 defmodule Core.Outbox.Test.Reactor do
+  @init_opts_schema [
+    subscribers: [
+      type: {:list, :keyword_list},
+      required: true,
+      doc: "Подписчики в форме `Core.Outbox.Test`; недопустимый подписчик — `ArgumentError` при старте."
+    ],
+    owner: [
+      type: :pid,
+      required: true,
+      doc:
+        "Владелец; `child_spec/1` по умолчанию берёт процесс, который строит спецификацию ребёнка: тест, " <>
+          "если он зовёт `start_supervised` сам; из `setup_all` или чужого процесса `owner:` MUST " <>
+          "передаваться явно."
+    ]
+  ]
+
   @moduledoc """
   Реактор дублёра доставки: `Core.Outbox.Test.drain/2` в фоне, раз в 10 мс.
 
@@ -8,21 +24,23 @@ defmodule Core.Outbox.Test.Reactor do
 
       reactor = start_supervised!({Core.Outbox.Test.Reactor, subscribers: MyApp.Notify.subscribers()})
 
-  Опции: `subscribers:` — обязательна, список подписчиков в форме `Core.Outbox.Test`; `owner:` —
-  владелец, по умолчанию процесс, который строит спецификацию ребёнка: тест, если он зовёт
-  `start_supervised` сам; из `setup_all` или чужого процесса `owner:` MUST передаваться явно.
   Реактор ставит себе `$callers = [владелец]`: sandbox Ecto и прочие владения по `$callers` видят
   его без `allow`, и тест остаётся `async: true`. Подписки на commit нет — только опрос.
-  Недопустимая опция или подписчик — `ArgumentError` при старте.
 
   Реактор не перезапускается (`restart: :temporary`): журналы, курсоры и мёртвые письма живут в
   нём. Исключение прохода останавливает опрос, и `settle/2` валит тест с его текстом. С выходом
   владельца реактор останавливается сам: sandbox теста ему больше не доступен.
+
+  ## Опции старта
+
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+
+  #{Core.Options.docs(@init_opts_schema)}
   """
 
   use GenServer
+  use Core.Options
 
-  alias Core.Helper.StartOpts
   alias Core.Outbox
 
   require Logger
@@ -51,15 +69,17 @@ defmodule Core.Outbox.Test.Reactor do
 
   def start_link(opts) when is_list(opts), do: GenServer.start_link(__MODULE__, opts)
 
+  @opts_schema @init_opts_schema
   @doc false
+  @spec init(keyword()) :: {:ok, %{subscribers: [keyword()], owner: pid(), crash: String.t() | nil}}
+
   @impl true
   def init(opts) do
     # Остановка ждёт конца прохода: убитый посреди запроса реактор рвёт соединение sandbox теста.
     Process.flag(:trap_exit, true)
-    StartOpts.keys!(@label, opts, ~w(subscribers owner)a)
-    subscribers = StartOpts.list!(@label, opts, :subscribers)
+    subscribers = Keyword.fetch!(opts, :subscribers)
     :ok = Outbox.Test.check_subscribers!(subscribers)
-    owner = owner!(opts)
+    owner = Keyword.fetch!(opts, :owner)
     Process.put(:"$callers", [owner])
     _ref = Process.monitor(owner)
     {:ok, schedule(%{subscribers: subscribers, owner: owner, crash: nil}, 0)}
@@ -89,13 +109,6 @@ defmodule Core.Outbox.Test.Reactor do
   def handle_call(:dead_letters, _from, state), do: {:reply, Outbox.Test.dead_letters(self()), state}
 
   # ---
-
-  defp owner!(opts) do
-    case StartOpts.term!(@label, opts, :owner) do
-      owner when is_pid(owner) -> owner
-      other -> StartOpts.raise_invalid!(@label, :owner, "pid", other)
-    end
-  end
 
   defp safe_drain(subscribers) do
     Outbox.Test.drain(subscribers)
