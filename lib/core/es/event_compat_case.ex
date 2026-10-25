@@ -243,18 +243,6 @@ defmodule Core.Es.EventCompatCase do
     check_present(upcast_sources(event_codec), fixtures)
   end
 
-  # ---
-
-  defp check_present(tags, fixtures) do
-    tags
-    |> Enum.map(&fixture_path(fixtures, &1))
-    |> Enum.reject(&File.regular?/1)
-    |> case do
-      [] -> :ok
-      paths -> {:error, %{missing: paths}}
-    end
-  end
-
   # ===== загрузка фикстур =====
 
   @doc false
@@ -398,6 +386,16 @@ defmodule Core.Es.EventCompatCase do
   defp destroyed_dir(fixtures), do: Path.join(fixtures, "destroyed")
 
   # ===== общее =====
+
+  defp check_present(tags, fixtures) do
+    tags
+    |> Enum.map(&fixture_path(fixtures, &1))
+    |> Enum.reject(&File.regular?/1)
+    |> case do
+      [] -> :ok
+      paths -> {:error, %{missing: paths}}
+    end
+  end
 
   defp collect_failures(paths, failure) do
     case Enum.flat_map(paths, failure) do

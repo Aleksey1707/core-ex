@@ -1,6 +1,7 @@
 # Раскладка модуля: маркеры `# ---` (падение уровня абстракции) и `# ===== <имя> =====`
-# (граница блока) — `docs/rules/20-agreements.md`, «Разделители внутри модуля». Проверка идёт
-# по AST плюс исходным строкам: маркер — комментарий, и в AST его нет.
+# (граница блока) и блок приватного по его вызывающим — `docs/rules/20-agreements.md`,
+# «Разделители внутри модуля». Проверка идёт по AST плюс исходным строкам: маркер —
+# комментарий, и в AST его нет.
 # Запуск: elixir scripts/layout_lint.exs  (цель `make layout-check`); у потребителя —
 # elixir deps/core/scripts/layout_lint.exs, и путь правил в сообщениях — `deps/core/…`.
 #
@@ -161,14 +162,71 @@ defmodule LayoutLint do
     {ast, %{nodes | quotes: [{meta[:line], end_line(meta, ast)} | nodes.quotes]}}
   end
 
-  defp node({kind, meta, [_head | _]} = ast, nodes) when kind in @publics or kind in @privates do
-    definition = %{line: meta[:line], column: meta[:column], kind: visibility(kind)}
+  defp node({kind, meta, [head | rest]} = ast, nodes) when kind in @publics or kind in @privates do
+    {name, arities} = signature(head)
+
+    definition = %{
+      line: meta[:line],
+      column: meta[:column],
+      kind: visibility(kind),
+      name: name,
+      arities: arities,
+      calls: calls([head | rest], MapSet.new())
+    }
+
     {ast, %{nodes | defs: [definition | nodes.defs]}}
   end
 
   defp node(ast, nodes), do: {ast, nodes}
 
   defp visibility(kind), do: if(kind in @publics, do: :public, else: :private)
+
+  # Имя и арности определения: аргумент со значением по умолчанию даёт несколько арностей.
+  defp signature({:when, _, [call | _guards]}), do: signature(call)
+  defp signature({name, _, context}) when is_atom(name) and is_atom(context), do: {name, [0]}
+
+  defp signature({name, _, args}) when is_atom(name) and is_list(args) do
+    defaults = Enum.count(args, &match?({:\\, _, _}, &1))
+    {name, Enum.to_list((length(args) - defaults)..length(args))}
+  end
+
+  defp signature(_head), do: {nil, []}
+
+  # Локальные вызовы головы (guard, умолчания) и тела: `f(x)`, `x |> f()`, `x |> f`, `&f/1`.
+  # Код `quote` — чужой модуль: из него в счёт идут опции (`bind_quoted:`) и `unquote` — они
+  # вычисляются здесь; при `unquote: false` — только опции.
+  defp calls({:quote, _, args}, acc) do
+    {body, quote_opts} = args |> Enum.filter(&is_list/1) |> Enum.concat() |> Keyword.split([:do])
+    acc = calls(Keyword.values(quote_opts), acc)
+
+    if Keyword.get(quote_opts, :unquote) == false,
+      do: acc,
+      else: unquotes(Keyword.values(body), acc)
+  end
+
+  defp calls({:|>, _, [left, {name, _, args}]}, acc) when is_atom(name) and is_list(args),
+    do: calls(args, calls(left, MapSet.put(acc, {name, length(args) + 1})))
+
+  defp calls({:|>, _, [left, {name, _, context}]}, acc) when is_atom(name) and is_atom(context),
+    do: calls(left, MapSet.put(acc, {name, 1}))
+
+  defp calls({:&, _, [{:/, _, [{name, _, context}, arity]}]}, acc)
+       when is_atom(name) and is_atom(context) and is_integer(arity),
+       do: MapSet.put(acc, {name, arity})
+
+  defp calls({name, _, args}, acc) when is_atom(name) and is_list(args),
+    do: calls(args, MapSet.put(acc, {name, length(args)}))
+
+  defp calls({callee, _, args}, acc) when is_list(args), do: calls(args, calls(callee, acc))
+  defp calls({left, right}, acc), do: calls(right, calls(left, acc))
+  defp calls(list, acc) when is_list(list), do: Enum.reduce(list, acc, &calls/2)
+  defp calls(_leaf, acc), do: acc
+
+  defp unquotes({kind, _, [expr]}, acc) when kind in ~w(unquote unquote_splicing)a, do: calls(expr, acc)
+  defp unquotes({callee, _, args}, acc) when is_list(args), do: unquotes(args, unquotes(callee, acc))
+  defp unquotes({left, right}, acc), do: unquotes(right, unquotes(left, acc))
+  defp unquotes(list, acc) when is_list(list), do: Enum.reduce(list, acc, &unquotes/2)
+  defp unquotes(_leaf, acc), do: acc
 
   defp end_line(meta, ast) do
     {_ast, last} =
@@ -192,7 +250,7 @@ defmodule LayoutLint do
 
     if mode == :form,
       do: form,
-      else: form ++ check_transitions(unit, path) ++ check_blocks(unit, path)
+      else: form ++ check_transitions(unit, path) ++ check_blocks(unit, path) ++ check_placement_by_callers(unit, path)
   end
 
   # Отступ маркера — как у определений модуля либо как у определения под ним: определения
@@ -370,6 +428,100 @@ defmodule LayoutLint do
 
   defp shared?(%{kind: :block, text: text}), do: String.trim(text) == "# ===== #{@shared_block} ====="
   defp shared?(_marker), do: false
+
+  # Блок приватного — блок его вызывающих: один блок — он сам, несколько — хвостовой `общее`.
+  # Вызывающие — определения модуля, прямые; рекурсия не в счёт. Модуль из одного блока не
+  # проверяется: блок у всех один.
+  defp check_placement_by_callers(%{defs: []}, _path), do: []
+
+  defp check_placement_by_callers(unit, path) do
+    case Enum.filter(unit.markers, &(&1.kind == :block)) do
+      [_first, _second | _] = marks -> misplaced_privates(layout(marks, unit), unit, path)
+      _single -> []
+    end
+  end
+
+  defp layout(marks, unit) do
+    blocks = blocks(marks, unit)
+    names = Enum.map(blocks, &block_name(&1, marks))
+    %{blocks: blocks, names: names, shared: Enum.find_index(names, &(&1 == @shared_block))}
+  end
+
+  defp misplaced_privates(layout, unit, path) do
+    for clauses <- private_functions(unit),
+        message = placement(clauses, unit, layout),
+        message != nil do
+      err(path, hd(clauses).line, message)
+    end
+  end
+
+  # Функция — клаузы одного имени с общей арностью: голова с умолчаниями (`f/1`, `f/2`) и клаузы
+  # `f/2` — одна функция, `f/1` и `f/2` без умолчаний — две.
+  defp private_functions(unit) do
+    unit.defs
+    |> Enum.filter(&(&1.kind == :private and &1.name != nil))
+    |> Enum.reduce([], fn clause, functions ->
+      case Enum.split_with(functions, &same_function?(&1, clause)) do
+        {[], rest} -> [[clause] | rest]
+        {[function], rest} -> [function ++ [clause] | rest]
+      end
+    end)
+    |> Enum.sort_by(&hd(&1).line)
+  end
+
+  defp same_function?([%{name: name} | _] = function, %{name: name, arities: arities}),
+    do: Enum.any?(function, &Enum.any?(&1.arities, fn arity -> arity in arities end))
+
+  defp same_function?(_function, _clause), do: false
+
+  defp placement(clauses, unit, %{names: names, shared: shared} = layout) do
+    name = hd(clauses).name
+    signatures = for clause <- clauses, arity <- clause.arities, into: MapSet.new(), do: {name, arity}
+    placed = block_index(hd(clauses), layout)
+    label = "`#{name}/#{clauses |> Enum.flat_map(& &1.arities) |> Enum.max()}`"
+
+    callers =
+      unit.defs
+      |> Enum.reject(&(&1 in clauses))
+      |> Enum.filter(&(not MapSet.disjoint?(&1.calls, signatures)))
+      |> Enum.map(&block_index(&1, layout))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    case callers do
+      [] ->
+        nil
+
+      [^placed] ->
+        nil
+
+      [single] when placed == shared ->
+        "в `общее` — только приватный, вызываемый из нескольких блоков; #{label} вызывает " <>
+          "только блок «#{Enum.at(names, single)}» — его место там"
+
+      [single] ->
+        "приватный #{label} вызывает только блок «#{Enum.at(names, single)}» — его место там"
+
+      _many when placed == shared ->
+        nil
+
+      many ->
+        "приватный #{label} вызывают блоки #{Enum.map_join(many, ", ", &"«#{Enum.at(names, &1)}»")} — " <>
+          "его место в `# ===== #{@shared_block} =====`"
+    end
+  end
+
+  defp block_index(definition, %{blocks: blocks}),
+    do: Enum.find_index(blocks, &(definition.line > &1.from and definition.line < &1.to))
+
+  defp block_name(block, marks) do
+    with %{text: text} <- Enum.find(marks, &(&1.line == block.from)),
+         [_line, name] <- Regex.run(@block, text) do
+      name
+    else
+      _unnamed -> "без имени"
+    end
+  end
 
   defp blocks(marks, unit) do
     bounds = Enum.map(marks, & &1.line)
