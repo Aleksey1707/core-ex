@@ -15,6 +15,8 @@ defmodule Core.Web.Params do
 
   require Error
 
+  use Core.Options
+
   @if_match_key :"If-Match"
   @limit_default 10
   @offset_default 0
@@ -48,11 +50,11 @@ defmodule Core.Web.Params do
 
   def get!(map, key) when is_map(map) and is_atom(key), do: Result.unwrap!(get(map, key))
 
-  @doc """
-  Разобрать параметры страницы: `limit` / `offset`.
-
-  Опции — `limit_default:` (#{@limit_default}) и `offset_default:` (#{@offset_default}).
-  """
+  @doc "Разобрать параметры страницы: `limit` / `offset`."
+  @opts_schema [
+    limit_default: [type: :pos_integer, default: @limit_default, doc: "`limit`, когда его нет в запросе."],
+    offset_default: [type: :non_neg_integer, default: @offset_default, doc: "`offset`, когда его нет в запросе."]
+  ]
   @spec page(map(), keyword()) ::
           Result.t({Pagination.Limit.t(), Pagination.Offset.t()})
 
@@ -113,13 +115,13 @@ defmodule Core.Web.Params do
 
   defp parse_limit(map, opts) do
     map
-    |> find(:limit, limit_default(opts))
+    |> find(:limit, Keyword.fetch!(opts, :limit_default))
     |> Pagination.Limit.new()
   end
 
   defp parse_offset(map, opts) do
     map
-    |> find(:offset, offset_default(opts))
+    |> find(:offset, Keyword.fetch!(opts, :offset_default))
     |> Pagination.Offset.new()
   end
 
@@ -148,8 +150,4 @@ defmodule Core.Web.Params do
       detail: key
     )
   end
-
-  defp limit_default(opts), do: Keyword.get(opts, :limit_default, @limit_default)
-
-  defp offset_default(opts), do: Keyword.get(opts, :offset_default, @offset_default)
 end

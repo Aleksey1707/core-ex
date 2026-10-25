@@ -35,9 +35,31 @@ defmodule Core.Web.ErrorMapper do
   alias OpenApiSpex.Cast
   alias Plug.Conn.Status
 
+  use Core.Options
+
   @auth_codes ~w(unauthorized auth_failed invalid_token session_not_found)a
   @unauthorized "Не авторизован"
   @critical "Произошла непредвиденная ошибка"
+
+  @auth_opts [
+    auth_codes: [
+      type: {:list, :atom},
+      default: @auth_codes,
+      doc: "Коды `%Error{}`, которые уходят 401 независимо от `kind`."
+    ]
+  ]
+  @unauthorized_opts [
+    unauthorized_message: [type: :string, default: @unauthorized, doc: "Текст `message` ответа 401."]
+  ]
+  @critical_opts [
+    critical_message: [type: :string, default: @critical, doc: "Шаблон `message` ответа 500, без точки в конце."],
+    error_id: [
+      type: {:or, [:string, nil]},
+      type_doc: "`t:String.t/0` | `nil`",
+      default: nil,
+      doc: "Идентификатор ошибки из службы учёта ошибок для ответа 500 (`critical/1`); `nil` — без него."
+    ]
+  ]
 
   @typedoc "Статус, обёртка ответа и уровень логирования (`nil` — не логировать)."
   @type result :: {100..599, Response.error(), Logger.level() | nil}
@@ -67,12 +89,10 @@ defmodule Core.Web.ErrorMapper do
   достаточно не быть ни 2xx, ни 412. Приложение, чей домен разводит коды «ресурс не найден» и
   «ссылка не найдена», может отдать 404 своей клозой `map/1` перед делегированием.
 
-  Опции: `auth_codes:` (дефолт `#{inspect(@auth_codes)}`), `unauthorized_message:`,
-  `critical_message:`, `error_id:` — только строки 500 (`critical/1`).
-
   Последняя clause принимает произвольный term намеренно: в `action_fallback` приходит
   `{:error, reason}` любой формы, и необработанный reason обязан стать 500, а не крашем.
   """
+  @opts_schema @auth_opts ++ @unauthorized_opts ++ @critical_opts
   @spec map(term(), keyword()) :: result()
 
   def map(error, opts \\ [])
@@ -81,54 +101,42 @@ defmodule Core.Web.ErrorMapper do
   def map(%Error{kind: :domain, code: :access_denied} = error, _opts), do: {403, Response.error(error), nil}
 
   def map(%Error{code: code} = error, opts) do
-    if code in Keyword.get(opts, :auth_codes, @auth_codes),
-      do: {401, unauthorized(opts), :debug},
+    if code in Keyword.fetch!(opts, :auth_codes),
+      do: {401, unauthorized_error(opts), :debug},
       else: by_kind(error, opts)
   end
 
-  def map(_reason, opts), do: {500, critical(opts), :error}
+  def map(_reason, opts), do: {500, critical_error(opts), :error}
 
   # ---
 
   defp by_kind(%Error{kind: :domain} = error, _opts), do: {400, Response.error(error), nil}
-  defp by_kind(%Error{kind: :app}, opts), do: {500, critical(opts), :error}
+  defp by_kind(%Error{kind: :app}, opts), do: {500, critical_error(opts), :error}
 
   # ===== unauthorized =====
 
   @doc """
   Обёртка ответа 401 для плага аутентификации: те же `"not_authorized"` и текст, что у строки 401
   `map/2` и у `by_status(401)`, — отказ уходит клиенту одной константой, где бы он ни случился.
-
-  Опция: `unauthorized_message:`.
   """
+  @opts_schema @unauthorized_opts
   @spec unauthorized(keyword()) :: Response.error()
 
-  def unauthorized(opts \\ []),
-    do: Response.error(:not_authorized, Keyword.get(opts, :unauthorized_message, @unauthorized))
+  def unauthorized(opts \\ []), do: unauthorized_error(opts)
 
   # ===== critical =====
 
   @doc """
   Обёртка ответа 500 на критическую ошибку: её собирают строки 500 `map/2` и `by_status(500)`.
 
-  `code` — `"internal_error"`, `message` — шаблон (`critical_message:` без точки в конце, дефолт —
-  константа маппера). С `error_id:` — идентификатор ошибки из службы учёта ошибок дважды: полем
-  `data.errorId` и вторым предложением `message` («<шаблон>. Идентификатор ошибки: <id>»).
-  Без `error_id:` (или с `nil`) `data` пуст. Решение — ADR-0071.
+  `code` — `"internal_error"`, `message` — шаблон. Идентификатор ошибки уходит клиенту дважды:
+  полем `data.errorId` и вторым предложением `message` («<шаблон>. Идентификатор ошибки: <id>»).
+  Без идентификатора `data` пуст. Решение — ADR-0071.
   """
+  @opts_schema @critical_opts
   @spec critical(keyword()) :: Response.error()
 
-  def critical(opts \\ []) do
-    message = Keyword.get(opts, :critical_message, @critical)
-
-    case Keyword.get(opts, :error_id) do
-      nil ->
-        Response.error(:internal_error, message)
-
-      error_id when is_binary(error_id) ->
-        Response.error(:internal_error, message <> ". Идентификатор ошибки: " <> error_id, %{errorId: error_id})
-    end
-  end
+  def critical(opts \\ []), do: critical_error(opts)
 
   # ===== by_status =====
 
@@ -145,14 +153,14 @@ defmodule Core.Web.ErrorMapper do
   | 5xx кроме 500 | `"internal_error"` | шаблон без идентификатора ошибки |
 
   Статус вне таблицы Plug отдаёт чужой плаг (`Plug.Exception.status/1`), и рендер ответа на ошибку
-  не имеет права упасть вместо обёртки. Опции: `unauthorized_message:`, `critical_message:`,
-  `error_id:` — только статус 500.
+  не имеет права упасть вместо обёртки.
   """
+  @opts_schema @unauthorized_opts ++ @critical_opts
   @spec by_status(400..599, keyword()) :: Response.error()
 
   def by_status(status, opts \\ [])
 
-  def by_status(401, opts), do: unauthorized(opts)
+  def by_status(401, opts), do: unauthorized_error(opts)
 
   def by_status(status, _opts) when status in 400..499 do
     Response.error(Status.reason_atom(status), Status.reason_phrase(status))
@@ -160,8 +168,8 @@ defmodule Core.Web.ErrorMapper do
     ArgumentError -> Response.error(:bad_request, Status.reason_phrase(400))
   end
 
-  def by_status(500, opts), do: critical(opts)
-  def by_status(status, opts) when status in 501..599, do: critical(Keyword.delete(opts, :error_id))
+  def by_status(500, opts), do: critical_error(opts)
+  def by_status(status, opts) when status in 501..599, do: critical_error(Keyword.put(opts, :error_id, nil))
 
   # ===== cast_errors =====
 
@@ -182,12 +190,14 @@ defmodule Core.Web.ErrorMapper do
     своя, без discriminator неизвестно. Решение — ADR-0068.
 
     Функция есть, только если `open_api_spex` был у приложения при сборке `core` (ADR-0064).
-    Опция: `invalid_params_message:`.
     """
+    @opts_schema [
+      invalid_params_message: [type: :string, default: @invalid_params, doc: "Текст `message` ответа 422."]
+    ]
     @spec cast_errors([Cast.Error.t(), ...], keyword()) :: result()
 
     def cast_errors([_ | _] = errors, opts \\ []) do
-      message = Keyword.get(opts, :invalid_params_message, @invalid_params)
+      message = Keyword.fetch!(opts, :invalid_params_message)
 
       violations = Enum.map(drop_branches(errors), &violation/1)
 
@@ -227,5 +237,21 @@ defmodule Core.Web.ErrorMapper do
 
     defp with_path(%Cast.Error{path: []}, message), do: "#: " <> message
     defp with_path(error, message), do: "#" <> Cast.Error.path_to_string(error) <> ": " <> message
+  end
+
+  # ===== общее =====
+
+  defp unauthorized_error(opts), do: Response.error(:not_authorized, Keyword.fetch!(opts, :unauthorized_message))
+
+  defp critical_error(opts) do
+    message = Keyword.fetch!(opts, :critical_message)
+
+    case Keyword.fetch!(opts, :error_id) do
+      nil ->
+        Response.error(:internal_error, message)
+
+      error_id when is_binary(error_id) ->
+        Response.error(:internal_error, message <> ". Идентификатор ошибки: " <> error_id, %{errorId: error_id})
+    end
   end
 end

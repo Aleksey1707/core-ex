@@ -35,6 +35,8 @@ defmodule Core.External do
   alias Core.Otel
   alias Core.Telemetry
 
+  use Core.Options
+
   @outcomes ~w(ok timeout down rejected)a
 
   @typedoc "Исход вызова, который определяет классификатор вызывающего."
@@ -42,14 +44,15 @@ defmodule Core.External do
 
   @doc """
   Выполнить вызов внешней системы `system` операцией `operation`; результат `fun` — без изменений.
-
-  Опция `outcome:` (обязательная) — классификатор «результат `fun` → исход».
   """
-  @spec call(atom(), atom(), (-> result), outcome: (result -> outcome())) :: result when result: var
+  @opts_schema [
+    outcome: [type: {:fun, 1}, required: true, doc: "Классификатор «результат `fun` → исход» (`t:outcome/0`)."]
+  ]
+  @spec call(atom(), atom(), (-> result), keyword()) :: result when result: var
 
   def call(system, operation, fun, opts)
       when is_atom(system) and is_atom(operation) and is_function(fun, 0) and is_list(opts) do
-    classify = classifier!(opts)
+    classify = Keyword.fetch!(opts, :outcome)
     metadata = %{system: system, operation: operation}
 
     system
@@ -63,18 +66,6 @@ defmodule Core.External do
   end
 
   # ---
-
-  defp classifier!(opts) do
-    case Keyword.fetch(opts, :outcome) do
-      {:ok, classify} when is_function(classify, 1) ->
-        classify
-
-      _missing ->
-        raise ArgumentError,
-              "Core.External.call: обязательная опция outcome: — функция «результат → одно из " <>
-                "#{inspect(@outcomes)}»"
-    end
-  end
 
   defp complete(fun, classify) do
     case invoke(fun) do

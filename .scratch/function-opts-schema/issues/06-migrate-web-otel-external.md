@@ -7,15 +7,48 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Классифицированы и переведены `Web.ErrorMapper` (`map`, `unauthorized`, `critical`,
+- [x] Классифицированы и переведены `Web.ErrorMapper` (`map`, `unauthorized`, `critical`,
       `by_status`, `cast_errors`), `Web.Params.page`, `Otel` (`span`, `root_span`,
       `with_span_from`), `Otel.Messaging` (`create`, `send`, `process`), `External.call`; функция,
       передающая опции насквозь (в OpenTelemetry, в соседнюю функцию модуля), — без схемы, с
       обоснованием в `## Comments`.
-- [ ] Ручная проза об опциях в `@doc` переведённых функций убрана.
-- [ ] Тесты модулей: по одной проверке «неизвестный ключ → `ArgumentError`»; остальные зелёные.
-- [ ] CHANGELOG: переведённые публичные функции добавлены в список пункта «Ломающие изменения
+- [x] Ручная проза об опциях в `@doc` переведённых функций убрана.
+- [x] Тесты модулей: по одной проверке «неизвестный ключ → `ArgumentError`»; остальные зелёные.
+- [x] CHANGELOG: переведённые публичные функции добавлены в список пункта «Ломающие изменения
       контракта».
-- [ ] `make` зелёный.
+- [x] `make` зелёный.
+
+## Comments
+
+- Свои ключи, схема: `Web.ErrorMapper.map/2`, `unauthorized/1`, `critical/1`, `by_status/2`,
+  `cast_errors/2`, `Web.Params.page/2`, `Otel.Messaging.create/4`, `External.call/4`.
+- `Web.ErrorMapper`: ключи общие у нескольких функций, поэтому схема собрана из атрибутов
+  `@auth_opts` / `@unauthorized_opts` / `@critical_opts`. `map/2` и `by_status/2` больше не зовут
+  публичные `unauthorized/1` / `critical/1` (их схема отклонила бы чужие ключи вроде `auth_codes:`),
+  а идут в приватные `unauthorized_error/1` / `critical_error/1` блока «общее»: опции уже проверены
+  один раз. `by_status(5xx кроме 500)` сбрасывает `error_id:` в `nil` вместо `Keyword.delete`:
+  тело читает его `Keyword.fetch!`.
+- `Web.ErrorMapper`: схема у каждой функции своя, по составу ключей `10-architecture.md`,
+  «Граница HTTP», а не общая на модуль. Цена: общий список опций маппера приложения, переданный
+  целиком в `critical/1` / `unauthorized/1` / `by_status/2`, теперь отклоняется (`auth_codes:` там не
+  действовал) — это и есть «ключ, который не действовал» спеки; правка потребителя (`Keyword.take`)
+  записана в CHANGELOG. Общая схема на модуль приняла бы `auth_codes:` у `critical/1` молча.
+- `Otel.Messaging.create/4`: умолчаний у ключей нет — их читает общий с `send/5` / `process/5`
+  приватный `attributes/3`, а у тех схемы нет (ниже). `attributes:` — `{:map, :string, :any}`:
+  имена атрибутов строковые.
+- `External.call/4`: ручной `classifier!/1` с `raise ArgumentError` снят — `outcome:` обязательный
+  ключ `{:fun, 1}`; `@spec` — `keyword()` вместо `[outcome: …]` (правило «тип опций — `keyword()`»).
+- Без схемы:
+  - `Otel.root_span/3` — передаёт опции насквозь в соседний `Otel.span/3`.
+  - `Otel.span/3`, `Otel.with_span_from/4`, `Otel.Messaging.send/5`, `Otel.Messaging.process/5` —
+    опции у них не последний аргумент (за ними колбэк `fun`), а `Core.Options` проверяет только
+    последний аргумент функции. Перестановка аргументов сломала бы всех вызывающих. Кроме того,
+    `Otel.span/3` — горячий путь: `Otel.Es` и `Otel.External` зовут его на каждую команду, пачку
+    проекции и внешний вызов с непустыми опциями (`attributes:`), и схема гнала бы NimbleOptions
+    на каждом span'е. Ключи `Otel.span/3` переводятся в опции `:otel_tracer` (`kind`, `attributes`,
+    `links`, `scope`) — это граница OpenTelemetry. Если их всё же нужно закрыть схемой — нужна
+    поддержка опций не последним аргументом в `Core.Options` (вне этого тикета); иначе
+    `CredoChecks.OptsSchema` (тикет 11) должен их пропускать.
+  - Отступление записано в `docs/rules/DEBT.md`, «Опции функций `lib/` мимо схемы».

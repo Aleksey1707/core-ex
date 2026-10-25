@@ -308,4 +308,26 @@ defmodule Core.Web.ErrorMapperTest do
     assert {400, %{code: "test/unauthorized"}, nil} = Web.ErrorMapper.map(domain(:unauthorized), opts)
     assert {500, body("internal_error", "Ой"), :error} == Web.ErrorMapper.map(app(:boom), opts)
   end
+
+  test "неизвестный ключ опций — ArgumentError" do
+    assert_raise ArgumentError, ~r"^Core.Web.ErrorMapper.map/2: unknown options \[:auth_code\]", fn ->
+      Web.ErrorMapper.map(domain(:invalid), auth_code: ~w(no_session)a)
+    end
+
+    assert_raise ArgumentError, ~r"^Core.Web.ErrorMapper.unauthorized/1: unknown options", fn ->
+      Web.ErrorMapper.unauthorized(message: "Нет")
+    end
+
+    assert_raise ArgumentError, ~r"^Core.Web.ErrorMapper.critical/1: unknown options", fn ->
+      Web.ErrorMapper.critical(errorId: "id")
+    end
+
+    assert_raise ArgumentError, ~r"^Core.Web.ErrorMapper.by_status/2: unknown options", fn ->
+      Web.ErrorMapper.by_status(404, critical: "Ой")
+    end
+
+    assert_raise ArgumentError, ~r"^Core.Web.ErrorMapper.cast_errors/2: unknown options", fn ->
+      Web.ErrorMapper.cast_errors(cast_errors(%{}), message: "Нет")
+    end
+  end
 end

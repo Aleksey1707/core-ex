@@ -42,6 +42,12 @@ defmodule Core.Web.ParamsTest do
              Web.Params.page(%{}, limit_default: 50, offset_default: 7)
   end
 
+  test "page: неизвестный ключ опций — ArgumentError" do
+    assert_raise ArgumentError, ~r"^Core.Web.Params.page/2: unknown options \[:limit\]", fn ->
+      Web.Params.page(%{}, limit: 50)
+    end
+  end
+
   test "page отдаёт доменную ошибку на значении вне границ" do
     assert {:error, %Error{kind: :domain}} = Web.Params.page(%{"limit" => 1000})
     assert {:error, %Error{kind: :domain}} = Web.Params.page(%{"offset" => -1})

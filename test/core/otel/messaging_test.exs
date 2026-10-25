@@ -50,6 +50,12 @@ defmodule Core.Otel.MessagingTest do
       assert create.attributes["messaging.system"] == "rabbitmq"
       assert create.attributes["core.outbox.record"] == "r-1"
     end
+
+    test "неизвестный ключ опций — ArgumentError" do
+      assert_raise ArgumentError, ~r"^Core.Otel.Messaging.create/4: unknown options \[:attrs\]", fn ->
+        Otel.Messaging.create(%{}, "products", "agg-1", attrs: %{})
+      end
+    end
   end
 
   describe "send/5" do

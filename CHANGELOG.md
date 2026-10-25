@@ -43,6 +43,23 @@
     проверяются: `host` / `vhost` / `username` / `password` — строки, `port` — положительное целое;
     charlist и `nil` (`System.get_env/1` без переменной) раньше уходили в struct, теперь —
     `ArgumentError`. Пароль не строкой отклоняется без значения в тексте.
+  - `Core.Web.ErrorMapper.map/2`, `unauthorized/1`, `critical/1`, `by_status/2`, `cast_errors/2` —
+    у каждой функции свой состав ключей (`docs/rules/10-architecture.md`, «Граница HTTP»), и общий
+    список опций маппера приложения, переданный целиком, теперь отклоняется: `auth_codes:` — у
+    `unauthorized/1`, `critical/1`, `by_status/2`; `error_id:` и `critical_message:` — у
+    `unauthorized/1`; всё, кроме `invalid_params_message:`, — у `cast_errors/2`. Было:
+    `critical(mapper_opts)`, стало: `critical(Keyword.take(mapper_opts, [:critical_message]))`.
+    Тип: `auth_codes:` не список атомов (в том числе `MapSet`), `*_message:` не строка, `error_id:`
+    не строка и не `nil` — `ArgumentError`, раньше `error_id:` иного типа давал `CaseClauseError` на
+    строке 500.
+  - `Core.Web.Params.page/2` — `limit_default:` не положительное целое и `offset_default:` не
+    неотрицательное целое — `ArgumentError`; раньше строка (`"20"`) разбиралась, а значение вне
+    границ давало доменную ошибку разбора страницы. Было: `limit_default: "20"`, стало:
+    `limit_default: 20`.
+  - `Core.Otel.Messaging.create/4` — `attributes:` с ключами-атомами — `ArgumentError`, раньше
+    уходили в span: имена атрибутов — строки (`Core.Otel.attributes/0`).
+  - `Core.External.call/4` — без `outcome:` по-прежнему `ArgumentError`, текст — NimbleOptions
+    (`required :outcome option not found`).
 
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на

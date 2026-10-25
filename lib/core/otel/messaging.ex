@@ -29,6 +29,8 @@ defmodule Core.Otel.Messaging do
 
   alias Core.Otel
 
+  use Core.Options
+
   @attr_system "messaging.system"
   @attr_operation_type "messaging.operation.type"
   @attr_operation_name "messaging.operation.name"
@@ -68,7 +70,13 @@ defmodule Core.Otel.Messaging do
   в запись outbox). Возвращает обновлённый carrier — его получает сообщение —
   и контекст create-span'а для `links:` у `send/5`.
   """
-  @spec create(Otel.carrier(), destination(), message_id(), opts()) ::
+  @opts_schema [
+    system: [type: :string, doc: "`messaging.system` (`\"rabbitmq\"`, `\"kafka\"`); не задан — атрибут не ставится."],
+    operation_name: [type: :string, doc: "`messaging.operation.name`; не задан — совпадает с типом операции."],
+    attributes: [type: {:map, :string, :any}, doc: "Собственные атрибуты вызывающего (вне `messaging.*`)."],
+    scope: [type: :atom, doc: "Модуль instrumentation scope (`Core.Otel`)."]
+  ]
+  @spec create(Otel.carrier(), destination(), message_id(), keyword()) ::
           {Otel.carrier(), Otel.span_ctx() | :undefined}
 
   def create(carrier, destination, message_id, opts \\ []) when is_map(carrier) do

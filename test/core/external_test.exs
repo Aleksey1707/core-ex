@@ -115,5 +115,11 @@ defmodule Core.ExternalTest do
     test "без outcome: — ArgumentError" do
       assert_raise ArgumentError, ~r/outcome/, fn -> External.call(:sms, :send, fn -> :ok end, []) end
     end
+
+    test "неизвестный ключ опций — ArgumentError" do
+      assert_raise ArgumentError, ~r"^Core.External.call/4: unknown options \[:classify\]", fn ->
+        External.call(:sms, :send, fn -> :ok end, outcome: fn _ -> :ok end, classify: & &1)
+      end
+    end
   end
 end
