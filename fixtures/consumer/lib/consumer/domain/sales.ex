@@ -14,7 +14,7 @@ defmodule Consumer.Domain.Sales do
     представление `Account.View` с `jsonb:` по типу плагина по полям и по семейству.
   - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (поля `union:`), семейства
     вариантов `Account.Profile.Channel.Codec` (тегированная форма с дискриминатором) и
-    `Account.Profile.Badge.Codec` (без обёртки).
+    `Account.Profile.Badge.Codec` (без обёртки, `variants:` выражением из реестра).
   - Компоненты: нет.
   - Другие контексты: нет.
   """

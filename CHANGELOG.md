@@ -381,7 +381,7 @@
   | `use Core.Prim.String` и другие обёртки | `name:`, `mutate:`, `validate:` и свои: `re:`, `max_len:`, `namespace:`, `min:` / `max:` у `Prim.Decimal` |
   | `use Core.Enum` | `name:` |
   | `use Core.Codec.Facade` | `plugins:` |
-  | `use Core.Codec.Plugin` | `types:` |
+  | `use Core.Codec.Plugin` | `types:`, `variants:` |
   | `use Core.Repo.Pg`, `use Core.Repo.Pg.StateStored` | `query:`, `to_entity:`, `to_model:`, `to_view:`, `to_id:`, `default_filters:` |
   | `use Core.Labels.Text` | `with:` |
   | `use Core.Labels.Fields` | `fields:`, `value:` |

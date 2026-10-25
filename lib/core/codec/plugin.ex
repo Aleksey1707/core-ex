@@ -85,10 +85,11 @@ defmodule Core.Codec.Plugin do
 
   ## Опции
 
-  `types:` — опция-выражение (`docs/rules/20-agreements.md`, «Опции `use`»): список вычисляется в теле
-  плагина, поэтому законно `types: Map.keys(@tag_by_mod)`. Остальные опции — литералы: ключи,
-  `loadable:` и `union:` проверяются при раскрытии `use`, атрибут или вызов функции — `CompileError`
-  «ожидается литерал».
+  `types:` и `variants:` — опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): список
+  вычисляется в теле плагина, поэтому законно `types: Map.keys(@tag_by_mod)` и `variants:` из реестра
+  модуля (`Enum.map(@tag_by_mod, fn {mod, tag} -> {mod, tag, level: [type: :pos_integer]} end)`).
+  Остальные опции — литералы: ключи, `loadable:` и `union:` проверяются при раскрытии `use`, атрибут
+  или вызов функции — `CompileError` «ожидается литерал».
 
   Модули `types:` / `fields:` / `variants:` MAY быть вложены в плагин: проверки по ним (struct, поля,
   Prim) идут в теле. Вложенный модуль `fields:` / `variants:` MUST быть объявлен выше `use` — ниже он
@@ -102,7 +103,7 @@ defmodule Core.Codec.Plugin do
   @label "Codec.Plugin"
   @required_keys ~w()a
   @optional_keys ~w(types loadable union fields variants)a
-  @expression_keys ~w(types)a
+  @expression_keys ~w(types variants)a
 
   @typedoc "Модуль entity-фасада (`Core.Codec.Facade.Behaviour`)."
   @type codec :: module()
@@ -169,7 +170,7 @@ defmodule Core.Codec.Plugin do
         @codec_union unquote(union)
         @codec_fields Core.Codec.Field.fields!(unquote(Macro.escape(Keyword.get(opts, :fields))), @codec_loadable)
         @codec_variants Core.Codec.Plugin.Variants.variants!(
-                          unquote(Macro.escape(Keyword.get(opts, :variants))),
+                          unquote(Keyword.get(opts, :variants)),
                           @codec_union
                         )
         @codec_types Core.Codec.Plugin.Opts.all_types!([

@@ -104,10 +104,28 @@ defmodule Core.Codec.PluginVariantsTest do
       variants: [{Frame.Box, "box", shape: [union: Shape]}]
   end
 
+  defmodule Mood do
+    defmodule Calm do
+      defstruct [:level]
+    end
+
+    defmodule Angry do
+      defstruct [:level]
+    end
+  end
+
+  defmodule MoodPlugin do
+    @tag_by_mod %{Mood.Calm => "calm", Mood.Angry => "angry"}
+
+    use Core.Codec.Plugin,
+      union: Mood,
+      variants: Enum.map(@tag_by_mod, fn {mod, tag} -> {mod, tag, level: [type: :pos_integer]} end)
+  end
+
   defmodule Facade do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.Internal,
-      plugins: [ShapePlugin, PetPlugin, DrawingPlugin]
+      plugins: [ShapePlugin, PetPlugin, DrawingPlugin, MoodPlugin]
   end
 
   describe "dump" do
@@ -146,6 +164,11 @@ defmodule Core.Codec.PluginVariantsTest do
         assert Facade.load(family, Facade.dump(value)) == {:ok, value}
         assert Facade.load(value.__struct__, Facade.dump(value)) == {:ok, value}
       end
+    end
+
+    test "variants: выражением — варианты из реестра модуля" do
+      assert Facade.dump(%Mood.Calm{level: 1}) == %{"type" => "calm", "fields" => %{"level" => 1}}
+      assert Facade.load(Mood, Facade.dump(%Mood.Angry{level: 2})) == {:ok, %Mood.Angry{level: 2}}
     end
 
     test "wire из jsonb: строковые и атомарные ключи, дискриминатор строкой" do

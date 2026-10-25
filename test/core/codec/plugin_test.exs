@@ -236,6 +236,21 @@ defmodule Core.Codec.PluginTest do
     end
   end
 
+  test "variants: неверное выражение — в теле, с меткой" do
+    assert_raise CompileError,
+                 ~r/^Codec\.Plugin: variants: ожидается непустой список \{Тип, адрес, спека\}, получено :x$/,
+                 fn ->
+                   Code.eval_quoted(
+                     quote do
+                       defmodule Core.Codec.PluginTest.BadExprVariants do
+                         @variants :x
+                         use Core.Codec.Plugin, union: Core.Codec.PluginTest.BadExprVariants, variants: @variants
+                       end
+                     end
+                   )
+                 end
+  end
+
   test "вложенный модуль ниже use — «недоступен»" do
     assert_raise CompileError,
                  ~r/^Codec\.Plugin: fields: .*NestedBelow\.X: .*NestedBelow\.X недоступен/,
