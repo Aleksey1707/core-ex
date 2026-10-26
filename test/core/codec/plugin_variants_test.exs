@@ -339,6 +339,27 @@ defmodule Core.Codec.PluginVariantsTest do
   end
 
   describe "сборка" do
+    test "вид поля варианта расходится со структурой по полям — CompileError" do
+      message =
+        ~r/variants: .*StructKind.V: a: вид поля расходится со структурой — в структуре \[type: :string\], в плагине \[type: :integer\]/
+
+      assert_raise CompileError, message, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Codec.PluginVariantsTest.StructKind do
+              defmodule V do
+                use Core.Struct, fields: [a: [type: :string]]
+              end
+
+              use Core.Codec.Plugin,
+                union: Core.Codec.PluginVariantsTest.StructKind.Family,
+                variants: [{Core.Codec.PluginVariantsTest.StructKind.V, "v", a: [type: :integer]}]
+            end
+          end
+        )
+      end
+    end
+
     test "variants: без union: — CompileError" do
       assert_raise CompileError, ~r/variants: требует union:/, fn ->
         compile(:NoUnion, quote(do: [{T, "t", a: [type: :string]}]), union: false)

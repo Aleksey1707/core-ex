@@ -210,8 +210,14 @@
   поле в `defstruct`, но не в типе, тип `%__MODULE__{}` без полей. Обязательны ключи всех полей:
   `optional: true` значит только «значение может быть `nil`», а ключ каждая сборка `%S{}`
   указывает явно. Кодека и конструктора нет — wire задаёт Codec-плагин по полям, сборка — литерал
-  `%S{}`. `wire:`, `subject:` и `default:` — `CompileError` `Struct: fields: <поле>: …`. Ручной
-  `defstruct` остаётся допустимым. Было:
+  `%S{}`. `wire:`, `subject:` и `default:` — `CompileError` `Struct: fields: <поле>: …`.
+  Codec-плагин по полям (`fields:` и `variants:`) сверяет со структурой по полям не только ключи, но
+  и вид каждого поля, включая вложенный `list:`, и `optional:`: `prim: Name` в структуре и
+  `prim: Other` в плагине — `CompileError` `Codec.Plugin: fields: <Тип>: <поле>: вид поля
+  расходится со структурой — в структуре [...], в плагине [...]` (у варианта — префикс
+  `Codec.Plugin: variants: <Тип>: <поле>`). `wire:` и `default:` остаются только у плагина;
+  поле структуры с `optional: true` плагин объявляет тоже `optional: true` и без `default:`. Ручной `defstruct` остаётся допустимым, у него плагин сверяет только ключи.
+  Было:
   `@enforce_keys ~w(name note)a` + `defstruct @enforce_keys` +
   `@type t :: %__MODULE__{name: Name.t(), note: Note.t() | nil}`, стало:
   `use Core.Struct, fields: [name: [prim: Name], note: [prim: Note, optional: true]]`.

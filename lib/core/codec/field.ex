@@ -150,6 +150,7 @@ defmodule Core.Codec.Field do
   defp type_fields!(type, spec, skipped, mode, where) do
     fields = spec_fields!(spec, mode, where)
     check_struct!(type, Keyword.keys(spec), skipped, where)
+    check_struct_fields!(type, fields, where)
 
     fields
   end
@@ -171,6 +172,33 @@ defmodule Core.Codec.Field do
         )
     end
   end
+
+  # Структура по полям объявляет вид каждого поля сама (ADR-0090): ключей мало, иначе плагин
+  # молча грузил бы в поле значение другого Prim или `nil` в поле без `optional: true`.
+  defp check_struct_fields!(type, fields, where) do
+    if Core.Helper.Module.exports?(type, :__struct_fields__, 0) do
+      declared = Map.new(type.__struct_fields__(), fn %__MODULE__{name: name} = field -> {name, shape(field)} end)
+
+      for %__MODULE__{name: name} = field <- fields,
+          struct_shape = Map.fetch!(declared, name),
+          plugin_shape = shape(field),
+          struct_shape != plugin_shape do
+        Helper.Opts.reject!(
+          "#{where}: #{name}",
+          "вид поля расходится со структурой — в структуре #{inspect(struct_shape)}, " <>
+            "в плагине #{inspect(plugin_shape)}"
+        )
+      end
+    end
+
+    :ok
+  end
+
+  defp shape(%__MODULE__{spec: spec, optional?: false}), do: spec_shape(spec)
+  defp shape(%__MODULE__{spec: spec, optional?: true}), do: spec_shape(spec) ++ [optional: true]
+
+  defp spec_shape({:list, inner}), do: [list: spec_shape(inner)]
+  defp spec_shape({kind, value}), do: [{kind, value}]
 
   defp spec_fields!(spec, mode, where) do
     if not Keyword.keyword?(spec) or spec == [] do

@@ -32,6 +32,16 @@ defmodule Core.Codec.PluginFieldsTest do
       values: ~w(new done)a
   end
 
+  defmodule Badge do
+    use Core.Struct,
+      fields: [
+        name: [prim: Name],
+        note: [prim: Name, optional: true],
+        status: [enum: Status],
+        tags: [list: [prim: Name]]
+      ]
+  end
+
   defmodule Card do
     defstruct [:status, :prev_status, :tag, :parent, :tags, :statuses, :grid, :count, :meta, :label, :rank, :flag]
   end
@@ -47,6 +57,11 @@ defmodule Core.Codec.PluginFieldsTest do
          version: [prim: Version],
          note: [prim: Name, optional: true]},
         {Tag, name: [prim: Name]},
+        {Badge,
+         name: [prim: Name, wire: "title"],
+         note: [prim: Name, optional: true],
+         status: [enum: Status, default: "new"],
+         tags: [list: [prim: Name]]},
         {Card,
          status: [enum: Status],
          prev_status: [enum: Status, optional: true],
@@ -170,6 +185,14 @@ defmodule Core.Codec.PluginFieldsTest do
     item = %{item | note: Name.new!("у окна")}
     assert Facade.load(Item, Facade.dump(item)) == {:ok, item}
     assert Facade.load(Tag, Facade.dump(%Tag{name: Name.new!("x")})) == {:ok, %Tag{name: Name.new!("x")}}
+  end
+
+  test "структура по полям: wire: и default: плагина не расходятся с её полями" do
+    badge = %Badge{name: Name.new!("Стол"), note: nil, status: :done, tags: [Name.new!("x")]}
+
+    assert Facade.dump(badge) == %{"title" => "Стол", "note" => nil, "status" => :done, "tags" => ["x"]}
+    assert Facade.load(Badge, Facade.dump(badge)) == {:ok, badge}
+    assert Facade.load(Badge, %{"title" => "Стол", "tags" => []}) == {:ok, %{badge | status: :new, tags: []}}
   end
 
   test "optional: отсутствующий ключ — nil", %{item: item} do
@@ -440,6 +463,45 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
+    test "вид поля расходится со структурой по полям — CompileError с обоими видами" do
+      message =
+        ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name\], в плагине \[prim: .*\.ID\]/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:StructKind, [a: [prim: Core.Codec.PluginFieldsTest.ID]], struct_fields: [a: [prim: Name]])
+      end
+    end
+
+    test "вид элемента list: расходится со структурой по полям — CompileError" do
+      message =
+        ~r/\.T: a: вид поля расходится со структурой — в структуре \[list: \[prim: .*\.Name\]\], в плагине \[list: \[list:/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:StructList, [a: [list: [list: [prim: Name]]]], struct_fields: [a: [list: [prim: Name]]])
+      end
+    end
+
+    test "optional: расходится со структурой по полям — CompileError в обе стороны" do
+      message =
+        ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name, optional: true\], в плагине \[prim: .*\.Name\]/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:StructOptional, [a: [prim: Name]], struct_fields: [a: [prim: Name, optional: true]])
+      end
+
+      message =
+        ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name\], в плагине \[prim: .*\.Name, optional: true\]/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:PluginOptional, [a: [prim: Name, optional: true]], struct_fields: [a: [prim: Name]])
+      end
+    end
+
+    test "ручной struct — сверяются только ключи, вид поля любой" do
+      assert {{:module, _plugin, _bytecode, _result}, []} =
+               compile_plugin(:ManualKinds, a: [prim: Core.Codec.PluginFieldsTest.ID], b: [list: [type: :integer]])
+    end
+
     test "тип в types: и в fields: — CompileError" do
       assert_raise CompileError, ~r/типы объявлены в нескольких опциях: \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
         Code.eval_quoted(
@@ -598,11 +660,17 @@ defmodule Core.Codec.PluginFieldsTest do
     type = Module.concat(plugin, T)
     spec = Macro.escape(spec)
 
+    struct =
+      case Keyword.fetch(opts, :struct_fields) do
+        {:ok, fields} -> quote(do: use(Core.Struct, fields: unquote(Macro.escape(fields))))
+        :error -> quote(do: defstruct([:a, :b]))
+      end
+
     Code.eval_quoted(
       quote do
         defmodule unquote(plugin) do
           defmodule unquote(type) do
-            defstruct [:a, :b]
+            unquote(struct)
           end
 
           use Core.Codec.Plugin,
