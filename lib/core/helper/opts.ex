@@ -31,6 +31,11 @@ defmodule Core.Helper.Opts do
   Опция-выражение (атрибут, вызов функции, захват) уходит AST-ом в атрибут тела через валидатор
   `<key>!`: `@doc false` функцию builder'а или value-вариант отсюда (`binary_value!/3`).
 
+  Выражением MAY быть и ключ внутри записи литеральной опции: элемент `{key, inner_keys}` в
+  `expression_keys` (`@expression_keys [fields: ~w(default)a]`) объявляет опцию `key` keyword-списком
+  записей, у которых ключи `inner_keys` — выражения, а остальное — литерал
+  (`fields: [count: [type: :integer, default: @zero]]`).
+
   `module_or_config!/4` — опция-модуль с дефолтом из `Core.Config`, резолвимым в рантайме.
 
   ## Тексты ошибок
@@ -99,11 +104,17 @@ defmodule Core.Helper.Opts do
   Литерал — значение, для которого после `expand!/3` истинно `Macro.quoted_literal?/1`; его AST
   вычисляется (кортеж или struct в AST значением не являются). Опции-выражения возвращаются AST
   как есть.
+
+  Элемент `{key, inner_keys}` — опция `key` из записей `[name: [...]]`: в каждой записи ключи
+  `inner_keys` возвращаются AST, остальные значения вычисляются как литерал с путём
+  `<метка>: <key>: <name>` в отказе. Опция другой формы целиком требует литерал.
   """
-  @spec literal!(keyword(), [atom()], String.t()) :: keyword()
+  @spec literal!(keyword(), [atom() | {atom(), [atom()]}], String.t()) :: keyword()
 
   def literal!(opts, expression_keys, label) do
-    Enum.map(opts, fn {key, value} -> {key, literal_value!(value, key in expression_keys, key, label)} end)
+    Enum.map(opts, fn {key, value} ->
+      {key, option_value!(value, expression(expression_keys, key), "#{label}: #{key}")}
+    end)
   end
 
   @doc """
@@ -245,12 +256,36 @@ defmodule Core.Helper.Opts do
   defp expand_value({left, right}, caller), do: {expand_value(left, caller), expand_value(right, caller)}
   defp expand_value(value, _caller), do: value
 
-  defp literal_value!(value, true = _expression?, _key, _label), do: value
+  defp expression(expression_keys, key) do
+    cond do
+      key in expression_keys -> :all
+      Keyword.has_key?(expression_keys, key) -> {:entries, Keyword.fetch!(expression_keys, key)}
+      true -> :none
+    end
+  end
 
-  defp literal_value!(value, false = _expression?, key, label) do
+  defp option_value!(value, :all, _where), do: value
+  defp option_value!(value, :none, where), do: literal_value!(value, where)
+
+  defp option_value!(value, {:entries, inner_keys}, where) do
+    if Keyword.keyword?(value),
+      do: Enum.map(value, fn {name, entry} -> {name, entry_value!(entry, inner_keys, "#{where}: #{name}")} end),
+      else: literal_value!(value, where)
+  end
+
+  defp entry_value!(entry, inner_keys, where) do
+    if Keyword.keyword?(entry),
+      do:
+        Enum.map(entry, fn {key, value} ->
+          {key, if(key in inner_keys, do: value, else: literal_value!(value, where))}
+        end),
+      else: literal_value!(entry, where)
+  end
+
+  defp literal_value!(value, where) do
     if Macro.quoted_literal?(value),
       do: elem(Code.eval_quoted(value), 0),
-      else: reject!("#{label}: #{key}", "ожидается литерал, получено #{Macro.to_string(value)}")
+      else: reject!(where, "ожидается литерал, получено #{Macro.to_string(value)}")
   end
 
   defp fetch!(opts, key, label, checks) do

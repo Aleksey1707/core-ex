@@ -17,6 +17,16 @@ defmodule Core.Helper.FieldCheck do
 
   def type_values, do: ~w(string boolean integer pos_integer non_neg_integer map)a
 
+  @doc "Значение `value` — значение типа `type` из `type_values/0`; `:map` — map, но не struct."
+  @spec type_value?(atom(), term()) :: boolean()
+
+  def type_value?(:string, value), do: is_binary(value)
+  def type_value?(:boolean, value), do: is_boolean(value)
+  def type_value?(:integer, value), do: is_integer(value)
+  def type_value?(:pos_integer, value), do: is_integer(value) and value > 0
+  def type_value?(:non_neg_integer, value), do: is_integer(value) and value >= 0
+  def type_value?(:map, value), do: is_map(value) and not is_struct(value)
+
   @doc "Проверить, что `mod` — собранный модуль."
   @spec module!(term(), String.t()) :: :ok
 

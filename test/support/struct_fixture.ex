@@ -51,6 +51,16 @@ defmodule Core.StructFixture do
       ]
   end
 
+  defmodule Defaults do
+    @moduledoc false
+
+    use Core.Struct,
+      fields: [
+        count: [type: :integer, default: 0],
+        note: [prim: Name, optional: true, default: nil]
+      ]
+  end
+
   defmodule Nested do
     @moduledoc false
 

@@ -7,7 +7,8 @@ defmodule Core.Codec.Field do
   (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Поле объявляется keyword-спекой с
   ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`) и ключами
   `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у нагрузки
-  (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет (ADR-0090).
+  (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у неё —
+  выражение значения поля, а не wire-литерал (ADR-0090).
 
   Модуль внутренний для библиотеки.
   """
@@ -34,7 +35,10 @@ defmodule Core.Codec.Field do
           | {:list, spec()}
           | {:type, atom()}
 
-  @typedoc "Значение `default:`: нет или wire-литерал."
+  @typedoc """
+  Значение `default:`: нет, wire-литерал у плагина или, у структуры, AST выражения до вычисления в
+  теле модуля и значение поля после него.
+  """
   @type default :: :none | {:default, term()}
 
   @typedoc """
@@ -46,8 +50,8 @@ defmodule Core.Codec.Field do
   @typedoc """
   Режим нормализации: `:plugin` — плагин с загрузкой (`default:` разрешён), `:dump_only` — плагин
   при `loadable: false`, `:payload` — нагрузка события (`subject:` разрешён, `default:` и wire-ключ на
-  `$` — нет), `:labels` — подписи, `:struct` — структура по полям (`wire:`, `subject:` и `default:` —
-  нет).
+  `$` — нет), `:labels` — подписи, `:struct` — структура по полям (`wire:` и `subject:` — нет,
+  `default:` — выражение значения поля).
   """
   @type mode :: :plugin | :dump_only | :payload | :labels | :struct
 
@@ -232,7 +236,7 @@ defmodule Core.Codec.Field do
       spec: spec,
       optional?: optional?,
       wire: wire!(name, opts, where),
-      default: default!(opts, spec, optional?, mode != :dump_only, where),
+      default: default!(opts, spec, optional?, mode, where),
       subject: subject!(opts, where)
     }
   end
@@ -240,8 +244,7 @@ defmodule Core.Codec.Field do
   defp check_struct_keys!(opts, where) do
     for {key, text} <- [
           wire: "wire: у структуры по полям нет wire — его задаёт Codec-плагин по полям",
-          subject: "subject: у структуры по полям нет кодека — субъект ПДн задаёт нагрузка события",
-          default: "default: у структуры по полям пока не поддерживается"
+          subject: "subject: у структуры по полям нет кодека — субъект ПДн задаёт нагрузка события"
         ],
         Keyword.has_key?(opts, key),
         do: Helper.Opts.reject!(where, text)
@@ -330,8 +333,15 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp default!(opts, spec, optional?, loadable?, where) do
-    case {Keyword.fetch(opts, :default), optional?, loadable?} do
+  defp default!(opts, _spec, _optional?, :struct, _where) do
+    case Keyword.fetch(opts, :default) do
+      :error -> :none
+      {:ok, ast} -> {:default, ast}
+    end
+  end
+
+  defp default!(opts, spec, optional?, mode, where) do
+    case {Keyword.fetch(opts, :default), optional?, mode != :dump_only} do
       {:error, _optional?, _loadable?} ->
         :none
 

@@ -186,6 +186,28 @@ defmodule Core.Helper.OptsTest do
         Opts.literal!([values: quote(do: @values)], ~w(name)a, "T")
       end
     end
+
+    test "вложенный ключ-выражение: в записях опции ключ отдаётся AST, остальное вычисляется" do
+      opts =
+        quote(do: [fields: [count: [type: :integer, default: @zero], name: [list: [type: :string]]]])
+        |> Opts.expand!(__ENV__, "T")
+        |> Opts.literal!([fields: ~w(default)a], "T")
+
+      assert [count: [type: :integer, default: default], name: [list: [type: :string]]] = opts[:fields]
+      assert Macro.to_string(default) == "@zero"
+    end
+
+    test "вложенный ключ-выражение: нелитерал вне ключа — CompileError с записью" do
+      assert_raise CompileError, ~r/^T: fields: count: ожидается литерал, получено Mod.type\(\)$/, fn ->
+        Opts.literal!([fields: quote(do: [count: [type: Mod.type(), default: @zero]])], [fields: ~w(default)a], "T")
+      end
+    end
+
+    test "вложенный ключ-выражение: опция не список записей — CompileError «ожидается литерал»" do
+      assert_raise CompileError, ~r/^T: fields: ожидается литерал, получено @fields$/, fn ->
+        Opts.literal!([fields: quote(do: @fields)], [fields: ~w(default)a], "T")
+      end
+    end
   end
 
   test "reject! — CompileError «<where>: <message>»" do
