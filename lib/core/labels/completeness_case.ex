@@ -18,11 +18,12 @@ defmodule Core.Labels.CompletenessCase do
   `Core.Es.Event.Codec.codec?/1` признаёт кодеком событий, семейства — плагины с `__codec_union__/0`
   (`use Core.Codec.Plugin, union:`). Перечня нет: новый кодек попадает под проверку сам, без новой
   строки теста. Обход идёт от событий кодеков по спеке нагрузки (`Core.Labels.Fields`): во вложенные
-  struct'ы, списки и варианты семейства. Автор события (`by`) в сведения не выходит, но событие
-  страницы событий с подписями (`Core.Web.Event`, `labels: true` требует `user_ref:`) дампит его
-  ссылкой на учётную запись с именем из словаря ссылок, а словарь находит только id с резолвером —
-  иначе `ArgumentError` на первом событии. Ключи и значения свободной map'ы (`type: :map`) спеки
-  нет, и вид id в них ратчет не видит: его проверяет только построение сведений.
+  struct'ы, списки, множества, ключи и значения словарей (`map:`) и варианты семейства. Автор события
+  (`by`) в сведения не выходит, но событие страницы событий с подписями (`Core.Web.Event`,
+  `labels: true` требует `user_ref:`) дампит его ссылкой на учётную запись с именем из словаря ссылок,
+  а словарь находит только id с резолвером — иначе `ArgumentError` на первом событии. Ключи и
+  значения свободной map'ы (`type: :map`) спеки нет, и вид id в них ратчет не видит: его проверяет
+  только построение сведений.
 
   ## Генерируемые тесты
 
@@ -280,7 +281,11 @@ defmodule Core.Labels.CompletenessCase do
   defp visit(owner, field, {kind, module}, acc, _families) when kind in ~w(prim enum)a,
     do: place(acc, {kind, owner, field, module})
 
-  defp visit(owner, field, {:list, inner}, acc, families), do: visit(owner, field, inner, acc, families)
+  defp visit(owner, field, {kind, inner}, acc, families) when kind in ~w(list set)a,
+    do: visit(owner, field, inner, acc, families)
+
+  defp visit(owner, field, {:map, key, value}, acc, families),
+    do: visit(owner, field, value, visit(owner, field, key, acc, families), families)
 
   defp visit(owner, field, {:entity, module}, acc, families),
     do: descend(place(acc, {:struct, owner, field, module}), module, families)

@@ -49,6 +49,16 @@ defmodule Core.Labels.RefsTest do
     assert Refs.get(event, context(names)) == {:ok, names}
   end
 
+  test "id в элементе множества и ключе словаря; id только в скрытом словаре резолвер не получает" do
+    [first, second, kept, keyed, hidden] = for _ <- 1..5, do: ItemID.new()
+    by = UserID.new()
+    names = %{first => "Позиция 1", second => "Позиция 2", kept => "Позиция 3", keyed => "Позиция 4", by => "Автор"}
+
+    assert Refs.get(grouped(by, [first, second], [kept], keyed, hidden), context(names)) == {:ok, names}
+    assert_received {:get_names, ItemQuery, items}
+    assert Enum.sort(items) == Enum.sort([first, second, kept, keyed])
+  end
+
   test "автор события и id в варианте семейства; id агрегата не обходится" do
     [by, assignee] = for _ <- 1..2, do: UserID.new()
     item = ItemID.new()
@@ -68,11 +78,11 @@ defmodule Core.Labels.RefsTest do
     assert Enum.sort(users) == Enum.sort([by, signer])
   end
 
-  test "id только под `text:` резолвер не получает: поле, список, значение изменения и список значений" do
+  test "id только под `text:` резолвер не получает: поле, список, множество, значение изменения и список значений" do
     by = UserID.new()
     names = %{by => "Автор"}
 
-    for event <- text_events(by, for(_ <- 1..6, do: ItemID.new())) do
+    for event <- text_events(by, for(_ <- 1..7, do: ItemID.new())) do
       assert Refs.get(event, context(names)) == {:ok, names}
       refute_received {:get_names, ItemQuery, _ids}
     end
@@ -92,7 +102,7 @@ defmodule Core.Labels.RefsTest do
   test "каждый id словаря, кроме автора, есть в сведениях: те же фикстуры и id под `text:`" do
     {events, names} = detailed()
     by = UserID.new()
-    text_ids = for _ <- 1..6, do: ItemID.new()
+    text_ids = for _ <- 1..7, do: ItemID.new()
     names = Map.merge(names, Map.new([by | text_ids], &{&1, "Имя"}))
 
     for event <- events ++ text_events(by, text_ids) do
@@ -176,10 +186,10 @@ defmodule Core.Labels.RefsTest do
 
   # События со сведениями обо всех видах обхода и словарь имён всех их id.
   defp detailed do
-    items = for _ <- 1..8, do: ItemID.new()
+    items = for _ <- 1..10, do: ItemID.new()
     users = for _ <- 1..5, do: UserID.new()
     names = Map.new(items ++ users, &{&1, "Имя"})
-    [item, backup, listed, keyed, pinned, old_item, new_item, sealed_item] = items
+    [item, backup, listed, keyed, pinned, old_item, new_item, sealed_item, in_set, set_key] = items
     [owner, valued, by, assignee, signer] = users
     moved = Event.Moved.Payload.new(old_item, new_item)
 
@@ -187,15 +197,16 @@ defmodule Core.Labels.RefsTest do
       linked(item, owner, backup: backup, items: [listed], limits: %{keyed => valued}),
       assigned(by, assignee, pinned),
       Event.Moved.new(moved, AggID.new(), Version.new(), by, At.now!()),
-      sealed(by, sealed_item, signer, limits: %{keyed => valued})
+      sealed(by, sealed_item, signer, limits: %{keyed => valued}),
+      grouped(by, [in_set], [], set_key, ItemID.new())
     ]
 
     {events, names}
   end
 
-  # Шесть id под `text:`: поле, список, стороны изменения значения и списка значений.
-  defp text_events(by, [origin, listed, old_value, new_value, old_listed, new_listed]) do
-    quoted = %Event.Quoted.Payload{origin: origin, origins: [listed]}
+  # Семь id под `text:`: поле, список, множество, стороны изменения значения и списка значений.
+  defp text_events(by, [origin, listed, in_set, old_value, new_value, old_listed, new_listed]) do
+    quoted = %Event.Quoted.Payload{origin: origin, origins: [listed], origin_set: MapSet.new([in_set])}
     requoted = %Event.Requoted.Payload{old_value: old_value, new_value: new_value}
     requoted_many = %Event.RequotedMany.Payload{old_value: [old_listed], new_value: [new_listed]}
 
@@ -276,6 +287,22 @@ defmodule Core.Labels.RefsTest do
       )
 
     Event.Sealed.new(payload, AggID.new(), Version.new(), by, At.now!())
+  end
+
+  defp grouped(by, items, backup, keyed, hidden) do
+    payload =
+      Event.Grouped.Payload.new(
+        MapSet.new(items),
+        MapSet.new([:active]),
+        MapSet.new(),
+        MapSet.new(backup),
+        %{keyed => Count.new!(1)},
+        %{},
+        %{"скрыто" => hidden},
+        nil
+      )
+
+    Event.Grouped.new(payload, AggID.new(), Version.new(), by, At.now!())
   end
 
   defp closed(by), do: Event.Closed.new(AggID.new(), Version.new(), by, At.now!())

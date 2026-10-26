@@ -225,6 +225,47 @@ defmodule Core.Web.Event.DetailsTest do
              }
     end
 
+    test "множество — элементы без подписи, словарь — пары key / value без подписи" do
+      [first, second] = Enum.sort([ItemID.new(), ItemID.new()], &(ItemID.value(&1) <= ItemID.value(&2)))
+      keyed = ItemID.new()
+      refs = %{first => "Позиция 1", second => "Позиция 2", keyed => "Позиция 3"}
+
+      payload =
+        Event.Grouped.Payload.new(
+          MapSet.new([second, first]),
+          MapSet.new([:active]),
+          MapSet.new(),
+          nil,
+          %{keyed => Count.new!(5)},
+          %{active: %Line{title: Name.new!("Болт"), count: Count.new!(2)}},
+          %{},
+          nil
+        )
+
+      item = fn id -> %{"kind" => "ref", "value" => ref_value(id, refs[id])} end
+
+      assert wire(event(Event.Grouped, payload), refs) == %{
+               "title" => "Позиции сгруппированы",
+               "details" => [
+                 detail("Позиции", "set", [item.(first), item.(second)]),
+                 detail("Статусы", "set", [%{"kind" => "text", "value" => "Активна"}]),
+                 detail("Счётчики", "set", []),
+                 detail("Запасные позиции", "set", nil),
+                 detail("Лимиты", "map", [%{"key" => item.(keyed), "value" => %{"kind" => "number", "value" => "5"}}]),
+                 detail("Строки по статусу", "map", [
+                   %{
+                     "key" => %{"kind" => "text", "value" => "Активна"},
+                     "value" => %{
+                       "kind" => "group",
+                       "value" => [text("Наименование", "Болт"), number("Количество", "2")]
+                     }
+                   }
+                 ]),
+                 detail("Дни", "set", nil)
+               ]
+             }
+    end
+
     test "id, которого нет в словаре ссылок, — ArgumentError" do
       payload =
         Event.Linked.Payload.new(
@@ -331,8 +372,8 @@ defmodule Core.Web.Event.DetailsTest do
     test "семейство видов Detail с дискриминатором kind, названия от модуля приложения" do
       %OpenApi{components: %Components{schemas: schemas}} = spec()
 
-      kinds = ~w(text number date datetime user ref group list change destroyed)
-      suffixes = ~w(Text Number Date DateTime User Ref Group List Change Destroyed)
+      kinds = ~w(text number date datetime user ref group list set map change destroyed)
+      suffixes = ~w(Text Number Date DateTime User Ref Group List Set Map Change Destroyed)
       titles = Enum.map(suffixes, &"WebEventDetail#{&1}")
       mapping = Map.new(Enum.zip(kinds, titles), fn {kind, title} -> {kind, "#/components/schemas/#{title}"} end)
 
@@ -351,6 +392,9 @@ defmodule Core.Web.Event.DetailsTest do
             %{"label" => "Автор", "kind" => "user", "value" => %{"id" => "u1"}},
             %{"kind" => "ref", "value" => %{"id" => "i1", "name" => nil}},
             %{"kind" => "group", "value" => [%{"kind" => "text", "value" => 1}]},
+            %{"kind" => "set", "value" => [%{"kind" => "number", "value" => 1}]},
+            %{"kind" => "map", "value" => [%{"key" => %{"kind" => "text", "value" => "a"}}]},
+            %{"kind" => "map", "value" => [%{"kind" => "text", "value" => "a"}]},
             %{"label" => "Название", "kind" => "change", "old" => %{"kind" => "text", "value" => "a"}},
             %{"label" => "Владелец", "kind" => "text", "value" => %{"$destroyed" => true}},
             %{"label" => "Владелец"}

@@ -70,16 +70,20 @@ defmodule Core.Labels.Fields do
       end
 
   Сверх языка плагина — вид `text:`: захват функции арности 1, значение выходит текстом её
-  результата; так подписывается значение без собственного модуля. `text:` и `list: [text: …]` — без
-  других ключей.
+  результата; так подписывается значение без собственного модуля. `text:`, `list: [text: …]` и
+  `set: [text: …]` — без других ключей.
+
+  Поле-множество (`set:`) и поле-словарь (`map:`) подписываются строкой, как список: элементы
+  множества, ключи и значения словаря выходят в сведения по своим видам без подписи.
 
   `fields:` и `value:` — опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): захваты в
   них проверяются в теле модуля; `labels:` и `change:` — литералы, проверяются при раскрытии `use`.
 
   Полнота проверяется на `@after_compile`, где уже есть struct и спека нагрузки. Сборку ломают:
   поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, свободная
-  map'а (`type: :map`) с подписью строкой, видимый список map'ов (`list: [type: :map]`, решение у него
-  только `:hidden`), подписи map'ы у поля, которое не map'а, ключ подписи map'ы вне
+  map'а (`type: :map`) с подписью строкой, видимый список, множество или словарь map'ов
+  (`list: [type: :map]`, `set: [type: :map]`, значение словаря `type: :map`, решение у них только
+  `:hidden`), подписи map'ы у поля, которое не map'а, ключ подписи map'ы вне
   `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки и
   структуры по полям — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без
   спеки, спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
@@ -108,8 +112,8 @@ defmodule Core.Labels.Fields do
   `value:` у `Core.Es.ValueChanged`, у структуры по полям или без `change:`, разный вид `old_value` и
   `new_value` у структуры по полям, struct без `old_value` / `new_value` или с полями вне них под
   `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct`, значение
-  изменения — map'а или список map'ов на любой глубине `list:` (в сведения оно не выходит, и
-  подписать его нельзя).
+  изменения — map'а или список, множество или словарь map'ов на любой глубине (в сведения оно не
+  выходит, и подписать его нельзя).
 
   Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
@@ -128,7 +132,7 @@ defmodule Core.Labels.Fields do
   @type map_label :: [label: String.t(), key: String.t(), value: String.t()]
 
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
-  @type spec :: Field.spec() | {:text, (term() -> String.t())} | {:list, spec()}
+  @type spec :: Field.spec() | {:text, (term() -> String.t())} | {:list, spec()} | {:set, spec()}
 
   # Объявление модуля под `use`: поля нагрузки (`Core.Es.Event.Payload`), поля структуры по полям
   # (`Core.Struct`), вид значения изменения (`Core.Es.ValueChanged`), ручной struct (`:struct`) или ничего.
@@ -276,19 +280,26 @@ defmodule Core.Labels.Fields do
     for {name, _opts} <- fields, do: {name, Map.fetch!(specs, name)}
   end
 
-  defp text?(opts), do: Keyword.keyword?(opts) and (Keyword.has_key?(opts, :text) or text_list?(opts[:list]))
+  defp text?(opts) do
+    Keyword.keyword?(opts) and
+      (Keyword.has_key?(opts, :text) or text_items?(opts[:list]) or text_items?(opts[:set]))
+  end
 
-  defp text_list?(inner), do: Keyword.keyword?(inner) and Keyword.has_key?(inner, :text)
+  defp text_items?(inner), do: Keyword.keyword?(inner) and Keyword.has_key?(inner, :text)
 
   defp text_spec!([text: fun], where), do: {:text, Check.capture!(fun, 1, "#{where}: text")}
 
   defp text_spec!([list: [text: fun]], where),
     do: {:list, {:text, Check.capture!(fun, 1, "#{where}: list: text")}}
 
+  defp text_spec!([set: [text: fun]], where),
+    do: {:set, {:text, Check.capture!(fun, 1, "#{where}: set: text")}}
+
   defp text_spec!(opts, where) do
     Helper.Opts.reject!(
       where,
-      "`text:` без других ключей: [text: &f/1] или [list: [text: &f/1]], получено #{inspect(opts)}"
+      "`text:` без других ключей: [text: &f/1], [list: [text: &f/1]] или [set: [text: &f/1]], " <>
+        "получено #{inspect(opts)}"
     )
   end
 
@@ -408,11 +419,8 @@ defmodule Core.Labels.Fields do
     labelled_maps = for {name, [_ | _]} <- labels(module), do: name
     not_maps = for {name, spec} <- visible, name in labelled_maps, not map?(spec), do: name
     maps = for {name, {:type, :map}} <- visible, name not in labelled_maps, do: name
-    map_lists = for {name, {:list, inner}} <- visible, map?(inner), do: name
+    nested_maps = for {name, spec} <- visible, map_inside?(spec), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
-
-    ensure_none!(env, of_kind(visible, :set), "множество в сведения не выходит — только `:hidden`")
-    ensure_none!(env, of_kind(visible, :map), "словарь в сведения не выходит — только `:hidden`")
 
     ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
 
@@ -422,7 +430,7 @@ defmodule Core.Labels.Fields do
       "свободная map'а выходит подписями ключа и значения — `[label:, key:, value:]` или `:hidden`"
     )
 
-    ensure_none!(env, map_lists, "список map'ов в сведения не выходит — только `:hidden`")
+    ensure_none!(env, nested_maps, "список, множество или словарь map'ов в сведения не выходит — только `:hidden`")
 
     ensure_none!(env, unlabelled, "вложенный struct без `use Core.Labels.Fields`")
   end
@@ -457,23 +465,27 @@ defmodule Core.Labels.Fields do
     ensure_none!(env, @change_fields -- fields, "struct изменения без полей")
     ensure_none!(env, fields -- @change_fields, "поля struct'а изменения вне `old_value` / `new_value`")
 
-    if map?(spec),
-      do: fail!(env, "значение изменения — map'а или список map'ов: в сведения не выходит, подписать его нельзя")
+    if map?(spec) do
+      fail!(
+        env,
+        "значение изменения — map'а или список, множество или словарь map'ов: в сведения не выходит, " <>
+          "подписать его нельзя"
+      )
+    end
   end
 
+  # Map'а на любой глубине: сама спека или внутри списка, множества, значения словаря.
   defp map?({:type, :map}), do: true
-  defp map?({:list, inner}), do: map?(inner)
-  defp map?(_spec), do: false
+  defp map?(spec), do: map_inside?(spec)
 
-  # Сведения множество и словарь пока не строят (`Core.Labels.Details`): видимое поле упало бы при выдаче.
-  defp of_kind(visible, kind), do: for({name, spec} <- visible, of_kind?(spec, kind), do: name)
-
-  defp of_kind?({:list, inner}, kind), do: of_kind?(inner, kind)
-  defp of_kind?(spec, kind) when elem(spec, 0) == kind, do: true
-  defp of_kind?(_spec, _kind), do: false
+  defp map_inside?({:list, inner}), do: map?(inner)
+  defp map_inside?({:set, inner}), do: map?(inner)
+  defp map_inside?({:map, _key, value}), do: map?(value)
+  defp map_inside?(_spec), do: false
 
   defp unlabelled?({:entity, mod}), do: not labelled?(mod)
-  defp unlabelled?({:list, inner}), do: unlabelled?(inner)
+  defp unlabelled?({kind, inner}) when kind in ~w(list set)a, do: unlabelled?(inner)
+  defp unlabelled?({:map, _key, value}), do: unlabelled?(value)
   defp unlabelled?(_spec), do: false
 
   defp ensure_none!(_env, [], _message), do: :ok
@@ -530,9 +542,9 @@ defmodule Core.Labels.Fields do
   @doc """
   Подписи видимых полей типа по пути поля, без значения, — в порядке объявления спеки.
 
-  Поля вложенного struct'а (`entity:`) идут под путём своего поля, поля элемента списка struct'ов —
-  под путём списка. Поле `union:` даёт только свою подпись: варианты семейства по типу не известны;
-  map'а с id в ключах — подпись поля (`label:`).
+  Поля вложенного struct'а (`entity:`) идут под путём своего поля, поля элемента списка или
+  множества struct'ов и значения словаря struct'ов — под путём поля. Поле `union:` даёт только свою
+  подпись: варианты семейства по типу не известны; map'а с id в ключах — подпись поля (`label:`).
   """
   @spec paths(module()) :: [{path(), String.t()}]
 
@@ -549,7 +561,8 @@ defmodule Core.Labels.Fields do
   # ---
 
   defp nested_paths({:entity, mod}), do: paths(mod)
-  defp nested_paths({:list, inner}), do: nested_paths(inner)
+  defp nested_paths({kind, inner}) when kind in ~w(list set)a, do: nested_paths(inner)
+  defp nested_paths({:map, _key, value}), do: nested_paths(value)
   defp nested_paths(_spec), do: []
 
   defp text(label: label, key: _key, value: _value), do: label

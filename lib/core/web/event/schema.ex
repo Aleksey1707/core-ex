@@ -16,6 +16,8 @@ if Code.ensure_loaded?(OpenApiSpex) do
       ref: {"Ref", "Ссылка на запись: вид записи, id и текущее имя"},
       group: {"Group", "Сведения вложенного значения"},
       list: {"List", "Элементы одного вида без подписи; у map'ы с id в ключах — группы «ключ — значение»"},
+      set: {"Set", "Элементы множества одного вида без подписи, по возрастанию значения"},
+      map: {"Map", "Пары словаря: ключ и значение — сведения своих видов без подписи"},
       change: {"Change", "Изменение: было и стало — сведения без подписи"},
       destroyed: {"Destroyed", "Уничтоженное ПДн-значение: подпись без значения"}
     ]
@@ -161,8 +163,22 @@ if Code.ensure_loaded?(OpenApiSpex) do
       }
     end
 
-    defp properties(kind, detail, _user) when kind in ~w(group list)a,
+    defp properties(kind, detail, _user) when kind in ~w(group list set)a,
       do: %{value: %OpenApiSpex.Schema{type: :array, items: detail, nullable: true}}
+
+    defp properties(:map, detail, _user) do
+      %{
+        value: %OpenApiSpex.Schema{
+          type: :array,
+          nullable: true,
+          items: %OpenApiSpex.Schema{
+            type: :object,
+            properties: %{key: detail, value: detail},
+            required: ~w(key value)a
+          }
+        }
+      }
+    end
 
     defp properties(:change, detail, _user), do: %{old: detail, new: detail}
     defp properties(:destroyed, _detail, _user), do: %{}

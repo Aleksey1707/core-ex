@@ -129,12 +129,14 @@ defmodule Core.LabelsBrokenFixture do
       alias Core.LabelsBrokenFixture
 
       defmodule Payload do
-        @moduledoc "Нагрузка с Enum без подписей, id без вида и семействами."
+        @moduledoc "Нагрузка с Enum без подписей, id без вида и семействами; Enum и id и в множестве и словаре."
 
         use Core.Es.Event.Payload,
           fields: [
             kind: [enum: LabelsBrokenFixture.Kind],
             kinds: [list: [enum: LabelsBrokenFixture.Kind]],
+            kind_set: [set: [enum: LabelsBrokenFixture.Kind]],
+            refs: [map: [key: [enum: LabelsBrokenFixture.Kind], value: [prim: Core.LabelsFixture.BareID]]],
             ref: [prim: Core.LabelsFixture.BareID],
             item: [prim: Core.LabelsFixture.ItemID],
             mark: [union: LabelsBrokenFixture.Mark],
@@ -145,6 +147,8 @@ defmodule Core.LabelsBrokenFixture do
           labels: [
             kind: "Вид",
             kinds: "Виды",
+            kind_set: "Набор видов",
+            refs: "Ссылки по виду",
             ref: "Ссылка",
             item: "Позиция",
             mark: "Метка",

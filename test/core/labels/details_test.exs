@@ -178,6 +178,15 @@ defmodule Core.Labels.DetailsTest do
               ]}
   end
 
+  test "set: [text: …] — элементы множества текстом функции" do
+    payload = %Event.Quoted.Payload{origin: ItemID.new(), origins: [], origin_set: MapSet.new([ItemID.new()])}
+
+    assert {_title, [_origin, _origins, %{label: "Набор источников", kind: :set, value: [item]}]} =
+             Details.build(event(Event.Quoted, payload))
+
+    assert item == %{kind: :text, value: "Позиция"}
+  end
+
   test "вложенная структура по полям — сведения по её спеке, скрытое не выходит" do
     name = Name.new!("Коробка")
     count = Count.new!(4)
@@ -196,6 +205,115 @@ defmodule Core.Labels.DetailsTest do
                   ]
                 }
               ]}
+  end
+
+  describe "множество и словарь" do
+    test "множество — элементы по виду элемента по возрастанию, словарь — пары ключ — значение по их видам" do
+      [first, second] = Enum.sort([ItemID.new(), ItemID.new()], &(ItemID.value(&1) <= ItemID.value(&2)))
+      limit = Count.new!(7)
+      title = Name.new!("Болт")
+      count = Count.new!(2)
+
+      payload =
+        Event.Grouped.Payload.new(
+          MapSet.new([second, first]),
+          MapSet.new(~w(draft active archived)a),
+          MapSet.new(),
+          nil,
+          %{second => limit},
+          %{active: %Line{title: title, count: count}},
+          %{"импорт" => first},
+          nil
+        )
+
+      assert Details.build(event(Event.Grouped, payload)) ==
+               {"Позиции сгруппированы",
+                [
+                  %{
+                    label: "Позиции",
+                    kind: :set,
+                    value: [
+                      %{kind: :ref, entity: :stock_item, value: first},
+                      %{kind: :ref, entity: :stock_item, value: second}
+                    ]
+                  },
+                  %{
+                    label: "Статусы",
+                    kind: :set,
+                    value: [
+                      %{kind: :text, value: "Активна"},
+                      %{kind: :text, value: "В архиве"},
+                      %{kind: :text, value: "Черновик"}
+                    ]
+                  },
+                  %{label: "Счётчики", kind: :set, value: []},
+                  %{label: "Запасные позиции", kind: :set, value: nil},
+                  %{
+                    label: "Лимиты",
+                    kind: :map,
+                    value: [
+                      %{
+                        key: %{kind: :ref, entity: :stock_item, value: second},
+                        value: %{kind: :number, value: limit}
+                      }
+                    ]
+                  },
+                  %{
+                    label: "Строки по статусу",
+                    kind: :map,
+                    value: [
+                      %{
+                        key: %{kind: :text, value: "Активна"},
+                        value: %{
+                          kind: :group,
+                          value: [
+                            %{label: "Наименование", kind: :text, value: title},
+                            %{label: "Количество", kind: :number, value: count}
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  %{label: "Дни", kind: :set, value: nil}
+                ]}
+    end
+
+    # Порядок обхода `MapSet` и map'ы больше 32 элементов не совпадает с порядком значений.
+    test "порядок элементов множества и пар словаря — по значению элемента и ключа, а не по обходу" do
+      counts = Enum.map(40..1//-1, &Count.new!/1)
+      ids = for _n <- 1..40, do: ItemID.new()
+      limits = Map.new(ids, &{&1, Count.new!(1)})
+
+      refute MapSet.to_list(MapSet.new(counts)) == Enum.reverse(counts)
+
+      payload =
+        Event.Grouped.Payload.new(MapSet.new(), MapSet.new(), MapSet.new(counts), nil, limits, %{}, %{}, nil)
+
+      {_title, details} = Details.build(event(Event.Grouped, payload))
+
+      assert %{kind: :set, value: items} = Enum.find(details, &(&1.label == "Счётчики"))
+      assert Enum.map(items, & &1.value) == Enum.reverse(counts)
+
+      assert %{kind: :map, value: pairs} = Enum.find(details, &(&1.label == "Лимиты"))
+      assert Enum.map(pairs, & &1.key.value) == Enum.sort_by(ids, &ItemID.value/1)
+    end
+
+    # Порядок термов `%Date{}` — сначала день, потом месяц и год: 2 января раньше 31 декабря.
+    test "даты множества — по хронологии, а не по порядку термов" do
+      days = Enum.map([~D[2025-12-31], ~D[2026-01-02]], &Day.new!/1)
+
+      payload =
+        Event.Grouped.Payload.new(MapSet.new(), MapSet.new(), MapSet.new(), nil, %{}, %{}, %{}, MapSet.new(days))
+
+      refute Enum.sort(Enum.map(days, &Day.value/1)) == Enum.map(days, &Day.value/1)
+
+      {_title, details} = Details.build(event(Event.Grouped, payload))
+
+      assert %{kind: :set, value: [%{kind: :date, value: first}, %{kind: :date, value: second}]} =
+               Enum.find(details, &(&1.label == "Дни"))
+
+      assert [first, second] == days
+    end
   end
 
   describe "изменение «было → стало»" do

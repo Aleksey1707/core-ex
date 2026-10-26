@@ -56,12 +56,14 @@ defmodule Core.Labels.CompletenessCaseTest do
       assert :ok = CompletenessCase.check_values(@full)
     end
 
-    test "Enum без подписей — каждое поле, где он достижим, и сам список" do
+    test "Enum без подписей — каждое поле, где он достижим: список, множество, ключ словаря" do
       assert {:error, %{unlabelled: unlabelled}} = CompletenessCase.check_values(@broken)
 
       assert unlabelled == [
                {Marked.Payload, :kind, LabelsBrokenFixture.Kind},
-               {Marked.Payload, :kinds, LabelsBrokenFixture.Kind}
+               {Marked.Payload, :kind_set, LabelsBrokenFixture.Kind},
+               {Marked.Payload, :kinds, LabelsBrokenFixture.Kind},
+               {Marked.Payload, :refs, LabelsBrokenFixture.Kind}
              ]
     end
   end
@@ -71,9 +73,10 @@ defmodule Core.Labels.CompletenessCaseTest do
       assert :ok = CompletenessCase.check_ids(@full)
     end
 
-    test "id без вида — владелец, поле и Prim" do
-      assert {:error, %{unkinded: [{Marked.Payload, :ref, LabelsFixture.BareID}]}} =
-               CompletenessCase.check_ids(@broken)
+    test "id без вида — владелец, поле и Prim; и в значении словаря" do
+      assert {:error, %{unkinded: unkinded}} = CompletenessCase.check_ids(@broken)
+
+      assert unkinded == [{Marked.Payload, :ref, LabelsFixture.BareID}, {Marked.Payload, :refs, LabelsFixture.BareID}]
     end
   end
 

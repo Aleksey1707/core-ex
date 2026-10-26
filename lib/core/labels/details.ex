@@ -20,8 +20,16 @@ defmodule Core.Labels.Details do
   | `:ref` | id `kind: :ref` → id; рядом `entity` — вид записи |
   | `:group` | `entity:`, `union:` → сведения полей struct'а; у варианта — по его `Core.Labels.Fields` |
   | `:list` | `list:` → элементы `%{kind, value}` вида спеки элемента, без подписи |
+  | `:set` | `set:` → элементы `%{kind, value}` вида спеки элемента, без подписи, в каноническом порядке |
+  | `:map` | `map:` → пары `%{key, value}`: ключ и значение — `%{kind, value}` своих видов, без подписи |
   | `:list` | `type: :map` с подписями `[label:, key:, value:]` → группы «ключ — значение» |
   | `:destroyed` | поле с `subject:`, на месте значения `%Core.Es.Personal.Destroyed{}` → без `value` |
+
+  Канонический порядок множества — по возрастанию значения элемента: у Prim — базового значения
+  (`Core.Prim.unwrap/1`), у даты, дата-времени, времени и `Decimal` — по `compare/2` своего модуля.
+  У строк, UUID, целых и Enum он совпадает с порядком wire (ADR-0091), у дат и чисел `Decimal` —
+  хронологический и числовой. Пары словаря идут по возрастанию ключа: ключ — вид с wire-строкой, и
+  порядок совпадает с порядком wire ключей.
 
   Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim, значение — композит как есть.
   Объявление вида id или текста у базы композита действует и на композит: значение — база с
@@ -58,10 +66,10 @@ defmodule Core.Labels.Details do
   alias Core.Labels.Kind
 
   @typedoc "Вид значения сведения."
-  @type kind :: :text | :number | :date | :datetime | :user | :ref | :group | :list | :destroyed
+  @type kind :: :text | :number | :date | :datetime | :user | :ref | :group | :list | :set | :map | :destroyed
 
-  @typedoc "Значение сведения: Prim, строка, число, сведения группы или элементы списка."
-  @type value :: struct() | String.t() | number() | [t()] | [item()] | nil
+  @typedoc "Значение сведения: Prim, строка, число, сведения группы, элементы списка или множества, пары словаря."
+  @type value :: struct() | String.t() | number() | [t()] | [item()] | [pair()] | nil
 
   @typedoc """
   Сведение: подписанное значение со своим видом, ссылка на запись, изменение «было → стало» или
@@ -78,6 +86,12 @@ defmodule Core.Labels.Details do
           %{kind: kind(), value: value()}
           | %{kind: :ref, entity: atom(), value: struct() | nil}
           | %{kind: :destroyed}
+
+  @typedoc "Пара словаря: ключ и значение своих видов, без подписи."
+  @type pair :: %{key: item(), value: item()}
+
+  # Значения, чей порядок задаёт `compare/2` модуля, а не порядок термов.
+  @comparable [Date, DateTime, NaiveDateTime, Time, Decimal]
 
   # Свободная map'а выходит подписями ключа и значения, а не видом `type:`: вида у неё нет, но ответ на неё дан.
   @type_kinds [
@@ -153,6 +167,8 @@ defmodule Core.Labels.Details do
   defp shape({:text, _fun}), do: %{kind: :text}
   defp shape({kind, _module}) when kind in ~w(entity union)a, do: %{kind: :group}
   defp shape({:list, _inner}), do: %{kind: :list}
+  defp shape({:set, _inner}), do: %{kind: :set}
+  defp shape({:map, _key, _value}), do: %{kind: :map}
   defp shape({:type, type}), do: %{kind: type_kind(type)}
 
   defp prim_shape(module) do
@@ -190,6 +206,8 @@ defmodule Core.Labels.Details do
   defp value({:prim, module}, prim), do: prim_value(module, prim)
   defp value({kind, _module}, struct) when kind in ~w(entity union)a, do: struct_details(struct)
   defp value({:list, inner}, items), do: Enum.map(items, &item(inner, &1))
+  defp value({:set, inner}, set), do: for(element <- sorted(set, inner), do: item(inner, element))
+  defp value({:map, key, inner}, map), do: pairs(map, key, inner)
   defp value(_spec, value), do: value
 
   defp prim_value(module, prim) do
@@ -199,4 +217,17 @@ defmodule Core.Labels.Details do
       {:declared, owner, _id} -> Kind.owned(prim, owner)
     end
   end
+
+  defp sorted(set, inner), do: Enum.sort_by(set, &order(inner, &1), &before?/2)
+
+  defp pairs(map, key, inner) do
+    for {key_value, value} <- Enum.sort_by(map, fn {key_value, _value} -> order(key, key_value) end, &before?/2),
+        do: %{key: item(key, key_value), value: item(inner, value)}
+  end
+
+  defp order({:prim, _module}, prim), do: Core.Prim.unwrap(prim)
+  defp order(_spec, value), do: value
+
+  defp before?(%module{} = left, %module{} = right) when module in @comparable, do: module.compare(left, right) != :gt
+  defp before?(left, right), do: left <= right
 end

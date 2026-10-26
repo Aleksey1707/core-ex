@@ -34,11 +34,15 @@ defmodule Core.Web.Event.Details do
   defp labelled(%{}, dumped), do: dumped
 
   defp value(_detail, nil, _env), do: nil
-  defp value(%{kind: kind}, details, env) when kind in ~w(group list)a, do: Enum.map(details, &detail(&1, env))
+  defp value(%{kind: kind}, details, env) when kind in ~w(group list set)a, do: Enum.map(details, &detail(&1, env))
+
   defp value(%{kind: :user}, id, env), do: env.user_dump.(env.codec.dump(id), name!(env.refs, id, "id сведения"))
 
   defp value(%{kind: :ref, entity: entity}, id, env),
     do: %{entity: Helper.Keys.camelize_key(entity), id: env.codec.dump(id), name: name!(env.refs, id, "id сведения")}
+
+  defp value(%{kind: :map}, pairs, env),
+    do: for(%{key: key, value: value} <- pairs, do: %{key: detail(key, env), value: detail(value, env)})
 
   defp value(%{kind: :number}, number, env), do: number(dump(number, env))
   defp value(%{kind: kind}, value, env) when kind in ~w(text date datetime)a, do: dump(value, env)

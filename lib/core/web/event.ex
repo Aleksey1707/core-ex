@@ -38,16 +38,18 @@ defmodule Core.Web.Event do
 
   | Сведение | На wire |
   |---|---|
-  | вид | строкой: `"text"`, `"number"`, `"date"`, `"datetime"`, `"user"`, `"ref"`, `"group"`, `"list"`, `"change"`, `"destroyed"` |
+  | вид | строкой — имя вида `Core.Labels.Details`, перечень — под таблицей |
   | `:number` | строкой с десятичной точкой: integer — `Integer.to_string/1`, decimal и float — нормальная запись |
   | `:text`, `:date`, `:datetime` | Prim — дампом `codec:`, строка — как есть |
   | `:ref` | `%{entity, id, name}`: вид записи — camelCase атома, id — дампом `codec:`, имя — из словаря ссылок |
   | `:user` | результат `dump:` от дампа id и имени из словаря ссылок — той же формы, что `by` |
-  | `:group`, `:list` | сведения и элементы — рекурсивно |
+  | `:group`, `:list`, `:set` | сведения и элементы — рекурсивно |
+  | `:map` | пары `%{key, value}`: ключ и значение — элементы, рекурсивно |
   | `:change` | `%{label, kind: "change", old, new}` |
 
-  Строка, которую отдал кодек (`decimal: :string`), выходит как есть. У элемента списка и стороны
-  изменения `label` нет; значения нет — `value: nil`.
+  Виды: `"text"`, `"number"`, `"date"`, `"datetime"`, `"user"`, `"ref"`, `"group"`, `"list"`, `"set"`, `"map"`,
+  `"change"`, `"destroyed"`. Строка, которую отдал кодек (`decimal: :string`), выходит как есть. У
+  элемента списка и стороны изменения `label` нет; значения нет — `value: nil`.
 
   Маркеры ПДн-значений дампа (`Core.Es.Personal.Marker`, поля с `subject:`) снимает сам `to_wire/2`
   (ADR-0074): живое значение уходит открытым wire-значением — права на него проверил usecase, —
@@ -72,10 +74,10 @@ defmodule Core.Web.Event do
 
   При `labels: true` — ещё `title` и `details`: схема сведений — вложенный модуль `Detail` (`oneOf` по
   видам с дискриминатором `kind`, название `<Имя>Detail`), схемы видов — его вложенные модули `Text`,
-  `Number`, `Date`, `DateTime`, `User`, `Ref`, `Group`, `List`, `Change`, `Destroyed` (`<Имя>DetailText`,
-  …). Сведения группы, списка и стороны изменения ссылаются на схему сведений, значение вида `user` — на
-  `schema:` из `user_ref:`; у вида `destroyed` значения нет. Без `open_api_spex` модуль — только дамп, и
-  `schema:` не требуется.
+  `Number`, `Date`, `DateTime`, `User`, `Ref`, `Group`, `List`, `Set`, `Map`, `Change`, `Destroyed`
+  (`<Имя>DetailText`, …). Сведения группы, списка, множества, ключ и значение пары словаря и сторона
+  изменения ссылаются на схему сведений, значение вида `user` — на `schema:` из `user_ref:`; у вида
+  `destroyed` значения нет. Без `open_api_spex` модуль — только дамп, и `schema:` не требуется.
 
   Сборку ломают: нет `codec:`, `codec:` без `dump/1`, неизвестная опция, `user_ref:` без `dump:` или с
   неизвестной опцией, `dump:` не захватом функции арности 2, `labels:` не boolean, `labels: true` без
@@ -123,8 +125,11 @@ defmodule Core.Web.Event do
           | %{label: String.t(), kind: String.t(), old: detail(), new: detail()}
           | %{optional(:label) => String.t(), required(:kind) => String.t()}
 
-  @typedoc "Значение сведения: дамп кодека, число строкой, ссылка, ссылка на учётную запись, сведения группы."
-  @type value :: String.t() | struct() | ref() | map() | [detail()] | nil
+  @typedoc """
+  Значение сведения: дамп кодека, число строкой, ссылка, ссылка на учётную запись, сведения группы, пары
+  словаря.
+  """
+  @type value :: String.t() | struct() | ref() | map() | [detail()] | [%{key: detail(), value: detail()}] | nil
 
   @typedoc "Ссылка на запись."
   @type ref :: %{entity: String.t(), id: term(), name: String.t() | nil}
@@ -151,6 +156,8 @@ defmodule Core.Web.Event do
     ref: quote(do: __MODULE__.Ref),
     group: quote(do: __MODULE__.Group),
     list: quote(do: __MODULE__.List),
+    set: quote(do: __MODULE__.Set),
+    map: quote(do: __MODULE__.Map),
     change: quote(do: __MODULE__.Change),
     destroyed: quote(do: __MODULE__.Destroyed)
   ]

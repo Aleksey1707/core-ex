@@ -11,8 +11,8 @@ defmodule Core.Labels.Refs do
            do: {:ok, {page, refs}}
 
   Id с резолвером — Prim-идентификатор с `use Core.Labels.ID` вида `:ref` или `:user`. Сборщик
-  находит его у автора события и на любой глубине нагрузки: в struct'ах, ключах и значениях map'ы,
-  списках, нагрузке-семействе, Prim-композите. Остальные поля события (`aggregate_id`, `id`) в
+  находит его у автора события и на любой глубине нагрузки: в struct'ах, ключах и значениях map'ы и
+  словаря, списках, множествах, нагрузке-семействе, Prim-композите. Остальные поля события (`aggregate_id`, `id`) в
   сведения не выходят и не обходятся. В `Date`, `DateTime`, `NaiveDateTime`, `Time`, `Decimal`, Prim без
   вида id, id `kind: :id` и Prim с `Core.Labels.Text` он не спускается: id там нет или он не выходит
   ссылкой. Вид модуля проверяется один раз на модуль в пределах вызова.
@@ -22,10 +22,10 @@ defmodule Core.Labels.Refs do
   его полям, у struct'а изменения по `old_value` / `new_value`. Id в поле `:hidden` в сведения не
   выходит, и резолвер его не получает. Struct без объявления полей обходится целиком.
 
-  Значение `text:` не обходится: поле `text:` и `list: [text: …]`, у struct'а изменения со спекой значения
-  `value: [text: …]` / `[list: [text: …]]` — ни `old_value`, ни `new_value`. Оно выходит в сведения
-  текстом функции, и id в нём ссылкой не выходит. Словарь не шире сведений: каждый его id, кроме
-  автора события, есть в сведениях.
+  Значение `text:` не обходится: поле `text:`, `list: [text: …]` и `set: [text: …]`, у struct'а
+  изменения со спекой значения `value: [text: …]` / `[list: [text: …]]` / `[set: [text: …]]` — ни
+  `old_value`, ни `new_value`. Оно выходит в сведения текстом функции, и id в нём ссылкой не выходит. Словарь не шире
+  сведений: каждый его id, кроме автора события, есть в сведениях.
 
   Id группируются по резолверу, и резолвер (`Core.Labels.Resolver`) вызывается один раз на группу
   пачкой уникальных id. Без id с резолвером — `{:ok, %{}}` без вызовов. Отказ резолвера — итог; у
@@ -63,6 +63,8 @@ defmodule Core.Labels.Refs do
   def get(%_{payload: _, by: _} = event, %Context{} = context), do: get([event], context)
 
   # ---
+
+  defp collect(%MapSet{} = set, acc), do: collect(MapSet.to_list(set), acc)
 
   defp collect(%module{} = struct, acc) do
     case role(module, acc) do
@@ -122,6 +124,6 @@ defmodule Core.Labels.Refs do
 
   # Значение `text:` выходит в сведения текстом функции, а не ссылкой.
   defp text?({:text, _fun}), do: true
-  defp text?({:list, inner}), do: text?(inner)
+  defp text?({kind, inner}) when kind in ~w(list set)a, do: text?(inner)
   defp text?(_spec), do: false
 end

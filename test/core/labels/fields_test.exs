@@ -4,6 +4,7 @@ defmodule Core.Labels.FieldsTest do
   alias Core.Codec.Field
   alias Core.Labels.Fields
   alias Core.LabelsFixture.Address
+  alias Core.LabelsFixture.Event.Grouped
   alias Core.LabelsFixture.Event.Linked
   alias Core.LabelsFixture.Event.NameChanged
   alias Core.LabelsFixture.Event.OriginChanged
@@ -77,6 +78,20 @@ defmodule Core.Labels.FieldsTest do
 
     test "map'а с id в ключах — подпись поля" do
       assert {[:limits], "Лимиты"} in Fields.paths(Linked.Payload)
+    end
+
+    test "значение словаря struct'ов — под путём словаря; скрытый словарь путей не даёт" do
+      assert Fields.paths(Grouped.Payload) == [
+               {[:items], "Позиции"},
+               {[:statuses], "Статусы"},
+               {[:counts], "Счётчики"},
+               {[:backup], "Запасные позиции"},
+               {[:limits], "Лимиты"},
+               {[:lines], "Строки по статусу"},
+               {[:lines, :title], "Наименование"},
+               {[:lines, :count], "Количество"},
+               {[:days], "Дни"}
+             ]
     end
   end
 
@@ -295,6 +310,20 @@ defmodule Core.Labels.FieldsTest do
         )
       end
     end
+
+    test "struct без Core.Labels.Fields в элементе множества и значении словаря — CompileError" do
+      assert_raise CompileError,
+                   ~r/BareInside: вложенный struct без `use Core.Labels.Fields`: \[:city, :zip\]/,
+                   fn ->
+                     compile_struct(:BareInside,
+                       fields: [
+                         city: [set: [entity: URI]],
+                         zip: [map: [key: [type: :string], value: [list: [entity: URI]]]]
+                       ],
+                       labels: [city: "Города", zip: "Индексы"]
+                     )
+                   end
+    end
   end
 
   describe "text:" do
@@ -328,6 +357,17 @@ defmodule Core.Labels.FieldsTest do
           )
         )
       end
+    end
+
+    test "set: [text: …] — множество текстов функции" do
+      {{:module, module, _bytecode, _result}, _binding} =
+        compile_struct(:TextSet,
+          fields: [city: [prim: Core.LabelsFixture.Name], zip: [set: [text: &Atom.to_string/1]]],
+          labels: [city: "Город", zip: "Индексы"]
+        )
+
+      assert [city: {:prim, Name}, zip: {:set, {:text, fun}}] = Fields.specs(module)
+      assert fun == (&Atom.to_string/1)
     end
 
     test "с другими ключами — CompileError" do
@@ -395,63 +435,56 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "видимый список map'ов — CompileError: только `:hidden`" do
-      assert_raise CompileError, ~r/MapList: список map'ов в сведения не выходит — только `:hidden`: \[:zip\]/, fn ->
-        compile_struct(:MapList,
-          fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [type: :map]]],
-          labels: [city: "Город", zip: "Индекс"]
-        )
-      end
-    end
-
-    test "видимое множество, и в списке тоже, — CompileError: только `:hidden`" do
       assert_raise CompileError,
-                   ~r/SetField: множество в сведения не выходит — только `:hidden`: \[:city, :zip\]/,
+                   ~r/MapList: список, множество или словарь map'ов в сведения не выходит — только `:hidden`: \[:zip\]/,
                    fn ->
-                     compile_struct(:SetField,
-                       fields: [city: [set: [prim: Core.LabelsFixture.Name]], zip: [list: [set: [type: :integer]]]],
-                       labels: [city: "Города", zip: "Индексы"]
+                     compile_struct(:MapList,
+                       fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [type: :map]]],
+                       labels: [city: "Город", zip: "Индекс"]
                      )
                    end
     end
 
-    test "видимый словарь, и в списке тоже, — CompileError: только `:hidden`" do
+    test "map'а в элементе множества и значении словаря — CompileError: только `:hidden`" do
       assert_raise CompileError,
-                   ~r/DictField: словарь в сведения не выходит — только `:hidden`: \[:city, :zip\]/,
+                   ~r/MapInside: список, множество или словарь map'ов в сведения не выходит.*: \[:city, :zip\]/,
                    fn ->
-                     compile_struct(:DictField,
+                     compile_struct(:MapInside,
                        fields: [
-                         city: [map: [key: [type: :string], value: [prim: Core.LabelsFixture.Name]]],
-                         zip: [list: [map: [key: [type: :string], value: [type: :integer]]]]
+                         city: [set: [type: :map]],
+                         zip: [map: [key: [type: :string], value: [list: [type: :map]]]]
                        ],
                        labels: [city: "Города", zip: "Индексы"]
                      )
                    end
     end
 
-    test "скрытый словарь — собирается" do
+    test "скрытые множество и словарь map'ов — собираются" do
       assert {{:module, _module, _bytecode, _result}, _binding} =
                Code.eval_quoted(
                  quote do
-                   defmodule Core.Labels.FieldsTest.HiddenDict do
+                   defmodule Core.Labels.FieldsTest.HiddenMaps do
                      use Core.Struct,
                        fields: [
-                         city: [prim: Core.LabelsFixture.Name],
-                         zip: [map: [key: [type: :string], value: [type: :integer]]]
+                         city: [set: [type: :map]],
+                         zip: [map: [key: [type: :string], value: [type: :map]]]
                        ]
 
-                     use Core.Labels.Fields, labels: [city: "Город", zip: :hidden]
+                     use Core.Labels.Fields, labels: [city: :hidden, zip: :hidden]
                    end
                  end
                )
     end
 
     test "подписи map'ы у списка map'ов — CompileError: только `:hidden`" do
-      assert_raise CompileError, ~r/MapListLabels: список map'ов в сведения не выходит — только `:hidden`/, fn ->
-        compile_struct(:MapListLabels,
-          fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [type: :map]]],
-          labels: [city: "Город", zip: [label: "Лимиты", key: "Счёт", value: "Лимит"]]
-        )
-      end
+      assert_raise CompileError,
+                   ~r/MapListLabels: список, множество или словарь map'ов в сведения не выходит — только `:hidden`/,
+                   fn ->
+                     compile_struct(:MapListLabels,
+                       fields: [city: [prim: Core.LabelsFixture.Name], zip: [list: [type: :map]]],
+                       labels: [city: "Город", zip: [label: "Лимиты", key: "Счёт", value: "Лимит"]]
+                     )
+                   end
     end
 
     test "подписи map'ы у поля, которое не map'а — CompileError" do
@@ -624,7 +657,13 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "значение-map'а и список map'ов на любой глубине — CompileError без советов" do
-      values = [MapValue: [type: :map], MapListValue: [list: [type: :map]], MapListsValue: [list: [list: [type: :map]]]]
+      values = [
+        MapValue: [type: :map],
+        MapListValue: [list: [type: :map]],
+        MapListsValue: [list: [list: [type: :map]]],
+        MapSetValue: [set: [type: :map]],
+        MapDictValue: [map: [key: [type: :string], value: [list: [type: :map]]]]
+      ]
 
       for {name, value} <- values do
         error =
@@ -633,7 +672,8 @@ defmodule Core.Labels.FieldsTest do
           end
 
         assert error.description =~
-                 "#{name}: значение изменения — map'а или список map'ов: в сведения не выходит, подписать его нельзя"
+                 "#{name}: значение изменения — map'а или список, множество или словарь map'ов: " <>
+                   "в сведения не выходит, подписать его нельзя"
 
         refute error.description =~ ":hidden"
         refute error.description =~ "[label:, key:, value:]"

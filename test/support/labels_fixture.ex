@@ -7,9 +7,10 @@ defmodule Core.LabelsFixture do
   нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие другого агрегата с id в варианте
   семейства, id в скрытых полях нагрузки, вложенного struct'а, варианта семейства и map'ы, изменение на
-  id, id под `text:` в поле, списке и значении изменения; автор каждого события — учётная запись с
-  резолвером; фикстурные резолверы имён; событие с ПДн-полями каждого вида сведений и изменение на
-  ПДн-значении; событие страницы событий со сведениями (`Core.Web.Event`, `labels: true`).
+  id, id под `text:` в поле, списке, множестве и значении изменения; автор каждого события — учётная
+  запись с резолвером; фикстурные резолверы имён; событие с ПДн-полями каждого вида сведений и изменение на
+  ПДн-значении; нагрузка с полями-множествами и полями-словарями; событие страницы событий со
+  сведениями (`Core.Web.Event`, `labels: true`).
 
   Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодеки `Core.LabelsFixture.Event.Codec` и
   `Core.LabelsFixture.Event.ManualFamily.Codec` — полный набор ратчета полноты: в кодеки не входят
@@ -773,23 +774,25 @@ defmodule Core.LabelsFixture do
     end
 
     defmodule Quoted do
-      @moduledoc "Событие с id под `text:`: в поле и в списке."
+      @moduledoc "Событие с id под `text:`: в поле, в списке и в множестве."
 
       alias Core.LabelsFixture
 
       defmodule Payload do
         @moduledoc "Нагрузка, где id выходят текстом функции."
 
-        defstruct [:origin, :origins]
+        defstruct [:origin, :origins, :origin_set]
 
         use Core.Labels.Fields,
           fields: [
             origin: [text: &LabelsFixture.Texts.ref/1],
-            origins: [list: [text: &LabelsFixture.Texts.ref/1]]
+            origins: [list: [text: &LabelsFixture.Texts.ref/1]],
+            origin_set: [set: [text: &LabelsFixture.Texts.ref/1]]
           ],
           labels: [
             origin: "Источник",
-            origins: "Источники"
+            origins: "Источники",
+            origin_set: "Набор источников"
           ]
       end
 
@@ -950,6 +953,46 @@ defmodule Core.LabelsFixture do
         payload: "Название"
     end
 
+    defmodule Grouped do
+      @moduledoc "Событие с полями-множествами и полями-словарями: id, Enum, числа, даты и struct'ы внутри."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка с множествами и словарями; id в скрытом словаре."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            items: [set: [prim: LabelsFixture.ItemID]],
+            statuses: [set: [enum: LabelsFixture.Status]],
+            counts: [set: [prim: LabelsFixture.Count]],
+            backup: [set: [prim: LabelsFixture.ItemID], optional: true],
+            limits: [map: [key: [prim: LabelsFixture.ItemID], value: [prim: LabelsFixture.Count]]],
+            lines: [map: [key: [enum: LabelsFixture.Status], value: [entity: LabelsFixture.Line]]],
+            origins: [map: [key: [type: :string], value: [prim: LabelsFixture.ItemID]]],
+            days: [set: [prim: LabelsFixture.Day], optional: true]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            items: "Позиции",
+            statuses: "Статусы",
+            counts: "Счётчики",
+            backup: "Запасные позиции",
+            limits: "Лимиты",
+            lines: "Строки по статусу",
+            origins: :hidden,
+            days: "Дни"
+          ]
+      end
+
+      use Core.Es.Event,
+        family: Family,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Позиции сгруппированы"
+    end
+
     defmodule Closed do
       @moduledoc "Событие без нагрузки."
 
@@ -977,6 +1020,7 @@ defmodule Core.LabelsFixture do
       Event.Contacted => "labels.contacted",
       Event.HolderChanged => "labels.holder_changed",
       Event.Renamed => "labels.renamed",
+      Event.Grouped => "labels.grouped",
       Event.Closed => "labels.closed"
     }
 
