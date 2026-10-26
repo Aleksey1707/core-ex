@@ -11,7 +11,10 @@ defmodule Core.PromEx.Dashboards do
   3. `dashboard_assigns/0` модуля PromEx приложения.
 
   `otp_app`, `title` и `uid` строятся от `otp_app` из `use PromEx` приложения и имени дашборда;
-  `dashboard_assigns/0` их не меняет: один ключ на все дашборды дал бы им общий заголовок и `uid`.
+  `dashboard_assigns/0` их ключами не меняет: один ключ на все дашборды дал бы им общий заголовок
+  и `uid`. Заголовок — `"<имя приложения> - <подпись дашборда>"`, и общая его часть, имя
+  приложения, задаётся ключом `app_title` в `dashboard_assigns/0` (по умолчанию
+  `Macro.camelize(otp_app)`). На `uid` имя приложения не влияет.
   `uid` — MD5 строки `"<otp_app>/<имя дашборда>"` в 32 hex-символах верхнего регистра, как форма
   `uid` штатных дашбордов PromEx. Штатный `__grafana_dashboard_uid__/3` не годится: в его хеш
   входит имя модуля PromEx, и переименованный модуль дал бы в Grafana второй дашборд рядом со
@@ -200,7 +203,8 @@ defmodule Core.PromEx.Dashboards do
   @doc """
   Отрендерить дашборд `name` для модуля PromEx приложения — JSON выгрузки.
 
-  `ArgumentError` — в `dashboard_assigns/0` нет `datasource_id` или параметры дали невалидный JSON.
+  `ArgumentError` — в `dashboard_assigns/0` нет `datasource_id`, `app_title` не непустая строка или
+  параметры дали невалидный JSON.
   """
   @spec render(module(), name()) :: String.t()
 
@@ -214,7 +218,7 @@ defmodule Core.PromEx.Dashboards do
     |> DashboardRenderer.merge_assigns(library_assigns(dashboard, otp_app, plugins))
     |> DashboardRenderer.merge_assigns(neighbour_assigns(name, otp_app, plugins))
     |> DashboardRenderer.merge_assigns(prom_ex.dashboard_assigns())
-    |> DashboardRenderer.merge_assigns(identity_assigns(otp_app, name, label))
+    |> merge_identity(prom_ex, name, label)
     |> check_datasource!(prom_ex)
     |> render_template()
     |> DashboardRenderer.decode_dashboard()
@@ -250,12 +254,29 @@ defmodule Core.PromEx.Dashboards do
 
   defp assign_key(prefix, kind), do: Map.fetch!(@assign_keys, {prefix, kind})
 
-  defp identity_assigns(otp_app, name, label) do
-    [
+  defp merge_identity(%DashboardRenderer{assigns: assigns} = dashboard, prom_ex, name, label) do
+    otp_app = prom_ex.__otp_app__()
+
+    DashboardRenderer.merge_assigns(dashboard,
       otp_app: otp_app,
-      title: "#{Macro.camelize(Atom.to_string(otp_app))} - #{label}",
+      title: "#{app_title!(assigns, otp_app, prom_ex)} - #{label}",
       uid: Base.encode16(:crypto.hash(:md5, "#{otp_app}/#{name}"))
-    ]
+    )
+  end
+
+  defp app_title!(assigns, otp_app, prom_ex) do
+    case Keyword.fetch(assigns, :app_title) do
+      :error ->
+        Macro.camelize(Atom.to_string(otp_app))
+
+      {:ok, <<_, _::binary>> = app_title} ->
+        app_title
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "Core.PromEx.Dashboards.render/2: #{inspect(prom_ex)}.dashboard_assigns/0 — ожидается " <>
+                "app_title: имя приложения непустой строкой, получено #{inspect(other)}"
+    end
   end
 
   defp metric_prefix(plugin_opts, otp_app, plugin) do

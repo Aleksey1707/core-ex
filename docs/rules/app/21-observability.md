@@ -286,8 +286,16 @@ config :my_app, MyAppApp.ObanDashboard,
 - Штатный дашборд MUST быть выгрузкой `mix prom_ex.dashboard.export` без ручных правок:
   повторный экспорт стирает правку молча.
 - Дашборд подсистемы библиотеки MUST быть выгрузкой `mix core.dashboards.export --module
-  MyAppApp.PromEx` без ручных правок. Пороги панелей и datasource задаёт `dashboard_assigns/0`
-  модуля PromEx; после обновления core выгрузки MUST выгружаться заново.
+  MyAppApp.PromEx` без ручных правок. Пороги панелей, datasource и имя приложения в заголовке
+  (`app_title`) задаёт `dashboard_assigns/0` модуля PromEx; после обновления core выгрузки MUST
+  выгружаться заново.
+- Имя приложения в заголовках трёх видов SHOULD быть одним — `app_title` из
+  `dashboard_assigns/0`. У штатного дашборда его задаёт
+  `--assign title="<app_title> - PromEx <Name> Dashboard"` при экспорте, по одному дашборду
+  (`<Name>` — имя файла через `Macro.camelize`, как в заголовке по умолчанию): ключ `title:` в
+  `dashboard_assigns/0` штатный экспорт дал бы всем штатным дашбордам разом. `uid` штатного
+  дашборда зависит от `title`: выгрузка с новым заголовком заводит в Grafana второй дашборд.
+  `uid` дашборда подсистемы библиотеки от `app_title` не зависит.
 - Доработка выгрузки — своя панель, порог в разметке, серия — MUST жить отдельной панелью
   в доменном дашборде приложения. Точки расширения у выгрузки нет.
 - Доменный дашборд под именем выгрузки библиотеки (`<имя>.json` из
@@ -302,6 +310,7 @@ config :my_app, MyAppApp.ObanDashboard,
 # плохо — панель памяти контейнера дописана руками в выгрузку beam.json: следующий экспорт её сотрёт
 # хорошо — выгрузки как их выдал экспорт, своя панель — в доменном дашборде
 mix prom_ex.dashboard.export --module MyAppApp.PromEx --dashboard beam.json \
+  --assign title="Мой сервис - PromEx Beam Dashboard" \
   --file_path deploy/monitoring/grafana/dashboards/beam.json
 mix core.dashboards.export --module MyAppApp.PromEx
 ```

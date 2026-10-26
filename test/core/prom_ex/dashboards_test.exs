@@ -38,6 +38,14 @@ defmodule Core.PromEx.DashboardsTest do
       assert dashboard["tags"] == ["PromEx", "Outbox", "other_app"]
     end
 
+    test "app_title в dashboard_assigns/0 — имя приложения в заголовке, uid прежний" do
+      dashboard = Dashboards.render(PromExFixture.AppTitle, :outbox) |> Jason.decode!()
+      default = Dashboards.render(PromExFixture.Outbox, :outbox) |> Jason.decode!()
+
+      assert dashboard["title"] == "Мой сервис - Outbox"
+      assert dashboard["uid"] == default["uid"]
+    end
+
     test "префикс и единица длительности — из опций плагина в plugins/0" do
       dashboard = Jason.decode!(Dashboards.render(PromExFixture.Custom, :outbox))
       exprs = exprs(dashboard)
@@ -95,6 +103,14 @@ defmodule Core.PromEx.DashboardsTest do
       assert_raise ArgumentError, ~r/NoDatasource.dashboard_assigns\/0 — ожидается datasource_id/, fn ->
         Dashboards.render(PromExFixture.NoDatasource, :outbox)
       end
+    end
+
+    test "app_title не непустой строкой — ArgumentError" do
+      assert_raise ArgumentError,
+                   ~r/^Core.PromEx.Dashboards.render\/2: .*BadAppTitle.dashboard_assigns\/0 — ожидается app_title/,
+                   fn ->
+                     Dashboards.render(PromExFixture.BadAppTitle, :outbox)
+                   end
     end
 
     test "дашборд es — префикс, заголовок, пороги отставания и проекции переменной дашборда" do
@@ -425,6 +441,17 @@ defmodule Core.PromEx.DashboardsTest do
       File.write!(file, Dashboards.render(PromExFixture.OtherApp, :outbox))
 
       assert Dashboards.stale(PromExFixture.Outbox, dir) == [%{file: file, dashboard: :outbox}]
+    end
+
+    test "выгрузка до смены app_title — нарушение, повторная выгрузка — нет", %{tmp_dir: dir} do
+      file = Path.join(dir, "outbox.json")
+      File.write!(file, Dashboards.render(PromExFixture.Outbox, :outbox))
+
+      assert Dashboards.stale(PromExFixture.AppTitle, dir) == [%{file: file, dashboard: :outbox}]
+
+      File.write!(file, Dashboards.render(PromExFixture.AppTitle, :outbox))
+
+      assert Dashboards.stale(PromExFixture.AppTitle, dir) == []
     end
 
     test "невалидный JSON на месте выгрузки — нарушение", %{tmp_dir: dir} do

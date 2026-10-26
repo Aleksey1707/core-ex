@@ -519,10 +519,12 @@ end
    | `external` | при `Core.External.PromEx` |
 
    Один дашборд — `--dashboard outbox`, другой каталог — `--out` (по умолчанию
-   `deploy/monitoring/grafana/dashboards`). Префикс метрик — от `otp_app` и опций плагина, `title`
-   и `uid` — от `otp_app` и имени дашборда: переименование модуля PromEx не плодит в Grafana второй
-   дашборд. Datasource и пороги панелей — из `dashboard_assigns/0`: ключ `datasource_id` (uid
-   datasource Prometheus в Grafana) обязателен, пороги и их умолчания — в `Core.PromEx.Dashboards`.
+   `deploy/monitoring/grafana/dashboards`). Префикс метрик — от `otp_app` и опций плагина, `uid` —
+   от `otp_app` и имени дашборда: переименование модуля PromEx не плодит в Grafana второй дашборд.
+   `title` — `"<имя приложения> - <подпись дашборда>"`. Datasource, имя приложения и пороги панелей —
+   из `dashboard_assigns/0`: ключ `datasource_id` (uid datasource Prometheus в Grafana) обязателен,
+   `app_title` по умолчанию — `Macro.camelize(otp_app)`, пороги и их умолчания — в
+   `Core.PromEx.Dashboards`.
    Выгрузку коммитят и руками не правят: после обновления core её выгружают заново.
 
 ## Имена метрик
