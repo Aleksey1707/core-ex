@@ -1,10 +1,12 @@
 # Домен
 
 - **Область.** `lib/core/prim/**`, `lib/core/enum.ex`, `lib/core/validator/**`, `lib/core/codec/**`,
-  `lib/core/view.ex`, `lib/core/context*`, `lib/core/result.ex`, `lib/core/option.ex`,
-  `lib/core/es/**`, `lib/core/labels/**`; у потребителя — агрегаты, профили Codec и entity-фасады.
-- **Читать перед.** Новым Prim, Enum, кодеком, событием, командой или View; правкой агрегата,
-  профиля Codec, `Core.View`, подписей событий; выбором между агрегатом и представлением.
+  `lib/core/struct.ex`, `lib/core/view.ex`, `lib/core/context*`, `lib/core/result.ex`,
+  `lib/core/option.ex`, `lib/core/es/**`, `lib/core/labels/**`; у потребителя — агрегаты, профили
+  Codec и entity-фасады.
+- **Читать перед.** Новым Prim, Enum, кодеком, событием, командой, View или доменным struct;
+  правкой агрегата, профиля Codec, `Core.View`, подписей событий; выбором между агрегатом и
+  представлением.
 - **Словарь.** Плейсхолдеры и модальность — `00-index.md`.
 
 Строительные блоки:
@@ -473,7 +475,8 @@ use Core.Codec.Plugin,
 ```
 
 - `fields:` — список пар `{Type, spec}`; повтор типа или тип, названный ещё и в `types:` /
-  `variants:`, — `CompileError`. Struct типа остаётся ручным
+  `variants:`, — `CompileError`. Struct типа плагин не порождает: ручной `defstruct` или структура
+  по полям («Структура по полям (`Core.Struct`)»)
 - Поле спеки — ровно один вид:
 
   | Вид | Значение поля | Дамп | Загрузка | Голова `dump/2` |
@@ -501,6 +504,12 @@ use Core.Codec.Plugin,
 - Ключи спеки MUST совпадать с полями struct без `__struct__` и `events` — расхождение в любую
   сторону `CompileError` со списком лишних и недостающих: поле, добавленное в struct, не теряется в
   wire молча
+- У структуры по полям вид каждого поля спеки, включая вложенный `list:`, и `optional:` MUST
+  совпадать с её спекой — иначе `CompileError` `Codec.Plugin: fields: <Тип>: <поле>: вид поля
+  расходится со структурой`, у варианта — `Codec.Plugin: variants: <Тип>: <поле>: …`. `wire:` и
+  `default:` плагина (wire-литерал загрузки) со структурой не сверяются: необязательное поле
+  структуры плагин объявляет `optional: true` без `default:`. У ручного `defstruct` сверяются только
+  ключи
 - Голова `dump/2` закрывает struct и Prim каждого поля: значение не того Prim — предупреждение при
   прямом вызове плагина, через фасад — `FunctionClauseError` при исполнении
 - Поле `union:` голова проверяет только `is_struct` (при `optional:` — и `nil`), тип поля в
@@ -648,6 +657,75 @@ InCodec.dump(item)
 Алиасы профилей — `deps/core/docs/rules/app/20-agreements.md`, «Алиасы приложения»; коллизии
 коротких имён — `20-agreements.md`, «Алиасы модулей».
 
+## Структура по полям (`Core.Struct`)
+
+Доменный struct — команда, состояние агрегата, вложенная сущность, вариант семейства — MAY
+объявляться структурой по полям (`CONTEXT.md`): `use Core.Struct, fields: [...]` на языке спеки
+полей порождает `defstruct`, `@enforce_keys` и `@type t` из одной декларации (решение — ADR-0090).
+Ручной `defstruct` MAY остаться: роли проверяют у него только то, что видно без спеки полей.
+Кодека и конструктора у структуры нет: wire задаёт Codec-плагин по полям, сборку — литерал
+`%S{}`. Struct нагрузки события и View порождают свои builder'ы («Нагрузка по полям»;
+`13-repos.md`, «View (read-модель)»).
+
+```elixir
+defmodule MyApp.Domain.<BC>.Account.Address do
+  use Core.Struct,
+    fields: [
+      city: [prim: MyApp.Domain.<BC>.Account.City],
+      note: [prim: MyApp.Domain.<BC>.Account.Note, optional: true],
+      kind: [enum: MyApp.Domain.<BC>.Account.AddressKind, default: :postal],
+      tags: [list: [prim: MyApp.Domain.<BC>.Account.Tag], default: []]
+    ]
+end
+```
+
+- Виды поля — те же, что у плагина по полям («Плагин по полям (`fields:`)»): `prim:` / `enum:` /
+  `entity:` / `union:` / `list:` / `type:`. `wire:` и `subject:` — `CompileError`: без кодека они
+  ничего не значат. Поле хранит значение своего вида: Prim — сам Prim
+- `optional: true` значит только «значение может быть `nil`» (`| nil` в `@type t`), а не «ключ
+  можно не указывать». Обязательность ключа задаёт только `default:`: ключ обязателен, пока у
+  поля нет значения по умолчанию:
+
+  | `optional:` | `default:` | Ключ в `%S{}` | В `@type t` |
+  |---|---|---|---|
+  | — | — | обязателен | `T` |
+  | `true` | — | обязателен | `T \| nil` |
+  | — | значение | можно не указывать | `T` |
+  | `true` | `nil` или значение | можно не указывать | `T \| nil` |
+
+  Необязательное поле без `default:` — когда каждая сборка `%S{}` решает про него явно: новое поле
+  роняет сборку каждого литерала, а не даёт тихий `nil`
+- `default:` — значение поля, а не wire-литерал загрузки, как у плагина: у одного типа они
+  объявляются независимо и не сверяются. Выражение — литерал, чистая функция Prim
+  (`Currency.new!("RUB")`) или атрибут модуля выше `use` — вычисляется
+  один раз при сборке модуля, и все struct получают одно значение: `now!` / `generate` в
+  `default:` — MUST NOT, сборка этого не ловит
+- `default:` не того вида, `default: nil` без `optional: true` и значение, в котором есть Prim
+  `personal: true` или `sensitive:` (значение ушло бы в исходник и байткод), — `CompileError`
+  `Struct: fields: <поле>: …`; остальные отказы — перечень в `@moduledoc` `Core.Struct`
+
+Что роль проверяет у структуры по полям — в разделе роли:
+
+| Роль | Раздел |
+|---|---|
+| команда `use Core.Es.Cmd` | «Команда» |
+| состояние event-sourced агрегата | «Event-sourced» |
+| вложенная сущность, вариант семейства с плагином по полям | «Плагин по полям (`fields:`)» |
+| подписи `use Core.Labels.Fields` | «Подписи полей (`Core.Labels.Fields`)» |
+
+Состояние state-stored агрегата структурой по полям сборка дополнительно не проверяет.
+
+```elixir
+# плохо — значение по умолчанию вычислено при сборке: у всех struct один и тот же момент
+use Core.Struct, fields: [created_at: [prim: CreatedAt, default: CreatedAt.now!()]]
+
+# хорошо — момент указывает каждая сборка struct
+use Core.Struct, fields: [created_at: [prim: CreatedAt]]
+```
+
+Проверяется: `test/core/struct_test.exs`; роли — тесты своих builder'ов; вывод типов —
+`make consumer-check`.
+
 ## Aggregates
 
 Агрегат бывает state-stored и event-sourced (термины — `CONTEXT.md`): вид выбирается на агрегат,
@@ -670,6 +748,13 @@ InCodec.dump(item)
 
 - `id` и `version` состояния ведёт только библиотека: домен MUST NOT ставить их ни в `decide`,
   ни в `evolve`. Начальное состояние — `%Agg{id: id}`, «не создан» — `version: nil`.
+- Состояние структурой по полям («Структура по полям (`Core.Struct`)»): у каждого поля, кроме
+  `id`, MUST быть `optional: true` или `default:` — библиотека собирает начальное состояние мимо
+  обязательных ключей, и до события создания поле без `default:` равно `nil`, а поле с `default:`
+  (`[type: :boolean, default: false]`) — своему значению по умолчанию. Литерал `%Agg{id: id}` вне
+  библиотеки (в тесте) собирается, только если у каждого поля, кроме `id`, есть `default:`
+  (например `optional: true, default: nil`), иначе — `struct(Agg, id: id)`. Порядок
+  `use Core.Struct` и `use Core.Es.Aggregate` не важен.
 - `decide(команда, состояние)` → `{:ok, [черновик]} | {:error, _}`: `id` события,
   `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без изменений —
   `{:ok, []}`.
@@ -708,7 +793,8 @@ InCodec.dump(item)
   `decide/2` команды, которой нужно уничтоженное значение, отвечает доменной ошибкой:
   `23-personal-data.md`, «Уничтоженное ПДн-значение».
 
-Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`;
+Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`, у
+структуры по полям — поле состояния, кроме `id`, без `optional: true` и без `default:`;
 предупреждение при сборке — у `draft` нагрузка другого события, `draft()` у события с нагрузкой
 или `draft(payload)` у события без неё; на строке `use Core.Es.Aggregate.Repo` — у `evolve/2` нет
 clause события кодека, опечатка в ключе `%{state | …}` или в поле нагрузки без паттерна
@@ -752,11 +838,26 @@ def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
 Команда event-sourced агрегата — `<Aggregate>.Cmd.<Name>` с `use Core.Es.Cmd`: struct из Prim
 без логики. `by` (Prim автора событий агрегата) и `at` (`%Es.Event.At{}`) MUST быть в
 `@enforce_keys`: автор и момент события — данные команды, а не `Context` и не часы библиотеки.
-Сборка команды в usecase — `deps/core/docs/rules/app/11-domain.md`, «Агрегаты».
+Struct команды MAY быть структурой по полям («Структура по полям (`Core.Struct`)») — тогда `by` и
+`at` объявляются без `default:` — или ручным `defstruct`, который перечисляет их в
+`@enforce_keys` сам. Сборка команды в usecase — `deps/core/docs/rules/app/11-domain.md`,
+«Агрегаты».
 
 Проверяется: `CompileError` в `use Core.Es.Cmd` — `by` или `at` не в `@enforce_keys`.
 
 ```elixir
+defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
+  use Core.Es.Cmd
+
+  use Core.Struct,
+    fields: [
+      name: [prim: MyApp.Domain.<BC>.Account.Name],
+      by: [prim: MyApp.Domain.<BC>.Values.UserID],
+      at: [prim: Core.Es.Event.At]
+    ]
+end
+
+# ручной struct — `by` и `at` перечислены в `@enforce_keys`
 defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
   use Core.Es.Cmd
 
@@ -984,7 +1085,8 @@ end
 ### Подписи полей (`Core.Labels.Fields`)
 
 `labels:` — решение по каждому полю struct'а: подпись или `:hidden`. У нагрузки
-`Core.Es.Event.Payload` вид поля в сведениях берётся из её спеки, в объявлении подписей его нет.
+`Core.Es.Event.Payload` и у структуры по полям («Структура по полям (`Core.Struct`)») вид поля в
+сведениях берётся из их спеки, в объявлении подписей его нет.
 
 - Полнота — на `@after_compile`: поле без решения и подпись поля вне struct'а — `CompileError`
 - Повтор поля, пустая или не строковая подпись — `CompileError`
@@ -994,7 +1096,7 @@ end
 - Список map'ов (`list: [type: :map]`) — только `:hidden`: подписи map'ы у списка нет, видимый
   список map'ов — `CompileError`
 - Вложенный struct (`entity:`) без `use Core.Labels.Fields` — `CompileError`
-- `use` не после `use Core.Es.Event.Payload` и без `fields:` — `CompileError`
+- `use` не после `use Core.Es.Event.Payload` или `use Core.Struct` и без `fields:` — `CompileError`
 
 Ключи и значения свободной map'ы с подписями `[label:, key:, value:]` MUST укладываться в виды,
 которые сведения выводят по самому значению (Prim, строка, число, `boolean`, `nil` — «Сведения
@@ -1011,12 +1113,13 @@ use Core.Labels.Fields,
   labels: [options: :hidden]
 ```
 
-Struct без спеки полей — нагрузка с ручным плагином кодека, вложенный struct сведений, вариант
-семейства — объявляет спеку **видимых** полей `fields:` на языке плагина по полям («Плагин по полям
-(`fields:`)»). Её разбирает нормализатор `Core.Codec.Field`; копия разбора в подсистеме
-MUST NOT: язык спеки один, и новый вид плагина иначе разошёлся бы с подписями. Сверх языка плагина —
-вид `text:`: захват функции арности 1, значение выходит текстом её результата; так подписывается
-значение без собственного модуля — поле с одним из двух struct'ов, список открытых атомов.
+Struct без спеки полей (ручной `defstruct`) — нагрузка с ручным плагином кодека, вложенный struct
+сведений, вариант семейства — объявляет спеку **видимых** полей `fields:` на языке плагина по полям
+(«Плагин по полям (`fields:`)»). Её разбирает нормализатор `Core.Codec.Field`; копия разбора в
+подсистеме MUST NOT: язык спеки один, и новый вид плагина иначе разошёлся бы с подписями. Сверх
+языка плагина — вид `text:`: захват функции арности 1, значение выходит текстом её результата;
+так подписывается значение без собственного модуля — поле с одним из двух struct'ов, список
+открытых атомов.
 
 ```elixir
 defmodule Address do
@@ -1032,7 +1135,8 @@ defmodule Address do
 end
 ```
 
-- Спека поля и у нагрузки события, и в `fields:` — `CompileError`: у вида поля один источник
+- Спека поля и у нагрузки события или структуры по полям, и в `fields:` — `CompileError`: у вида
+  поля один источник
 - Видимое поле без спеки, спека скрытого поля или поля вне struct'а — `CompileError`
 - `text:` не захватом функции арности 1, `text:` / `list: [text: …]` с другими ключами —
   `CompileError`
@@ -1040,8 +1144,9 @@ end
 
 Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
 двух опций: изменение выходит в сведения одним сведением, а не двумя полями. Вид значения у
-`Core.Es.ValueChanged` берётся из его `type:`; у ручного struct'а с полями `old_value` / `new_value`
-его задаёт `value:` — спека одного значения на языке `fields:`, вместе с `text:`.
+`Core.Es.ValueChanged` берётся из его `type:`, у структуры по полям — из спеки `old_value` /
+`new_value`; у ручного struct'а с этими полями его задаёт `value:` — спека одного значения на языке
+`fields:`, вместе с `text:`.
 
 ```elixir
 defmodule Payload do
@@ -1062,7 +1167,8 @@ end
 
 - `labels:` вместе с `change:`, `fields:` вместе с `change:` — `CompileError`
 - Ручной struct изменения без `value:`, `value:` у `Core.Es.ValueChanged` (у вида значения один
-  источник — `type:`), `value:` без `change:` — `CompileError`
+  источник — `type:`) или у структуры по полям (её спека), `value:` без `change:`, разный вид
+  `old_value` и `new_value` у структуры по полям — `CompileError`
 - Struct без `old_value` / `new_value` или с полями вне них под `change:`, пустая подпись
   изменения — `CompileError`
 - `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct` — `CompileError`: иначе

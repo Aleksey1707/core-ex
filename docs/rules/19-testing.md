@@ -194,8 +194,9 @@ end
 
 Решения агрегата тестируются без БД, в `ExUnit.Case, async: true`:
 
-- given — `Core.Es.Aggregate.Test.given(state, results, by:, at:)` от `%Agg{id: id}`: результаты
-  `decide/2`, версии и `id` событий ставит библиотека; разные авторы — цепочкой вызовов;
+- given — `Core.Es.Aggregate.Test.given(state, results, by:, at:)` от `%Agg{id: id}` (у состояния
+  структурой по полям без `default:` — `struct(Agg, id: id)`, `11-domain.md`, «Event-sourced»):
+  результаты `decide/2`, версии и `id` событий ставит библиотека; разные авторы — цепочкой вызовов;
 - when — `Agg.decide(cmd, state)`;
 - then SHOULD — короткая форма результата: `{:ok, [{Mod, payload}]}`, `{:ok, []}`,
   `{:error, %Error{kind: :domain, code: …}}` без `message` / `detail`.

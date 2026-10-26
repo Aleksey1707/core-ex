@@ -202,48 +202,107 @@
 
 ### Новое
 
-- **Структура по полям: `use Core.Struct, fields: [...]`** (ADR-0090). Доменный struct (команда,
-  состояние агрегата, вложенная сущность, вариант семейства) объявляется одним списком полей на
-  языке спеки полей — `prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`,
-  `optional: true` и `default:`; из него порождаются `defstruct`, `@enforce_keys` и `@type t`
-  (`prim: Name` → `Name.t()`, `optional: true` → `| nil`). Раньше три части писались руками и
-  расходились молча: поле в `defstruct`, но не в типе, тип `%__MODULE__{}` без полей.
-  `optional: true` значит только «значение может быть `nil`»; ключ обязателен, пока у поля нет
-  `default:`. `default:` — выражение значения поля (`0`, `:draft`, `Currency.new!("RUB")`, `@rub`),
-  вычисляется один раз при сборке модуля, и сборка проверяет вид результата; `default: nil` без
-  `optional: true`, значение не того вида и значение Prim `personal: true` / `sensitive:` —
-  `CompileError`. Кодека и конструктора нет — wire задаёт Codec-плагин по полям, сборка — литерал
-  `%S{}`. `wire:` и `subject:` — `CompileError` `Struct: fields: <поле>: …`. Для выражения внутри
-  литеральной опции `Core.Helper.Opts.literal!/3` принимает в `expression_keys` элемент
-  `{key, inner_keys}` (`[fields: ~w(default)a]`): у записей опции ключи `inner_keys` остаются AST,
-  остальное — литерал.
-  Codec-плагин по полям (`fields:` и `variants:`) сверяет со структурой по полям не только ключи, но
-  и вид каждого поля, включая вложенный `list:`, и `optional:`: `prim: Name` в структуре и
-  `prim: Other` в плагине — `CompileError` `Codec.Plugin: fields: <Тип>: <поле>: вид поля
-  расходится со структурой — в структуре [...], в плагине [...]` (у варианта — префикс
-  `Codec.Plugin: variants: <Тип>: <поле>`). `wire:` и `default:` остаются только у плагина;
-  поле структуры с `optional: true` плагин объявляет тоже `optional: true` и без `default:`. Ручной
-  `defstruct` остаётся допустимым, у него плагин сверяет только ключи.
-  Было:
-  `@enforce_keys ~w(name note)a` + `defstruct @enforce_keys` +
-  `@type t :: %__MODULE__{name: Name.t(), note: Note.t() | nil}`, стало:
-  `use Core.Struct, fields: [name: [prim: Name], note: [prim: Note, optional: true]]`.
-  Подписи структуры по полям — `use Core.Labels.Fields, labels: [...]` после `use Core.Struct`:
-  вид полей для сведений берётся из её спеки, как у нагрузки события, и второй список не нужен;
-  `fields:` рядом с ней — `CompileError` `Labels.Fields: fields: спека поля и у структуры по
-  полям …`. Было: `defstruct [:city, :checksum]` + `use Core.Labels.Fields, fields: [city:
-  [prim: City]], labels: [city: "Город", checksum: :hidden]`, стало:
-  `use Core.Struct, fields: [city: [prim: City], checksum: [type: :string]]` +
-  `use Core.Labels.Fields, labels: [city: "Город", checksum: :hidden]`. Подпись изменения `change:`
-  у структуры по полям берёт вид значения из спеки `old_value` / `new_value`; `value:` рядом с ней —
-  `CompileError`.
-  Команда `use Core.Es.Cmd` принимает структуру по полям как есть: `by` и `at` без `default:` —
-  обязательные ключи. У состояния event-sourced агрегата структурой по полям каждое поле, кроме
-  `id`, MUST быть `optional: true`, иначе `CompileError` `Es.Aggregate: … поля состояния без
-  optional: true`: начальное состояние `%Agg{id: id}` собирается мимо обязательных ключей, и до
-  события создания поле без `default:` равно `nil`. Литерал `%Agg{id: id}` собирается, только если
-  у каждого поля, кроме `id`, есть `default:` (`optional: true, default: nil`), иначе в тесте
-  начальное состояние — `struct(Agg, id: id)`. Ручной `defstruct` агрегата так не проверяется.
+- **Структура по полям: `use Core.Struct, fields: [...]`** (ADR-0090; норма —
+  `docs/rules/11-domain.md`, «Структура по полям (`Core.Struct`)»). Доменный struct — команда,
+  состояние агрегата, вложенная сущность, вариант семейства — объявляется одним списком полей на
+  языке спеки полей: `prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`, `optional: true`
+  и `default:`. Из него порождаются `defstruct`, `@enforce_keys` и `@type t` (`prim: Name` →
+  `Name.t()`, `optional: true` → `| nil`). Раньше три части писались руками и расходились молча:
+  поле в `defstruct`, но не в типе, тип `%__MODULE__{}` без полей. Ручной `defstruct` остаётся
+  допустимым и проверяется как раньше; правка потребителя не обязательна.
+  - `optional: true` значит только «значение может быть `nil`»; ключ обязателен, пока у поля нет
+    `default:`. Необязательное поле без `default:` указывается в каждом `%S{}` явно, и новое такое
+    поле роняет сборку каждого литерала, а не даёт тихий `nil`; `optional: true, default: nil` —
+    ключ можно не указывать.
+  - `default:` — значение поля, выражение (`0`, `:draft`, `[]`, `Currency.new!("RUB")`, атрибут
+    `@rub`, объявленный выше `use`). Оно вычисляется один раз при сборке модуля — `now!` /
+    `generate` в `default:` дают момент и id сборки, сборка этого не ловит, — и сборка проверяет вид
+    результата. `CompileError` `Struct: fields: <поле>: …`: `default:` не того вида, `default: nil`
+    без `optional: true`, значение с Prim `personal: true` / `sensitive:` (ушло бы в исходник и
+    байткод), `wire:` и `subject:` (без кодека они ничего не значат); полный перечень отказов —
+    `@moduledoc` `Core.Struct`.
+  - Кодека и конструктора нет: wire задаёт Codec-плагин по полям, сборку — литерал `%S{}`.
+  - Команда `use Core.Es.Cmd` принимает структуру по полям как есть: `by` и `at` без `default:` —
+    обязательные ключи.
+  - Состояние event-sourced агрегата структурой по полям: поле, кроме `id`, без `optional: true` и
+    без `default:` — `CompileError` `Es.Aggregate: …`: начальное состояние `struct(Agg, id: id)`
+    библиотека собирает мимо обязательных ключей, и до события создания поле без `default:` равно
+    `nil`. Поле с `default:` (`[type: :boolean, default: false]`) допустимо — в нём значение по
+    умолчанию. Литерал `%Agg{id: id}` собирается, только если у каждого поля, кроме `id`, есть
+    `default:` (например `optional: true, default: nil`); иначе в тесте начальное состояние —
+    `struct(Agg, id: id)`. Ручной `defstruct` агрегата так не проверяется.
+  - Codec-плагин по полям (`fields:` и `variants:`) сверяет со структурой по полям не только ключи,
+    но и вид каждого поля, включая вложенный `list:`, и `optional:`: `prim: Name` в структуре и
+    `prim: Other` в плагине — `CompileError` `Codec.Plugin: fields: <Тип>: <поле>: вид поля
+    расходится со структурой — в структуре [...], в плагине [...]` (у варианта — префикс
+    `Codec.Plugin: variants: <Тип>: <поле>`). `wire:` и `default:` (wire-литерал загрузки, не
+    значение поля) — только плагина: поле структуры с `optional: true` плагин объявляет тоже
+    `optional: true` и без `default:`. У ручного `defstruct` плагин сверяет только ключи.
+  - Подписи — `use Core.Labels.Fields` после `use Core.Struct`: вид полей берётся из её спеки, как у
+    нагрузки события, и хватает `labels:`; `fields:` рядом — `CompileError` `Labels.Fields: fields:
+    спека поля и у структуры по полям …`. Подпись изменения `change:` берёт вид значения из спеки
+    `old_value` / `new_value` (разный вид у них — `CompileError`); `value:` рядом —
+    `CompileError`.
+  - `Core.Helper.Opts.literal!/3` принимает в `expression_keys` элемент `{key, inner_keys}`
+    (`[fields: ~w(default)a]`): у записей опции ключи `inner_keys` остаются AST, остальное —
+    литерал (`docs/rules/20-agreements.md`, «Опции `use`»).
+
+  Команда, было:
+
+  ```elixir
+  use Core.Es.Cmd
+
+  @enforce_keys ~w(name note by at)a
+  defstruct @enforce_keys
+  @type t :: %__MODULE__{
+          name: Name.t(),
+          note: Note.t() | nil,
+          by: UserID.t(),
+          at: Core.Es.Event.At.t()
+        }
+  ```
+
+  стало:
+
+  ```elixir
+  use Core.Es.Cmd
+
+  use Core.Struct,
+    fields: [
+      name: [prim: Name],
+      note: [prim: Note, optional: true],
+      by: [prim: UserID],
+      at: [prim: Core.Es.Event.At]
+    ]
+  ```
+
+  Вложенная сущность с подписями, было:
+
+  ```elixir
+  defstruct [:city, :checksum]
+
+  use Core.Labels.Fields,
+    fields: [city: [prim: City]],
+    labels: [city: "Город", checksum: :hidden]
+  ```
+
+  стало:
+
+  ```elixir
+  use Core.Struct,
+    fields: [
+      city: [prim: City],
+      checksum: [type: :string]
+    ]
+
+  use Core.Labels.Fields,
+    labels: [city: "Город", checksum: :hidden]
+  ```
+
+  У ручного `defstruct [:city, :checksum]` обязательных ключей нет, у структуры по полям оба поля
+  без `default:` — обязательные ключи: литерал `%Address{}` без них перестаёт собираться. Плагин по
+  полям такой сущности не меняется: он сверяет со структурой ещё и вид полей.
+
 - **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
   Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном
   `priv/dashboards/outbox.json.eex`; задача рендерит его через `PromEx.DashboardRenderer` в каталог

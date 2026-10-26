@@ -1,6 +1,6 @@
 ---
 name: domain
-description: "Свод правил домена библиотеки Core: Core.Prim (String/Integer/Decimal/UUID/DateTime/Date/Compose, sensitive, personal), Core.Enum (values:/codes:, описания значений в @moduledoc), опции Prim-профиля Codec (uuid/datetime/datetime_tz/date/decimal), плагины и фасады (dump/load только через фасад, union, dump-only), Core.View, агрегаты state-stored и event-sourced (Core.Es.Aggregate: decide/evolve, fold/execute), команды Core.Es.Cmd, агрегаты против представления, Es.Event, Context и Context.Accessor, Version, Pagination, Result/Option. Использовать при заведении или правке примитивов, enum, кодеков, событий, команд, View и агрегатов."
+description: "Свод правил домена библиотеки Core: Core.Prim (String/Integer/Decimal/UUID/DateTime/Date/Compose, sensitive, personal), Core.Enum (values:/codes:, описания значений в @moduledoc), опции Prim-профиля Codec (uuid/datetime/datetime_tz/date/decimal), плагины и фасады (dump/load только через фасад, union, dump-only), Core.View, агрегаты state-stored и event-sourced (Core.Es.Aggregate: decide/evolve, fold/execute), команды Core.Es.Cmd, структура по полям Core.Struct (optional: против обязательного ключа, default:, проверки ролей), агрегаты против представления, Es.Event, Context и Context.Accessor, Version, Pagination, Result/Option. Использовать при заведении или правке примитивов, enum, кодеков, событий, команд, View, агрегатов и доменных struct."
 ---
 
 # 11-domain.md
