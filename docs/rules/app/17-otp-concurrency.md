@@ -168,7 +168,8 @@ MUST жить под одним корнем `<Component>.Supervisor`; проц�
 
 - тумблером: выключенный компонент отдаёт `:ignore` из `start_link/1` и пишет причину на `info`
   («Тумблер компонента»);
-- сборкой опций своих процессов из конфигурации («Опции процессов»);
+- конфигурацией компонента (`CONTEXT.md`, «Конфигурация компонента») и сборкой из неё опций своих
+  процессов («Опции процессов», «Конфигурация корня»);
 - проверками старта своего компонента — единственность на кластере, доступность клиента внешнего
   сервиса: проверка живёт рядом с тем, что защищает. Клиент брокера —
   разделяемая инфраструктура, его проверяет `Application`;
@@ -178,39 +179,81 @@ MUST жить под одним корнем `<Component>.Supervisor`; проц�
   `stream_readers/0` из его `stream_readers/1`: дереву передаётся `enabled: true` (или подчинённый
   тумблер), и отфильтровать список тумблером корня может только корень.
 
+### Конфигурация корня
+
+Конфигурацию компонента корень читает сам, а не получает аргументом: её же без аргументов читают
+`watch_list/0`, `stream_readers/0` и прочие функции корня, и опции, влитые поверх неё в
+`start_link`, развели бы старт и наблюдение.
+
+- `start_link/1` корня MUST принимать только `[]` — `def start_link([])`: в дереве работают `Mod` и
+  `{Mod, []}`, а переданные опции дают `FunctionClauseError`, а не молча пропадают. Принимать опции
+  и вливать их поверх конфигурации — MUST NOT; подмена в тестах — `Application.put_env/3`.
+- Конфигурацию MUST читать одна приватная `config/0` корня: `Application.fetch_env!/2` и
+  `Core.Options.validate!/3` по схеме `@config NimbleOptions.new!(@config_schema)` с меткой
+  `"config :my_app, <Key>"`. Остальные функции корня зовут `config/0`, а не `Application.*`: вторая
+  точка чтения проверила бы конфигурацию иначе или не проверила бы вовсе.
+- Описание конфигурации — `@doc` `start_link/1`: раздел `## Конфигурация`, ключ и вставка
+  `Core.Options.docs(@config_schema)`. `@opts_schema` над `start_link([])` — MUST NOT: опций у неё
+  нет, атрибут означает опции функции (`deps/core/docs/rules/20-agreements.md`, «Схема опций
+  функции»).
+
 ```elixir
 defmodule MyApp.<Subsystem>.Supervisor do
   use Supervisor
 
   require Logger
 
-  def start_link(_arg) do
-    opts = opts()
+  @config_schema [
+    enabled: [type: :boolean, required: true, doc: "Тумблер компонента."],
+    interval_ms: [type: :pos_integer, required: true, doc: "Период опроса, мс."]
+  ]
+  @config NimbleOptions.new!(@config_schema)
 
-    case Keyword.fetch!(opts, :enabled) do
+  @doc """
+  Старт корня; `:ignore` — компонент отключён.
+
+  ## Конфигурация
+
+  `config :my_app, MyApp.<Subsystem>.Supervisor` из `config/runtime.exs`:
+
+  #{Core.Options.docs(@config_schema)}
+  """
+  @spec start_link([]) :: Supervisor.on_start()
+
+  def start_link([]) do
+    config = config()
+
+    case Keyword.fetch!(config, :enabled) do
       false ->
         Logger.info("<subsystem>: отключён")
         :ignore
 
       true ->
-        MyApp.<Subsystem>.Client.ensure_available!(opts)
-        Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+        MyApp.<Subsystem>.Client.ensure_available!(config)
+        Supervisor.start_link(__MODULE__, config, name: __MODULE__)
     end
   end
 
   def watch_list do
-    case Keyword.fetch!(opts(), :enabled) do
+    case Keyword.fetch!(config(), :enabled) do
       false -> []
       true -> [%{component: "<subsystem>", name: MyApp.<Subsystem>.Worker}]
     end
   end
 
   @impl true
-  def init(opts), do: Supervisor.init([{MyApp.<Subsystem>.Worker, opts}], strategy: :one_for_one)
+  def init(config) do
+    worker_opts = [interval_ms: Keyword.fetch!(config, :interval_ms)]
+    Supervisor.init([{MyApp.<Subsystem>.Worker, worker_opts}], strategy: :one_for_one)
+  end
 
   # ---
 
-  defp opts, do: Application.fetch_env!(:my_app, __MODULE__)
+  defp config do
+    :my_app
+    |> Application.fetch_env!(__MODULE__)
+    |> Core.Options.validate!(@config, "config :my_app, #{inspect(__MODULE__)}")
+  end
 end
 ```
 
@@ -357,8 +400,8 @@ end
 
 ## Опции процессов
 
-Опции приходят из `config/runtime.exs` через корень компонента и проверяются в `start_link/1`
-схемой опций над ним (`use Core.Options`, `@opts_schema`;
+Опции процессов корень компонента собирает из конфигурации компонента («Конфигурация корня»), а
+проверяются они в `start_link/1` процесса схемой опций над ним (`use Core.Options`, `@opts_schema`;
 `deps/core/docs/rules/20-agreements.md`, «Схема опций функции»): это точка входа процесса, и
 описание опций — вставка `Core.Options.docs/1` в её `@doc`, а не в `@moduledoc`. Доменные значения
 проверяют custom-типы схемы: Prim — `Core.Options.Type`
@@ -474,7 +517,8 @@ config :my_app, MyApp.Domain.<BC>.Account.Process,
 
 - Опции MUST собирать одна функция приложения — `MyAppApp.Application.outbox_opts/0` из
   `config :my_app, Core.Outbox.Supervisor`: её же принимает `Core.Outbox.Supervisor.watch_list/1`.
-  Состав опций — moduledoc дерева, env — `14-events-outbox.md`, «Конфигурация».
+  Состав опций — `@doc` `Core.Outbox.Supervisor.start_link/1`, env — `14-events-outbox.md`,
+  «Конфигурация».
 - Соединение с брокером, у которого других пользователей нет, — опция `connection:` дерева;
   соединение, которое делят несколько компонентов, — ребёнок `Application` («Дерево процессов»).
 - Контекст поллеров и cleaner'а MUST собирать фабрика приложения — опция дерева
