@@ -202,6 +202,19 @@
 
 ### Новое
 
+- **Структура по полям: `use Core.Struct, fields: [...]`** (ADR-0090). Доменный struct (команда,
+  состояние агрегата, вложенная сущность, вариант семейства) объявляется одним списком полей на
+  языке спеки полей — `prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:` и
+  `optional: true`; из него порождаются `defstruct`, `@enforce_keys` и `@type t` (`prim: Name` →
+  `Name.t()`, `optional: true` → `| nil`). Раньше три части писались руками и расходились молча:
+  поле в `defstruct`, но не в типе, тип `%__MODULE__{}` без полей. Обязательны ключи всех полей:
+  `optional: true` значит только «значение может быть `nil`», а ключ каждая сборка `%S{}`
+  указывает явно. Кодека и конструктора нет — wire задаёт Codec-плагин по полям, сборка — литерал
+  `%S{}`. `wire:`, `subject:` и `default:` — `CompileError` `Struct: fields: <поле>: …`. Ручной
+  `defstruct` остаётся допустимым. Было:
+  `@enforce_keys ~w(name note)a` + `defstruct @enforce_keys` +
+  `@type t :: %__MODULE__{name: Name.t(), note: Note.t() | nil}`, стало:
+  `use Core.Struct, fields: [name: [prim: Name], note: [prim: Note, optional: true]]`.
 - **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
   Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном
   `priv/dashboards/outbox.json.eex`; задача рендерит его через `PromEx.DashboardRenderer` в каталог

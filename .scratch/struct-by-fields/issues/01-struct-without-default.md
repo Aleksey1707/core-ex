@@ -6,21 +6,21 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Builder `Core.Struct` с меткой `"Struct"`, пролог `Helper.Opts.expand!/3` → `validate!` → `literal!/3`
+- [x] Builder `Core.Struct` с меткой `"Struct"`, пролог `Helper.Opts.expand!/3` → `validate!` → `literal!/3`
       (ADR-0085), обязательный ключ `fields:`.
-- [ ] `Core.Codec.Field` получает режим `:struct`; остальные режимы не меняются.
-- [ ] Виды `prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:` дают в `@type t` тип своего вида;
+- [x] `Core.Codec.Field` получает режим `:struct`; остальные режимы не меняются.
+- [x] Виды `prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:` дают в `@type t` тип своего вида;
       `optional: true` добавляет `| nil`.
-- [ ] `@enforce_keys` — все поля; `defstruct` — все поля; `__struct_fields__/0` (`@doc false`).
-- [ ] Модули спеки проверяются в теле: Prim, вложенный выше `use`, собирается.
-- [ ] `CompileError` с префиксом `Struct: fields: <поле>: …` на `wire:`, `subject:`, `default:` (временно),
+- [x] `@enforce_keys` — все поля; `defstruct` — все поля; `__struct_fields__/0` (`@doc false`).
+- [x] Модули спеки проверяются в теле: Prim, вложенный выше `use`, собирается.
+- [x] `CompileError` с префиксом `Struct: fields: <поле>: …` на `wire:`, `subject:`, `default:` (временно),
       не-Prim в `prim:`, не-Enum в `enum:`, несобранный модуль, неизвестное значение `type:`, повтор поля,
       нелитеральный `fields:`.
-- [ ] Тесты через поверхность `use`: `%S{}`, `Code.eval_string("%S{}")` → `ArgumentError` со списком ключей,
+- [x] Тесты через поверхность `use`: `%S{}`, `Code.eval_string("%S{}")` → `ArgumentError` со списком ключей,
       `Code.Typespec.fetch_types/1` у модуля в `.beam`, `Code.eval_quoted` → `CompileError` на каждый отказ.
-- [ ] `@moduledoc` с примером, таблицей видов и перечнем отказов; `optional:` не называется «необязательным
+- [x] `@moduledoc` с примером, таблицей видов и перечнем отказов; `optional:` не называется «необязательным
       ключом».
-- [ ] CHANGELOG, «Не выпущено» → «Новое»: пункт о `Core.Struct`.
-- [ ] `make` зелёный.
+- [x] CHANGELOG, «Не выпущено» → «Новое»: пункт о `Core.Struct`.
+- [x] `make` зелёный.

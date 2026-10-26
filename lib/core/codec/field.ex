@@ -4,9 +4,10 @@ defmodule Core.Codec.Field do
 
   Спеку говорят Codec-плагин по полям (`use Core.Codec.Plugin, fields:`), варианты семейства,
   нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged` и подписи
-  (`Core.Labels.Fields`). Поле объявляется keyword-спекой с ровно одним kind-ключом
-  (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`) и необязательными `optional: true`
-  и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у нагрузки (ADR-0056, ADR-0073).
+  (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Поле объявляется keyword-спекой с
+  ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`) и ключами
+  `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у нагрузки
+  (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет (ADR-0090).
 
   Модуль внутренний для библиотеки.
   """
@@ -45,9 +46,10 @@ defmodule Core.Codec.Field do
   @typedoc """
   Режим нормализации: `:plugin` — плагин с загрузкой (`default:` разрешён), `:dump_only` — плагин
   при `loadable: false`, `:payload` — нагрузка события (`subject:` разрешён, `default:` и wire-ключ на
-  `$` — нет), `:labels` — подписи.
+  `$` — нет), `:labels` — подписи, `:struct` — структура по полям (`wire:`, `subject:` и `default:` —
+  нет).
   """
-  @type mode :: :plugin | :dump_only | :payload | :labels
+  @type mode :: :plugin | :dump_only | :payload | :labels | :struct
 
   @typedoc "Нормализованное поле: имя, спека значения, необязательность, wire-ключ, `default:`, субъект."
   @type t :: %__MODULE__{
@@ -97,7 +99,7 @@ defmodule Core.Codec.Field do
     end
   end
 
-  def normalize!(spec, mode, where) when mode in ~w(plugin dump_only labels)a and is_binary(where),
+  def normalize!(spec, mode, where) when mode in ~w(plugin dump_only labels struct)a and is_binary(where),
     do: spec_fields!(spec, mode, where)
 
   @doc false
@@ -187,6 +189,8 @@ defmodule Core.Codec.Field do
       Helper.Opts.reject!(where, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
+    if mode == :struct, do: check_struct_keys!(opts, where)
+
     case Keyword.keys(opts) -- (@kind_keys ++ @extra_keys ++ if(mode == :payload, do: [:subject], else: [])) do
       [] -> :ok
       unknown -> Helper.Opts.reject!(where, "неизвестные ключи #{inspect(unknown)}")
@@ -203,6 +207,18 @@ defmodule Core.Codec.Field do
       default: default!(opts, spec, optional?, mode != :dump_only, where),
       subject: subject!(opts, where)
     }
+  end
+
+  defp check_struct_keys!(opts, where) do
+    for {key, text} <- [
+          wire: "wire: у структуры по полям нет wire — его задаёт Codec-плагин по полям",
+          subject: "subject: у структуры по полям нет кодека — субъект ПДн задаёт нагрузка события",
+          default: "default: у структуры по полям пока не поддерживается"
+        ],
+        Keyword.has_key?(opts, key),
+        do: Helper.Opts.reject!(where, text)
+
+    :ok
   end
 
   defp spec!(opts, where) do
