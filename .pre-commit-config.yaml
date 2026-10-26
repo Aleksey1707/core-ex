@@ -58,6 +58,12 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        # Сборка и тесты — только когда в коммите код: правка одних docs/ их не меняет.
+        files: &code |
+          (?x)^(
+            (lib|test|config|scripts|fixtures|priv|deploy)/.*|
+            mix\.exs|mix\.lock|Makefile|\.credo\.exs|\.formatter\.exs|dialyzer\.ignore\.exs
+          )$
 
       - id: mix-compile-no-optional
         name: "Elixir: mix compile --no-optional-deps"
@@ -65,6 +71,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: consumer-check
         name: "Consumer: предупреждения фикстуры-потребителя"
@@ -72,6 +79,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: mix-deps-clean
         name: "Elixir: mix deps.clean --unused"
@@ -79,6 +87,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: mix-xref
         name: "Elixir: mix xref (циклы)"
@@ -86,6 +95,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: mix-dialyzer
         name: "Elixir: mix dialyzer"
@@ -93,6 +103,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: mix-test
         name: "Elixir: mix test"
@@ -100,6 +111,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: mix-credo
         name: "Elixir: mix credo"
@@ -107,6 +119,7 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+        files: *code
 
       - id: mix-audit
         name: "Elixir: mix deps.audit"
