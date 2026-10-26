@@ -327,9 +327,51 @@ Es.Transact.run(fn -> ... end)
 
 ### Снапшоты
 
-`snapshot: [every: N]` включается, когда поток вырос настолько, что свёртка стала заметна в
-`duration` загрузки агрегата, а не заранее: снапшот — кэш, и его цена — вторая запись после
-commit.
+`snapshot: [every: N]` включается по замеру, а не заранее: снапшот — кэш, и его цена — вторая
+запись после commit. Шаги замера и куда идут его цифры — `20-agreements.md`, «Решения о
+производительности»; здесь — что мерить.
+
+- Повод — длительность загрузки `my_app_prom_ex_es_aggregate_load_duration_milliseconds` и длина
+  свёртки `my_app_prom_ex_es_aggregate_fold_events`: распределение длин потоков задаёт размеры
+  сценария.
+- Параметр — сценарий `bench/snapshot_bench.exs`: загрузка агрегата на длинах из повода, без
+  снапшота и со снапшотом. Хвост после снапшота короче `every`, поэтому `every:` — наибольшая
+  длина, загрузка которой без снапшота ещё укладывается в бюджет. Прогон со снапшотом меряет
+  лучший случай — пустой хвост; худший, хвост `every − 1`, стоит как прогон без снапшота на этой
+  длине.
+- Ожидание в коммите — p99 длины свёртки не выше `every`.
+
+Сценарий гоняет рабочий `<Aggregate>.Repo.Pg` дважды — до `snapshot:` и с ним — и сравнивает
+второй прогон с сохранённым первым (`save:` / `load:` benchee). Второй репозиторий агрегата ради
+замера MUST NOT: репозиторий event-sourced агрегата один (`deps/core/docs/rules/13-repos.md`,
+«Write event-sourced агрегата (`use Core.Es.Aggregate.Repo.Pg`)»).
+
+```elixir
+# bench/snapshot_bench.exs: `mix run bench/snapshot_bench.exs plain` без `snapshot:`
+# у `<Aggregate>.Repo.Pg`, затем `mix run bench/snapshot_bench.exs snapshot` — с ним
+alias Core.Context
+alias MyApp.Domain.<BC>.<Aggregate>
+
+[tag] = System.argv()
+
+# команды агрегата, дающие поток из n событий
+commands = fn n -> [%<Aggregate>.Cmd.Open{...} | for(i <- 2..n//1, do: %<Aggregate>.Cmd.Rename{...})] end
+
+stream = fn n ->
+  id = <Aggregate>.ID.new()
+  {:ok, {events, _state}} = <Aggregate>.execute(%<Aggregate>{id: id}, commands.(n))
+  :ok = <Aggregate>.Repo.Pg.append(events, Context.new())
+  id
+end
+
+Benchee.run(
+  %{"load" => fn id -> {:ok, _} = <Aggregate>.Repo.Pg.get(id, :current, Context.new()) end},
+  inputs: %{"10" => 10, "100" => 100, "1000" => 1_000, "10000" => 10_000},
+  before_scenario: stream,
+  save: [path: "tmp/snapshot.benchee", tag: tag],
+  load: "tmp/snapshot.benchee"
+)
+```
 
 Подъём `version:` снапшота — `deps/core/docs/rules/13-repos.md`, «Снапшоты».
 
