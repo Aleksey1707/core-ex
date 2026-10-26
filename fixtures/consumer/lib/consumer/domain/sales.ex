@@ -2,9 +2,9 @@ defmodule Consumer.Domain.Sales do
   @moduledoc """
   Продажи фикстуры: счета, заказы и выдача ролей; держит храповик вывода типов (ADR-0014).
 
-  - Агрегаты: `Account` (event-sourced, кодек с `upcasts:`, модули ключа `NameKey` и из ПДн `HolderKey`,
-    процесс), `Order` (enum `Status` отдельным файлом в guard `is_enum/2` самого агрегата), `Ping` (события
-    без нагрузки),
+  - Агрегаты: `Account` (event-sourced, состояние и команда `Cmd.Rename` — структуры по полям, кодек с
+    `upcasts:`, модули ключа `NameKey` и из ПДн `HolderKey`, процесс), `Order` (enum `Status` отдельным
+    файлом в guard `is_enum/2` самого агрегата), `Ping` (события без нагрузки),
     `Grants` (два события делят модуль нагрузки, нагрузка по полям с `union:`), `NeverFails` и
     `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата
     (владелец потока — struct `Parcel`).

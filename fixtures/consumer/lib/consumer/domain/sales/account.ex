@@ -50,9 +50,20 @@ defmodule Consumer.Domain.Sales.Account do
       personal: true
   end
 
-  defstruct id: nil, version: nil, name: nil, status: nil, holder: nil
+  defmodule Status do
+    use Core.Enum,
+      name: "Статус счёта",
+      values: ~w(open frozen closed)a
+  end
 
-  @type t :: %__MODULE__{}
+  use Core.Struct,
+    fields: [
+      id: [prim: ID],
+      version: [prim: Version, optional: true],
+      name: [prim: Name, optional: true],
+      status: [enum: Status, optional: true],
+      holder: [prim: Holder, optional: true]
+    ]
 
   @on_existing [Cmd.Rename, Cmd.SetHolder, Cmd.Freeze, Cmd.Close]
 

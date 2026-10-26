@@ -5,15 +5,20 @@ defmodule Core.Es.Cmd do
       defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
         use Core.Es.Cmd
 
-        @enforce_keys ~w(name by at)a
-        defstruct @enforce_keys
+        use Core.Struct,
+          fields: [
+            name: [prim: MyApp.Domain.<BC>.Account.Name],
+            by: [prim: MyApp.Domain.<BC>.Values.UserID],
+            at: [prim: Core.Es.Event.At]
+          ]
       end
 
   Команда — struct из Prim, собирает её usecase. Автор и момент событий приходят из
   команды, а не из `Context` и не из часов библиотеки: `by` — Prim автора событий агрегата,
-  `at` — `%Core.Es.Event.At{}`. Оба поля MUST быть в `@enforce_keys` — иначе `CompileError`.
-  Типы значений проверяет конструктор события при исполнении команды
-  (`Core.Es.Aggregate`).
+  `at` — `%Core.Es.Event.At{}`. Оба поля MUST быть в `@enforce_keys` — иначе `CompileError`: у
+  структуры по полям (`use Core.Struct`) это поля без `default:`, ручной struct перечисляет их
+  сам (`@enforce_keys ~w(name by at)a` + `defstruct @enforce_keys`). Типы значений проверяет
+  конструктор события при исполнении команды (`Core.Es.Aggregate`).
 
   Опций нет.
   """

@@ -13,6 +13,18 @@ defmodule Core.Es.CmdTest do
       assert_raise ArgumentError, ~r/:by, :at/, fn -> struct!(cmd, name: 1) end
     end
 
+    test "структура по полям — by и at обязательные ключи, команда собирается" do
+      fields = [
+        name: [prim: Core.EsFixture.Account.Name],
+        by: [prim: Core.EsFixture.UserID],
+        at: [prim: Core.Es.Event.At]
+      ]
+
+      cmd = compile(ByFields, nil, quote(do: use(Core.Struct, fields: unquote(fields))))
+
+      assert_raise ArgumentError, ~r/:by, :at/, fn -> struct!(cmd, name: 1) end
+    end
+
     test "без by или at в @enforce_keys — CompileError" do
       for {name, keys} <- [{NoBy, ~w(name at)a}, {NoAt, ~w(name by)a}] do
         assert_raise CompileError, ~r/обязан объявить \[:by, :at\] в @enforce_keys/, fn ->

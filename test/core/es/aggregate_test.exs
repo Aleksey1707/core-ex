@@ -187,6 +187,29 @@ defmodule Core.Es.AggregateTest do
       end
     end
 
+    test "состояние структурой по полям: поле без optional: true, кроме id, — CompileError" do
+      fields = [id: [prim: Account.ID], version: [prim: Version], name: [prim: Account.Name, optional: true]]
+
+      assert_raise CompileError, ~r/поля состояния без optional: true: \[:version\]/, fn ->
+        compile(RequiredVersion, [event_codec: Account.Event.Codec], {:fields, fields})
+      end
+    end
+
+    test "состояние структурой по полям: все поля, кроме id, optional: true — агрегат собирается" do
+      fields = [
+        id: [prim: Account.ID],
+        version: [prim: Version, optional: true, default: nil],
+        name: [prim: Account.Name, optional: true]
+      ]
+
+      compile(ByFields, [event_codec: Account.Event.Codec], {:fields, fields})
+      aggregate = Module.concat(__MODULE__, ByFields)
+      id = Account.ID.new()
+
+      assert {:ok, {[], state}} = aggregate.execute(struct(aggregate, id: id), close())
+      assert %{id: ^id, version: nil, name: nil} = state
+    end
+
     test "event_codec: не атом — CompileError" do
       assert_raise CompileError, ~r/^Es\.Aggregate: event_codec: ожидается атом, получено "account"$/, fn ->
         compile(BadCodec, [event_codec: "account"], ~w(id version)a)
@@ -234,9 +257,11 @@ defmodule Core.Es.AggregateTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(Module.concat(__MODULE__, name)) do
+          unquote(struct_by_fields(fields))
+
           use Core.Es.Aggregate, unquote(opts)
 
-          defstruct unquote(fields)
+          unquote(manual_struct(fields))
 
           @impl true
           def decide(_command, _state), do: {:ok, []}
@@ -247,4 +272,10 @@ defmodule Core.Es.AggregateTest do
       end
     )
   end
+
+  defp struct_by_fields({:fields, fields}), do: quote(do: use(Core.Struct, fields: unquote(fields)))
+  defp struct_by_fields(_fields), do: nil
+
+  defp manual_struct({:fields, _fields}), do: nil
+  defp manual_struct(fields), do: quote(do: defstruct(unquote(fields)))
 end

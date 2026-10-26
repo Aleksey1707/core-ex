@@ -38,6 +38,21 @@ defmodule Core.Es.Aggregate do
   библиотека. Начальное состояние — `%Agg{id: id}` с `id` из адреса вызова, «не создан» —
   `version: nil`.
 
+  Состояние MAY объявляться структурой по полям (`use Core.Struct`). Тогда каждое поле, кроме
+  `id`, MUST быть `optional: true`, иначе `CompileError`: начальное состояние собирается мимо
+  обязательных ключей, и до события создания поле без `default:` равно `nil`. Литерал
+  `%Agg{id: id}` собирается, только если у каждого поля, кроме `id`, есть `default:`
+  (`optional: true, default: nil`); иначе начальное состояние вне библиотеки (в тесте) —
+  `struct(Agg, id: id)`. Порядок `use Core.Struct` и `use Core.Es.Aggregate` не
+  важен — поля проверяются после сборки модуля. Ручной `defstruct` так не проверяется.
+
+      use Core.Struct,
+        fields: [
+          id: [prim: ID],
+          version: [prim: Core.Version, optional: true],
+          name: [prim: Name, optional: true]
+        ]
+
   ## Генерируемые функции
 
   - `fold(state, events)` → `%Agg{}` — свёртка истории от любого состояния: версии событий идут
@@ -76,6 +91,7 @@ defmodule Core.Es.Aggregate do
     репозитория не проверяется.
   """
 
+  alias Core.Codec.Field
   alias Core.Error
   alias Core.Es
   alias Core.Helper
@@ -164,7 +180,7 @@ defmodule Core.Es.Aggregate do
 
     case @state_keys -- fields do
       [] ->
-        :ok
+        ensure_state_optional!(env)
 
       missing ->
         raise CompileError,
@@ -174,6 +190,29 @@ defmodule Core.Es.Aggregate do
           file: env.file,
           line: env.line
     end
+  end
+
+  # ---
+
+  defp ensure_state_optional!(env) do
+    case required_state_fields(env.module) do
+      [] ->
+        :ok
+
+      required ->
+        raise CompileError,
+          description:
+            "#{@label}: #{inspect(env.module)} — поля состояния без optional: true: #{inspect(required)} — " <>
+              "до события создания библиотека собирает состояние %Agg{id: id}, и поля равны nil",
+          file: env.file,
+          line: env.line
+    end
+  end
+
+  defp required_state_fields(aggregate) do
+    if Helper.Module.exports?(aggregate, :__struct_fields__, 0),
+      do: for(%Field{name: name, optional?: false} when name != :id <- aggregate.__struct_fields__(), do: name),
+      else: []
   end
 
   # ===== команда =====

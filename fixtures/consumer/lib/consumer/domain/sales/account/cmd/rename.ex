@@ -5,8 +5,10 @@ defmodule Consumer.Domain.Sales.Account.Cmd.Rename do
 
   use Core.Es.Cmd
 
-  @enforce_keys ~w(name by at)a
-  defstruct @enforce_keys
-
-  @type t :: %__MODULE__{name: Account.Name.t(), by: UserID.t(), at: Es.Event.At.t()}
+  use Core.Struct,
+    fields: [
+      name: [prim: Account.Name],
+      by: [prim: UserID],
+      at: [prim: Es.Event.At]
+    ]
 end

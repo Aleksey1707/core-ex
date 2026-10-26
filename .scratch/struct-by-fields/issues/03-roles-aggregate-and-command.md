@@ -6,15 +6,15 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Core.Es.Aggregate` на `@after_compile`: при `__struct_fields__/0` поле без `optional: true`, кроме `id`, —
+- [x] `Core.Es.Aggregate` на `@after_compile`: при `__struct_fields__/0` поле без `optional: true`, кроме `id`, —
       `CompileError`. Ручной `defstruct` не проверяется.
-- [ ] `Core.Es.Cmd` без изменений принимает структуру по полям: `by` / `at` без `default:` — обязательные ключи.
-- [ ] Пример в `@moduledoc` `Core.Es.Cmd` — на `use Core.Struct`.
-- [ ] Тесты в тестах агрегата и команды через их `use`: отказ на поле без `optional:`, успех на корректном
+- [x] `Core.Es.Cmd` без изменений принимает структуру по полям: `by` / `at` без `default:` — обязательные ключи.
+- [x] Пример в `@moduledoc` `Core.Es.Cmd` — на `use Core.Struct`.
+- [x] Тесты в тестах агрегата и команды через их `use`: отказ на поле без `optional:`, успех на корректном
       состоянии, команда со структурой по полям.
-- [ ] Фикстура-потребитель: одна команда и состояние одного event-sourced агрегата — на `use Core.Struct`;
+- [x] Фикстура-потребитель: одна команда и состояние одного event-sourced агрегата — на `use Core.Struct`;
       `make consumer-check` зелёный.
-- [ ] CHANGELOG: пункт из 01 дополняется.
-- [ ] `make` зелёный.
+- [x] CHANGELOG: пункт из 01 дополняется.
+- [x] `make` зелёный.

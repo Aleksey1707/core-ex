@@ -237,6 +237,13 @@
   `use Core.Labels.Fields, labels: [city: "Город", checksum: :hidden]`. Подпись изменения `change:`
   у структуры по полям берёт вид значения из спеки `old_value` / `new_value`; `value:` рядом с ней —
   `CompileError`.
+  Команда `use Core.Es.Cmd` принимает структуру по полям как есть: `by` и `at` без `default:` —
+  обязательные ключи. У состояния event-sourced агрегата структурой по полям каждое поле, кроме
+  `id`, MUST быть `optional: true`, иначе `CompileError` `Es.Aggregate: … поля состояния без
+  optional: true`: начальное состояние `%Agg{id: id}` собирается мимо обязательных ключей, и до
+  события создания поле без `default:` равно `nil`. Литерал `%Agg{id: id}` собирается, только если
+  у каждого поля, кроме `id`, есть `default:` (`optional: true, default: nil`), иначе в тесте
+  начальное состояние — `struct(Agg, id: id)`. Ручной `defstruct` агрегата так не проверяется.
 - **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
   Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном
   `priv/dashboards/outbox.json.eex`; задача рендерит его через `PromEx.DashboardRenderer` в каталог

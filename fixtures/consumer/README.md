@@ -35,7 +35,8 @@
   ```
 
   Контекст `Consumer.Domain.Sales` — граница верхнего уровня: `deps` — кодек и сток, `exports` — модули
-  usecases, типы ID, семейства событий, модули outbox и плагин кодека. Агрегаты `Account` (кодек с
+  usecases, типы ID, семейства событий, модули outbox и плагин кодека. Агрегаты `Account` (состояние и
+  команда `Account.Cmd.Rename` — структуры по полям `use Core.Struct`, кодек с
   `upcasts:`, модули ключа `Account.NameKey` и ключа из ПДн `Account.HolderKey` с `personal: true` в
   `key_reservations:` у репозитория счёта, процесс), `Order` (enum `Order.Status` отдельным файлом в
   guard `is_enum/2` самого агрегата), `Ping` (кодек только из событий без нагрузки), `Grants` (два события делят нагрузку-Prim, третье несёт `Es.ValueChanged`,
