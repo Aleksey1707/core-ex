@@ -24,6 +24,24 @@ defmodule ConsumerTest.BadProjection do
   defp name(_name), do: :ok
 end
 
+defmodule ConsumerTest.BadFamilyProjection do
+  @moduledoc "Проекция на семейство событий без clause `project/1` для `Cancelled`."
+
+  alias Consumer.Domain.Sales.Order
+
+  # G1f — семейство в `events:`: событие семейства без clause `project/1` — та же проверка полноты
+  # expect: incompatible types given to project/1
+  use Core.Es.Projection,
+    name: "consumer_bad_family",
+    events: [Order.Event]
+
+  @impl true
+  def project(%Order.Event.Placed{}), do: :ok
+
+  @impl true
+  def clear, do: :ok
+end
+
 defmodule ConsumerTest.BadProjectionPayload do
   @moduledoc "Проекция с опечаткой в поле нагрузки, не суженной паттерном."
 

@@ -41,7 +41,8 @@ defmodule Core.Es.Projection do
   Предупреждение компилятора указывает на строку `use`, а имя функции в нём называет нарушенное
   утверждение — `"project/1 принимает <Event>"`. Ловятся:
 
-  - модуль `events:` без clause `project/1`;
+  - модуль `events:` без clause `project/1`, в том числе модуль семейства из `events:`, добавленный
+    в его кодек позже;
   - опечатка в поле нагрузки, которую clause не сузила паттерном `%Payload{}`.
 
   ## События
@@ -180,7 +181,8 @@ defmodule Core.Es.Projection do
   ## Opts
 
   - `name:` — имя проекции, непустая строка; неизменяемо: другое имя — другая проекция
-  - `events:` — непустой список модулей событий (`use Core.Es.Event`) без повторов
+  - `events:` — непустой список модулей событий (`use Core.Es.Event`) и семейств событий
+    (`use Core.Es.Event.Family`) без повторов; семейство — все модули событий его кодека
   - `version:` — версия проекции, целое ≥ 1, по умолчанию 1
   - `personal:` — только `false`: read-модель ПДн не держит («Персональные данные»)
   - `repo:` — Ecto-репозиторий транзакции пачки; по умолчанию `Core.Config.dao/0` в рантайме
@@ -192,7 +194,8 @@ defmodule Core.Es.Projection do
 
   При раскрытии `use` `CompileError`: `name:` не непустая строка; `version:` не целое ≥ 1;
   `events:` пустой, с повтором, с модулем, который не событие или не собран (модуль события в
-  проекцию не вкладывается), с семейством событий, с событием, чей `family:` не семейство
+  проекцию не вкладывается), с событием вместе с его семейством, с семейством, чей `codec:` не
+  кодек событий этого семейства, с событием, чей `family:` не семейство
   (`use Core.Es.Event.Family`), с событием, у семейства которого `codec:` не найден, не кодек с
   `type:` или кодек другого семейства, с событием, не объявленным в `tags:` кодека, с двумя
   кодеками одного типа агрегата; событие с полем `subject:` без события уничтожения ключа и без
@@ -290,13 +293,18 @@ defmodule Core.Es.Projection do
 
   defp events!([_ | _] = events) do
     ensure_unique!(events)
-    Enum.map(events, &{&1, event_codec!(&1)})
+    families = for event <- events, family_module?(event), into: %{}, do: {event, family_events!(event)}
+    ensure_disjoint!(events, families)
+
+    events
+    |> Enum.flat_map(&Map.get(families, &1, [&1]))
+    |> Enum.map(&{&1, event_codec!(&1)})
   end
 
   defp events!(events) do
     Helper.Opts.reject!(
       "#{@label}: events",
-      "ожидается непустой список модулей событий, получено #{inspect(events)}"
+      "ожидается непустой список модулей и семейств событий, получено #{inspect(events)}"
     )
   end
 
@@ -304,6 +312,35 @@ defmodule Core.Es.Projection do
     case Enum.uniq(events -- Enum.uniq(events)) do
       [] -> :ok
       repeated -> Helper.Opts.reject!("#{@label}: events", "модули объявлены дважды: #{inspect(repeated)}")
+    end
+  end
+
+  defp family_module?(mod) when is_atom(mod) and not is_nil(mod), do: compiled?(mod) and family?(mod)
+  defp family_module?(_other), do: false
+
+  # Семейство в `events:` — все модули событий его кодека: новое событие семейства без clause
+  # `project/1` проверка полноты замечает при сборке.
+  defp family_events!(family) do
+    codec = family.__es_codec__()
+
+    if compiled?(codec) and Es.Event.Codec.codec?(codec) and codec.__codec_union__() == family do
+      Enum.sort(codec.__es_mods__())
+    else
+      Helper.Opts.reject!(
+        "#{@label}: events",
+        "семейство #{inspect(family)} объявляет codec: #{inspect(codec)} — не кодек событий этого семейства " <>
+          "(use Core.Es.Event.Codec, family: #{inspect(family)})"
+      )
+    end
+  end
+
+  defp ensure_disjoint!(events, families) do
+    case for({family, members} <- families, event <- events, event in members, do: {event, family}) do
+      [] ->
+        :ok
+
+      [{event, family} | _] ->
+        Helper.Opts.reject!("#{@label}: events", "#{inspect(event)} уже входит в семейство #{inspect(family)}")
     end
   end
 
@@ -317,9 +354,6 @@ defmodule Core.Es.Projection do
 
       Helper.Module.exports?(mod, :__es_payload__, 0) ->
         codec!(mod, family!(mod))
-
-      family?(mod) ->
-        Helper.Opts.reject!("#{@label}: events", "#{inspect(mod)} — семейство событий, объявляются модули событий")
 
       true ->
         Helper.Opts.reject!("#{@label}: events", "#{inspect(mod)} — не модуль события (use Core.Es.Event)")

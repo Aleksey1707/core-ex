@@ -245,10 +245,51 @@ defmodule Core.Es.ProjectionTest do
       end
     end
 
-    test "семейство событий в events: — CompileError" do
-      assert_raise CompileError, ~r/Account\.Event — семейство событий/, fn ->
-        compile!(Family, events: [Account.Event])
+    test "семейство событий в events: — все модули событий его кодека" do
+      {{:module, family, _binary, _term}, _binding} =
+        compile!(Family, events: [Account.Event, Personal.Event.KeyDestroyed])
+
+      declaration = family.__es_projection__()
+
+      assert declaration.events == [
+               Account.Event.Closed,
+               Account.Event.Frozen,
+               Account.Event.HolderSet,
+               Account.Event.Opened,
+               Account.Event.Renamed,
+               Account.Event.Verified,
+               Personal.Event.KeyDestroyed
+             ]
+
+      assert %{"account" => %{tags: tags}} = declaration.streams
+
+      assert tags ==
+               MapSet.new(~w(account.opened account.renamed account.holder_set account.frozen account.closed
+                             account.verified))
+    end
+
+    test "событие вместе со своим семейством — CompileError с именем семейства" do
+      assert_raise CompileError,
+                   ~r/Account\.Event\.Opened уже входит в семейство Core\.EsFixture\.Account\.Event$/,
+                   fn ->
+                     compile!(FamilyTwice, events: [Account.Event.Opened, Account.Event, Personal.Event.KeyDestroyed])
+                   end
+    end
+
+    test "семейство с полем subject: без события уничтожения ключа — CompileError" do
+      assert_raise CompileError, ~r/HolderSet.*subject:.*KeyDestroyed.*personal: false/s, fn ->
+        compile!(FamilyUnsigned, events: [Account.Event])
       end
+    end
+
+    test "семейство, чей codec: не кодек этого семейства, — CompileError" do
+      compile_family!(Orphan, "Core.EventFixture.Event.Codec")
+
+      assert_raise CompileError,
+                   ~r/семейство .*Orphan\.Family объявляет codec: .*EventFixture\.Event\.Codec — не кодек событий этого/,
+                   fn ->
+                     compile!(Orphan, events: [Core.Es.ProjectionTest.Orphan.Family])
+                   end
     end
 
     test "событие, чей family: не семейство, — CompileError" do
@@ -413,8 +454,8 @@ defmodule Core.Es.ProjectionTest do
     end
 
     test "events: — при раскрытии" do
-      assert_raise CompileError, ~r/^Es\.Projection: events: .*Account\.Event — семейство событий/, fn ->
-        expand!(name: "compile_test", events: [Account.Event])
+      assert_raise CompileError, ~r/^Es\.Projection: events: .*Account\.Event\.Opened уже входит в семейство/, fn ->
+        expand!(name: "compile_test", events: [Account.Event, Account.Event.Opened])
       end
     end
 
