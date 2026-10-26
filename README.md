@@ -477,7 +477,8 @@ end
        {Core.Mq.PromEx,
         poll_rate: 5_000,
         stream_readers: {MyAppApp.PromEx.Mq, :stream_readers, []},
-        kafka_readers: {MyAppApp.PromEx.Mq, :kafka_readers, []}},
+        kafka_readers: {MyAppApp.PromEx.Mq, :kafka_readers, []},
+        dlq_repo: MyApp.Infra.DAO},
        {Core.Workers.PromEx, poll_rate: 5_000, watch: {MyAppApp.Application, :watch_list, []}},
        {Core.Cache.PromEx, poll_rate: 5_000, sizes: {MyAppApp.PromEx.Caches, :sizes, []}},
        {Core.Cgroup.PromEx, poll_rate: 5_000},
@@ -505,8 +506,10 @@ end
    mix core.dashboards.export --module MyAppApp.PromEx
    ```
 
-   Набор по умолчанию — по `plugins/0` (дашборд outbox — при `Core.Outbox.PromEx`, workers — при
-   `Core.Workers.PromEx`, external — при `Core.External.PromEx`), один дашборд —
+   Набор по умолчанию — по `plugins/0` (дашборд outbox — при `Core.Outbox.PromEx`, mq — при
+   `stream_readers:` у `Core.Mq.PromEx`, kafka — при `kafka_readers:`, workers — при
+   `Core.Workers.PromEx`, external — при `Core.External.PromEx`; DLQ-панели kafka пусты без
+   `dlq_repo:` — репозитория с таблицей `Core.Mq.Dlq.Migration`), один дашборд —
    `--dashboard outbox`, другой каталог — `--out` (по умолчанию `deploy/monitoring/grafana/dashboards`).
    Префикс метрик, `title` и `uid` строятся от `otp_app`, datasource и пороги панелей — из
    `dashboard_assigns/0`: ключ `datasource_id` (uid datasource Prometheus в Grafana) обязателен,

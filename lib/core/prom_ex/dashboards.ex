@@ -27,6 +27,11 @@ defmodule Core.PromEx.Dashboards do
   | | | `outbox_queue_warning` / `outbox_queue_critical` | `100` / `500` записей |
   | | | `outbox_oldest_age_warning` / `outbox_oldest_age_critical` | `30` / `120` секунд |
   | | | `outbox_expired_locks_warning` / `outbox_expired_locks_critical` | `1` / `10` записей |
+  | `mq` | `Core.Mq.PromEx` | `mq_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_mq"` |
+  | | | `mq_duration_unit` | `duration_unit:` плагина (мн. ч.) или `"milliseconds"` |
+  | | | `mq_duration_axis_unit` | единица оси Grafana по `duration_unit:` плагина, `"ms"` |
+  | `kafka` | `Core.Mq.PromEx` | `mq_metric_prefix` | как у `mq` |
+  | | | `kafka_backlog_critical` | `1000` непрочитанных сообщений партиции |
   | `es` | `Core.Es.PromEx` | `es_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_es"` |
   | | | `es_duration_unit` | `duration_unit:` плагина (мн. ч.) или `"milliseconds"` |
   | | | `es_duration_axis_unit` | единица оси Grafana по `duration_unit:` плагина, `"ms"` |
@@ -75,7 +80,7 @@ defmodule Core.PromEx.Dashboards do
   end
 
   @typedoc "Имя дашборда подсистемы библиотеки; файл выгрузки — `<имя>.json`."
-  @type name :: :outbox | :es | :cache | :workers | :external
+  @type name :: :outbox | :mq | :kafka | :es | :cache | :workers | :external
 
   @typedoc "Выгрузка `file` дашборда `dashboard`, разошедшаяся с рендером."
   @type stale_export :: %{file: Path.t(), dashboard: name()}
@@ -88,6 +93,8 @@ defmodule Core.PromEx.Dashboards do
 
   @dashboards [
     outbox: %{plugin: Core.Outbox.PromEx, label: "Outbox"},
+    mq: %{plugin: Core.Mq.PromEx, label: "MQ", options: ~w(stream_readers readers)a},
+    kafka: %{plugin: Core.Mq.PromEx, label: "Kafka", options: ~w(kafka_readers)a},
     es: %{plugin: Core.Es.PromEx, label: "Event Sourcing"},
     cache: %{plugin: Core.Cache.PromEx, label: "Cache"},
     workers: %{plugin: Core.Workers.PromEx, label: "Workers"},
@@ -105,14 +112,25 @@ defmodule Core.PromEx.Dashboards do
   @doc """
   Набор дашбордов по умолчанию для модуля PromEx приложения — по его `plugins/0`.
 
-  Дашборд входит в набор, если в `plugins/0` есть плагин его подсистемы.
+  Дашборд входит в набор, если в `plugins/0` есть плагин его подсистемы. Дашборды `Core.Mq.PromEx`
+  требуют ещё и опции плагина: `mq` — `stream_readers:` или `readers:`, `kafka` — `kafka_readers:`;
+  иначе в Grafana лёг бы дашборд транспорта, которого у приложения нет.
   """
   @spec defaults(module()) :: [name()]
 
   def defaults(prom_ex) when is_atom(prom_ex) do
     plugins = plugins(prom_ex)
-    for {name, %{plugin: plugin}} <- @dashboards, Map.has_key?(plugins, plugin), do: name
+
+    for {name, %{plugin: plugin} = dashboard} <- @dashboards,
+        plugin_opts = Map.get(plugins, plugin),
+        is_list(plugin_opts) and options_given?(dashboard, plugin_opts),
+        do: name
   end
+
+  # ---
+
+  defp options_given?(%{options: options}, plugin_opts), do: Enum.any?(options, &Keyword.has_key?(plugin_opts, &1))
+  defp options_given?(%{}, _plugin_opts), do: true
 
   # ===== рендер =====
 
@@ -155,6 +173,17 @@ defmodule Core.PromEx.Dashboards do
       outbox_expired_locks_critical: 10
     ]
   end
+
+  defp library_assigns(:mq, otp_app, plugin_opts) do
+    [
+      mq_metric_prefix: metric_prefix(plugin_opts, otp_app, :mq),
+      mq_duration_unit: duration_unit(plugin_opts),
+      mq_duration_axis_unit: duration_axis_unit(plugin_opts)
+    ]
+  end
+
+  defp library_assigns(:kafka, otp_app, plugin_opts),
+    do: [mq_metric_prefix: metric_prefix(plugin_opts, otp_app, :mq), kafka_backlog_critical: 1_000]
 
   defp library_assigns(:es, otp_app, plugin_opts) do
     [

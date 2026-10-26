@@ -52,6 +52,36 @@ defmodule Core.PromEx.DashboardsTest do
       assert uid.(PromExFixture.Outbox) == uid.(PromExFixture.Outbox)
     end
 
+    test "дашборды mq и kafka — заголовок, теги и префикс метрик Core.Mq.PromEx" do
+      for {prom_ex, name, label} <- [{PromExFixture.MqReaders, :mq, "MQ"}, {PromExFixture.MqKafka, :kafka, "Kafka"}] do
+        dashboard = Dashboards.render(prom_ex, name) |> Jason.decode!()
+
+        assert dashboard["title"] == "MyApp - #{label}"
+        assert dashboard["tags"] == ["PromEx", label, "my_app"]
+        assert Enum.all?(exprs(dashboard), &(&1 =~ "my_app_prom_ex_mq_"))
+      end
+    end
+
+    test "префикс и единица длительности mq — из опций Core.Mq.PromEx" do
+      dashboard = Jason.decode!(Dashboards.render(PromExFixture.MqStream, :mq))
+      exprs = exprs(dashboard)
+
+      assert Enum.all?(exprs, &(&1 =~ "custom_mq_"))
+      assert Enum.any?(exprs, &(&1 =~ "custom_mq_publish_duration_seconds_bucket"))
+
+      assert get_in(
+               Enum.find(dashboard["panels"], &(&1["title"] == "Publish duration p95")),
+               ~w(fieldConfig defaults unit)
+             ) == "s"
+    end
+
+    test "порог отставания kafka — умолчание библиотеки, перекрывается dashboard_assigns/0" do
+      backlog = fn prom_ex -> thresholds(Jason.decode!(Dashboards.render(prom_ex, :kafka)), "Max backlog") end
+
+      assert backlog.(PromExFixture.Outbox) == [1000]
+      assert backlog.(PromExFixture.MqKafka) == [5000]
+    end
+
     test "без datasource_id в dashboard_assigns/0 — ArgumentError" do
       assert_raise ArgumentError, ~r/NoDatasource.dashboard_assigns\/0 — ожидается datasource_id/, fn ->
         Dashboards.render(PromExFixture.NoDatasource, :outbox)
@@ -147,6 +177,16 @@ defmodule Core.PromEx.DashboardsTest do
 
     test "без плагина подсистемы её дашборда нет" do
       assert Dashboards.defaults(PromExFixture.Bare) == []
+    end
+
+    test "mq — при stream_readers: или readers: у Core.Mq.PromEx, kafka — при kafka_readers:" do
+      assert Dashboards.defaults(PromExFixture.MqStream) == [:mq]
+      assert Dashboards.defaults(PromExFixture.MqReaders) == [:mq]
+      assert Dashboards.defaults(PromExFixture.MqKafka) == [:kafka]
+    end
+
+    test "Core.Mq.PromEx без читателей не даёт ни mq, ни kafka" do
+      assert Dashboards.defaults(PromExFixture.MqBare) == []
     end
 
     test "es и cache — по плагинам Core.Es.PromEx и Core.Cache.PromEx" do

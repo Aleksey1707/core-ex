@@ -4,7 +4,7 @@ defmodule Core.PromExFixture do
   с плагином outbox и порогами по умолчанию, такой же с другим `otp_app`, с порогами и префиксом из
   `dashboard_assigns/0`, с префиксом и единицей длительности из опций плагина, без плагинов подсистем,
   без `datasource_id`, с плагинами es и cache; с плагинами процессов, памяти контейнера и внешних
-  вызовов со своими опциями и порогами.
+  вызовов со своими опциями и порогами; с `Core.Mq.PromEx` и разными наборами опций читателей.
   """
 
   defmodule Outbox do
@@ -135,5 +135,58 @@ defmodule Core.PromExFixture do
         workers_collect_errors_pattern: "legacy_.+_collect_errors_total"
       ]
     end
+  end
+
+  defmodule MqStream do
+    @moduledoc "`Core.Mq.PromEx` со `stream_readers:` и своими `metric_prefix:` и `duration_unit:`."
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins do
+      [
+        {Core.Mq.PromEx,
+         stream_readers: {__MODULE__, :readers, []}, metric_prefix: [:custom, :mq], duration_unit: :second}
+      ]
+    end
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus"]
+  end
+
+  defmodule MqReaders do
+    @moduledoc "`Core.Mq.PromEx` с `readers:`."
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins, do: [{Core.Mq.PromEx, readers: {__MODULE__, :readers, []}}]
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus"]
+  end
+
+  defmodule MqKafka do
+    @moduledoc "`Core.Mq.PromEx` с `kafka_readers:` и `dlq_repo:`, порог отставания — из `dashboard_assigns/0`."
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins, do: [{Core.Mq.PromEx, kafka_readers: {__MODULE__, :readers, []}, dlq_repo: Core.TestRepo}]
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus", kafka_backlog_critical: 5000]
+  end
+
+  defmodule MqBare do
+    @moduledoc "`Core.Mq.PromEx` без читателей."
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins, do: [Core.Mq.PromEx]
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus"]
   end
 end

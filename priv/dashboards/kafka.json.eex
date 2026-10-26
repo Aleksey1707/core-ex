@@ -1,0 +1,963 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Kafka readers: reading lag, reading errors and DLQ in Postgres (Core.Mq.PromEx)",
+  "editable": false,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Reading lag",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Kafka topics no node holds the lease of: nobody reads them (alert MqKafkaReaderNoLease)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "count(max by (component, topic) (<%= @mq_metric_prefix %>_kafka_reader_lease{job=\"$job\"}) == 0) or vector(0)",
+          "legendFormat": "no lease",
+          "refId": "A"
+        }
+      ],
+      "title": "Topics without lease",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Unread messages of the most lagging partition (alert MqKafkaReaderBacklog)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": <%= @kafka_backlog_critical %>
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "max(<%= @mq_metric_prefix %>_kafka_reader_lag_messages{job=\"$job\"}) or vector(0)",
+          "legendFormat": "messages",
+          "refId": "A"
+        }
+      ],
+      "title": "Max backlog",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Rejected messages in the mq_dlq table waiting for the operator (alert MqSubscriberDlq; requeue: mix mq.dlq.requeue)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "sum(max by (subscriber, topic) (<%= @mq_metric_prefix %>_dlq_count{job=\"$job\", status=\"dead\"})) or vector(0)",
+          "legendFormat": "dead",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ dead records",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Unread messages by topic: high watermark of the last batch minus the committed offset, summed over partitions. Only the lease holder reports; other nodes report zeros",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic) (max by (component, topic, partition) (<%= @mq_metric_prefix %>_kafka_reader_lag_messages{job=\"$job\", topic=~\"$topic\"}))",
+          "legendFormat": "{{topic}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Backlog by topic",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Age of the last committed message of a partition with unread messages, worst partition of the topic (alert MqKafkaReaderLagging). Empty when the topic is read up",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (topic) (<%= @mq_metric_prefix %>_kafka_reader_lag_seconds{job=\"$job\", topic=~\"$topic\"} and on (component, topic, partition, instance) (<%= @mq_metric_prefix %>_kafka_reader_lag_messages{job=\"$job\", topic=~\"$topic\"} > 0))",
+          "legendFormat": "{{topic}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Lag by topic",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Backlog of every partition by its reader",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 6,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Unread",
+            "desc": true
+          }
+        ]
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "max by (component, topic, partition) (<%= @mq_metric_prefix %>_kafka_reader_lag_messages{job=\"$job\", topic=~\"$topic\"})",
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Partitions",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "component": "Reader",
+              "topic": "Topic",
+              "partition": "Partition",
+              "Value": "Unread"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Reading errors",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Failed reads over the last 5m by reason, all topics (alert MqKafkaReadErrors)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(<%= @mq_metric_prefix %>_kafka_read_errors_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Read errors, 5m",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Offsets not committed over the last 5m by reason, all topics (alert MqKafkaCommitErrors on failed)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(<%= @mq_metric_prefix %>_kafka_commit_errors_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Commit errors, 5m",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Failed reads per 5m by reason: subscribe, consumer_down, lease (alert MqKafkaReadErrors)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "drawStyle": "bars"
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic, reason) (increase(<%= @mq_metric_prefix %>_kafka_read_errors_total{job=\"$job\", instance=\"$instance\", topic=~\"$topic\"}[5m]))",
+          "legendFormat": "{{topic}} / {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Read errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Offsets not committed per 5m: failed - the write failed (alert MqKafkaCommitErrors), lease_lost - the lease moved to another node",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "drawStyle": "bars"
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic, reason) (increase(<%= @mq_metric_prefix %>_kafka_commit_errors_total{job=\"$job\", instance=\"$instance\", topic=~\"$topic\"}[5m]))",
+          "legendFormat": "{{topic}} / {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Commit errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Per 5m: offsets out of the log reread from the beginning (alert MqKafkaOffsetReset) and records the reader cannot represent as a message (alert MqDecodeDrops)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "drawStyle": "bars"
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic) (increase(<%= @mq_metric_prefix %>_kafka_offset_reset_total{job=\"$job\", instance=\"$instance\", topic=~\"$topic\"}[5m]))",
+          "legendFormat": "{{topic}} reset",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (topic) (increase(<%= @mq_metric_prefix %>_kafka_decode_drop_total{job=\"$job\", instance=\"$instance\", topic=~\"$topic\"}[5m]))",
+          "legendFormat": "{{topic}} dropped",
+          "refId": "B"
+        }
+      ],
+      "title": "Offset resets and dropped records",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 102,
+      "panels": [],
+      "title": "DLQ",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Messages moved to DLQ over the last 5m by reason, all topics (alert MqSubscriberDlq)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 14,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(<%= @mq_metric_prefix %>_subscriber_dlq_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Messages to DLQ, 5m",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Messages moved to DLQ per 5m: rejected - the handler rejected without retries, exhausted - max_attempts ran out (alert MqSubscriberDlq)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "drawStyle": "bars"
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 47
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic, reason) (increase(<%= @mq_metric_prefix %>_subscriber_dlq_total{job=\"$job\", instance=\"$instance\", topic=~\"$topic\"}[5m]))",
+          "legendFormat": "{{topic}} / {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Messages to DLQ",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Rows of the mq_dlq table by status: dead - waits for the operator, requeued - returned and waiting to be reread (alert MqDlqRequeuedStuck), processed - reread",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 47
+      },
+      "id": 11,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Records",
+            "desc": true
+          }
+        ]
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "max by (subscriber, topic, status) (<%= @mq_metric_prefix %>_dlq_count{job=\"$job\"})",
+          "format": "table",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ records",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "subscriber": "Subscriber",
+              "topic": "Topic",
+              "status": "Status",
+              "Value": "Records"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [
+    "PromEx",
+    "Kafka",
+    "<%= @otp_app %>"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @prom_ex_metric_prefix %>_status_info, job)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus Job",
+        "multi": false,
+        "name": "job",
+        "options": [],
+        "query": "label_values(<%= @prom_ex_metric_prefix %>_status_info, job)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 6,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @prom_ex_metric_prefix %>_status_info{job=\"$job\"}, instance)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Application Instance",
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(<%= @prom_ex_metric_prefix %>_status_info{job=\"$job\"}, instance)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @mq_metric_prefix %>_kafka_reader_lease{job=\"$job\"}, topic)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Topic",
+        "multi": true,
+        "name": "topic",
+        "options": [],
+        "query": "label_values(<%= @mq_metric_prefix %>_kafka_reader_lease{job=\"$job\"}, topic)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "timezone": "",
+  "title": "<%= @title %>",
+  "uid": "<%= @uid %>",
+  "version": 1
+}

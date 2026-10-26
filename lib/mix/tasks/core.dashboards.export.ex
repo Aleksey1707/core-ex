@@ -37,8 +37,14 @@ defmodule Mix.Tasks.Core.Dashboards.Export do
     out = Keyword.get(switches, :out, @default_out)
 
     case dashboards!(Keyword.get_values(switches, :dashboard), prom_ex) do
-      [] -> Mix.shell().info("Для #{inspect(prom_ex)} нет дашбордов подсистем библиотеки: в plugins/0 нет их плагинов")
-      names -> Enum.each(names, &export(prom_ex, &1, out))
+      [] ->
+        Mix.shell().info(
+          "Для #{inspect(prom_ex)} нет дашбордов подсистем библиотеки: " <>
+            "в plugins/0 нет их плагинов или опций, которых они требуют"
+        )
+
+      names ->
+        Enum.each(names, &export(prom_ex, &1, out))
     end
   end
 
