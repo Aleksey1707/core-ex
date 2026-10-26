@@ -1,7 +1,7 @@
 defmodule Core.PromExFixture do
   @moduledoc """
   Модули PromEx приложения для рендера дашбордов подсистем библиотеки (`Core.PromEx.Dashboards`):
-  с плагином outbox и порогами по умолчанию, такой же с другим `otp_app`, с порогами и префиксом из
+  с плагином outbox и порогами по умолчанию, такой же с другим и с длинным `otp_app`, с порогами и префиксом из
   `dashboard_assigns/0`, с префиксом и единицей длительности из опций плагина, без плагинов подсистем,
   без `datasource_id`, с плагинами es и cache; с плагинами процессов, памяти контейнера и внешних
   вызовов со своими опциями и порогами; с `Core.Mq.PromEx` и разными наборами опций читателей.
@@ -29,6 +29,18 @@ defmodule Core.PromExFixture do
 
     @impl true
     def dashboard_assigns, do: [datasource_id: "prometheus", default_selected_interval: "30s"]
+  end
+
+  defmodule LongApp do
+    @moduledoc "Плагин outbox, `otp_app` длиннее лимита `uid` Grafana."
+
+    use PromEx, otp_app: :an_application_with_a_name_longer_than_the_grafana_uid_limit
+
+    @impl true
+    def plugins, do: [Core.Outbox.PromEx]
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus"]
   end
 
   defmodule Tuned do
@@ -155,7 +167,7 @@ defmodule Core.PromExFixture do
   end
 
   defmodule MqReaders do
-    @moduledoc "`Core.Mq.PromEx` с `readers:`."
+    @moduledoc "`Core.Mq.PromEx` со старым ключом `readers:` без `stream_readers:`."
 
     use PromEx, otp_app: :my_app
 

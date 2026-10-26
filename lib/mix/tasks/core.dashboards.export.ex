@@ -27,6 +27,8 @@ defmodule Mix.Tasks.Core.Dashboards.Export do
   @default_out "deploy/monitoring/grafana/dashboards"
 
   @doc false
+  @spec run([String.t()]) :: :ok
+
   @impl Mix.Task
   def run(argv) when is_list(argv) do
     {switches, _rest} = OptionParser.parse!(argv, strict: @switches)

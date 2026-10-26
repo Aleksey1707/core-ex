@@ -10,20 +10,27 @@ defmodule Core.PromEx.Dashboards do
   2. умолчания библиотеки — префикс плагина подсистемы и пороги панелей (таблица ниже);
   3. `dashboard_assigns/0` модуля PromEx приложения.
 
-  `otp_app` и `title` берутся из `use PromEx` приложения и имени дашборда; `dashboard_assigns/0` их не
-  меняет: один ключ на все дашборды дал бы им общий заголовок. `uid` считает
-  `__grafana_dashboard_uid__/3` модуля PromEx, как у штатных дашбордов: от `otp_app`, имени модуля
-  PromEx, пути шаблона и заголовка — переименованный модуль даёт в Grafana новый дашборд.
+  `otp_app`, `title` и `uid` строятся от `otp_app` из `use PromEx` приложения и имени дашборда;
+  `dashboard_assigns/0` их не меняет: один ключ на все дашборды дал бы им общий заголовок и `uid`.
+  `uid` — MD5 строки `"<otp_app>/<имя дашборда>"` в 32 hex-символах верхнего регистра, как форма
+  `uid` штатных дашбордов PromEx. Штатный `__grafana_dashboard_uid__/3` не годится: в его хеш
+  входит имя модуля PromEx, и переименованный модуль дал бы в Grafana второй дашборд рядом со
+  старым. Хеш, а не читаемое `"<otp_app>-<имя>"`: длина постоянна и укладывается в лимит Grafana
+  (40 символов) при любом `otp_app`, а усечение читаемой формы сводило бы длинные `otp_app` с
+  общим началом к одному `uid`.
   `datasource_id` — uid datasource Prometheus в Grafana, обязателен в `dashboard_assigns/0`,
   умолчания нет.
 
   Префикс метрик и единица длительности по умолчанию следуют опциям плагина подсистемы в
-  `plugins/0` (`metric_prefix:`, `duration_unit:`), как имена метрик самого плагина.
+  `plugins/0` (`metric_prefix:`, `duration_unit:`), как имена метрик самого плагина. Параметры
+  префикса и длительности называются по ключу префикса плагина: `<ключ>_metric_prefix`,
+  `<ключ>_duration_unit`, `<ключ>_duration_axis_unit`.
 
   | Дашборд | Плагин | Параметр | Умолчание |
   |---|---|---|---|
   | `outbox` | `Core.Outbox.PromEx` | `outbox_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_outbox"` |
   | | | `outbox_duration_unit` | `duration_unit:` плагина (мн. ч.) или `"milliseconds"` |
+  | | | `outbox_duration_axis_unit` | единица оси Grafana по `duration_unit:` плагина, `"ms"` |
   | | | `outbox_queue_warning` / `outbox_queue_critical` | `100` / `500` записей |
   | | | `outbox_oldest_age_warning` / `outbox_oldest_age_critical` | `30` / `120` секунд |
   | | | `outbox_expired_locks_warning` / `outbox_expired_locks_critical` | `1` / `10` записей |
@@ -92,15 +99,70 @@ defmodule Core.PromEx.Dashboards do
   @type form_violation :: %{dashboard: String.t(), panel: String.t(), rule: form_rule(), labels: [String.t()]}
 
   @dashboards [
-    outbox: %{plugin: Core.Outbox.PromEx, label: "Outbox"},
-    mq: %{plugin: Core.Mq.PromEx, label: "MQ", options: ~w(stream_readers readers)a},
-    kafka: %{plugin: Core.Mq.PromEx, label: "Kafka", options: ~w(kafka_readers)a},
-    es: %{plugin: Core.Es.PromEx, label: "Event Sourcing"},
-    cache: %{plugin: Core.Cache.PromEx, label: "Cache"},
-    workers: %{plugin: Core.Workers.PromEx, label: "Workers"},
-    external: %{plugin: Core.External.PromEx, label: "External"}
+    outbox: %{
+      plugin: Core.Outbox.PromEx,
+      label: "Outbox",
+      prefix: :outbox,
+      duration?: true,
+      thresholds: [
+        outbox_queue_warning: 100,
+        outbox_queue_critical: 500,
+        outbox_oldest_age_warning: 30,
+        outbox_oldest_age_critical: 120,
+        outbox_expired_locks_warning: 1,
+        outbox_expired_locks_critical: 10
+      ]
+    },
+    mq: %{
+      plugin: Core.Mq.PromEx,
+      label: "MQ",
+      options: ~w(stream_readers)a,
+      prefix: :mq,
+      duration?: true,
+      thresholds: []
+    },
+    kafka: %{
+      plugin: Core.Mq.PromEx,
+      label: "Kafka",
+      options: ~w(kafka_readers)a,
+      prefix: :mq,
+      duration?: false,
+      thresholds: [kafka_backlog_critical: 1_000]
+    },
+    es: %{
+      plugin: Core.Es.PromEx,
+      label: "Event Sourcing",
+      prefix: :es,
+      duration?: true,
+      thresholds: [es_projection_lag_warning: 30, es_projection_lag_critical: 60]
+    },
+    cache: %{
+      plugin: Core.Cache.PromEx,
+      label: "Cache",
+      prefix: :cache,
+      duration?: false,
+      thresholds: [cache_hit_ratio_warning: 0.9, cache_hit_ratio_critical: 0.5]
+    },
+    workers: %{
+      plugin: Core.Workers.PromEx,
+      label: "Workers",
+      prefix: :workers,
+      duration?: false,
+      thresholds: [workers_container_memory_warning: 500_000_000, workers_container_memory_critical: 1_000_000_000]
+    },
+    external: %{
+      plugin: Core.External.PromEx,
+      label: "External",
+      prefix: :external,
+      duration?: true,
+      thresholds: []
+    }
   ]
   @names Keyword.keys(@dashboards)
+  @assign_keys for prefix <- [:cgroup | for({_name, %{prefix: prefix}} <- @dashboards, do: prefix)],
+                   kind <- ~w(metric_prefix duration_unit duration_axis_unit)a,
+                   into: %{},
+                   do: {{prefix, kind}, :"#{prefix}_#{kind}"}
 
   # ===== набор =====
 
@@ -113,8 +175,9 @@ defmodule Core.PromEx.Dashboards do
   Набор дашбордов по умолчанию для модуля PromEx приложения — по его `plugins/0`.
 
   Дашборд входит в набор, если в `plugins/0` есть плагин его подсистемы. Дашборды `Core.Mq.PromEx`
-  требуют ещё и опции плагина: `mq` — `stream_readers:` или `readers:`, `kafka` — `kafka_readers:`;
-  иначе в Grafana лёг бы дашборд транспорта, которого у приложения нет.
+  требуют ещё и опции плагина: `mq` — `stream_readers:`, `kafka` — `kafka_readers:`; иначе в
+  Grafana лёг бы дашборд транспорта, которого у приложения нет. Старый ключ `readers:` плагин не
+  читает, и `mq` по нему не входит.
   """
   @spec defaults(module()) :: [name()]
 
@@ -143,88 +206,57 @@ defmodule Core.PromEx.Dashboards do
 
   def render(prom_ex, name) when is_atom(prom_ex) and name in @names do
     otp_app = prom_ex.__otp_app__()
-    %{plugin: plugin, label: label} = Keyword.fetch!(@dashboards, name)
+    %{label: label} = dashboard = Keyword.fetch!(@dashboards, name)
     plugins = plugins(prom_ex)
-    plugin_opts = Map.get(plugins, plugin, [])
 
     :core
     |> DashboardRenderer.build("dashboards/#{name}.json", otp_app)
-    |> DashboardRenderer.merge_assigns(library_assigns(name, otp_app, plugin_opts))
+    |> DashboardRenderer.merge_assigns(library_assigns(dashboard, otp_app, plugins))
     |> DashboardRenderer.merge_assigns(neighbour_assigns(name, otp_app, plugins))
     |> DashboardRenderer.merge_assigns(prom_ex.dashboard_assigns())
-    |> DashboardRenderer.merge_assigns(otp_app: otp_app, title: "#{Macro.camelize(Atom.to_string(otp_app))} - #{label}")
+    |> DashboardRenderer.merge_assigns(identity_assigns(otp_app, name, label))
     |> check_datasource!(prom_ex)
-    |> DashboardRenderer.render_dashboard(prom_ex)
+    |> render_template()
     |> DashboardRenderer.decode_dashboard()
     |> rendered!(prom_ex, name)
   end
 
   # ---
 
-  defp library_assigns(:outbox, otp_app, plugin_opts) do
+  defp library_assigns(%{plugin: plugin, prefix: prefix, thresholds: thresholds} = dashboard, otp_app, plugins) do
+    plugin_opts = Map.get(plugins, plugin, [])
+    prefix_assigns(prefix, plugin_opts, otp_app) ++ duration_assigns(dashboard, plugin_opts) ++ thresholds
+  end
+
+  defp prefix_assigns(prefix, plugin_opts, otp_app),
+    do: [{assign_key(prefix, :metric_prefix), metric_prefix(plugin_opts, otp_app, prefix)}]
+
+  defp duration_assigns(%{duration?: false}, _plugin_opts), do: []
+
+  defp duration_assigns(%{duration?: true, prefix: prefix}, plugin_opts) do
     [
-      outbox_metric_prefix: metric_prefix(plugin_opts, otp_app, :outbox),
-      outbox_duration_unit: duration_unit(plugin_opts),
-      outbox_queue_warning: 100,
-      outbox_queue_critical: 500,
-      outbox_oldest_age_warning: 30,
-      outbox_oldest_age_critical: 120,
-      outbox_expired_locks_warning: 1,
-      outbox_expired_locks_critical: 10
+      {assign_key(prefix, :duration_unit), duration_unit(plugin_opts)},
+      {assign_key(prefix, :duration_axis_unit), duration_axis_unit(plugin_opts)}
     ]
   end
 
-  defp library_assigns(:mq, otp_app, plugin_opts) do
-    [
-      mq_metric_prefix: metric_prefix(plugin_opts, otp_app, :mq),
-      mq_duration_unit: duration_unit(plugin_opts),
-      mq_duration_axis_unit: duration_axis_unit(plugin_opts)
-    ]
+  # Параметры панелей дашборда на метриках соседних плагинов — по опциям этих плагинов в `plugins/0`.
+  defp neighbour_assigns(:workers, otp_app, plugins) do
+    prefix_assigns(:cgroup, Map.get(plugins, Core.Cgroup.PromEx, []), otp_app) ++
+      [workers_collect_errors_pattern: "#{otp_app}_prom_ex_.+_collect_errors_total"]
   end
-
-  defp library_assigns(:kafka, otp_app, plugin_opts),
-    do: [mq_metric_prefix: metric_prefix(plugin_opts, otp_app, :mq), kafka_backlog_critical: 1_000]
-
-  defp library_assigns(:es, otp_app, plugin_opts) do
-    [
-      es_metric_prefix: metric_prefix(plugin_opts, otp_app, :es),
-      es_duration_unit: duration_unit(plugin_opts),
-      es_duration_axis_unit: duration_axis_unit(plugin_opts),
-      es_projection_lag_warning: 30,
-      es_projection_lag_critical: 60
-    ]
-  end
-
-  defp library_assigns(:cache, otp_app, plugin_opts) do
-    [
-      cache_metric_prefix: metric_prefix(plugin_opts, otp_app, :cache),
-      cache_hit_ratio_warning: 0.9,
-      cache_hit_ratio_critical: 0.5
-    ]
-  end
-
-  defp library_assigns(:workers, otp_app, plugin_opts) do
-    [
-      workers_metric_prefix: metric_prefix(plugin_opts, otp_app, :workers),
-      workers_container_memory_warning: 500_000_000,
-      workers_container_memory_critical: 1_000_000_000,
-      workers_collect_errors_pattern: "#{otp_app}_prom_ex_.+_collect_errors_total"
-    ]
-  end
-
-  defp library_assigns(:external, otp_app, plugin_opts) do
-    [
-      external_metric_prefix: metric_prefix(plugin_opts, otp_app, :external),
-      external_duration_unit: duration_unit(plugin_opts),
-      external_duration_axis_unit: duration_axis_unit(plugin_opts)
-    ]
-  end
-
-  # Параметры панелей дашборда на метриках соседнего плагина — по опциям этого плагина в `plugins/0`.
-  defp neighbour_assigns(:workers, otp_app, plugins),
-    do: [cgroup_metric_prefix: metric_prefix(Map.get(plugins, Core.Cgroup.PromEx, []), otp_app, :cgroup)]
 
   defp neighbour_assigns(_name, _otp_app, _plugins), do: []
+
+  defp assign_key(prefix, kind), do: Map.fetch!(@assign_keys, {prefix, kind})
+
+  defp identity_assigns(otp_app, name, label) do
+    [
+      otp_app: otp_app,
+      title: "#{Macro.camelize(Atom.to_string(otp_app))} - #{label}",
+      uid: Base.encode16(:crypto.hash(:md5, "#{otp_app}/#{name}"))
+    ]
+  end
 
   defp metric_prefix(plugin_opts, otp_app, plugin) do
     plugin_opts
@@ -260,6 +292,9 @@ defmodule Core.PromEx.Dashboards do
     end
   end
 
+  defp render_template(%DashboardRenderer{file_type: :eex, file_contents: contents, assigns: assigns} = dashboard),
+    do: %{dashboard | rendered_file: EEx.eval_string(contents, assigns: assigns)}
+
   defp rendered!(%DashboardRenderer{valid_json?: true, rendered_file: json}, _prom_ex, _name), do: json
 
   defp rendered!(%DashboardRenderer{error: error}, prom_ex, name) do
@@ -278,15 +313,14 @@ defmodule Core.PromEx.Dashboards do
   `mix core.dashboards.export`. Другие файлы каталога — доменные и штатные дашборды — не
   проверяются; дашборд, которого в каталоге нет, нарушением не считается. Файл сравнивается с
   рендером как JSON: форматирование и перевод строки в конце не важны, ручная правка, старый
-  порог, выгрузка другого модуля PromEx, невалидный JSON или нечитаемый файл — расхождение.
+  порог, выгрузка другого `otp_app`, невалидный JSON или нечитаемый файл — расхождение.
 
   `ArgumentError` — каталога `dir` нет: опечатка в пути иначе молча дала бы пустой список.
   """
   @spec stale(module(), Path.t()) :: [stale_export()]
 
   def stale(prom_ex, dir) when is_atom(prom_ex) and is_binary(dir) do
-    File.dir?(dir) ||
-      raise ArgumentError, "Core.PromEx.Dashboards.stale/2: каталог #{dir} не найден"
+    dir!(dir, "stale/2")
 
     for name <- @names,
         file = Path.join(dir, "#{name}.json"),
@@ -371,10 +405,12 @@ defmodule Core.PromEx.Dashboards do
   дашборд с таким именем выпал бы из проверки вместе с ним, поэтому имя шаблона PromEx ему не
   дают.
 
-  Проверяются запросы панелей (и панелей свёрнутых рядов) с метриками `<otp_app>_prom_ex_`
-  модуля PromEx: метки экспортёров (`datname`, `mountpoint`) задаёт окружение. Метки панели
-  берутся из `legendFormat` запроса; растущая — любая вне закрытого списка фиксированных
-  `#{Enum.join(@fixed_labels, ", ")}` и `fixed_labels:`.
+  Проверяются запросы панелей (и панелей свёрнутых рядов) с метриками плагинов модуля PromEx:
+  префикс `<otp_app>_prom_ex_` (умолчание `PromEx.metric_prefix/2` у каждого плагина) и
+  `metric_prefix:` плагинов из `plugins/0`. Метки экспортёров (`datname`, `mountpoint`) задаёт
+  окружение, их запросы вне охвата. Метки панели берутся из `legendFormat` запроса; растущая —
+  любая вне закрытого списка фиксированных `#{Enum.join(@fixed_labels, ", ")}` и
+  `fixed_labels:`.
 
   | Правило | Нарушение |
   |---|---|
@@ -394,11 +430,11 @@ defmodule Core.PromEx.Dashboards do
   @spec form_violations(module(), Path.t() | {String.t(), map()}, keyword()) :: [form_violation()]
 
   def form_violations(prom_ex, source, opts \\ []) when is_atom(prom_ex) and is_list(opts) do
-    prefix = "#{prom_ex.__otp_app__()}_prom_ex_"
+    prefixes = metric_prefixes(prom_ex)
     fixed = @fixed_labels ++ Keyword.fetch!(opts, :fixed_labels)
 
     for {name, dashboard} <- form_sources(source),
-        target <- form_targets(dashboard, prefix, fixed),
+        target <- form_targets(dashboard, prefixes, fixed),
         violation <- target_violations(target),
         uniq: true,
         do: Map.put(violation, :dashboard, name)
@@ -434,12 +470,20 @@ defmodule Core.PromEx.Dashboards do
     Enum.join(["форма панелей нарушена (#{@form_norm}):" | lines], "\n")
   end
 
+  defp metric_prefixes(prom_ex) do
+    own =
+      for {_plugin, plugin_opts} <- plugins(prom_ex),
+          prefix = Keyword.get(plugin_opts, :metric_prefix),
+          is_list(prefix),
+          do: Enum.join(prefix, "_") <> "_"
+
+    Enum.uniq(["#{prom_ex.__otp_app__()}_prom_ex_" | own])
+  end
+
   defp form_sources({name, %{} = dashboard}) when is_binary(name), do: [{name, dashboard}]
 
   defp form_sources(dir) when is_binary(dir) do
-    if not File.dir?(dir) do
-      raise ArgumentError, "Core.PromEx.Dashboards.form_violations/3: каталог дашбордов не найден: #{inspect(dir)}"
-    end
+    dir!(dir, "form_violations/3")
 
     standard = promex_files()
 
@@ -457,10 +501,10 @@ defmodule Core.PromEx.Dashboards do
     |> Enum.map(&Path.basename(&1, ".eex"))
   end
 
-  defp form_targets(dashboard, prefix, fixed) do
+  defp form_targets(dashboard, prefixes, fixed) do
     for panel <- form_panels(dashboard),
         %{"expr" => expr} = target <- Map.get(panel, "targets", []),
-        String.contains?(expr, prefix) do
+        String.contains?(expr, prefixes) do
       format = Map.get(target, "legendFormat", "")
       %{dashboard: dashboard, panel: panel, expr: expr, legend_format: format, growing: growing(format, fixed)}
     end
@@ -526,6 +570,11 @@ defmodule Core.PromEx.Dashboards do
   end
 
   # ===== общее =====
+
+  defp dir!(dir, function) do
+    File.dir?(dir) ||
+      raise ArgumentError, "Core.PromEx.Dashboards.#{function}: каталог дашбордов не найден: #{inspect(dir)}"
+  end
 
   defp plugins(prom_ex), do: Map.new(prom_ex.plugins(), &plugin_entry/1)
 

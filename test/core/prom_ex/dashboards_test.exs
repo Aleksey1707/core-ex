@@ -39,21 +39,30 @@ defmodule Core.PromEx.DashboardsTest do
     end
 
     test "префикс и единица длительности — из опций плагина в plugins/0" do
-      exprs = exprs(Jason.decode!(Dashboards.render(PromExFixture.Custom, :outbox)))
+      dashboard = Jason.decode!(Dashboards.render(PromExFixture.Custom, :outbox))
+      exprs = exprs(dashboard)
 
       assert Enum.all?(exprs, &(&1 =~ "custom_outbox_"))
       assert Enum.any?(exprs, &(&1 =~ "custom_outbox_poller_duration_seconds_bucket"))
+      assert unit(dashboard, "Poller duration p95") == "s"
+      assert unit(Jason.decode!(Dashboards.render(PromExFixture.Outbox, :outbox)), "Poller duration p95") == "ms"
     end
 
-    test "uid зависит от приложения" do
-      uid = fn prom_ex -> Jason.decode!(Dashboards.render(prom_ex, :outbox))["uid"] end
+    test "uid — от otp_app и имени дашборда, а не от имени модуля PromEx" do
+      uid = fn prom_ex, name -> Jason.decode!(Dashboards.render(prom_ex, name))["uid"] end
 
-      refute uid.(PromExFixture.Outbox) == uid.(PromExFixture.Tuned)
-      assert uid.(PromExFixture.Outbox) == uid.(PromExFixture.Outbox)
+      assert uid.(PromExFixture.Outbox, :outbox) == uid.(PromExFixture.Bare, :outbox)
+      assert uid.(PromExFixture.Tuned, :outbox) == uid.(PromExFixture.OtherApp, :outbox)
+      refute uid.(PromExFixture.Outbox, :outbox) == uid.(PromExFixture.OtherApp, :outbox)
+      refute uid.(PromExFixture.Outbox, :outbox) == uid.(PromExFixture.Outbox, :es)
+    end
+
+    test "uid в пределах 40 символов Grafana при длинном otp_app" do
+      assert Jason.decode!(Dashboards.render(PromExFixture.LongApp, :outbox))["uid"] =~ ~r/^[0-9A-F]{32}$/
     end
 
     test "дашборды mq и kafka — заголовок, теги и префикс метрик Core.Mq.PromEx" do
-      for {prom_ex, name, label} <- [{PromExFixture.MqReaders, :mq, "MQ"}, {PromExFixture.MqKafka, :kafka, "Kafka"}] do
+      for {prom_ex, name, label} <- [{PromExFixture.MqBare, :mq, "MQ"}, {PromExFixture.MqKafka, :kafka, "Kafka"}] do
         dashboard = Dashboards.render(prom_ex, name) |> Jason.decode!()
 
         assert dashboard["title"] == "MyApp - #{label}"
@@ -165,6 +174,9 @@ defmodule Core.PromEx.DashboardsTest do
         dashboard = Jason.decode!(Dashboards.render(PromExFixture.Outbox, name))
         assert Dashboards.assert_form!(PromExFixture.Outbox, {"#{name}.json", dashboard}) == :ok
       end
+
+      custom = Jason.decode!(Dashboards.render(PromExFixture.Custom, :outbox))
+      assert Dashboards.assert_form!(PromExFixture.Custom, {"outbox.json", custom}) == :ok
     end
   end
 
@@ -179,10 +191,13 @@ defmodule Core.PromEx.DashboardsTest do
       assert Dashboards.defaults(PromExFixture.Bare) == []
     end
 
-    test "mq — при stream_readers: или readers: у Core.Mq.PromEx, kafka — при kafka_readers:" do
+    test "mq — при stream_readers: у Core.Mq.PromEx, kafka — при kafka_readers:" do
       assert Dashboards.defaults(PromExFixture.MqStream) == [:mq]
-      assert Dashboards.defaults(PromExFixture.MqReaders) == [:mq]
       assert Dashboards.defaults(PromExFixture.MqKafka) == [:kafka]
+    end
+
+    test "readers: без stream_readers: не даёт mq: плагин этот ключ не читает" do
+      assert Dashboards.defaults(PromExFixture.MqReaders) == []
     end
 
     test "Core.Mq.PromEx без читателей не даёт ни mq, ни kafka" do
@@ -191,6 +206,16 @@ defmodule Core.PromEx.DashboardsTest do
 
     test "es и cache — по плагинам Core.Es.PromEx и Core.Cache.PromEx" do
       assert Dashboards.defaults(PromExFixture.EsCache) == [:es, :cache]
+    end
+  end
+
+  describe "names/0" do
+    test "совпадает с типом name" do
+      {:ok, types} = Code.Typespec.fetch_types(Dashboards)
+      [union] = for {:type, {:name, union, []}} <- types, do: union
+      {:type, _, :union, atoms} = union
+
+      assert Enum.sort(for({:atom, _, atom} <- atoms, do: atom)) == Enum.sort(Dashboards.names())
     end
   end
 
@@ -289,6 +314,15 @@ defmodule Core.PromEx.DashboardsTest do
       assert violations(dashboard([summary]), fixed_labels: ["tier"]) == []
     end
 
+    test "запросы на метриках плагина со своим metric_prefix: проверяются" do
+      growing = panel("stat", "By cache", [target("min(custom_outbox_queue_count)", "{{cache}}")])
+
+      assert Dashboards.form_violations(PromExFixture.Custom, {"d.json", dashboard([growing])}) ==
+               [violation("By cache", :summary_legend, ["cache"])]
+
+      assert violations(dashboard([growing])) == []
+    end
+
     test "метки экспортёров и метрики без префикса приложения не проверяются" do
       exporter = panel("stat", "Connections", [target("sum by (datname) (pg_stat_activity_count)", "{{datname}}")])
       other = panel("stat", "Other app", [target("other_app_prom_ex_workers_up", "{{component}}")])
@@ -328,7 +362,7 @@ defmodule Core.PromEx.DashboardsTest do
     end
 
     test "каталога нет — ArgumentError" do
-      assert_raise ArgumentError, ~r/form_violations\/3: каталог дашбордов не найден/, fn ->
+      assert_raise ArgumentError, ~r/^Core.PromEx.Dashboards.form_violations\/3: каталог дашбордов не найден: /, fn ->
         Dashboards.form_violations(PromExFixture.Outbox, "no/such/dir")
       end
     end
@@ -401,7 +435,7 @@ defmodule Core.PromEx.DashboardsTest do
     end
 
     test "каталога нет — ArgumentError", %{tmp_dir: dir} do
-      assert_raise ArgumentError, ~r/каталог .*missing не найден/, fn ->
+      assert_raise ArgumentError, ~r/^Core.PromEx.Dashboards.stale\/2: каталог дашбордов не найден: ".*missing"$/, fn ->
         Dashboards.stale(PromExFixture.Outbox, Path.join(dir, "missing"))
       end
     end

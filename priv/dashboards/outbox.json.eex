@@ -526,7 +526,7 @@
             "fillOpacity": 10,
             "showPoints": "never"
           },
-          "unit": "ms"
+          "unit": "<%= @outbox_duration_axis_unit %>"
         },
         "overrides": []
       },

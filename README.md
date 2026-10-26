@@ -506,15 +506,24 @@ end
    mix core.dashboards.export --module MyAppApp.PromEx
    ```
 
-   Набор по умолчанию — по `plugins/0` (дашборд outbox — при `Core.Outbox.PromEx`, mq — при
-   `stream_readers:` у `Core.Mq.PromEx`, kafka — при `kafka_readers:`, workers — при
-   `Core.Workers.PromEx`, external — при `Core.External.PromEx`; DLQ-панели kafka пусты без
-   `dlq_repo:` — репозитория с таблицей `Core.Mq.Dlq.Migration`), один дашборд —
-   `--dashboard outbox`, другой каталог — `--out` (по умолчанию `deploy/monitoring/grafana/dashboards`).
-   Префикс метрик, `title` и `uid` строятся от `otp_app`, datasource и пороги панелей — из
-   `dashboard_assigns/0`: ключ `datasource_id` (uid datasource Prometheus в Grafana) обязателен,
-   пороги и их умолчания — в `Core.PromEx.Dashboards`. Выгрузку коммитят и руками не правят: после
-   обновления core её выгружают заново.
+   Набор по умолчанию — по `plugins/0`:
+
+   | Дашборд | Входит в набор |
+   |---|---|
+   | `outbox` | при `Core.Outbox.PromEx` |
+   | `mq` | при `stream_readers:` у `Core.Mq.PromEx` (старый ключ `readers:` не в счёт) |
+   | `kafka` | при `kafka_readers:` у `Core.Mq.PromEx`; DLQ-панели пусты без `dlq_repo:` — репозитория с таблицей `Core.Mq.Dlq.Migration` |
+   | `es` | при `Core.Es.PromEx` |
+   | `cache` | при `Core.Cache.PromEx` |
+   | `workers` | при `Core.Workers.PromEx`; панели памяти контейнера пусты без `Core.Cgroup.PromEx` |
+   | `external` | при `Core.External.PromEx` |
+
+   Один дашборд — `--dashboard outbox`, другой каталог — `--out` (по умолчанию
+   `deploy/monitoring/grafana/dashboards`). Префикс метрик — от `otp_app` и опций плагина, `title`
+   и `uid` — от `otp_app` и имени дашборда: переименование модуля PromEx не плодит в Grafana второй
+   дашборд. Datasource и пороги панелей — из `dashboard_assigns/0`: ключ `datasource_id` (uid
+   datasource Prometheus в Grafana) обязателен, пороги и их умолчания — в `Core.PromEx.Dashboards`.
+   Выгрузку коммитят и руками не правят: после обновления core её выгружают заново.
 
 ## Имена метрик
 
