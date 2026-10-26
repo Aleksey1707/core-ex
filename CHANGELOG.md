@@ -414,6 +414,25 @@
   Правка потребителя: было — `plug Core.Web.HealthPlug, repos: [MyApp.Infra.DAO]`, стало —
   `plug Core.Web.HealthPlug`.
 
+- **Служебный эндпоинт, Oban Web и Tidewave — нормы яруса потребителя** (норма —
+  `docs/rules/app/21-observability.md`, «Служебный эндпоинт», «Сервер метрик», «Oban Web»;
+  `docs/rules/app/20-agreements.md`, «Инструменты агента»; термин «Служебный эндпоинт» —
+  `CONTEXT.md`). Свод молчал об Oban Web и Tidewave, а сервер метрик описывал без адреса и
+  тумблера: приложение подключало их, не опираясь на свод, и случайный `secret_key_base`
+  дашборда Oban ломался бы на нескольких нодах. Теперь сервер метрик и отдельный эндпоинт
+  дашборда Oban устроены по одному шаблону: свой порт, `ip:` — `{0, 0, 0, 0}` только в prod и
+  loopback вне его, порт на хост не публикуется, корень с тумблером и `:ignore`, в test
+  выключен. Oban Web без аутентификации — отдельный служебный эндпоинт за прокси с логином,
+  с аутентификацией — маршрут в `MyAppWeb.Router` со своим `resolver:` и только чтением по
+  умолчанию; `Oban.Met` — ребёнок корня дашборда при `config :oban_met, auto_start: false`;
+  `secret_key_base` отдельного эндпоинта — из окружения, один на все ноды. Tidewave MAY:
+  `only: :dev`, плаг под `Code.ensure_loaded?(Tidewave)`, только localhost. Правка потребителя:
+  литерал `ip:` в корне служебного эндпоинта → ключ `ip:` из `config/runtime.exs`;
+  `secret_key_base: :crypto.strong_rand_bytes(…)` → `System.fetch_env!(…)` в
+  `config/runtime.exs`; автостарт `oban_met` или `Oban.Met` в `plugins:` →
+  `auto_start: false` и ребёнок корня дашборда; `if Mix.env() == :dev do plug Tidewave end` →
+  `if Code.ensure_loaded?(Tidewave) do plug Tidewave end`.
+
 ### Изменения контракта макросов
 
 - **`events:` у `use Core.Es.Projection` принимает семейство событий.** Семейство

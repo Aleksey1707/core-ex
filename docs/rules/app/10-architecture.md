@@ -401,9 +401,9 @@ Core.Security.Secret.ensure_configured!()
 
 | Файл | Что в нём |
 |---|---|
-| `config.exs` | `compile_env` и DI-подмены: `config :core` (`otp_app`, `telemetry_prefix`), подмена `<Behaviour>.Pg` (`13-repos.md`, «DI»), `.Cached` и TTL кеша (`16-caching.md`, «Конфигурация»), реализация и реестр порта `MyApp.Authz` (см. «Проверка доступа») |
+| `config.exs` | `compile_env` и DI-подмены: `config :core` (`otp_app`, `telemetry_prefix`), подмена `<Behaviour>.Pg` (`13-repos.md`, «DI»), `.Cached` и TTL кеша (`16-caching.md`, «Конфигурация»), реализация и реестр порта `MyApp.Authz` (см. «Проверка доступа»), автостарт `oban_met` (`21-observability.md`, «Oban Web») |
 | `runtime.exs` | env и тумблеры: `OUTBOX_*` (`14-events-outbox.md`, «Конфигурация»), тумблеры поддеревьев и опции процессов, `ES_PROJECTIONS_*` (`17-otp-concurrency.md`), тумблер инвалидатора кеша (`16-caching.md`) |
-| `test.exs` | тестовый overlay: очередь выключена (`14-events-outbox.md`), кеш на `.Pg` (`16-caching.md`), тестовый plug HTTP-клиентов (`19-testing.md`, «Внешние зависимости»), мок порта `MyApp.Authz` (`19-testing.md`, «Проверка доступа»), сервер метрик и PromEx выключены (`21-observability.md`, «Сервер метрик») |
+| `test.exs` | тестовый overlay: очередь выключена (`14-events-outbox.md`), кеш на `.Pg` (`16-caching.md`), тестовый plug HTTP-клиентов (`19-testing.md`, «Внешние зависимости»), мок порта `MyApp.Authz` (`19-testing.md`, «Проверка доступа»), служебные эндпоинты и PromEx выключены (`21-observability.md`, «Служебный эндпоинт», «Сервер метрик») |
 | `dev.exs`, `prod.exs` | настройки окружения без секретов и env: уровень логов, `debug_errors`, `force_ssl` |
 
 Секреты площадок и чтение env в `dev.exs` / `prod.exs` MUST NOT, их место — `runtime.exs`:
