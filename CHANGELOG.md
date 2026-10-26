@@ -211,9 +211,13 @@
   метрик и единица длительности — от него же и опций плагина в `plugins/0`. Datasource —
   ключ `datasource_id` в `dashboard_assigns/0`, обязателен; пороги стат-панелей — параметры
   шаблона с умолчаниями библиотеки, перекрываются там же (таблица — `Core.PromEx.Dashboards`).
-  Набор по умолчанию — по `plugins/0`, флаги — `@moduledoc` задачи. Правка потребителя — по
-  желанию: своя копия дашборда outbox → `mix core.dashboards.export --module MyAppApp.PromEx`,
-  свои пороги — в `dashboard_assigns/0`.
+  Набор по умолчанию — по `plugins/0`, флаги — `@moduledoc` задачи. Свежесть выгрузок проверяет
+  `Core.PromEx.Dashboards.stale/2`: выгрузки каталога (`<имя>.json` из `names/0`), разошедшиеся
+  как JSON с текущим рендером для модуля PromEx; остальные файлы каталога не проверяются.
+  `assert_fresh!/2` — вариант для теста: исключение `Core.PromEx.Dashboards.Stale` с файлом и
+  командой переэкспорта. Правка потребителя: своя копия дашборда outbox →
+  `mix core.dashboards.export --module MyAppApp.PromEx`, свои пороги — в `dashboard_assigns/0`
+  (норма — пункт о выгрузках дашбордов ниже).
 
 - **Механизм ради скорости вводится по замеру benchee, а не по предположению** (норма —
   `docs/rules/app/20-agreements.md`, «Решения о производительности»; `docs/rules/app/13-repos.md`,
@@ -445,6 +449,18 @@
   `config/runtime.exs`; автостарт `oban_met` или `Oban.Met` в `plugins:` →
   `auto_start: false` и ребёнок корня дашборда; `if Mix.env() == :dev do plug Tidewave end` →
   `if Code.ensure_loaded?(Tidewave) do plug Tidewave end`.
+
+- **Дашборды подсистем библиотеки и штатные — выгрузки без ручных правок** (норма —
+  `docs/rules/app/21-observability.md`, «Выгрузки дашбордов»; граница ярусов —
+  `docs/rules/app/00-index.md`, «Что попадает сюда, а что — в локальный свод»). Свод относил
+  дашборды к локальному своду приложения, и выгрузку, отставшую от core или поправленную руками,
+  ловила только пустая панель в проде. Теперь выгрузки и нормы обращения с ними — ярус
+  потребителя, доменные дашборды и пороги — локальный свод; свежесть выгрузок держит тест
+  приложения на `Core.PromEx.Dashboards.assert_fresh!/2`. Правка потребителя: своя копия дашборда
+  подсистемы библиотеки → `mix core.dashboards.export --module MyAppApp.PromEx` и тест
+  `Core.PromEx.Dashboards.assert_fresh!(MyAppApp.PromEx, "deploy/monitoring/grafana/dashboards")`;
+  своя доработка штатного дашборда или выгрузки → отдельная панель доменного дашборда; доменный
+  дашборд с именем выгрузки (`outbox.json`) переименовать.
 
 ### Изменения контракта макросов
 

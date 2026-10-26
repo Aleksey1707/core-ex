@@ -1,14 +1,27 @@
 defmodule Core.PromExFixture do
   @moduledoc """
   Модули PromEx приложения для рендера дашбордов подсистем библиотеки (`Core.PromEx.Dashboards`):
-  с плагином outbox и порогами по умолчанию, с порогами и префиксом из `dashboard_assigns/0`, с
-  префиксом и единицей длительности из опций плагина, без плагинов подсистем, без `datasource_id`.
+  с плагином outbox и порогами по умолчанию, такой же с другим `otp_app`, с порогами и префиксом из
+  `dashboard_assigns/0`, с префиксом и единицей длительности из опций плагина, без плагинов подсистем,
+  без `datasource_id`.
   """
 
   defmodule Outbox do
     @moduledoc "Плагин outbox, пороги по умолчанию."
 
     use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins, do: [{Core.Outbox.PromEx, poll_rate: 5_000}, PromEx.Plugins.Beam]
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus", default_selected_interval: "30s"]
+  end
+
+  defmodule OtherApp do
+    @moduledoc "Как `Outbox`, но другой `otp_app`."
+
+    use PromEx, otp_app: :other_app
 
     @impl true
     def plugins, do: [{Core.Outbox.PromEx, poll_rate: 5_000}, PromEx.Plugins.Beam]

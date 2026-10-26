@@ -28,13 +28,23 @@ defmodule Core.PromEx.Dashboards do
   | | | `outbox_oldest_age_warning` / `outbox_oldest_age_critical` | `30` / `120` секунд |
   | | | `outbox_expired_locks_warning` / `outbox_expired_locks_critical` | `1` / `10` записей |
 
-  Выгрузку в каталог дашбордов приложения делает `mix core.dashboards.export`.
+  Выгрузку в каталог дашбордов приложения делает `mix core.dashboards.export`; совпадение выгрузок
+  с текущим рендером проверяют `stale/2` и вариант для теста `assert_fresh!/2`.
   """
 
   alias PromEx.DashboardRenderer
 
+  defmodule Stale do
+    @moduledoc "Выгрузка дашборда подсистемы библиотеки разошлась с рендером (`assert_fresh!/2`)."
+
+    defexception [:message]
+  end
+
   @typedoc "Имя дашборда подсистемы библиотеки; файл выгрузки — `<имя>.json`."
   @type name :: :outbox
+
+  @typedoc "Выгрузка `file` дашборда `dashboard`, разошедшаяся с рендером."
+  @type stale_export :: %{file: Path.t(), dashboard: name()}
 
   @dashboards [outbox: %{plugin: Core.Outbox.PromEx, label: "Outbox"}]
   @names Keyword.keys(@dashboards)
@@ -129,6 +139,68 @@ defmodule Core.PromEx.Dashboards do
     raise ArgumentError,
           "Core.PromEx.Dashboards.render/2: дашборд #{name} для #{inspect(prom_ex)} не отрендерился: " <>
             inspect(error)
+  end
+
+  # ===== свежесть выгрузок =====
+
+  @doc """
+  Выгрузки дашбордов подсистем библиотеки в каталоге `dir`, разошедшиеся с текущим рендером для
+  модуля PromEx приложения; пустой список — все выгрузки свежие.
+
+  Выгрузка узнаётся по имени файла: `<имя>.json` для каждого имени из `names/0` — так её называет
+  `mix core.dashboards.export`. Другие файлы каталога — доменные и штатные дашборды — не
+  проверяются; дашборд, которого в каталоге нет, нарушением не считается. Файл сравнивается с
+  рендером как JSON: форматирование и перевод строки в конце не важны, ручная правка, старый
+  порог, выгрузка другого модуля PromEx, невалидный JSON или нечитаемый файл — расхождение.
+
+  `ArgumentError` — каталога `dir` нет: опечатка в пути иначе молча дала бы пустой список.
+  """
+  @spec stale(module(), Path.t()) :: [stale_export()]
+
+  def stale(prom_ex, dir) when is_atom(prom_ex) and is_binary(dir) do
+    File.dir?(dir) ||
+      raise ArgumentError, "Core.PromEx.Dashboards.stale/2: каталог #{dir} не найден"
+
+    for name <- @names,
+        file = Path.join(dir, "#{name}.json"),
+        File.regular?(file),
+        decode_file(file) != Jason.decode(render(prom_ex, name)),
+        do: %{file: file, dashboard: name}
+  end
+
+  @doc """
+  Вариант `stale/2` для теста приложения: `:ok` или `Core.PromEx.Dashboards.Stale` с перечнем
+  разошедшихся выгрузок и командой переэкспорта каждой.
+  """
+  @spec assert_fresh!(module(), Path.t()) :: :ok
+
+  def assert_fresh!(prom_ex, dir) when is_atom(prom_ex) and is_binary(dir) do
+    case stale(prom_ex, dir) do
+      [] -> :ok
+      exports -> raise Stale, stale_message(exports, prom_ex, dir)
+    end
+  end
+
+  # ---
+
+  defp decode_file(file) do
+    with {:ok, json} <- File.read(file), do: Jason.decode(json)
+  end
+
+  defp stale_message(exports, prom_ex, dir) do
+    lines =
+      for %{file: file, dashboard: name} <- exports do
+        "  #{file}: mix core.dashboards.export --module #{inspect(prom_ex)} --dashboard #{name} --out #{dir}"
+      end
+
+    Enum.join(
+      [
+        "Core.PromEx.Dashboards.assert_fresh!/2: выгрузки разошлись с рендером для #{inspect(prom_ex)} — " <>
+          "выгрузить заново, руками не править:"
+        | lines
+      ],
+      "\n"
+    )
   end
 
   # ===== общее =====

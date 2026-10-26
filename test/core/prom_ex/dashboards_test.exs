@@ -94,6 +94,86 @@ defmodule Core.PromEx.DashboardsTest do
     end
   end
 
+  describe "stale/2" do
+    @describetag :tmp_dir
+
+    test "выгрузка совпадает с рендером — нарушений нет", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "outbox.json"), Dashboards.render(PromExFixture.Outbox, :outbox))
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == []
+    end
+
+    test "переформатированная выгрузка — не расхождение", %{tmp_dir: dir} do
+      json = Jason.encode!(Jason.decode!(Dashboards.render(PromExFixture.Outbox, :outbox)))
+      File.write!(Path.join(dir, "outbox.json"), json <> "\n")
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == []
+    end
+
+    test "ручная правка — нарушение с именем файла", %{tmp_dir: dir} do
+      file = Path.join(dir, "outbox.json")
+      dashboard = Dashboards.render(PromExFixture.Outbox, :outbox) |> Jason.decode!()
+      File.write!(file, Jason.encode!(%{dashboard | "title" => "Outbox (правка)"}))
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == [%{file: file, dashboard: :outbox}]
+    end
+
+    test "старый порог — нарушение", %{tmp_dir: dir} do
+      file = Path.join(dir, "outbox.json")
+      json = Dashboards.render(PromExFixture.Outbox, :outbox)
+      File.write!(file, String.replace(json, ~r/("value": )500\b/, "\\g{1}400"))
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == [%{file: file, dashboard: :outbox}]
+    end
+
+    test "выгрузка другого otp_app — нарушение", %{tmp_dir: dir} do
+      file = Path.join(dir, "outbox.json")
+      File.write!(file, Dashboards.render(PromExFixture.OtherApp, :outbox))
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == [%{file: file, dashboard: :outbox}]
+    end
+
+    test "невалидный JSON на месте выгрузки — нарушение", %{tmp_dir: dir} do
+      file = Path.join(dir, "outbox.json")
+      File.write!(file, "{")
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == [%{file: file, dashboard: :outbox}]
+    end
+
+    test "каталога нет — ArgumentError", %{tmp_dir: dir} do
+      assert_raise ArgumentError, ~r/каталог .*missing не найден/, fn ->
+        Dashboards.stale(PromExFixture.Outbox, Path.join(dir, "missing"))
+      end
+    end
+
+    test "доменные и штатные дашборды не проверяются", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "beam.json"), ~s({"title": "MyApp - BEAM"}))
+      File.write!(Path.join(dir, "orders.json"), "{")
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == []
+    end
+  end
+
+  describe "assert_fresh!/2" do
+    @describetag :tmp_dir
+
+    test "свежие выгрузки — :ok", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "outbox.json"), Dashboards.render(PromExFixture.Outbox, :outbox))
+
+      assert Dashboards.assert_fresh!(PromExFixture.Outbox, dir) == :ok
+    end
+
+    test "расхождение — исключение с файлом и командой переэкспорта", %{tmp_dir: dir} do
+      file = Path.join(dir, "outbox.json")
+      File.write!(file, Dashboards.render(PromExFixture.Tuned, :outbox))
+
+      error = assert_raise Dashboards.Stale, fn -> Dashboards.assert_fresh!(PromExFixture.Outbox, dir) end
+
+      assert error.message =~ file
+      assert error.message =~ "mix core.dashboards.export --module Core.PromExFixture.Outbox --dashboard outbox"
+    end
+  end
+
   # ---
 
   @provider {Kernel, :node, []}
