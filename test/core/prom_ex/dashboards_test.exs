@@ -81,6 +81,13 @@ defmodule Core.PromEx.DashboardsTest do
         assert prefixes == ["my_app_prom_ex_"], "#{name}: чужой префикс #{inspect(prefixes)}"
       end
     end
+
+    test "форма панелей соблюдена" do
+      for name <- Dashboards.names() do
+        dashboard = Jason.decode!(Dashboards.render(PromExFixture.Outbox, name))
+        assert Dashboards.assert_form!(PromExFixture.Outbox, {"#{name}.json", dashboard}) == :ok
+      end
+    end
   end
 
   describe "defaults/1" do
@@ -91,6 +98,166 @@ defmodule Core.PromEx.DashboardsTest do
 
     test "без плагина подсистемы её дашборда нет" do
       assert Dashboards.defaults(PromExFixture.Bare) == []
+    end
+  end
+
+  @lag_expr ~s(my_app_prom_ex_es_projection_lag{projection=~"$projection"})
+  @lag_unfiltered "my_app_prom_ex_es_projection_lag"
+  @table_legend %{
+    "displayMode" => "table",
+    "placement" => "right",
+    "calcs" => ~w(lastNotNull max),
+    "sortBy" => "Max",
+    "sortDesc" => true
+  }
+  @down_expr ~s(1 - my_app_prom_ex_workers_up{component=~"$component"})
+  @state_legend %{"displayMode" => "list", "placement" => "right", "calcs" => []}
+  @state_tooltip %{"mode" => "multi", "hideZeros" => true}
+
+  describe "form_violations/3" do
+    test "сводка с фиксированной меткой и legendFormat — норма" do
+      summary = panel("stat", "Queue", [target("my_app_prom_ex_outbox_queue_count", "{{status}}")])
+
+      assert Dashboards.form_violations(PromExFixture.Outbox, {"d.json", dashboard([summary])}) == []
+    end
+
+    test "сводка с растущей меткой или без legendFormat — нарушение" do
+      growing = panel("gauge", "By cache", [target("min(my_app_prom_ex_cache_size)", "{{cache}}")])
+      unnamed = panel("bargauge", "Unnamed", [%{"expr" => "max(my_app_prom_ex_workers_up)"}])
+
+      assert Dashboards.form_violations(PromExFixture.Outbox, {"d.json", dashboard([growing, unnamed])}) == [
+               %{dashboard: "d.json", panel: "By cache", rule: :summary_legend, labels: ["cache"]},
+               %{dashboard: "d.json", panel: "Unnamed", rule: :summary_legend, labels: []}
+             ]
+    end
+
+    test "state-timeline с фиксированной меткой — норма, с растущей — нарушение" do
+      fixed = panel("state-timeline", "Cycles", [target("my_app_prom_ex_outbox_poller_cycles_total", "{{result}}")])
+      growing = panel("state-timeline", "Up", [target("my_app_prom_ex_workers_up", "{{component}}")])
+
+      assert violations(dashboard([fixed])) == []
+      assert violations(dashboard([growing])) == [violation("Up", :state_timeline, ["component"])]
+    end
+
+    test "график с растущей меткой: легенда-таблица справа и фильтр переменной — норма" do
+      series = panel("timeseries", "Lag", [target(@lag_expr, "{{projection}}")], %{"legend" => @table_legend})
+
+      assert violations(dashboard([series], [variable("projection")])) == []
+    end
+
+    test "график с растущей меткой и легендой-списком — нарушение" do
+      legend = %{@table_legend | "displayMode" => "list", "placement" => "bottom"}
+      series = panel("timeseries", "Lag", [target(@lag_expr, "{{projection}}")], %{"legend" => legend})
+
+      assert violations(dashboard([series], [variable("projection")])) ==
+               [violation("Lag", :timeseries_legend, ["projection"])]
+    end
+
+    test "растущая метка без фильтра переменной дашборда — нарушение" do
+      unfiltered = panel("timeseries", "Lag", [target(@lag_unfiltered, "{{projection}}")], %{"legend" => @table_legend})
+      filtered = panel("timeseries", "Lag 2", [target(@lag_expr, "{{projection}}")], %{"legend" => @table_legend})
+      single = Map.merge(variable("projection"), %{"multi" => false, "includeAll" => false})
+
+      assert violations(dashboard([unfiltered], [variable("projection")])) ==
+               [violation("Lag", :variable_filter, ["projection"])]
+
+      assert violations(dashboard([filtered])) == [violation("Lag 2", :variable_filter, ["projection"])]
+      assert violations(dashboard([filtered], [single])) == [violation("Lag 2", :variable_filter, ["projection"])]
+    end
+
+    test "состояние «1 = проблема»: легенда-список без calcs и подсказка multi с hideZeros — норма" do
+      options = %{"legend" => @state_legend, "tooltip" => @state_tooltip}
+      state = panel("timeseries", "Down", [target(@down_expr, "{{component}}")], options)
+
+      assert violations(dashboard([state], [variable("component")])) == []
+    end
+
+    test "состояние с легендой-таблицей или подсказкой с нулями — нарушение" do
+      table = panel("timeseries", "Down", [target(@down_expr, "{{component}}")], %{"legend" => @table_legend})
+      zeros = %{"legend" => @state_legend, "tooltip" => %{"mode" => "multi", "hideZeros" => false}}
+      noisy = panel("timeseries", "Down 2", [target(@down_expr, "{{component}}")], zeros)
+
+      assert violations(dashboard([table, noisy], [variable("component")])) == [
+               violation("Down", :state_legend, ["component"]),
+               violation("Down 2", :state_legend, ["component"])
+             ]
+    end
+
+    test "таблица с растущей меткой освобождена" do
+      table = panel("table", "Lag", [target(@lag_unfiltered, "{{projection}}")])
+
+      assert violations(dashboard([table])) == []
+    end
+
+    test "fixed_labels: расширяет закрытый список фиксированных меток" do
+      summary = panel("stat", "By tenant tier", [target("sum by (tier) (my_app_prom_ex_billing_total)", "{{tier}}")])
+
+      assert violations(dashboard([summary])) == [violation("By tenant tier", :summary_legend, ["tier"])]
+      assert violations(dashboard([summary]), fixed_labels: ["tier"]) == []
+    end
+
+    test "метки экспортёров и метрики без префикса приложения не проверяются" do
+      exporter = panel("stat", "Connections", [target("sum by (datname) (pg_stat_activity_count)", "{{datname}}")])
+      other = panel("stat", "Other app", [target("other_app_prom_ex_workers_up", "{{component}}")])
+
+      assert violations(dashboard([exporter, other])) == []
+    end
+
+    test "панели свёрнутого ряда проверяются" do
+      nested = panel("state-timeline", "Up", [target("my_app_prom_ex_workers_up", "{{component}}")])
+      row = %{"type" => "row", "title" => "Workers", "panels" => [nested]}
+
+      assert violations(dashboard([row])) == [violation("Up", :state_timeline, ["component"])]
+    end
+
+    test "дашборд без templating и панель без title — нарушение, а не отказ" do
+      untitled = %{"type" => "timeseries", "targets" => [target(@lag_unfiltered, "{{projection}}")]}
+      bare = %{"panels" => [untitled]}
+
+      assert violations(bare) == [
+               violation("", :timeseries_legend, ["projection"]),
+               violation("", :variable_filter, ["projection"])
+             ]
+
+      assert violations(%{}) == []
+    end
+
+    @tag :tmp_dir
+    test "каталог: нарушения с именем файла, штатные дашборды PromEx вне охвата", %{tmp_dir: dir} do
+      growing = panel("state-timeline", "Up", [target("my_app_prom_ex_workers_up", "{{component}}")])
+      write!(dir, "domain.json", dashboard([growing]))
+      write!(dir, "beam.json", dashboard([growing]))
+      File.write!(Path.join(dir, "outbox.json"), Dashboards.render(PromExFixture.Outbox, :outbox))
+
+      assert Dashboards.form_violations(PromExFixture.Outbox, dir) == [
+               %{dashboard: "domain.json", panel: "Up", rule: :state_timeline, labels: ["component"]}
+             ]
+    end
+
+    test "каталога нет — ArgumentError" do
+      assert_raise ArgumentError, ~r/form_violations\/3: каталог дашбордов не найден/, fn ->
+        Dashboards.form_violations(PromExFixture.Outbox, "no/such/dir")
+      end
+    end
+  end
+
+  describe "assert_form!/3" do
+    test "норма — :ok" do
+      assert Dashboards.assert_form!(PromExFixture.Outbox, {"d.json", dashboard([])}) == :ok
+    end
+
+    test "нарушения — исключение с перечнем: дашборд, панель, правило, метки" do
+      growing = panel("state-timeline", "Up", [target("my_app_prom_ex_workers_up", "{{component}}")])
+      unnamed = panel("stat", "Unnamed", [%{"expr" => "max(my_app_prom_ex_workers_up)"}])
+
+      error =
+        assert_raise Dashboards.FormError, fn ->
+          Dashboards.assert_form!(PromExFixture.Outbox, {"d.json", dashboard([growing, unnamed])})
+        end
+
+      assert Exception.message(error) =~ "«Форма панелей»"
+      assert Exception.message(error) =~ "d.json: Up — state_timeline (component): state-timeline"
+      assert Exception.message(error) =~ "d.json: Unnamed — summary_legend: сводка"
     end
   end
 
@@ -221,4 +388,20 @@ defmodule Core.PromEx.DashboardsTest do
     panels = for panel <- dashboard["panels"], panel["type"] != "row", do: panel["datasource"]
     panels ++ for variable <- dashboard["templating"]["list"], do: variable["datasource"]
   end
+
+  defp violations(dashboard, opts \\ []),
+    do: Dashboards.form_violations(PromExFixture.Outbox, {"d.json", dashboard}, opts)
+
+  defp violation(panel, rule, labels), do: %{dashboard: "d.json", panel: panel, rule: rule, labels: labels}
+
+  defp dashboard(panels, variables \\ []), do: %{"panels" => panels, "templating" => %{"list" => variables}}
+
+  defp panel(type, title, targets, options \\ %{}),
+    do: %{"type" => type, "title" => title, "targets" => targets, "options" => options}
+
+  defp target(expr, format), do: %{"expr" => expr, "legendFormat" => format}
+
+  defp write!(dir, file, dashboard), do: File.write!(Path.join(dir, file), Jason.encode!(dashboard))
+
+  defp variable(name), do: %{"name" => name, "multi" => true, "includeAll" => true, "allValue" => ".*"}
 end

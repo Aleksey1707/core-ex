@@ -29,8 +29,11 @@ defmodule Core.PromEx.Dashboards do
   | | | `outbox_expired_locks_warning` / `outbox_expired_locks_critical` | `1` / `10` записей |
 
   Выгрузку в каталог дашбордов приложения делает `mix core.dashboards.export`; совпадение выгрузок
-  с текущим рендером проверяют `stale/2` и вариант для теста `assert_fresh!/2`.
+  с текущим рендером проверяют `stale/2` и вариант для теста `assert_fresh!/2`, форму панелей всех
+  дашбордов каталога — `form_violations/3` и `assert_form!/3`.
   """
+
+  use Core.Options
 
   alias PromEx.DashboardRenderer
 
@@ -40,11 +43,26 @@ defmodule Core.PromEx.Dashboards do
     defexception [:message]
   end
 
+  defmodule FormError do
+    @moduledoc """
+    Форма панелей нарушена (`assert_form!/3`): `message` — читаемый перечень, `violations` —
+    нарушения в форме `form_violations/3`.
+    """
+
+    defexception message: "форма панелей нарушена", violations: []
+  end
+
   @typedoc "Имя дашборда подсистемы библиотеки; файл выгрузки — `<имя>.json`."
   @type name :: :outbox
 
   @typedoc "Выгрузка `file` дашборда `dashboard`, разошедшаяся с рендером."
   @type stale_export :: %{file: Path.t(), dashboard: name()}
+
+  @typedoc "Правило формы панелей; таблица — `form_violations/3`."
+  @type form_rule :: :summary_legend | :state_timeline | :timeseries_legend | :state_legend | :variable_filter
+
+  @typedoc "Нарушение формы: дашборд, заголовок панели, правило и растущие метки, на которых оно сработало."
+  @type form_violation :: %{dashboard: String.t(), panel: String.t(), rule: form_rule(), labels: [String.t()]}
 
   @dashboards [outbox: %{plugin: Core.Outbox.PromEx, label: "Outbox"}]
   @names Keyword.keys(@dashboards)
@@ -201,6 +219,201 @@ defmodule Core.PromEx.Dashboards do
       ],
       "\n"
     )
+  end
+
+  # ===== форма панелей =====
+
+  @fixed_labels ~w(result outcome status error op operation channel kind collector reason)
+  @summaries ~w(stat gauge bargauge)
+  @unfiltered ["table", "state-timeline" | @summaries]
+  @form_rules [
+    summary_legend: "сводка без legendFormat или с растущей меткой в нём",
+    state_timeline: "state-timeline с растущей меткой",
+    timeseries_legend: "легенда графика — не таблица справа: lastNotNull, max, сортировка по max desc",
+    state_legend: "состояние «1 = проблема»: легенда не список справа без calcs или подсказка не multi с hideZeros",
+    variable_filter: ~s(нет фильтра переменной дашборда: label=~"$label", multi, All, allValue ".*")
+  ]
+  @form_norm "`deps/core/docs/rules/app/21-observability.md`, «Форма панелей»"
+  @table_legend %{
+    "displayMode" => "table",
+    "placement" => "right",
+    "calcs" => ~w(lastNotNull max),
+    "sortBy" => "Max",
+    "sortDesc" => true
+  }
+  @state_legend %{"displayMode" => "list", "placement" => "right", "calcs" => []}
+  @state_tooltip %{"mode" => "multi", "hideZeros" => true}
+  @variable %{"multi" => true, "includeAll" => true, "allValue" => ".*"}
+
+  @opts_schema [
+    fixed_labels: [
+      type: {:list, :string},
+      default: [],
+      doc: "Фиксированные метки приложения сверх списка библиотеки."
+    ]
+  ]
+  @doc """
+  Нарушения формы панелей (#{@form_norm}) — пустой список при норме.
+
+  `source` — каталог дашбордов (`*.json`, имя дашборда в нарушении — имя файла) либо один дашборд
+  `{имя, декодированный JSON}`. Каталога нет — `ArgumentError`: проверка пустоты прошла бы
+  вхолостую. Файл каталога с именем шаблона PromEx (`beam.json`, `application.json`, …) —
+  выгрузка штатного дашборда, его форму задаёт PromEx, и проверка его пропускает; доменный
+  дашборд с таким именем выпал бы из проверки вместе с ним, поэтому имя шаблона PromEx ему не
+  дают.
+
+  Проверяются запросы панелей (и панелей свёрнутых рядов) с метриками `<otp_app>_prom_ex_`
+  модуля PromEx: метки экспортёров (`datname`, `mountpoint`) задаёт окружение. Метки панели
+  берутся из `legendFormat` запроса; растущая — любая вне закрытого списка фиксированных
+  `#{Enum.join(@fixed_labels, ", ")}` и `fixed_labels:`.
+
+  | Правило | Нарушение |
+  |---|---|
+  | `:summary_legend` | `stat` / `gauge` / `bargauge` без `legendFormat` или с растущей меткой в нём |
+  | `:state_timeline` | `state-timeline` с растущей меткой |
+  | `:timeseries_legend` | `timeseries` с растущей меткой: легенда не таблица справа (`lastNotNull`, `max`, `Max`↓) |
+  | `:state_legend` | состояние `1 - …`: легенда не список справа без `calcs`, подсказка не `multi` + `hideZeros` |
+  | `:variable_filter` | растущая метка без `<метка>=~"$<метка>"` и переменной `multi`, All, `allValue: ".*"` |
+
+  `:variable_filter` не проверяется у `table` (прокручивает строки) и у сводки и `state-timeline`: растущая
+  метка там уже нарушение.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
+  @spec form_violations(module(), Path.t() | {String.t(), map()}, keyword()) :: [form_violation()]
+
+  def form_violations(prom_ex, source, opts \\ []) when is_atom(prom_ex) and is_list(opts) do
+    prefix = "#{prom_ex.__otp_app__()}_prom_ex_"
+    fixed = @fixed_labels ++ Keyword.fetch!(opts, :fixed_labels)
+
+    for {name, dashboard} <- form_sources(source),
+        target <- form_targets(dashboard, prefix, fixed),
+        violation <- target_violations(target),
+        uniq: true,
+        do: Map.put(violation, :dashboard, name)
+  end
+
+  @doc """
+  `form_violations/3` для теста приложения: `:ok` при норме, иначе `Core.PromEx.Dashboards.FormError`
+  с перечнем нарушений — дашборд, панель, правило, растущие метки. `source` и опции
+  (`fixed_labels:`) — как у `form_violations/3`.
+
+      test "форма панелей" do
+        Core.PromEx.Dashboards.assert_form!(MyAppApp.PromEx, "deploy/monitoring/grafana/dashboards")
+      end
+  """
+  @spec assert_form!(module(), Path.t() | {String.t(), map()}, keyword()) :: :ok
+
+  def assert_form!(prom_ex, source, opts \\ []) when is_atom(prom_ex) do
+    case form_violations(prom_ex, source, opts) do
+      [] -> :ok
+      violations -> raise FormError, message: form_message(violations), violations: violations
+    end
+  end
+
+  # ---
+
+  defp form_message(violations) do
+    lines =
+      for %{dashboard: dashboard, panel: panel, rule: rule, labels: labels} <- violations do
+        labels = if labels == [], do: "", else: " (#{Enum.join(labels, ", ")})"
+        "  #{dashboard}: #{panel} — #{rule}#{labels}: #{Keyword.fetch!(@form_rules, rule)}"
+      end
+
+    Enum.join(["форма панелей нарушена (#{@form_norm}):" | lines], "\n")
+  end
+
+  defp form_sources({name, %{} = dashboard}) when is_binary(name), do: [{name, dashboard}]
+
+  defp form_sources(dir) when is_binary(dir) do
+    if not File.dir?(dir) do
+      raise ArgumentError, "Core.PromEx.Dashboards.form_violations/3: каталог дашбордов не найден: #{inspect(dir)}"
+    end
+
+    standard = promex_files()
+
+    for path <- Enum.sort(Path.wildcard(Path.join(dir, "*.json"))),
+        file = Path.basename(path),
+        file not in standard,
+        do: {file, Jason.decode!(File.read!(path))}
+  end
+
+  defp promex_files do
+    :prom_ex
+    |> :code.priv_dir()
+    |> Path.join("*.json.eex")
+    |> Path.wildcard()
+    |> Enum.map(&Path.basename(&1, ".eex"))
+  end
+
+  defp form_targets(dashboard, prefix, fixed) do
+    for panel <- form_panels(dashboard),
+        %{"expr" => expr} = target <- Map.get(panel, "targets", []),
+        String.contains?(expr, prefix) do
+      format = Map.get(target, "legendFormat", "")
+      %{dashboard: dashboard, panel: panel, expr: expr, legend_format: format, growing: growing(format, fixed)}
+    end
+  end
+
+  defp form_panels(dashboard),
+    do: Enum.flat_map(Map.get(dashboard, "panels", []), &[&1 | Map.get(&1, "panels", [])])
+
+  defp growing(format, fixed) do
+    ~r/\{\{\s*(\w+)\s*\}\}/
+    |> Regex.scan(format, capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.uniq()
+    |> Kernel.--(fixed)
+  end
+
+  defp target_violations(%{panel: panel} = target) do
+    title = Map.get(panel, "title", "")
+
+    for {rule, _text} <- @form_rules,
+        labels <- offending_labels(rule, target),
+        do: %{panel: title, rule: rule, labels: labels}
+  end
+
+  defp offending_labels(:summary_legend, %{panel: %{"type" => type}, legend_format: format, growing: growing})
+       when type in @summaries,
+       do: offending(format == "" or growing != [], growing)
+
+  defp offending_labels(:state_timeline, %{panel: %{"type" => "state-timeline"}, growing: growing}),
+    do: offending(growing != [], growing)
+
+  defp offending_labels(:timeseries_legend, %{panel: %{"type" => "timeseries"} = panel, expr: expr, growing: growing}),
+    do: offending(growing != [] and not state?(expr) and not matches?(panel, "legend", @table_legend), growing)
+
+  defp offending_labels(:state_legend, %{panel: %{"type" => "timeseries"} = panel, expr: expr, growing: growing}) do
+    shaped? = matches?(panel, "legend", @state_legend) and matches?(panel, "tooltip", @state_tooltip)
+    offending(growing != [] and state?(expr) and not shaped?, growing)
+  end
+
+  defp offending_labels(:variable_filter, %{dashboard: dashboard, panel: panel, expr: expr, growing: growing}) do
+    if Map.get(panel, "type") in @unfiltered,
+      do: [],
+      else: for(label <- growing, not filtered?(dashboard, expr, label), do: [label])
+  end
+
+  defp offending_labels(_rule, _target), do: []
+
+  defp offending(true, labels), do: [labels]
+  defp offending(false, _labels), do: []
+
+  defp state?(expr), do: String.starts_with?(expr, "1 - ")
+
+  defp matches?(panel, option, shape) do
+    options = get_in(panel, ["options", option]) || %{}
+    Map.take(options, Map.keys(shape)) == shape
+  end
+
+  defp filtered?(dashboard, expr, label) do
+    variables = get_in(dashboard, ["templating", "list"]) || []
+
+    String.contains?(expr, ~s(#{label}=~"$#{label}")) and
+      Enum.any?(variables, &(&1["name"] == label and Map.take(&1, Map.keys(@variable)) == @variable))
   end
 
   # ===== общее =====
