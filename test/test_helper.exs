@@ -5,6 +5,20 @@
 
 :ok = Core.Clock.Test.start()
 
+# Запись мимо sandbox (скрипт с `Sandbox.mode(:auto)`, упавший `unboxed_run`) остаётся в базе, и
+# тесты, ждущие пустую таблицу, падают далеко от причины. Сверка до прогона называет таблицу.
+%{rows: tables} =
+  Core.TestRepo.query!(
+    "SELECT table_name FROM information_schema.tables " <>
+      "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> 'schema_migrations'"
+  )
+
+for [table] <- tables,
+    %{rows: [[count]]} = Core.TestRepo.query!(~s[SELECT count(*) FROM "#{table}"]),
+    count > 0 do
+  raise "core_test: таблица #{table} не пуста, строк: #{count} — остатки записи мимо sandbox"
+end
+
 Ecto.Adapters.SQL.Sandbox.mode(Core.TestRepo, :manual)
 
 # `lazy: true` — коннект откладывается до первого `Connection.connect/0`, поэтому
