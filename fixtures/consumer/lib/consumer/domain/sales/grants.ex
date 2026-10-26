@@ -1,11 +1,14 @@
 defmodule Consumer.Domain.Sales.Grants do
   @moduledoc """
-  Агрегат, у кодека которого два события делят нагрузку-Prim, третье несёт `Es.ValueChanged`, а
-  четвёртое — нагрузку по полям с вариантами семейств (`union:`): клаузы нагрузки кодек выводит сам.
+  Агрегат, у кодека которого два события делят нагрузку-Prim, третье несёт `Es.ValueChanged`,
+  четвёртое — нагрузку по полям с вариантами семейств (`union:`), пятое — нагрузку по полям с
+  множеством и словарём (`set:`, `map:`): клаузы нагрузки кодек выводит сам. Состояние и команда
+  `Cmd.Assign` — структуры по полям с `set:` и `map:`.
   """
 
   alias Consumer.Domain.Sales.Grants.Cmd
   alias Consumer.Domain.Sales.Grants.Event
+  alias Core.Version
 
   use Core.Es.Aggregate,
     event_codec: Consumer.Domain.Sales.Grants.Event.Codec
@@ -24,9 +27,20 @@ defmodule Consumer.Domain.Sales.Grants do
     use Core.Labels.ID, kind: :id
   end
 
-  defstruct id: nil, version: nil, roles: MapSet.new()
+  use Core.Struct,
+    fields: [
+      id: [prim: ID],
+      version: [prim: Version, optional: true],
+      roles: [set: [prim: RoleID], default: MapSet.new()],
+      quotas: [map: [key: [prim: RoleID], value: [type: :non_neg_integer]], default: %{}]
+    ]
 
   @impl true
+  def decide(%Cmd.Assign{roles: roles, quotas: quotas}, %__MODULE__{roles: roles, quotas: quotas}), do: {:ok, []}
+
+  def decide(%Cmd.Assign{roles: %MapSet{} = roles, quotas: quotas}, %__MODULE__{}),
+    do: {:ok, [Event.Assigned.draft(Event.Assigned.Payload.new(roles, quotas))]}
+
   def decide(%Cmd.Grant{role: %RoleID{} = role}, %__MODULE__{} = state) do
     if MapSet.member?(state.roles, role),
       do: {:ok, []},
@@ -50,4 +64,7 @@ defmodule Consumer.Domain.Sales.Grants do
     do: %{state | roles: state.roles |> MapSet.delete(payload.old_value) |> MapSet.put(payload.new_value)}
 
   def evolve(%__MODULE__{} = state, %Event.Badged{payload: %Event.Badged.Payload{}}), do: state
+
+  def evolve(%__MODULE__{} = state, %Event.Assigned{payload: %Event.Assigned.Payload{} = payload}),
+    do: %{state | roles: payload.roles, quotas: payload.quotas}
 end

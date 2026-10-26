@@ -2,6 +2,7 @@ defmodule Consumer.Domain.Sales.Grants.Event do
   @moduledoc "События выдачи ролей."
 
   alias Consumer.Domain.Sales.Grants
+  alias Consumer.Domain.Sales.Grants.Event.Assigned
   alias Consumer.Domain.Sales.Grants.Event.Badged
   alias Consumer.Domain.Sales.Grants.Event.Granted
   alias Consumer.Domain.Sales.Grants.Event.Replaced
@@ -14,5 +15,5 @@ defmodule Consumer.Domain.Sales.Grants.Event do
     by: UserID,
     codec: Grants.Event.Codec
 
-  @type t :: Granted.t() | Revoked.t() | Replaced.t() | Badged.t()
+  @type t :: Granted.t() | Revoked.t() | Replaced.t() | Badged.t() | Assigned.t()
 end

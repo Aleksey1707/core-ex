@@ -12,7 +12,9 @@ defmodule Consumer.Domain.Sales.Account.Profile.Codec do
        contacts: [list: [entity: Account.Profile.Contact]],
        main: [entity: Account.Profile.Contact, optional: true],
        channel: [union: Account.Profile.Channel, optional: true],
-       badges: [list: [union: Account.Profile.Badge]]},
+       badges: [list: [union: Account.Profile.Badge]],
+       aliases: [set: [prim: Account.Name], default: []],
+       escalation: [map: [key: [enum: Order.Status], value: [entity: Account.Profile.Contact]], default: %{}]},
       {Account.Profile.Contact, name: [prim: Account.Name]}
     ]
 end

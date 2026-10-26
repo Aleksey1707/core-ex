@@ -40,11 +40,13 @@
   `upcasts:`, модули ключа `Account.NameKey` и ключа из ПДн `Account.HolderKey` с `personal: true` в
   `key_reservations:` у репозитория счёта, процесс), `Order` (enum `Order.Status` отдельным файлом в
   guard `is_enum/2` самого агрегата), `Ping` (кодек только из событий без нагрузки), `Grants` (два события делят нагрузку-Prim, третье несёт `Es.ValueChanged`,
-  четвёртое — нагрузку по полям с вариантами семейств `union:`; клаузы нагрузки кодек выводит сам),
+  четвёртое — нагрузку по полям с вариантами семейств `union:`, пятое — нагрузку по полям с множеством
+  `set:` и словарём `map:`; клаузы нагрузки кодек выводит сам; состояние и команда `Grants.Cmd.Assign` —
+  структуры по полям с `set:` и `map:`),
   `NeverFails` и `AlwaysFails` (`decide` никогда не ошибается / только ошибается), события `Parcel` без
   агрегата (кодек вне фасада, владелец потока — struct `Parcel`), идентификаторы из ключа (`DeliveryID`, составной ключ —
   `InspectionID`), read-модель `Activity` с проекцией на события двух агрегатов и событие уничтожения ключа, dump-only плагин
-  фасада `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (с полями `union:`), нагрузка по полям
+  фасада `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (с полями `union:`, `set:` и `map:`), нагрузка по полям
   `Account.Event.Renamed.Payload`, ручной плагин нагрузки `Account.Event.Opened.Payload` (`Account.Codec`) и представление `Account.View` с `jsonb:` по типу `Account.Profile` и
   семейству `Account.Profile.Channel` (спеку пере-дампа выводят их плагины). Подписи событий
   (`Core.Labels.*`): название у `Account.Event.Renamed`, `Account.Event.Opened` и `Account.Event.Closed`,

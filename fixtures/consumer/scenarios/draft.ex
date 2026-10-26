@@ -48,6 +48,16 @@ defmodule ConsumerTest.Draft do
     # expect: incompatible types given to Consumer.Domain.Sales.Grants.Event.Badged.Payload.new/2
     do: Grants.Event.Badged.draft(Grants.Event.Badged.Payload.new(badge, "email"))
 
+  # B2s — нагрузка по полям: список вместо множества (`set:`) в позиционном `new`
+  def b2s_fields_payload_set_list(%Grants.RoleID{} = role),
+    # expect: incompatible types given to Consumer.Domain.Sales.Grants.Event.Assigned.Payload.new/2
+    do: Grants.Event.Assigned.draft(Grants.Event.Assigned.Payload.new([role], %{}))
+
+  # B2m — нагрузка по полям: множество вместо словаря (`map:`) в позиционном `new`
+  def b2m_fields_payload_map_set(%Grants.RoleID{} = role),
+    # expect: incompatible types given to Consumer.Domain.Sales.Grants.Event.Assigned.Payload.new/2
+    do: Grants.Event.Assigned.draft(Grants.Event.Assigned.Payload.new(MapSet.new([role]), MapSet.new()))
+
   # B3 — `draft/0` события с нагрузкой
   # expect: Consumer.Domain.Sales.Account.Event.Opened.draft/0 is undefined or private
   def b3_payload_event_without_payload, do: Account.Event.Opened.draft()

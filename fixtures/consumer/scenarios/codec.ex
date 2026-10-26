@@ -59,6 +59,20 @@ defmodule ConsumerTest.Codec do
     # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Codec.dump/2
     do: Account.Profile.Codec.dump(%Account.Profile{id: name, name: name, status: :placed, contacts: []}, InCodec)
 
+  # H8s — список вместо множества (`set:`) в `dump/2` плагина по полям
+  def h8s_fields_dump_set_list(%Account.ID{} = id, %Account.Name{} = name) do
+    profile = %Account.Profile{id: id, name: name, status: :placed, contacts: [], aliases: [name]}
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Codec.dump/2
+    Account.Profile.Codec.dump(profile, InCodec)
+  end
+
+  # H8m — список вместо словаря (`map:`) в `dump/2` плагина по полям
+  def h8m_fields_dump_map_list(%Account.ID{} = id, %Account.Name{} = name) do
+    profile = %Account.Profile{id: id, name: name, status: :placed, contacts: [], escalation: []}
+    # expect: incompatible types given to Consumer.Domain.Sales.Account.Profile.Codec.dump/2
+    Account.Profile.Codec.dump(profile, InCodec)
+  end
+
   # H9a — опечатка в поле результата `load/2` варианта семейства
   def h9a_variant_load_typo(data) do
     {:ok, mobile} = InCodec.load(Account.Profile.Channel.Mobile, data)

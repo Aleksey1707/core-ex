@@ -129,10 +129,25 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
          do: {profile.name, profile.note, profile.status, Enum.map(profile.contacts, & &1.name), profile.main}
   end
 
+  def load_profile_collections(data) do
+    with {:ok, profile} <- InCodec.load(Account.Profile, data),
+         do:
+           {MapSet.to_list(profile.aliases),
+            Enum.map(profile.escalation, fn {status, contact} -> {status, contact.name} end)}
+  end
+
   def dump_profile(%Account.ID{} = id, %Account.Name{} = name) do
     contact = %Account.Profile.Contact{name: name}
 
-    InCodec.dump(%Account.Profile{id: id, name: name, status: :placed, contacts: [contact], main: contact})
+    InCodec.dump(%Account.Profile{
+      id: id,
+      name: name,
+      status: :placed,
+      contacts: [contact],
+      main: contact,
+      aliases: MapSet.new([name]),
+      escalation: %{cancelled: contact}
+    })
   end
 
   def load_channel(data) do

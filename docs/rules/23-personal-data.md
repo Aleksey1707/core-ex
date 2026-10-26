@@ -85,8 +85,10 @@ use Core.Es.Event.Payload,
 ```
 
 Единица шифротекста — значение поля верхнего уровня целиком, любого вида (`prim`, `entity`,
-`list`, `enum`, `type`). Плагин сущности и View `subject:` не принимают (ADR-0073). `subject:`
-MAY и у поля с Prim без `personal: true`: шифруется поле, а не флаг Prim.
+`list`, `set`, `map`, `enum`, `type`); множество шифруется уже отсортированным по wire элемента —
+одно значение даёт один открытый текст. Плагин сущности и View `subject:` не принимают
+(ADR-0073). `subject:` MAY и у поля с Prim без `personal: true`: шифруется поле, а не флаг Prim.
+Персональный ключ словаря — `11-domain.md`, «Плагин по полям (`fields:`)».
 
 ПДн вложенной сущности (`entity:`, `union:`, `type:`) размечается `subject:` у её поля нагрузки,
 а не внутри плагина.
@@ -101,7 +103,8 @@ fields: [recipient_id: [prim: Order.RecipientID], address: [entity: Order.Addres
 
 Сборка (`CompileError`) ловит:
 
-- персональный Prim на прямом поле (`prim:` / `list: [prim:]`) без `subject:`;
+- персональный Prim на прямом поле (`prim:`), элементом `list:` / `set:` или значением `map:` на
+  любой глубине без `subject:`;
 - субъект — не `Prim.UUID` и не `Prim.Compose` над ним; у
   `subject: :aggregate_id` это проверяет `use Core.Es.Event` по `aggregate_id:` семейства;
 - поле с `subject:` в роли субъекта, `subject:` на несуществующее поле или на само себя;

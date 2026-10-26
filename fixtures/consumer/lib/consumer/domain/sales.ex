@@ -5,14 +5,15 @@ defmodule Consumer.Domain.Sales do
   - Агрегаты: `Account` (event-sourced, состояние и команда `Cmd.Rename` — структуры по полям, кодек с
     `upcasts:`, модули ключа `NameKey` и из ПДн `HolderKey`, процесс), `Order` (enum `Status` отдельным
     файлом в guard `is_enum/2` самого агрегата), `Ping` (события без нагрузки),
-    `Grants` (два события делят модуль нагрузки, нагрузка по полям с `union:`), `NeverFails` и
+    `Grants` (два события делят модуль нагрузки, нагрузки по полям с `union:` и с `set:` / `map:`,
+    состояние и команда `Cmd.Assign` — структуры по полям с `set:` / `map:`), `NeverFails` и
     `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата
     (владелец потока — struct `Parcel`).
   - Акторы: `Client` — usecases в каталоге каждого агрегата и read-модели.
   - Значения без владельца (`Values`): `UserID`, идентификаторы из ключа `DeliveryID` и `InspectionID`.
   - Read-модели: активность `Activity` по назначению — проекция на события `Account` и `Order`;
     представление `Account.View` с `jsonb:` по типу плагина по полям и по семейству.
-  - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (поля `union:`), семейства
+  - Кодеки: dump-only плагин `Account.Card.Codec`, плагин по полям `Account.Profile.Codec` (поля `union:`, `set:`, `map:`), семейства
     вариантов `Account.Profile.Channel.Codec` (тегированная форма с дискриминатором) и
     `Account.Profile.Badge.Codec` (без обёртки, `variants:` выражением из реестра).
   - Компоненты: нет.

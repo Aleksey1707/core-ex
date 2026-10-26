@@ -5,7 +5,8 @@ defmodule Consumer.Domain.Sales.Grants.Event.Codec do
     Event.Granted => "grants.granted",
     Event.Revoked => "grants.revoked",
     Event.Replaced => "grants.replaced",
-    Event.Badged => "grants.badged"
+    Event.Badged => "grants.badged",
+    Event.Assigned => "grants.assigned"
   }
 
   use Core.Es.Event.Codec,
