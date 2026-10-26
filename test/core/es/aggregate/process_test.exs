@@ -489,7 +489,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
       refute inspect(status) =~ "Счёт"
 
       log =
-        capture_log(fn ->
+        capture_log([colors: [enabled: false]], fn ->
           assert {{:function_clause, [{Account, :decide, _args, _location} | _stack]}, _call} =
                    catch_exit(
                      Account.Process.execute(
