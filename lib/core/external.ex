@@ -42,12 +42,16 @@ defmodule Core.External do
   @typedoc "Исход вызова, который определяет классификатор вызывающего."
   @type outcome :: :ok | :timeout | :down | :rejected
 
-  @doc """
-  Выполнить вызов внешней системы `system` операцией `operation`; результат `fun` — без изменений.
-  """
   @opts_schema [
     outcome: [type: {:fun, 1}, required: true, doc: "Классификатор «результат `fun` → исход» (`t:outcome/0`)."]
   ]
+  @doc """
+  Выполнить вызов внешней системы `system` операцией `operation`; результат `fun` — без изменений.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec call(atom(), atom(), (-> result), keyword()) :: result when result: var
 
   def call(system, operation, fun, opts)

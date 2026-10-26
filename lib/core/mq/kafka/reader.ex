@@ -48,7 +48,7 @@ if Code.ensure_loaded?(:brod) do
     Консьюмер партиции у `:brod` принимает одного подписчика: читатели одного топика с разными
     `subscriber_name` требуют разных клиентов.
 
-    Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+    Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
 
     ## Wire-формат
 
@@ -106,7 +106,7 @@ if Code.ensure_loaded?(:brod) do
 
     @shutdown_ms 15_000
 
-    @init_opts_schema [
+    @start_opts_schema [
       client: [
         type: {:custom, Core.Options.Type, :atom, []},
         type_doc: "`t:atom/0`",
@@ -180,9 +180,16 @@ if Code.ensure_loaded?(:brod) do
     @spec child_spec(keyword()) :: Supervisor.child_spec()
 
     def child_spec(opts) when is_list(opts),
-      do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
+      do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @start_opts_schema)
 
-    @doc "Запустить читатель."
+    @opts_schema @start_opts_schema
+    @doc """
+    Запустить читатель.
+
+    ## Опции
+
+    #{Core.Options.docs(@opts_schema)}
+    """
     @spec start_link(keyword()) :: GenServer.on_start()
 
     def start_link(opts) when is_list(opts) do
@@ -227,7 +234,6 @@ if Code.ensure_loaded?(:brod) do
 
     def info(server), do: GenServer.call(server, :info, @call_timeout)
 
-    @opts_schema @init_opts_schema
     @doc false
     @spec init(keyword()) :: {:ok, %__MODULE__{}, {:continue, :lease}}
 

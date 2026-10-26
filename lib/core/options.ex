@@ -9,6 +9,13 @@ defmodule Core.Options do
         @opts_schema [
           batch_size: [type: :pos_integer, default: 100, doc: "Сколько строк читает пачка."]
         ]
+        @doc \"""
+        Собрать отчёт.
+
+        ## Опции
+
+        \#{Core.Options.docs(@opts_schema)}
+        \"""
         @spec build(module(), keyword()) :: Core.Result.unit()
 
         def build(source, opts \\\\ []) when is_atom(source) and is_list(opts) do
@@ -44,8 +51,11 @@ defmodule Core.Options do
 
   ## Документация
 
-  Документацию схема не трогает: состав, типы и умолчания опций читаются в самой схеме над
-  функцией, в `@doc` и `@moduledoc` их нет.
+  Схема стоит над `@doc` функции, а описание опций автор вставляет в `@doc` сам:
+  `\#{Core.Options.docs(@opts_schema)}`. Видимый `@doc` без этой вставки — `CompileError`, как и
+  функция со схемой без `@doc` в модуле, который документирован. Без `@doc` остаются `@impl`
+  и функции модуля с `@moduledoc false`; `@doc false` проверку снимает. В `@moduledoc` описания
+  опций нет: он остаётся литералом.
 
   ## Ошибки объявления
 
@@ -58,6 +68,8 @@ defmodule Core.Options do
   - `@opts_schema` перед второй и следующей клаузой функции или между головой без тела и первой
     клаузой;
   - висячий `@opts_schema` — за ним нет `def` до конца модуля;
+  - видимый `@doc` функции со схемой без вставки `docs/1` её схемы; функция со схемой без `@doc`
+    и без `@impl` в модуле, у которого `@moduledoc` не `false`;
   - последний аргумент функции со схемой — не переменная или на него стоит guard, кроме
     `is_list/1`.
 
@@ -70,6 +82,7 @@ defmodule Core.Options do
   @required_keys ~w()a
   @optional_keys ~w()a
   @expression_keys ~w()a
+  @insert_hint "ожидается вставка Core.Options.docs(@opts_schema)"
 
   # ===== подключение =====
 
@@ -255,6 +268,7 @@ defmodule Core.Options do
 
     Module.delete_attribute(module, :opts_schema)
     entry = compile!(raw, where)
+    documented!(module, entry.schema, where)
     Module.put_attribute(module, :core_options_schemas, Map.put(schemas(module), fun, entry))
     entry
   end
@@ -290,6 +304,23 @@ defmodule Core.Options do
     end
   end
 
+  defp documented!(module, schema, where) do
+    case Module.get_attribute(module, :doc) do
+      {_line, false} ->
+        :ok
+
+      {_line, text} when is_binary(text) ->
+        unless String.contains?(text, NimbleOptions.docs(schema)),
+          do: Helper.Opts.reject!(where, "в @doc нет описания опций: #{@insert_hint}")
+
+      _none ->
+        if Module.get_attribute(module, :impl) in [nil, false] and not hidden?(module),
+          do: Helper.Opts.reject!(where, "нет @doc с описанием опций: #{@insert_hint}")
+    end
+  end
+
+  defp hidden?(module), do: match?({_line, false}, Module.get_attribute(module, :moduledoc))
+
   defp generated({name, meta, context}), do: {name, Keyword.put(meta, :generated, true), context}
 
   defp checked(var, %{schema: schema, defaults: :none}, label, body, where) do
@@ -323,7 +354,7 @@ defmodule Core.Options do
   @doc """
   Описание опций схемы `schema` (`NimbleOptions.docs/1`): ключ, тип, умолчание и `doc:` каждого.
 
-  В документацию модуля и функции текст не вставляется: опции читаются в самой схеме.
+  Текст вставляется в `@doc` функции со схемой: `\#{Core.Options.docs(@opts_schema)}`.
 
   Некорректная схема — `ArgumentError` NimbleOptions; ключ без `doc:` строкой — `ArgumentError`, как
   и у `@opts_schema`: неописанная опция не попадает в контракт.

@@ -54,12 +54,16 @@ defmodule Core.Web.Params do
 
   def get!(map, key) when is_map(map) and is_atom(key), do: Result.unwrap!(get(map, key))
 
+  @opts_schema @page_opts_schema
   @doc """
   Разобрать параметры страницы `limit` / `offset` из параметров экшена — query, а не тела запроса.
 
   В `operation/2` их описывает `Core.Web.Params.Schema.page/1` с теми же опциями.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @page_opts_schema
   @spec page(map(), keyword()) ::
           Result.t({Pagination.Limit.t(), Pagination.Offset.t()})
 

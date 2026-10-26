@@ -580,15 +580,19 @@ defmodule Core.Es.Projection do
 
   # ===== пачка =====
 
+  @opts_schema [
+    batch_size: [type: :pos_integer, default: @default_batch_size, doc: "Сколько событий читает пачка."]
+  ]
   @doc """
   Прогнать одну пачку проекции `projection` в вызывающем процессе.
 
   Шаги и исходы — в `@moduledoc`. Вызов внутри транзакции `repo:` проекции — `ArgumentError`: пачка
   открывает свою.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [
-    batch_size: [type: :pos_integer, default: @default_batch_size, doc: "Сколько событий читает пачка."]
-  ]
   @spec run_once(module(), keyword()) :: outcome()
 
   def run_once(projection, opts \\ []) when is_atom(projection) and is_list(opts) do

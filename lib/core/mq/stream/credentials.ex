@@ -29,7 +29,6 @@ defmodule Core.Mq.Stream.Credentials do
           password: String.t()
         }
 
-  @doc "Собрать credentials из keyword."
   @opts_schema [
     host: [type: :string, default: "localhost", doc: "Хост брокера."],
     port: [type: :pos_integer, default: 5552, doc: "Порт RabbitMQ Stream protocol."],
@@ -41,6 +40,13 @@ defmodule Core.Mq.Stream.Credentials do
       doc: "Пароль: строка; в тексте отказа значение не печатается."
     ]
   ]
+  @doc """
+  Собрать credentials из keyword.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec new(keyword()) :: t()
 
   def new(opts) when is_list(opts) do

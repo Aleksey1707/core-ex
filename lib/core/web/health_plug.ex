@@ -59,7 +59,13 @@ defmodule Core.Web.HealthPlug do
     ],
     timeout: [type: :pos_integer, default: 1000, doc: "Таймаут запроса `SELECT 1` к репозиторию, мс."]
   ]
-  @doc false
+  @doc """
+  Разобрать опции плага.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec init(keyword()) :: Plug.opts()
 
   @impl true

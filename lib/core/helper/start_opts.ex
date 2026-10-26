@@ -1,21 +1,21 @@
 defmodule Core.Helper.StartOpts do
   @moduledoc """
-  Проверка опций OTP-процесса в `init/1`.
+  Проверка опций OTP-процесса в `start_link/1`.
 
   Опции приходят из дерева супервизии потребителя и разбираются один раз: ошибка в них —
-  ошибка конфигурации. `ArgumentError` в `init/1` называет опцию и ожидаемое значение,
+  ошибка конфигурации. `ArgumentError` в `start_link/1` называет опцию и ожидаемое значение,
   тогда как непроверенное значение всплывает позже и хуже: `FunctionClauseError` в
   `handle_continue/2` (супервизор уходит в цикл рестартов) или молчаливый backoff, в
   котором опечатка неотличима от недоступного брокера (`17-otp-concurrency.md`).
 
-  Опции процесса проверяет схема над `init/1` (`use Core.Options`, `@opts_schema`). Значения, общие
+  Опции процесса проверяет схема над `start_link/1` (`use Core.Options`, `@opts_schema`). Значения, общие
   для любой схемы (Prim, модуль, атом, строка), — custom-типы `Core.Options.Type`; здесь — типы
   опций процесса `{:custom, Core.Helper.StartOpts, fun, []}`: `name/1` и `shutdown/1`.
 
   Повторяющиеся ключи схемы — фрагменты: `name_option/0,1` и `shutdown_option/1,2` дают описание
   ключа целиком (тип, `type_doc:`, `doc:`), его ставят в атрибут схемы:
   `name: Core.Helper.StartOpts.name_option()`. `child_spec/3` строит спецификацию ребёнка
-  процесса из той же схемы: умолчание `shutdown:` у неё одно с `init/1`.
+  процесса из той же схемы: умолчание `shutdown:` у неё одно с `start_link/1`.
 
   `process!/3` — для готовых деревьев: проверяет значение, а не достаёт его из `opts`, потому что
   процессы дерева приходят вложенными в элементы его списков. `label` — функция, отклонившая вызов,
@@ -81,11 +81,11 @@ defmodule Core.Helper.StartOpts do
   end
 
   @doc """
-  Спецификация ребёнка процесса `module` со схемой `schema` над `init/1`: `:id` — `name:` из `opts`,
+  Спецификация ребёнка процесса `module` со схемой `schema` над `start_link/1`: `:id` — `name:` из `opts`,
   без него — `module`; `:shutdown` — `shutdown:` из `opts`, без него — `default:` ключа `shutdown:`
   схемы, а без такого ключа в схеме `:shutdown` не задаётся.
 
-  Опции уходят в `start_link/1` насквозь: проверяет их схема `init/1`.
+  Опции уходят в `start_link/1` насквозь: проверяет их его схема.
   """
   @spec child_spec(module(), keyword(), keyword()) :: Supervisor.child_spec()
 

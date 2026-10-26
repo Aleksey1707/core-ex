@@ -45,11 +45,7 @@ defmodule Core.Outbox.CleanerTest do
   end
 
   defp start_error(opts) do
-    Process.flag(:trap_exit, true)
-
-    assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
-             with_log(fn -> Cleaner.start_link(opts) end)
-
+    %ArgumentError{message: message} = assert_raise(ArgumentError, fn -> Cleaner.start_link(opts) end)
     message
   end
 
@@ -68,8 +64,8 @@ defmodule Core.Outbox.CleanerTest do
     assert %{id: :notifications_cleaner} = Cleaner.child_spec(name: :notifications_cleaner)
   end
 
-  test "start_link: :name не той формы — ArgumentError до init/1" do
-    assert_raise ArgumentError, ~r/expected :name option/, fn ->
+  test "start_link: :name не той формы — ArgumentError схемы" do
+    assert_raise ArgumentError, ~r/^Core\.Outbox\.Cleaner\.start_link\/1: invalid value for :name option/, fn ->
       Cleaner.start_link(Keyword.put(cleaner_opts(), :name, "notifications_cleaner"))
     end
   end
@@ -78,13 +74,13 @@ defmodule Core.Outbox.CleanerTest do
     test "неизвестная опция — ArgumentError" do
       opts = Keyword.put(cleaner_opts(), :shutdown, 30_000)
 
-      assert start_error(opts) =~ "Core.Outbox.Cleaner.init/1: unknown options [:shutdown]"
+      assert start_error(opts) =~ "Core.Outbox.Cleaner.start_link/1: unknown options [:shutdown]"
     end
 
     test "нет обязательной опции — ArgumentError" do
       for key <- ~w(repo published_ttl interval_ms)a do
         assert start_error(Keyword.delete(cleaner_opts(), key)) =~
-                 "Core.Outbox.Cleaner.init/1: required #{inspect(key)} option not found"
+                 "Core.Outbox.Cleaner.start_link/1: required #{inspect(key)} option not found"
       end
     end
 
@@ -97,7 +93,7 @@ defmodule Core.Outbox.CleanerTest do
             {:context_factory, :system, "expected function of arity 0, got: :system"}
           ] do
         assert start_error(Keyword.put(cleaner_opts(), key, value)) =~
-                 "Core.Outbox.Cleaner.init/1: invalid value for #{inspect(key)} option: #{expected}"
+                 "Core.Outbox.Cleaner.start_link/1: invalid value for #{inspect(key)} option: #{expected}"
       end
     end
   end

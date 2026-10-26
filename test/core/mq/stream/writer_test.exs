@@ -322,30 +322,31 @@ defmodule Core.Mq.Stream.WriterTest do
   end
 
   test "мусор в опциях — ArgumentError на старте" do
-    Process.flag(:trap_exit, true)
-
     capture_log(fn ->
-      assert {:error, {%ArgumentError{message: message}, _stack}} =
-               Stream.Writer.start_link(connection: FakeConn, reference_prefix: 42)
+      %ArgumentError{message: message} =
+        assert_raise(ArgumentError, fn -> Stream.Writer.start_link(connection: FakeConn, reference_prefix: 42) end)
 
-      assert message =~ "Core.Mq.Stream.Writer.init/1: invalid value for :reference_prefix option"
+      assert message =~ "Core.Mq.Stream.Writer.start_link/1: invalid value for :reference_prefix option"
 
-      assert {:error, {%ArgumentError{message: message}, _stack}} =
-               Stream.Writer.start_link(connection: FakeConn, reference_prefix: "")
+      %ArgumentError{message: message} =
+        assert_raise(ArgumentError, fn -> Stream.Writer.start_link(connection: FakeConn, reference_prefix: "") end)
 
       assert message =~ ~s(invalid value for :reference_prefix option: ожидается непустая строка, получено "")
 
-      assert {:error, {%ArgumentError{}, _stack}} =
-               Stream.Writer.start_link(
-                 connection: FakeConn,
-                 reference_prefix: "test-writer",
-                 confirm_timeout_ms: 0
-               )
+      assert_raise ArgumentError, fn ->
+        Stream.Writer.start_link(
+          connection: FakeConn,
+          reference_prefix: "test-writer",
+          confirm_timeout_ms: 0
+        )
+      end
 
-      assert {:error, {%ArgumentError{message: message}, _stack}} =
-               Stream.Writer.start_link(connection: FakeConn, reference_prefix: "test-writer", max_producer: 8)
+      %ArgumentError{message: message} =
+        assert_raise(ArgumentError, fn ->
+          Stream.Writer.start_link(connection: FakeConn, reference_prefix: "test-writer", max_producer: 8)
+        end)
 
-      assert message =~ "Core.Mq.Stream.Writer.init/1: unknown options [:max_producer]"
+      assert message =~ "Core.Mq.Stream.Writer.start_link/1: unknown options [:max_producer]"
     end)
   end
 

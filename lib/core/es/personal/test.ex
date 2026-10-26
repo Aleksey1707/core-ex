@@ -109,16 +109,20 @@ defmodule Core.Es.Personal.Test do
 
   # ===== событие уничтожения ключа =====
 
+  @opts_schema [
+    by: [type: :any, required: true, doc: "Автор уничтожения — UUID-Prim, как `subject_id`."],
+    at: [type: {:struct, Es.Event.At}, required: true, doc: "Время события."]
+  ]
   @doc """
   Событие уничтожения ключа субъекта `subject_id` — в той форме, в какой его пишет
   `Core.Es.Personal.destroy_key/3`: поток `"core.subject"`, версия `1`, без нагрузки, `id` — новый.
 
   `subject_id` — UUID-Prim (`Prim.UUID` или `Prim.Compose` над ним).
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [
-    by: [type: :any, required: true, doc: "Автор уничтожения — UUID-Prim, как `subject_id`."],
-    at: [type: {:struct, Es.Event.At}, required: true, doc: "Время события."]
-  ]
   @spec key_destroyed(struct(), keyword()) :: KeyDestroyed.t()
 
   def key_destroyed(subject_id, opts) when is_prim(subject_id) and is_list(opts) do

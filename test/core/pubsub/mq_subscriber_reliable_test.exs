@@ -746,8 +746,10 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
       Process.flag(:trap_exit, true)
 
       capture_log(fn ->
-        assert {:error, {%ArgumentError{message: message}, _stack}} =
-                 MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe: "yes"))
+        %ArgumentError{message: message} =
+          assert_raise(ArgumentError, fn ->
+            MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe: "yes"))
+          end)
 
         assert message =~ "invalid value for :subscribe option: expected boolean"
       end)
@@ -760,8 +762,10 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
       Process.flag(:trap_exit, true)
 
       capture_log(fn ->
-        assert {:error, {%ArgumentError{message: message}, _stack}} =
-                 MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe_data: :boot))
+        %ArgumentError{message: message} =
+          assert_raise(ArgumentError, fn ->
+            MqSubscriberReliable.start_link(sub_opts(reader, topic, subscribe_data: :boot))
+          end)
 
         assert message =~ "опция :subscribe_data задаётся только с subscribe: true"
       end)
@@ -769,8 +773,8 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
   end
 
   describe "опции старта" do
-    test "start_link: :name не той формы — ArgumentError до init/1", %{reader: reader, topic: topic} do
-      assert_raise ArgumentError, ~r/expected :name option/, fn ->
+    test "start_link: :name не той формы — ArgumentError схемы", %{reader: reader, topic: topic} do
+      assert_raise ArgumentError, ~r/^Core\.PubSub\.MqSubscriberReliable\.start_link\/1: invalid value for :name/, fn ->
         MqSubscriberReliable.start_link(sub_opts(reader, topic, name: "subscriber"))
       end
     end
@@ -782,13 +786,13 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
 
     test "неизвестная опция — ArgumentError", %{reader: reader, topic: topic} do
       assert start_error(sub_opts(reader, topic, dlq: "products.dlq")) =~
-               "Core.PubSub.MqSubscriberReliable.init/1: unknown options [:dlq]"
+               "Core.PubSub.MqSubscriberReliable.start_link/1: unknown options [:dlq]"
     end
 
     test "нет обязательной опции — ArgumentError", %{reader: reader, topic: topic} do
       for key <- ~w(reader_module reader from_message on_message)a do
         assert start_error(Keyword.delete(sub_opts(reader, topic, []), key)) =~
-                 "Core.PubSub.MqSubscriberReliable.init/1: required #{inspect(key)} option not found"
+                 "Core.PubSub.MqSubscriberReliable.start_link/1: required #{inspect(key)} option not found"
       end
     end
 
@@ -809,18 +813,18 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
             {:shutdown, :kill, "ожидается неотрицательное целое"}
           ] do
         assert start_error(sub_opts(reader, topic, [{key, value}])) =~
-                 "Core.PubSub.MqSubscriberReliable.init/1: invalid value for #{inspect(key)} option: #{expected}"
+                 "Core.PubSub.MqSubscriberReliable.start_link/1: invalid value for #{inspect(key)} option: #{expected}"
       end
     end
 
     test "dlq_handle: обязателен с dlq_writer и только с ним", %{reader: reader, topic: topic} do
       for opts <- [[dlq_writer: MqFake.Writer], [dlq_writer: MqFake.Writer, dlq_handle: nil]] do
         assert start_error(sub_opts(reader, topic, opts)) =~
-                 "Core.PubSub.MqSubscriberReliable.init/1: нет обязательной при :dlq_writer опции :dlq_handle"
+                 "Core.PubSub.MqSubscriberReliable.start_link/1: нет обязательной при :dlq_writer опции :dlq_handle"
       end
 
       assert start_error(sub_opts(reader, topic, dlq_handle: MqFake.Writer.new())) =~
-               "Core.PubSub.MqSubscriberReliable.init/1: опция :dlq_handle задаётся только с :dlq_writer"
+               "Core.PubSub.MqSubscriberReliable.start_link/1: опция :dlq_handle задаётся только с :dlq_writer"
     end
 
     test "nil в name:, dlq_writer: и dlq_handle: — как их отсутствие", %{reader: reader, topic: topic} do
@@ -965,11 +969,7 @@ defmodule Core.PubSub.MqSubscriberReliableTest do
   end
 
   defp start_error(opts) do
-    Process.flag(:trap_exit, true)
-
-    assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
-             with_log(fn -> MqSubscriberReliable.start_link(opts) end)
-
+    %ArgumentError{message: message} = assert_raise(ArgumentError, fn -> MqSubscriberReliable.start_link(opts) end)
     message
   end
 

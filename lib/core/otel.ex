@@ -84,8 +84,14 @@ defmodule Core.Otel do
     |> Map.merge(Map.new(:otel_propagator_text_map.inject([])))
   end
 
-  @doc "Выполнить `fun` в span'е внутри текущего контекста."
   @opts_schema @span_opts_schema
+  @doc """
+  Выполнить `fun` в span'е внутри текущего контекста.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec span(String.t(), (-> result), keyword()) :: result when result: var
 
   def span(name, fun, opts \\ []) when is_binary(name) and is_function(fun, 0) and is_list(opts) do
@@ -103,14 +109,18 @@ defmodule Core.Otel do
   def root_span(name, fun, opts \\ []) when is_binary(name) and is_function(fun, 0) and is_list(opts),
     do: with_ctx(:otel_ctx.new(), fn -> span(name, fun, opts) end)
 
+  @opts_schema @span_opts_schema
   @doc """
   Выполнить `fun` в span'е, родитель которого извлечён из carrier.
 
   Прежний контекст процесса восстанавливается в `after`: процесс, обрабатывающий
   поток чужих сообщений (подписчик), не имеет права унести контекст одного
   сообщения в обработку следующего.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @span_opts_schema
   @spec with_span_from(carrier(), String.t(), (-> result), keyword()) :: result
         when result: var
 

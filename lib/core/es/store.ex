@@ -179,11 +179,6 @@ defmodule Core.Es.Store do
 
   # ===== запись =====
 
-  @doc """
-  Записать события потоков одного типа агрегата — `type:` кодека `event_codec`.
-
-  `mismatch` строит ошибку отказа из `t:mismatch_detail/0`. Проверки и исходы — в `@moduledoc`.
-  """
   @opts_schema [
     continuous?: [
       type: :boolean,
@@ -191,6 +186,15 @@ defmodule Core.Es.Store do
       doc: "Непрерывность потока: первая версия потока в пачке — наибольшая версия потока + 1."
     ]
   ]
+  @doc """
+  Записать события потоков одного типа агрегата — `type:` кодека `event_codec`.
+
+  `mismatch` строит ошибку отказа из `t:mismatch_detail/0`. Проверки и исходы — в `@moduledoc`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec append(
           module(),
           [Es.Event.t()],

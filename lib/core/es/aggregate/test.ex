@@ -19,16 +19,20 @@ defmodule Core.Es.Aggregate.Test do
 
   use Core.Options
 
+  @opts_schema [
+    by: [type: :any, required: true, doc: "Автор событий — Prim автора из кодека событий агрегата."],
+    at: [type: {:struct, Es.Event.At}, required: true, doc: "Время событий."]
+  ]
   @doc """
   Состояние после результатов `decide/2` (`Event.Mod.draft(payload)` / `Event.Mod.draft()`).
 
   События собираются, как в `execute/2`: `id` — новый, `aggregate_id` — `state.id`, версии — по
   порядку от `state.version`, `by` и `at` — из опций. Разные авторы — цепочкой вызовов.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [
-    by: [type: :any, required: true, doc: "Автор событий — Prim автора из кодека событий агрегата."],
-    at: [type: {:struct, Es.Event.At}, required: true, doc: "Время событий."]
-  ]
   @spec given(struct(), [Es.Aggregate.result()], keyword()) :: struct()
 
   def given(%aggregate{} = state, results, opts) when is_list(results) and is_list(opts) do

@@ -311,15 +311,17 @@ defmodule Core.Mq.Stream.ReaderTest do
     Process.flag(:trap_exit, true)
 
     capture_log(fn ->
-      assert {:error, {%ArgumentError{message: message}, _stack}} =
-               Stream.Reader.start_link(
-                 connection: FakeConn,
-                 topic: topic,
-                 subscriber_name: Mq.SubscriberName.new!("sub"),
-                 initial_offset: :bogus
-               )
+      %ArgumentError{message: message} =
+        assert_raise(ArgumentError, fn ->
+          Stream.Reader.start_link(
+            connection: FakeConn,
+            topic: topic,
+            subscriber_name: Mq.SubscriberName.new!("sub"),
+            initial_offset: :bogus
+          )
+        end)
 
-      assert message =~ "Core.Mq.Stream.Reader.init/1: "
+      assert message =~ "Core.Mq.Stream.Reader.start_link/1: "
       assert message =~ "invalid value for :initial_offset option"
     end)
   end
@@ -328,15 +330,17 @@ defmodule Core.Mq.Stream.ReaderTest do
     Process.flag(:trap_exit, true)
 
     capture_log(fn ->
-      assert {:error, {%ArgumentError{message: message}, _stack}} =
-               Stream.Reader.start_link(
-                 connection: FakeConn,
-                 topic: topic,
-                 subscriber_name: Mq.SubscriberName.new!("sub"),
-                 retry_max: 5_000
-               )
+      %ArgumentError{message: message} =
+        assert_raise(ArgumentError, fn ->
+          Stream.Reader.start_link(
+            connection: FakeConn,
+            topic: topic,
+            subscriber_name: Mq.SubscriberName.new!("sub"),
+            retry_max: 5_000
+          )
+        end)
 
-      assert message =~ "Core.Mq.Stream.Reader.init/1: unknown options [:retry_max]"
+      assert message =~ "Core.Mq.Stream.Reader.start_link/1: unknown options [:retry_max]"
     end)
   end
 
@@ -344,12 +348,13 @@ defmodule Core.Mq.Stream.ReaderTest do
     Process.flag(:trap_exit, true)
 
     capture_log(fn ->
-      assert {:error, {%ArgumentError{}, _stack}} =
-               Stream.Reader.start_link(
-                 connection: FakeConn,
-                 topic: Mq.Topic.value(topic),
-                 subscriber_name: Mq.SubscriberName.new!("sub")
-               )
+      assert_raise ArgumentError, fn ->
+        Stream.Reader.start_link(
+          connection: FakeConn,
+          topic: Mq.Topic.value(topic),
+          subscriber_name: Mq.SubscriberName.new!("sub")
+        )
+      end
     end)
   end
 

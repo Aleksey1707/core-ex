@@ -97,10 +97,14 @@ defmodule Core.DurationParser do
   @type timeout_input ::
           String.t() | non_neg_integer() | :infinity | Duration.t() | keyword(integer())
 
+  @opts_schema @rounding_schema
   @doc """
   Парсит строку длительности, возвращает целое значение в единице `unit` (по умолчанию `:s`).
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @rounding_schema
   @spec parse(String.t(), Unit.t(), keyword()) :: Result.t(non_neg_integer())
 
   def parse(str, unit \\ :s, opts \\ []) when is_binary(str) and is_enum(unit, Unit) do
@@ -113,12 +117,16 @@ defmodule Core.DurationParser do
 
   def parse!(str, unit \\ :s, opts \\ []), do: Result.unwrap!(parse(str, unit, opts))
 
+  @opts_schema @rounding_schema
   @doc """
   Парсит строку длительности в `Duration.t()` (day / hour / minute / second / microsecond).
 
   Точность `Duration` — микросекунда.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @rounding_schema
   @spec to_duration(String.t(), keyword()) :: Result.t(Duration.t())
 
   def to_duration(str, opts \\ []) when is_binary(str) do
@@ -133,6 +141,7 @@ defmodule Core.DurationParser do
 
   def to_duration!(str, opts \\ []), do: Result.unwrap!(to_duration(str, opts))
 
+  @opts_schema @rounding_schema
   @doc """
   OTP-таймаут в целых миллисекундах.
 
@@ -140,8 +149,11 @@ defmodule Core.DurationParser do
   keyword-компоненты (`week` / `day` / `hour` / `minute` / `second` / `millisecond` /
   `microsecond` / `nanosecond`). Повторяющиеся компоненты keyword суммируются (у
   `Kernel.to_timeout/1` — `ArgumentError`).
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @rounding_schema
   @spec to_timeout(timeout_input(), keyword()) ::
           Result.t(non_neg_integer() | :infinity)
 

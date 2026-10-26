@@ -47,7 +47,7 @@ defmodule Core.Es.Projection.Listener do
   Метрики — `es_projection_signal_sent_total` и `es_projection_signal_received_total`
   (`Core.Es.PromEx`), алерт `EsProjectionSignalLost` — `22-projections.md`, «Эксплуатация».
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   use GenServer
@@ -72,11 +72,6 @@ defmodule Core.Es.Projection.Listener do
     %{id: {__MODULE__, Keyword.fetch!(opts, :repo)}, start: {__MODULE__, :start_link, [opts]}}
   end
 
-  @doc "Запустить слушателя на соединении `repo:` с опциями `connection:` поверх `repo.config()`."
-  @spec start_link(keyword()) :: GenServer.on_start()
-
-  def start_link(opts) when is_list(opts), do: GenServer.start_link(__MODULE__, opts)
-
   @opts_schema [
     repo: [
       type: {:custom, Core.Options.Type, :module, []},
@@ -90,6 +85,17 @@ defmodule Core.Es.Projection.Listener do
       doc: "Опции соединения Postgrex поверх `repo.config()` — keyword из `notifications:` дерева."
     ]
   ]
+  @doc """
+  Запустить слушателя на соединении `repo:` с опциями `connection:` поверх `repo.config()`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
+
+  def start_link(opts) when is_list(opts), do: GenServer.start_link(__MODULE__, opts)
+
   @doc false
   @spec init(keyword()) :: {:ok, state(), {:continue, :listen}}
 

@@ -14,7 +14,7 @@ defmodule Core.Outbox.Poller do
   вставки адресует поллеры по отметке дерева. Не найдя своего `:name` в отметке, `init/1`
   отказывает `ArgumentError`.
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   use GenServer
@@ -36,7 +36,7 @@ defmodule Core.Outbox.Poller do
 
   @shutdown_ms 30_000
 
-  @init_opts_schema [
+  @start_opts_schema [
     name: [
       type: {:custom, Core.Options.Type, :atom, []},
       type_doc: "`t:atom/0`",
@@ -119,7 +119,14 @@ defmodule Core.Outbox.Poller do
           topics: Outbox.topics_filter()
         }
 
-  @doc "Запустить poller."
+  @opts_schema @start_opts_schema
+  @doc """
+  Запустить poller.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
 
   def start_link(opts) when is_list(opts) do
@@ -135,7 +142,7 @@ defmodule Core.Outbox.Poller do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts),
-    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @start_opts_schema)
 
   @doc """
   Разбудить poller (best-effort).
@@ -164,7 +171,6 @@ defmodule Core.Outbox.Poller do
     GenServer.call(server, :run_once, 60_000)
   end
 
-  @opts_schema @init_opts_schema
   @doc false
   @spec init(keyword()) :: {:ok, t()}
 

@@ -11,12 +11,6 @@ defmodule Core.Mq.Client do
 
   use Core.Options
 
-  @doc """
-  Проверить пару «клиент → адаптер».
-
-  Различает два случая: клиента нет в сборке вовсе, и клиент есть, но библиотека была
-  собрана без него и не пересобрана.
-  """
   @opts_schema [
     label: [
       type: {:custom, Core.Options.Type, :binary, []},
@@ -49,6 +43,16 @@ defmodule Core.Mq.Client do
       doc: "Требование к версии зависимости."
     ]
   ]
+  @doc """
+  Проверить пару «клиент → адаптер».
+
+  Различает два случая: клиента нет в сборке вовсе, и клиент есть, но библиотека была
+  собрана без него и не пересобрана.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec ensure_available!(keyword()) :: :ok
 
   def ensure_available!(opts) when is_list(opts) do

@@ -54,7 +54,7 @@ defmodule Core.Es.Projection.Reader do
   `[:es, :projection, :signal, :sent]` после commit пачки с исходом `:processed` —
   `Core.Es.Projection.Listener`, «Telemetry».
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   use GenServer
@@ -121,12 +121,6 @@ defmodule Core.Es.Projection.Reader do
     }
   end
 
-  @doc "Запустить читатель под именем модуля проекции."
-  @spec start_link(keyword()) :: GenServer.on_start()
-
-  def start_link(opts) when is_list(opts),
-    do: GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :projection))
-
   @opts_schema [
     projection: [
       type: {:custom, Core.Options.Type, :module, []},
@@ -153,6 +147,18 @@ defmodule Core.Es.Projection.Reader do
       doc: "`:shutdown` в `child_spec/1`: сколько супервизор ждёт конца пачки при остановке, мс."
     ]
   ]
+  @doc """
+  Запустить читатель под именем модуля проекции.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
+
+  def start_link(opts) when is_list(opts),
+    do: GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :projection))
+
   @doc false
   @spec init(keyword()) :: {:ok, t()}
 

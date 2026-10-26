@@ -857,6 +857,13 @@ end
 # `Es.Transact.run` в `write_open/3`, хелперы `awaited/2` и `projected/3` —
 # `deps/core/docs/rules/22-projections.md`, «Read-after-write»
 @opts_schema [wait: Core.Es.Projection.wait_option()]
+@doc """
+Открыть счёт.
+
+## Опции
+
+#{Core.Options.docs(@opts_schema)}
+"""
 def open(%Agg.Name{} = name, %Context{} = context, opts \\ []) do
   with :ok <- check_user(~w(create)a, context),
        {:ok, by} <- CurrentUser.get(context),

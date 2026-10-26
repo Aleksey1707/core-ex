@@ -212,8 +212,6 @@ defmodule Core.Outbox.TestTest do
 
     @tag :capture_log
     test "реактор: неизвестная опция, нет subscribers:, owner: не pid — ArgumentError при старте" do
-      Process.flag(:trap_exit, true)
-
       for {opts, expected} <- [
             {[subscribers: [], owner: self(), interval_ms: 10], "unknown options [:interval_ms]"},
             {[owner: self()], "required :subscribers option not found"},
@@ -223,8 +221,8 @@ defmodule Core.Outbox.TestTest do
             {[subscribers: [subscriber(notify(:a)), subscriber(notify(:b))], owner: self()],
              "опция :name — ожидается различные name подписчиков"}
           ] do
-        assert {:error, {%ArgumentError{message: message}, _stack}} = Outbox.Test.Reactor.start_link(opts)
-        assert message =~ "Core.Outbox.Test.Reactor.init/1: #{expected}"
+        %ArgumentError{message: message} = assert_raise(ArgumentError, fn -> Outbox.Test.Reactor.start_link(opts) end)
+        assert message =~ "Core.Outbox.Test.Reactor.start_link/1: #{expected}"
       end
     end
   end

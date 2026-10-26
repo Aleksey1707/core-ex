@@ -164,6 +164,13 @@ defmodule Consumer.Domain.Sales.Account.Client.Usecases do
     do: Account.fold(state, events).status
 
   @opts_schema [wait: Core.Es.Projection.wait_option()]
+  @doc """
+  Открыть счёт.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   def open(%Account.ID{} = id, %Account.Cmd.Open{} = command, %Context{} = context, opts \\ []) do
     written =
       Transact.run(DAO, fn ->

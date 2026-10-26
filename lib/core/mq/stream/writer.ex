@@ -23,7 +23,7 @@ defmodule Core.Mq.Stream.Writer do
   пачки, а не по ходу: внутри неё кеш только растёт, иначе вытеснение сняло бы producer
   топика, который эта же пачка ещё подтверждает.
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   @behaviour Core.Mq.Writer
@@ -44,7 +44,7 @@ defmodule Core.Mq.Stream.Writer do
 
   @shutdown_ms 30_000
 
-  @init_opts_schema [
+  @start_opts_schema [
     connection: [
       type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
@@ -85,9 +85,16 @@ defmodule Core.Mq.Stream.Writer do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts),
-    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @start_opts_schema)
 
-  @doc "Запустить writer."
+  @opts_schema @start_opts_schema
+  @doc """
+  Запустить writer.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
 
   def start_link(opts) when is_list(opts) do
@@ -116,7 +123,6 @@ defmodule Core.Mq.Stream.Writer do
     GenServer.call(server, {:put_many, messages}, :infinity)
   end
 
-  @opts_schema @init_opts_schema
   @doc false
   @spec init(keyword()) :: {:ok, %__MODULE__{}}
 

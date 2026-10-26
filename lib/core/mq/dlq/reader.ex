@@ -22,7 +22,7 @@ defmodule Core.Mq.Dlq.Reader do
   подписчик без `poll_interval_ms:` опрашивает этот читатель раз в 5 с
   (`default_poll_interval_ms/0`), а не раз в 100 мс, как читатели брокеров.
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   @behaviour Core.Mq.ReaderReliable
@@ -46,7 +46,7 @@ defmodule Core.Mq.Dlq.Reader do
 
   @shutdown_ms 15_000
 
-  @init_opts_schema [
+  @start_opts_schema [
     repo: [
       type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
@@ -73,9 +73,16 @@ defmodule Core.Mq.Dlq.Reader do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts),
-    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @start_opts_schema)
 
-  @doc "Запустить читатель."
+  @opts_schema @start_opts_schema
+  @doc """
+  Запустить читатель.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
 
   def start_link(opts) when is_list(opts) do
@@ -105,7 +112,6 @@ defmodule Core.Mq.Dlq.Reader do
   @impl true
   def default_poll_interval_ms, do: @default_poll_interval_ms
 
-  @opts_schema @init_opts_schema
   @doc false
   @spec init(keyword()) :: {:ok, %__MODULE__{}}
 

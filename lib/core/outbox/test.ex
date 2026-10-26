@@ -123,6 +123,13 @@ defmodule Core.Outbox.Test do
 
   # ===== доставка =====
 
+  @opts_schema [
+    context_factory: [
+      type: {:fun, 0},
+      default: &Context.new/0,
+      doc: "Фабрика контекста вызовов `Core.Outbox.Repo`."
+    ]
+  ]
   @doc """
   Один проход доставки — синхронно, в процессе вызова.
 
@@ -138,14 +145,11 @@ defmodule Core.Outbox.Test do
 
   Недопустимая опция или подписчик — `ArgumentError`; запись, которую нельзя перевести в
   сообщение, — `Core.Exc`, зарезервированная пачка при этом возвращается в `:new`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [
-    context_factory: [
-      type: {:fun, 0},
-      default: &Context.new/0,
-      doc: "Фабрика контекста вызовов `Core.Outbox.Repo`."
-    ]
-  ]
   @spec drain([keyword()], keyword()) :: :ok
 
   def drain(subscribers, opts \\ []) when is_list(subscribers) and is_list(opts) do
@@ -274,15 +278,6 @@ defmodule Core.Outbox.Test do
 
   # ===== тишина =====
 
-  @doc """
-  Дождаться тишины реактора — перед проверками приёмочного теста.
-
-  Тишина — три условия разом: в outbox нет записей `:new`, курсоры всех подписчиков в конце
-  журналов и ни один подписчик не застрял на ошибке.
-
-  Упавший проход реактора и реактор, не ответивший к пределу, — тоже `NotSettled`. Недопустимая
-  опция — `ArgumentError`.
-  """
   @opts_schema [
     timeout: [
       type: :pos_integer,
@@ -299,6 +294,19 @@ defmodule Core.Outbox.Test do
           "мешают, их читает `dead_letters/1`."
     ]
   ]
+  @doc """
+  Дождаться тишины реактора — перед проверками приёмочного теста.
+
+  Тишина — три условия разом: в outbox нет записей `:new`, курсоры всех подписчиков в конце
+  журналов и ни один подписчик не застрял на ошибке.
+
+  Упавший проход реактора и реактор, не ответивший к пределу, — тоже `NotSettled`. Недопустимая
+  опция — `ArgumentError`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec settle(GenServer.server(), keyword()) :: :ok
 
   def settle(reactor, opts \\ []) when is_list(opts) do

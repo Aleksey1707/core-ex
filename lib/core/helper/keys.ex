@@ -31,14 +31,26 @@ defmodule Core.Helper.Keys do
     ]
   ]
 
-  @doc "Рекурсивно перевести ключи map в camelCase."
   @opts_schema @except_schema
+  @doc """
+  Рекурсивно перевести ключи map в camelCase.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec camelize(term(), keyword()) :: term()
 
   def camelize(term, opts \\ []), do: convert(term, &camelize_key/1, except(opts))
 
-  @doc "Рекурсивно перевести ключи map в snake_case."
   @opts_schema @except_schema
+  @doc """
+  Рекурсивно перевести ключи map в snake_case.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec snakify(term(), keyword()) :: term()
 
   def snakify(term, opts \\ []), do: convert(term, &snakify_key/1, except(opts))

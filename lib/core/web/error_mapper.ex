@@ -66,6 +66,7 @@ defmodule Core.Web.ErrorMapper do
 
   # ===== map =====
 
+  @opts_schema @auth_opts ++ @unauthorized_opts ++ @critical_opts
   @doc """
   Разложить ошибку на HTTP-ответ.
 
@@ -91,8 +92,11 @@ defmodule Core.Web.ErrorMapper do
 
   Последняя clause принимает произвольный term намеренно: в `action_fallback` приходит
   `{:error, reason}` любой формы, и необработанный reason обязан стать 500, а не крашем.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @auth_opts ++ @unauthorized_opts ++ @critical_opts
   @spec map(term(), keyword()) :: result()
 
   def map(error, opts \\ [])
@@ -115,31 +119,40 @@ defmodule Core.Web.ErrorMapper do
 
   # ===== unauthorized =====
 
+  @opts_schema @unauthorized_opts
   @doc """
   Обёртка ответа 401 для плага аутентификации: те же `"not_authorized"` и текст, что у строки 401
   `map/2` и у `by_status(401)`, — отказ уходит клиенту одной константой, где бы он ни случился.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @unauthorized_opts
   @spec unauthorized(keyword()) :: Response.error()
 
   def unauthorized(opts \\ []), do: unauthorized_error(opts)
 
   # ===== critical =====
 
+  @opts_schema @critical_opts
   @doc """
   Обёртка ответа 500 на критическую ошибку: её собирают строки 500 `map/2` и `by_status(500)`.
 
   `code` — `"internal_error"`, `message` — шаблон. Идентификатор ошибки уходит клиенту дважды:
   полем `data.errorId` и вторым предложением `message` («<шаблон>. Идентификатор ошибки: <id>»).
   Без идентификатора `data` пуст. Решение — ADR-0071.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @critical_opts
   @spec critical(keyword()) :: Response.error()
 
   def critical(opts \\ []), do: critical_error(opts)
 
   # ===== by_status =====
 
+  @opts_schema @unauthorized_opts ++ @critical_opts
   @doc """
   Обёртка ответа на ошибку, не дошедшую до контроллера, — для `ErrorJSON` потребителя
   (`render_errors:` у `Endpoint`): `def render(_template, %{status: status}), do: by_status(status)`.
@@ -154,8 +167,11 @@ defmodule Core.Web.ErrorMapper do
 
   Статус вне таблицы Plug отдаёт чужой плаг (`Plug.Exception.status/1`), и рендер ответа на ошибку
   не имеет права упасть вместо обёртки.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @unauthorized_opts ++ @critical_opts
   @spec by_status(400..599, keyword()) :: Response.error()
 
   def by_status(status, opts \\ [])
@@ -179,6 +195,9 @@ defmodule Core.Web.ErrorMapper do
     @no_schema_match "Value matches none of the allowed schemas"
     @many_schemas_match "Value matches more than one of the allowed schemas"
 
+    @opts_schema [
+      invalid_params_message: [type: :string, default: @invalid_params, doc: "Текст `message` ответа 422."]
+    ]
     @doc """
     Ответ на ошибку разбора запроса по OpenAPI — для плага `render_error:` у
     `OpenApiSpex.Plug.CastAndValidate` потребителя: `{422, обёртка, nil}`, как строка `map/2`.
@@ -190,10 +209,11 @@ defmodule Core.Web.ErrorMapper do
     своя, без discriminator неизвестно. Решение — ADR-0068.
 
     Функция есть, только если `open_api_spex` был у приложения при сборке `core` (ADR-0064).
+
+    ## Опции
+
+    #{Core.Options.docs(@opts_schema)}
     """
-    @opts_schema [
-      invalid_params_message: [type: :string, default: @invalid_params, doc: "Текст `message` ответа 422."]
-    ]
     @spec cast_errors([Cast.Error.t(), ...], keyword()) :: result()
 
     def cast_errors([_ | _] = errors, opts \\ []) do

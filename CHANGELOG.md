@@ -76,9 +76,9 @@
   - `Core.Outbox.Test.drain/2`, `settle/2` и старт `Core.Outbox.Test.Reactor` — неизвестный ключ и
     значение не той формы отклонялись и раньше; меняется только текст отказа.
   - Опции старта `Core.Mq.Stream.Reader`, `Core.Mq.Stream.Writer`, `Core.Mq.Kafka.Reader` (схема над
-    `init/1`): неизвестный ключ раньше проходил молча и давал умолчание, теперь — `ArgumentError` в
-    `init/1` (`"Core.Mq.Stream.Reader.init/1: unknown options […]"`), а не backoff, неотличимый от
-    недоступного брокера. `Core.Mq.Client.ensure_available!/1` — так же: неизвестный ключ —
+    `start_link/1`): неизвестный ключ раньше проходил молча и давал умолчание, теперь — `ArgumentError`
+    из `start_link/1` (`"Core.Mq.Stream.Reader.start_link/1: unknown options […]"`), а не backoff,
+    неотличимый от недоступного брокера. `Core.Mq.Client.ensure_available!/1` — так же: неизвестный ключ —
     `ArgumentError`. Значения не той формы отклонялись и раньше, меняется текст.
   - `Core.Es.Projection.Supervisor.start_link/1` (и через неё `child_spec/1`), `watch_list/1`;
     опции старта процесса агрегата `{Agg.Process, opts}` (`use Core.Es.Aggregate.Process`) и
@@ -100,6 +100,17 @@
     `watch_list/1` — её префикс). Правка: `assert_raise` с прежней меткой дерева — на префикс
     функции.
 
+  - Опции старта OTP-процессов `Core.Mq.Dlq.Reader`, `Core.Mq.Dlq.Writer`, `Core.Mq.Stream.Reader`,
+    `Core.Mq.Stream.Writer`, `Core.Mq.Kafka.Reader`, `Core.Es.Projection.Reader`,
+    `Core.Es.Projection.Listener`, `Core.Outbox.Cleaner`, `Core.Outbox.Poller`,
+    `Core.Outbox.Test.Reactor`, `Core.PubSub.MqSubscriberReliable` проверяются в `start_link/1`, до
+    порождения процесса: неверные опции — `ArgumentError` из `start_link/1`, а не
+    `{:error, {%ArgumentError{}, stack}}` упавшего `init/1`, и отказ называет `start_link/1`
+    (`"Core.Outbox.Poller.start_link/1: unknown options […]"`). Под супервизором разницы нет: старт
+    дерева падает так же. Отказ `Core.Outbox.Poller` вне дерева очереди остаётся в `init/1`. Правка:
+    было `{:error, {%ArgumentError{message: m}, _}} = Mod.start_link(opts)`, стало
+    `assert_raise ArgumentError, ~r/Mod\.start_link\/1: /, fn -> Mod.start_link(opts) end`.
+
   Правка потребителя: убрать из вызова ключ, который не действовал, и передавать значения типа из
   схемы функции; `assert_raise ArgumentError` с текстом `unknown keys` переписать на
   `unknown options`.
@@ -117,7 +128,7 @@
   `keyword()`.
 
 - **`Core.Helper.StartOpts` сведён к опциям процесса и проверкам дерева; общие custom-типы схемы —
-  `Core.Options.Type`.** Опции OTP-процесса проверяет схема над `init/1` (`use Core.Options`,
+  `Core.Options.Type`.** Опции OTP-процесса проверяет схема над `start_link/1` (`use Core.Options`,
   `@opts_schema`), поэтому функции разбора по ключу удалены: `keys!/3`, `module!/3,4`, `atom!/3`,
   `prim!/4`, `binary!/3,4`, `list!/3`, `term!/3`, `fun!/4,5`, `pos_integer!/3,4`, `boolean!/3,4`,
   `one_of!/5`, `topics_filter!/4`, `name!/3`, `shutdown!/4`, `raise_invalid!/4`. Значения, которые
@@ -126,14 +137,15 @@
   топиков — `Core.Outbox.topics_filter/1`; проверка после схемы «значения без повторов» —
   `Core.Options.unique!/4`. В `StartOpts` остаются типы опций процесса `name/1` и `shutdown/1`,
   фрагменты `name_option/0,1` и `shutdown_option/1,2`, `child_spec/3` — спецификация ребёнка с
-  умолчанием `shutdown:` из схемы `init/1`, — и `process!/3`. Метка `process!/3` и `unique!/4` —
+  умолчанием `shutdown:` из схемы `start_link/1`, — и `process!/3`. Метка `process!/3` и `unique!/4` —
   функция, отклонившая вызов (`"MyApp.Tree.start_link/1"`), как в отказе схемы. Правка потребителя: было `StartOpts.pos_integer!(label, opts, :interval_ms,
   1_000)` в `init/1`, стало `@opts_schema [interval_ms: [type: :pos_integer, default: 1_000,
-  doc: "…"]]` над `init/1` и `Keyword.fetch!(opts, :interval_ms)`; доменное значение —
+  doc: "…"]]` над `start_link/1`, вставка `#{Core.Options.docs(@opts_schema)}` в её `@doc` и
+  `Keyword.fetch!(opts, :interval_ms)` в `init/1`; доменное значение —
   `{:custom, Core.Options.Type, :prim, [Mod]}` вместо `StartOpts.prim!/4`, свой отказ сложнее
   перечисления — `raise ArgumentError` вместо `raise_invalid!/4`. Норма потребителя `docs/rules/app/17-otp-concurrency.md`, «Опции процессов»,
-  переписана так же: опции процесса проверяет схема над `init/1`, обязательная опция с умолчанием из
-  `runtime.exs` — `required: true` без `default:`.
+  переписана так же: опции процесса проверяет схема над `start_link/1`, описание опций — вставка в
+  её `@doc`, обязательная опция с умолчанием из `runtime.exs` — `required: true` без `default:`.
 
 - **RabbitMQ Stream: соединение перезапускается, когда исчерпаны номера подписок и producer'ов.**
   Клиент `:rabbitmq_stream` выдаёт номера подписок и producer'ов счётчиком на процесс соединения,
@@ -208,8 +220,8 @@
   MUST NOT. Правка потребителя со своей схемой: было — `[wait: [type: …, default: :none, doc: …]]`,
   стало — `@opts_schema [wait: Core.Es.Projection.wait_option()]`; `wait: 0` теперь
   `ArgumentError`, вызывающему — `:none`. Usecase без схемы (`Keyword.get(opts, :wait, :none)`)
-  переводится на неё по «Схема опций функции» (SHOULD): `use Core.Options`, тот же `@opts_schema`
-  и `Keyword.fetch!(opts, :wait)` в теле.
+  переводится на неё по «Схема опций функции» (SHOULD): `use Core.Options`, тот же `@opts_schema`,
+  вставка `#{Core.Options.docs(@opts_schema)}` в `@doc` и `Keyword.fetch!(opts, :wait)` в теле.
 
 - **`layout_lint.exs` проверяет блок приватного по его вызывающим** (норма —
   `docs/rules/20-agreements.md`, «Общие приватные»). Правило «приватный, вызываемый более чем из
@@ -254,9 +266,16 @@
   её отказ — исключение, а невалидный ввод — `{:error, %Error{}}`. Ошибки объявления —
   `CompileError`: ключ без `doc:`, атрибут над `defp` / `defmacro`,
   висячий атрибут, атрибут между головой без тела и первой клаузой, паттерн или guard кроме
-  `is_list/1` на опциях. Описание опций — сама схема над функцией: ни в `@doc`, ни в `@moduledoc`
-  OTP-процесса со скрытым `init/1` их нет. Состав опций прозой в `@doc` после перевода функции на
-  схему убирается: он повторил бы схему.
+  `is_list/1` на опциях, видимый `@doc` без вставки описания опций, функция со схемой без `@doc` и
+  без `@impl` в модуле, у которого `@moduledoc` не `false`. Схема стоит над `@doc`, а описание опций
+  автор вставляет в него сам: `#{Core.Options.docs(@opts_schema)}` под заголовком `## Опции`. На
+  месте вызова и у потребителя `@doc` со вставкой полный; hover ElixirLS в файле самой функции его
+  не вычисляет и показывает пустым. В `@moduledoc` описания опций нет: вычисляемый `@moduledoc`
+  ElixirLS в файле модуля не показывает вовсе. Схема стоит у публичной точки входа опций — у
+  OTP-процесса над `start_link/1`, у плага над `init/1`; у места использования — только когда точка
+  входа сгенерирована в `quote`, объявлена `defdelegate` или отдаёт `opts` функции со своим
+  контрактом. Состав опций прозой в `@doc` после перевода функции на схему убирается: он повторил
+  бы вставку.
   Данные в форме опций, которые не последний аргумент функции (элементы позиционного списка),
   проверяет `Core.Options.validate!/3` по схеме, собранной `NimbleOptions.new!/1`, с тем же форматом
   отказа. У схемы без обязательных ключей вызов с `[]` NimbleOptions не проходит: умолчания
@@ -269,6 +288,13 @@
   use Core.Options
 
   @opts_schema [limit: [type: :pos_integer, default: 10, doc: "Сколько строк вернуть."]]
+  @doc """
+  Список строк.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   def list(context, opts \\ []) when is_list(opts), do: ... Keyword.fetch!(opts, :limit) ...
   ```
 

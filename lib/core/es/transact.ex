@@ -56,10 +56,14 @@ defmodule Core.Es.Transact do
   @label "Es.Transact"
   @retries_schema [retries: [type: :pos_integer, default: 3, doc: "Предел повторов после отказа хранилища."]]
 
+  @opts_schema @retries_schema
   @doc """
   Исполнить `fun` в транзакции команды с повтором после отказа хранилища: результат `fun`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @retries_schema
   @spec run((-> result), keyword()) :: result when result: var
 
   def run(fun, opts \\ []) when is_function(fun, 0) and is_list(opts) do
@@ -67,10 +71,14 @@ defmodule Core.Es.Transact do
     result
   end
 
+  @opts_schema @retries_schema
   @doc """
   То же, что `run/2`, плюс число повторов — измерение telemetry вызывающего.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @retries_schema
   @spec run_counted((-> result), keyword()) :: {result, non_neg_integer()} when result: var
 
   def run_counted(fun, opts \\ []) when is_function(fun, 0) and is_list(opts),

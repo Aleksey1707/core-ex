@@ -25,23 +25,22 @@ defmodule Core.OptionsDocsTest do
       mode: [type: {:in, ~w(fast slow)a}, required: true, doc: "Режим."]
     ]
 
+    @opts_schema @schema
     @doc """
     Текст автора.
 
-    Второй абзац.
+    ## Опции
+
+    #{Core.Options.docs(@opts_schema)}
     """
-    @opts_schema @schema
     def documented(opts), do: opts
 
-    @opts_schema @schema
-    def bare(opts), do: opts
-
-    @doc false
     @opts_schema [size: [type: :pos_integer, default: 10, doc: "Размер."]]
+    @doc false
     def hidden(opts), do: opts
 
-    @doc "Голова без тела."
     @opts_schema @schema
+    @doc "Голова без тела.\n\n#{Core.Options.docs(@opts_schema)}"
     def head(subject, opts \\ [])
 
     def head(:a, opts), do: opts
@@ -86,20 +85,16 @@ defmodule Core.OptionsDocsTest do
   end
 
   describe "@doc функции со схемой" do
-    test "текст автора как есть, без описания опций" do
-      assert doc(Subject, :documented, 1) == "Текст автора.\n\nВторой абзац.\n"
-    end
-
-    test "функция без @doc остаётся без @doc" do
-      assert doc(Subject, :bare, 1) == :none
+    test "текст автора и вставленное описание опций" do
+      assert doc(Subject, :documented, 1) == "Текст автора.\n\n## Опции\n\n" <> @options <> "\n"
     end
 
     test "@doc false остаётся скрытым" do
       assert doc(Subject, :hidden, 1) == :hidden
     end
 
-    test "голова без тела несёт текст автора" do
-      assert doc(Subject, :head, 2) == "Голова без тела."
+    test "голова без тела несёт текст автора и описание опций" do
+      assert doc(Subject, :head, 2) == "Голова без тела.\n\n" <> @options
     end
 
     test "@impl без @doc остаётся скрытым" do

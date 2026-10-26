@@ -240,7 +240,13 @@ defmodule Core.Outbox.Supervisor do
   end
 
   @opts_schema @tree_opts_schema
-  @doc "Запустить дерево очереди; `:ignore` — дерево отключено."
+  @doc """
+  Запустить дерево очереди; `:ignore` — дерево отключено.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: Supervisor.on_start()
 
   def start_link(opts) when is_list(opts) do
@@ -373,6 +379,10 @@ defmodule Core.Outbox.Supervisor do
   Процесс из `via:` наблюдает его владелец. `opts` — опции дерева, проверяются как в
   `start_link/1`. При `enabled: false` элементов нет: процессов на ноде нет, и `up=0` был бы ложной
   тревогой.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
   @spec watch_list(keyword()) :: [watch_item()]
 

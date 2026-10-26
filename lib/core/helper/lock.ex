@@ -21,6 +21,7 @@ defmodule Core.Helper.Lock do
     ]
   ]
 
+  @opts_schema @lock_timeout_schema ++ @timeout_schema
   @doc """
   Взять исключительную advisory-блокировку на время транзакции.
 
@@ -29,8 +30,11 @@ defmodule Core.Helper.Lock do
   Ожидание ограничено `lock_timeout`: зависший держатель иначе блокирует старт всех узлов
   бесконечно. Превышение — `Postgrex.Error` (`lock_not_available`), то есть падение старта
   с внятной причиной, а не тихое зависание.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @lock_timeout_schema ++ @timeout_schema
   @spec advisory_xact!(Ecto.Repo.t(), integer(), keyword()) :: :ok
 
   def advisory_xact!(repo, key, opts \\ []) when is_integer(key) and is_list(opts) do
@@ -40,13 +44,17 @@ defmodule Core.Helper.Lock do
     :ok
   end
 
+  @opts_schema @timeout_schema
   @doc """
   Попытаться взять advisory-блокировку без ожидания.
 
   `true` — блокировка взята (до конца транзакции), `false` — её держит кто-то другой.
   Для операций, которые незанятый узел просто пропускает вместо того, чтобы ждать.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @timeout_schema
   @spec try_advisory_xact(Ecto.Repo.t(), integer(), keyword()) :: boolean()
 
   def try_advisory_xact(repo, key, opts \\ []) when is_integer(key) and is_list(opts) do
@@ -61,6 +69,7 @@ defmodule Core.Helper.Lock do
     acquired
   end
 
+  @opts_schema @lock_timeout_schema ++ @timeout_schema
   @doc """
   Выполнить `fun` под сессионной advisory-блокировкой одного соединения.
 
@@ -72,8 +81,11 @@ defmodule Core.Helper.Lock do
 
   Вызывать вне транзакции: внутри неё сессионная блокировка пережила бы откат.
   `lock_timeout` ставится на сессию только на время взятия и сбрасывается сразу после.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @lock_timeout_schema ++ @timeout_schema
   @spec with_advisory!(Ecto.Repo.t(), integer(), (-> result), keyword()) :: result when result: term()
 
   def with_advisory!(repo, key, fun, opts \\ [])

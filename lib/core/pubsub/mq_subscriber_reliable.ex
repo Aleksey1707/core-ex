@@ -49,7 +49,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   трейс команды, записавшей событие в outbox, продолжается здесь, а не начинается
   заново.
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   @behaviour Core.PubSub.Subscriber
@@ -73,7 +73,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @attr_dlq_topic "core.pubsub.dlq_topic"
   @attr_dlq_reason "core.pubsub.dlq_reason"
 
-  @init_label "Core.PubSub.MqSubscriberReliable.init/1"
+  @start_label "Core.PubSub.MqSubscriberReliable.start_link/1"
 
   @call_timeout 5_000
   @fallback_poll_interval_ms 100
@@ -141,7 +141,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
       )
   ]
 
-  @init_opts_schema @own_opts_schema ++ Core.PubSub.MqSubscriberReliable.Step.schema()
+  @start_opts_schema @own_opts_schema ++ Core.PubSub.MqSubscriberReliable.Step.schema()
 
   defstruct [
     :reader_module,
@@ -183,12 +183,21 @@ defmodule Core.PubSub.MqSubscriberReliable do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts),
-    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @start_opts_schema)
 
-  @doc "Запустить reliable subscriber; опции — «Опции старта»."
+  @opts_schema @start_opts_schema
+  @doc """
+  Запустить reliable subscriber; опции — «Опции старта».
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
 
   def start_link(opts) when is_list(opts) do
+    :ok = check_dlq_handle!(opts)
+    :ok = check_subscribe_data!(opts)
     GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
   end
 
@@ -215,7 +224,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
     GenServer.call(server, :run_once, @call_timeout)
   end
 
-  @opts_schema @init_opts_schema
   @doc false
   @spec init(keyword()) :: {:ok, %__MODULE__{}}
 
@@ -227,7 +235,6 @@ defmodule Core.PubSub.MqSubscriberReliable do
     reader_module = Keyword.fetch!(opts, :reader_module)
     poll_interval_ms = Keyword.get(opts, :poll_interval_ms) || default_poll_interval_ms(reader_module)
     step = Step.new!(opts)
-    dlq_writer = Keyword.fetch!(opts, :dlq_writer)
 
     state = %__MODULE__{
       reader_module: reader_module,
@@ -238,8 +245,8 @@ defmodule Core.PubSub.MqSubscriberReliable do
       retry_max_ms: max(Keyword.fetch!(opts, :retry_max_ms), poll_interval_ms),
       retry_ms: poll_interval_ms,
       max_attempts: Keyword.fetch!(opts, :max_attempts),
-      dlq_writer: dlq_writer,
-      dlq_handle: dlq_handle!(opts, dlq_writer),
+      dlq_writer: Keyword.fetch!(opts, :dlq_writer),
+      dlq_handle: Keyword.get(opts, :dlq_handle),
       dlq_topic: Keyword.get(opts, :dlq_topic) || step.topic <> ".dlq",
       topic: step.topic,
       timer_ref: nil,
@@ -248,7 +255,7 @@ defmodule Core.PubSub.MqSubscriberReliable do
       subscribed?: false
     }
 
-    {:ok, subscribe_on_start!(state, opts)}
+    {:ok, subscribe_on_start(state, opts)}
   end
 
   @doc false
@@ -584,38 +591,37 @@ defmodule Core.PubSub.MqSubscriberReliable do
       else: @fallback_poll_interval_ms
   end
 
-  defp dlq_handle!(opts, nil) do
-    case Keyword.get(opts, :dlq_handle) do
-      nil ->
-        nil
+  defp check_dlq_handle!(opts) do
+    case {Keyword.fetch!(opts, :dlq_writer), Keyword.get(opts, :dlq_handle)} do
+      {nil, nil} ->
+        :ok
 
-      handle ->
+      {nil, handle} ->
         raise ArgumentError,
-              "#{@init_label}: опция :dlq_handle задаётся только с :dlq_writer, получено #{inspect(handle)}"
+              "#{@start_label}: опция :dlq_handle задаётся только с :dlq_writer, получено #{inspect(handle)}"
+
+      {_dlq_writer, nil} ->
+        raise ArgumentError, "#{@start_label}: нет обязательной при :dlq_writer опции :dlq_handle"
+
+      {_dlq_writer, _handle} ->
+        :ok
     end
   end
 
-  defp dlq_handle!(opts, _dlq_writer) do
-    case Keyword.get(opts, :dlq_handle) do
-      nil -> raise ArgumentError, "#{@init_label}: нет обязательной при :dlq_writer опции :dlq_handle"
-      handle -> handle
-    end
-  end
-
-  defp subscribe_on_start!(state, opts) do
+  defp check_subscribe_data!(opts) do
     case {Keyword.fetch!(opts, :subscribe), Keyword.fetch(opts, :subscribe_data)} do
-      {true, {:ok, data}} ->
-        mark_subscribed(state, data)
-
-      {true, :error} ->
-        mark_subscribed(state, nil)
-
-      {false, :error} ->
-        state
-
       {false, {:ok, data}} ->
         raise ArgumentError,
-              "#{@init_label}: опция :subscribe_data задаётся только с subscribe: true, получено #{inspect(data)}"
+              "#{@start_label}: опция :subscribe_data задаётся только с subscribe: true, получено #{inspect(data)}"
+
+      _valid ->
+        :ok
     end
+  end
+
+  defp subscribe_on_start(state, opts) do
+    if Keyword.fetch!(opts, :subscribe),
+      do: mark_subscribed(state, Keyword.get(opts, :subscribe_data)),
+      else: state
   end
 end

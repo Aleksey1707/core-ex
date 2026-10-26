@@ -7,6 +7,7 @@ defmodule ConsumerTest.Options do
   alias Consumer.Domain.Sales.Order
 
   @opts_schema [limit: [type: :pos_integer, default: 1, doc: "Предел."]]
+  @doc "Взять заказ с пределом.\n\n## Опции\n\n#{Core.Options.docs(@opts_schema)}"
   def take(%Order{} = order, opts \\ []) when is_list(opts), do: {order, Keyword.fetch!(opts, :limit)}
 
   # состояние другого агрегата в своей функции со схемой

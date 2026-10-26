@@ -297,20 +297,99 @@ defmodule Core.OptionsTest do
     end
   end
 
-  # ---
+  describe "описание опций в @doc" do
+    test "@doc без описания опций — CompileError" do
+      assert_compile_error(
+        ~r/^Options: f\/1: в @doc нет описания опций: ожидается вставка Core\.Options\.docs\(@opts_schema\)$/,
+        """
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        @doc "Текст автора."
+        def f(opts), do: opts
+        """,
+        ~s(@moduledoc "Модуль.")
+      )
+    end
 
-  # Строка, а не `quote`: `def` из `quote` теста раскрылся бы `Kernel.def` по импорту теста.
-  defp assert_compile_error(message, body) do
-    module = "Core.OptionsTest.Compiled#{System.unique_integer([:positive])}"
+    test "функция без @doc в видимом модуле — CompileError" do
+      assert_compile_error(
+        ~r/^Options: f\/1: нет @doc с описанием опций: ожидается вставка Core\.Options\.docs\(@opts_schema\)$/,
+        """
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        def f(opts), do: opts
+        """,
+        ~s(@moduledoc "Модуль.")
+      )
+    end
 
-    assert_raise CompileError, message, fn ->
-      Code.compile_string("""
-      defmodule #{module} do
-        use Core.Options
+    test "голова без тела с @doc без описания опций — CompileError" do
+      assert_compile_error(
+        ~r/^Options: f\/2: в @doc нет описания опций/,
+        """
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        @doc "Текст автора."
+        def f(subject, opts \\\\ [])
+        def f(subject, opts), do: {subject, opts}
+        """,
+        ~s(@moduledoc "Модуль.")
+      )
+    end
 
-      #{body}
-      end
+    test "вставка в @doc, @doc false, @impl без @doc и функция скрытого модуля собираются" do
+      compile(
+        """
+        @behaviour GenServer
+
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        @doc \"""
+        Текст автора.
+
+        ## Опции
+
+        \#{Core.Options.docs(@opts_schema)}
+        \"""
+        def documented(opts), do: opts
+
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        @doc "Голова.\\n\\n\#{Core.Options.docs(@opts_schema)}"
+        def head(subject, opts \\\\ [])
+        def head(subject, opts), do: {subject, opts}
+
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        @doc false
+        def hidden(opts), do: opts
+
+        @opts_schema [size: [type: :integer, doc: "Размер."]]
+        @impl true
+        def init(opts), do: {:ok, opts}
+        """,
+        ~s(@moduledoc "Модуль.")
+      )
+
+      compile("""
+      @opts_schema [size: [type: :integer, doc: "Размер."]]
+      def internal(opts), do: opts
       """)
     end
+  end
+
+  # ---
+
+  defp assert_compile_error(message, body, moduledoc \\ "@moduledoc false") do
+    assert_raise CompileError, message, fn -> compile(body, moduledoc) end
+  end
+
+  # Строка, а не `quote`: `def` из `quote` теста раскрылся бы `Kernel.def` по импорту теста.
+  defp compile(body, moduledoc \\ "@moduledoc false") do
+    module = "Core.OptionsTest.Compiled#{System.unique_integer([:positive])}"
+
+    Code.compile_string("""
+    defmodule #{module} do
+      #{moduledoc}
+
+      use Core.Options
+
+    #{body}
+    end
+    """)
   end
 end

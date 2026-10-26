@@ -59,14 +59,18 @@ defmodule Core.Otel.Messaging do
     scope: [type: :atom, doc: "Модуль instrumentation scope (`Core.Otel`)."]
   ]
 
+  @opts_schema @operation_opts_schema
   @doc """
   Отметить создание сообщения и записать контекст создания в carrier.
 
   Родитель — контекст из `carrier` (например `traceparent`, положенный командой
   в запись outbox). Возвращает обновлённый carrier — его получает сообщение —
   и контекст create-span'а для `links:` у `send/5`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @operation_opts_schema
   @spec create(Otel.carrier(), destination(), message_id(), keyword()) ::
           {Otel.carrier(), Otel.span_ctx() | :undefined}
 
@@ -86,13 +90,17 @@ defmodule Core.Otel.Messaging do
     )
   end
 
+  @opts_schema @operation_opts_schema
   @doc """
   Выполнить `fun` — отправку пачки — в span'е `send`.
 
   `links` — контексты создания сообщений пачки (из `create/4`); `destination`
   задаётся, только когда у всей пачки он один.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @operation_opts_schema
   @spec send(destination(), pos_integer(), [Otel.span_ctx()], (-> result), keyword()) :: result
         when result: var
 
@@ -108,12 +116,16 @@ defmodule Core.Otel.Messaging do
     Otel.span(name(@send, destination), fun, span_opts)
   end
 
+  @opts_schema @operation_opts_schema
   @doc """
   Выполнить `fun` — обработку сообщения — в span'е `process`.
 
   Родитель — creation context из заголовков сообщения.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @operation_opts_schema
   @spec process(Otel.carrier(), destination(), message_id(), (-> result), keyword()) :: result
         when result: var
 

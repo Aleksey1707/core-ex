@@ -133,8 +133,14 @@ defmodule Core.Es.Projection.Supervisor do
 
   # ===== дерево =====
 
-  @doc "Запустить дерево проекций; `:ignore` — дерево отключено или проекций нет."
   @opts_schema @tree_opts_schema
+  @doc """
+  Запустить дерево проекций; `:ignore` — дерево отключено или проекций нет.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: Supervisor.on_start()
 
   def start_link(opts) when is_list(opts), do: start(options!(opts, @start_label))
@@ -160,14 +166,18 @@ defmodule Core.Es.Projection.Supervisor do
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
+  @opts_schema @tree_opts_schema
   @doc """
   Элементы `watch:` плагина `Core.Workers.PromEx` — по читателю на проекцию под именем её модуля,
   `component: "es_projection:<name>"`.
 
   `opts` — опции дерева, как у `start_link/1`. При `enabled: false` элементов нет: читателей на
   ноде нет, и `up=0` был бы ложной тревогой.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @tree_opts_schema
   @spec watch_list(keyword()) :: [watch_item()]
 
   def watch_list(opts) when is_list(opts) do

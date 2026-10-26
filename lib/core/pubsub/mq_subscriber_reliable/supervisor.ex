@@ -143,8 +143,14 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
     }
   end
 
-  @doc "Запустить дерево подписчиков; `:ignore` — дерево отключено или топиков нет."
   @opts_schema @tree_opts_schema
+  @doc """
+  Запустить дерево подписчиков; `:ignore` — дерево отключено или топиков нет.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: Supervisor.on_start()
 
   def start_link(opts) when is_list(opts), do: start(options!(opts, fun_label(:start_link)))
@@ -203,6 +209,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   # ===== watch_list =====
 
+  @opts_schema @tree_opts_schema
   @doc """
   Элементы `watch:` плагина `Core.Workers.PromEx` — все процессы дерева в порядке старта:
   `component: "mq_dlq_writer:<component>"`, `"mq_reader:<component>:<топик>"`,
@@ -212,8 +219,11 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   модуля компонента не меняет ряды метрик. `opts` — опции дерева, как у `start_link/1`.
   Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет: процессов на ноде нет,
   и `up=0` был бы ложной тревогой.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @tree_opts_schema
   @spec watch_list(keyword()) :: [watch_item()]
 
   def watch_list(opts) when is_list(opts) do
@@ -243,26 +253,34 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
 
   # ===== readers =====
 
+  @opts_schema @tree_opts_schema
   @doc """
   Элементы `stream_readers:` плагина `Core.Mq.PromEx` — stream-читатели дерева с той же меткой, что у
   `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
 
   Читатель другого модуля в список не попадает: у `Core.Mq.Kafka.Reader` своя группа метрик опроса
   (`kafka_readers/1`), у прочих её нет. Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @tree_opts_schema
   @spec stream_readers(keyword()) :: [watch_item()]
 
   def stream_readers(opts) when is_list(opts), do: reader_items(opts, @stream_reader, fun_label(:stream_readers))
 
+  @opts_schema @tree_opts_schema
   @doc """
   Элементы `kafka_readers:` плагина `Core.Mq.PromEx` — читатели Kafka дерева с той же меткой, что
   у `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
 
   Читатель другого модуля в список не попадает. Когда дерево не стартует (`enabled: false`,
   `topics: []`), элементов нет.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema @tree_opts_schema
   @spec kafka_readers(keyword()) :: [watch_item()]
 
   def kafka_readers(opts) when is_list(opts), do: reader_items(opts, @kafka_reader, fun_label(:kafka_readers))

@@ -32,8 +32,14 @@ if Code.ensure_loaded?(OpenApiSpex) do
 
     use Core.Options
 
-    @doc "Query-параметры страницы `limit` / `offset` — то, что разбирает `Core.Web.Params.page/2`."
     @opts_schema Params.page_opts_schema()
+    @doc """
+    Query-параметры страницы `limit` / `offset` — то, что разбирает `Core.Web.Params.page/2`.
+
+    ## Опции
+
+    #{Core.Options.docs(@opts_schema)}
+    """
     @spec page(keyword()) :: [OpenApiSpex.Parameter.t()]
 
     def page(opts \\ []) when is_list(opts) do

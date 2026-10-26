@@ -286,6 +286,16 @@ defmodule Core.Es.Personal.KeyStore.Pg do
 
   # ===== перевёртка =====
 
+  @opts_schema [
+    batch_size: [type: :pos_integer, default: @rewrap_batch_size, doc: "Сколько живых ключей берёт пачка."],
+    on_batch: [
+      type: {:fun, 1},
+      default: &Function.identity/1,
+      doc:
+        "Функция от числа ключей, перевёрнутых с начала прогона; зовётся после commit каждой " <>
+          "непустой пачки (прогресс оператору)."
+    ]
+  ]
   @doc """
   Перевернуть обёртки живых ключей под нетекущими версиями KEK на `current_kek:` — шаг ротации KEK.
 
@@ -298,17 +308,11 @@ defmodule Core.Es.Personal.KeyStore.Pg do
   откатывается, закоммиченные остаются; ключ под версией вне `keks:` — `:kek_unknown`, обёртка,
   которая не разворачивается, — `:key_unresolved`. Внутри транзакции — `ArgumentError`: пачки
   стали бы точками сохранения, и блокировки держались бы до чужого commit.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [
-    batch_size: [type: :pos_integer, default: @rewrap_batch_size, doc: "Сколько живых ключей берёт пачка."],
-    on_batch: [
-      type: {:fun, 1},
-      default: &Function.identity/1,
-      doc:
-        "Функция от числа ключей, перевёрнутых с начала прогона; зовётся после commit каждой " <>
-          "непустой пачки (прогресс оператору)."
-    ]
-  ]
   @spec rewrap(keyword()) :: Result.t(non_neg_integer())
 
   def rewrap(opts) when is_list(opts) do

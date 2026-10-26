@@ -39,12 +39,16 @@ defmodule Core.Cgroup do
     ]
   ]
 
+  @opts_schema [current_path: [type: :string, doc: "Явный путь к `memory.current` (тесты / DI)."]] ++ @location_schema
   @doc """
   Текущее потребление ОЗУ cgroup в байтах.
 
   Считает вместе со страничным кешем; память приложения — `memory_anon/1`.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [current_path: [type: :string, doc: "Явный путь к `memory.current` (тесты / DI)."]] ++ @location_schema
   @spec memory_current() :: {:ok, non_neg_integer()} | :unavailable
   @spec memory_current(keyword()) :: {:ok, non_neg_integer()} | :unavailable
 
@@ -55,6 +59,7 @@ defmodule Core.Cgroup do
     end
   end
 
+  @opts_schema [stat_path: [type: :string, doc: "Явный путь к `memory.stat` (тесты / DI)."]] ++ @location_schema
   @doc """
   Анонимная память cgroup в байтах (`memory.stat`).
 
@@ -62,8 +67,11 @@ defmodule Core.Cgroup do
   в отличие от `memory.current`. То же значение показывает `podman stats`.
 
   Имя ключа у v2 (`anon`) и v1 (`total_rss` / `rss`) разное, наружу отдаются байты.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [stat_path: [type: :string, doc: "Явный путь к `memory.stat` (тесты / DI)."]] ++ @location_schema
   @spec memory_anon() :: {:ok, non_neg_integer()} | :unavailable
   @spec memory_anon(keyword()) :: {:ok, non_neg_integer()} | :unavailable
 
@@ -74,13 +82,17 @@ defmodule Core.Cgroup do
     end
   end
 
+  @opts_schema [max_path: [type: :string, doc: "Явный путь к `memory.max` (тесты / DI)."]] ++ @location_schema
   @doc """
   Лимит памяти cgroup в байтах.
 
   `:unlimited` — лимит не задан (v2 `max`, v1 «бесконечное» значение); без него
   утилизацию (`current / max`) посчитать не из чего.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
   """
-  @opts_schema [max_path: [type: :string, doc: "Явный путь к `memory.max` (тесты / DI)."]] ++ @location_schema
   @spec memory_max() :: {:ok, pos_integer()} | :unlimited | :unavailable
   @spec memory_max(keyword()) :: {:ok, pos_integer()} | :unlimited | :unavailable
 

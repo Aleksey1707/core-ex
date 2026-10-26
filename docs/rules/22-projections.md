@@ -284,6 +284,13 @@ histogram_quantile(0.5, sum by (le, projection)
 ```elixir
 # хорошо — Account.Query, его зовёт реакция другого контекста: ждёт до чтения
 @opts_schema [wait: Core.Es.Projection.wait_option()]
+@doc """
+Счёт по `id`; `wait:` — дождаться проекции до чтения.
+
+## Опции
+
+#{Core.Options.docs(@opts_schema)}
+"""
 def get(%Account.ID{} = id, %Context{} = context, opts \\ []) do
   with :ok <- awaited_read(id, Keyword.fetch!(opts, :wait)),
        do: @read_repo.get(id, :current, context)

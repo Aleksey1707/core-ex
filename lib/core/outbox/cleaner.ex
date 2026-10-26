@@ -6,7 +6,7 @@ defmodule Core.Outbox.Cleaner do
   через backoff от `retry_min_ms` с удвоением до `interval_ms` — иначе лежащая база
   опрашивалась бы с полной частотой и заливала лог.
 
-  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `init/1`.
+  Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
   use GenServer
@@ -22,7 +22,7 @@ defmodule Core.Outbox.Cleaner do
   require Logger
   require Error
 
-  @init_opts_schema [
+  @start_opts_schema [
     repo: [
       type: {:custom, Core.Options.Type, :module, []},
       type_doc: "`t:module/0`",
@@ -56,7 +56,14 @@ defmodule Core.Outbox.Cleaner do
           context: Context.t()
         }
 
-  @doc "Запустить cleaner."
+  @opts_schema @start_opts_schema
+  @doc """
+  Запустить cleaner.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
 
   def start_link(opts) when is_list(opts) do
@@ -72,7 +79,7 @@ defmodule Core.Outbox.Cleaner do
   @spec child_spec(keyword()) :: Supervisor.child_spec()
 
   def child_spec(opts) when is_list(opts),
-    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @init_opts_schema)
+    do: Core.Helper.StartOpts.child_spec(__MODULE__, opts, @start_opts_schema)
 
   @doc "Выполнить одну очистку (для тестов)."
   @spec run_once(GenServer.server()) :: Result.unit()
@@ -81,7 +88,6 @@ defmodule Core.Outbox.Cleaner do
     GenServer.call(server, :run_once, 60_000)
   end
 
-  @opts_schema @init_opts_schema
   @doc false
   @spec init(keyword()) :: {:ok, t()}
 

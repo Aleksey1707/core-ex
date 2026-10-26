@@ -107,7 +107,7 @@ defmodule Core.Outbox.PollerTest do
 
   describe "опции старта" do
     test "вне дерева очереди поллер не стартует — ArgumentError" do
-      assert start_error(poller_opts()) =~
+      assert init_error(poller_opts()) =~
                "Core.Outbox.Poller.init/1: поллер :outside_tree не из отметки дерева очереди — " <>
                  "поллер стартует только из Core.Outbox.Supervisor"
     end
@@ -115,7 +115,7 @@ defmodule Core.Outbox.PollerTest do
     test "неизвестная опция — ArgumentError" do
       opts = Keyword.put(poller_opts(), :poll_interval, 1_000)
 
-      assert start_error(opts) =~ "Core.Outbox.Poller.init/1: unknown options [:poll_interval]"
+      assert start_error(opts) =~ "Core.Outbox.Poller.start_link/1: unknown options [:poll_interval]"
     end
 
     test "нет обязательной опции — ArgumentError" do
@@ -123,7 +123,7 @@ defmodule Core.Outbox.PollerTest do
             name repo delivery_module delivery poll_interval_ms idle_min_ms batch_size lock_duration max_attempts
           )a do
         assert start_error(Keyword.delete(poller_opts(), key)) =~
-                 "Core.Outbox.Poller.init/1: required #{inspect(key)} option not found"
+                 "Core.Outbox.Poller.start_link/1: required #{inspect(key)} option not found"
       end
     end
 
@@ -142,7 +142,7 @@ defmodule Core.Outbox.PollerTest do
             {:shutdown, "30s", "ожидается неотрицательное целое, :infinity или :brutal_kill"}
           ] do
         assert start_error(Keyword.put(poller_opts(), key, value)) =~
-                 "Core.Outbox.Poller.init/1: invalid value for #{inspect(key)} option: #{expected}"
+                 "Core.Outbox.Poller.start_link/1: invalid value for #{inspect(key)} option: #{expected}"
       end
     end
   end
@@ -162,6 +162,11 @@ defmodule Core.Outbox.PollerTest do
   end
 
   defp start_error(opts) do
+    %ArgumentError{message: message} = assert_raise(ArgumentError, fn -> Poller.start_link(opts) end)
+    message
+  end
+
+  defp init_error(opts) do
     Process.flag(:trap_exit, true)
 
     assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =

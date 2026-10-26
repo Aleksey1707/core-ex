@@ -61,7 +61,6 @@ defmodule Core.Mq.Dlq.ReaderTest do
   end
 
   test "неверные опции — ArgumentError на старте с именем опции", %{subscriber: subscriber} do
-    Process.flag(:trap_exit, true)
     opts = [repo: TestRepo, topic: @topic, subscriber_name: subscriber]
 
     for {opts, expected} <- [
@@ -70,10 +69,9 @@ defmodule Core.Mq.Dlq.ReaderTest do
           {Keyword.put(opts, :topic, "orders"), "invalid value for :topic option: ожидается %Core.Mq.Topic{}"},
           {Keyword.put(opts, :lease_ttl_ms, 0), "invalid value for :lease_ttl_ms option"}
         ] do
-      assert {{:error, {%ArgumentError{message: message}, _stack}}, _log} =
-               with_log(fn -> Dlq.Reader.start_link(opts) end)
+      %ArgumentError{message: message} = assert_raise(ArgumentError, fn -> Dlq.Reader.start_link(opts) end)
 
-      assert message =~ "Core.Mq.Dlq.Reader.init/1: #{expected}"
+      assert message =~ "Core.Mq.Dlq.Reader.start_link/1: #{expected}"
     end
   end
 
