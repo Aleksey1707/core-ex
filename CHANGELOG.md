@@ -202,6 +202,19 @@
 
 ### Новое
 
+- **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
+  Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном
+  `priv/dashboards/outbox.json.eex`; задача рендерит его через `PromEx.DashboardRenderer` в каталог
+  дашбордов приложения, provisioning файлами остаётся. Раньше каждое приложение держало свою копию
+  JSON с префиксом метрик, `title` и `uid` под себя, и переименование метрики в библиотеке молча
+  гасило панель. `title`, `uid` и `tags` выгрузки строятся от `otp_app` модуля PromEx, префикс
+  метрик и единица длительности — от него же и опций плагина в `plugins/0`. Datasource —
+  ключ `datasource_id` в `dashboard_assigns/0`, обязателен; пороги стат-панелей — параметры
+  шаблона с умолчаниями библиотеки, перекрываются там же (таблица — `Core.PromEx.Dashboards`).
+  Набор по умолчанию — по `plugins/0`, флаги — `@moduledoc` задачи. Правка потребителя — по
+  желанию: своя копия дашборда outbox → `mix core.dashboards.export --module MyAppApp.PromEx`,
+  свои пороги — в `dashboard_assigns/0`.
+
 - **Механизм ради скорости вводится по замеру benchee, а не по предположению** (норма —
   `docs/rules/app/20-agreements.md`, «Решения о производительности»; `docs/rules/app/13-repos.md`,
   «Снапшоты»; `docs/rules/app/16-caching.md`, «Чек-лист перед включением»). Свод требовал включать

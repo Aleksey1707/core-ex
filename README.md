@@ -499,6 +499,19 @@ end
    чекпоинтов. `processes:` — список модулей процесса агрегата, тот же
    `MyAppApp.Application.processes/0`, что у дерева.
 
+7. **Дашборды подсистем библиотеки** выгружаются задачей в каталог provisioning Grafana:
+
+   ```bash
+   mix core.dashboards.export --module MyAppApp.PromEx
+   ```
+
+   Набор по умолчанию — по `plugins/0` (дашборд outbox — при `Core.Outbox.PromEx`), один дашборд —
+   `--dashboard outbox`, другой каталог — `--out` (по умолчанию `deploy/monitoring/grafana/dashboards`).
+   Префикс метрик, `title` и `uid` строятся от `otp_app`, datasource и пороги панелей — из
+   `dashboard_assigns/0`: ключ `datasource_id` (uid datasource Prometheus в Grafana) обязателен,
+   пороги и их умолчания — в `Core.PromEx.Dashboards`. Выгрузку коммитят и руками не правят: после
+   обновления core её выгружают заново.
+
 ## Имена метрик
 
 Telemetry-события Core называются `telemetry_prefix ++ suffix`. По умолчанию префикс —

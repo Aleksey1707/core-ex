@@ -11,14 +11,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Шаблон EEx дашборда outbox лежит в `priv` библиотеки; рендер даёт валидный JSON
-- [ ] Префикс, `title`, `uid`, `tags` строятся от `otp_app` и имени дашборда; datasource — параметр `datasource_id`, как у штатных дашбордов
-- [ ] Пороги — параметры шаблона: умолчания библиотеки уступают `dashboard_assigns/0` приложения
-- [ ] Публичный `Core.PromEx.Dashboards` с `@moduledoc` / `@doc` / `@spec`: рендер одного дашборда, набор по умолчанию по `plugins/0`
-- [ ] `mix core.dashboards.export`: `--module` обязателен, `--dashboard` повторяемый, `--out` с умолчанием `deploy/monitoring/grafana/dashboards`; ответ через `Mix.shell()`
-- [ ] Самопроверка: каждое имя метрики в запросах и переменных шаблона (после снятия префикса, с суффиксами distribution) объявлено плагином `Core.*.PromEx`
-- [ ] Тест задачи во временном каталоге: набор по умолчанию, `--dashboard`, `--out`, отказ без `--module`
-- [ ] Абзац об экспорте в `README.md`; пункт в CHANGELOG «Новое»
-- [ ] `make` зелёный
+- [x] Шаблон EEx дашборда outbox лежит в `priv` библиотеки; рендер даёт валидный JSON
+- [x] Префикс, `title`, `uid`, `tags` строятся от `otp_app` и имени дашборда; datasource — параметр `datasource_id`, как у штатных дашбордов
+- [x] Пороги — параметры шаблона: умолчания библиотеки уступают `dashboard_assigns/0` приложения
+- [x] Публичный `Core.PromEx.Dashboards` с `@moduledoc` / `@doc` / `@spec`: рендер одного дашборда, набор по умолчанию по `plugins/0`
+- [x] `mix core.dashboards.export`: `--module` обязателен, `--dashboard` повторяемый, `--out` с умолчанием `deploy/monitoring/grafana/dashboards`; ответ через `Mix.shell()`
+- [x] Самопроверка: каждое имя метрики в запросах и переменных шаблона (после снятия префикса, с суффиксами distribution) объявлено плагином `Core.*.PromEx`
+- [x] Тест задачи во временном каталоге: набор по умолчанию, `--dashboard`, `--out`, отказ без `--module`
+- [x] Абзац об экспорте в `README.md`; пункт в CHANGELOG «Новое»
+- [x] `make` зелёный

@@ -1,0 +1,787 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Transactional Outbox: queue depth, delivery outcomes, poller and cleaner (Core.Outbox.PromEx)",
+  "editable": false,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Records in outbox by status (new, in_work, failed)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": <%= @outbox_queue_warning %>
+              },
+              {
+                "color": "red",
+                "value": <%= @outbox_queue_critical %>
+              }
+            ]
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 10,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "<%= @outbox_metric_prefix %>_queue_count{job=\"$job\", instance=\"$instance\"}",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue depth by status",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Age of the oldest status=new record (seconds)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": <%= @outbox_oldest_age_warning %>
+              },
+              {
+                "color": "red",
+                "value": <%= @outbox_oldest_age_critical %>
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 7,
+        "x": 10,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "<%= @outbox_metric_prefix %>_queue_oldest_age_seconds{job=\"$job\", instance=\"$instance\"}",
+          "legendFormat": "oldest new",
+          "refId": "A"
+        }
+      ],
+      "title": "Oldest new age",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "in_work rows with expired locked_until",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": <%= @outbox_expired_locks_warning %>
+              },
+              {
+                "color": "red",
+                "value": <%= @outbox_expired_locks_critical %>
+              }
+            ]
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 7,
+        "x": 17,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "<%= @outbox_metric_prefix %>_queue_expired_locks_count{job=\"$job\", instance=\"$instance\"}",
+          "legendFormat": "expired locks",
+          "refId": "A"
+        }
+      ],
+      "title": "Expired locks",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Queue depth over time by status",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "<%= @outbox_metric_prefix %>_queue_count{job=\"$job\", instance=\"$instance\"}",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Oldest new age over time",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "expr": "<%= @outbox_metric_prefix %>_queue_oldest_age_seconds{job=\"$job\", instance=\"$instance\"}",
+          "legendFormat": "oldest new",
+          "refId": "A"
+        }
+      ],
+      "title": "Oldest new age",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Delivery",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Delivery attempts rate by outcome",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(<%= @outbox_metric_prefix %>_delivery_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Delivery rate by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Delivery rate by topic and outcome",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic, outcome) (rate(<%= @outbox_metric_prefix %>_delivery_total{job=\"$job\", instance=\"$instance\", topic=~\"$topic\"}[5m]))",
+          "legendFormat": "{{topic}} / {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Delivery by topic",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Poller cycle outcome sums: published / retry / failed",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(<%= @outbox_metric_prefix %>_poller_published_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "published",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(<%= @outbox_metric_prefix %>_poller_retry_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "retry",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(<%= @outbox_metric_prefix %>_poller_failed_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "failed",
+          "refId": "C"
+        }
+      ],
+      "title": "Poller published / retry / failed",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Poller",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Poller cycles rate by result",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(<%= @outbox_metric_prefix %>_poller_cycles_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Poller cycles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Poller cycle duration p95",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, result) (rate(<%= @outbox_metric_prefix %>_poller_duration_<%= @outbox_duration_unit %>_bucket{job=\"$job\", instance=\"$instance\"}[5m])))",
+          "legendFormat": "p95 {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Poller duration p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Average reserved batch size per second of cycles",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(<%= @outbox_metric_prefix %>_poller_batch_size{job=\"$job\", instance=\"$instance\", result=\"processed\"}[5m])) / clamp_min(sum(rate(<%= @outbox_metric_prefix %>_poller_cycles_total{job=\"$job\", instance=\"$instance\", result=\"processed\"}[5m])), 1e-9)",
+          "legendFormat": "avg batch",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg batch size (processed)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 103,
+      "panels": [],
+      "title": "Cleaner",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Deleted published records rate",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(<%= @outbox_metric_prefix %>_cleaner_deleted_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "deleted/s",
+          "refId": "A"
+        }
+      ],
+      "title": "Cleaner deleted rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Cleaner cycles by result",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(<%= @outbox_metric_prefix %>_cleaner_cycles_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cleaner cycles",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [
+    "PromEx",
+    "Outbox",
+    "<%= @otp_app %>"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @prom_ex_metric_prefix %>_status_info, job)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus Job",
+        "multi": false,
+        "name": "job",
+        "options": [],
+        "query": "label_values(<%= @prom_ex_metric_prefix %>_status_info, job)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 6,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @prom_ex_metric_prefix %>_status_info{job=\"$job\"}, instance)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Application Instance",
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(<%= @prom_ex_metric_prefix %>_status_info{job=\"$job\"}, instance)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @outbox_metric_prefix %>_delivery_total{job=\"$job\", instance=\"$instance\"}, topic)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Topic",
+        "multi": true,
+        "name": "topic",
+        "options": [],
+        "query": "label_values(<%= @outbox_metric_prefix %>_delivery_total{job=\"$job\", instance=\"$instance\"}, topic)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "timezone": "",
+  "title": "<%= @title %>",
+  "uid": "<%= @uid %>",
+  "version": 1
+}
