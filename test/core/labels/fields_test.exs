@@ -414,6 +414,37 @@ defmodule Core.Labels.FieldsTest do
                    end
     end
 
+    test "видимый словарь, и в списке тоже, — CompileError: только `:hidden`" do
+      assert_raise CompileError,
+                   ~r/DictField: словарь в сведения не выходит — только `:hidden`: \[:city, :zip\]/,
+                   fn ->
+                     compile_struct(:DictField,
+                       fields: [
+                         city: [map: [key: [type: :string], value: [prim: Core.LabelsFixture.Name]]],
+                         zip: [list: [map: [key: [type: :string], value: [type: :integer]]]]
+                       ],
+                       labels: [city: "Города", zip: "Индексы"]
+                     )
+                   end
+    end
+
+    test "скрытый словарь — собирается" do
+      assert {{:module, _module, _bytecode, _result}, _binding} =
+               Code.eval_quoted(
+                 quote do
+                   defmodule Core.Labels.FieldsTest.HiddenDict do
+                     use Core.Struct,
+                       fields: [
+                         city: [prim: Core.LabelsFixture.Name],
+                         zip: [map: [key: [type: :string], value: [type: :integer]]]
+                       ]
+
+                     use Core.Labels.Fields, labels: [city: "Город", zip: :hidden]
+                   end
+                 end
+               )
+    end
+
     test "подписи map'ы у списка map'ов — CompileError: только `:hidden`" do
       assert_raise CompileError, ~r/MapListLabels: список map'ов в сведения не выходит — только `:hidden`/, fn ->
         compile_struct(:MapListLabels,

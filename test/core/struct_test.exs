@@ -8,7 +8,10 @@ defmodule Core.StructTest do
   describe "use Core.Struct" do
     test "defstruct — все поля, значение nil" do
       assert Map.from_struct(struct(Wide)) ==
-               Map.new(~w(name note status point shape tags matrix roles grid count title attrs)a, &{&1, nil})
+               Map.new(
+                 ~w(name note status point shape tags matrix roles grid stock by_status count title attrs)a,
+                 &{&1, nil}
+               )
     end
 
     test "struct собирается литералом, Prim лежит в поле сам" do
@@ -19,7 +22,7 @@ defmodule Core.StructTest do
 
     test "обязательны все поля, и optional: тоже" do
       assert_raise ArgumentError,
-                   ~r/\[:name, :note, :status, :point, :shape, :tags, :matrix, :roles, :grid, :count, :title, :attrs\]/,
+                   ~r/\[:name, :note, :status, :point, :shape, :tags, :matrix, :roles, :grid, :stock, :by_status, :count, :title, :attrs\]/,
                    fn -> Code.eval_string("%Core.StructFixture.Wide{}") end
     end
   end
@@ -47,6 +50,8 @@ defmodule Core.StructTest do
                 matrix: [list: [list: [type: :integer]], default: [[1], []]],
                 roles: [set: [prim: Name], default: MapSet.new([Name.new!("а")])],
                 grid: [set: [set: [type: :integer]], default: MapSet.new()],
+                stock: [map: [key: [prim: Name], value: [type: :integer]], default: %{Name.new!("а") => 1}],
+                empty: [map: [key: [enum: StructFixture.Status], value: [set: [type: :integer]]], default: %{}],
                 count: [type: :pos_integer, default: 3 * 7],
                 title: [type: :string, default: "без названия"],
                 flag: [type: :boolean, default: false],
@@ -67,6 +72,8 @@ defmodule Core.StructTest do
                matrix: [[1], []],
                roles: MapSet.new([Name.new!("а")]),
                grid: MapSet.new(),
+               stock: %{Name.new!("а") => 1},
+               empty: %{},
                count: 21,
                title: "без названия",
                flag: false,
@@ -181,6 +188,66 @@ defmodule Core.StructTest do
                          do: [fields: [grid: [set: [set: [type: :integer]], default: MapSet.new([MapSet.new(["1"])])]]]
                        )
                      )
+                   end
+    end
+
+    test "map: — не map, ключ или значение не того вида — CompileError" do
+      assert_raise CompileError, ~r/^Struct: fields: stock: default: ожидается map, получено \[\]$/, fn ->
+        define(fields: [stock: [map: [key: [prim: Name], value: [type: :integer]], default: []]])
+      end
+
+      assert_raise CompileError, ~r/^Struct: fields: stock: default: ожидается map, получено MapSet.new\(\[\]\)$/, fn ->
+        define(quote(do: [fields: [stock: [map: [key: [prim: Name], value: [type: :integer]], default: MapSet.new()]]]))
+      end
+
+      assert_raise CompileError,
+                   ~r/^Struct: fields: stock: default: ожидается Prim Core.StructFixture.Name, получено "а"$/,
+                   fn ->
+                     define(
+                       quote(
+                         do: [
+                           fields: [stock: [map: [key: [prim: Name], value: [type: :integer]], default: %{"а" => 1}]]
+                         ]
+                       )
+                     )
+                   end
+
+      assert_raise CompileError,
+                   ~r/^Struct: fields: stock: default: ожидается integer, получено "1"$/,
+                   fn ->
+                     define(
+                       quote(
+                         do: [
+                           fields: [
+                             stock: [
+                               map: [key: [prim: Name], value: [type: :integer]],
+                               default: %{Name.new!("а") => "1"}
+                             ]
+                           ]
+                         ]
+                       )
+                     )
+                   end
+    end
+
+    test "map: — Prim personal: true в значении — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: emails: default: значение Prim .*Email с personal: true или sensitive: /,
+                   fn ->
+                     Code.eval_string("""
+                     defmodule Core.StructTest.SecretMap do
+                       defmodule Email do
+                         use Core.Prim.String,
+                           name: "Почта",
+                           max_len: 50,
+                           personal: true
+                       end
+
+                       use Core.Struct,
+                         fields: [emails: [map: [key: [type: :string], value: [prim: Email]],
+                                           default: %{"a" => Email.new!("a@b.c")}]]
+                     end
+                     """)
                    end
     end
 
@@ -299,6 +366,13 @@ defmodule Core.StructTest do
       assert fields[:grid] == "MapSet.t(MapSet.t(integer())) | nil"
     end
 
+    test "map: — map с типами ключа и значения, и вложенный тоже", %{fields: fields} do
+      assert fields[:stock] == "%{optional(Core.StructFixture.Name.t()) => integer()}"
+
+      assert fields[:by_status] ==
+               "%{optional(Core.StructFixture.Status.t()) => %{optional(String.t()) => integer()}} | nil"
+    end
+
     test "type: — тип примитива", %{fields: fields} do
       assert fields[:count] == "non_neg_integer()"
       assert fields[:title] == "String.t()"
@@ -323,6 +397,22 @@ defmodule Core.StructTest do
   end
 
   describe "отказы декларации" do
+    test "map: — ключ без wire-строки, персональный ключ, без value: — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: stock: map: key: ожидается вид с wire-строкой, получено \[type: :integer\]$/,
+                   fn -> define(fields: [stock: [map: [key: [type: :integer], value: [type: :integer]]]]) end
+
+      assert_raise CompileError,
+                   ~r/^Struct: fields: phones: map: key: Prim Core.PrimFixture.Personal с personal: true или sensitive:/,
+                   fn ->
+                     define(fields: [phones: [map: [key: [prim: Core.PrimFixture.Personal], value: [type: :integer]]]])
+                   end
+
+      assert_raise CompileError, ~r/^Struct: fields: stock: map: ожидается \[key: спека, value: спека\]/, fn ->
+        define(fields: [stock: [map: [key: [prim: Name]]]])
+      end
+    end
+
     test "wire: — CompileError" do
       assert_raise CompileError, ~r/^Struct: fields: name: wire: у структуры по полям нет wire/, fn ->
         define(fields: [name: [prim: Name, wire: "title"]])

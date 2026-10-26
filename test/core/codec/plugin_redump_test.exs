@@ -81,6 +81,10 @@ defmodule Core.Codec.PluginRedumpTest do
     defstruct [:id, :name, :note, :secret, :secrets, :status, :count, :flags, :at, :weights, :tag, :tags, :shape, :pet]
   end
 
+  defmodule Ledger do
+    defstruct [:name, :codes, :weights, :tags, :secrets]
+  end
+
   defmodule Plugin do
     use Core.Codec.Plugin,
       union: Shape,
@@ -88,6 +92,12 @@ defmodule Core.Codec.PluginRedumpTest do
         {Tag, id: [prim: ID], at: [prim: At]},
         {Labelled, label: [prim: Label], name: [prim: Name]},
         {Contact, phone: [prim: Personal], phones: [list: [prim: Personal]]},
+        {Ledger,
+         name: [prim: Name],
+         codes: [map: [key: [prim: ID], value: [enum: Status]]],
+         weights: [map: [key: [prim: ID], value: [prim: Weight]]],
+         tags: [map: [key: [type: :string], value: [entity: Tag]]],
+         secrets: [map: [key: [type: :string], value: [list: [prim: Sensitive]]]]},
         {Item,
          id: [prim: ID],
          name: [prim: Name, wire: "title"],
@@ -259,6 +269,11 @@ defmodule Core.Codec.PluginRedumpTest do
     test "personal-Prim входит в спеку как обычный" do
       assert Plugin.__codec_redump__(Contact) ==
                {:map, %{phone: {:prim, Personal}, phones: {:list, {:prim, Personal}}}}
+    end
+
+    test "словарь: формы у пере-дампа нет — значение без пере-дампа идёт как есть, с пере-дампом снимает поле" do
+      assert Plugin.__codec_redump__(Ledger) ==
+               {:map, %{name: {:prim, Name}, weights: :sensitive, tags: :sensitive, secrets: :sensitive}}
     end
 
     test "Prim с кастомным kind в спеку не входит" do

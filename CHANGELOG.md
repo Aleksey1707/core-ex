@@ -303,48 +303,78 @@
   без `default:` — обязательные ключи: литерал `%Address{}` без них перестаёт собираться. Плагин по
   полям такой сущности не меняется: он сверяет со структурой ещё и вид полей.
 
-- **Спека полей: поле-множество `set: <спека элемента>`** (ADR-0091). Значение «набор без
-  повторов» объявляется видом спеки полей, а не ручным `defstruct` с ручным кодеком. Элемент — любой
-  вид, как у элемента `list:`, в том числе вложенный `set:`.
-  - Структура по полям: значение поля — `MapSet`, в `@type t` — `MapSet.t(<тип элемента>)`
-    (`| nil` при `optional: true`). `default:` — выражение `MapSet`, проверяется поэлементно по виду:
-    `default: MapSet.new()`, `default: MapSet.new([@admin])`; список вместо `MapSet` и элемент не
-    того вида — `CompileError` `Struct: fields: <поле>: default: …`.
-  - Codec-плагин по полям: wire — JSON-список, отсортированный по wire элемента (порядок термов):
-    одно значение — один wire, независимо от порядка обхода `MapSet`. `load` собирает `MapSet`,
-    повторы и порядок в wire не важны. Не список — `{:error, %Error{code: :invalid_value, ns:
+- **Спека полей: поле-множество `set: <спека элемента>` и поле-словарь
+  `map: [key: <спека ключа>, value: <спека значения>]`** (ADR-0091). Значения «набор без повторов» и
+  «соответствие ключа значению» объявляются видами спеки полей, а не ручным `defstruct` с ручным
+  кодеком. Элемент множества и значение словаря — любой вид, как у элемента `list:`, в том числе
+  вложенные `set:` / `map:`. Ключ словаря — вид с wire-строкой: Prim со строковой базой
+  (`Prim.String`, `Prim.UUID`, `Prim.Compose` над ними, kind встроенный), `enum:` или
+  `type: :string`; иное — `CompileError` «map: key: ожидается вид с wire-строкой, получено …», Prim
+  `personal: true` или `sensitive:` ключом — `CompileError`: ключ объекта лежит в wire открыто.
+  `map:` без `key:` / `value:` или с лишним ключом — `CompileError` с именем поля. `type: :map`
+  остаётся: map без спеки ключа и значения.
+  - Структура по полям: значение поля `set:` — `MapSet`, в `@type t` — `MapSet.t(<тип элемента>)`;
+    значение поля `map:` — map, в `@type t` — `%{optional(<ключ>) => <значение>}` (`| nil` при
+    `optional: true`). `default:` — выражение, проверяется по видам: `default: MapSet.new()`,
+    `default: MapSet.new([@admin])`, `default: %{}`; список вместо `MapSet`, не map на месте словаря,
+    элемент, ключ или значение не того вида — `CompileError` `Struct: fields: <поле>: default: …`.
+  - Codec-плагин по полям: wire множества — JSON-список, отсортированный по wire элемента (порядок
+    термов): одно значение — один wire, независимо от порядка обхода `MapSet`. `load` собирает
+    `MapSet`, повторы и порядок в wire не важны. Wire словаря — объект `{"<wire ключа>": <wire
+    значения>}` (ключ enum — строка значения), порядок ключей не гарантируется; `load` грузит ключ и
+    значение по их видам. Не список / не объект — `{:error, %Error{code: :invalid_value, ns:
     :codec}}` с `detail: %{field: поле}`; невалидный элемент — такая же ошибка с `detail: %{field:
-    поле, index: индекс элемента в wire}`, ошибка элемента — её причина (`parent`). `default: []` —
-    wire-литерал отсутствующего ключа; не список (`default: %MapSet{}`) — `CompileError`. Голова
-    `dump/2` закрывает поле паттерном `%MapSet{}`.
-  - Сверка плагина со структурой по полям учитывает `set:` и вид его элемента: `set:` против
-    `list:` или другой вид элемента — `CompileError` «вид поля расходится со структурой».
-  - Нагрузка события: персональный Prim элементом `set:` без `subject:` — `CompileError`, как у
-    `list: [prim:]`.
-  - Подписи: видимое поле `set:` (и `list:` множеств) — `CompileError` «множество в сведения не
-    выходит — только `:hidden`».
+    поле, index: индекс элемента в wire}`, невалидный ключ или значение словаря — с `detail:
+    %{field: поле, key: wire-ключ}`, ошибка элемента, ключа или значения — её причина (`parent`).
+    `default: []` у `set:` и `default: %{}` у `map:` — wire-литерал отсутствующего ключа; другая
+    форма (`default: %MapSet{}`) — `CompileError`. Голова `dump/2` закрывает поле паттерном
+    `%MapSet{}` / `%{}`.
+  - Сверка плагина со структурой по полям учитывает `set:` / `map:` и виды элемента, ключа и
+    значения: `set:` против `list:`, `map:` против `type: :map` или другой вид внутри —
+    `CompileError` «вид поля расходится со структурой».
+  - Нагрузка события: персональный Prim элементом `set:` или значением `map:` без `subject:` —
+    `CompileError`, как у `list: [prim:]`.
+  - Пере-дамп плагина (Redump): `set:` — как `list:`; у словаря формы пока нет — поле, значению
+    которого не нужен пере-дамп (`enum:`, `type:`, Prim со своим kind), идёт на read-путь как есть,
+    иначе (`prim:` с приводимым kind, `entity:`, `union:`, sensitive) снимается целиком.
+  - Подписи: видимое поле `set:` / `map:` (и `list:` из них) — `CompileError` «множество в сведения
+    не выходит — только `:hidden`» / «словарь в сведения не выходит — только `:hidden`».
 
   Было:
 
   ```elixir
-  defstruct [:roles]
-  @type t :: %__MODULE__{roles: MapSet.t(Role.ID.t())}
+  defstruct [:roles, :counts]
+  @type t :: %__MODULE__{roles: MapSet.t(Role.ID.t()), counts: %{optional(Item.ID.t()) => Qty.t()}}
 
   # в ручном кодеке
-  def dump(%Access{roles: roles}, codec), do: %{"roles" => Enum.map(roles, &codec.dump/1)}
+  def dump(%Access{roles: roles, counts: counts}, codec),
+    do: %{
+      "roles" => Enum.map(roles, &codec.dump/1),
+      "counts" => Map.new(counts, fn {id, qty} -> {codec.dump(id), codec.dump(qty)} end)
+    }
   ```
 
   стало:
 
   ```elixir
-  use Core.Struct, fields: [roles: [set: [prim: Role.ID]]]
+  use Core.Struct,
+    fields: [
+      roles: [set: [prim: Role.ID]],
+      counts: [map: [key: [prim: Item.ID], value: [prim: Qty]]]
+    ]
 
   # в Codec-плагине
-  use Core.Codec.Plugin, fields: [{Access, roles: [set: [prim: Role.ID]]}]
+  use Core.Codec.Plugin,
+    fields: [
+      {Access,
+       roles: [set: [prim: Role.ID]],
+       counts: [map: [key: [prim: Item.ID], value: [prim: Qty]]]}
+    ]
   ```
 
   Ручной кодек, писавший список в порядке обхода `MapSet`, плагин читает как есть; новый `dump`
-  пишет отсортированный список — golden-фикстура события с таким полем сверяется заново.
+  пишет отсортированный список — golden-фикстура события с таким полем сверяется заново. Ручной
+  кодек словаря списком пар — другой wire: переход на `map:` — новый тег события с апкастом.
 
 - **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
   Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном

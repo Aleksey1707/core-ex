@@ -171,6 +171,7 @@ defmodule Core.Es.Event.Payload do
 
   defp personal_prim({:prim, mod}), do: if(mod.__domain_personal__(), do: mod)
   defp personal_prim({kind, inner}) when kind in ~w(list set)a, do: personal_prim(inner)
+  defp personal_prim({:map, _key, value}), do: personal_prim(value)
   defp personal_prim(_spec), do: nil
 
   # ===== Prim субъекта =====

@@ -5,11 +5,15 @@ defmodule Core.Codec.Field do
   Спеку говорят Codec-плагин по полям (`use Core.Codec.Plugin, fields:`), варианты семейства,
   нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged` и подписи
   (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Поле объявляется keyword-спекой с
-  ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `set:` / `type:`) и ключами
-  `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у нагрузки
-  (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у неё —
-  выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле `Core.Struct`
+  ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `set:` / `map:` / `type:`)
+  и ключами `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у
+  нагрузки (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у
+  неё — выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле `Core.Struct`
   (ADR-0090).
+
+  Ключ словаря (`map: [key:, value:]`) — вид с wire-строкой: Prim со строковой базой (`Prim.String`,
+  `Prim.UUID` и `Prim.Compose` над ними, kind встроенный), `enum:` или `type: :string`; ключ объекта
+  лежит в wire открыто, поэтому Prim `personal: true` или `sensitive:` ключом не бывает (ADR-0091).
 
   Модуль внутренний для библиотеки.
   """
@@ -19,11 +23,13 @@ defmodule Core.Codec.Field do
   alias Core.Prim
 
   @label "Codec.Plugin"
-  @kind_keys ~w(prim enum entity union list set type)a
+  @kind_keys ~w(prim enum entity union list set map type)a
   @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
   @type_values FieldCheck.type_values()
   @collection_kinds ~w(list set)a
+  @map_keys ~w(key value)a
+  @string_kinds ~w(string uuid)a
 
   @enforce_keys ~w(name spec optional? wire default subject)a
   defstruct @enforce_keys
@@ -36,6 +42,7 @@ defmodule Core.Codec.Field do
           | {:union, module()}
           | {:list, spec()}
           | {:set, spec()}
+          | {:map, spec(), spec()}
           | {:type, atom()}
 
   @typedoc """
@@ -216,6 +223,7 @@ defmodule Core.Codec.Field do
   defp shape(%__MODULE__{spec: spec, optional?: true}), do: spec_shape(spec) ++ [optional: true]
 
   defp spec_shape({kind, inner}) when kind in @collection_kinds, do: [{kind, spec_shape(inner)}]
+  defp spec_shape({:map, key, value}), do: [map: [key: spec_shape(key), value: spec_shape(value)]]
   defp spec_shape({kind, value}), do: [{kind, value}]
 
   defp spec_fields!(spec, mode, where) do
@@ -311,19 +319,19 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp kind_spec!(kind, inner, where) when kind in @collection_kinds do
-    if not Keyword.keyword?(inner) do
-      Helper.Opts.reject!(where, "#{kind}: ожидается keyword-спека элемента, получено #{inspect(inner)}")
+  defp kind_spec!(kind, inner, where) when kind in @collection_kinds,
+    do: {kind, element_spec!("#{kind}", "элемента", inner, where)}
+
+  defp kind_spec!(:map, inner, where) do
+    if not Keyword.keyword?(inner) or Enum.sort(Keyword.keys(inner)) != @map_keys do
+      Helper.Opts.reject!(where, "map: ожидается [key: спека, value: спека], получено #{inspect(inner)}")
     end
 
-    if Keyword.has_key?(inner, :optional) do
-      Helper.Opts.reject!(where, "optional: задаётся у самого поля, не в #{kind}:")
-    end
+    key_opts = Keyword.fetch!(inner, :key)
+    key = element_spec!("map: key", "ключа", key_opts, where)
+    check_key!(key, key_opts, where)
 
-    case Keyword.keys(inner) -- @kind_keys do
-      [] -> {kind, spec!(inner, where)}
-      unknown -> Helper.Opts.reject!(where, "#{kind}: неизвестные ключи #{inspect(unknown)}")
-    end
+    {:map, key, element_spec!("map: value", "значения", Keyword.fetch!(inner, :value), where)}
   end
 
   defp kind_spec!(:type, type, _where) when type in @type_values, do: {:type, type}
@@ -331,6 +339,55 @@ defmodule Core.Codec.Field do
   defp kind_spec!(:type, type, where) do
     Helper.Opts.reject!(where, "неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@type_values)}")
   end
+
+  defp element_spec!(label, role, inner, where) do
+    if not Keyword.keyword?(inner) do
+      Helper.Opts.reject!(where, "#{label}: ожидается keyword-спека #{role}, получено #{inspect(inner)}")
+    end
+
+    if Keyword.has_key?(inner, :optional) do
+      Helper.Opts.reject!(where, "optional: задаётся у самого поля, не в #{label}:")
+    end
+
+    case Keyword.keys(inner) -- @kind_keys do
+      [] -> spec!(inner, where)
+      unknown -> Helper.Opts.reject!(where, "#{label}: неизвестные ключи #{inspect(unknown)}")
+    end
+  end
+
+  # Ключ объекта — строка: ключ с другим wire пришлось бы переводить в строку и разбирать обратно, а
+  # открытый в wire и индексе `jsonb` ключ не зашифровать (ADR-0091).
+  defp check_key!({:prim, mod}, key_opts, where) do
+    cond do
+      not string_prim?(mod) ->
+        reject_key!(key_opts, where)
+
+      mod.__domain_personal__() or mod.__domain_sensitive__() ->
+        Helper.Opts.reject!(
+          where,
+          "map: key: Prim #{inspect(mod)} с personal: true или sensitive: — ключ лежит в wire открыто"
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  defp check_key!({:enum, _mod}, _key_opts, _where), do: :ok
+  defp check_key!({:type, :string}, _key_opts, _where), do: :ok
+  defp check_key!(_spec, key_opts, where), do: reject_key!(key_opts, where)
+
+  # Wire Prim задаёт kind: свой kind кодек дампит своей клаузой, и строка ли это — при сборке неизвестно.
+  defp string_prim?(mod) do
+    {links, [leaf]} = Enum.split(Prim.chain(mod), -1)
+
+    Enum.all?(links, &(&1.__domain_kind__() == :composite)) and leaf.__domain_kind__() in @string_kinds
+  end
+
+  @spec reject_key!(term(), String.t()) :: no_return()
+
+  defp reject_key!(key_opts, where),
+    do: Helper.Opts.reject!(where, "map: key: ожидается вид с wire-строкой, получено #{inspect(key_opts)}")
 
   defp optional!(opts, where) do
     case Keyword.get(opts, :optional, false) do
@@ -406,6 +463,9 @@ defmodule Core.Codec.Field do
   defp check_default!({:set, _inner}, default, where) when not is_list(default),
     do: Helper.Opts.reject!(where, "default: у set: — wire-литерал списка, получено #{inspect(default)}")
 
+  defp check_default!({:map, _key, _value}, default, where) when not is_map(default) or is_struct(default),
+    do: Helper.Opts.reject!(where, "default: у map: — wire-литерал объекта, получено #{inspect(default)}")
+
   defp check_default!(_spec, _default, _where), do: :ok
 
   # ===== субъекты =====
@@ -434,6 +494,10 @@ defmodule Core.Codec.Field do
   defp spec_type({kind, mod}) when kind in ~w(prim enum entity)a, do: quote(do: unquote(mod).t())
   defp spec_type({:list, inner}), do: quote(do: [unquote(spec_type(inner))])
   defp spec_type({:set, inner}), do: quote(do: MapSet.t(unquote(spec_type(inner))))
+
+  defp spec_type({:map, key, value}),
+    do: quote(do: %{optional(unquote(spec_type(key))) => unquote(spec_type(value))})
+
   defp spec_type({:type, :string}), do: quote(do: String.t())
   defp spec_type({:type, scalar}), do: quote(do: unquote(scalar)())
 end

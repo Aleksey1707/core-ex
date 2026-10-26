@@ -411,7 +411,8 @@ defmodule Core.Labels.Fields do
     map_lists = for {name, {:list, inner}} <- visible, map?(inner), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
-    ensure_none!(env, sets(visible), "множество в сведения не выходит — только `:hidden`")
+    ensure_none!(env, of_kind(visible, :set), "множество в сведения не выходит — только `:hidden`")
+    ensure_none!(env, of_kind(visible, :map), "словарь в сведения не выходит — только `:hidden`")
 
     ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
 
@@ -464,12 +465,12 @@ defmodule Core.Labels.Fields do
   defp map?({:list, inner}), do: map?(inner)
   defp map?(_spec), do: false
 
-  # Сведения множество пока не строят (`Core.Labels.Details`): видимое поле упало бы при выдаче.
-  defp sets(visible), do: for({name, spec} <- visible, set?(spec), do: name)
+  # Сведения множество и словарь пока не строят (`Core.Labels.Details`): видимое поле упало бы при выдаче.
+  defp of_kind(visible, kind), do: for({name, spec} <- visible, of_kind?(spec, kind), do: name)
 
-  defp set?({:set, _inner}), do: true
-  defp set?({:list, inner}), do: set?(inner)
-  defp set?(_spec), do: false
+  defp of_kind?({:list, inner}, kind), do: of_kind?(inner, kind)
+  defp of_kind?(spec, kind) when elem(spec, 0) == kind, do: true
+  defp of_kind?(_spec, _kind), do: false
 
   defp unlabelled?({:entity, mod}), do: not labelled?(mod)
   defp unlabelled?({:list, inner}), do: unlabelled?(inner)

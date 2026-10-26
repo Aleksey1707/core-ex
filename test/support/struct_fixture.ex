@@ -52,6 +52,11 @@ defmodule Core.StructFixture do
         matrix: [list: [list: [type: :integer]]],
         roles: [set: [prim: Name]],
         grid: [set: [set: [type: :integer]], optional: true],
+        stock: [map: [key: [prim: Name], value: [type: :integer]]],
+        by_status: [
+          map: [key: [enum: Status], value: [map: [key: [type: :string], value: [type: :integer]]]],
+          optional: true
+        ],
         count: [type: :non_neg_integer],
         title: [type: :string],
         attrs: [type: :map, optional: true]

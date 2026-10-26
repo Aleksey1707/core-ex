@@ -195,6 +195,15 @@ defmodule Core.Codec.Plugin.Redump do
   # Wire множества — список: его пере-дамп поэлементный, как у `list:`.
   defp field_spec({:set, inner}), do: field_spec({:list, inner})
 
+  # Формы словаря у пере-дампа пока нет: значение, которому нужен пере-дамп, ушло бы на read-путь в
+  # формате записи, а у `entity:` — вместе с его sensitive-полями. Такое поле снимается целиком.
+  defp field_spec({:map, _key, value}) do
+    case field_spec(value) do
+      nil -> nil
+      _spec -> :sensitive
+    end
+  end
+
   # ===== спека варианта и семейства =====
 
   @doc false

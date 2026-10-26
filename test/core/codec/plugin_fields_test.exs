@@ -18,6 +18,10 @@ defmodule Core.Codec.PluginFieldsTest do
     use Prim.Compose, name: "Владелец", of: ID
   end
 
+  defmodule Slug do
+    use Prim.String, name: "Код", max_len: 50, kind: :slug
+  end
+
   defmodule Item do
     defstruct [:id, :name, :owner_id, :secret, :version, :note, events: []]
   end
@@ -48,6 +52,10 @@ defmodule Core.Codec.PluginFieldsTest do
 
   defmodule Team do
     defstruct [:roles, :ranks, :tags, :statuses, :levels]
+  end
+
+  defmodule Stock do
+    defstruct [:counts, :titles, :tags, :owners, :grid]
   end
 
   defmodule Plugin do
@@ -84,7 +92,13 @@ defmodule Core.Codec.PluginFieldsTest do
          ranks: [set: [type: :integer], default: []],
          tags: [set: [entity: Tag]],
          statuses: [set: [enum: Status], optional: true],
-         levels: [set: [set: [prim: Name]]]}
+         levels: [set: [set: [prim: Name]]]},
+        {Stock,
+         counts: [map: [key: [prim: Name], value: [type: :integer]]],
+         titles: [map: [key: [enum: Status], value: [prim: Name]], optional: true],
+         tags: [map: [key: [prim: ID], value: [entity: Tag]], default: %{}],
+         owners: [map: [key: [prim: OwnerID], value: [set: [prim: Name]]]],
+         grid: [map: [key: [type: :string], value: [map: [key: [prim: Name], value: [list: [enum: Status]]]]]]}
       ]
   end
 
@@ -425,6 +439,90 @@ defmodule Core.Codec.PluginFieldsTest do
     end
   end
 
+  describe "map:" do
+    setup do
+      id = "6f1f8b8e-6b5a-4c47-9d5e-0b7c1d0e8f11"
+      owner = "1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+
+      stock = %Stock{
+        counts: %{Name.new!("а") => 1, Name.new!("б") => 2},
+        titles: %{new: Name.new!("Новый"), done: Name.new!("Готов")},
+        tags: %{ID.new!(id) => %Tag{name: Name.new!("x")}},
+        owners: %{OwnerID.new!(owner) => MapSet.new([Name.new!("б"), Name.new!("а")])},
+        grid: %{"ряд" => %{Name.new!("в") => [:new, :done]}, "пусто" => %{}}
+      }
+
+      %{stock: stock, id: id, owner: owner}
+    end
+
+    test "dump — объект: ключ — wire-строка ключа, значение — wire значения", %{stock: stock, id: id, owner: owner} do
+      assert Facade.dump(stock) == %{
+               "counts" => %{"а" => 1, "б" => 2},
+               "titles" => %{"new" => "Новый", "done" => "Готов"},
+               "tags" => %{id => %{"name" => "x"}},
+               "owners" => %{owner => ["а", "б"]},
+               "grid" => %{"ряд" => %{"в" => [:new, :done]}, "пусто" => %{}}
+             }
+    end
+
+    test "round-trip через фасад и через JSON", %{stock: stock} do
+      assert Facade.load(Stock, Facade.dump(stock)) == {:ok, stock}
+      assert Facade.load(Stock, Jason.decode!(Jason.encode!(Facade.dump(stock)))) == {:ok, stock}
+
+      stock = %{stock | titles: nil}
+      assert Facade.load(Stock, Facade.dump(stock)) == {:ok, stock}
+    end
+
+    test "default: %{} — при отсутствии ключа и при nil", %{stock: stock} do
+      assert {:ok, %Stock{tags: tags}} = Facade.load(Stock, Map.delete(Facade.dump(stock), "tags"))
+      assert tags == %{}
+      assert {:ok, %Stock{tags: ^tags}} = Facade.load(Stock, %{Facade.dump(stock) | "tags" => nil})
+    end
+
+    test "не объект — ошибка загрузки поля", %{stock: stock} do
+      assert {:error, %Error{module: Stock, ns: :codec, code: :invalid_value, detail: %{field: :counts}} = error} =
+               Facade.load(Stock, %{Facade.dump(stock) | "counts" => [["а", 1]]})
+
+      assert error.parent == nil
+
+      assert {:error, %Error{module: Stock, code: :invalid_value, detail: %{field: :counts}}} =
+               Facade.load(Stock, Map.delete(Facade.dump(stock), "counts"))
+    end
+
+    test "невалидный ключ или значение — ошибка с ключом в пути, причина — ошибка ключа или значения",
+         %{stock: stock, owner: owner} do
+      assert {:error, %Error{module: Stock, code: :invalid_value, detail: %{field: :counts, key: ""}} = error} =
+               Facade.load(Stock, %{Facade.dump(stock) | "counts" => %{"" => 1}})
+
+      assert %Error{module: Name} = Error.root(error)
+
+      assert {:error, %Error{detail: %{field: :titles, key: "lost"}, parent: %Error{module: Status}}} =
+               Facade.load(Stock, %{Facade.dump(stock) | "titles" => %{"lost" => "Потерян"}})
+
+      assert {:error, %Error{detail: %{field: :titles, key: "new"}} = error} =
+               Facade.load(Stock, %{Facade.dump(stock) | "titles" => %{"new" => ""}})
+
+      assert %Error{module: Name} = Error.root(error)
+
+      assert {:error, %Error{detail: %{field: :owners, key: ^owner}} = error} =
+               Facade.load(Stock, %{Facade.dump(stock) | "owners" => %{owner => ["а", ""]}})
+
+      assert [%{field: :owners, key: ^owner}, %{field: :owners, index: 1}, _name] = Enum.map(error, & &1.detail)
+
+      assert {:error, %Error{} = error} =
+               Facade.load(Stock, %{Facade.dump(stock) | "grid" => %{"ряд" => %{"в" => ["lost"]}}})
+
+      assert [%{field: :grid, key: "ряд"}, %{field: :grid, key: "в"}, _status] = Enum.map(error, & &1.detail)
+    end
+
+    test "значение не map — FunctionClauseError", %{stock: stock} do
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{stock | counts: [{Name.new!("а"), 1}]}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{stock | counts: nil}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{stock | counts: MapSet.new()}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{stock | titles: MapSet.new()}) end
+    end
+  end
+
   describe "смешанный плагин" do
     test "типы по полям и ручные клаузы — round-trip через фасад" do
       label = %Label{name: Name.new!("x")}
@@ -597,6 +695,37 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
+    test "map: и виды ключа и значения расходятся со структурой по полям — CompileError" do
+      message =
+        ~r/\.T: a: вид поля расходится .* в структуре \[map: \[key: \[prim: .*\.Name\], value: \[type: :integer\]\]\], в плагине \[type: :map\]/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:StructMapType, [a: [type: :map]],
+          struct_fields: [a: [map: [key: [prim: Name], value: [type: :integer]]]]
+        )
+      end
+
+      for {name, plugin} <- [
+            StructMapKey: [key: [type: :string], value: [type: :integer]],
+            StructMapValue: [key: [prim: Name], value: [type: :string]]
+          ] do
+        message = ~r/\.T: a: вид поля расходится .* в плагине \[map: \[key: #{Regex.escape(inspect(plugin[:key]))}/
+
+        assert_raise CompileError, message, fn ->
+          compile_plugin(name, [a: [map: plugin]],
+            struct_fields: [a: [map: [key: [prim: Name], value: [type: :integer]]]]
+          )
+        end
+      end
+    end
+
+    test "map: совпадает со структурой по полям — собирается" do
+      assert {{:module, _plugin, _bytecode, _result}, []} =
+               compile_plugin(:StructMap, [a: [map: [key: [prim: Name], value: [set: [prim: Name]]], default: %{}]],
+                 struct_fields: [a: [map: [key: [prim: Name], value: [set: [prim: Name]]]]]
+               )
+    end
+
     test "set: совпадает со структурой по полям — собирается" do
       assert {{:module, _plugin, _bytecode, _result}, []} =
                compile_plugin(:StructSet, [a: [set: [prim: Name], default: []]],
@@ -727,7 +856,7 @@ defmodule Core.Codec.PluginFieldsTest do
 
     test "два вида в поле — CompileError" do
       assert_raise CompileError,
-                   ~r/\.T: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/set:\/type:/,
+                   ~r/\.T: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/set:\/map:\/type:/,
                    fn ->
                      compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
                    end
@@ -754,6 +883,90 @@ defmodule Core.Codec.PluginFieldsTest do
     test "default: у set: не wire-список — CompileError" do
       assert_raise CompileError, ~r/\.T: a: default: у set: — wire-литерал списка, получено MapSet.new\(\[\]\)/, fn ->
         compile_plugin(:DefaultSet, a: [set: [prim: Name], default: MapSet.new()], b: [prim: Name])
+      end
+    end
+
+    test "default: у map: не wire-объект — CompileError" do
+      assert_raise CompileError, ~r/\.T: a: default: у map: — wire-литерал объекта, получено \[\]/, fn ->
+        compile_plugin(:DefaultMap, a: [map: [key: [prim: Name], value: [prim: Name]], default: []], b: [prim: Name])
+      end
+    end
+
+    test "ключ map: без wire-строки — CompileError с видом ключа" do
+      for {name, key} <- [
+            MapKeyInteger: [prim: Version],
+            MapKeyEntity: [entity: Core.Codec.PluginFieldsTest.Tag],
+            MapKeyList: [list: [prim: Name]],
+            MapKeySet: [set: [prim: Name]],
+            MapKeyMap: [map: [key: [prim: Name], value: [prim: Name]]],
+            MapKeyType: [type: :integer],
+            MapKeyUnion: [union: Core.Codec.PluginFieldsTest.Shape],
+            MapKeyKind: [prim: Core.Codec.PluginFieldsTest.Slug]
+          ] do
+        message =
+          ~r/\.T: a: map: key: ожидается вид с wire-строкой, получено \[#{Regex.escape(inspect(key) |> String.slice(1..-2//1))}\]/
+
+        assert_raise CompileError, message, fn ->
+          compile_plugin(name, a: [map: [key: key, value: [prim: Name]]], b: [prim: Name])
+        end
+      end
+    end
+
+    test "ключ map: со строковой базой — Prim.String, Prim.UUID, Compose над ними, enum:, type: :string" do
+      for {name, key} <- [
+            MapKeyString: [prim: Name],
+            MapKeyUUID: [prim: Core.Codec.PluginFieldsTest.ID],
+            MapKeyCompose: [prim: Core.Codec.PluginFieldsTest.OwnerID],
+            MapKeyEnum: [enum: Core.Codec.PluginFieldsTest.Status],
+            MapKeyText: [type: :string]
+          ] do
+        assert {{:module, _plugin, _bytecode, _result}, []} =
+                 compile_plugin(name, a: [map: [key: key, value: [prim: Name]]], b: [prim: Name])
+      end
+    end
+
+    test "персональный или чувствительный ключ map: — CompileError" do
+      for {name, prim} <- [
+            MapKeyPersonal: PrimFixture.Personal,
+            MapKeyPersonalRef: PrimFixture.PersonalRef,
+            MapKeySensitive: PrimFixture.Sensitive
+          ] do
+        message =
+          ~r/\.T: a: map: key: Prim #{inspect(prim)} с personal: true или sensitive: — ключ лежит в wire открыто/
+
+        assert_raise CompileError, message, fn ->
+          compile_plugin(name, a: [map: [key: [prim: prim], value: [prim: Name]]], b: [prim: Name])
+        end
+      end
+    end
+
+    test "map: без key: или value:, с лишним ключом, не keyword — CompileError с именем поля" do
+      for {name, spec} <- [
+            MapNoKey: [value: [prim: Name]],
+            MapNoValue: [key: [prim: Name]],
+            MapExtra: [key: [prim: Name], value: [prim: Name], default: %{}],
+            MapNotKeyword: Name
+          ] do
+        assert_raise CompileError, ~r/\.T: a: map: ожидается \[key: спека, value: спека\], получено/, fn ->
+          compile_plugin(name, a: [map: spec], b: [prim: Name])
+        end
+      end
+    end
+
+    test "optional: и неизвестный вид в ключе или значении map: — CompileError" do
+      assert_raise CompileError, ~r/\.T: a: optional: задаётся у самого поля, не в map: value:/, fn ->
+        compile_plugin(:MapValueOptional,
+          a: [map: [key: [prim: Name], value: [prim: Name, optional: true]]],
+          b: [prim: Name]
+        )
+      end
+
+      assert_raise CompileError, ~r/\.T: a: map: key: ожидается keyword-спека ключа, получено/, fn ->
+        compile_plugin(:MapKeyNotKeyword, a: [map: [key: Name, value: [prim: Name]]], b: [prim: Name])
+      end
+
+      assert_raise CompileError, ~r/\.T: a: map: value: неизвестные ключи \[:wire\]/, fn ->
+        compile_plugin(:MapValueWire, a: [map: [key: [prim: Name], value: [prim: Name, wire: "x"]]], b: [prim: Name])
       end
     end
 
