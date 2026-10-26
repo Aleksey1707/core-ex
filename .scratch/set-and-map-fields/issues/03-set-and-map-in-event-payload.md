@@ -6,13 +6,13 @@
 
 **Blocked by:** 01, 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `use Core.Es.Event.Payload` принимает `set:` и `map:`; тип, `new`, `dump` / `load` — по их wire.
-- [ ] Персональный Prim в элементе множества и значении словаря требует `subject:`, как `list: [prim:]`, и
+- [x] `use Core.Es.Event.Payload` принимает `set:` и `map:`; тип, `new`, `dump` / `load` — по их wire.
+- [x] Персональный Prim в элементе множества и значении словаря требует `subject:`, как `list: [prim:]`, и
       шифруется.
-- [ ] Порядок множества с персональными элементами — по wire элемента до шифрования.
-- [ ] Тесты через `use`: объявление и round-trip, отказ без `subject:`, шифрование и детерминизм порядка.
-- [ ] `@moduledoc` `Core.Es.Event.Payload`: виды `set:` / `map:`.
-- [ ] CHANGELOG: пункт из 01 дополняется.
-- [ ] `make` зелёный.
+- [x] Порядок множества с персональными элементами — по wire элемента до шифрования.
+- [x] Тесты через `use`: объявление и round-trip, отказ без `subject:`, шифрование и детерминизм порядка.
+- [x] `@moduledoc` `Core.Es.Event.Payload`: виды `set:` / `map:`.
+- [x] CHANGELOG: пункт из 01 дополняется.
+- [x] `make` зелёный.

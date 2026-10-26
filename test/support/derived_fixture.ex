@@ -2,8 +2,8 @@ defmodule Core.DerivedFixture do
   @moduledoc """
   События, чьи клаузы нагрузки `Core.Es.Event.Codec` выводит сам: нагрузка-Prim,
   `Core.Es.ValueChanged` с Prim-, nilable- и enum-типом, нагрузка по полям с вариантом
-  семейства `Core.DerivedFixture.Mark` (`union:`) и нагрузка-сущность `Core.DerivedFixture.Place`
-  со своим плагином.
+  семейства `Core.DerivedFixture.Mark` (`union:`), нагрузка по полям с множествами и словарями (`set:` /
+  `map:`, в том числе с ПДн) и нагрузка-сущность `Core.DerivedFixture.Place` со своим плагином.
 
   `Core.DerivedFixture.Event.Codec` ручных клауз не объявляет; он, `Core.DerivedFixture.Mark.Codec` и
   `Core.DerivedFixture.Place.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
@@ -89,6 +89,8 @@ defmodule Core.DerivedFixture do
   defmodule Event do
     @moduledoc "События с выводимой нагрузкой."
 
+    alias Core.DerivedFixture.Event.Contacted
+    alias Core.DerivedFixture.Event.Grouped
     alias Core.DerivedFixture.Event.Located
     alias Core.DerivedFixture.Event.Marked
     alias Core.DerivedFixture.Event.NoteChanged
@@ -102,7 +104,15 @@ defmodule Core.DerivedFixture do
       by: Core.EventFixture.ActorID,
       codec: Core.DerivedFixture.Event.Codec
 
-    @type t :: Tagged.t() | Renamed.t() | NoteChanged.t() | StatusChanged.t() | Marked.t() | Located.t()
+    @type t ::
+            Tagged.t()
+            | Renamed.t()
+            | NoteChanged.t()
+            | StatusChanged.t()
+            | Marked.t()
+            | Grouped.t()
+            | Contacted.t()
+            | Located.t()
   end
 
   defmodule Event.Tagged do
@@ -177,6 +187,46 @@ defmodule Core.DerivedFixture do
       payload: Payload
   end
 
+  defmodule Event.Grouped do
+    @moduledoc "Нагрузка по полям с множеством и словарём."
+
+    defmodule Payload do
+      @moduledoc "Метки и остатки по названию."
+
+      use Core.Es.Event.Payload,
+        fields: [
+          tags: [set: [prim: Core.EventFixture.Name]],
+          stock: [map: [key: [prim: Core.EventFixture.Name], value: [type: :non_neg_integer]]]
+        ]
+    end
+
+    use Core.Es.Event,
+      family: Core.DerivedFixture.Event,
+      payload: Payload
+  end
+
+  defmodule Event.Contacted do
+    @moduledoc "ПДн в элементе множества и значении словаря: поля с `subject:`."
+
+    defmodule Payload do
+      @moduledoc "Контакты лица и контакт по виду связи."
+
+      use Core.Es.Event.Payload,
+        fields: [
+          contacts: [set: [prim: Core.EventFixture.Contact], subject: :aggregate_id],
+          contact_by_kind: [
+            map: [key: [type: :string], value: [prim: Core.EventFixture.Contact]],
+            subject: :aggregate_id,
+            optional: true
+          ]
+        ]
+    end
+
+    use Core.Es.Event,
+      family: Core.DerivedFixture.Event,
+      payload: Payload
+  end
+
   defmodule Event.Located do
     @moduledoc "Нагрузка — сущность со своим плагином."
 
@@ -199,6 +249,8 @@ defmodule Core.DerivedFixture do
         Event.NoteChanged => "derived.note_changed",
         Event.StatusChanged => "derived.status_changed",
         Event.Marked => "derived.marked",
+        Event.Grouped => "derived.grouped",
+        Event.Contacted => "derived.contacted",
         Event.Located => "derived.located"
       }
   end

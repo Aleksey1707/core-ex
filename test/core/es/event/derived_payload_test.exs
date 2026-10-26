@@ -116,6 +116,73 @@ defmodule Core.Es.Event.DerivedPayloadTest do
     end
   end
 
+  describe "Event.Codec: нагрузка по полям с set: и map:" do
+    test "new/N принимает MapSet и map; не тот вид — мимо головы" do
+      tags = MapSet.new([Name.new!("Склад")])
+      stock = %{Name.new!("Склад") => 2}
+
+      assert Event.Grouped.Payload.new(tags, stock) == %Event.Grouped.Payload{tags: tags, stock: stock}
+
+      assert_raise FunctionClauseError, fn ->
+        Event.Grouped.Payload.new(Function.identity([Name.new!("Склад")]), stock)
+      end
+
+      assert_raise FunctionClauseError, fn -> Event.Grouped.Payload.new(tags, Function.identity(tags)) end
+    end
+
+    test "@type t — MapSet.t/1 элемента и словарь с видами ключа и значения" do
+      {:ok, types} = Code.Typespec.fetch_types(Event.Grouped.Payload)
+      fields = struct_type_fields(types)
+
+      assert fields[:tags] == "MapSet.t(Core.EventFixture.Name.t())"
+      assert fields[:stock] == "%{optional(Core.EventFixture.Name.t()) => non_neg_integer()}"
+    end
+
+    test "dump: множество — список по wire элемента, словарь — объект по wire ключа" do
+      grouped = grouped_event(MapSet.new([Name.new!("Склад"), Name.new!("Отгрузка")]), %{Name.new!("Склад") => 2})
+
+      assert %{"tags" => ["Отгрузка", "Склад"], "stock" => %{"Склад" => 2}} = InCodec.dump(grouped)["payload"]
+    end
+
+    test "round-trip через JSON — по модулю события и по семейству" do
+      grouped =
+        grouped_event(MapSet.new([Name.new!("Склад"), Name.new!("Отгрузка")]), %{
+          Name.new!("Склад") => 2,
+          Name.new!("Цех") => 0
+        })
+
+      wire = json(InCodec.dump(grouped))
+
+      assert InCodec.load(Event.Grouped, wire) == {:ok, grouped}
+      assert InCodec.load(DerivedFixture.Event, wire) == {:ok, grouped}
+    end
+
+    test "порядок множества — по wire элемента, а не по обходу MapSet" do
+      values = for i <- 1..40, do: "метка #{i}"
+      tags = MapSet.new(values, &Name.new!/1)
+
+      refute Enum.map(tags, &Name.value/1) == Enum.sort(values)
+      assert InCodec.dump(grouped_event(tags, %{}))["payload"]["tags"] == Enum.sort(values)
+    end
+
+    test "повторы в wire множества схлопываются" do
+      wire = put_in(json(InCodec.dump(grouped_event(MapSet.new(), %{}))), ["payload", "tags"], ["Склад", "Склад"])
+
+      assert {:ok, %Event.Grouped{payload: %{tags: tags}}} = InCodec.load(Event.Grouped, wire)
+      assert tags == MapSet.new([Name.new!("Склад")])
+    end
+
+    test "ошибка load — путь: индекс элемента множества, ключ словаря" do
+      wire = json(InCodec.dump(grouped_event(MapSet.new(), %{})))
+
+      assert {:error, %Error{ns: :codec, detail: %{field: :tags, index: 1}}} =
+               InCodec.load(Event.Grouped, put_in(wire, ["payload", "tags"], ["Склад", ""]))
+
+      assert {:error, %Error{ns: :codec, detail: %{field: :stock, key: ""}}} =
+               InCodec.load(Event.Grouped, put_in(wire, ["payload", "stock"], %{"" => 1}))
+    end
+  end
+
   describe "Event.Codec: нагрузка-сущность с ручным плагином" do
     test "нагрузка в конверте — дамп плагина сущности" do
       located = event(Event.Located, place())
@@ -195,9 +262,26 @@ defmodule Core.Es.Event.DerivedPayloadTest do
 
   defp place, do: %DerivedFixture.Place{name: Name.new!("Склад"), floor: 2}
 
+  defp grouped_event(tags, stock), do: event(Event.Grouped, Event.Grouped.Payload.new(tags, stock))
+
   defp json(wire), do: Jason.decode!(Jason.encode!(wire))
 
   defp event(mod, payload) do
     mod.new(payload, AggID.new(), Version.new!(3), ActorID.new(), Core.Es.Event.At.new!(@at))
+  end
+
+  defp struct_type_fields(types) do
+    {:type, {:t, {:type, _, :map, entries}, []}} = Enum.find(types, &match?({:type, {:t, _, []}}, &1))
+
+    for {:type, _, :map_field_exact, [{:atom, _, key}, value]} <- entries,
+        key != :__struct__,
+        into: %{},
+        do: {key, type_to_string(value)}
+  end
+
+  defp type_to_string(type) do
+    {:"::", _, [_name, quoted]} = Code.Typespec.type_to_quoted({:printed, type, []})
+
+    Macro.to_string(quoted)
   end
 end

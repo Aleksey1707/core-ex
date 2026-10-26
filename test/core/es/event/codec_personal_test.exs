@@ -2,8 +2,10 @@ defmodule Core.Es.Event.CodecPersonalTest do
   use ExUnit.Case, async: true
 
   alias Core.CodecFixture.Internal, as: InCodec
+  alias Core.DerivedFixture.Event.Contacted
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal
   alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Marker
   alias Core.EsFixture.Account
@@ -170,7 +172,75 @@ defmodule Core.Es.Event.CodecPersonalTest do
     end
   end
 
+  describe "set: и map: с subject:" do
+    test "dump: маркер множества — список по wire элемента, маркер словаря — объект" do
+      event = contacted(["+7 900 000-00-02", "+7 900 000-00-01"], %{"дом" => "+7 900 000-00-03"})
+      subject = InCodec.dump(event.aggregate_id)
+
+      assert %{"contacts" => contacts, "contact_by_kind" => by_kind} = InCodec.dump(event)["payload"]
+      assert contacts == %Marker{subject: subject, value: ["+7 900 000-00-01", "+7 900 000-00-02"]}
+      assert by_kind == %Marker{subject: subject, value: %{"дом" => "+7 900 000-00-03"}}
+    end
+
+    test "открытый текст маркера множества — по wire элемента до шифрования, а не по обходу MapSet" do
+      values = for i <- 10..49, do: "+7 900 000-00-#{i}"
+      event = contacted(values, nil)
+
+      refute Enum.map(event.payload.contacts, &EventFixture.Contact.value/1) == values
+      assert %Marker{value: ^values} = InCodec.dump(event)["payload"]["contacts"]
+    end
+
+    test "открытое значение после расшифровки — round-trip; nil необязательного словаря — nil" do
+      event = contacted(["+7 900 000-00-01", "+7 900 000-00-02"], %{"дом" => "+7 900 000-00-03"})
+
+      assert InCodec.load(Contacted, Personal.Test.fixtures(event).open) == {:ok, event}
+
+      without = contacted(["+7 900 000-00-01"], nil)
+
+      assert InCodec.load(Contacted, Personal.Test.fixtures(without).open) == {:ok, without}
+    end
+
+    test "{\"$pd\": null} → %Destroyed{} на месте множества и словаря целиком" do
+      %{destroyed: wire} = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], %{}))
+
+      assert %{"contacts" => %{"$pd" => nil}, "contact_by_kind" => %{"$pd" => nil}} = wire["payload"]
+
+      assert {:ok, %Contacted{payload: %{contacts: %Destroyed{}, contact_by_kind: %Destroyed{}}}} =
+               InCodec.load(Contacted, wire)
+    end
+
+    test "detail ошибки элемента и значения словаря редактируется" do
+      long = String.duplicate("контакт", 20)
+      wire = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], nil)).open
+
+      assert {:error, %Error{} = error} = InCodec.load(Contacted, put_payload(wire, %{"contacts" => [long]}))
+      refute inspect(error) =~ "контакт"
+
+      assert {:error, %Error{} = error} =
+               InCodec.load(Contacted, put_payload(wire, %{"contact_by_kind" => %{"дом" => long}}))
+
+      refute inspect(error) =~ "контакт"
+    end
+
+    test "new/N не принимает %Destroyed{} на месте множества и словаря" do
+      contacts = MapSet.new([EventFixture.Contact.new!("+7 900 000-00-01")])
+
+      assert_raise FunctionClauseError, fn -> Contacted.Payload.new(Function.identity(%Destroyed{}), nil) end
+      assert_raise FunctionClauseError, fn -> Contacted.Payload.new(contacts, Function.identity(%Destroyed{})) end
+    end
+  end
+
   # ---
+
+  defp contacted(contacts, by_kind) do
+    payload =
+      Contacted.Payload.new(
+        MapSet.new(contacts, &EventFixture.Contact.new!/1),
+        if(by_kind, do: Map.new(by_kind, fn {kind, value} -> {kind, EventFixture.Contact.new!(value)} end))
+      )
+
+    Contacted.new(payload, EventFixture.AggID.new(), Version.new(), EventFixture.ActorID.new(), Es.Event.At.now!())
+  end
 
   defp holder_set(holder) do
     Account.Event.HolderSet.new(

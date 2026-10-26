@@ -76,6 +76,10 @@ defmodule Core.Es.Event.PayloadPersonalTest do
       assert_raise CompileError, ~r/^Es.Event.Payload: fields: phones: персональный Prim .*Personal без subject:/, fn ->
         payload(:BareMap, phones: [map: [key: [type: :string], value: [list: [prim: PrimFixture.Personal]]]])
       end
+
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: персональный Prim .*Personal без subject:/, fn ->
+        payload(:BareMapValue, phone: [map: [key: [type: :string], value: [prim: PrimFixture.Personal]]])
+      end
     end
 
     test "персональный композит без subject:" do

@@ -6,6 +6,8 @@ defmodule Core.Es.Personal.EventsTest do
 
   alias Core.Config
   alias Core.Context
+  alias Core.DerivedFixture
+  alias Core.DerivedFixture.Event.Contacted
   alias Core.Error
   alias Core.Es
   alias Core.Es.Personal
@@ -13,6 +15,7 @@ defmodule Core.Es.Personal.EventsTest do
   alias Core.EsFixture.Account
   alias Core.EsFixture.UserID
   alias Core.EventFixture
+  alias Core.EventFixture.ActorID
   alias Core.EventFixture.AggID
   alias Core.EventFixture.PersonID
   alias Core.Outbox
@@ -219,6 +222,34 @@ defmodule Core.Es.Personal.EventsTest do
 
       assert {:error, %Error{code: :subject_destroyed}} = @state_stored.insert(entity(id, [contact_set]), Context.new())
       assert {:error, %Error{code: :not_found}} = @state_stored.get(id, :current, Context.new())
+    end
+  end
+
+  describe "set: и map: с subject:" do
+    test "шифротекст — поле целиком; чтение — открытое значение, после destroy_key/3 — %Destroyed{}" do
+      id = AggID.new()
+      contacts = MapSet.new([@contact, "+7 900 000-00-01"], &EventFixture.Contact.new!/1)
+      by_kind = %{"дом" => EventFixture.Contact.new!(@contact)}
+
+      event =
+        Contacted.new(Contacted.Payload.new(contacts, by_kind), id, Version.new(), ActorID.new(), Es.Event.At.now!())
+
+      :ok = Es.Store.append(DerivedFixture.Event.Codec, [event], Context.new(), & &1)
+
+      assert %{"contacts" => %{"$pd" => sealed}, "contact_by_kind" => %{"$pd" => sealed_by_kind}} =
+               stored_payload("derived", id, "derived.contacted")
+
+      assert is_binary(sealed) and is_binary(sealed_by_kind)
+      refute Base.decode64!(sealed) =~ @contact
+      refute Base.decode64!(sealed_by_kind) =~ @contact
+
+      assert [%Contacted{payload: %{contacts: ^contacts, contact_by_kind: ^by_kind}}] =
+               Es.Store.Test.events!(DerivedFixture.Event.Codec, id)
+
+      assert :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+
+      assert [%Contacted{payload: %{contacts: %Destroyed{}, contact_by_kind: %Destroyed{}}}] =
+               Es.Store.Test.events!(DerivedFixture.Event.Codec, id)
     end
   end
 
