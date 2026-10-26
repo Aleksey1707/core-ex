@@ -3,7 +3,8 @@ defmodule Core.PromExFixture do
   Модули PromEx приложения для рендера дашбордов подсистем библиотеки (`Core.PromEx.Dashboards`):
   с плагином outbox и порогами по умолчанию, такой же с другим `otp_app`, с порогами и префиксом из
   `dashboard_assigns/0`, с префиксом и единицей длительности из опций плагина, без плагинов подсистем,
-  без `datasource_id`, с плагинами es и cache.
+  без `datasource_id`, с плагинами es и cache; с плагинами процессов, памяти контейнера и внешних
+  вызовов со своими опциями и порогами.
   """
 
   defmodule Outbox do
@@ -104,6 +105,34 @@ defmodule Core.PromExFixture do
         es_projection_lag_critical: 15,
         cache_hit_ratio_warning: 0.95,
         cache_hit_ratio_critical: 0.7
+      ]
+    end
+  end
+
+  defmodule Runtime do
+    @moduledoc """
+    Плагины процессов, памяти контейнера и внешних вызовов со своими опциями; пороги памяти и шаблон
+    счётчиков сбоев сбора — из `dashboard_assigns/0`.
+    """
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins do
+      [
+        {Core.Workers.PromEx, watch: {Kernel, :node, []}},
+        {Core.Cgroup.PromEx, metric_prefix: [:custom, :cgroup]},
+        {Core.External.PromEx, metric_prefix: [:custom, :external], duration_unit: :second}
+      ]
+    end
+
+    @impl true
+    def dashboard_assigns do
+      [
+        datasource_id: "prometheus",
+        workers_container_memory_warning: 2_000_000_000,
+        workers_container_memory_critical: 4_000_000_000,
+        workers_collect_errors_pattern: "legacy_.+_collect_errors_total"
       ]
     end
   end

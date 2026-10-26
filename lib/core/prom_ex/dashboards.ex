@@ -33,9 +33,22 @@ defmodule Core.PromEx.Dashboards do
   | | | `es_projection_lag_warning` / `es_projection_lag_critical` | `30` / `60` секунд |
   | `cache` | `Core.Cache.PromEx` | `cache_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_cache"` |
   | | | `cache_hit_ratio_warning` / `cache_hit_ratio_critical` | `0.9` / `0.5` — ниже доли попаданий |
+  | `workers` | `Core.Workers.PromEx` | `workers_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_workers"` |
+  | | `Core.Cgroup.PromEx` | `cgroup_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_cgroup"` |
+  | | | `workers_container_memory_warning` / `workers_container_memory_critical` | `500_000_000` / `1_000_000_000` байт |
+  | | `Core.PromEx.Safe` | `workers_collect_errors_pattern` | `"<otp_app>_prom_ex_.+_collect_errors_total"` |
+  | `external` | `Core.External.PromEx` | `external_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_external"` |
+  | | | `external_duration_unit` | `duration_unit:` плагина (мн. ч.) или `"milliseconds"` |
+  | | | `external_duration_axis_unit` | единица оси Grafana по `duration_unit:` плагина, `"ms"` |
 
   Имена проекций, агрегатов и кешей шаблоны не несут: их дают переменные дашборда `projection`,
   `type` и `cache` по меткам метрик.
+
+  Дашборд `workers` входит в набор по `Core.Workers.PromEx`; без `Core.Cgroup.PromEx` в `plugins/0`
+  панели памяти контейнера пусты. `workers_collect_errors_pattern` — регулярка PromQL по
+  `__name__` счётчиков сбоев сбора `<префикс плагина>_collect_errors_total` всех плагинов
+  `Core.*.PromEx`: плагин со своим `metric_prefix:` вне `<otp_app>_prom_ex_` требует своей
+  регулярки. Система внешнего вызова у дашборда `external` — переменная `system`.
 
   Выгрузку в каталог дашбордов приложения делает `mix core.dashboards.export`; совпадение выгрузок
   с текущим рендером проверяют `stale/2` и вариант для теста `assert_fresh!/2`, форму панелей всех
@@ -62,7 +75,7 @@ defmodule Core.PromEx.Dashboards do
   end
 
   @typedoc "Имя дашборда подсистемы библиотеки; файл выгрузки — `<имя>.json`."
-  @type name :: :outbox | :es | :cache
+  @type name :: :outbox | :es | :cache | :workers | :external
 
   @typedoc "Выгрузка `file` дашборда `dashboard`, разошедшаяся с рендером."
   @type stale_export :: %{file: Path.t(), dashboard: name()}
@@ -76,7 +89,9 @@ defmodule Core.PromEx.Dashboards do
   @dashboards [
     outbox: %{plugin: Core.Outbox.PromEx, label: "Outbox"},
     es: %{plugin: Core.Es.PromEx, label: "Event Sourcing"},
-    cache: %{plugin: Core.Cache.PromEx, label: "Cache"}
+    cache: %{plugin: Core.Cache.PromEx, label: "Cache"},
+    workers: %{plugin: Core.Workers.PromEx, label: "Workers"},
+    external: %{plugin: Core.External.PromEx, label: "External"}
   ]
   @names Keyword.keys(@dashboards)
 
@@ -111,11 +126,13 @@ defmodule Core.PromEx.Dashboards do
   def render(prom_ex, name) when is_atom(prom_ex) and name in @names do
     otp_app = prom_ex.__otp_app__()
     %{plugin: plugin, label: label} = Keyword.fetch!(@dashboards, name)
-    plugin_opts = Map.get(plugins(prom_ex), plugin, [])
+    plugins = plugins(prom_ex)
+    plugin_opts = Map.get(plugins, plugin, [])
 
     :core
     |> DashboardRenderer.build("dashboards/#{name}.json", otp_app)
     |> DashboardRenderer.merge_assigns(library_assigns(name, otp_app, plugin_opts))
+    |> DashboardRenderer.merge_assigns(neighbour_assigns(name, otp_app, plugins))
     |> DashboardRenderer.merge_assigns(prom_ex.dashboard_assigns())
     |> DashboardRenderer.merge_assigns(otp_app: otp_app, title: "#{Macro.camelize(Atom.to_string(otp_app))} - #{label}")
     |> check_datasource!(prom_ex)
@@ -156,6 +173,29 @@ defmodule Core.PromEx.Dashboards do
       cache_hit_ratio_critical: 0.5
     ]
   end
+
+  defp library_assigns(:workers, otp_app, plugin_opts) do
+    [
+      workers_metric_prefix: metric_prefix(plugin_opts, otp_app, :workers),
+      workers_container_memory_warning: 500_000_000,
+      workers_container_memory_critical: 1_000_000_000,
+      workers_collect_errors_pattern: "#{otp_app}_prom_ex_.+_collect_errors_total"
+    ]
+  end
+
+  defp library_assigns(:external, otp_app, plugin_opts) do
+    [
+      external_metric_prefix: metric_prefix(plugin_opts, otp_app, :external),
+      external_duration_unit: duration_unit(plugin_opts),
+      external_duration_axis_unit: duration_axis_unit(plugin_opts)
+    ]
+  end
+
+  # Параметры панелей дашборда на метриках соседнего плагина — по опциям этого плагина в `plugins/0`.
+  defp neighbour_assigns(:workers, otp_app, plugins),
+    do: [cgroup_metric_prefix: metric_prefix(Map.get(plugins, Core.Cgroup.PromEx, []), otp_app, :cgroup)]
+
+  defp neighbour_assigns(_name, _otp_app, _plugins), do: []
 
   defp metric_prefix(plugin_opts, otp_app, plugin) do
     plugin_opts

@@ -104,7 +104,21 @@ defmodule Core.PromEx.DashboardsTest do
 
         assert used != [], "#{name}: в шаблоне нет метрик"
         assert undeclared == [], "#{name}: метрики не объявлены плагинами: #{inspect(undeclared)}"
+        assert stray_name_patterns(json, :my_app) == [], "#{name}: регулярка __name__ мимо счётчиков сбоев сбора"
       end
+    end
+
+    test "регулярка __name__ сверяется со счётчиками сбоев сбора Core.PromEx.Safe" do
+      json = Dashboards.render(PromExFixture.Outbox, :workers)
+
+      assert name_patterns(json) == ["my_app_prom_ex_.+_collect_errors_total"]
+      assert stray_name_patterns(json, :my_app) == []
+
+      assert stray_name_patterns(Dashboards.render(PromExFixture.Runtime, :workers), :my_app) ==
+               ["legacy_.+_collect_errors_total"]
+
+      assert stray_name_patterns(~s({"expr": "{__name__=~\\"my_app_prom_ex_.+_up\\"}"}), :my_app) ==
+               ["my_app_prom_ex_.+_up"]
     end
 
     test "префикс метрик — только от otp_app приложения" do
@@ -128,6 +142,7 @@ defmodule Core.PromEx.DashboardsTest do
     test "дашборд подсистемы входит, если в plugins/0 есть её плагин" do
       assert Dashboards.defaults(PromExFixture.Outbox) == [:outbox]
       assert Dashboards.defaults(PromExFixture.Tuned) == [:outbox]
+      assert Dashboards.defaults(PromExFixture.Runtime) == [:workers, :external]
     end
 
     test "без плагина подсистемы её дашборда нет" do
@@ -379,6 +394,59 @@ defmodule Core.PromEx.DashboardsTest do
     end
   end
 
+  describe "render/2 — workers" do
+    test "процессы, сбои сбора всех плагинов и память контейнера" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :workers) |> Jason.decode!()
+      exprs = exprs(dashboard)
+
+      assert dashboard["title"] == "MyApp - Workers"
+      assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_workers_up{"))
+      assert Enum.any?(exprs, &(&1 =~ ~s({__name__=~"my_app_prom_ex_.+_collect_errors_total")))
+      assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_memory_current_bytes{"))
+      assert thresholds(dashboard, "Container memory") == [500_000_000, 1_000_000_000]
+    end
+
+    test "пороги памяти, шаблон сбоев сбора и префикс cgroup — из dashboard_assigns/0 и plugins/0" do
+      dashboard = Dashboards.render(PromExFixture.Runtime, :workers) |> Jason.decode!()
+      exprs = exprs(dashboard)
+
+      assert thresholds(dashboard, "Container memory") == [2_000_000_000, 4_000_000_000]
+      assert Enum.any?(exprs, &(&1 =~ ~s({__name__=~"legacy_.+_collect_errors_total")))
+      assert Enum.any?(exprs, &(&1 =~ "custom_cgroup_memory_current_bytes{"))
+      refute Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_"))
+    end
+  end
+
+  describe "render/2 — external" do
+    test "система — переменная дашборда, а не литерал" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :external) |> Jason.decode!()
+      exprs = exprs(dashboard)
+      system = Enum.find(dashboard["templating"]["list"], &(&1["name"] == "system"))
+
+      assert dashboard["title"] == "MyApp - External"
+      assert exprs != []
+      assert Enum.all?(exprs, &(&1 =~ ~s(system=~"$system")))
+      refute Enum.any?(exprs, &(&1 =~ ~s(system=")))
+      assert system["query"] =~ "label_values(my_app_prom_ex_external_call_total{"
+
+      assert Map.take(system, ~w(multi includeAll allValue)) == %{
+               "multi" => true,
+               "includeAll" => true,
+               "allValue" => ".*"
+             }
+    end
+
+    test "префикс и единица длительности — из опций плагина в plugins/0" do
+      dashboard = Jason.decode!(Dashboards.render(PromExFixture.Runtime, :external))
+      exprs = exprs(dashboard)
+
+      assert Enum.all?(exprs, &(&1 =~ "custom_external_call_"))
+      assert Enum.any?(exprs, &(&1 =~ "custom_external_call_duration_seconds_bucket"))
+      assert duration_units(dashboard) == ["s", "s"]
+      assert duration_units(Jason.decode!(Dashboards.render(PromExFixture.Outbox, :external))) == ["ms", "ms"]
+    end
+  end
+
   # ---
 
   @provider {Kernel, :node, []}
@@ -394,15 +462,40 @@ defmodule Core.PromEx.DashboardsTest do
   ]
 
   defp declared_metrics(otp_app) do
+    for metric <- plugin_metrics(otp_app), name <- exported_names(metric) do
+      String.replace_prefix(name, "#{otp_app}_prom_ex_", "")
+    end
+  end
+
+  defp plugin_metrics(otp_app) do
     for {plugin, plugin_opts} <- @plugins,
         callback <- [:event_metrics, :polling_metrics, :manual_metrics],
         Helper.Module.exports?(plugin, callback, 1),
         %{metrics: metrics} <- List.wrap(apply(plugin, callback, [[otp_app: otp_app] ++ plugin_opts])),
         metric <- metrics,
-        name <- exported_names(metric) do
-      String.replace_prefix(name, "#{otp_app}_prom_ex_", "")
-    end
+        do: metric
   end
+
+  # Регулярка `{__name__=~"…"}` (якорная, как в PromQL), которая не выбирает ни одной метрики
+  # плагинов или выбирает что-то кроме счётчиков сбоев сбора `Core.PromEx.Safe`.
+  defp stray_name_patterns(json, otp_app) do
+    metrics = plugin_metrics(otp_app)
+    names = for metric <- metrics, name <- exported_names(metric), do: name
+
+    collect_errors =
+      for %{event_name: [:prom_ex, :plugin, _plugin, :collect, :error]} = metric <- metrics,
+          name <- exported_names(metric),
+          do: name
+
+    for pattern <- name_patterns(json),
+        regex = Regex.compile!("\\A(?:#{pattern})\\z"),
+        matched = Enum.filter(names, &Regex.match?(regex, &1)),
+        matched == [] or matched -- collect_errors != [],
+        do: pattern
+  end
+
+  defp name_patterns(json),
+    do: List.flatten(Regex.scan(~r/__name__=~\\"(.*?)\\"/, json, capture: :all_but_first))
 
   defp exported_names(%Telemetry.Metrics.Distribution{name: name}) do
     base = Enum.join(name, "_")
@@ -420,6 +513,12 @@ defmodule Core.PromEx.DashboardsTest do
       Enum.find(dashboard["panels"], &(&1["title"] == title and &1["type"] == "stat"))
 
     for %{"value" => value} <- steps, value != nil, do: value
+  end
+
+  defp duration_units(dashboard) do
+    for panel <- dashboard["panels"],
+        Enum.any?(Map.get(panel, "targets", []), &(&1["expr"] =~ "_duration_")),
+        do: panel["fieldConfig"]["defaults"]["unit"]
   end
 
   defp unit(dashboard, title) do

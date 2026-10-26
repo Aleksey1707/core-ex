@@ -505,7 +505,8 @@ end
    mix core.dashboards.export --module MyAppApp.PromEx
    ```
 
-   Набор по умолчанию — по `plugins/0` (дашборд outbox — при `Core.Outbox.PromEx`), один дашборд —
+   Набор по умолчанию — по `plugins/0` (дашборд outbox — при `Core.Outbox.PromEx`, workers — при
+   `Core.Workers.PromEx`, external — при `Core.External.PromEx`), один дашборд —
    `--dashboard outbox`, другой каталог — `--out` (по умолчанию `deploy/monitoring/grafana/dashboards`).
    Префикс метрик, `title` и `uid` строятся от `otp_app`, datasource и пороги панелей — из
    `dashboard_assigns/0`: ключ `datasource_id` (uid datasource Prometheus в Grafana) обязателен,

@@ -225,6 +225,17 @@
   проверка свежести принимает файлы с этими именами за выгрузки. Правка потребителя: свои копии →
   `mix core.dashboards.export --module MyAppApp.PromEx`; свой доменный дашборд с именем `es.json`
   или `cache.json` → переименовать.
+  Дашборд `workers` (при `Core.Workers.PromEx`): наблюдаемые процессы, память контейнера
+  `Core.Cgroup.PromEx` с порогами-параметрами `workers_container_memory_warning` /
+  `workers_container_memory_critical` (умолчания 500 МБ / 1 ГБ) и сбои сбора всех плагинов
+  `Core.PromEx.Safe` по регулярке `__name__` (`workers_collect_errors_pattern`, умолчание
+  `"<otp_app>_prom_ex_.+_collect_errors_total"`). Дашборд `external` (при `Core.External.PromEx`):
+  частота, доля отказов и p95 внешних вызовов, система — переменная `system`, а не литерал
+  `system="…"`. Правка потребителя: своя копия дашборда процессов или внешних вызовов →
+  выгрузка, свои панели (доменные счётчики, панели одной системы) — доменный дашборд; доработка
+  штатного `beam` панелью памяти контейнера → выгрузка `workers`, порог памяти — в
+  `dashboard_assigns/0`; свой доменный дашборд с именем `workers.json` или `external.json` →
+  переименовать.
 
 - **Проверка формы панелей: `Core.PromEx.Dashboards.form_violations/3` и `assert_form!/3`** (норма —
   `docs/rules/app/21-observability.md`, «Форма панелей»). Панель с растущей меткой (`component`,
