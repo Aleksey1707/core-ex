@@ -611,6 +611,102 @@ defmodule Core.Labels.FieldsTest do
     assert Fields.paths(module) == [{[:name], "Название"}, {[:note], "Лимиты"}]
   end
 
+  describe "структура по полям" do
+    test "labels: без fields: — вид полей из спеки структуры, без скрытых" do
+      {{:module, module, _bytecode, _result}, _binding} =
+        compile_core_struct(:Parcel, labels: [name: "Название", note: "Примечание", trace: :hidden])
+
+      assert Fields.specs(module) == [name: {:prim, Name}, note: {:type, :string}]
+      assert Fields.paths(module) == [{[:name], "Название"}, {[:note], "Примечание"}]
+    end
+
+    test "fields: рядом со структурой — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Labels.Fields: fields: спека поля и у структуры по полям.*\[:name\]$/,
+                   fn ->
+                     compile_core_struct(:Twice,
+                       fields: [name: [prim: Core.LabelsFixture.Name]],
+                       labels: [name: "Название", note: "Примечание", trace: :hidden]
+                     )
+                   end
+    end
+
+    test "поле без решения — CompileError, как у ручного struct'а" do
+      assert_raise CompileError, ~r/Undecided: поля без подписи или `:hidden`: \[:trace\]/, fn ->
+        compile_core_struct(:Undecided, labels: [name: "Название", note: "Примечание"])
+      end
+    end
+
+    test "подпись поля вне структуры — CompileError" do
+      assert_raise CompileError, ~r/Outside: подписи полей вне struct'а: \[:extra\]/, fn ->
+        compile_core_struct(:Outside, labels: [name: "Название", note: "Примечание", trace: :hidden, extra: "Лишнее"])
+      end
+    end
+
+    test "вложенный struct без Core.Labels.Fields — CompileError" do
+      assert_raise CompileError, ~r/BareEntity: вложенный struct без `use Core.Labels.Fields`: \[:uri\]/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.FieldsTest.BareEntity do
+              use Core.Struct, fields: [uri: [entity: URI]]
+
+              use Core.Labels.Fields, labels: [uri: "Адрес"]
+            end
+          end
+        )
+      end
+    end
+
+    test "change: — вид значения из спеки old_value / new_value" do
+      {{:module, module, _bytecode, _result}, _binding} =
+        compile_core_change(:StructChanged, [old_value: [prim: Name, optional: true], new_value: [prim: Name]],
+          change: "Название"
+        )
+
+      assert Fields.change(module) == {"Название", {:prim, Name}}
+      assert Fields.visible(module) == [old_value: {:prim, Name}, new_value: {:prim, Name}]
+    end
+
+    test "change: и value: — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields: `value:` у структуры по полям — вид значения задаёт/, fn ->
+        compile_core_change(:ChangedValue, [old_value: [prim: Name], new_value: [prim: Name]],
+          change: "Название",
+          value: [prim: Core.LabelsFixture.Count]
+        )
+      end
+    end
+
+    test "change: и разный вид old_value / new_value — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields: структура изменения: ожидается один вид у/, fn ->
+        compile_core_change(:ChangedKinds, [old_value: [prim: Name], new_value: [type: :string]], change: "Название")
+      end
+    end
+
+    test "change: и поле вне old_value / new_value — CompileError, как у ручного struct'а" do
+      assert_raise CompileError, ~r/ChangedReason: поля struct'а изменения вне `old_value` \/ `new_value`/, fn ->
+        compile_core_change(
+          :ChangedReason,
+          [old_value: [prim: Name], new_value: [prim: Name], reason: [type: :string]],
+          change: "Название"
+        )
+      end
+    end
+
+    test "use до Core.Struct — CompileError" do
+      assert_raise CompileError, ~r/^Labels.Fields: не нагрузка: .*`use Core.Struct`/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Labels.FieldsTest.EarlyStruct do
+              use Core.Labels.Fields, labels: [name: "Название"]
+
+              use Core.Struct, fields: [name: [prim: Core.LabelsFixture.Name]]
+            end
+          end
+        )
+      end
+    end
+  end
+
   test "свободная map под :hidden собирается" do
     {{:module, module, _bytecode, _result}, _binding} =
       compile_payload(:HiddenMap, [labels: [name: "Название", note: :hidden]], :map)
@@ -660,6 +756,39 @@ defmodule Core.Labels.FieldsTest do
       quote do
         defmodule unquote(module) do
           defstruct unquote(fields)
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
+
+  defp compile_core_struct(name, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          use Core.Struct,
+            fields: [
+              name: [prim: Core.LabelsFixture.Name],
+              note: [type: :string, optional: true],
+              trace: [type: :string]
+            ]
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
+
+  defp compile_core_change(name, fields, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          use Core.Struct, fields: unquote(fields)
 
           use Core.Labels.Fields, unquote(opts)
         end

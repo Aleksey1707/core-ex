@@ -23,6 +23,23 @@ defmodule Core.Labels.Fields do
   Решение по полю — подпись (непустая строка) или `:hidden`: поле в сведения не попадает. Вид поля
   в сведениях (`Core.Labels.Details`) у нагрузки берётся из её спеки, в объявлении подписей его нет.
 
+  Так же — у структуры по полям (`Core.Struct`): вид поля задаёт её спека, `use Core.Labels.Fields`
+  подключается после `use Core.Struct` и объявляет только `labels:`:
+
+      defmodule MyApp.Domain.Sales.Account.Address do
+        use Core.Struct,
+          fields: [
+            city: [prim: MyApp.Domain.Sales.Account.City],
+            checksum: [type: :string]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            city: "Город",
+            checksum: :hidden
+          ]
+      end
+
   Свободная map'а (`type: :map`) с id в ключах подписывается ключом и значением —
   `[label:, key:, value:]` — и выходит в сведения списком групп «ключ — значение»:
 
@@ -31,9 +48,9 @@ defmodule Core.Labels.Fields do
           limits: [label: "Лимиты", key: "Счёт", value: "Лимит"]
         ]
 
-  У struct'а без спеки полей — нагрузки с ручным плагином кодека, вложенного struct'а сведений,
-  варианта семейства — вид видимых полей задаёт `fields:` на языке спеки плагина по полям
-  (`Core.Codec.Field`), её разбирает тот же нормализатор:
+  У struct'а без спеки полей — на ручном `defstruct`: нагрузки с ручным плагином кодека, вложенного
+  struct'а сведений, варианта семейства — вид видимых полей задаёт `fields:` на языке спеки плагина по
+  полям (`Core.Codec.Field`), её разбирает тот же нормализатор:
 
       defmodule MyApp.Domain.Sales.Account.Address do
         defstruct [:city, :origin, :tags, :checksum]
@@ -63,13 +80,14 @@ defmodule Core.Labels.Fields do
   поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, свободная
   map'а (`type: :map`) с подписью строкой, видимый список map'ов (`list: [type: :map]`, решение у него
   только `:hidden`), подписи map'ы у поля, которое не map'а, ключ подписи map'ы вне
-  `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки —
-  `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки, спека скрытого
-  поля или поля вне struct'а, `text:` не захватом функции арности 1.
+  `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки и
+  структуры по полям — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без
+  спеки, спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
 
   Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
-  двух опций. Вид значения у `Core.Es.ValueChanged` берётся из его `type:`, у ручного struct'а с
-  полями `old_value` / `new_value` — из `value:`, спеки одного значения на языке `fields:`:
+  двух опций. Вид значения у `Core.Es.ValueChanged` берётся из его `type:`, у структуры по полям — из
+  спеки `old_value` / `new_value`, у ручного struct'а с этими полями — из `value:`, спеки одного
+  значения на языке `fields:`:
 
       defmodule Payload do
         use Core.Es.ValueChanged,
@@ -87,10 +105,11 @@ defmodule Core.Labels.Fields do
       end
 
   Сборку ломают: `labels:` или `fields:` вместе с `change:`, ручной struct изменения без `value:`,
-  `value:` у `Core.Es.ValueChanged` или без `change:`, struct без `old_value` / `new_value` или с
-  полями вне них под `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или
-  `defstruct`, значение изменения — map'а или список map'ов на любой глубине `list:` (в сведения
-  оно не выходит, и подписать его нельзя).
+  `value:` у `Core.Es.ValueChanged`, у структуры по полям или без `change:`, разный вид `old_value` и
+  `new_value` у структуры по полям, struct без `old_value` / `new_value` или с полями вне них под
+  `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct`, значение
+  изменения — map'а или список map'ов на любой глубине `list:` (в сведения оно не выходит, и
+  подписать его нельзя).
 
   Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
@@ -100,6 +119,7 @@ defmodule Core.Labels.Fields do
   alias Core.Es.ValueChanged
   alias Core.Helper
   alias Core.Labels.Check
+  alias Core.Struct
 
   @typedoc "Решение по полю: подпись, подписи map'ы с id в ключах или скрыто."
   @type label :: String.t() | map_label() | :hidden
@@ -110,10 +130,15 @@ defmodule Core.Labels.Fields do
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
   @type spec :: Field.spec() | {:text, (term() -> String.t())} | {:list, spec()}
 
-  # Объявление модуля под `use`: поля нагрузки (`Core.Es.Event.Payload`), вид значения изменения
-  # (`Core.Es.ValueChanged`), struct без них или ничего.
+  # Объявление модуля под `use`: поля нагрузки (`Core.Es.Event.Payload`), поля структуры по полям
+  # (`Core.Struct`), вид значения изменения (`Core.Es.ValueChanged`), ручной struct (`:struct`) или ничего.
   @typedoc false
-  @type host :: {:payload, [Field.t()]} | {:change, [type: module(), nilable: boolean()]} | :struct | :none
+  @type host ::
+          {:payload, [Field.t()]}
+          | {:struct_fields, [Field.t()]}
+          | {:change, [type: module(), nilable: boolean()]}
+          | :struct
+          | :none
 
   @typedoc false
   @type declared :: %{specs: [{atom(), spec()}], fields: [{atom(), label()}], change: {String.t(), spec()} | nil}
@@ -272,17 +297,18 @@ defmodule Core.Labels.Fields do
 
   # ===== решение по объявлению модуля =====
 
-  # Объявление модуля известно только телу: `use Core.Es.Event.Payload` или `use Core.Es.ValueChanged`
-  # выше пишет его атрибутом. Struct нужен уже здесь: без него `use` выше `use Core.Es.ValueChanged`
-  # сошёл бы за ручной struct.
+  # Объявление модуля известно только телу: `use Core.Es.Event.Payload`, `use Core.Struct` или
+  # `use Core.Es.ValueChanged` выше пишет его атрибутом. Struct нужен уже здесь: без него `use` выше
+  # `use Core.Es.ValueChanged` сошёл бы за ручной struct.
   @doc false
   @spec host(module()) :: host()
 
   def host(module) when is_atom(module) do
-    case {Payload.declared_fields(module), ValueChanged.declared(module)} do
-      {nil, nil} -> if Module.defines?(module, {:__struct__, 0}), do: :struct, else: :none
-      {nil, changed} -> {:change, changed}
-      {fields, nil} -> {:payload, fields}
+    case {Payload.declared_fields(module), Struct.declared_fields(module), ValueChanged.declared(module)} do
+      {nil, nil, nil} -> if Module.defines?(module, {:__struct__, 0}), do: :struct, else: :none
+      {nil, nil, changed} -> {:change, changed}
+      {nil, fields, nil} -> {:struct_fields, fields}
+      {fields, nil, nil} -> {:payload, fields}
     end
   end
 
@@ -306,11 +332,20 @@ defmodule Core.Labels.Fields do
     )
   end
 
+  defp specs!({:struct_fields, fields}, nil), do: pairs(fields)
+
+  defp specs!({:struct_fields, _fields}, specs) do
+    Helper.Opts.reject!(
+      "#{@label}: fields",
+      "спека поля и у структуры по полям — вид поля задаёт `use Core.Struct`: #{inspect(Keyword.keys(specs))}"
+    )
+  end
+
   defp specs!(_host, nil) do
     Helper.Opts.reject!(
       @label,
       "не нагрузка: `use Core.Labels.Fields` подключается после `use Core.Es.Event.Payload` " <>
-        "или объявляет спеку видимых полей `fields:`"
+        "или `use Core.Struct` либо объявляет спеку видимых полей `fields:`"
     )
   end
 
@@ -328,6 +363,22 @@ defmodule Core.Labels.Fields do
 
   defp change!({:change, _changed}, _label, _value),
     do: Helper.Opts.reject!(@label, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
+
+  defp change!({:struct_fields, fields}, label, nil) do
+    case Enum.uniq(for %Field{name: name, spec: spec} <- fields, name in @change_fields, do: spec) do
+      [spec] ->
+        {label, spec}
+
+      specs ->
+        Helper.Opts.reject!(
+          @label,
+          "структура изменения: ожидается один вид у `old_value` / `new_value`, получено #{inspect(specs)}"
+        )
+    end
+  end
+
+  defp change!({:struct_fields, _fields}, _label, _value),
+    do: Helper.Opts.reject!(@label, "`value:` у структуры по полям — вид значения задаёт `use Core.Struct`")
 
   defp change!(_struct, _label, nil),
     do: Helper.Opts.reject!(@label, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
@@ -383,8 +434,11 @@ defmodule Core.Labels.Fields do
     ensure_none!(env, fields -- labelled, "поля без подписи или `:hidden`")
     ensure_none!(env, labelled -- fields, "подписи полей вне struct'а")
 
-    if is_nil(Payload.declared_fields(module)),
-      do: ensure_specs!(env, module.__label_specs__(), labels, fields)
+    case host(module) do
+      {:payload, _payload} -> :ok
+      {:struct_fields, _fields} -> :ok
+      _manual -> ensure_specs!(env, module.__label_specs__(), labels, fields)
+    end
   end
 
   defp ensure_specs!(env, specs, labels, fields) do

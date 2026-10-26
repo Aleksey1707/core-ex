@@ -221,6 +221,15 @@
   `@enforce_keys ~w(name note)a` + `defstruct @enforce_keys` +
   `@type t :: %__MODULE__{name: Name.t(), note: Note.t() | nil}`, стало:
   `use Core.Struct, fields: [name: [prim: Name], note: [prim: Note, optional: true]]`.
+  Подписи структуры по полям — `use Core.Labels.Fields, labels: [...]` после `use Core.Struct`:
+  вид полей для сведений берётся из её спеки, как у нагрузки события, и второй список не нужен;
+  `fields:` рядом с ней — `CompileError` `Labels.Fields: fields: спека поля и у структуры по
+  полям …`. Было: `defstruct [:city, :checksum]` + `use Core.Labels.Fields, fields: [city:
+  [prim: City]], labels: [city: "Город", checksum: :hidden]`, стало:
+  `use Core.Struct, fields: [city: [prim: City], checksum: [type: :string]]` +
+  `use Core.Labels.Fields, labels: [city: "Город", checksum: :hidden]`. Подпись изменения `change:`
+  у структуры по полям берёт вид значения из спеки `old_value` / `new_value`; `value:` рядом с ней —
+  `CompileError`.
 - **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
   Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном
   `priv/dashboards/outbox.json.eex`; задача рендерит его через `PromEx.DashboardRenderer` в каталог

@@ -18,6 +18,7 @@ defmodule Core.Labels.DetailsTest do
   alias Core.LabelsFixture.Line
   alias Core.LabelsFixture.Moment
   alias Core.LabelsFixture.Name
+  alias Core.LabelsFixture.Parcel
   alias Core.LabelsFixture.Shape
   alias Core.LabelsFixture.SnapshotID
   alias Core.LabelsFixture.Title
@@ -174,6 +175,26 @@ defmodule Core.Labels.DetailsTest do
                   value: [%{kind: :text, value: "urgent"}, %{kind: :text, value: "fragile"}]
                 },
                 %{label: "Количество", kind: :number, value: count}
+              ]}
+  end
+
+  test "вложенная структура по полям — сведения по её спеке, скрытое не выходит" do
+    name = Name.new!("Коробка")
+    count = Count.new!(4)
+    payload = Event.Packed.Payload.new(%Parcel{name: name, count: count, note: nil, trace: "t-2"})
+
+    assert Details.build(event(Event.Packed, payload)) ==
+             {"Посылка собрана",
+              [
+                %{
+                  label: "Посылка",
+                  kind: :group,
+                  value: [
+                    %{label: "Название", kind: :text, value: name},
+                    %{label: "Количество", kind: :number, value: count},
+                    %{label: "Примечание", kind: :text, value: nil}
+                  ]
+                }
               ]}
   end
 

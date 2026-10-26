@@ -47,6 +47,10 @@ defmodule Core.Struct do
   - `__struct_fields__/0` — внутренняя для builder'ов ролей: нормализованные поля спеки, форма — не
     контракт.
 
+  Макрос занимает в модуле имя `@core_struct_fields`: поля спеки структуры, которая ещё собирается,
+  отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей, и подписям
+  хватает `labels:`.
+
   `fields:` — литерал (`docs/rules/20-agreements.md`, «Опции `use`»): атрибут или вызов функции —
   `CompileError` «ожидается литерал». Модули спеки проверяются в теле модуля, поэтому MAY быть
   вложены в него выше `use`.
@@ -91,6 +95,11 @@ defmodule Core.Struct do
       end
     ]
   end
+
+  @doc false
+  @spec declared_fields(module()) :: [Field.t()] | nil
+
+  def declared_fields(module) when is_atom(module), do: Module.get_attribute(module, :core_struct_fields)
 
   @doc false
   @spec fields!(term()) :: [Field.t()]

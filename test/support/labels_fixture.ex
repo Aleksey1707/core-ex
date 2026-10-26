@@ -2,8 +2,9 @@ defmodule Core.LabelsFixture do
   @moduledoc """
   События и нагрузки с подписями (`Core.Labels.*`): нагрузка по полям всех видов сведений,
   нагрузка с полями Enum, нагрузка с вложенными struct'ами, списками, семейством и Prim-композитом,
-  нагрузка с ручным плагином и полями `text:`, изменения «было → стало» (`Core.Es.ValueChanged` и
-  ручной struct с `value:`), нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
+  нагрузка с ручным плагином и полями `text:`, нагрузка с вложенной структурой по полям
+  (`Core.Struct`), изменения «было → стало» (`Core.Es.ValueChanged` и ручной struct с `value:`),
+  нагрузка-Prim, событие без нагрузки, нагрузка с id каждого вида,
   Prim текстом и map'ой с id в ключах, нагрузка с id без вида, событие другого агрегата с id в варианте
   семейства, id в скрытых полях нагрузки, вложенного struct'а, варианта семейства и map'ы, изменение на
   id, id под `text:` в поле, списке и значении изменения; автор каждого события — учётная запись с
@@ -16,8 +17,8 @@ defmodule Core.LabelsFixture do
   `Core.LabelsFixture.Mark` плагина нет), изменение на id и события с id под `text:`. Нагрузку событий
   `Core.LabelsFixture.Event.Codec` дампят фасады: он, плагин семейства, плагин вложенных struct'ов
   `Core.LabelsFixture.Codec` и ручной плагин нагрузки `Core.LabelsFixture.Event.Limited.Codec`
-  зарегистрированы в `Core.CodecFixture.plugins/0`. События с нагрузкой без плагина — в семействе
-  `ManualFamily`, его кодек в фасад не входит.
+  зарегистрированы в `Core.CodecFixture.plugins/0`. События с нагрузкой без плагина и с вложенной
+  структурой по полям без плагина — в семействе `ManualFamily`, его кодек в фасад не входит.
   """
 
   alias Core.EventFixture.AggID
@@ -251,6 +252,26 @@ defmodule Core.LabelsFixture do
       labels: [
         title: "Наименование",
         count: "Количество"
+      ]
+  end
+
+  defmodule Parcel do
+    @moduledoc "Посылка — вложенный struct сведений структурой по полям: вид полей из `use Core.Struct`."
+
+    use Core.Struct,
+      fields: [
+        name: [prim: Core.LabelsFixture.Name],
+        count: [prim: Core.LabelsFixture.Count],
+        note: [type: :string, optional: true],
+        trace: [type: :string]
+      ]
+
+    use Core.Labels.Fields,
+      labels: [
+        name: "Название",
+        count: "Количество",
+        note: "Примечание",
+        trace: :hidden
       ]
   end
 
@@ -519,6 +540,24 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Метки расставлены"
+    end
+
+    defmodule Packed do
+      @moduledoc "Событие с вложенной структурой по полям."
+
+      defmodule Payload do
+        @moduledoc "Нагрузка со структурой по полям."
+
+        use Core.Es.Event.Payload, fields: [parcel: [entity: Core.LabelsFixture.Parcel]]
+
+        use Core.Labels.Fields, labels: [parcel: "Посылка"]
+      end
+
+      use Core.Es.Event,
+        family: ManualFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Посылка собрана"
     end
 
     defmodule NameChanged do
@@ -965,6 +1004,7 @@ defmodule Core.LabelsFixture do
 
     @tag_by_mod %{
       Event.Tagged => "labels_manual.tagged",
+      Event.Packed => "labels_manual.packed",
       Event.OriginChanged => "labels_manual.origin_changed",
       Event.TagsChanged => "labels_manual.tags_changed"
     }

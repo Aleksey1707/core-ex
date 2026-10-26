@@ -5,13 +5,13 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Спека структуры, которая ещё собирается, отдаётся `Core.Labels.Fields` (аналог
+- [x] Спека структуры, которая ещё собирается, отдаётся `Core.Labels.Fields` (аналог
       `Payload.declared_fields/1`) — третий источник вида полей.
-- [ ] `fields:` у `use Core.Labels.Fields` рядом со структурой по полям — `CompileError`.
-- [ ] Проверки полноты подписей не меняются.
-- [ ] Тесты в тестах подписей: подписи без `fields:`, отказ на `fields:`, сведения `Core.Labels.Details` по
+- [x] `fields:` у `use Core.Labels.Fields` рядом со структурой по полям — `CompileError`.
+- [x] Проверки полноты подписей не меняются.
+- [x] Тесты в тестах подписей: подписи без `fields:`, отказ на `fields:`, сведения `Core.Labels.Details` по
       нагрузке с вложенной структурой по полям (`entity:`).
-- [ ] CHANGELOG: пункт из 01 дополняется.
-- [ ] `make` зелёный.
+- [x] CHANGELOG: пункт из 01 дополняется.
+- [x] `make` зелёный.
