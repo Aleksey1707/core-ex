@@ -57,6 +57,40 @@ defmodule Core.PromEx.DashboardsTest do
         Dashboards.render(PromExFixture.NoDatasource, :outbox)
       end
     end
+
+    test "дашборд es — префикс, заголовок, пороги отставания и проекции переменной дашборда" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :es) |> Jason.decode!()
+
+      assert dashboard["title"] == "MyApp - Event Sourcing"
+      assert dashboard["tags"] == ["PromEx", "Es", "my_app"]
+      assert Enum.all?(exprs(dashboard), &(&1 =~ "my_app_prom_ex_es_"))
+      assert Enum.any?(exprs(dashboard), &(&1 =~ "my_app_prom_ex_es_projection_duration_milliseconds_bucket"))
+      assert thresholds(dashboard, "Projection lag (max)") == [30, 60]
+      assert unit(dashboard, "Aggregate load duration p95") == "ms"
+      assert variable_names(dashboard) == ~w(job instance projection type)
+    end
+
+    test "дашборд cache — префикс, заголовок, пороги hit ratio и кеши переменной дашборда" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :cache) |> Jason.decode!()
+
+      assert dashboard["title"] == "MyApp - Cache"
+      assert dashboard["tags"] == ["PromEx", "Cache", "my_app"]
+      assert Enum.all?(exprs(dashboard), &(&1 =~ "my_app_prom_ex_cache_"))
+      assert thresholds(dashboard, "Hit ratio (5m, min)") == [0.5, 0.9]
+      assert variable_names(dashboard) == ~w(job instance cache)
+    end
+
+    test "es и cache: префикс и единица длительности — из опций плагинов, пороги — из dashboard_assigns/0" do
+      es = Jason.decode!(Dashboards.render(PromExFixture.EsCache, :es))
+      cache = Jason.decode!(Dashboards.render(PromExFixture.EsCache, :cache))
+
+      assert Enum.all?(exprs(es), &(&1 =~ "custom_es_"))
+      assert Enum.any?(exprs(es), &(&1 =~ "custom_es_aggregate_load_duration_seconds_bucket"))
+      assert unit(es, "Aggregate load duration p95") == "s"
+      assert thresholds(es, "Projection lag (max)") == [5, 15]
+      assert Enum.all?(exprs(cache), &(&1 =~ "custom_cache_"))
+      assert thresholds(cache, "Hit ratio (5m, min)") == [0.7, 0.95]
+    end
   end
 
   describe "шаблоны библиотеки" do
@@ -98,6 +132,10 @@ defmodule Core.PromEx.DashboardsTest do
 
     test "без плагина подсистемы её дашборда нет" do
       assert Dashboards.defaults(PromExFixture.Bare) == []
+    end
+
+    test "es и cache — по плагинам Core.Es.PromEx и Core.Cache.PromEx" do
+      assert Dashboards.defaults(PromExFixture.EsCache) == [:es, :cache]
     end
   end
 
@@ -383,6 +421,13 @@ defmodule Core.PromEx.DashboardsTest do
 
     for %{"value" => value} <- steps, value != nil, do: value
   end
+
+  defp unit(dashboard, title) do
+    %{"fieldConfig" => %{"defaults" => %{"unit" => unit}}} = Enum.find(dashboard["panels"], &(&1["title"] == title))
+    unit
+  end
+
+  defp variable_names(dashboard), do: for(variable <- dashboard["templating"]["list"], do: variable["name"])
 
   defp datasources(dashboard) do
     panels = for panel <- dashboard["panels"], panel["type"] != "row", do: panel["datasource"]

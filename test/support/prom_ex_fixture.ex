@@ -3,7 +3,7 @@ defmodule Core.PromExFixture do
   Модули PromEx приложения для рендера дашбордов подсистем библиотеки (`Core.PromEx.Dashboards`):
   с плагином outbox и порогами по умолчанию, такой же с другим `otp_app`, с порогами и префиксом из
   `dashboard_assigns/0`, с префиксом и единицей длительности из опций плагина, без плагинов подсистем,
-  без `datasource_id`.
+  без `datasource_id`, с плагинами es и cache.
   """
 
   defmodule Outbox do
@@ -81,5 +81,30 @@ defmodule Core.PromExFixture do
 
     @impl true
     def plugins, do: [Core.Outbox.PromEx]
+  end
+
+  defmodule EsCache do
+    @moduledoc "Плагины es и cache со своими `metric_prefix:`, у es — `duration_unit:`; пороги — из `dashboard_assigns/0`."
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins do
+      [
+        {Core.Es.PromEx, metric_prefix: [:custom, :es], duration_unit: :second},
+        {Core.Cache.PromEx, sizes: {Function, :identity, [[]]}, metric_prefix: [:custom, :cache]}
+      ]
+    end
+
+    @impl true
+    def dashboard_assigns do
+      [
+        datasource_id: "prometheus",
+        es_projection_lag_warning: 5,
+        es_projection_lag_critical: 15,
+        cache_hit_ratio_warning: 0.95,
+        cache_hit_ratio_critical: 0.7
+      ]
+    end
   end
 end

@@ -218,6 +218,13 @@
   командой переэкспорта. Правка потребителя: своя копия дашборда outbox →
   `mix core.dashboards.export --module MyAppApp.PromEx`, свои пороги — в `dashboard_assigns/0`
   (норма — пункт о выгрузках дашбордов ниже).
+  Дашборды `es` (`Core.Es.PromEx`) и `cache` (`Core.Cache.PromEx`) поставляются так же и входят в
+  набор по умолчанию по своему плагину; имена проекций, агрегатов и кешей — переменные дашборда
+  `projection`, `type` и `cache`, пороги отставания проекции и доли попаданий кеша — в
+  `dashboard_assigns/0`. Экспорт без `--dashboard` теперь пишет и `es.json` / `cache.json`, а
+  проверка свежести принимает файлы с этими именами за выгрузки. Правка потребителя: свои копии →
+  `mix core.dashboards.export --module MyAppApp.PromEx`; свой доменный дашборд с именем `es.json`
+  или `cache.json` → переименовать.
 
 - **Проверка формы панелей: `Core.PromEx.Dashboards.form_violations/3` и `assert_form!/3`** (норма —
   `docs/rules/app/21-observability.md`, «Форма панелей»). Панель с растущей меткой (`component`,

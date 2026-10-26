@@ -1,0 +1,1484 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Event sourcing: projection lag and retries, await after a command, aggregate load and fold length (Core.Es.PromEx)",
+  "editable": false,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 103,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Lag of the most lagging projection that is not rebuilding, seconds (alert EsProjectionLagging); which one — table Projections",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": <%= @es_projection_lag_warning %>
+              },
+              {
+                "color": "red",
+                "value": <%= @es_projection_lag_critical %>
+              }
+            ]
+          },
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "max(max by (projection) (<%= @es_metric_prefix %>_projection_lag_seconds{job=\"$job\", instance=\"$instance\"}) and on (projection) max by (projection) (<%= @es_metric_prefix %>_projection_rebuilding{job=\"$job\", instance=\"$instance\"}) == 0) or vector(0)",
+          "legendFormat": "max lag",
+          "refId": "A"
+        }
+      ],
+      "title": "Projection lag (max)",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Projections replaying history: their read models are incomplete",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "count(<%= @es_metric_prefix %>_projection_rebuilding{job=\"$job\", instance=\"$instance\"} == 1) or vector(0)",
+          "legendFormat": "rebuilding",
+          "refId": "A"
+        }
+      ],
+      "title": "Rebuilding (count)",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Projections behind their version: and waiting for a rebuild (alert EsProjectionOutdated)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 14,
+          "valueSize": 20
+        }
+      },
+      "pluginVersion": "7.1.3",
+      "targets": [
+        {
+          "expr": "count(<%= @es_metric_prefix %>_projection_outdated{job=\"$job\", instance=\"$instance\"} == 1) or vector(0)",
+          "legendFormat": "outdated",
+          "refId": "A"
+        }
+      ],
+      "title": "Outdated (count)",
+      "type": "stat"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Reader cycles per second by result, summed over projections",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(<%= @es_metric_prefix %>_projection_cycles_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reader cycles (all projections)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Batch retries per second by error, summed over projections",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (error) (rate(<%= @es_metric_prefix %>_projection_retry_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{error}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Batch retries (all projections)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Awaits per second by result, summed over projections",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(<%= @es_metric_prefix %>_projection_await_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Await (all projections)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Aggregate loads per second by op and result, summed over types",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (op, result) (rate(<%= @es_metric_prefix %>_aggregate_load_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{op}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Aggregate loads (all aggregates)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Projections",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Per projection: lag, rebuilding, outdated version:",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lag"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": <%= @es_projection_lag_warning %>
+                    },
+                    {
+                      "color": "red",
+                      "value": <%= @es_projection_lag_critical %>
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rebuilding"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "NO"
+                      },
+                      "1": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "YES"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outdated"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "NO"
+                      },
+                      "1": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "YES"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 16,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (projection) (<%= @es_metric_prefix %>_projection_lag_seconds{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (projection) (<%= @es_metric_prefix %>_projection_rebuilding{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "B"
+        },
+        {
+          "expr": "max by (projection) (<%= @es_metric_prefix %>_projection_outdated{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "C"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "instance": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value #A": "lag",
+              "Value #B": "rebuilding",
+              "Value #C": "outdated"
+            }
+          }
+        }
+      ],
+      "title": "Projections",
+      "type": "table"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Projection lag over time; a rebuild shows as the age of the unprocessed history",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "<%= @es_metric_prefix %>_projection_lag_seconds{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}",
+          "legendFormat": "{{projection}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Lag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "processed / idle / locked / retry / outdated",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (projection, result) (rate(<%= @es_metric_prefix %>_projection_cycles_total{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}[5m]))",
+          "legendFormat": "{{projection}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reader cycles by result",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Batch failures with a retry: the checkpoint stands until project/1 is fixed",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (projection, error) (rate(<%= @es_metric_prefix %>_projection_retry_total{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}[5m]))",
+          "legendFormat": "{{projection}} {{error}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Batch retries by error",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Events read by batches, per second",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (projection) (rate(<%= @es_metric_prefix %>_projection_events_total{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}[5m]))",
+          "legendFormat": "{{projection}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Events projected",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Duration of batches that projected events: a slow project/1 shows up here before it shows up in the lag",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "<%= @es_duration_axis_unit %>"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, projection) (rate(<%= @es_metric_prefix %>_projection_duration_<%= @es_duration_unit %>_bucket{job=\"$job\", instance=\"$instance\", projection=~\"$projection\", result=\"processed\"}[5m])))",
+          "legendFormat": "{{projection}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reader cycle duration p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Checkpoints with no projection in the tree: normally empty",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "id": 9,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "<%= @es_metric_prefix %>_checkpoint_orphan{job=\"$job\", instance=\"$instance\"} == 1",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "instance": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value": "orphan"
+            }
+          }
+        }
+      ],
+      "title": "Checkpoint orphans",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Await after a command",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "ok / timeout / rebuilding; a timeout is an accepted answer (202) to a command instead of a projected view",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (projection, result) (rate(<%= @es_metric_prefix %>_projection_await_total{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}[5m]))",
+          "legendFormat": "{{projection}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Await by result",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "How long a command waits for its own write to reach the read model",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "<%= @es_duration_axis_unit %>"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, projection) (rate(<%= @es_metric_prefix %>_projection_await_duration_<%= @es_duration_unit %>_bucket{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}[5m])))",
+          "legendFormat": "p95 {{projection}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, projection) (rate(<%= @es_metric_prefix %>_projection_await_duration_<%= @es_duration_unit %>_bucket{job=\"$job\", instance=\"$instance\", projection=~\"$projection\"}[5m])))",
+          "legendFormat": "p99 {{projection}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Await duration p95 / p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Waits that ran out of the await limit: every one of them is an accepted answer (202) instead of a projected view",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (projection) (rate(<%= @es_metric_prefix %>_projection_await_total{job=\"$job\", instance=\"$instance\", projection=~\"$projection\", result=\"timeout\"}[5m]))",
+          "legendFormat": "timeout {{projection}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (projection) (rate(<%= @es_metric_prefix %>_projection_await_total{job=\"$job\", instance=\"$instance\", projection=~\"$projection\", result=\"rebuilding\"}[5m]))",
+          "legendFormat": "rebuilding {{projection}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Await timeouts",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Aggregates",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Stream restores by type and result (ok / version_mismatch)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (type, op, result) (rate(<%= @es_metric_prefix %>_aggregate_load_total{job=\"$job\", instance=\"$instance\", type=~\"$type\"}[5m]))",
+          "legendFormat": "{{type}} {{op}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Aggregate loads",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Restore duration by type",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "<%= @es_duration_axis_unit %>"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, type) (rate(<%= @es_metric_prefix %>_aggregate_load_duration_<%= @es_duration_unit %>_bucket{job=\"$job\", instance=\"$instance\", type=~\"$type\"}[5m])))",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Aggregate load duration p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Events folded per restore: this is the number snapshots are decided by",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, type) (rate(<%= @es_metric_prefix %>_aggregate_fold_events_bucket{job=\"$job\", instance=\"$instance\", type=~\"$type\"}[5m])))",
+          "legendFormat": "p95 {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, type) (rate(<%= @es_metric_prefix %>_aggregate_fold_events_bucket{job=\"$job\", instance=\"$instance\", type=~\"$type\"}[5m])))",
+          "legendFormat": "p99 {{type}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Fold length p95 / p99",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 81
+      },
+      "id": 104,
+      "panels": [],
+      "title": "Key reservations",
+      "type": "row"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Key reservation outcomes per second: taken is a domain refusal, unresolved is a race the retry did not settle (EsKeyReservationUnresolved)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 82
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(<%= @es_metric_prefix %>_key_reservation_total{job=\"$job\", instance=\"$instance\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Key reservations by result",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Key reservation outcomes by scope over the dashboard range: unresolved should stay 0",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 82
+      },
+      "id": 22,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (scope, result) (increase(<%= @es_metric_prefix %>_key_reservation_total{job=\"$job\", instance=\"$instance\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value": "count"
+            }
+          }
+        }
+      ],
+      "title": "Key reservations by scope",
+      "type": "table"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [
+    "PromEx",
+    "Es",
+    "<%= @otp_app %>"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @prom_ex_metric_prefix %>_status_info, job)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus Job",
+        "multi": false,
+        "name": "job",
+        "options": [],
+        "query": "label_values(<%= @prom_ex_metric_prefix %>_status_info, job)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 6,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": null,
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @prom_ex_metric_prefix %>_status_info{job=\"$job\"}, instance)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Application Instance",
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(<%= @prom_ex_metric_prefix %>_status_info{job=\"$job\"}, instance)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @es_metric_prefix %>_projection_cycles_total{job=\"$job\", instance=\"$instance\"}, projection)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Projection",
+        "multi": true,
+        "name": "projection",
+        "options": [],
+        "query": "label_values(<%= @es_metric_prefix %>_projection_cycles_total{job=\"$job\", instance=\"$instance\"}, projection)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": "<%= @datasource_id %>",
+        "definition": "label_values(<%= @es_metric_prefix %>_aggregate_load_total{job=\"$job\", instance=\"$instance\"}, type)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Aggregate",
+        "multi": true,
+        "name": "type",
+        "options": [],
+        "query": "label_values(<%= @es_metric_prefix %>_aggregate_load_total{job=\"$job\", instance=\"$instance\"}, type)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "timezone": "",
+  "title": "<%= @title %>",
+  "uid": "<%= @uid %>",
+  "version": 1
+}
