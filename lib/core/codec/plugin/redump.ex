@@ -192,6 +192,9 @@ defmodule Core.Codec.Plugin.Redump do
     end
   end
 
+  # Wire множества — список: его пере-дамп поэлементный, как у `list:`.
+  defp field_spec({:set, inner}), do: field_spec({:list, inner})
+
   # ===== спека варианта и семейства =====
 
   @doc false

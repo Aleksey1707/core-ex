@@ -403,6 +403,17 @@ defmodule Core.Labels.FieldsTest do
       end
     end
 
+    test "видимое множество, и в списке тоже, — CompileError: только `:hidden`" do
+      assert_raise CompileError,
+                   ~r/SetField: множество в сведения не выходит — только `:hidden`: \[:city, :zip\]/,
+                   fn ->
+                     compile_struct(:SetField,
+                       fields: [city: [set: [prim: Core.LabelsFixture.Name]], zip: [list: [set: [type: :integer]]]],
+                       labels: [city: "Города", zip: "Индексы"]
+                     )
+                   end
+    end
+
     test "подписи map'ы у списка map'ов — CompileError: только `:hidden`" do
       assert_raise CompileError, ~r/MapListLabels: список map'ов в сведения не выходит — только `:hidden`/, fn ->
         compile_struct(:MapListLabels,

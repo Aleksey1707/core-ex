@@ -411,6 +411,8 @@ defmodule Core.Labels.Fields do
     map_lists = for {name, {:list, inner}} <- visible, map?(inner), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
+    ensure_none!(env, sets(visible), "множество в сведения не выходит — только `:hidden`")
+
     ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
 
     ensure_none!(
@@ -461,6 +463,13 @@ defmodule Core.Labels.Fields do
   defp map?({:type, :map}), do: true
   defp map?({:list, inner}), do: map?(inner)
   defp map?(_spec), do: false
+
+  # Сведения множество пока не строят (`Core.Labels.Details`): видимое поле упало бы при выдаче.
+  defp sets(visible), do: for({name, spec} <- visible, set?(spec), do: name)
+
+  defp set?({:set, _inner}), do: true
+  defp set?({:list, inner}), do: set?(inner)
+  defp set?(_spec), do: false
 
   defp unlabelled?({:entity, mod}), do: not labelled?(mod)
   defp unlabelled?({:list, inner}), do: unlabelled?(inner)

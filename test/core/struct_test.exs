@@ -8,7 +8,7 @@ defmodule Core.StructTest do
   describe "use Core.Struct" do
     test "defstruct — все поля, значение nil" do
       assert Map.from_struct(struct(Wide)) ==
-               Map.new(~w(name note status point shape tags matrix count title attrs)a, &{&1, nil})
+               Map.new(~w(name note status point shape tags matrix roles grid count title attrs)a, &{&1, nil})
     end
 
     test "struct собирается литералом, Prim лежит в поле сам" do
@@ -19,7 +19,7 @@ defmodule Core.StructTest do
 
     test "обязательны все поля, и optional: тоже" do
       assert_raise ArgumentError,
-                   ~r/\[:name, :note, :status, :point, :shape, :tags, :matrix, :count, :title, :attrs\]/,
+                   ~r/\[:name, :note, :status, :point, :shape, :tags, :matrix, :roles, :grid, :count, :title, :attrs\]/,
                    fn -> Code.eval_string("%Core.StructFixture.Wide{}") end
     end
   end
@@ -45,6 +45,8 @@ defmodule Core.StructTest do
                 shape: [union: StructFixture.Shape, default: %StructFixture.Point{x: 2}],
                 tags: [list: [prim: Name], default: [Name.new!("а"), Name.new!("б")]],
                 matrix: [list: [list: [type: :integer]], default: [[1], []]],
+                roles: [set: [prim: Name], default: MapSet.new([Name.new!("а")])],
+                grid: [set: [set: [type: :integer]], default: MapSet.new()],
                 count: [type: :pos_integer, default: 3 * 7],
                 title: [type: :string, default: "без названия"],
                 flag: [type: :boolean, default: false],
@@ -63,6 +65,8 @@ defmodule Core.StructTest do
                shape: %StructFixture.Point{x: 2},
                tags: [Name.new!("а"), Name.new!("б")],
                matrix: [[1], []],
+               roles: MapSet.new([Name.new!("а")]),
+               grid: MapSet.new(),
                count: 21,
                title: "без названия",
                flag: false,
@@ -160,6 +164,46 @@ defmodule Core.StructTest do
                    end
     end
 
+    test "set: — не MapSet и элемент не того вида — CompileError" do
+      assert_raise CompileError, ~r/^Struct: fields: roles: default: ожидается MapSet, получено \[\]$/, fn ->
+        define(fields: [roles: [set: [prim: Name], default: []]])
+      end
+
+      assert_raise CompileError,
+                   ~r/^Struct: fields: roles: default: ожидается Prim Core.StructFixture.Name, получено "а"$/,
+                   fn -> define(quote(do: [fields: [roles: [set: [prim: Name], default: MapSet.new(["а"])]]])) end
+
+      assert_raise CompileError,
+                   ~r/^Struct: fields: grid: default: ожидается integer, получено "1"$/,
+                   fn ->
+                     define(
+                       quote(
+                         do: [fields: [grid: [set: [set: [type: :integer]], default: MapSet.new([MapSet.new(["1"])])]]]
+                       )
+                     )
+                   end
+    end
+
+    test "set: — Prim personal: true в элементе — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: emails: default: значение Prim .*Email с personal: true или sensitive: /,
+                   fn ->
+                     Code.eval_string("""
+                     defmodule Core.StructTest.SecretSet do
+                       defmodule Email do
+                         use Core.Prim.String,
+                           name: "Почта",
+                           max_len: 50,
+                           personal: true
+                       end
+
+                       use Core.Struct,
+                         fields: [emails: [set: [prim: Email], default: MapSet.new([Email.new!("a@b.c")])]]
+                     end
+                     """)
+                   end
+    end
+
     test "default: nil без optional: true — CompileError" do
       assert_raise CompileError,
                    ~r/^Struct: fields: note: default: nil без optional: true — тип поля не допускает nil$/,
@@ -248,6 +292,11 @@ defmodule Core.StructTest do
     test "list: — список типа элемента, и вложенный тоже", %{fields: fields} do
       assert fields[:tags] == "[Core.StructFixture.Name.t()]"
       assert fields[:matrix] == "[[integer()]]"
+    end
+
+    test "set: — MapSet.t типа элемента, и вложенный тоже", %{fields: fields} do
+      assert fields[:roles] == "MapSet.t(Core.StructFixture.Name.t())"
+      assert fields[:grid] == "MapSet.t(MapSet.t(integer())) | nil"
     end
 
     test "type: — тип примитива", %{fields: fields} do

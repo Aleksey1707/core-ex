@@ -36,6 +36,7 @@ defmodule Core.Struct do
   | `entity: Mod` | struct-модуль | `Mod.t()` |
   | `union: Mod` | семейство вариантов | `struct()` |
   | `list: [<вид>]` | спека элемента | `[<тип элемента>]` |
+  | `set: [<вид>]` | спека элемента; значение — `MapSet` | `MapSet.t(<тип элемента>)` |
   | `type: :string` | строка | `String.t()` |
   | `type: :boolean` / `:integer` / `:pos_integer` / `:non_neg_integer` / `:map` | примитив | `boolean()` / … |
 
@@ -56,7 +57,8 @@ defmodule Core.Struct do
   вычисляется в теле модуля, и сборка проверяет вид результата: `prim:` — struct этого Prim, `enum:` —
   значение Enum, `type:` — значение типа, `entity:` — struct модуля, `union:` — struct, но не Prim
   (принадлежность семейству не проверяется: варианты объявляет кодек), `list:` — список,
-  поэлементно; `nil` — только при `optional: true`.
+  поэлементно, `set:` — `MapSet` (`MapSet.new()`, `MapSet.new([@admin])`), поэлементно; `nil` — только
+  при `optional: true`.
 
   > #### Значение вычисляется один раз {: .warning}
   >
@@ -221,6 +223,11 @@ defmodule Core.Struct do
     do: Enum.each(values, &check_value!(inner, &1, where))
 
   defp check_value!({:list, _inner}, value, where), do: mismatch!(where, "список", value)
+
+  defp check_value!({:set, inner}, %MapSet{} = values, where),
+    do: Enum.each(values, &check_value!(inner, &1, where))
+
+  defp check_value!({:set, _inner}, value, where), do: mismatch!(where, "MapSet", value)
 
   defp check_value!({:type, type}, value, where),
     do: expect!(FieldCheck.type_value?(type, value), where, "#{type}", value)

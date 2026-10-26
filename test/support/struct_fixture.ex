@@ -50,6 +50,8 @@ defmodule Core.StructFixture do
         shape: [union: Shape],
         tags: [list: [prim: Name]],
         matrix: [list: [list: [type: :integer]]],
+        roles: [set: [prim: Name]],
+        grid: [set: [set: [type: :integer]], optional: true],
         count: [type: :non_neg_integer],
         title: [type: :string],
         attrs: [type: :map, optional: true]

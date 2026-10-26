@@ -46,6 +46,10 @@ defmodule Core.Codec.PluginFieldsTest do
     defstruct [:status, :prev_status, :tag, :parent, :tags, :statuses, :grid, :count, :meta, :label, :rank, :flag]
   end
 
+  defmodule Team do
+    defstruct [:roles, :ranks, :tags, :statuses, :levels]
+  end
+
   defmodule Plugin do
     use Core.Codec.Plugin,
       fields: [
@@ -74,7 +78,13 @@ defmodule Core.Codec.PluginFieldsTest do
          meta: [type: :map, optional: true],
          label: [prim: Name, default: "без имени"],
          rank: [enum: Status, default: "new"],
-         flag: [type: :boolean, default: true]}
+         flag: [type: :boolean, default: true]},
+        {Team,
+         roles: [set: [prim: Name]],
+         ranks: [set: [type: :integer], default: []],
+         tags: [set: [entity: Tag]],
+         statuses: [set: [enum: Status], optional: true],
+         levels: [set: [set: [prim: Name]]]}
       ]
   end
 
@@ -327,6 +337,94 @@ defmodule Core.Codec.PluginFieldsTest do
     end
   end
 
+  describe "set:" do
+    setup do
+      team = %Team{
+        roles: MapSet.new([Name.new!("в"), Name.new!("а"), Name.new!("б")]),
+        ranks: MapSet.new(1..40),
+        tags: MapSet.new([%Tag{name: Name.new!("y")}, %Tag{name: Name.new!("x")}]),
+        statuses: MapSet.new([:new, :done]),
+        levels: MapSet.new([MapSet.new([Name.new!("б"), Name.new!("а")]), MapSet.new()])
+      }
+
+      %{team: team}
+    end
+
+    test "dump — список, отсортированный по wire элемента", %{team: team} do
+      assert Facade.dump(team) == %{
+               "roles" => ["а", "б", "в"],
+               "ranks" => Enum.to_list(1..40),
+               "tags" => [%{"name" => "x"}, %{"name" => "y"}],
+               "statuses" => [:done, :new],
+               "levels" => [[], ["а", "б"]]
+             }
+    end
+
+    test "dump не зависит от порядка обхода MapSet" do
+      ranks = MapSet.new(1..40)
+      refute MapSet.to_list(ranks) == Enum.to_list(1..40)
+
+      team = %Team{roles: MapSet.new(), ranks: ranks, tags: MapSet.new(), statuses: nil, levels: MapSet.new()}
+
+      assert %{"ranks" => wire} = Facade.dump(team)
+      assert wire == Enum.to_list(1..40)
+    end
+
+    test "round-trip через фасад, enum из строки — cast", %{team: team} do
+      assert Facade.load(Team, Facade.dump(team)) == {:ok, team}
+
+      wire = %{Facade.dump(team) | "statuses" => ["new", "done"]}
+      assert Facade.load(Team, wire) == {:ok, team}
+
+      team = %{team | statuses: nil}
+      assert Facade.load(Team, Facade.dump(team)) == {:ok, team}
+    end
+
+    test "load схлопывает повторы и принимает любой порядок", %{team: team} do
+      wire = %{Facade.dump(team) | "roles" => ["в", "а", "б", "а"], "ranks" => [2, 1, 2]}
+
+      assert {:ok, %Team{roles: roles, ranks: ranks}} = Facade.load(Team, wire)
+      assert roles == team.roles
+      assert ranks == MapSet.new([1, 2])
+    end
+
+    test "default: [] — при отсутствии ключа и при nil", %{team: team} do
+      empty = MapSet.new()
+
+      assert {:ok, %Team{ranks: ^empty}} = Facade.load(Team, Map.delete(Facade.dump(team), "ranks"))
+      assert {:ok, %Team{ranks: ^empty}} = Facade.load(Team, %{Facade.dump(team) | "ranks" => nil})
+    end
+
+    test "не список — ошибка загрузки поля", %{team: team} do
+      assert {:error, %Error{module: Team, ns: :codec, code: :invalid_value, detail: %{field: :roles}}} =
+               Facade.load(Team, Map.delete(Facade.dump(team), "roles"))
+
+      assert {:error, %Error{module: Team, code: :invalid_value, detail: %{field: :levels, index: 0}}} =
+               Facade.load(Team, %{Facade.dump(team) | "levels" => [1]})
+    end
+
+    test "невалидный элемент — ошибка с индексом элемента, причина — ошибка элемента", %{team: team} do
+      assert {:error, %Error{module: Team, code: :invalid_value, detail: %{field: :roles, index: 1}} = error} =
+               Facade.load(Team, %{Facade.dump(team) | "roles" => ["а", ""]})
+
+      assert %Error{module: Name} = Error.root(error)
+
+      assert {:error, %Error{detail: %{field: :levels, index: 0}} = error} =
+               Facade.load(Team, %{Facade.dump(team) | "levels" => [["а", ""], []]})
+
+      assert [%{field: :levels, index: 0}, %{field: :levels, index: 1}, _name] = Enum.map(error, & &1.detail)
+
+      assert {:error, %Error{detail: %{field: :statuses, index: 0}, parent: %Error{module: Status}}} =
+               Facade.load(Team, %{Facade.dump(team) | "statuses" => ["lost"]})
+    end
+
+    test "значение не MapSet — FunctionClauseError", %{team: team} do
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{team | roles: [Name.new!("а")]}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{team | roles: nil}) end
+      assert_raise FunctionClauseError, fn -> Facade.dump(%{team | statuses: [:new]}) end
+    end
+  end
+
   describe "смешанный плагин" do
     test "типы по полям и ручные клаузы — round-trip через фасад" do
       label = %Label{name: Name.new!("x")}
@@ -481,6 +579,41 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
+    test "set: и вид его элемента расходятся со структурой по полям — CompileError" do
+      message =
+        ~r/\.T: a: вид поля расходится со структурой — в структуре \[set: \[prim: .*\.Name\]\], в плагине \[list:/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:StructSetList, [a: [list: [prim: Name]]], struct_fields: [a: [set: [prim: Name]]])
+      end
+
+      message =
+        ~r/\.T: a: вид поля расходится .* в структуре \[set: \[prim: .*\.Name\]\], в плагине \[set: \[prim: .*\.ID\]\]/
+
+      assert_raise CompileError, message, fn ->
+        compile_plugin(:StructSetItem, [a: [set: [prim: Core.Codec.PluginFieldsTest.ID]]],
+          struct_fields: [a: [set: [prim: Name]]]
+        )
+      end
+    end
+
+    test "set: совпадает со структурой по полям — собирается" do
+      assert {{:module, _plugin, _bytecode, _result}, []} =
+               compile_plugin(:StructSet, [a: [set: [prim: Name], default: []]],
+                 struct_fields: [a: [set: [prim: Name]]]
+               )
+    end
+
+    test "optional: внутри set: и не keyword-спека элемента — CompileError" do
+      assert_raise CompileError, ~r/\.T: a: optional: задаётся у самого поля, не в set:/, fn ->
+        compile_plugin(:SetOptional, a: [set: [prim: Name, optional: true]], b: [prim: Name])
+      end
+
+      assert_raise CompileError, ~r/\.T: a: set: ожидается keyword-спека элемента, получено/, fn ->
+        compile_plugin(:SetNotKeyword, a: [set: Name], b: [prim: Name])
+      end
+    end
+
     test "optional: расходится со структурой по полям — CompileError в обе стороны" do
       message =
         ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name, optional: true\], в плагине \[prim: .*\.Name\]/
@@ -593,9 +726,11 @@ defmodule Core.Codec.PluginFieldsTest do
     end
 
     test "два вида в поле — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
-        compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
-      end
+      assert_raise CompileError,
+                   ~r/\.T: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/set:\/type:/,
+                   fn ->
+                     compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
+                   end
     end
 
     test "optional: внутри list: — CompileError" do
@@ -613,6 +748,12 @@ defmodule Core.Codec.PluginFieldsTest do
     test "default: enum: вне значений enum — CompileError" do
       assert_raise CompileError, ~r/\.T: a: default: "nwe" не загружается .*Status/, fn ->
         compile_plugin(:DefaultEnum, a: [enum: Core.Codec.PluginFieldsTest.Status, default: "nwe"], b: [prim: Name])
+      end
+    end
+
+    test "default: у set: не wire-список — CompileError" do
+      assert_raise CompileError, ~r/\.T: a: default: у set: — wire-литерал списка, получено MapSet.new\(\[\]\)/, fn ->
+        compile_plugin(:DefaultSet, a: [set: [prim: Name], default: MapSet.new()], b: [prim: Name])
       end
     end
 

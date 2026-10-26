@@ -303,6 +303,49 @@
   без `default:` — обязательные ключи: литерал `%Address{}` без них перестаёт собираться. Плагин по
   полям такой сущности не меняется: он сверяет со структурой ещё и вид полей.
 
+- **Спека полей: поле-множество `set: <спека элемента>`** (ADR-0091). Значение «набор без
+  повторов» объявляется видом спеки полей, а не ручным `defstruct` с ручным кодеком. Элемент — любой
+  вид, как у элемента `list:`, в том числе вложенный `set:`.
+  - Структура по полям: значение поля — `MapSet`, в `@type t` — `MapSet.t(<тип элемента>)`
+    (`| nil` при `optional: true`). `default:` — выражение `MapSet`, проверяется поэлементно по виду:
+    `default: MapSet.new()`, `default: MapSet.new([@admin])`; список вместо `MapSet` и элемент не
+    того вида — `CompileError` `Struct: fields: <поле>: default: …`.
+  - Codec-плагин по полям: wire — JSON-список, отсортированный по wire элемента (порядок термов):
+    одно значение — один wire, независимо от порядка обхода `MapSet`. `load` собирает `MapSet`,
+    повторы и порядок в wire не важны. Не список — `{:error, %Error{code: :invalid_value, ns:
+    :codec}}` с `detail: %{field: поле}`; невалидный элемент — такая же ошибка с `detail: %{field:
+    поле, index: индекс элемента в wire}`, ошибка элемента — её причина (`parent`). `default: []` —
+    wire-литерал отсутствующего ключа; не список (`default: %MapSet{}`) — `CompileError`. Голова
+    `dump/2` закрывает поле паттерном `%MapSet{}`.
+  - Сверка плагина со структурой по полям учитывает `set:` и вид его элемента: `set:` против
+    `list:` или другой вид элемента — `CompileError` «вид поля расходится со структурой».
+  - Нагрузка события: персональный Prim элементом `set:` без `subject:` — `CompileError`, как у
+    `list: [prim:]`.
+  - Подписи: видимое поле `set:` (и `list:` множеств) — `CompileError` «множество в сведения не
+    выходит — только `:hidden`».
+
+  Было:
+
+  ```elixir
+  defstruct [:roles]
+  @type t :: %__MODULE__{roles: MapSet.t(Role.ID.t())}
+
+  # в ручном кодеке
+  def dump(%Access{roles: roles}, codec), do: %{"roles" => Enum.map(roles, &codec.dump/1)}
+  ```
+
+  стало:
+
+  ```elixir
+  use Core.Struct, fields: [roles: [set: [prim: Role.ID]]]
+
+  # в Codec-плагине
+  use Core.Codec.Plugin, fields: [{Access, roles: [set: [prim: Role.ID]]}]
+  ```
+
+  Ручной кодек, писавший список в порядке обхода `MapSet`, плагин читает как есть; новый `dump`
+  пишет отсортированный список — golden-фикстура события с таким полем сверяется заново.
+
 - **Дашборды подсистем библиотеки поставляет core: `mix core.dashboards.export`** (ADR-0089).
   Дашборд outbox на метриках `Core.Outbox.PromEx` лежит в библиотеке шаблоном
   `priv/dashboards/outbox.json.eex`; задача рендерит его через `PromEx.DashboardRenderer` в каталог

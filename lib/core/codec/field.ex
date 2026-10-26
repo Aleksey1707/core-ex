@@ -5,7 +5,7 @@ defmodule Core.Codec.Field do
   Спеку говорят Codec-плагин по полям (`use Core.Codec.Plugin, fields:`), варианты семейства,
   нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged` и подписи
   (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Поле объявляется keyword-спекой с
-  ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`) и ключами
+  ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `set:` / `type:`) и ключами
   `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у нагрузки
   (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у неё —
   выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле `Core.Struct`
@@ -19,10 +19,11 @@ defmodule Core.Codec.Field do
   alias Core.Prim
 
   @label "Codec.Plugin"
-  @kind_keys ~w(prim enum entity union list type)a
+  @kind_keys ~w(prim enum entity union list set type)a
   @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
   @type_values FieldCheck.type_values()
+  @collection_kinds ~w(list set)a
 
   @enforce_keys ~w(name spec optional? wire default subject)a
   defstruct @enforce_keys
@@ -34,6 +35,7 @@ defmodule Core.Codec.Field do
           | {:entity, module()}
           | {:union, module()}
           | {:list, spec()}
+          | {:set, spec()}
           | {:type, atom()}
 
   @typedoc """
@@ -213,7 +215,7 @@ defmodule Core.Codec.Field do
   defp shape(%__MODULE__{spec: spec, optional?: false}), do: spec_shape(spec)
   defp shape(%__MODULE__{spec: spec, optional?: true}), do: spec_shape(spec) ++ [optional: true]
 
-  defp spec_shape({:list, inner}), do: [list: spec_shape(inner)]
+  defp spec_shape({kind, inner}) when kind in @collection_kinds, do: [{kind, spec_shape(inner)}]
   defp spec_shape({kind, value}), do: [{kind, value}]
 
   defp spec_fields!(spec, mode, where) do
@@ -309,18 +311,18 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp kind_spec!(:list, inner, where) do
+  defp kind_spec!(kind, inner, where) when kind in @collection_kinds do
     if not Keyword.keyword?(inner) do
-      Helper.Opts.reject!(where, "list: ожидается keyword-спека элемента, получено #{inspect(inner)}")
+      Helper.Opts.reject!(where, "#{kind}: ожидается keyword-спека элемента, получено #{inspect(inner)}")
     end
 
     if Keyword.has_key?(inner, :optional) do
-      Helper.Opts.reject!(where, "optional: задаётся у самого поля, не в list:")
+      Helper.Opts.reject!(where, "optional: задаётся у самого поля, не в #{kind}:")
     end
 
     case Keyword.keys(inner) -- @kind_keys do
-      [] -> {:list, spec!(inner, where)}
-      unknown -> Helper.Opts.reject!(where, "list: неизвестные ключи #{inspect(unknown)}")
+      [] -> {kind, spec!(inner, where)}
+      unknown -> Helper.Opts.reject!(where, "#{kind}: неизвестные ключи #{inspect(unknown)}")
     end
   end
 
@@ -400,6 +402,10 @@ defmodule Core.Codec.Field do
     end
   end
 
+  # `default:` плагина — wire, а не значение поля: `%MapSet{}` из структуры по полям загрузка не прочла бы.
+  defp check_default!({:set, _inner}, default, where) when not is_list(default),
+    do: Helper.Opts.reject!(where, "default: у set: — wire-литерал списка, получено #{inspect(default)}")
+
   defp check_default!(_spec, _default, _where), do: :ok
 
   # ===== субъекты =====
@@ -427,6 +433,7 @@ defmodule Core.Codec.Field do
   defp spec_type({:union, _family}), do: quote(do: struct())
   defp spec_type({kind, mod}) when kind in ~w(prim enum entity)a, do: quote(do: unquote(mod).t())
   defp spec_type({:list, inner}), do: quote(do: [unquote(spec_type(inner))])
+  defp spec_type({:set, inner}), do: quote(do: MapSet.t(unquote(spec_type(inner))))
   defp spec_type({:type, :string}), do: quote(do: String.t())
   defp spec_type({:type, scalar}), do: quote(do: unquote(scalar)())
 end

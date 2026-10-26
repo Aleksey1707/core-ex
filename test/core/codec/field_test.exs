@@ -87,9 +87,11 @@ defmodule Core.Codec.FieldTest do
 
   describe "kind-ключ" do
     test "ровно один" do
-      assert_raise CompileError, ~r/W: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/type:/, fn ->
-        Field.normalize!([a: [prim: Name, enum: Status]], :plugin, @where)
-      end
+      assert_raise CompileError,
+                   ~r/W: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/set:\/type:/,
+                   fn ->
+                     Field.normalize!([a: [prim: Name, enum: Status]], :plugin, @where)
+                   end
     end
 
     test "неизвестный ключ" do

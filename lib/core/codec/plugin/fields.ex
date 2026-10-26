@@ -13,10 +13,16 @@ defmodule Core.Codec.Plugin.Fields do
   | `entity: Mod` | `codec.dump/1` | `codec.load(Mod, raw)` |
   | `union: Family` | `codec.dump/1` | `codec.load(Family, raw)` |
   | `list: спека` | поэлементно по спеке | поэлементно по спеке; не список — ошибка |
+  | `set: спека` | список, отсортированный по wire | `MapSet` поэлементно; повторы схлопываются, не список — ошибка |
   | `type: скаляр` | как есть | как есть |
 
+  Множество (`set:`) даёт один wire на одно значение: порядок списка — порядок термов wire
+  элементов, а не обход `MapSet` (ADR-0091). Ошибку элемента множества загрузка оборачивает
+  ошибкой поля с `detail: %{field: поле, index: индекс элемента в wire}`.
+
   `default:` — wire-литерал, который загрузка подставляет вместо отсутствующего ключа или
-  `nil` и грузит как записанный. Голова `dump/2` закрывает Prim и сущность поля паттерном, а
+  `nil` и грузит как записанный (у `set:` — `[]`). Голова `dump/2` закрывает Prim, сущность и
+  множество (`%MapSet{}`) поля паттерном, а
   вариант семейства (`union:`) — только `is_struct`: варианты знает плагин семейства, а не этот
   (ADR-0058). Загрузка собирает struct литералом после успешной загрузки
   всех полей; первая ошибка поля — итог, лишние ключи wire игнорируются.
@@ -33,6 +39,7 @@ defmodule Core.Codec.Plugin.Fields do
 
   @facade_kinds ~w(prim entity union)a
   @pattern_kinds ~w(prim entity)a
+  @collection_kinds ~w(list set)a
 
   # ===== dump =====
 
@@ -105,12 +112,16 @@ defmodule Core.Codec.Plugin.Fields do
   def dump_pattern(%Field{name: name, spec: {kind, mod}, optional?: false}) when kind in @pattern_kinds,
     do: {name, quote(generated: true, do: %unquote(mod){} = unquote(var(name)))}
 
+  def dump_pattern(%Field{name: name, spec: {:set, _inner}, optional?: false}),
+    do: {name, quote(generated: true, do: %MapSet{} = unquote(var(name)))}
+
   def dump_pattern(%Field{name: name}), do: {name, var(name)}
 
   @doc false
   @spec field_guard(Field.t()) :: [Macro.t()]
 
   def field_guard(%Field{spec: {kind, _mod}, optional?: false}) when kind in @pattern_kinds, do: []
+  def field_guard(%Field{spec: {:set, _inner}, optional?: false}), do: []
   def field_guard(%Field{name: name, spec: spec, optional?: false}), do: [value_guard(spec, var(name))]
 
   def field_guard(%Field{name: name, spec: spec, optional?: true}) do
@@ -131,6 +142,7 @@ defmodule Core.Codec.Plugin.Fields do
     do: quote(generated: true, do: is_atom(unquote(value)) and not is_nil(unquote(value)))
 
   def value_guard({:list, _inner}, value), do: quote(generated: true, do: is_list(unquote(value)))
+  def value_guard({:set, _inner}, value), do: quote(generated: true, do: is_struct(unquote(value), MapSet))
   def value_guard({:type, :string}, value), do: quote(generated: true, do: is_binary(unquote(value)))
   def value_guard({:type, :boolean}, value), do: quote(generated: true, do: is_boolean(unquote(value)))
   def value_guard({:type, :integer}, value), do: quote(generated: true, do: is_integer(unquote(value)))
@@ -172,8 +184,14 @@ defmodule Core.Codec.Plugin.Fields do
     )
   end
 
+  # Порядок обхода `MapSet` зависит от числа элементов и не совпадает с порядком их wire: одно
+  # значение давало бы разный список (ADR-0091).
+  defp dump_expr({:set, inner}, value),
+    do: quote(generated: true, do: Enum.sort(unquote(dump_expr({:list, inner}, value))))
+
   defp as_is?({kind, _}) when kind in ~w(enum type)a, do: true
   defp as_is?({:list, inner}), do: as_is?(inner)
+  defp as_is?({:set, _inner}), do: false
   defp as_is?({_kind, _mod}), do: false
 
   # ===== load =====
@@ -252,15 +270,20 @@ defmodule Core.Codec.Plugin.Fields do
   def load_value(_type, _name, {:enum, mod}, raw, false),
     do: quote(generated: true, do: unquote(mod).cast(unquote(raw)))
 
-  def load_value(type, name, {:list, inner}, raw, false) do
+  def load_value(type, name, {kind, inner}, raw, false) when kind in @collection_kinds do
     item = item_var()
 
     quote generated: true do
-      Core.Codec.Plugin.Fields.load_list(unquote(type), unquote(name), unquote(raw), fn unquote(item) ->
+      Core.Codec.Plugin.Fields.unquote(loader(kind))(unquote(type), unquote(name), unquote(raw), fn unquote(item) ->
         unquote(load_value(type, name, inner, item, false))
       end)
     end
   end
+
+  # ---
+
+  defp loader(:list), do: :load_list
+  defp loader(:set), do: :load_set
 
   # ===== wire-ключ =====
 
@@ -286,6 +309,41 @@ defmodule Core.Codec.Plugin.Fields do
        ns: :codec,
        message: "#{inspect(type)}: поле #{name} — ожидается список"
      )}
+  end
+
+  # ===== загрузка множества =====
+
+  @doc false
+  @spec load_set(module(), atom(), term(), (term() -> Result.t())) :: Result.t(MapSet.t())
+
+  def load_set(type, name, raw, fun) when is_list(raw) and is_function(fun, 1) do
+    raw
+    |> Enum.with_index()
+    |> Result.traverse(fn {item, index} -> Result.map_error(fun.(item), &item_error(type, name, index, &1)) end)
+    |> Result.map(&MapSet.new/1)
+  end
+
+  def load_set(type, name, _raw, _fun) when is_atom(type) and is_atom(name) do
+    {:error,
+     Error.domain(type,
+       code: :invalid_value,
+       ns: :codec,
+       message: "#{inspect(type)}: поле #{name} — ожидается список элементов множества",
+       detail: %{field: name}
+     )}
+  end
+
+  # ---
+
+  # Путь — индекс в wire: по нему элемент находится в записи, а у `MapSet` порядка нет.
+  defp item_error(type, name, index, %Error{} = reason) do
+    Error.domain(type,
+      code: :invalid_value,
+      ns: :codec,
+      message: "#{inspect(type)}: поле #{name}[#{index}] — элемент не загружается",
+      detail: %{field: name, index: index},
+      parent: reason
+    )
   end
 
   # ===== переменные =====

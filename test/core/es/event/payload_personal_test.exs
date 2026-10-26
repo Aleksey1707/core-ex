@@ -66,6 +66,12 @@ defmodule Core.Es.Event.PayloadPersonalTest do
       end
     end
 
+    test "персональный Prim элементом set: без subject:" do
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phones: персональный Prim .*Personal без subject:/, fn ->
+        payload(:BareSet, phones: [set: [prim: PrimFixture.Personal]])
+      end
+    end
+
     test "персональный композит без subject:" do
       assert_raise CompileError,
                    ~r/^Es.Event.Payload: fields: phone: персональный Prim .*PersonalRef без subject:/,

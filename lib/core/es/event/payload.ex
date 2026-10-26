@@ -170,7 +170,7 @@ defmodule Core.Es.Event.Payload do
   defp check_subject_optional!(_optional?, _subject_optional?, _subject, _where), do: :ok
 
   defp personal_prim({:prim, mod}), do: if(mod.__domain_personal__(), do: mod)
-  defp personal_prim({:list, inner}), do: personal_prim(inner)
+  defp personal_prim({kind, inner}) when kind in ~w(list set)a, do: personal_prim(inner)
   defp personal_prim(_spec), do: nil
 
   # ===== Prim субъекта =====
