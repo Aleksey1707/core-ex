@@ -90,7 +90,9 @@ defmodule Core.StructTest do
         Code.eval_string("""
         defmodule Core.StructTest.NestedDefault do
           defmodule Sku do
-            use Core.Prim.String, name: "Артикул", max_len: 10
+            use Core.Prim.String,
+              name: "Артикул",
+              max_len: 10
           end
 
           use Core.Struct, fields: [sku: [prim: Sku, default: Sku.new!("A1")]]
@@ -172,7 +174,10 @@ defmodule Core.StructTest do
                        Code.eval_string("""
                        defmodule Core.StructTest.Secret#{System.unique_integer([:positive])} do
                          defmodule Email do
-                           use Core.Prim.String, name: "Почта", max_len: 50, #{flag}
+                           use Core.Prim.String,
+                             name: "Почта",
+                             max_len: 50,
+                             #{flag}
                          end
 
                          use Core.Struct, fields: [email: [prim: Email, default: Email.new!("a@b.c")]]
@@ -189,7 +194,10 @@ defmodule Core.StructTest do
                      Code.eval_string("""
                      defmodule Core.StructTest.SecretBox do
                        defmodule Email do
-                         use Core.Prim.String, name: "Почта", max_len: 50, personal: true
+                         use Core.Prim.String,
+                           name: "Почта",
+                           max_len: 50,
+                           personal: true
                        end
 
                        defmodule Box do
@@ -207,7 +215,10 @@ defmodule Core.StructTest do
         Code.eval_string("""
         defmodule Core.StructTest.PersonalNil do
           defmodule Email do
-            use Core.Prim.String, name: "Почта", max_len: 50, personal: true
+            use Core.Prim.String,
+              name: "Почта",
+              max_len: 50,
+              personal: true
           end
 
           use Core.Struct, fields: [email: [prim: Email, optional: true, default: nil]]

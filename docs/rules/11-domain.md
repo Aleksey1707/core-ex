@@ -699,7 +699,7 @@ end
   объявляются независимо и не сверяются. Выражение — литерал, чистая функция Prim
   (`Currency.new!("RUB")`) или атрибут модуля выше `use` — вычисляется
   один раз при сборке модуля, и все struct получают одно значение: `now!` / `generate` в
-  `default:` — MUST NOT, сборка этого не ловит
+  `default:` — MUST NOT
 - `default:` не того вида, `default: nil` без `optional: true` и значение, в котором есть Prim
   `personal: true` или `sensitive:` (значение ушло бы в исходник и байткод), — `CompileError`
   `Struct: fields: <поле>: …`; остальные отказы — перечень в `@moduledoc` `Core.Struct`
@@ -713,7 +713,8 @@ end
 | вложенная сущность, вариант семейства с плагином по полям | «Плагин по полям (`fields:`)» |
 | подписи `use Core.Labels.Fields` | «Подписи полей (`Core.Labels.Fields`)» |
 
-Состояние state-stored агрегата структурой по полям сборка дополнительно не проверяет.
+Состояние state-stored агрегата структурой по полям MAY объявлять `optional:` и `default:` у любого
+поля.
 
 ```elixir
 # плохо — значение по умолчанию вычислено при сборке: у всех struct один и тот же момент
@@ -852,16 +853,16 @@ defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
   use Core.Struct,
     fields: [
       name: [prim: MyApp.Domain.<BC>.Account.Name],
-      by: [prim: MyApp.Domain.<BC>.Values.UserID],
-      at: [prim: Core.Es.Event.At]
+      at: [prim: Core.Es.Event.At],
+      by: [prim: MyApp.Domain.<BC>.Values.UserID]
     ]
 end
 
-# ручной struct — `by` и `at` перечислены в `@enforce_keys`
+# ручной struct — `at` и `by` перечислены в `@enforce_keys`
 defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
   use Core.Es.Cmd
 
-  @enforce_keys ~w(name by at)a
+  @enforce_keys ~w(name at by)a
   defstruct @enforce_keys
 end
 ```

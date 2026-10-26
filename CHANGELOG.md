@@ -252,13 +252,13 @@
   ```elixir
   use Core.Es.Cmd
 
-  @enforce_keys ~w(name note by at)a
+  @enforce_keys ~w(name note at by)a
   defstruct @enforce_keys
   @type t :: %__MODULE__{
           name: Name.t(),
           note: Note.t() | nil,
-          by: UserID.t(),
-          at: Core.Es.Event.At.t()
+          at: Core.Es.Event.At.t(),
+          by: UserID.t()
         }
   ```
 
@@ -271,8 +271,8 @@
     fields: [
       name: [prim: Name],
       note: [prim: Note, optional: true],
-      by: [prim: UserID],
-      at: [prim: Core.Es.Event.At]
+      at: [prim: Core.Es.Event.At],
+      by: [prim: UserID]
     ]
   ```
 

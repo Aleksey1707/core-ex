@@ -10,10 +10,12 @@
 
 - [x] `Core.Helper.Opts` пропускает выражение в `default:` поля внутри литерального `fields:`; остальная
       `fields:` по-прежнему обязана быть литералом.
-- [x] Нормализатор режима `:struct` держит AST `default:`; у плагина `default:` остаётся wire-литералом.
+- [x] `Core.Struct` снимает AST `default:` со спеки до нормализатора режима `:struct`; у плагина `default:`
+      остаётся wire-литералом.
 - [x] `@enforce_keys` — поля без `default:`; `defstruct` получает вычисленное значение.
 - [x] Валидатор в теле (`@doc false` у `Core.Struct`) проверяет вид результата: struct своего Prim, значение
-      Enum, значение `type:`, struct `entity:` / вариант `union:`, `list:` поэлементно, `nil` — только при
+      Enum, значение `type:`, struct `entity:`, struct не-Prim у `union:` (принадлежность семейству не
+      проверяется — у семейства нет списка вариантов), `list:` поэлементно, `nil` — только при
       `optional: true`.
 - [x] `CompileError` на `default:` не того вида, на `default: nil` без `optional: true`, на `default:` у поля с
       Prim `personal: true` или `sensitive:`.

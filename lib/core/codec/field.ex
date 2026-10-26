@@ -8,7 +8,8 @@ defmodule Core.Codec.Field do
   ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `type:`) и ключами
   `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у нагрузки
   (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у неё —
-  выражение значения поля, а не wire-литерал (ADR-0090).
+  выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле `Core.Struct`
+  (ADR-0090).
 
   Модуль внутренний для библиотеки.
   """
@@ -36,8 +37,8 @@ defmodule Core.Codec.Field do
           | {:type, atom()}
 
   @typedoc """
-  Значение `default:`: нет, wire-литерал у плагина или, у структуры, AST выражения до вычисления в
-  теле модуля и значение поля после него.
+  Значение `default:`: нет, wire-литерал у плагина или, у структуры, значение поля, вычисленное в
+  теле модуля (`Core.Struct`).
   """
   @type default :: :none | {:default, term()}
 
@@ -51,7 +52,7 @@ defmodule Core.Codec.Field do
   Режим нормализации: `:plugin` — плагин с загрузкой (`default:` разрешён), `:dump_only` — плагин
   при `loadable: false`, `:payload` — нагрузка события (`subject:` разрешён, `default:` и wire-ключ на
   `$` — нет), `:labels` — подписи, `:struct` — структура по полям (`wire:` и `subject:` — нет,
-  `default:` — выражение значения поля).
+  `default:` в спеку не приходит).
   """
   @type mode :: :plugin | :dump_only | :payload | :labels | :struct
 
@@ -138,6 +139,12 @@ defmodule Core.Codec.Field do
     end
   end
 
+  @doc false
+  @spec struct_fields(module()) :: [t()] | nil
+
+  def struct_fields(module) when is_atom(module),
+    do: if(Core.Helper.Module.exports?(module, :__struct_fields__, 0), do: module.__struct_fields__())
+
   # ---
 
   defp pair!({type, spec}) when is_atom(type) and not is_nil(type), do: {type, spec}
@@ -180,19 +187,24 @@ defmodule Core.Codec.Field do
   # Структура по полям объявляет вид каждого поля сама (ADR-0090): ключей мало, иначе плагин
   # молча грузил бы в поле значение другого Prim или `nil` в поле без `optional: true`.
   defp check_struct_fields!(type, fields, where) do
-    if Core.Helper.Module.exports?(type, :__struct_fields__, 0) do
-      declared = Map.new(type.__struct_fields__(), fn %__MODULE__{name: name} = field -> {name, shape(field)} end)
+    case struct_fields(type) do
+      nil -> :ok
+      declared -> check_shapes!(declared, fields, where)
+    end
+  end
 
-      for %__MODULE__{name: name} = field <- fields,
-          struct_shape = Map.fetch!(declared, name),
-          plugin_shape = shape(field),
-          struct_shape != plugin_shape do
-        Helper.Opts.reject!(
-          "#{where}: #{name}",
-          "вид поля расходится со структурой — в структуре #{inspect(struct_shape)}, " <>
-            "в плагине #{inspect(plugin_shape)}"
-        )
-      end
+  defp check_shapes!(declared, fields, where) do
+    declared = Map.new(declared, fn %__MODULE__{name: name} = field -> {name, shape(field)} end)
+
+    for %__MODULE__{name: name} = field <- fields,
+        struct_shape = Map.fetch!(declared, name),
+        plugin_shape = shape(field),
+        struct_shape != plugin_shape do
+      Helper.Opts.reject!(
+        "#{where}: #{name}",
+        "вид поля расходится со структурой — в структуре #{inspect(struct_shape)}, " <>
+          "в плагине #{inspect(plugin_shape)}"
+      )
     end
 
     :ok
@@ -236,7 +248,7 @@ defmodule Core.Codec.Field do
       spec: spec,
       optional?: optional?,
       wire: wire!(name, opts, where),
-      default: default!(opts, spec, optional?, mode, where),
+      default: default!(opts, spec, optional?, mode != :dump_only, where),
       subject: subject!(opts, where)
     }
   end
@@ -333,15 +345,8 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp default!(opts, _spec, _optional?, :struct, _where) do
-    case Keyword.fetch(opts, :default) do
-      :error -> :none
-      {:ok, ast} -> {:default, ast}
-    end
-  end
-
-  defp default!(opts, spec, optional?, mode, where) do
-    case {Keyword.fetch(opts, :default), optional?, mode != :dump_only} do
+  defp default!(opts, spec, optional?, loadable?, where) do
+    case {Keyword.fetch(opts, :default), optional?, loadable?} do
       {:error, _optional?, _loadable?} ->
         :none
 

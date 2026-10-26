@@ -1,7 +1,7 @@
 defmodule Core.Helper.FieldCheck do
   @moduledoc """
   Элементарные compile-time проверки модуля в спеке поля: модуль собран, является Prim,
-  является `Core.Enum`; повторы в декларации; общий набор значений `type:`.
+  является `Core.Enum`; повторы в декларации; общий набор значений `type:` и проверка значения по нему.
 
   Общие для деклараций полей (`Core.View`, спека полей Codec-плагина, подписи): специфичные
   проверки остаются у каждой декларации. `where` — префикс текста ошибки, по которому видно
@@ -12,20 +12,27 @@ defmodule Core.Helper.FieldCheck do
   alias Core.Helper.Opts
   alias Core.Prim
 
+  @value Macro.var(:value, __MODULE__)
+  @type_checks [
+    string: quote(do: is_binary(unquote(@value))),
+    boolean: quote(do: is_boolean(unquote(@value))),
+    integer: quote(do: is_integer(unquote(@value))),
+    pos_integer: quote(do: is_integer(unquote(@value)) and unquote(@value) > 0),
+    non_neg_integer: quote(do: is_integer(unquote(@value)) and unquote(@value) >= 0),
+    map: quote(do: is_map(unquote(@value)) and not is_struct(unquote(@value)))
+  ]
+
   @doc "Значения `type:`, общие для деклараций полей: скаляры и свободная map."
   @spec type_values() :: [atom()]
 
-  def type_values, do: ~w(string boolean integer pos_integer non_neg_integer map)a
+  def type_values, do: unquote(Keyword.keys(@type_checks))
 
-  @doc "Значение `value` — значение типа `type` из `type_values/0`; `:map` — map, но не struct."
+  @doc "Проверить, что `value` — значение типа `type` из `type_values/0`; `:map` — map, но не struct."
   @spec type_value?(atom(), term()) :: boolean()
 
-  def type_value?(:string, value), do: is_binary(value)
-  def type_value?(:boolean, value), do: is_boolean(value)
-  def type_value?(:integer, value), do: is_integer(value)
-  def type_value?(:pos_integer, value), do: is_integer(value) and value > 0
-  def type_value?(:non_neg_integer, value), do: is_integer(value) and value >= 0
-  def type_value?(:map, value), do: is_map(value) and not is_struct(value)
+  for {type, check} <- @type_checks do
+    def type_value?(unquote(type), unquote(@value)), do: unquote(check)
+  end
 
   @doc "Проверить, что `mod` — собранный модуль."
   @spec module!(term(), String.t()) :: :ok

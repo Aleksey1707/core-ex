@@ -5,7 +5,9 @@ defmodule Core.Struct do
 
       defmodule Rename do
         defmodule Note do
-          use Core.Prim.String, name: "Заметка", max_len: 200
+          use Core.Prim.String,
+            name: "Заметка",
+            max_len: 200
         end
 
         use Core.Struct,
@@ -68,7 +70,7 @@ defmodule Core.Struct do
   - `defstruct` — значения по умолчанию, у поля без `default:` — `nil`;
   - `@type t` по видам полей;
   - `__struct_fields__/0` — внутренняя для builder'ов ролей: нормализованные поля спеки, форма — не
-    контракт.
+    контракт; у собранного модуля её читает `Core.Codec.Field.struct_fields/1`.
 
   Макрос занимает в модуле имя `@core_struct_fields`: поля спеки структуры, которая ещё собирается,
   отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей, и подписям
@@ -106,12 +108,12 @@ defmodule Core.Struct do
     opts = Helper.Opts.expand!(opts, __CALLER__, @label)
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
-    fields = Keyword.fetch!(opts, :fields)
+    {fields, defaults} = split_defaults(Keyword.fetch!(opts, :fields))
 
     [
       quote do
         @core_struct_fields Core.Struct.fields!(unquote(Macro.escape(fields)))
-        @core_struct_fields Core.Struct.default!(@core_struct_fields, unquote(default_expressions(fields)))
+        @core_struct_fields Core.Struct.default!(@core_struct_fields, unquote(defaults))
       end,
       quote unquote: false do
         @enforce_keys for %Core.Codec.Field{name: name, default: :none} <- @core_struct_fields, do: name
@@ -132,17 +134,18 @@ defmodule Core.Struct do
 
   # ---
 
-  defp default_expressions(fields) do
+  defp split_defaults(fields) do
     if Keyword.keyword?(fields),
       do:
-        for(
-          {name, spec} <- fields,
-          Keyword.keyword?(spec),
-          Keyword.has_key?(spec, :default),
-          do: {name, spec[:default]}
-        ),
-      else: []
+        {Enum.map(fields, &without_default/1),
+         for({name, spec} <- fields, {:ok, ast} <- [default(spec)], do: {name, ast})},
+      else: {fields, []}
   end
+
+  defp without_default({name, spec}),
+    do: {name, if(Keyword.keyword?(spec), do: Keyword.delete(spec, :default), else: spec)}
+
+  defp default(spec), do: if(Keyword.keyword?(spec), do: Keyword.fetch(spec, :default), else: :error)
 
   # ===== поля =====
 
@@ -178,9 +181,11 @@ defmodule Core.Struct do
   @spec default!([Field.t()], keyword()) :: [Field.t()]
 
   def default!(fields, values) when is_list(fields) and is_list(values) do
-    Enum.map(fields, fn
-      %Field{default: :none} = field -> field
-      %Field{name: name} = field -> %{field | default: {:default, value!(field, Keyword.fetch!(values, name))}}
+    Enum.map(fields, fn %Field{name: name} = field ->
+      case Keyword.fetch(values, name) do
+        :error -> field
+        {:ok, value} -> %{field | default: {:default, value!(field, value)}}
+      end
     end)
   end
 

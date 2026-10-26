@@ -187,10 +187,10 @@ defmodule Core.Es.AggregateTest do
       end
     end
 
-    test "состояние структурой по полям: поле без optional: true, кроме id, — CompileError" do
+    test "состояние структурой по полям: поле без optional: true и default:, кроме id, — CompileError" do
       fields = [id: [prim: Account.ID], version: [prim: Version], name: [prim: Account.Name, optional: true]]
 
-      assert_raise CompileError, ~r/поля состояния без optional: true: \[:version\]/, fn ->
+      assert_raise CompileError, ~r/поля состояния \[:version\] без optional: true и без default:/, fn ->
         compile(RequiredVersion, [event_codec: Account.Event.Codec], {:fields, fields})
       end
     end
@@ -208,6 +208,20 @@ defmodule Core.Es.AggregateTest do
 
       assert {:ok, {[], state}} = aggregate.execute(struct(aggregate, id: id), close())
       assert %{id: ^id, version: nil, name: nil} = state
+    end
+
+    test "состояние структурой по полям: поле с default: без optional: — агрегат собирается, struct/2 даёт значение" do
+      fields = [
+        id: [prim: Account.ID],
+        version: [prim: Version, optional: true],
+        frozen: [type: :boolean, default: false]
+      ]
+
+      compile(WithDefault, [event_codec: Account.Event.Codec], {:fields, fields})
+      aggregate = Module.concat(__MODULE__, WithDefault)
+      id = Account.ID.new()
+
+      assert %{id: ^id, version: nil, frozen: false} = struct(aggregate, id: id)
     end
 
     test "event_codec: не атом — CompileError" do

@@ -51,6 +51,16 @@ defmodule Consumer.Domain.Sales.Account do
   end
 
   defmodule Status do
+    @moduledoc """
+    Статус счёта
+
+    | Значение | Описание |
+    |---|---|
+    | `:open` | счёт открыт и принимает команды |
+    | `:frozen` | счёт заморожен командой `Freeze` |
+    | `:closed` | счёт закрыт командой `Close` |
+    """
+
     use Core.Enum,
       name: "Статус счёта",
       values: ~w(open frozen closed)a

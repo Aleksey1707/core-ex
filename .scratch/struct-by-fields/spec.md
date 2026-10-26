@@ -75,10 +75,12 @@ Status: ready-for-agent
 24. Как автор, я хочу получить `CompileError` на повтор поля в `fields:`.
 25. Как автор команды, я хочу, чтобы `use Core.Es.Cmd` принимал структуру по полям и требовал `by` / `at`
     обязательными ключами, как сейчас.
-26. Как автор event-sourced агрегата, я хочу объявить состояние структурой по полям, где все поля, кроме `id`,
-    `optional: true`, чтобы тип честно показывал `nil` до события создания.
-27. Как автор event-sourced агрегата, я хочу получить `CompileError` на поле состояния без `optional: true`,
-    кроме `id`, потому что библиотека собирает пустое состояние в обход обязательных ключей.
+26. Как автор event-sourced агрегата, я хочу объявить состояние структурой по полям, где у каждого поля, кроме
+    `id`, есть `optional: true` или `default:`, чтобы тип честно показывал `nil` до события создания, а поле с
+    `default:` (`[type: :boolean, default: false]`) начиналось со своего значения по умолчанию.
+27. Как автор event-sourced агрегата, я хочу получить `CompileError` на поле состояния, кроме `id`, без
+    `optional: true` и без `default:`, потому что библиотека собирает начальное состояние `struct(Agg, id: id)`
+    в обход обязательных ключей.
 28. Как автор state-stored агрегата, я хочу объявить его структурой по полям без ограничений на
     `optional:` / `default:`.
 29. Как автор вложенной сущности, я хочу объявить её структурой по полям и плагином по полям, а при расхождении
@@ -126,7 +128,9 @@ Status: ready-for-agent
   - `prim:` — struct этого модуля;
   - `enum:` — значение Enum;
   - `type:` — значение типа;
-  - `entity:` / `union:` — struct модуля / вариант семейства;
+  - `entity:` — struct модуля;
+  - `union:` — struct, но не Prim: принадлежность семейству не проверяется, у семейства нет списка
+    вариантов (их объявляет кодек);
   - `list:` — список, поэлементно;
   - `nil` — только при `optional: true`.
 - Prim с `personal: true` или `sensitive:` у поля с `default:` — `CompileError`.
@@ -135,7 +139,8 @@ Status: ready-for-agent
 
 ### Спека полей
 
-- `Core.Codec.Field` получает режим `:struct`: `default:` держится AST-ом, `wire:` и `subject:` — `CompileError`.
+- `Core.Codec.Field` получает режим `:struct`: `default:` в него не приходит — AST снимает со спеки `Core.Struct`,
+  `wire:` и `subject:` — `CompileError`.
   В режимах `:plugin` / `:dump_only` / `:payload` / `:labels` поведение не меняется; `default:` у плагина
   остаётся wire-литералом.
 - `Core.Helper.Opts` учится пропускать выражение во вложенном ключе (`fields: [x: [default: expr]]`), не
@@ -143,8 +148,9 @@ Status: ready-for-agent
 
 ### Роли
 
-- `Core.Es.Aggregate`: если у модуля агрегата есть `__struct_fields__/0`, поле без `optional: true`, кроме
-  `id`, — `CompileError`. Ручной `defstruct` не проверяется.
+- `Core.Es.Aggregate`: если у модуля агрегата есть `__struct_fields__/0`, поле, кроме `id`, без
+  `optional: true` и без `default:` — `CompileError`: начальное состояние `struct(Agg, id: id)` кладёт в поле
+  с `default:` значение по умолчанию, в остальные — `nil`. Ручной `defstruct` не проверяется.
 - Codec-плагин по полям: если у `entity:` плагина есть `__struct_fields__/0`, кроме ключей сверяются виды полей
   (с учётом `list:`) и `optional:`; расхождение — `CompileError`. Ручной struct — сверка только ключей, как
   сейчас.
@@ -184,7 +190,7 @@ Status: ready-for-agent
     на `CompileError`), `test/core/view_test.exs`.
 - **Интеграции — в тестах своих builder'ов**, через их `use`:
   - плагин по полям — расхождение вида и `optional:` со структурой;
-  - `Core.Es.Aggregate` — поле состояния без `optional: true`;
+  - `Core.Es.Aggregate` — поле состояния без `optional: true` и без `default:`, поле с `default:`;
   - `Core.Labels.Fields` — подписи без `fields:` на структуре по полям, `CompileError` на `fields:` рядом с ней,
     сведения `Core.Labels.Details` по такому struct.
 - **`make consumer-check`** — фикстура-потребитель, новый тест не пишется.

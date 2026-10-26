@@ -38,19 +38,22 @@ defmodule Core.Es.Aggregate do
   библиотека. Начальное состояние — `%Agg{id: id}` с `id` из адреса вызова, «не создан» —
   `version: nil`.
 
-  Состояние MAY объявляться структурой по полям (`use Core.Struct`). Тогда каждое поле, кроме
-  `id`, MUST быть `optional: true`, иначе `CompileError`: начальное состояние собирается мимо
-  обязательных ключей, и до события создания поле без `default:` равно `nil`. Литерал
-  `%Agg{id: id}` собирается, только если у каждого поля, кроме `id`, есть `default:`
-  (`optional: true, default: nil`); иначе начальное состояние вне библиотеки (в тесте) —
-  `struct(Agg, id: id)`. Порядок `use Core.Struct` и `use Core.Es.Aggregate` не
-  важен — поля проверяются после сборки модуля. Ручной `defstruct` так не проверяется.
+  Состояние MAY объявляться структурой по полям (`use Core.Struct`). Тогда у каждого поля, кроме
+  `id`, MUST быть `optional: true` или `default:`, иначе `CompileError`: начальное состояние
+  библиотека собирает `struct(Agg, id: id)` мимо обязательных ключей, и до события создания поле
+  без `default:` равно `nil`, а поле с `default:` (`[type: :boolean, default: false]`) — своему
+  значению по умолчанию. Литерал `%Agg{id: id}` собирается, только если у каждого поля, кроме
+  `id`, есть `default:` (`optional: true, default: nil`); иначе начальное состояние вне
+  библиотеки (в тесте) — `struct(Agg, id: id)`. Порядок `use Core.Struct` и
+  `use Core.Es.Aggregate` не важен — поля проверяются после сборки модуля. Ручной `defstruct` так
+  не проверяется.
 
       use Core.Struct,
         fields: [
           id: [prim: ID],
           version: [prim: Core.Version, optional: true],
-          name: [prim: Name, optional: true]
+          name: [prim: Name, optional: true],
+          frozen: [type: :boolean, default: false]
         ]
 
   ## Генерируемые функции
@@ -180,7 +183,7 @@ defmodule Core.Es.Aggregate do
 
     case @state_keys -- fields do
       [] ->
-        ensure_state_optional!(env)
+        ensure_initial_state!(env)
 
       missing ->
         raise CompileError,
@@ -194,7 +197,7 @@ defmodule Core.Es.Aggregate do
 
   # ---
 
-  defp ensure_state_optional!(env) do
+  defp ensure_initial_state!(env) do
     case required_state_fields(env.module) do
       [] ->
         :ok
@@ -202,17 +205,17 @@ defmodule Core.Es.Aggregate do
       required ->
         raise CompileError,
           description:
-            "#{@label}: #{inspect(env.module)} — поля состояния без optional: true: #{inspect(required)} — " <>
-              "до события создания библиотека собирает состояние %Agg{id: id}, и поля равны nil",
+            "#{@label}: #{inspect(env.module)} — поля состояния #{inspect(required)} без optional: true и без " <>
+              "default: — до события создания библиотека собирает состояние struct(Agg, id: id), и такие поля " <>
+              "равны nil",
           file: env.file,
           line: env.line
     end
   end
 
   defp required_state_fields(aggregate) do
-    if Helper.Module.exports?(aggregate, :__struct_fields__, 0),
-      do: for(%Field{name: name, optional?: false} when name != :id <- aggregate.__struct_fields__(), do: name),
-      else: []
+    for %Field{name: name, optional?: false, default: :none} when name != :id <- Field.struct_fields(aggregate) || [],
+        do: name
   end
 
   # ===== команда =====

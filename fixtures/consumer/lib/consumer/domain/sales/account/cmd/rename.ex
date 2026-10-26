@@ -8,7 +8,7 @@ defmodule Consumer.Domain.Sales.Account.Cmd.Rename do
   use Core.Struct,
     fields: [
       name: [prim: Account.Name],
-      by: [prim: UserID],
-      at: [prim: Es.Event.At]
+      at: [prim: Es.Event.At],
+      by: [prim: UserID]
     ]
 end

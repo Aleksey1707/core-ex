@@ -7,7 +7,10 @@ defmodule Core.StructFixture do
   defmodule Name do
     @moduledoc false
 
-    use Core.Prim.String, name: "Название", min_len: 1, max_len: 50
+    use Core.Prim.String,
+      name: "Название",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule Status do
@@ -20,7 +23,9 @@ defmodule Core.StructFixture do
     | `:done` | завершён |
     """
 
-    use Core.Enum, name: "Статус", values: ~w(new done)a
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(new done)a
   end
 
   defmodule Point do
@@ -67,7 +72,10 @@ defmodule Core.StructFixture do
     defmodule Title do
       @moduledoc false
 
-      use Core.Prim.String, name: "Заголовок", min_len: 1, max_len: 50
+      use Core.Prim.String,
+        name: "Заголовок",
+        min_len: 1,
+        max_len: 50
     end
 
     use Core.Struct, fields: [title: [prim: Title]]

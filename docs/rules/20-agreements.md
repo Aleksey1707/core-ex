@@ -664,6 +664,17 @@ defmacro __using__(opts) do
 end
 ```
 
+```elixir
+# плохо — выражением объявлена вся `fields:`: атрибут вместо вида поля проходит раскрытие
+@expression_keys ~w(fields)a
+
+# хорошо — выражение только в `default:` записи, остальная `fields:` — литерал
+@expression_keys [fields: ~w(default)a]
+
+use Core.Struct,
+  fields: [count: [type: :integer, default: @zero]]
+```
+
 Проверяется: `mix credo --strict` (`CredoChecks.UseOpts`, только `lib/`) — `quote bind_quoted:`
 в модуле с `__using__`, первое употребление `opts` в `__using__` мимо `Helper.Opts.expand!/3` /
 `Prim.Opts.prepare!`, функции ключей вне `Core.Prim.Wrapper`.
