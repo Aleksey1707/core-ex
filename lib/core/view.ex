@@ -33,6 +33,8 @@ defmodule Core.View do
   | `view:` | вложенный View | его кодеком через фасад |
   | `form:` | имя формы из `forms:` | дампером формы (`dump_form/3`) |
   | `list:` | вложенная спека | поэлементно |
+  | `set:` | вложенная спека элемента | поэлементно, список в каноническом порядке wire |
+  | `map:` | `[key: спека, value: спека]` | объект: ключ и значение — каждый по своей спеке |
   | `jsonb:` | модуль типа или `{Модуль, :функция}` спеки `Core.Codec.Redump` | пере-дампом нагрузки |
 
   `optional: true` выводит поле из `@enforce_keys` и добавляет `| nil` в тип.
@@ -52,6 +54,13 @@ defmodule Core.View do
   `type: :map` — jsonb без форматируемых Prim (`:uuid` / `:datetime` / `:date` / `:decimal`) на любой
   глубине: словарь строк, свободная map. Переводить в ней нечего, поэтому она уходит как есть, без
   спеки пере-дампа; форма с такими Prim — `jsonb:`.
+
+  `set:` и `map:` — поле-множество и поле-словарь спеки полей (ADR-0091). Struct держит `MapSet` и map
+  (`MapSet.t(элемент)`, `%{optional(ключ) => значение}`), а наружу уходит та же форма, что wire плагина
+  по полям: множество — список, отсортированный по wire элемента, без повторов; словарь — объект, ключ
+  enum — строкой. Ключ — вид с wire-строкой (Prim со строковой базой, `enum:`, `type: :string`), не
+  ПДн. Дамп тотален: jsonb-форма (список на месте множества, строковые ключи) уходит тем же wire.
+  `type: :map` — значение без спеки ключа и значения, `map:` — словарь со спекой.
 
   `jsonb:` типизируется `map()`; jsonb-массив объявляется `list: [jsonb: Type]` (или
   `list: [jsonb: {Мод, :спека}]`) — тогда и тип (`[map()]`), и пере-дамп идут поэлементно.
@@ -187,6 +196,8 @@ defmodule Core.View do
   defp type_ast({:type, type}), do: {type, [], []}
   defp type_ast({:form, name}), do: {name, [], []}
   defp type_ast({:list, inner}), do: quote(do: [unquote(type_ast(inner))])
+  defp type_ast({:set, inner}), do: quote(do: MapSet.t(unquote(type_ast(inner))))
+  defp type_ast({:map, key, value}), do: quote(do: %{optional(unquote(type_ast(key))) => unquote(type_ast(value))})
   defp type_ast({:jsonb, _spec_ref}), do: quote(do: map())
 
   defp new_ast(fields) do

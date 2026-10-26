@@ -8,9 +8,13 @@ defmodule Core.Codec.Plugin.Redump do
   |---|---|
   | `prim:` с приводимым kind (`Core.Codec.coercible?/1`) | `{:prim, P}` |
   | `prim:` с кастомным kind, `enum:`, `type:` | нет |
-  | `prim:` sensitive (и элементом `list:`) | `:sensitive` |
+  | `prim:` sensitive | `:sensitive` |
   | `entity: M`, `union: F` | `{:codec, M}` / `{:codec, F}` |
   | `list: спека` | `{:list, спека элемента}`; нет, если у элемента её нет |
+  | `set: спека` | `{:set, спека элемента}`; нет, если у элемента её нет |
+  | `map: [key:, value:]` | `{:dict, спека ключа, спека значения}`, `nil` — часть без спеки; нет, если спеки нет у обеих |
+
+  Sensitive-элемент `list:` / `set:` и sensitive-значение `map:` дают полю `:sensitive`.
 
   Спека варианта повторяет форму его дампа: тегированный — `{:tagged, %{тег => {:map, поля}}}`,
   без обёртки — `{:map, поля}`; дискриминатор — литерал, переводить в нём нечего. Семейство
@@ -192,15 +196,20 @@ defmodule Core.Codec.Plugin.Redump do
     end
   end
 
-  # Wire множества — список: его пере-дамп поэлементный, как у `list:`.
-  defp field_spec({:set, inner}), do: field_spec({:list, inner})
-
-  # Формы словаря у пере-дампа пока нет: значение, которому нужен пере-дамп, ушло бы на read-путь в
-  # формате записи, а у `entity:` — вместе с его sensitive-полями. Такое поле снимается целиком.
-  defp field_spec({:map, _key, value}) do
-    case field_spec(value) do
+  defp field_spec({:set, inner}) do
+    case field_spec(inner) do
       nil -> nil
-      _spec -> :sensitive
+      :sensitive -> :sensitive
+      spec -> {:set, spec}
+    end
+  end
+
+  # Ключ словаря — вид с wire-строкой и не sensitive: его спека — `{:prim, _}` или нет.
+  defp field_spec({:map, key, value}) do
+    case {field_spec(key), field_spec(value)} do
+      {_key, :sensitive} -> :sensitive
+      {nil, nil} -> nil
+      {key, value} -> {:dict, key, value}
     end
   end
 

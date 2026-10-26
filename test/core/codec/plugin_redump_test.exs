@@ -85,6 +85,10 @@ defmodule Core.Codec.PluginRedumpTest do
     defstruct [:name, :codes, :weights, :tags, :secrets]
   end
 
+  defmodule Roster do
+    defstruct [:ids, :ats, :statuses, :tags, :secrets]
+  end
+
   defmodule Plugin do
     use Core.Codec.Plugin,
       union: Shape,
@@ -98,6 +102,12 @@ defmodule Core.Codec.PluginRedumpTest do
          weights: [map: [key: [prim: ID], value: [prim: Weight]]],
          tags: [map: [key: [type: :string], value: [entity: Tag]]],
          secrets: [map: [key: [type: :string], value: [list: [prim: Sensitive]]]]},
+        {Roster,
+         ids: [set: [prim: ID]],
+         ats: [set: [prim: At]],
+         statuses: [set: [enum: Status]],
+         tags: [set: [entity: Tag]],
+         secrets: [set: [prim: Sensitive]]},
         {Item,
          id: [prim: ID],
          name: [prim: Name, wire: "title"],
@@ -271,9 +281,54 @@ defmodule Core.Codec.PluginRedumpTest do
                {:map, %{phone: {:prim, Personal}, phones: {:list, {:prim, Personal}}}}
     end
 
-    test "словарь: формы у пере-дампа нет — значение без пере-дампа идёт как есть, с пере-дампом снимает поле" do
+    test "словарь — {:dict, ключ, значение}: часть без пере-дампа — nil, sensitive-значение снимает поле" do
       assert Plugin.__codec_redump__(Ledger) ==
-               {:map, %{name: {:prim, Name}, weights: :sensitive, tags: :sensitive, secrets: :sensitive}}
+               {:map,
+                %{
+                  name: {:prim, Name},
+                  codes: {:dict, {:prim, ID}, nil},
+                  weights: {:dict, {:prim, ID}, {:prim, Weight}},
+                  tags: {:dict, nil, {:codec, Tag}},
+                  secrets: :sensitive
+                }}
+
+      assert Redump.validate!(Plugin.__codec_redump__(Ledger))
+    end
+
+    test "множество — {:set, спека элемента}; элемент без пере-дампа — нет, sensitive — снимает поле" do
+      assert Plugin.__codec_redump__(Roster) ==
+               {:map,
+                %{ids: {:set, {:prim, ID}}, ats: {:set, {:prim, At}}, tags: {:set, {:codec, Tag}}, secrets: :sensitive}}
+
+      assert Redump.validate!(Plugin.__codec_redump__(Roster))
+    end
+
+    test "словарь и множество переводятся как дамп внешним профилем" do
+      ledger = %Ledger{
+        name: Name.new!("Склад"),
+        codes: %{ID.new!(@uuid) => :active},
+        weights: %{ID.new!(@uuid) => Weight.new!(Decimal.new("10.5"))},
+        tags: %{"верх" => %Tag{id: ID.new!(@uuid), at: At.new!(~U[2024-06-02 08:30:00Z])}},
+        secrets: %{"к" => [Sensitive.new!("s3cr3t-value")]}
+      }
+
+      assert redump(ledger, Ledger) == Map.delete(json_roundtrip(Out.dump(ledger)), "secrets")
+      assert redump(ledger, Ledger)["codes"] == %{String.replace(@uuid, "-", "") => "active"}
+
+      # Порядок термов `DateTime` во внутреннем wire — не хронологический: пере-дамп сортирует заново.
+      ats = [~U[2024-01-02 00:00:00Z], ~U[2023-12-05 00:00:00Z], ~U[2023-12-31 00:00:00Z]]
+
+      roster = %Roster{
+        ids: MapSet.new([ID.new!(@uuid)]),
+        ats: MapSet.new(ats, &At.new!/1),
+        statuses: MapSet.new(~w(draft active)a),
+        tags: MapSet.new([%Tag{id: ID.new!(@uuid), at: At.new!(~U[2024-06-02 08:30:00Z])}]),
+        secrets: MapSet.new([Sensitive.new!("s3cr3t-value")])
+      }
+
+      internal_ats = json_roundtrip(In.dump(roster))["ats"]
+      refute internal_ats == Enum.sort(internal_ats)
+      assert redump(roster, Roster) == Map.delete(json_roundtrip(Out.dump(roster)), "secrets")
     end
 
     test "Prim с кастомным kind в спеку не входит" do

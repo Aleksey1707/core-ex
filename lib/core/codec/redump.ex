@@ -26,6 +26,11 @@ defmodule Core.Codec.Redump do
 
   `:sensitive` — значение поля `{:map, _}`: ключ удаляется из результата. Так выведенная спека
   описывает sensitive-поле, которое спека полей плагина допускает на write-пути.
+
+  `{:set, _}` — множество: элементы переводятся по спеке и пишутся в каноническом порядке wire
+  (отсортированы, без повторов), как их пишет плагин по полям. `{:dict, ключ, значение}` — словарь
+  (объект): ключ — `{:prim, Mod}` либо `nil`, значение — любая спека либо `nil`; `nil` оставляет
+  часть как есть. `{:map, _}` — запись с полями, а не словарь (ADR-0091).
   """
 
   alias Core.Codec
@@ -35,6 +40,8 @@ defmodule Core.Codec.Redump do
           {:prim, module()}
           | {:map, %{optional(atom()) => spec() | :sensitive}}
           | {:list, spec()}
+          | {:set, spec()}
+          | {:dict, {:prim, module()} | nil, spec() | nil}
           | {:tagged, %{optional(String.t()) => spec()}}
           | {:codec, module()}
 
@@ -62,6 +69,16 @@ defmodule Core.Codec.Redump do
 
   def run(value, {:list, _spec}, _codec), do: value
 
+  def run(value, {:set, spec}, codec) when is_list(value), do: canonical(value, &run(&1, spec, codec))
+
+  def run(value, {:set, _spec}, _codec), do: value
+
+  def run(value, {:dict, key, spec}, codec) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} -> {run_part(k, key, codec), run_part(v, spec, codec)} end)
+  end
+
+  def run(value, {:dict, _key, _spec}, _codec), do: value
+
   def run(value, {:tagged, by_tag}, codec) when is_map(value) and is_map(by_tag) do
     run_tagged(value, by_tag, codec)
   end
@@ -74,7 +91,23 @@ defmodule Core.Codec.Redump do
 
   def run(value, {:map, fields}, _codec) when is_map(fields), do: value
 
+  @doc """
+  Wire множества: элементы через `fun`, отсортированные (порядок термов) и без повторов. Так его
+  пишут пере-дамп и `Core.View` (ADR-0091).
+  """
+  @spec canonical(Enumerable.t(), (term() -> term())) :: list()
+
+  def canonical(items, fun) when is_function(fun, 1) do
+    items
+    |> Enum.map(fun)
+    |> Enum.sort()
+    |> Enum.dedup()
+  end
+
   # ---
+
+  defp run_part(value, nil, _codec), do: value
+  defp run_part(value, spec, codec), do: run(value, spec, codec)
 
   defp run_tagged(map, by_tag, codec) do
     case Map.fetch(by_tag, Helper.Map.field(map, @tag_key)) do
@@ -136,6 +169,19 @@ defmodule Core.Codec.Redump do
     spec
   end
 
+  def validate!({:set, inner} = spec) do
+    validate!(inner)
+
+    spec
+  end
+
+  def validate!({:dict, key, value} = spec) do
+    validate_key!(key)
+    validate_part!(value)
+
+    spec
+  end
+
   def validate!({:map, fields} = spec) when is_map(fields) do
     Enum.each(fields, &validate_field!/1)
 
@@ -151,10 +197,21 @@ defmodule Core.Codec.Redump do
   def validate!(other) do
     raise ArgumentError,
           "неверная спека Redump: #{inspect(other)}; ожидается {:prim, Mod}, " <>
-            "{:map, %{поле => спека}}, {:list, спека}, {:tagged, %{тег => спека}} или {:codec, Mod}"
+            "{:map, %{поле => спека}}, {:list, спека}, {:set, спека}, {:dict, ключ, значение}, " <>
+            "{:tagged, %{тег => спека}} или {:codec, Mod}"
   end
 
   # ---
+
+  defp validate_part!(nil), do: :ok
+  defp validate_part!(spec), do: validate!(spec)
+
+  defp validate_key!(nil), do: :ok
+  defp validate_key!({:prim, _mod} = key), do: validate!(key)
+
+  defp validate_key!(other) do
+    raise ArgumentError, "неверный ключ спеки {:dict, _, _}: #{inspect(other)}; ожидается nil или {:prim, Mod}"
+  end
 
   defp validate_field!({field, :sensitive}) when is_atom(field), do: :ok
   defp validate_field!({field, spec}) when is_atom(field), do: validate!(spec)

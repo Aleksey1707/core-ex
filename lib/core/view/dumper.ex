@@ -54,6 +54,30 @@ defmodule Core.View.Dumper do
   def map_list(list, fun) when is_list(list), do: Enum.map(list, fun)
   def map_list(other, _fun), do: other
 
+  @doc false
+  @spec map_set(term(), (term() -> term())) :: term()
+
+  def map_set(nil, _fun), do: nil
+  def map_set(%MapSet{} = set, fun), do: Core.Codec.Redump.canonical(set, fun)
+  def map_set(list, fun) when is_list(list), do: Core.Codec.Redump.canonical(list, fun)
+  def map_set(other, _fun), do: other
+
+  @doc false
+  @spec map_dict(term(), (term() -> term()), (term() -> term())) :: term()
+
+  def map_dict(nil, _key_fun, _value_fun), do: nil
+
+  def map_dict(map, key_fun, value_fun) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {key, value} -> {key_fun.(key), value_fun.(value)} end)
+
+  def map_dict(other, _key_fun, _value_fun), do: other
+
+  @doc false
+  @spec enum_key(term()) :: term()
+
+  def enum_key(key) when is_atom(key) and not is_nil(key), do: Atom.to_string(key)
+  def enum_key(key), do: key
+
   # ---
 
   # Формы дампятся одной функцией с именем формы аргументом, а не функцией на форму:
@@ -120,6 +144,33 @@ defmodule Core.View.Dumper do
       end)
     end
   end
+
+  defp dump_ast({:set, inner}, value, codec, depth) do
+    item = Macro.var(item_var!(depth), __MODULE__)
+
+    quote do
+      Core.View.Dumper.map_set(unquote(value), fn unquote(item) ->
+        unquote(dump_ast(inner, item, codec, depth + 1))
+      end)
+    end
+  end
+
+  # Ключ — вид с wire-строкой: Prim дампится по профилю, enum — строкой, как его пишет плагин по полям.
+  defp dump_ast({:map, key, inner}, value, codec, depth) do
+    key_var = Macro.var(:key, __MODULE__)
+    item = Macro.var(item_var!(depth), __MODULE__)
+
+    quote do
+      Core.View.Dumper.map_dict(
+        unquote(value),
+        fn unquote(key_var) -> unquote(key_dump_ast(key, key_var, codec)) end,
+        fn unquote(item) -> unquote(dump_ast(inner, item, codec, depth + 1)) end
+      )
+    end
+  end
+
+  defp key_dump_ast({:enum, _mod}, key, _codec), do: quote(do: Core.View.Dumper.enum_key(unquote(key)))
+  defp key_dump_ast(spec, key, codec), do: dump_ast(spec, key, codec, 0)
 
   defp fields_need_codec?(fields) do
     Enum.any?(fields, fn {_name, spec, _optional?} -> Opts.needs_codec?(spec) end)

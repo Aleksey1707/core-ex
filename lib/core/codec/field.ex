@@ -154,6 +154,24 @@ defmodule Core.Codec.Field do
   def struct_fields(module) when is_atom(module),
     do: if(Core.Helper.Module.exports?(module, :__struct_fields__, 0), do: module.__struct_fields__())
 
+  @doc false
+  @spec map_opts!(term(), String.t()) :: {keyword(), keyword()}
+
+  def map_opts!(inner, where) when is_binary(where) do
+    if not Keyword.keyword?(inner) or Enum.sort(Keyword.keys(inner)) != @map_keys do
+      Helper.Opts.reject!(where, "map: ожидается [key: спека, value: спека], получено #{inspect(inner)}")
+    end
+
+    {Keyword.fetch!(inner, :key), Keyword.fetch!(inner, :value)}
+  end
+
+  # Ключ спеки другого режима (`Core.View`) приходит в его форме: всё, кроме `{:prim, _}`, `{:enum, _}`
+  # и `{:type, :string}`, — отказ.
+  @doc false
+  @spec check_map_key!(term(), keyword(), String.t()) :: :ok
+
+  def check_map_key!(key, key_opts, where) when is_binary(where), do: check_key!(key, key_opts, where)
+
   # ---
 
   defp pair!({type, spec}) when is_atom(type) and not is_nil(type), do: {type, spec}
@@ -323,15 +341,11 @@ defmodule Core.Codec.Field do
     do: {kind, element_spec!("#{kind}", "элемента", inner, where)}
 
   defp kind_spec!(:map, inner, where) do
-    if not Keyword.keyword?(inner) or Enum.sort(Keyword.keys(inner)) != @map_keys do
-      Helper.Opts.reject!(where, "map: ожидается [key: спека, value: спека], получено #{inspect(inner)}")
-    end
-
-    key_opts = Keyword.fetch!(inner, :key)
+    {key_opts, value_opts} = map_opts!(inner, where)
     key = element_spec!("map: key", "ключа", key_opts, where)
     check_key!(key, key_opts, where)
 
-    {:map, key, element_spec!("map: value", "значения", Keyword.fetch!(inner, :value), where)}
+    {:map, key, element_spec!("map: value", "значения", value_opts, where)}
   end
 
   defp kind_spec!(:type, type, _where) when type in @type_values, do: {:type, type}

@@ -6,6 +6,7 @@ defmodule Core.ViewTest do
   alias Core.ViewFixture.OutCodec
 
   @uuid "550e8400-e29b-41d4-a716-446655440000"
+  @hex "550e8400e29b41d4a716446655440000"
   @at ~U[2024-06-01 12:00:00Z]
   @measured_at ~U[2024-06-01 12:00:00.123456Z]
 
@@ -212,6 +213,65 @@ defmodule Core.ViewTest do
     end
   end
 
+  describe "множество и словарь" do
+    test "множество: элементы по Prim в каноническом порядке wire" do
+      # Date сравнивается как терм по дню раньше года: порядок MapSet — не порядок wire.
+      days = MapSet.new([~D[2024-01-02], ~D[2023-12-05]])
+      assert Enum.to_list(days) == [~D[2024-01-02], ~D[2023-12-05]]
+
+      dumped = dump_bag(bag(ids: MapSet.new([@uuid]), days: days))
+
+      assert dumped.ids == [@hex]
+      assert dumped.days == ["2023-12-05", "2024-01-02"]
+    end
+
+    test "словарь: ключ и значение по своим видам, ключ enum — строка" do
+      dumped =
+        dump_bag(
+          bag(
+            weights: %{@uuid => Decimal.new("10.5")},
+            by_status: %{done: [@at]},
+            notes: %{"н" => %{at: @at}}
+          )
+        )
+
+      assert dumped.weights == %{@hex => "10.5"}
+      assert dumped.by_status == %{"done" => [OutCodec.dump(ViewFixture.CreatedAt.new!(@at))]}
+      assert dumped.notes == %{"н" => %{at: OutCodec.dump(ViewFixture.CreatedAt.new!(@at))}}
+    end
+
+    test "read-путь: jsonb-форма дампится в тот же wire, что агрегатный" do
+      stock = stock()
+      row = json_roundtrip(InCodec.dump(stock))
+
+      view =
+        bag(
+          ids: row["ids"],
+          days: row["days"],
+          weights: row["weights"],
+          by_status: row["by_status"],
+          stock: row
+        )
+
+      expected = json_roundtrip(OutCodec.dump(stock))
+      dumped = json_roundtrip(dump_bag(view))
+
+      assert Map.take(dumped, Map.keys(expected)) == expected
+      assert dumped["stock"] == expected
+      assert expected["days"] == ["2023-12-05", "2024-01-02"]
+    end
+
+    test "jsonb-форма множества: повторы схлопываются" do
+      assert dump_bag(bag(ids: [@uuid, @uuid])).ids == [@hex]
+    end
+
+    test "nil и значение не той формы уходят как есть" do
+      dumped = dump_bag(bag(ids: "x", weights: [1], days: nil, notes: nil))
+
+      assert %{ids: "x", weights: [1], days: nil, notes: nil} = dumped
+    end
+  end
+
   describe "точность сгенерированных типов" do
     setup do
       {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Sample)
@@ -284,6 +344,19 @@ defmodule Core.ViewTest do
       assert printed =~ "code: String.t()"
       assert printed =~ "at: DateTime.t()"
       assert printed =~ "by: String.t() | nil"
+    end
+  end
+
+  describe "точность типов множества и словаря" do
+    test "множество — MapSet.t(элемент), словарь — %{optional(ключ) => значение}" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Bag)
+      fields = struct_type_fields(types)
+
+      assert "MapSet.t(String.t())" = fields[:ids]
+      assert "MapSet.t(Date.t()) | nil" = fields[:days]
+      assert "%{optional(String.t()) => Decimal.t()}" = fields[:weights]
+      assert fields[:by_status] =~ ~r/^%\{optional\(.*Status.t\(\)\) => \[DateTime.t\(\)\]\}$/
+      assert "%{optional(String.t()) => note()} | nil" = fields[:notes]
     end
   end
 
@@ -457,6 +530,40 @@ defmodule Core.ViewTest do
       end
     end
 
+    test "set: и map: — форма спеки и optional: у самого поля" do
+      assert_raise CompileError, ~r/^View: fields: s: set: optional: задаётся у самого поля, не в set:$/, fn ->
+        define(fields: [s: [set: [type: :string, optional: true]]])
+      end
+
+      assert_raise CompileError,
+                   ~r/^View: fields: m: map: ожидается \[key: спека, value: спека\], получено \[key: \[type: :string\]\]$/,
+                   fn ->
+                     define(fields: [m: [map: [key: [type: :string]]]])
+                   end
+
+      assert_raise CompileError,
+                   ~r/^View: fields: m: map: value: optional: задаётся у самого поля, не в map: value:$/,
+                   fn ->
+                     define(fields: [m: [map: [key: [type: :string], value: [type: :string, optional: true]]]])
+                   end
+    end
+
+    test "ключ словаря — вид с wire-строкой, не персональный" do
+      assert_raise CompileError,
+                   ~r/^View: fields: m: map: key: ожидается вид с wire-строкой, получено \[type: :integer\]$/,
+                   fn ->
+                     define(fields: [m: [map: [key: [type: :integer], value: [type: :string]]]])
+                   end
+
+      assert_raise CompileError, ~r/^View: fields: m: map: key: ожидается вид с wire-строкой/, fn ->
+        define(fields: [m: [map: [key: [view: Core.ViewFixture.Nested], value: [type: :string]]]])
+      end
+
+      assert_raise CompileError, ~r/^View: fields: m: map: key: Prim .*Personal с personal: true/, fn ->
+        define(fields: [m: [map: [key: [prim: Core.PrimFixture.Personal], value: [type: :string]]]])
+      end
+    end
+
     test "вложенность списков глубже допустимой" do
       assert_raise CompileError, ~r/^View: вложенность списков 4 глубже допустимой \(4\)$/, fn ->
         define(fields: [deep: [list: [list: [list: [list: [list: [type: :string]]]]]]])
@@ -499,6 +606,21 @@ defmodule Core.ViewTest do
   end
 
   # ---
+
+  defp bag(overrides) do
+    ViewFixture.Bag.new(Keyword.merge([ids: MapSet.new(), weights: %{}, by_status: %{}], overrides))
+  end
+
+  defp dump_bag(view), do: ViewFixture.Bag.Codec.dump(view, OutCodec)
+
+  defp stock do
+    %ViewFixture.Stock{
+      ids: MapSet.new([ViewFixture.ID.new!(@uuid)]),
+      days: MapSet.new([~D[2024-01-02], ~D[2023-12-05]], &ViewFixture.Day.new!/1),
+      weights: %{ViewFixture.ID.new!(@uuid) => ViewFixture.Weight.new!(Decimal.new("10.5"))},
+      by_status: %{done: [ViewFixture.CreatedAt.new!(@at)], new: []}
+    }
+  end
 
   defp declared_fields do
     ~w(id name status version active weight day nested children tags payload marks

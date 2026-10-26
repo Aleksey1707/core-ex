@@ -88,6 +88,39 @@ defmodule Core.Codec.RedumpTest do
     end
   end
 
+  describe "run/3 — {:set, spec}" do
+    test "переводит элементы и пишет их в каноническом порядке без повторов" do
+      list = [~U[2024-06-02 00:00:00Z], ~U[2024-06-01 00:00:00Z], ~U[2024-06-02 00:00:00Z]]
+
+      assert Redump.run(list, {:set, {:prim, At}}, Profile) == ["2024-06-01T00:00:00Z", "2024-06-02T00:00:00Z"]
+    end
+
+    test "не-список проходит как есть" do
+      assert %{} == Redump.run(%{}, {:set, {:prim, ID}}, Profile)
+    end
+  end
+
+  describe "run/3 — {:dict, key, value}" do
+    test "переводит ключ и значение, nil — как есть" do
+      dict = %{@uuid => Decimal.new("10.5")}
+
+      assert Redump.run(dict, {:dict, {:prim, ID}, {:prim, Weight}}, Profile) == %{@hex => "10.5"}
+      assert Redump.run(dict, {:dict, nil, {:prim, Weight}}, Profile) == %{@uuid => "10.5"}
+      assert Redump.run(dict, {:dict, {:prim, ID}, nil}, Profile) == %{@hex => Decimal.new("10.5")}
+    end
+
+    test "значение — любая спека" do
+      dict = %{"a" => [%{"id" => @uuid}]}
+
+      assert Redump.run(dict, {:dict, nil, {:list, {:map, %{id: {:prim, ID}}}}}, Profile) ==
+               %{"a" => [%{"id" => @hex}]}
+    end
+
+    test "не-map проходит как есть" do
+      assert [] == Redump.run([], {:dict, {:prim, ID}, nil}, Profile)
+    end
+  end
+
   describe "run/3 — {:tagged, by_tag}" do
     setup do
       %{
@@ -224,6 +257,21 @@ defmodule Core.Codec.RedumpTest do
       tagged = {:tagged, %{"w" => {:map, %{value: {:prim, Weight}}}}}
 
       assert Redump.validate!(tagged) == tagged
+    end
+
+    test "множество и словарь: ключ — nil или {:prim, _}, значение — nil или спека" do
+      assert Redump.validate!({:set, {:prim, At}}) == {:set, {:prim, At}}
+      assert Redump.validate!({:dict, {:prim, ID}, nil}) == {:dict, {:prim, ID}, nil}
+      assert Redump.validate!({:dict, nil, {:list, {:prim, At}}}) == {:dict, nil, {:list, {:prim, At}}}
+
+      assert_raise ArgumentError, ~r/требует Prim-модуль/, fn -> Redump.validate!({:set, {:prim, Enum}}) end
+      assert_raise ArgumentError, ~r/требует Prim-модуль/, fn -> Redump.validate!({:dict, nil, {:prim, Enum}}) end
+
+      assert_raise ArgumentError, ~r/неверный ключ спеки \{:dict, _, _\}: .*; ожидается nil или \{:prim, Mod\}/, fn ->
+        Redump.validate!({:dict, {:codec, ID}, nil})
+      end
+
+      assert_raise ArgumentError, ~r/только значением поля/, fn -> Redump.validate!({:dict, nil, :sensitive}) end
     end
 
     test "форма без форматируемых полей допустима" do

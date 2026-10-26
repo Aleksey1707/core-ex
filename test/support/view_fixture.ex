@@ -98,6 +98,25 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule Stock do
+    @moduledoc false
+
+    defstruct [:ids, :days, :weights, :by_status]
+  end
+
+  defmodule Stock.Codec do
+    @moduledoc false
+
+    use Core.Codec.Plugin,
+      fields: [
+        {Core.ViewFixture.Stock,
+         ids: [set: [prim: Core.ViewFixture.ID]],
+         days: [set: [prim: Core.ViewFixture.Day]],
+         weights: [map: [key: [prim: Core.ViewFixture.ID], value: [prim: Core.ViewFixture.Weight]]],
+         by_status: [map: [key: [enum: Core.ViewFixture.Status], value: [list: [prim: Core.ViewFixture.CreatedAt]]]]}
+      ]
+  end
+
   defmodule Nested do
     @moduledoc false
 
@@ -211,6 +230,25 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule Bag do
+    @moduledoc false
+
+    use Core.View,
+      fields: [
+        ids: [set: [prim: Core.ViewFixture.ID]],
+        days: [set: [prim: Core.ViewFixture.Day], optional: true],
+        weights: [map: [key: [prim: Core.ViewFixture.ID], value: [prim: Core.ViewFixture.Weight]]],
+        by_status: [map: [key: [enum: Core.ViewFixture.Status], value: [list: [prim: Core.ViewFixture.CreatedAt]]]],
+        notes: [map: [key: [type: :string], value: [form: :note]], optional: true],
+        stock: [jsonb: Core.ViewFixture.Stock, optional: true]
+      ],
+      forms: [
+        note: [
+          at: [prim: Core.ViewFixture.CreatedAt]
+        ]
+      ]
+  end
+
   # Фикстурные представления не входят в `Core.CodecFixture` plugins, поэтому у них свой
   # фасад: вложенный View дампится через фасад, а тот обязан знать его плагин.
   defmodule OutCodec do
@@ -219,6 +257,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.External,
       plugins: [
+        Core.ViewFixture.Bag.Codec,
         Core.ViewFixture.Free.Codec,
         Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
@@ -226,6 +265,7 @@ defmodule Core.ViewFixture do
         Core.ViewFixture.Reading.Codec,
         Core.ViewFixture.Refs.Codec,
         Core.ViewFixture.Sample.Codec,
+        Core.ViewFixture.Stock.Codec,
         Core.ViewFixture.Typed.Codec
       ]
   end
@@ -236,6 +276,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.Internal,
       plugins: [
+        Core.ViewFixture.Bag.Codec,
         Core.ViewFixture.Free.Codec,
         Core.ViewFixture.Listy.Codec,
         Core.ViewFixture.Nested.Codec,
@@ -243,6 +284,7 @@ defmodule Core.ViewFixture do
         Core.ViewFixture.Reading.Codec,
         Core.ViewFixture.Refs.Codec,
         Core.ViewFixture.Sample.Codec,
+        Core.ViewFixture.Stock.Codec,
         Core.ViewFixture.Typed.Codec
       ]
   end

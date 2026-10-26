@@ -548,9 +548,11 @@ use Core.Codec.Plugin,
   |---|---|
   | `prim:` с приводимым kind, включая plain-kind (`:string`, `:integer`) | `{:prim, P}` |
   | `prim:` с кастомным kind, `enum:`, `type:` | нет |
-  | `prim:` sensitive (и элементом `list:`) | `:sensitive` — ключ удаляется на read-пути |
+  | `prim:` sensitive (и элементом `list:` / `set:`, значением `map:`) | `:sensitive` — ключ удаляется на read-пути |
   | `entity: M`, `union: F` | `{:codec, M}` / `{:codec, F}` |
   | `list: спека` | `{:list, спека элемента}`; нет, если у элемента её нет |
+  | `set: спека` | `{:set, спека элемента}` — с каноническим порядком; нет, если у элемента её нет |
+  | `map: [key:, value:]` | `{:dict, ключ, значение}`, `nil` — часть без спеки; нет, если её нет у обеих |
 
 - Ручной плагин объявляет спеку ручного типа колбэком `redump_spec/1` (optional `@callback`
   `Core.Codec.Plugin`, `@impl true`); тип без клаузы колбэка — `ArgumentError` при первом

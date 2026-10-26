@@ -3,18 +3,21 @@ defmodule Core.View.Opts do
   Валидация и нормализация деклараций `use Core.View`.
 
   Поле объявляется keyword-спекой с ровно одним kind-ключом (`prim:`, `enum:`, `type:`,
-  `view:`, `form:`, `list:`, `jsonb:`) и необязательным `optional: true`. Спека — источник
+  `view:`, `form:`, `list:`, `set:`, `map:`, `jsonb:`) и необязательным `optional: true`. Спека — источник
   и структуры, и её типа, и дампа, поэтому всё, что нельзя типизировать точно
   (кастомный kind Prim, неизвестная форма), отвергается на этапе компиляции.
   """
 
   alias Core.Codec
+  alias Core.Codec.Field
   alias Core.Helper
   alias Core.Helper.FieldCheck
   alias Core.Prim
 
   @label "View"
   @type_values FieldCheck.type_values()
+  @kind_keys ~w(prim enum type view form list set map jsonb)a
+  @collection_kinds ~w(list set)a
 
   @prim_type_asts %{
     uuid: quote(do: String.t()),
@@ -44,6 +47,8 @@ defmodule Core.View.Opts do
           | {:view, module()}
           | {:form, atom()}
           | {:list, spec()}
+          | {:set, spec()}
+          | {:map, spec(), spec()}
           | {:jsonb, module() | {module(), atom()}}
 
   @typedoc "Нормализованное поле: имя, спека значения, признак необязательности."
@@ -94,7 +99,8 @@ defmodule Core.View.Opts do
   @spec needs_codec?(spec()) :: boolean()
 
   def needs_codec?({:prim, _mod, _kind}), do: true
-  def needs_codec?({:list, inner}), do: needs_codec?(inner)
+  def needs_codec?({kind, inner}) when kind in @collection_kinds, do: needs_codec?(inner)
+  def needs_codec?({:map, key, value}), do: needs_codec?(key) or needs_codec?(value)
   def needs_codec?({:enum, _mod}), do: false
   def needs_codec?({:type, _type}), do: false
   def needs_codec?({:view, _mod}), do: true
@@ -120,13 +126,13 @@ defmodule Core.View.Opts do
 
   defp kind_key!(opts, path) do
     case Keyword.drop(opts, ~w(optional)a) do
-      [{key, value}] when key in ~w(prim enum type view form list jsonb)a ->
+      [{key, value}] when key in @kind_keys ->
         {key, value}
 
       other ->
         Helper.Opts.reject!(
           path,
-          "ожидается ровно один из prim:/enum:/type:/view:/form:/list:/jsonb:, получено #{inspect(other)}"
+          "ожидается ровно один из #{Enum.map_join(@kind_keys, "/", &"#{&1}:")}, получено #{inspect(other)}"
         )
     end
   end
@@ -191,14 +197,16 @@ defmodule Core.View.Opts do
     {:form, form_name}
   end
 
-  defp spec!(:list, inner, name, form_names, path) do
-    {^name, spec, optional?} = field!(name, inner, form_names, path)
+  defp spec!(kind, inner, name, form_names, path) when kind in @collection_kinds,
+    do: {kind, element!("#{kind}", name, inner, form_names, path)}
 
-    if optional? do
-      Helper.Opts.reject!("#{path}: list", "optional: задаётся у самого поля, не в list:")
-    end
+  # Ключ — по тому же правилу, что в спеке полей: вид с wire-строкой, не ПДн (ADR-0091).
+  defp spec!(:map, inner, name, form_names, path) do
+    {key_opts, value_opts} = Field.map_opts!(inner, path)
+    key = element!("map: key", name, key_opts, form_names, path)
+    Field.check_map_key!(field_key(key), key_opts, path)
 
-    {:list, spec}
+    {:map, key, element!("map: value", name, value_opts, form_names, path)}
   end
 
   defp spec!(:jsonb, {mod, fun}, _name, _form_names, path)
@@ -240,10 +248,24 @@ defmodule Core.View.Opts do
     )
   end
 
+  defp element!(label, name, inner, form_names, path) do
+    {^name, spec, optional?} = field!(name, inner, form_names, path)
+
+    if optional? do
+      Helper.Opts.reject!("#{path}: #{label}", "optional: задаётся у самого поля, не в #{label}:")
+    end
+
+    spec
+  end
+
+  defp field_key({:prim, mod, _kind}), do: {:prim, mod}
+  defp field_key(spec), do: spec
+
   defp prim_label(leaf, leaf), do: inspect(leaf)
   defp prim_label(mod, leaf), do: "#{inspect(mod)} (leaf #{inspect(leaf)})"
 
   defp collect_forms({:form, name}, acc), do: MapSet.put(acc, name)
-  defp collect_forms({:list, inner}, acc), do: collect_forms(inner, acc)
+  defp collect_forms({kind, inner}, acc) when kind in @collection_kinds, do: collect_forms(inner, acc)
+  defp collect_forms({:map, _key, value}, acc), do: collect_forms(value, acc)
   defp collect_forms(_spec, acc), do: acc
 end
