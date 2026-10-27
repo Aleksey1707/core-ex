@@ -736,6 +736,12 @@
   `Core.PromEx.Dashboards.assert_fresh!(MyAppApp.PromEx, "deploy/monitoring/grafana/dashboards")`;
   своя доработка штатного дашборда или выгрузки → отдельная панель доменного дашборда; доменный
   дашборд с именем выгрузки (`outbox.json`) переименовать.
+- **Проверки сводов `CredoChecks.UseOptsPerLine` и `CredoChecks.EnumValuesTable` — у потребителя**
+  (норма — `docs/rules/app/20-agreements.md`, «Настройки Credo»). Параметры `use` по одному на
+  строку и строка таблицы `@moduledoc` у каждого значения `Core.Enum` проверялись только в
+  библиотеке. Правка потребителя: в `.credo.exs` — `requires: ["deps/core/scripts/credo_checks.exs"]`
+  и в `enabled:` — `{CredoChecks.UseOptsPerLine, []}`,
+  `{CredoChecks.EnumValuesTable, [files: %{included: ["lib/", "test/support/"]}]}`.
 
 ### Изменения контракта макросов
 

@@ -56,7 +56,7 @@ defmodule RulesLint do
   # либо внешняя зависимость, либо конвенционный короткий алиас из примеров свода.
   @app_roots ~w(
     Core MyApp MyAppApp MyAppIngest MyAppTest MyAppWeb
-    Ecto ExUnit Credo Logger Oban Cachex Phoenix Plug PromEx OpenApiSpex Sentry
+    Ecto ExUnit Credo CredoChecks Logger Oban Cachex Phoenix Plug PromEx OpenApiSpex Sentry
     Consistency Design Readability Refactor Warning
     Application Enum Keyword Map Mix Process String
     Actor Agg Caches Cart Codec Config Context DAO Error Errors Es Event Helper InCodec Invoice Order

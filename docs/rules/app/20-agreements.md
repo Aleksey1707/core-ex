@@ -132,11 +132,17 @@ Expected after deploy: fold events p99 <= 100.
 Длина строки (`Readability.MaxLineLength`, ≤ 120) и разбиение литерала `Logger.*` —
 `deps/core/docs/rules/20-agreements.md`, «Linters & Formatters» и «Логирование (`Logger`)».
 
+Проверки сводов `CredoChecks.*` лежат в `deps/core/scripts/credo_checks.exs`: `.credo.exs`
+подключает их строкой `requires: ["deps/core/scripts/credo_checks.exs"]`, без неё модулей
+`CredoChecks.*` в `enabled:` нет.
+
 Включены осознанно, потому что проверяют письменные правила:
 
 | Чек | Правило |
 |---|---|
 | `Readability.Specs` | `@spec` у публичных функций; исключены `test/` и контроллеры (`**/controller.ex`) |
+| `CredoChecks.UseOptsPerLine` | два и более параметра `use` — каждый на своей строке (`deps/core/docs/rules/20-agreements.md`, «Стиль кодирования») |
+| `CredoChecks.EnumValuesTable` | строка таблицы значений в `@moduledoc` у каждого значения `Core.Enum` (`deps/core/docs/rules/11-domain.md`, «Описание значений в `@moduledoc`»); область — `lib/` и `test/support/`: `{CredoChecks.EnumValuesTable, [files: %{included: ["lib/", "test/support/"]}]}` |
 | `Warning.UnsafeToAtom` | атомы из внешних данных; исключён `test/` |
 | `Warning.LeakyEnvironment` | утечка окружения в подпроцессы |
 | `Warning.MixEnv` | runtime-конфиг вместо `Mix.env/0` |
