@@ -389,6 +389,40 @@ defmodule Core.StructTest do
       assert struct_type_fields(types) == %{count: "integer()", note: "Core.StructFixture.Name.t() | nil"}
     end
 
+    test "destroyable: true добавляет | Destroyed.t(), с optional: — ещё | nil" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Destroyable)
+      fields = struct_type_fields(types)
+
+      assert fields[:holder] == "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()"
+      assert fields[:phone] == "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t() | nil"
+      assert fields[:point] == "Core.StructFixture.Point.t() | Core.Es.Personal.Destroyed.t()"
+    end
+
+    test "destroyable: у поля вложенной сущности — в типе сущности, не в типе поля" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Recipient)
+
+      assert struct_type_fields(types) == %{phone: "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()"}
+
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Destroyable)
+
+      assert struct_type_fields(types)[:recipients] == "[Core.StructFixture.Recipient.t()]"
+    end
+
+    test "destroyable: у элемента list: и значения map: — к типу элемента и значения" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Destroyable)
+      fields = struct_type_fields(types)
+
+      assert fields[:names] == "[Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()]"
+
+      assert fields[:matrix] ==
+               "[[Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()] | Core.Es.Personal.Destroyed.t()]"
+
+      assert fields[:tags] == "[Core.StructFixture.Name.t()] | Core.Es.Personal.Destroyed.t()"
+
+      assert fields[:by_id] ==
+               "%{optional(String.t()) => Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()}"
+    end
+
     test "Prim, вложенный выше use, — тип вложенного модуля" do
       {:ok, types} = Code.Typespec.fetch_types(StructFixture.Nested)
 
@@ -422,6 +456,40 @@ defmodule Core.StructTest do
     test "subject: — CompileError" do
       assert_raise CompileError, ~r/^Struct: fields: name: subject: у структуры по полям нет кодека/, fn ->
         define(fields: [name: [prim: Name, subject: :aggregate_id]])
+      end
+    end
+
+    test "destroyable: не true — CompileError" do
+      assert_raise CompileError, ~r/^Struct: fields: holder: destroyable: ожидается true, получено false$/, fn ->
+        define(fields: [holder: [prim: Name, destroyable: false]])
+      end
+
+      assert_raise CompileError, ~r/^Struct: fields: names: list: destroyable: ожидается true, получено :yes$/, fn ->
+        define(fields: [names: [list: [prim: Name, destroyable: :yes]]])
+      end
+    end
+
+    test "destroyable: у элемента set: — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: roles: destroyable: у элемента set: нет — равные уничтоженные значения/,
+                   fn -> define(fields: [roles: [set: [prim: Name, destroyable: true]]]) end
+
+      assert_raise CompileError, ~r/^Struct: fields: grid: list: destroyable: у элемента set: нет/, fn ->
+        define(fields: [grid: [list: [set: [list: [prim: Name, destroyable: true]]]]])
+      end
+    end
+
+    test "destroyable: у ключа map: — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: by_id: destroyable: у ключа map: нет — равные уничтоженные .+ запись$/,
+                   fn ->
+                     define(fields: [by_id: [map: [key: [prim: Name, destroyable: true], value: [type: :integer]]]])
+                   end
+    end
+
+    test "default: у уничтожаемого поля проверяется как раньше" do
+      assert_raise CompileError, ~r/^Struct: fields: holder: default: ожидается Prim Core.StructFixture.Name, /, fn ->
+        define(fields: [holder: [prim: Name, destroyable: true, default: "Склад"]])
       end
     end
 

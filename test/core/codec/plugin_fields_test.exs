@@ -810,6 +810,23 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
+    test "destroyable: структуры плагин не повторяет — собирается" do
+      assert {{:module, _plugin, _bytecode, _result}, []} =
+               compile_plugin(:StructDestroyable, [a: [list: [prim: Name]]],
+                 struct_fields: [a: [list: [prim: Name, destroyable: true], destroyable: true]]
+               )
+    end
+
+    test "destroyable: в спеке плагина — CompileError" do
+      assert_raise CompileError, ~r/\.T: a: destroyable: у Codec-плагина по полям нет/, fn ->
+        compile_plugin(:PluginDestroyable, a: [prim: Name, destroyable: true], b: [prim: Name])
+      end
+
+      assert_raise CompileError, ~r/\.T: a: destroyable: у Codec-плагина по полям нет/, fn ->
+        compile_plugin(:PluginDestroyableItem, a: [list: [prim: Name, destroyable: true]], b: [prim: Name])
+      end
+    end
+
     test "ручной struct — сверяются только ключи, вид поля любой" do
       assert {{:module, _plugin, _bytecode, _result}, []} =
                compile_plugin(:ManualKinds, a: [prim: Core.Codec.PluginFieldsTest.ID], b: [list: [type: :integer]])

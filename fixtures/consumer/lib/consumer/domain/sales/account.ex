@@ -72,7 +72,7 @@ defmodule Consumer.Domain.Sales.Account do
       version: [prim: Version, optional: true],
       name: [prim: Name, optional: true],
       status: [enum: Status, optional: true],
-      holder: [prim: Holder, optional: true]
+      holder: [prim: Holder, optional: true, destroyable: true]
     ]
 
   @on_existing [Cmd.Rename, Cmd.SetHolder, Cmd.Freeze, Cmd.Close]

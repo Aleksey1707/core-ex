@@ -7,7 +7,8 @@ defmodule Core.Codec.Field do
   (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Поле объявляется keyword-спекой с
   ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `set:` / `map:` / `type:`)
   и ключами `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у
-  нагрузки (ADR-0056, ADR-0073). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у
+  нагрузки (ADR-0056, ADR-0073), `destroyable: true` у структуры — и у её элемента `list:` и значения
+  `map:` (ADR-0092). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у
   неё — выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле `Core.Struct`
   (ADR-0090).
 
@@ -39,7 +40,7 @@ defmodule Core.Codec.Field do
   @string_kinds ~w(string uuid)a
   @checked_defaults ~w(enum set map)a
 
-  @enforce_keys ~w(name spec optional? wire default subject)a
+  @enforce_keys ~w(name spec optional? wire default subject destroyable)a
   defstruct @enforce_keys
 
   @typedoc "Нормализованная спека значения поля."
@@ -73,14 +74,24 @@ defmodule Core.Codec.Field do
   """
   @type mode :: :plugin | :dump_only | :payload | :labels | :struct
 
-  @typedoc "Нормализованное поле: имя, спека значения, необязательность, wire-ключ, `default:`, субъект."
+  @typedoc """
+  Место внутри значения поля: `[]` — само поле, `:list` — шаг в элемент `list:`, `:value` — в
+  значение `map:`.
+  """
+  @type place :: [:list | :value]
+
+  @typedoc """
+  Нормализованное поле: имя, спека значения, необязательность, wire-ключ, `default:`, субъект и
+  места с `destroyable: true` (только у структуры; пусто — поле не уничтожаемо).
+  """
   @type t :: %__MODULE__{
           name: atom(),
           spec: spec(),
           optional?: boolean(),
           wire: String.t(),
           default: default(),
-          subject: subject()
+          subject: subject(),
+          destroyable: [place()]
         }
 
   # ===== спека =====
@@ -262,6 +273,7 @@ defmodule Core.Codec.Field do
       Helper.Opts.reject!(where, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
+    {opts, places} = places!(opts, mode, where)
     if mode == :struct, do: check_struct_keys!(opts, where)
 
     case Keyword.keys(opts) -- (@kind_keys ++ @extra_keys ++ if(mode == :payload, do: [:subject], else: [])) do
@@ -278,9 +290,98 @@ defmodule Core.Codec.Field do
       optional?: optional?,
       wire: wire!(name, opts, where),
       default: default!(opts, spec, optional?, mode != :dump_only, where),
-      subject: subject!(opts, where)
+      subject: subject!(opts, where),
+      destroyable: places
     }
   end
+
+  # `destroyable:` снимается со спеки до её разбора: место уничтоженного значения — тип, а не вид.
+  defp places!(opts, :struct, where), do: pop_places!(opts, [], where)
+
+  defp places!(opts, mode, where) do
+    if destroyable_key?(opts), do: Helper.Opts.reject!(where, "destroyable: #{mode_text(mode)}")
+
+    {opts, []}
+  end
+
+  defp pop_places!(opts, place, where) do
+    if Keyword.keyword?(opts) do
+      {here, opts} = own_place!(opts, place, where)
+      {opts, nested} = Enum.map_reduce(opts, [], &nested_places!(&1, &2, place, where))
+
+      {opts, here ++ nested}
+    else
+      {opts, []}
+    end
+  end
+
+  defp own_place!(opts, place, where) do
+    case Keyword.fetch(opts, :destroyable) do
+      :error ->
+        {[], opts}
+
+      {:ok, true} ->
+        {[place], Keyword.delete(opts, :destroyable)}
+
+      {:ok, other} ->
+        Helper.Opts.reject!(where, "#{place_label(place)}destroyable: ожидается true, получено #{inspect(other)}")
+    end
+  end
+
+  defp nested_places!({:list, inner}, acc, place, where) do
+    {inner, places} = pop_places!(inner, place ++ [:list], where)
+    {{:list, inner}, acc ++ places}
+  end
+
+  defp nested_places!({:set, inner}, acc, place, where) do
+    reject_place!(inner, place, where, "у элемента set: нет — равные уничтоженные значения схлопываются в множестве")
+    {{:set, inner}, acc}
+  end
+
+  defp nested_places!({:map, inner}, acc, place, where) do
+    if Keyword.keyword?(inner) do
+      {inner, places} = Enum.map_reduce(inner, [], &map_places!(&1, &2, place, where))
+      {{:map, inner}, acc ++ places}
+    else
+      {{:map, inner}, acc}
+    end
+  end
+
+  defp nested_places!(entry, acc, _place, _where), do: {entry, acc}
+
+  defp map_places!({:key, inner}, acc, place, where) do
+    reject_place!(inner, place, where, "у ключа map: нет — равные уничтоженные значения не идентифицируют запись")
+    {{:key, inner}, acc}
+  end
+
+  defp map_places!({:value, inner}, acc, place, where) do
+    {inner, places} = pop_places!(inner, place ++ [:value], where)
+    {{:value, inner}, acc ++ places}
+  end
+
+  defp map_places!(entry, acc, _place, _where), do: {entry, acc}
+
+  defp reject_place!(inner, place, where, text) do
+    if destroyable_key?(inner), do: Helper.Opts.reject!(where, "#{place_label(place)}destroyable: #{text}")
+
+    :ok
+  end
+
+  defp place_label(place), do: Enum.map_join(place, &"#{place_step(&1)}: ")
+
+  defp place_step(:list), do: "list"
+  defp place_step(:value), do: "map: value"
+
+  defp destroyable_key?(spec) do
+    Keyword.keyword?(spec) and
+      (Keyword.has_key?(spec, :destroyable) or Enum.any?(Keyword.values(spec), &destroyable_key?/1))
+  end
+
+  defp mode_text(mode) when mode in ~w(plugin dump_only)a,
+    do: "у Codec-плагина по полям нет — уничтоженное значение плагин не загружает"
+
+  defp mode_text(:payload), do: "у нагрузки события нет — уничтоженное значение на месте поля задаёт subject:"
+  defp mode_text(:labels), do: "у подписей нет — тип поля задаёт структура по полям"
 
   defp check_struct_keys!(opts, where) do
     for {key, text} <- [
@@ -549,22 +650,44 @@ defmodule Core.Codec.Field do
   @spec typespec([t()]) :: keyword(Macro.t())
 
   def typespec(fields) do
-    Enum.map(fields, fn
-      %__MODULE__{name: name, spec: spec, optional?: false} -> {name, spec_type(spec)}
-      %__MODULE__{name: name, spec: spec, optional?: true} -> {name, quote(do: unquote(spec_type(spec)) | nil)}
+    Enum.map(fields, fn %__MODULE__{name: name, spec: spec, optional?: optional?, destroyable: places} ->
+      {name, union_type([place_type(spec, places, []) | if(optional?, do: [nil], else: [])])}
     end)
   end
 
   # ---
 
-  defp spec_type({:union, _family}), do: quote(do: struct())
-  defp spec_type({kind, mod}) when kind in ~w(prim enum entity)a, do: quote(do: unquote(mod).t())
-  defp spec_type({:list, inner}), do: quote(do: [unquote(spec_type(inner))])
-  defp spec_type({:set, inner}), do: quote(do: MapSet.t(unquote(spec_type(inner))))
+  defp place_type(spec, places, place) do
+    type = spec_type(spec, places, place)
 
-  defp spec_type({:map, key, value}),
-    do: quote(do: %{optional(unquote(spec_type(key))) => unquote(spec_type(value))})
+    if place in places, do: union_type([type, quote(do: Core.Es.Personal.Destroyed.t())]), else: type
+  end
 
-  defp spec_type({:type, :string}), do: quote(do: String.t())
-  defp spec_type({:type, scalar}), do: quote(do: unquote(scalar)())
+  # Объединение справа (`A | (B | nil)`): так `Macro.to_string/1` печатает тип плоско.
+  defp union_type(types) do
+    [last | rest] = Enum.reverse(Enum.flat_map(types, &alternatives/1))
+
+    Enum.reduce(rest, last, &quote(do: unquote(&1) | unquote(&2)))
+  end
+
+  defp alternatives({:|, _meta, [left, right]}), do: [left | alternatives(right)]
+  defp alternatives(type), do: [type]
+
+  defp spec_type({:union, _family}, _places, _place), do: quote(do: struct())
+  defp spec_type({kind, mod}, _places, _place) when kind in ~w(prim enum entity)a, do: quote(do: unquote(mod).t())
+
+  defp spec_type({:list, inner}, places, place),
+    do: quote(do: [unquote(place_type(inner, places, place ++ [:list]))])
+
+  # У элемента `set:` и ключа `map:` мест нет: `destroyable:` там — отказ.
+  defp spec_type({:set, inner}, _places, _place), do: quote(do: MapSet.t(unquote(spec_type(inner, [], []))))
+
+  defp spec_type({:map, key, value}, places, place) do
+    key = spec_type(key, [], [])
+
+    quote(do: %{optional(unquote(key)) => unquote(place_type(value, places, place ++ [:value]))})
+  end
+
+  defp spec_type({:type, :string}, _places, _place), do: quote(do: String.t())
+  defp spec_type({:type, scalar}, _places, _place), do: quote(do: unquote(scalar)())
 end

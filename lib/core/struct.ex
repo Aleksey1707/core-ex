@@ -56,6 +56,31 @@ defmodule Core.Struct do
   | — | значение | можно не указывать | `T` |
   | `true` | `nil` или значение | можно не указывать | `T \\| nil` |
 
+  `destroyable: true` допускает на месте значения уничтоженное ПДн-значение: к типу добавляется
+  `| Core.Es.Personal.Destroyed.t()` до `| nil` от `optional: true`. Его объявляет состояние
+  event-sourced агрегата там, куда `evolve/2` кладёт значение поля нагрузки с `subject:`: после
+  уничтожения ключа субъекта на этом месте `%Destroyed{}` (ADR-0092). Опция — у поля любого вида, у
+  спеки элемента `list:` и у спеки значения `map:`:
+
+      defmodule Account do
+        use Core.Struct,
+          fields: [
+            id: [prim: Account.ID],
+            holder: [prim: Account.Holder, optional: true, destroyable: true],
+            phones: [map: [key: [prim: Subject.ID], value: [prim: Phone, destroyable: true]], default: %{}]
+          ]
+      end
+
+  | Спека | В `@type t` |
+  |---|---|
+  | `[prim: Mod, destroyable: true]` | `Mod.t() \\| Destroyed.t()` |
+  | `[prim: Mod, optional: true, destroyable: true]` | `Mod.t() \\| Destroyed.t() \\| nil` |
+  | `[list: [prim: Mod, destroyable: true]]` | `[Mod.t() \\| Destroyed.t()]` |
+  | `[map: [key: [<вид>], value: [prim: Mod, destroyable: true]]]` | `%{optional(K) => Mod.t() \\| Destroyed.t()}` |
+
+  `default:` уничтожаемого поля проверяется как у любого: `%Destroyed{}` значением по умолчанию не
+  бывает.
+
   `default:` — опция-выражение внутри литерального `fields:` (`docs/rules/20-agreements.md`,
   «Опции `use`»): литерал, вызов чистой функции Prim (`Currency.new!("RUB")`,
   `DeliveryID.from_number!(42)`) или атрибут модуля, объявленный выше `use` (`@rub`). Выражение
@@ -90,6 +115,8 @@ defmodule Core.Struct do
   `CompileError` с префиксом `Struct: fields: <поле>: …`:
 
   - `wire:` и `subject:` — без кодека они ничего не значат;
+  - `destroyable:` не `true`, у элемента `set:` и у ключа `map:` — равные уничтоженные значения не
+    идентифицируют запись;
   - `default:` не того вида, `default: nil` без `optional: true`;
   - `default:`, в значении которого есть Prim `personal: true` или `sensitive:`, в том числе внутри
     struct и списка, — значение ушло бы в исходник и байткод (`default: nil` у такого поля допустим);

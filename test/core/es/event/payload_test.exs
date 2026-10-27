@@ -66,6 +66,19 @@ defmodule Core.Es.Event.PayloadTest do
                    end
     end
 
+    test "destroyable: — CompileError" do
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: name: destroyable: у нагрузки события нет/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.PayloadTest.Destroyable do
+              use Core.Es.Event.Payload,
+                fields: [name: [prim: Core.EsFixture.Account.Name, subject: :aggregate_id, destroyable: true]]
+            end
+          end
+        )
+      end
+    end
+
     test "ошибка спеки называет поле" do
       assert_raise CompileError, ~r/^Es.Event.Payload: fields: name: .*Status не Prim/, fn ->
         Code.eval_quoted(

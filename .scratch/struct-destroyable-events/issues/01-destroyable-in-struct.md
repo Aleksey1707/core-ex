@@ -7,28 +7,28 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `destroyable: true` у поля верхнего уровня любого вида: тип — `T | Core.Es.Personal.Destroyed.t()`, с
+- [x] `destroyable: true` у поля верхнего уровня любого вида: тип — `T | Core.Es.Personal.Destroyed.t()`, с
       `optional: true` ещё `| nil`.
-- [ ] `destroyable: true` у спеки элемента `list:` (и вложенных `list:`) и у спеки значения `map:`: `Destroyed`
+- [x] `destroyable: true` у спеки элемента `list:` (и вложенных `list:`) и у спеки значения `map:`: `Destroyed`
       добавляется к типу элемента и значения.
-- [ ] `CompileError` с префиксом `Struct: fields: <поле>: …`: `destroyable:` у элемента `set:`, у ключа `map:`
+- [x] `CompileError` с префиксом `Struct: fields: <поле>: …`: `destroyable:` у элемента `set:`, у ключа `map:`
       (текст — равные уничтоженные значения не идентифицируют запись), значение не `true`
       («ожидается true, получено …»).
-- [ ] `destroyable:` в режимах плагина по полям, `Payload` и `View` — `CompileError`.
-- [ ] Плагин по полям при сверке со структурой `destroyable:` не сравнивает: плагин рядом со структурой с
+- [x] `destroyable:` в режимах плагина по полям, `Payload` и `View` — `CompileError`.
+- [x] Плагин по полям при сверке со структурой `destroyable:` не сравнивает: плагин рядом со структурой с
       уничтожаемым полем собирается без повтора опции.
-- [ ] Нормализованное поле `__struct_fields__/0` несёт признак уничтожаемости (форма — не контракт) — его прочтёт
+- [x] Нормализованное поле `__struct_fields__/0` несёт признак уничтожаемости (форма — не контракт) — его прочтёт
       проверка команды в 02.
-- [ ] `@moduledoc` `Core.Struct`: опция в таблице и пример состояния с уничтожаемым полем; текст не называет
+- [x] `@moduledoc` `Core.Struct`: опция в таблице и пример состояния с уничтожаемым полем; текст не называет
       поле «персональным».
-- [ ] Тесты: `@type t` через `Code.Typespec.fetch_types/1` у модулей `test/support/struct_fixture.ex` (верхний
+- [x] Тесты: `@type t` через `Code.Typespec.fetch_types/1` у модулей `test/support/struct_fixture.ex` (верхний
       уровень с `optional:` и без, элемент `list:`, значение `map:`); отказы — `Code.eval_quoted`; отказы
       режимов — в тестах плагина, `Payload`, `View`.
-- [ ] Фикстура-потребитель: поле состояния `Account.holder` — `destroyable: true`; `make consumer-check` зелёный.
-- [ ] `docs/rules/23-personal-data.md`: норма MUST — каждое место состояния, куда `evolve/2` кладёт значение поля
+- [x] Фикстура-потребитель: поле состояния `Account.holder` — `destroyable: true`; `make consumer-check` зелёный.
+- [x] `docs/rules/23-personal-data.md`: норма MUST — каждое место состояния, куда `evolve/2` кладёт значение поля
       нагрузки с `subject:`, объявляется `destroyable: true`; сборка этого не проверяет; пример «хорошо» с
       `holder`. `docs/rules/11-domain.md`, структура по полям: `destroyable:`. `make rules-check` зелёный.
-- [ ] CHANGELOG, «Изменения контракта макросов»: `destroyable:`, было → стало для поля состояния с ПДн.
-- [ ] `make` зелёный.
+- [x] CHANGELOG, «Изменения контракта макросов»: `destroyable:`, было → стало для поля состояния с ПДн.
+- [x] `make` зелёный.

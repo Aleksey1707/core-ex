@@ -218,13 +218,24 @@ AAD — `event_id` и wire-ключ поля, открытый текст — JS
   отказ потребителя.
 - Апкастер MAY переносить `{"$pd": null}` как есть, в том числе в оба поля после разделения;
   строковая операция над ним MUST NOT — событие станет нечитаемым.
+- Каждое место состояния, куда `evolve/2` кладёт значение поля с `subject:`, — поле состояния,
+  поле вложенной в него сущности, элемент `list:`, значение `map:` — MUST объявляться
+  `destroyable: true` (`11-domain.md`, «Структура по полям (`Core.Struct`)»): без неё `@type t`
+  состояния не допускает `%Destroyed{}`, и клауза `decide/2`, которая его разбирает, для читателя и
+  Dialyzer недостижима. Ручной `defstruct` дописывает `| Destroyed.t()` в `@type t` сам. Почему
+  разметку ставит автор, а не вывод по потоку значения, — ADR-0092, «Цена».
 
 ```elixir
 # плохо — функция Prim над уничтоженным значением: свёртка падает после уничтожения ключа
 def evolve(state, %Event.HolderSet{payload: payload}),
   do: %{state | holder_name: Holder.value(payload.holder)}
 
+# плохо — в holder после уничтожения ключа лежит %Destroyed{}, а @type t состояния его не допускает
+use Core.Struct, fields: [id: [prim: ID], holder: [prim: Holder, optional: true]]
+
 # хорошо — значение поля хранится как есть, уничтоженное разбирается паттерном там, где нужно ПДн
+use Core.Struct, fields: [id: [prim: ID], holder: [prim: Holder, optional: true, destroyable: true]]
+
 def evolve(state, %Event.HolderSet{payload: payload}), do: %{state | holder: payload.holder}
 
 def decide(%Cmd.Notify{}, %__MODULE__{holder: %Destroyed{}}),

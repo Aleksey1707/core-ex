@@ -567,6 +567,16 @@ defmodule Core.ViewTest do
       end
     end
 
+    test "destroyable: — CompileError, и у элемента" do
+      assert_raise CompileError, ~r/^View: fields: id: destroyable: у View нет/, fn ->
+        define(fields: [id: [prim: Core.ViewFixture.ID, destroyable: true]])
+      end
+
+      assert_raise CompileError, ~r/^View: fields: tags: list: destroyable: у View нет/, fn ->
+        define(fields: [tags: [list: [type: :string, destroyable: true]]])
+      end
+    end
+
     test "set: и map: — форма спеки и optional: у самого поля" do
       assert_raise CompileError, ~r/^View: fields: s: set: optional: задаётся у самого поля, не в set:$/, fn ->
         define(fields: [s: [set: [type: :string, optional: true]]])

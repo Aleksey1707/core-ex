@@ -1,5 +1,24 @@
 # Changelog
 
+## Не выпущено
+
+### Изменения контракта макросов
+
+- **`destroyable: true` у поля `use Core.Struct`.** Поле состояния event-sourced агрегата, куда
+  `evolve/2` кладёт значение поля нагрузки с `subject:`, после уничтожения ключа субъекта держит
+  `%Core.Es.Personal.Destroyed{}`, а `@type t` структуры по полям его не допускал: тип состояния врал,
+  и клауза `decide/2` с `%Destroyed{}` выглядела для Dialyzer недостижимой. Теперь `destroyable: true`
+  добавляет к типу места `| Core.Es.Personal.Destroyed.t()` (с `optional: true` — ещё `| nil`). Опция
+  ставится у поля любого вида, у спеки элемента `list:` и у спеки значения `map:`; у элемента `set:`,
+  у ключа `map:` и значение не `true` — `CompileError` `Struct: fields: <поле>: …`. Codec-плагин по
+  полям, нагрузка события и `Core.View` опцию не принимают (`CompileError`), плагин при сверке со
+  структурой её не сравнивает — повторять её в плагине не нужно (ADR-0092). Норма — каждое такое
+  место объявляется `destroyable: true` (`docs/rules/23-personal-data.md`, «Уничтоженное
+  ПДн-значение»). Правка потребителя — у состояния с полем, куда свёртка кладёт ПДн-значение: было
+  `holder: [prim: Holder, optional: true]`, стало `holder: [prim: Holder, optional: true,
+  destroyable: true]`; у элемента — было `holders: [list: [prim: Holder]]`, стало
+  `holders: [list: [prim: Holder, destroyable: true]]`.
+
 ## 0.17.1
 
 ### Новое

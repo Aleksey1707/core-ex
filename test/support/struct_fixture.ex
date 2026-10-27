@@ -63,6 +63,28 @@ defmodule Core.StructFixture do
       ]
   end
 
+  defmodule Recipient do
+    @moduledoc false
+
+    use Core.Struct, fields: [phone: [prim: Name, destroyable: true]]
+  end
+
+  defmodule Destroyable do
+    @moduledoc false
+
+    use Core.Struct,
+      fields: [
+        holder: [prim: Name, destroyable: true],
+        phone: [prim: Name, optional: true, destroyable: true],
+        point: [entity: Point, destroyable: true],
+        recipients: [list: [entity: Recipient]],
+        names: [list: [prim: Name, destroyable: true]],
+        matrix: [list: [list: [prim: Name, destroyable: true], destroyable: true]],
+        tags: [list: [prim: Name], destroyable: true],
+        by_id: [map: [key: [type: :string], value: [prim: Name, destroyable: true]]]
+      ]
+  end
+
   defmodule Defaults do
     @moduledoc false
 
