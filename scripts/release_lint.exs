@@ -21,6 +21,8 @@ defmodule ReleaseLint do
   @heading_re ~r/^## (.+)$/m
   @tag_re ~r/^v(\d+\.\d+\.\d+)$/
 
+  @spec run() :: :ok
+
   def run do
     tag = head_tag()
     ref = if tag, do: "v#{tag}", else: nil
@@ -80,8 +82,10 @@ defmodule ReleaseLint do
   defp report(tag, _versions), do: "release-check: тег v#{tag} сведён"
 
   defp head_tag do
+    # git — инструмент того же оператора, что запустил проверку: скрывать от него окружение нечего.
+    # credo:disable-for-next-line Credo.Check.Warning.LeakyEnvironment
     case System.cmd("git", ["tag", "--points-at", "HEAD"], stderr_to_stdout: true) do
-      {out, 0} -> out |> String.split("\n", trim: true) |> Enum.find_value(&version_of/1)
+      {out, 0} -> Enum.find_value(String.split(out, "\n", trim: true), &version_of/1)
       {_out, _code} -> nil
     end
   end
@@ -96,6 +100,7 @@ defmodule ReleaseLint do
   defp read!(nil, path), do: File.read!(path)
 
   defp read!(ref, path) do
+    # credo:disable-for-next-line Credo.Check.Warning.LeakyEnvironment
     case System.cmd("git", ["show", "#{ref}:#{path}"], stderr_to_stdout: true) do
       {content, 0} -> content
       {out, _code} -> abort(["git show #{ref}:#{path}: #{String.trim(out)}"])

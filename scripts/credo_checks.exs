@@ -454,7 +454,7 @@ defmodule CredoChecks.OptsSchema do
   # переменной её параметра, а результат вызова уходит туда же, куда уходил бы сам вызов.
   defp walk_helper({name, _meta, args}, clauses, env, acc) do
     fun = {name, length(args)}
-    {given, rest} = args |> Enum.with_index() |> Enum.split_with(fn {arg, _index} -> var?(arg, env.var) end)
+    {given, rest} = Enum.split_with(Enum.with_index(args), fn {arg, _index} -> var?(arg, env.var) end)
     acc = walk_each(Enum.map(rest, &elem(&1, 0)), %{env | consumer?: true}, acc)
 
     if MapSet.member?(env.seen, fun) do
@@ -517,7 +517,7 @@ defmodule CredoChecks.UseOptsPerLine do
   # ---
 
   defp walk({:use, meta, [_module, opts]} = node, issues, ctx) do
-    lines = opts |> keyword() |> Enum.map(&key_line/1)
+    lines = Enum.map(keyword(opts), &key_line/1)
 
     if one_per_line?(lines, meta[:line]),
       do: {node, issues},
@@ -622,7 +622,7 @@ defmodule CredoChecks.EnumValuesTable do
   end
 
   defp atoms({:sigil_w, _meta, [{:<<>>, _bin, [words]}, ~c"a"]}) when is_binary(words),
-    do: {:ok, words |> String.split() |> Enum.map(&String.to_atom/1)}
+    do: {:ok, Enum.map(String.split(words), &String.to_atom/1)}
 
   defp atoms(list) when is_list(list) do
     if Enum.all?(list, &is_atom/1), do: {:ok, list}, else: :skip
@@ -658,7 +658,7 @@ defmodule CredoChecks.EnumValuesTable do
 
   defp table_line?(line), do: String.starts_with?(String.trim_leading(line), "|")
 
-  defp first_cell(line), do: line |> String.split("|", parts: 3) |> Enum.at(1, "") |> String.trim()
+  defp first_cell(line), do: String.trim(Enum.at(String.split(line, "|", parts: 3), 1, ""))
 
   defp cell(value), do: "`#{inspect(value)}`"
 

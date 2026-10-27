@@ -42,6 +42,8 @@ defmodule BoundaryLint do
   @web_parts ~w(Endpoint Router Telemetry ErrorJSON FallbackController ErrorMapper Accepted
                 Schemas Presenters Plugs Params)
 
+  @spec run([String.t()]) :: :ok
+
   def run(["--consumer" | dirs]) do
     check(:consumer, if(dirs == [], do: @consumer_dirs, else: dirs))
   end
@@ -65,7 +67,7 @@ defmodule BoundaryLint do
   end
 
   defp abort(errors) do
-    rules = errors |> Enum.map(& &1.doc) |> Enum.uniq() |> Enum.join(", ")
+    rules = Enum.join(Enum.uniq(Enum.map(errors, & &1.doc)), ", ")
 
     Enum.each(errors, &IO.puts(:stderr, &1.text))
     IO.puts(:stderr, "\nboundary-check: нарушений — #{length(errors)}; правила — #{rules}")
@@ -183,9 +185,9 @@ defmodule BoundaryLint do
   defp web_anchors(placed, known) do
     placed
     |> Enum.filter(&web_offender?(&1.name, known))
-    |> Enum.group_by(&(&1.name |> String.split(".") |> Enum.take(2) |> List.to_tuple()))
+    |> Enum.group_by(&List.to_tuple(Enum.take(String.split(&1.name, "."), 2)))
     |> Map.new(fn {key, modules} ->
-      spec = key |> Tuple.to_list() |> Enum.join(".") |> Kernel.<>(".ApiSpec")
+      spec = Enum.join(Tuple.to_list(key), ".") <> ".ApiSpec"
       anchor = Enum.find(modules, &(&1.name == spec)) || Enum.min_by(modules, &{&1.path, &1.line})
       {key, %{path: anchor.path, line: anchor.line, others: length(modules) - 1}}
     end)
@@ -342,7 +344,7 @@ defmodule BoundaryLint do
 
   # Конвенция Mix: `Mix.Tasks.Foo.Bar` — задача `foo.bar`, файл `mix/tasks/foo.bar.ex`.
   defp module_file("Mix.Tasks." <> task),
-    do: "mix/tasks/#{task |> String.split(".") |> Enum.map_join(".", &Macro.underscore/1)}.ex"
+    do: "mix/tasks/#{Enum.map_join(String.split(task, "."), ".", &Macro.underscore/1)}.ex"
 
   defp module_file(name), do: Macro.underscore(name) <> ".ex"
 
@@ -614,7 +616,7 @@ defmodule BoundaryLint do
   defp collect_modules(list, env) when is_list(list), do: {env, collected(list, env)}
   defp collect_modules(_node, env), do: {env, []}
 
-  defp collected(nodes, env), do: Enum.flat_map(nodes, &(&1 |> collect_modules(env) |> elem(1)))
+  defp collected(nodes, env), do: Enum.flat_map(nodes, &elem(collect_modules(&1, env), 1))
 
   defp use_targets({:__block__, _meta, exprs}, env) do
     Enum.reduce(exprs, {env, []}, fn expr, {env, found} ->
@@ -637,7 +639,7 @@ defmodule BoundaryLint do
   defp use_targets(list, env) when is_list(list), do: {env, used(list, env)}
   defp use_targets(_node, env), do: {env, []}
 
-  defp used(nodes, env), do: Enum.flat_map(nodes, &(&1 |> use_targets(env) |> elem(1)))
+  defp used(nodes, env), do: Enum.flat_map(nodes, &elem(use_targets(&1, env), 1))
 
   defp references({:__block__, _meta, exprs}, env) do
     Enum.reduce(exprs, {env, []}, fn expr, {env, found} ->
@@ -660,7 +662,7 @@ defmodule BoundaryLint do
   defp references(list, env) when is_list(list), do: {env, referenced(list, env)}
   defp references(_node, env), do: {env, []}
 
-  defp referenced(nodes, env), do: Enum.flat_map(nodes, &(&1 |> references(env) |> elem(1)))
+  defp referenced(nodes, env), do: Enum.flat_map(nodes, &elem(references(&1, env), 1))
 
   # Вложенный `defmodule Line` внутри `A` — это `A.Line` даже при алиасе `Line`, и `Line` становится
   # алиасом в `A`; `defmodule Elixir.Line` вложенностью не считается.
@@ -719,7 +721,7 @@ defmodule BoundaryLint do
   defp markers(ast, comments, lines) do
     by_line =
       for %{line: line, text: text} <- comments,
-          lines |> Enum.at(line - 1) |> String.trim_leading() |> String.starts_with?("#"),
+          String.starts_with?(String.trim_leading(Enum.at(lines, line - 1)), "#"),
           into: %{},
           do: {line, text}
 

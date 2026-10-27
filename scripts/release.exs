@@ -18,6 +18,8 @@ defmodule Release do
   @heading_re ~r/^## (.+)$/m
   @version_re ~r/^\d+\.\d+\.\d+$/
 
+  @spec run([String.t()]) :: :ok
+
   def run([version]), do: release(version, current())
 
   def run(_args), do: abort("аргумент — версия выпуска: elixir scripts/release.exs X.Y.Z")
@@ -48,7 +50,7 @@ defmodule Release do
     end
   end
 
-  defp ensure_unreleased!() do
+  defp ensure_unreleased! do
     case capture!(@heading_re, @changelog) do
       @unreleased ->
         :ok

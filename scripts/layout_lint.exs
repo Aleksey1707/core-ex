@@ -29,6 +29,8 @@ defmodule LayoutLint do
   @dash ~r/^ *# ---$/
   @block ~r/^ *# ===== ([^=\s]|[^=\s].*[^=\s]) =====$/
 
+  @spec run() :: :ok
+
   def run do
     files = files()
     errors = Enum.flat_map(files, fn {path, mode} -> check_file(path, mode) end)
@@ -42,8 +44,8 @@ defmodule LayoutLint do
   # ---
 
   defp files do
-    full = @full |> Enum.flat_map(&Path.wildcard/1) |> MapSet.new()
-    form = @form |> Enum.flat_map(&Path.wildcard/1) |> Enum.reject(&MapSet.member?(full, &1))
+    full = MapSet.new(Enum.flat_map(@full, &Path.wildcard/1))
+    form = Enum.reject(Enum.flat_map(@form, &Path.wildcard/1), &MapSet.member?(full, &1))
 
     Enum.sort(Enum.map(full, &{&1, :full}) ++ Enum.map(form, &{&1, :form}))
   end
@@ -67,7 +69,7 @@ defmodule LayoutLint do
   defp check_file(path, mode) do
     source = File.read!(path)
     code = code_lines(path, source)
-    nodes = source |> Code.string_to_quoted!(columns: true, token_metadata: true) |> collect()
+    nodes = collect(Code.string_to_quoted!(source, columns: true, token_metadata: true))
     markers = markers(code)
 
     quoted =
@@ -125,7 +127,7 @@ defmodule LayoutLint do
 
       %{
         module: module,
-        defs: nodes.defs |> Enum.filter(own) |> Enum.sort_by(& &1.line),
+        defs: Enum.sort_by(Enum.filter(nodes.defs, own), & &1.line),
         markers: Enum.filter(markers, own)
       }
     end
@@ -196,7 +198,7 @@ defmodule LayoutLint do
   # Код `quote` — чужой модуль: из него в счёт идут опции (`bind_quoted:`) и `unquote` — они
   # вычисляются здесь; при `unquote: false` — только опции.
   defp calls({:quote, _, args}, acc) when is_list(args) do
-    {body, quote_opts} = args |> Enum.filter(&is_list/1) |> Enum.concat() |> Keyword.split([:do])
+    {body, quote_opts} = Keyword.split(Enum.concat(Enum.filter(args, &is_list/1)), [:do])
     acc = calls(Keyword.values(quote_opts), acc)
 
     if Keyword.get(quote_opts, :unquote) == false,
@@ -263,7 +265,7 @@ defmodule LayoutLint do
   end
 
   defp def_indent(%{defs: [], module: module}), do: module.column + 1
-  defp def_indent(%{defs: defs}), do: defs |> Enum.map(& &1.column) |> Enum.min() |> Kernel.-(1)
+  defp def_indent(%{defs: defs}), do: Enum.min(Enum.map(defs, & &1.column)) - 1
 
   defp check_form(marker, unit, code, indent, path) do
     shape(marker, path) ++
@@ -478,12 +480,11 @@ defmodule LayoutLint do
     name = hd(clauses).name
     signatures = for clause <- clauses, arity <- clause.arities, into: MapSet.new(), do: {name, arity}
     placed = block_index(hd(clauses), layout)
-    label = "`#{name}/#{clauses |> Enum.flat_map(& &1.arities) |> Enum.max()}`"
+    label = "`#{name}/#{Enum.max(Enum.flat_map(clauses, & &1.arities))}`"
 
     callers =
       unit.defs
-      |> Enum.reject(&(&1 in clauses))
-      |> Enum.filter(&(not MapSet.disjoint?(&1.calls, signatures)))
+      |> Enum.filter(&(&1 not in clauses and not MapSet.disjoint?(&1.calls, signatures)))
       |> Enum.map(&block_index(&1, layout))
       |> Enum.uniq()
       |> Enum.sort()

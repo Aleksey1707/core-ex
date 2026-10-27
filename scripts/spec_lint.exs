@@ -19,8 +19,10 @@ defmodule SpecLint do
   @result [[:Result], [:Core, :Result]]
   @error [[:Error], [:Core, :Error]]
 
+  @spec run() :: :ok
+
   def run do
-    files = @paths |> Enum.flat_map(&Path.wildcard/1) |> Enum.uniq() |> Enum.sort()
+    files = Enum.sort(Enum.uniq(Enum.flat_map(@paths, &Path.wildcard/1)))
     errors = Enum.flat_map(files, &check_file/1)
 
     case errors do
@@ -48,7 +50,7 @@ defmodule SpecLint do
   end
 
   defp check_file(path) do
-    ast = path |> File.read!() |> Code.string_to_quoted!(columns: true)
+    ast = Code.string_to_quoted!(File.read!(path), columns: true)
     walk(ast, %{path: path, quoted?: false, line: nil, short?: short_result?(ast)}, [])
   end
 
@@ -76,7 +78,7 @@ defmodule SpecLint do
   defp walk({:@, meta, [{attr, _, [type]}]}, ctx, acc) when attr in @attrs,
     do: check_type(type, %{ctx | line: meta[:line]}, acc)
 
-  defp walk(node, ctx, acc), do: node |> children() |> Enum.reduce(acc, &walk(&1, ctx, &2))
+  defp walk(node, ctx, acc), do: Enum.reduce(children(node), acc, &walk(&1, ctx, &2))
 
   # Объединение разбирается целиком на верхнем `|`, затем — его члены: пропись бывает вложена
   # в тип аргумента или колбэка.
@@ -86,7 +88,7 @@ defmodule SpecLint do
   end
 
   defp check_type(type, ctx, acc),
-    do: type |> children() |> Enum.reduce(name_error(type, ctx) ++ acc, &check_type(&1, ctx, &2))
+    do: Enum.reduce(children(type), name_error(type, ctx) ++ acc, &check_type(&1, ctx, &2))
 
   defp children({form, _meta, args}) when is_list(args), do: [form | args]
   defp children({left, right}), do: [left, right]
@@ -113,8 +115,8 @@ defmodule SpecLint do
   defp ok?({:ok, _value}), do: true
   defp ok?(_type), do: false
 
-  defp values(oks), do: oks |> Enum.map(fn {:ok, value} -> value end) |> union()
-  defp reasons(errors), do: errors |> Enum.map(fn {:error, reason} -> reason end) |> union()
+  defp values(oks), do: union(Enum.map(oks, fn {:ok, value} -> value end))
+  defp reasons(errors), do: union(Enum.map(errors, fn {:error, reason} -> reason end))
 
   defp union(types), do: Enum.reduce(types, fn type, union -> {:|, [], [union, type]} end)
 
