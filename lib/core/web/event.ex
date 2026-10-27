@@ -44,12 +44,13 @@ defmodule Core.Web.Event do
   | `:ref` | `%{entity, id, name}`: вид записи — camelCase атома, id — дампом `codec:`, имя — из словаря ссылок |
   | `:user` | результат `dump:` от дампа id и имени из словаря ссылок — той же формы, что `by` |
   | `:group`, `:list`, `:set` | сведения и элементы — рекурсивно |
-  | `:map` | пары `%{key, value}`: ключ и значение — элементы, рекурсивно |
+  | `:map` | пары `%{key, value}`: ключ и значение — элементы, рекурсивно; с `label` при подписях ключа и значения |
   | `:change` | `%{label, kind: "change", old, new}` |
 
   Виды: `"text"`, `"number"`, `"date"`, `"datetime"`, `"user"`, `"ref"`, `"group"`, `"list"`, `"set"`, `"map"`,
   `"change"`, `"destroyed"`. Строка, которую отдал кодек (`decimal: :string`), выходит как есть. У
-  элемента списка и стороны изменения `label` нет; значения нет — `value: nil`.
+  элемента списка, стороны изменения и стороны неподписанного словаря `label` нет; значения нет —
+  `value: nil`.
 
   Маркеры ПДн-значений дампа (`Core.Es.Personal.Marker`, поля с `subject:`) снимает сам `to_wire/2`
   (ADR-0074): живое значение уходит открытым wire-значением — права на него проверил usecase, —
@@ -119,7 +120,10 @@ defmodule Core.Web.Event do
           details: [detail()]
         }
 
-  @typedoc "Сведение для JSON: у элемента списка и стороны изменения `label` нет, у вида `destroyed` нет `value`."
+  @typedoc """
+  Сведение для JSON: у элемента списка, стороны изменения и стороны неподписанного словаря `label` нет, у вида
+  `destroyed` нет `value`.
+  """
   @type detail ::
           %{optional(:label) => String.t(), required(:kind) => String.t(), required(:value) => value()}
           | %{label: String.t(), kind: String.t(), old: detail(), new: detail()}

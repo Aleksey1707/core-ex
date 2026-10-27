@@ -493,12 +493,26 @@ defmodule Core.Labels.FieldsTest do
                    end
     end
 
-    test "подписи map'ы у поля, которое не map'а — CompileError" do
+    test "подписи ключа и значения у поля, которое не map'а и не словарь — CompileError" do
       assert_raise CompileError,
-                   ~r/NotMap: подписи map'ы `\[label:, key:, value:\]` у поля, которое не map'а: \[:note\]/,
+                   ~r/NotMap: подписи ключа и значения `\[label:, key:, value:\]` у поля, которое не map'а и не словарь: \[:note\]/,
                    fn ->
                      compile_payload(:NotMap,
                        labels: [name: "Название", note: [label: "Данные", key: "Ключ", value: "Значение"]]
+                     )
+                   end
+    end
+
+    test "подписи ключа и значения у словаря внутри списка и множества — CompileError" do
+      dict = [key: [type: :string], value: [prim: Core.LabelsFixture.Count]]
+      labels = [label: "Лимиты", key: "Счёт", value: "Лимит"]
+
+      assert_raise CompileError,
+                   ~r/NestedDict: подписи ключа и значения .* не map'а и не словарь: \[:city, :zip\]/,
+                   fn ->
+                     compile_struct(:NestedDict,
+                       fields: [city: [set: [map: dict]], zip: [list: [map: dict]]],
+                       labels: [city: labels, zip: labels]
                      )
                    end
     end
@@ -697,6 +711,20 @@ defmodule Core.Labels.FieldsTest do
 
     assert Fields.specs(module) == [name: {:prim, Name}, note: {:type, :map}]
     assert Fields.paths(module) == [{[:name], "Название"}, {[:note], "Лимиты"}]
+  end
+
+  test "словарь с подписями ключа и значения собирается; подпись строкой — тоже" do
+    {{:module, module, _bytecode, _result}, _binding} =
+      compile_struct(:LabelledDict,
+        fields: [
+          city: [map: [key: [type: :string], value: [prim: Core.LabelsFixture.Count]]],
+          zip: [map: [key: [type: :string], value: [prim: Core.LabelsFixture.Count]]]
+        ],
+        labels: [city: [label: "Лимиты", key: "Счёт", value: "Лимит"], zip: "Запасные лимиты"]
+      )
+
+    assert Fields.labels(module) == [city: [label: "Лимиты", key: "Счёт", value: "Лимит"], zip: "Запасные лимиты"]
+    assert Fields.paths(module) == [{[:city], "Лимиты"}, {[:zip], "Запасные лимиты"}]
   end
 
   describe "структура по полям" do

@@ -225,7 +225,7 @@ defmodule Core.Web.Event.DetailsTest do
              }
     end
 
-    test "множество — элементы без подписи, словарь — пары key / value без подписи" do
+    test "множество — элементы без подписи, словарь — пары key / value, с подписями сторон у подписанного" do
       [first, second] = Enum.sort([ItemID.new(), ItemID.new()], &(ItemID.value(&1) <= ItemID.value(&2)))
       keyed = ItemID.new()
       refs = %{first => "Позиция 1", second => "Позиция 2", keyed => "Позиция 3"}
@@ -251,7 +251,9 @@ defmodule Core.Web.Event.DetailsTest do
                  detail("Статусы", "set", [%{"kind" => "text", "value" => "Активна"}]),
                  detail("Счётчики", "set", []),
                  detail("Запасные позиции", "set", nil),
-                 detail("Лимиты", "map", [%{"key" => item.(keyed), "value" => %{"kind" => "number", "value" => "5"}}]),
+                 detail("Лимиты", "map", [
+                   %{"key" => Map.put(item.(keyed), "label", "Позиция"), "value" => number("Лимит", "5")}
+                 ]),
                  detail("Строки по статусу", "map", [
                    %{
                      "key" => %{"kind" => "text", "value" => "Активна"},

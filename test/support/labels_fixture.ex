@@ -959,7 +959,7 @@ defmodule Core.LabelsFixture do
       alias Core.LabelsFixture
 
       defmodule Payload do
-        @moduledoc "Нагрузка с множествами и словарями; id в скрытом словаре."
+        @moduledoc "Нагрузка с множествами и словарями; у словаря лимитов — подписи ключа и значения, id в скрытом словаре."
 
         use Core.Es.Event.Payload,
           fields: [
@@ -979,7 +979,7 @@ defmodule Core.LabelsFixture do
             statuses: "Статусы",
             counts: "Счётчики",
             backup: "Запасные позиции",
-            limits: "Лимиты",
+            limits: [label: "Лимиты", key: "Позиция", value: "Лимит"],
             lines: "Строки по статусу",
             origins: :hidden,
             days: "Дни"

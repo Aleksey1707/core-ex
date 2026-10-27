@@ -21,7 +21,7 @@ defmodule Core.Labels.Details do
   | `:group` | `entity:`, `union:` → сведения полей struct'а; у варианта — по его `Core.Labels.Fields` |
   | `:list` | `list:` → элементы `%{kind, value}` вида спеки элемента, без подписи |
   | `:set` | `set:` → элементы `%{kind, value}` вида спеки элемента, без подписи, в каноническом порядке |
-  | `:map` | `map:` → пары `%{key, value}`: ключ и значение — `%{kind, value}` своих видов, без подписи |
+  | `:map` | `map:` → пары `%{key, value}`: ключ и значение — `%{kind, value}` своих видов; с подписями `[label:, key:, value:]` — с подписью стороны |
   | `:list` | `type: :map` с подписями `[label:, key:, value:]` → группы «ключ — значение» |
   | `:destroyed` | поле с `subject:`, на месте значения `%Core.Es.Personal.Destroyed{}` → без `value` |
 
@@ -87,8 +87,8 @@ defmodule Core.Labels.Details do
           | %{kind: :ref, entity: atom(), value: struct() | nil}
           | %{kind: :destroyed}
 
-  @typedoc "Пара словаря: ключ и значение своих видов, без подписи."
-  @type pair :: %{key: item(), value: item()}
+  @typedoc "Пара словаря: ключ и значение своих видов; подписаны, если у поля подписи ключа и значения."
+  @type pair :: %{key: item() | t(), value: item() | t()}
 
   # Значения, чей порядок задаёт `compare/2` модуля, а не порядок термов.
   @comparable Kind.scalars()
@@ -139,7 +139,17 @@ defmodule Core.Labels.Details do
   defp field_detail([label: label, key: key, value: value], {:type, :map}, map),
     do: %{label: label, kind: :list, value: map_items(map, key, value)}
 
+  defp field_detail([label: label, key: key_label, value: value_label], {:map, _key, _value} = spec, map) do
+    case detail(label, spec, map) do
+      %{value: [_ | _] = pairs} = detail -> %{detail | value: Enum.map(pairs, &label_pair(&1, key_label, value_label))}
+      detail -> detail
+    end
+  end
+
   defp field_detail(label, spec, value), do: detail(label, spec, value)
+
+  defp label_pair(%{key: key, value: value}, key_label, value_label),
+    do: %{key: Map.put(key, :label, key_label), value: Map.put(value, :label, value_label)}
 
   defp map_items(nil, _key, _value), do: nil
 

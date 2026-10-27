@@ -73,8 +73,10 @@ defmodule Core.Labels.Fields do
   результата; так подписывается значение без собственного модуля. `text:`, `list: [text: …]` и
   `set: [text: …]` — без других ключей.
 
-  Поле-множество (`set:`) и поле-словарь (`map:`) подписываются строкой, как список: элементы
-  множества, ключи и значения словаря выходят в сведения по своим видам без подписи.
+  Поле-множество (`set:`) подписывается строкой, как список: элементы выходят в сведения по своему
+  виду без подписи. Поле-словарь (`map:`) подписывается строкой либо подписями ключа и значения
+  `[label:, key:, value:]`: ключ и значение выходят по своим видам, с подписями — каждая сторона со
+  своей. У словаря внутри `list:`, `set:` и значения `map:` подписей ключа и значения нет.
 
   `fields:` и `value:` — опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): захваты в
   них проверяются в теле модуля; `labels:` и `change:` — литералы, проверяются при раскрытии `use`.
@@ -83,7 +85,7 @@ defmodule Core.Labels.Fields do
   поле без решения, подпись поля, которого нет в struct'е, повтор поля, пустая подпись, свободная
   map'а (`type: :map`) с подписью строкой, видимый список, множество или словарь map'ов
   (`list: [type: :map]`, `set: [type: :map]`, значение словаря `type: :map`, решение у них только
-  `:hidden`), подписи map'ы у поля, которое не map'а, ключ подписи map'ы вне
+  `:hidden`), подписи ключа и значения у поля, которое не map'а и не словарь, ключ в них вне
   `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки и
   структуры по полям — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без
   спеки, спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
@@ -125,10 +127,10 @@ defmodule Core.Labels.Fields do
   alias Core.Labels.Check
   alias Core.Struct
 
-  @typedoc "Решение по полю: подпись, подписи map'ы с id в ключах или скрыто."
+  @typedoc "Решение по полю: подпись, подписи ключа и значения или скрыто."
   @type label :: String.t() | map_label() | :hidden
 
-  @typedoc "Подписи map'ы с id в ключах: поля, ключа и значения."
+  @typedoc "Подписи ключа и значения map'ы или словаря: поля, ключа и значения."
   @type map_label :: [label: String.t(), key: String.t(), value: String.t()]
 
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
@@ -417,12 +419,16 @@ defmodule Core.Labels.Fields do
 
     visible = visible(module)
     labelled_maps = for {name, [_ | _]} <- labels(module), do: name
-    not_maps = for {name, spec} <- visible, name in labelled_maps, not free_map?(spec), do: name
+    not_maps = for {name, spec} <- visible, name in labelled_maps, not pair_labelled?(spec), do: name
     maps = for {name, {:type, :map}} <- visible, name not in labelled_maps, do: name
     nested_maps = for {name, spec} <- visible, holds_free_map?(spec), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
-    ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
+    ensure_none!(
+      env,
+      not_maps,
+      "подписи ключа и значения `[label:, key:, value:]` у поля, которое не map'а и не словарь"
+    )
 
     ensure_none!(
       env,
@@ -473,6 +479,9 @@ defmodule Core.Labels.Fields do
       )
     end
   end
+
+  defp pair_labelled?({:map, _key, _value}), do: true
+  defp pair_labelled?(spec), do: free_map?(spec)
 
   # Свободная map'а (`type: :map`) на любой глубине: сама спека или внутри списка, множества,
   # значения словаря. Словарь `map:` — не свободная map'а.

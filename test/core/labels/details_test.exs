@@ -208,7 +208,7 @@ defmodule Core.Labels.DetailsTest do
   end
 
   describe "множество и словарь" do
-    test "множество — элементы по виду элемента по возрастанию, словарь — пары ключ — значение по их видам" do
+    test "множество — элементы по виду элемента по возрастанию, словарь — пары ключ — значение по их видам и подписям" do
       [first, second] = Enum.sort([ItemID.new(), ItemID.new()], &(ItemID.value(&1) <= ItemID.value(&2)))
       limit = Count.new!(7)
       title = Name.new!("Болт")
@@ -253,8 +253,8 @@ defmodule Core.Labels.DetailsTest do
                     kind: :map,
                     value: [
                       %{
-                        key: %{kind: :ref, entity: :stock_item, value: second},
-                        value: %{kind: :number, value: limit}
+                        key: %{label: "Позиция", kind: :ref, entity: :stock_item, value: second},
+                        value: %{label: "Лимит", kind: :number, value: limit}
                       }
                     ]
                   },
