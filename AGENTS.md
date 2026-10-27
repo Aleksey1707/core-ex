@@ -161,7 +161,7 @@ mix docs
 | `dialyzer` | `mix dialyzer` |
 | `test` | `mix test` после `make infra-up` |
 | `credo` | `mix credo --strict`; конфиг `consumer` — проверки сводов над `fixtures/consumer/lib` |
-| `audit` | `mix deps.audit` — известные CVE в зависимостях |
+| `audit` | `mix deps.audit` и `mix hex.audit` — известные CVE в зависимостях, advisories и retired-пакеты Hex |
 
 Тестовая инфраструктура живёт в самой библиотеке: `Core.TestRepo`, `Core.DataCase`,
 Codec-фикстуры и Prim-фикстуры — в `test/support`, таблица `outbox` — в

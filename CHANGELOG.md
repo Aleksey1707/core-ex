@@ -742,6 +742,11 @@
   библиотеке. Правка потребителя: в `.credo.exs` — `requires: ["deps/core/scripts/credo_checks.exs"]`
   и в `enabled:` — `{CredoChecks.UseOptsPerLine, []}`,
   `{CredoChecks.EnumValuesTable, [files: %{included: ["lib/", "test/support/"]}]}`.
+- **`hackney` — `~> 4.9` вместо `~> 4.0.1`** (override транзитивной зависимости `prom_ex` в
+  `mix.exs`). Прежний override держал потребителя на hackney 4.0.x с известными уязвимостями, и
+  обойти его можно было только своим override. Правка потребителя: свой
+  `{:hackney, "~> 4.0.1", override: true}` → `{:hackney, "~> 4.9", override: true}`, затем
+  `mix deps.update hackney`.
 
 ### Изменения контракта макросов
 

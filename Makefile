@@ -99,10 +99,11 @@ deps-clean:
 credo:
 	mix credo --strict && mix credo --strict -C consumer
 
-# Известные CVE в зависимостях.
+# Известные CVE в зависимостях: база mix_audit и advisories/retired самого Hex.
 .PHONY: audit
 audit:
 	mix deps.audit
+	mix hex.audit
 
 # Храповик на циклы компиляции: новые добавлять нельзя. Порог 1 держит принятый цикл семейства
 # Core.Es.Personal.Event (ADR-0084).

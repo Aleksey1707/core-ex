@@ -13,6 +13,9 @@ defmodule Core.MixProject do
       aliases: aliases(),
       deps: deps(),
       dialyzer: [plt_add_apps: [:mix], ignore_warnings: "dialyzer.ignore.exs"],
+      # cowlib приходит только через тестовую `bypass` (у prom_ex `plug_cowboy` optional);
+      # исправленной версии нет — снять, когда выйдет.
+      hex: [ignore_advisories: ["EEF-CVE-2026-43966"]],
       # Адаптеры брокеров компилируются условно (см. deps): без клиента модуля нет,
       # и ссылка на него из Mq.PromEx — не ошибка, а осознанный no-op.
       elixirc_options: [no_warn_undefined: [Core.Mq.Stream.Reader, Core.Mq.Kafka.Writer, Core.Mq.Kafka.Reader]],
@@ -69,7 +72,7 @@ defmodule Core.MixProject do
       # Нужен prom_ex: он компилирует `PromEx.Plug` безусловно, хотя plug у него optional
       {:plug, "~> 1.20"},
       # Транзитивная зависимость prom_ex; тот же override, что у потребителей
-      {:hackney, "~> 4.0.1", override: true},
+      {:hackney, "~> 4.9", override: true},
       #
       # База часовых поясов нужна только тестам библиотеки: потребитель выбирает
       # реализацию `config :elixir, :time_zone_database` сам.

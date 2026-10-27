@@ -122,8 +122,8 @@ repos:
         files: *code
 
       - id: mix-audit
-        name: "Elixir: mix deps.audit"
-        entry: mix deps.audit
+        name: "Elixir: mix deps.audit + mix hex.audit"
+        entry: make audit
         language: system
         require_serial: true
         pass_filenames: false

@@ -22,7 +22,7 @@ defmodule Consumer.MixProject do
     [
       {:core, path: "../.."},
       {:boundary, "~> 0.10", runtime: false},
-      {:hackney, "~> 4.0.1", override: true}
+      {:hackney, "~> 4.9", override: true}
     ]
   end
 end
