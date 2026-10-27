@@ -32,6 +32,7 @@ defmodule Core.Labels.Refs do
   записи без имени — `nil`.
   """
 
+  alias Core.Codec.Field
   alias Core.Context
   alias Core.Es
   alias Core.Labels.Fields
@@ -43,7 +44,7 @@ defmodule Core.Labels.Refs do
   @type t :: %{struct() => String.t() | nil}
 
   # Struct'ы значений, внутри которых id нет.
-  @leaves [Date, DateTime, NaiveDateTime, Time, Decimal]
+  @leaves Kind.scalars()
 
   @doc "Словарь ссылок страницы событий, списка событий или события."
   @spec get(Pagination.Result.t(Es.Event.t()) | [Es.Event.t()] | Es.Event.t(), Context.t()) :: Result.t(t())
@@ -124,6 +125,5 @@ defmodule Core.Labels.Refs do
 
   # Значение `text:` выходит в сведения текстом функции, а не ссылкой.
   defp text?({:text, _fun}), do: true
-  defp text?({kind, inner}) when kind in ~w(list set)a, do: text?(inner)
-  defp text?(_spec), do: false
+  defp text?(spec), do: Enum.any?(Field.values(spec), &text?/1)
 end

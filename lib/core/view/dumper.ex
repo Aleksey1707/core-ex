@@ -58,8 +58,8 @@ defmodule Core.View.Dumper do
   @spec map_set(term(), (term() -> term())) :: term()
 
   def map_set(nil, _fun), do: nil
-  def map_set(%MapSet{} = set, fun), do: Core.Codec.Redump.canonical(set, fun)
-  def map_set(list, fun) when is_list(list), do: Core.Codec.Redump.canonical(list, fun)
+  def map_set(%MapSet{} = set, fun), do: Core.Codec.Helper.set_wire(Enum.map(set, fun))
+  def map_set(list, fun) when is_list(list), do: Core.Codec.Helper.set_wire(Enum.map(list, fun))
   def map_set(other, _fun), do: other
 
   @doc false
@@ -71,12 +71,6 @@ defmodule Core.View.Dumper do
     do: Map.new(map, fn {key, value} -> {key_fun.(key), value_fun.(value)} end)
 
   def map_dict(other, _key_fun, _value_fun), do: other
-
-  @doc false
-  @spec enum_key(term()) :: term()
-
-  def enum_key(key) when is_atom(key) and not is_nil(key), do: Atom.to_string(key)
-  def enum_key(key), do: key
 
   # ---
 
@@ -169,7 +163,15 @@ defmodule Core.View.Dumper do
     end
   end
 
-  defp key_dump_ast({:enum, _mod}, key, _codec), do: quote(do: Core.View.Dumper.enum_key(unquote(key)))
+  # Дамп тотален: строковый ключ jsonb-формы проходит как есть.
+  defp key_dump_ast({:enum, _mod}, key, _codec) do
+    quote do
+      if is_atom(unquote(key)) and not is_nil(unquote(key)),
+        do: Core.Codec.Helper.enum_key(unquote(key)),
+        else: unquote(key)
+    end
+  end
+
   defp key_dump_ast(spec, key, codec), do: dump_ast(spec, key, codec, 0)
 
   defp fields_need_codec?(fields) do

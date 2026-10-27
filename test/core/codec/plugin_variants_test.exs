@@ -276,8 +276,11 @@ defmodule Core.Codec.PluginVariantsTest do
       assert {:error, %Error{ns: :codec, code: :invalid_value}} =
                Facade.load(Drawing, %{wire | "shape" => "circle"})
 
-      assert {:error, %Error{ns: :codec, code: :unknown_tag, detail: %{tag: "hexagon"}}} =
-               Facade.load(Drawing, %{wire | "shapes" => [%{"type" => "hexagon", "fields" => %{}}]})
+      assert {:error,
+              %Error{
+                detail: %{field: :shapes, index: 0},
+                parent: %Error{ns: :codec, code: :unknown_tag, detail: %{tag: "hexagon"}}
+              }} = Facade.load(Drawing, %{wire | "shapes" => [%{"type" => "hexagon", "fields" => %{}}]})
     end
 
     test "не struct в поле union: — FunctionClauseError" do

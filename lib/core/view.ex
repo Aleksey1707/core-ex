@@ -33,7 +33,7 @@ defmodule Core.View do
   | `view:` | вложенный View | его кодеком через фасад |
   | `form:` | имя формы из `forms:` | дампером формы (`dump_form/3`) |
   | `list:` | вложенная спека | поэлементно |
-  | `set:` | вложенная спека элемента | поэлементно, список в каноническом порядке wire |
+  | `set:` | вложенная спека элемента | поэлементно, список по JSON-кодировке wire элемента |
   | `map:` | `[key: спека, value: спека]` | объект: ключ и значение — каждый по своей спеке |
   | `jsonb:` | модуль типа или `{Модуль, :функция}` спеки `Core.Codec.Redump` | пере-дампом нагрузки |
 
@@ -56,10 +56,13 @@ defmodule Core.View do
   спеки пере-дампа; форма с такими Prim — `jsonb:`.
 
   `set:` и `map:` — поле-множество и поле-словарь спеки полей (ADR-0091). Struct держит `MapSet` и map
-  (`MapSet.t(элемент)`, `%{optional(ключ) => значение}`), а наружу уходит та же форма, что wire плагина
-  по полям: множество — список, отсортированный по wire элемента, без повторов; словарь — объект, ключ
-  enum — строкой. Ключ — вид с wire-строкой (Prim со строковой базой, `enum:`, `type: :string`), не
-  ПДн. Дамп тотален: jsonb-форма (список на месте множества, строковые ключи) уходит тем же wire.
+  с ключами своего вида (`MapSet.t(элемент)`, `%{optional(ключ) => значение}`), а наружу уходит та же
+  форма, что wire плагина по полям: множество — список по JSON-кодировке wire элемента, без повторов;
+  словарь — объект, ключ enum — строкой. Ключ — вид с wire-строкой (Prim со строковой базой, `enum:`,
+  `type: :string`), не ПДн. jsonb-колонка отдаёт множество списком, ключ и элемент enum, дату и
+  `Decimal` — строкой: `new/1` приводит такое значение к форме типа (список — в `MapSet`, строку enum
+  — в атом через `cast/1`, значение Prim — через `Core.Codec.coerce/2`; неприводимое остаётся как
+  есть), литерал `%View{}` в `to_view/1` собирает `MapSet` и значения вида сам. Дамп тотален: и не приведённая jsonb-форма уходит тем же wire.
   `type: :map` — значение без спеки ключа и значения, `map:` — словарь со спекой.
 
   `jsonb:` типизируется `map()`; jsonb-массив объявляется `list: [jsonb: Type]` (или
@@ -115,6 +118,38 @@ defmodule Core.View do
           message: "#{inspect(view)}: поля #{inspect(unknown)} не объявлены в представлении"
     end
   end
+
+  # jsonb-колонка отдаёт множество списком, ключ и элемент enum — строкой, дату и `Decimal` —
+  # строкой: `new/1` приводит поле `set:` / `map:` к форме его типа (`Core.Codec.coerce/2` у Prim).
+  # Неприводимое значение остаётся как есть — read-путь не валидирует.
+  @doc false
+  @spec shape(Opts.spec(), term()) :: term()
+
+  def shape({:set, inner}, items) when is_list(items) or is_struct(items, MapSet),
+    do: MapSet.new(items, &shape(inner, &1))
+
+  def shape({:map, key, inner}, map) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {k, v} -> {shape(key, k), shape(inner, v)} end)
+
+  def shape({:list, inner}, items) when is_list(items), do: Enum.map(items, &shape(inner, &1))
+
+  def shape({:prim, _mod, _kind}, nil), do: nil
+
+  def shape({:prim, mod, _kind}, value) do
+    case Core.Codec.coerce(mod, value) do
+      {:ok, prim} -> Core.Prim.unwrap(prim)
+      :error -> value
+    end
+  end
+
+  def shape({:enum, mod}, value) when is_binary(value) do
+    case mod.cast(value) do
+      {:ok, value} -> value
+      {:error, _reason} -> value
+    end
+  end
+
+  def shape(_spec, value), do: value
 
   # ---
 
@@ -217,8 +252,14 @@ defmodule Core.View do
 
   defp new_pairs(fields) do
     Enum.map(fields, fn
-      {name, _spec, false} -> {name, quote(do: Keyword.fetch!(opts, unquote(name)))}
-      {name, _spec, true} -> {name, quote(do: Keyword.get(opts, unquote(name)))}
+      {name, spec, false} -> {name, shape_ast(spec, quote(do: Keyword.fetch!(opts, unquote(name))))}
+      {name, spec, true} -> {name, shape_ast(spec, quote(do: Keyword.get(opts, unquote(name))))}
     end)
+  end
+
+  defp shape_ast(spec, value) do
+    if Opts.shaped?(spec),
+      do: quote(do: Core.View.shape(unquote(Macro.escape(spec)), unquote(value))),
+      else: value
   end
 end

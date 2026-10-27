@@ -315,7 +315,7 @@ defmodule Core.Codec.PluginRedumpTest do
       assert redump(ledger, Ledger) == Map.delete(json_roundtrip(Out.dump(ledger)), "secrets")
       assert redump(ledger, Ledger)["codes"] == %{String.replace(@uuid, "-", "") => "active"}
 
-      # Порядок термов `DateTime` во внутреннем wire — не хронологический: пере-дамп сортирует заново.
+      # Порядок термов `DateTime` — не хронологический, порядок JSON-кодировки — хронологический.
       ats = [~U[2024-01-02 00:00:00Z], ~U[2023-12-05 00:00:00Z], ~U[2023-12-31 00:00:00Z]]
 
       roster = %Roster{
@@ -326,8 +326,11 @@ defmodule Core.Codec.PluginRedumpTest do
         secrets: MapSet.new([Sensitive.new!("s3cr3t-value")])
       }
 
-      internal_ats = json_roundtrip(In.dump(roster))["ats"]
-      refute internal_ats == Enum.sort(internal_ats)
+      refute Enum.sort(ats) == Enum.sort(ats, DateTime)
+
+      assert json_roundtrip(In.dump(roster))["ats"] ==
+               ~w(2023-12-05T00:00:00Z 2023-12-31T00:00:00Z 2024-01-02T00:00:00Z)
+
       assert redump(roster, Roster) == Map.delete(json_roundtrip(Out.dump(roster)), "secrets")
     end
 

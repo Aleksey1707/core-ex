@@ -28,7 +28,7 @@ defmodule Core.Codec.Redump do
   описывает sensitive-поле, которое спека полей плагина допускает на write-пути.
 
   `{:set, _}` — множество: элементы переводятся по спеке и пишутся в каноническом порядке wire
-  (отсортированы, без повторов), как их пишет плагин по полям. `{:dict, ключ, значение}` — словарь
+  (по JSON-кодировке элемента, без повторов), как их пишет плагин по полям. `{:dict, ключ, значение}` — словарь
   (объект): ключ — `{:prim, Mod}` либо `nil`, значение — любая спека либо `nil`; `nil` оставляет
   часть как есть. `{:map, _}` — запись с полями, а не словарь (ADR-0091).
   """
@@ -69,7 +69,8 @@ defmodule Core.Codec.Redump do
 
   def run(value, {:list, _spec}, _codec), do: value
 
-  def run(value, {:set, spec}, codec) when is_list(value), do: canonical(value, &run(&1, spec, codec))
+  def run(value, {:set, spec}, codec) when is_list(value),
+    do: Codec.Helper.set_wire(Enum.map(value, &run(&1, spec, codec)))
 
   def run(value, {:set, _spec}, _codec), do: value
 
@@ -90,19 +91,6 @@ defmodule Core.Codec.Redump do
   end
 
   def run(value, {:map, fields}, _codec) when is_map(fields), do: value
-
-  @doc """
-  Wire множества: элементы через `fun`, отсортированные (порядок термов) и без повторов. Так его
-  пишут пере-дамп и `Core.View` (ADR-0091).
-  """
-  @spec canonical(Enumerable.t(), (term() -> term())) :: list()
-
-  def canonical(items, fun) when is_function(fun, 1) do
-    items
-    |> Enum.map(fun)
-    |> Enum.sort()
-    |> Enum.dedup()
-  end
 
   # ---
 

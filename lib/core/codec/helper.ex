@@ -61,4 +61,23 @@ defmodule Core.Codec.Helper do
   def load_many(mod, list, codec) when is_atom(mod) and is_list(list) and is_atom(codec) do
     Result.traverse(list, &codec.load(mod, &1))
   end
+
+  # Порядок — по JSON-кодировке wire, а не по терму: терм `%Date{}` и `%Decimal{}` сравнивается по
+  # полям struct, а JSON-список уходит строками (ADR-0091).
+  @doc false
+  @spec set_wire(Enumerable.t()) :: list()
+
+  def set_wire(wires) do
+    wires
+    |> Enum.map(&{Jason.encode!(&1), &1})
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.dedup_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  # Ключ объекта — строка: атом enum `Jason` записал бы строкой только при кодировании.
+  @doc false
+  @spec enum_key(atom()) :: String.t()
+
+  def enum_key(key) when is_atom(key) and not is_nil(key), do: Atom.to_string(key)
 end

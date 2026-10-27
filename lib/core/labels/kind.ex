@@ -65,4 +65,13 @@ defmodule Core.Labels.Kind do
 
   def owned(%owner{} = prim, owner), do: prim
   def owned(%_composite{value: base}, owner), do: owned(base, owner)
+
+  # ===== скалярные struct'ы =====
+
+  # Struct'ы скалярных значений: id внутри нет (`Core.Labels.Refs` в них не спускается), а порядок
+  # задаёт `compare/2` модуля, а не порядок термов (`Core.Labels.Details`).
+  @doc false
+  @spec scalars() :: [module()]
+
+  def scalars, do: [Date, DateTime, NaiveDateTime, Time, Decimal]
 end

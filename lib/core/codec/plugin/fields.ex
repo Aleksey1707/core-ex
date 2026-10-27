@@ -13,20 +13,23 @@ defmodule Core.Codec.Plugin.Fields do
   | `entity: Mod` | `codec.dump/1` | `codec.load(Mod, raw)` |
   | `union: Family` | `codec.dump/1` | `codec.load(Family, raw)` |
   | `list: спека` | поэлементно по спеке | поэлементно по спеке; не список — ошибка |
-  | `set: спека` | список, отсортированный по wire | `MapSet` поэлементно; повторы схлопываются, не список — ошибка |
+  | `set: спека` | список по JSON-кодировке wire элемента, без повторов | `MapSet` поэлементно; повторы схлопываются, не список — ошибка |
   | `map: [key: спека, value: спека]` | объект `{"<wire ключа>": <wire значения>}` | map по видам ключа и значения; не объект — ошибка |
   | `type: скаляр` | как есть | как есть |
 
-  Множество (`set:`) даёт один wire на одно значение: порядок списка — порядок термов wire
-  элементов, а не обход `MapSet` (ADR-0091). Ошибку элемента множества загрузка оборачивает
-  ошибкой поля с `detail: %{field: поле, index: индекс элемента в wire}`.
+  Множество (`set:`) даёт один wire на одно значение: порядок списка — по JSON-кодировке wire
+  элемента (`Jason.encode!/1`), а не по обходу `MapSet` и не по терму (`%Date{}` и `%Decimal{}` как
+  термы сравниваются по полям struct); элементы с равным wire схлопываются (ADR-0091). Тот же порядок
+  пишут пере-дамп (`Core.Codec.Redump`) и `Core.View`. Ошибку элемента списка и множества загрузка
+  оборачивает ошибкой поля с `detail: %{field: поле, index: индекс элемента в wire}`.
 
   Словарь (`map:`) — соответствие ключа значению, у каждого свой вид; `type: :map` — map без спеки
   ключа и значения, загрузка отдаёт её как есть. Ключ словаря — вид с wire-строкой: Prim со
   строковой базой (`Prim.String`, `Prim.UUID`, `Prim.Compose` над ними), `enum:` (wire — строка
   значения) или `type: :string`; иное и Prim `personal: true` / `sensitive:` — `CompileError`
   (ADR-0091). Порядок ключей объекта не гарантируется. Ошибку ключа или значения загрузка
-  оборачивает ошибкой поля с `detail: %{field: поле, key: wire-ключ}`.
+  оборачивает ошибкой поля с `detail: %{field: поле, key: wire-ключ}`; два wire-ключа, которые
+  после загрузки дали один ключ (Prim ключа нормализует значение), — такая же ошибка без причины.
 
   `default:` — wire-литерал, который загрузка подставляет вместо отсутствующего ключа или
   `nil` и грузит как записанный (у `set:` — `[]`, у `map:` — `%{}`). Голова `dump/2` закрывает
@@ -206,7 +209,7 @@ defmodule Core.Codec.Plugin.Fields do
   # Порядок обхода `MapSet` зависит от числа элементов и не совпадает с порядком их wire: одно
   # значение давало бы разный список (ADR-0091).
   defp dump_expr({:set, inner}, value),
-    do: quote(generated: true, do: Enum.sort(unquote(dump_expr({:list, inner}, value))))
+    do: quote(generated: true, do: Core.Codec.Helper.set_wire(unquote(dump_expr({:list, inner}, value))))
 
   defp dump_expr({:map, key, inner}, value) do
     key_item = key_var()
@@ -219,8 +222,7 @@ defmodule Core.Codec.Plugin.Fields do
     end
   end
 
-  # Ключ объекта — строка: атом enum `Jason` записал бы строкой только при кодировании.
-  defp dump_key({:enum, _mod}, key), do: quote(generated: true, do: Atom.to_string(unquote(key)))
+  defp dump_key({:enum, _mod}, key), do: quote(generated: true, do: Core.Codec.Helper.enum_key(unquote(key)))
   defp dump_key(spec, key), do: dump_value(spec, key, false)
 
   defp as_is?({kind, _}) when kind in ~w(enum type)a, do: true
@@ -350,14 +352,21 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec load_list(module(), atom(), term(), (term() -> Result.t())) :: Result.t([term()])
 
-  def load_list(_type, _name, raw, fun) when is_list(raw) and is_function(fun, 1), do: Result.traverse(raw, fun)
+  def load_list(type, name, raw, fun) when is_list(raw) and is_function(fun, 1) do
+    raw
+    |> Enum.with_index()
+    |> Result.traverse(fn {item, index} ->
+      Result.map_error(fun.(item), &item_error(type, name, {:index, index}, "элемент", &1))
+    end)
+  end
 
   def load_list(type, name, _raw, _fun) when is_atom(type) and is_atom(name) do
     {:error,
      Error.domain(type,
        code: :invalid_value,
        ns: :codec,
-       message: "#{inspect(type)}: поле #{name} — ожидается список"
+       message: "#{inspect(type)}: поле #{name} — ожидается список",
+       detail: %{field: name}
      )}
   end
 
@@ -366,14 +375,8 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec load_set(module(), atom(), term(), (term() -> Result.t())) :: Result.t(MapSet.t())
 
-  def load_set(type, name, raw, fun) when is_list(raw) and is_function(fun, 1) do
-    raw
-    |> Enum.with_index()
-    |> Result.traverse(fn {item, index} ->
-      Result.map_error(fun.(item), &item_error(type, name, {:index, index}, "элемент", &1))
-    end)
-    |> Result.map(&MapSet.new/1)
-  end
+  def load_set(type, name, raw, fun) when is_list(raw) and is_function(fun, 1),
+    do: Result.map(load_list(type, name, raw, fun), &MapSet.new/1)
 
   def load_set(type, name, _raw, _fun) when is_atom(type) and is_atom(name) do
     {:error,
@@ -397,9 +400,9 @@ defmodule Core.Codec.Plugin.Fields do
     |> Result.traverse(fn {key, value} ->
       with {:ok, loaded} <- Result.map_error(key_fun.(key), &item_error(type, name, {:key, key}, "ключ", &1)),
            {:ok, item} <- Result.map_error(value_fun.(value), &item_error(type, name, {:key, key}, "значение", &1)),
-           do: {:ok, {loaded, item}}
+           do: {:ok, {key, loaded, item}}
     end)
-    |> Result.map(&Map.new/1)
+    |> Result.and_then(&collect_pairs(type, name, &1))
   end
 
   def load_map(type, name, _raw, _key_fun, _value_fun) when is_atom(type) and is_atom(name) do
@@ -411,6 +414,46 @@ defmodule Core.Codec.Plugin.Fields do
        detail: %{field: name}
      )}
   end
+
+  # ---
+
+  # Prim ключа нормализует значение (UUID с дефисами и без): два wire-ключа дали бы один ключ, и
+  # значение одного из них молча пропало бы.
+  defp collect_pairs(type, name, pairs) do
+    pairs
+    |> Enum.reduce_while({%{}, %{}}, fn {key, loaded, item}, {map, wires} ->
+      case Map.fetch(wires, loaded) do
+        {:ok, first} -> {:halt, {:error, key_clash(type, name, key, first)}}
+        :error -> {:cont, {Map.put(map, loaded, item), Map.put(wires, loaded, key)}}
+      end
+    end)
+    |> case do
+      {:error, error} -> {:error, error}
+      {map, _wires} -> {:ok, map}
+    end
+  end
+
+  defp key_clash(type, name, key, first) do
+    Error.domain(type,
+      code: :invalid_value,
+      ns: :codec,
+      message:
+        "#{inspect(type)}: поле #{name}[#{inspect(key)}] — ключ совпал после загрузки с ключом #{inspect(first)}",
+      detail: %{field: name, key: key}
+    )
+  end
+
+  # ===== путь ошибки =====
+
+  # Путь — имя поля, индекс элемента и wire-ключ словаря: ПДн в нём нет (персональный ключ словаря
+  # запрещён сборкой), и редакция ошибки поля с `subject:` его не снимает.
+  @doc false
+  @spec path_error?(Error.t()) :: boolean()
+
+  def path_error?(%Error{ns: :codec, detail: %{field: name} = detail}) when is_atom(name),
+    do: Map.keys(detail) -- ~w(field index key)a == []
+
+  def path_error?(%Error{}), do: false
 
   # ===== переменные =====
 

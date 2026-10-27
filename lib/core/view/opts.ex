@@ -95,19 +95,29 @@ defmodule Core.View.Opts do
 
   def prim_type_ast(kind) when is_atom(kind), do: Map.fetch!(@prim_type_asts, kind)
 
+  @doc false
+  @spec shaped?(spec()) :: boolean()
+
+  def shaped?({:set, _inner}), do: true
+  def shaped?({:map, _key, _value}), do: true
+  def shaped?({:list, inner}), do: shaped?(inner)
+  def shaped?(_spec), do: false
+
   @doc "Спека требует `codec` для дампа (иначе значение уходит как есть)."
   @spec needs_codec?(spec()) :: boolean()
 
   def needs_codec?({:prim, _mod, _kind}), do: true
-  def needs_codec?({kind, inner}) when kind in @collection_kinds, do: needs_codec?(inner)
-  def needs_codec?({:map, key, value}), do: needs_codec?(key) or needs_codec?(value)
   def needs_codec?({:enum, _mod}), do: false
   def needs_codec?({:type, _type}), do: false
   def needs_codec?({:view, _mod}), do: true
   def needs_codec?({:form, _name}), do: true
   def needs_codec?({:jsonb, _spec_ref}), do: true
+  def needs_codec?({kind, _inner} = spec) when kind in @collection_kinds, do: nested_codec?(spec)
+  def needs_codec?({:map, _key, _value} = spec), do: nested_codec?(spec)
 
   # ---
+
+  defp nested_codec?(spec), do: Enum.any?(Field.children(spec), &needs_codec?/1)
 
   defp field!(name, opts, form_names, path) when is_atom(name) do
     if not Keyword.keyword?(opts) do
@@ -265,7 +275,5 @@ defmodule Core.View.Opts do
   defp prim_label(mod, leaf), do: "#{inspect(mod)} (leaf #{inspect(leaf)})"
 
   defp collect_forms({:form, name}, acc), do: MapSet.put(acc, name)
-  defp collect_forms({kind, inner}, acc) when kind in @collection_kinds, do: collect_forms(inner, acc)
-  defp collect_forms({:map, _key, value}, acc), do: collect_forms(value, acc)
-  defp collect_forms(_spec, acc), do: acc
+  defp collect_forms(spec, acc), do: Enum.reduce(Field.values(spec), acc, &collect_forms/2)
 end

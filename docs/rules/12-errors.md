@@ -316,9 +316,12 @@ Fallback-контроллер состав сам не собирает: он о
 - Репозитории (`Repo.Pg`): `not_found` / `version_mismatch` / … →
   `errors_mod.domain(behaviour, code, detail)`; незамапленный constraint и провал `changeset/2` →
   `%Error{kind: :app}` (`ns: :repo`, `code: :write_failed`) — см. `13-repos.md`.
-- Плагин по полям (`use Core.Codec.Plugin, fields:`): поле `list:` не списком при загрузке →
-  `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`, `module` — тип плагина); ошибки
-  Prim и `cast` enum — как есть (`11-domain.md`, «Плагин по полям»).
+- Плагин по полям (`use Core.Codec.Plugin, fields:`): поле `list:` / `set:` не списком, `map:` не
+  объектом при загрузке → `%Error{kind: :domain}` (`ns: :codec`, `code: :invalid_value`, `module` —
+  тип плагина, `detail: %{field: поле}`); ошибка элемента списка или множества — такая же ошибка с
+  `detail: %{field:, index:}`, ключа или значения словаря — с `detail: %{field:, key:}`, причина —
+  в `parent`; два wire-ключа, давшие после загрузки один ключ, — с `detail: %{field:, key:}` без
+  `parent`. Ошибки Prim и `cast` enum прямого поля — как есть (`11-domain.md`, «Плагин по полям»).
 - Нагрузка события по полям: `{"$pd": …}` на месте значения поля — `ns: :codec`, исходы —
   `23-personal-data.md`, «Уничтоженное ПДн-значение».
 - Варианты семейства (`use Core.Codec.Plugin, variants:`): повреждённая форма →

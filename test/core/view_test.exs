@@ -261,6 +261,43 @@ defmodule Core.ViewTest do
       assert expected["days"] == ["2023-12-05", "2024-01-02"]
     end
 
+    test "множество Prim.Date в профиле по умолчанию: хронологический порядок у плагина, Redump и View" do
+      days = [~D[2024-01-02], ~D[2023-12-05], ~D[2023-01-10]]
+      chronological = [~D[2023-01-10], ~D[2023-12-05], ~D[2024-01-02]]
+      assert Enum.sort(days) == days
+
+      stock = %{stock() | days: MapSet.new(days, &ViewFixture.Day.new!/1)}
+      jsonb = json_roundtrip(InCodec.dump(stock))
+
+      assert InCodec.dump(stock)["days"] == chronological
+      assert jsonb["days"] == ~w(2023-01-10 2023-12-05 2024-01-02)
+
+      assert Core.Codec.Redump.run(
+               %{jsonb | "days" => Enum.reverse(jsonb["days"])},
+               {:codec, ViewFixture.Stock},
+               InCodec
+             )["days"] ==
+               chronological
+
+      assert ViewFixture.Bag.Codec.dump(bag(days: MapSet.new(days)), InCodec).days == chronological
+    end
+
+    test "new/1 приводит jsonb-форму к форме struct: MapSet, ключи и значения вида" do
+      row = json_roundtrip(InCodec.dump(stock()))
+      view = bag(ids: row["ids"], days: row["days"], weights: row["weights"], by_status: row["by_status"])
+
+      assert view.ids == MapSet.new([@uuid])
+      assert view.days == MapSet.new([~D[2023-12-05], ~D[2024-01-02]])
+      assert view.weights == %{@uuid => Decimal.new("10.5")}
+      assert %{done: [%DateTime{} = at], new: []} = view.by_status
+      assert DateTime.compare(at, @at) == :eq
+      assert bag(ids: MapSet.new([@uuid])).ids == MapSet.new([@uuid])
+    end
+
+    test "new/1: строковый ключ вне enum остаётся строкой" do
+      assert bag(by_status: %{"lost" => []}).by_status == %{"lost" => []}
+    end
+
     test "jsonb-форма множества: повторы схлопываются" do
       assert dump_bag(bag(ids: [@uuid, @uuid])).ids == [@hex]
     end

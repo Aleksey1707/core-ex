@@ -222,6 +222,21 @@ defmodule Core.Es.Event.CodecPersonalTest do
       refute inspect(error) =~ "контакт"
     end
 
+    test "путь ошибки (индекс элемента, ключ словаря) при редакции остаётся, редактируется значение" do
+      long = String.duplicate("контакт", 20)
+      wire = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], nil)).open
+
+      assert {:error, %Error{detail: %{field: :contacts, index: 1}, parent: %Error{detail: detail}}} =
+               InCodec.load(Contacted, put_payload(wire, %{"contacts" => ["+7 900 000-00-01", long]}))
+
+      assert detail in [:redacted, {:redacted, byte_size(long)}]
+
+      assert {:error, %Error{detail: %{field: :contact_by_kind, key: "дом"}, parent: %Error{detail: detail}}} =
+               InCodec.load(Contacted, put_payload(wire, %{"contact_by_kind" => %{"дом" => long}}))
+
+      assert detail in [:redacted, {:redacted, byte_size(long)}]
+    end
+
     test "new/N не принимает %Destroyed{} на месте множества и словаря" do
       contacts = MapSet.new([EventFixture.Contact.new!("+7 900 000-00-01")])
 

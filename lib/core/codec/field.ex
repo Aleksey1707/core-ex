@@ -30,6 +30,7 @@ defmodule Core.Codec.Field do
   @collection_kinds ~w(list set)a
   @map_keys ~w(key value)a
   @string_kinds ~w(string uuid)a
+  @checked_defaults ~w(enum set map)a
 
   @enforce_keys ~w(name spec optional? wire default subject)a
   defstruct @enforce_keys
@@ -164,13 +165,6 @@ defmodule Core.Codec.Field do
 
     {Keyword.fetch!(inner, :key), Keyword.fetch!(inner, :value)}
   end
-
-  # Ключ спеки другого режима (`Core.View`) приходит в его форме: всё, кроме `{:prim, _}`, `{:enum, _}`
-  # и `{:type, :string}`, — отказ.
-  @doc false
-  @spec check_map_key!(term(), keyword(), String.t()) :: :ok
-
-  def check_map_key!(key, key_opts, where) when is_binary(where), do: check_key!(key, key_opts, where)
 
   # ---
 
@@ -343,7 +337,7 @@ defmodule Core.Codec.Field do
   defp kind_spec!(:map, inner, where) do
     {key_opts, value_opts} = map_opts!(inner, where)
     key = element_spec!("map: key", "ключа", key_opts, where)
-    check_key!(key, key_opts, where)
+    check_map_key!(key, key_opts, where)
 
     {:map, key, element_spec!("map: value", "значения", value_opts, where)}
   end
@@ -368,40 +362,6 @@ defmodule Core.Codec.Field do
       unknown -> Helper.Opts.reject!(where, "#{label}: неизвестные ключи #{inspect(unknown)}")
     end
   end
-
-  # Ключ объекта — строка: ключ с другим wire пришлось бы переводить в строку и разбирать обратно, а
-  # открытый в wire и индексе `jsonb` ключ не зашифровать (ADR-0091).
-  defp check_key!({:prim, mod}, key_opts, where) do
-    cond do
-      not string_prim?(mod) ->
-        reject_key!(key_opts, where)
-
-      mod.__domain_personal__() or mod.__domain_sensitive__() ->
-        Helper.Opts.reject!(
-          where,
-          "map: key: Prim #{inspect(mod)} с personal: true или sensitive: — ключ лежит в wire открыто"
-        )
-
-      true ->
-        :ok
-    end
-  end
-
-  defp check_key!({:enum, _mod}, _key_opts, _where), do: :ok
-  defp check_key!({:type, :string}, _key_opts, _where), do: :ok
-  defp check_key!(_spec, key_opts, where), do: reject_key!(key_opts, where)
-
-  # Wire Prim задаёт kind: свой kind кодек дампит своей клаузой, и строка ли это — при сборке неизвестно.
-  defp string_prim?(mod) do
-    {links, [leaf]} = Enum.split(Prim.chain(mod), -1)
-
-    Enum.all?(links, &(&1.__domain_kind__() == :composite)) and leaf.__domain_kind__() in @string_kinds
-  end
-
-  @spec reject_key!(term(), String.t()) :: no_return()
-
-  defp reject_key!(key_opts, where),
-    do: Helper.Opts.reject!(where, "map: key: ожидается вид с wire-строкой, получено #{inspect(key_opts)}")
 
   defp optional!(opts, where) do
     case Keyword.get(opts, :optional, false) do
@@ -462,25 +422,111 @@ defmodule Core.Codec.Field do
   defp check_wire!(_wire, _where), do: :ok
 
   # Загрузку Prim и сущности без фасада не повторить, а `cast` enum — чистая функция модуля:
-  # опечатка в `default:` всплыла бы только на строке, записанной до появления поля.
-  defp check_default!({:enum, mod}, default, where) do
-    case mod.cast(default) do
-      {:ok, _value} ->
-        :ok
+  # опечатка в `default:` всплыла бы только на строке, записанной до появления поля. У `set:` и
+  # `map:` так же проверяются элементы, ключи и значения непустого литерала.
+  defp check_default!(spec, default, where) when elem(spec, 0) in @checked_defaults,
+    do: check_default_wire!(spec, default, where, "default")
 
-      {:error, _reason} ->
-        Helper.Opts.reject!(where, "default: #{inspect(default)} не загружается #{inspect(mod)}")
+  defp check_default!(_spec, _default, _where), do: :ok
+
+  defp check_default_wire!({:enum, mod}, value, where, label) do
+    case mod.cast(value) do
+      {:ok, _value} -> :ok
+      {:error, _reason} -> Helper.Opts.reject!(where, "#{label}: #{inspect(value)} не загружается #{inspect(mod)}")
     end
   end
 
+  defp check_default_wire!({:type, type}, value, where, label) do
+    if not FieldCheck.type_value?(type, value),
+      do: Helper.Opts.reject!(where, "#{label}: ожидается #{type}, получено #{inspect(value)}")
+
+    :ok
+  end
+
   # `default:` плагина — wire, а не значение поля: `%MapSet{}` из структуры по полям загрузка не прочла бы.
-  defp check_default!({:set, _inner}, default, where) when not is_list(default),
-    do: Helper.Opts.reject!(where, "default: у set: — wire-литерал списка, получено #{inspect(default)}")
+  defp check_default_wire!({kind, _inner}, value, where, label) when kind in @collection_kinds and not is_list(value),
+    do: Helper.Opts.reject!(where, "#{label}: у #{kind}: — wire-литерал списка, получено #{inspect(value)}")
 
-  defp check_default!({:map, _key, _value}, default, where) when not is_map(default) or is_struct(default),
-    do: Helper.Opts.reject!(where, "default: у map: — wire-литерал объекта, получено #{inspect(default)}")
+  defp check_default_wire!({kind, inner}, values, where, label) when kind in @collection_kinds,
+    do: Enum.each(values, &check_default_wire!(inner, &1, where, label))
 
-  defp check_default!(_spec, _default, _where), do: :ok
+  defp check_default_wire!({:map, _key, _value}, value, where, label) when not is_map(value) or is_struct(value),
+    do: Helper.Opts.reject!(where, "#{label}: у map: — wire-литерал объекта, получено #{inspect(value)}")
+
+  defp check_default_wire!({:map, key, inner}, values, where, label) do
+    Enum.each(values, fn {wire_key, value} ->
+      check_default_wire!(key_wire(key), wire_key, where, "#{label}: ключ")
+      check_default_wire!(inner, value, where, label)
+    end)
+  end
+
+  defp check_default_wire!(_spec, _value, _where, _label), do: :ok
+
+  # Wire ключа — строка: у enum — строка значения, у Prim и `type: :string` — сама строка.
+  defp key_wire({:enum, _mod} = key), do: key
+  defp key_wire(_key), do: {:type, :string}
+
+  # ===== ключ словаря =====
+
+  # Ключ объекта — строка: ключ с другим wire пришлось бы переводить в строку и разбирать обратно, а
+  # открытый в wire и индексе `jsonb` ключ не зашифровать (ADR-0091). Ключ спеки другого режима
+  # (`Core.View`) приходит в его форме: всё, кроме `{:prim, _}`, `{:enum, _}` и `{:type, :string}`, — отказ.
+  @doc false
+  @spec check_map_key!(term(), keyword(), String.t()) :: :ok
+
+  def check_map_key!({:prim, mod}, key_opts, where) when is_binary(where) do
+    cond do
+      not string_prim?(mod) ->
+        reject_key!(key_opts, where)
+
+      mod.__domain_personal__() or mod.__domain_sensitive__() ->
+        Helper.Opts.reject!(
+          where,
+          "map: key: Prim #{inspect(mod)} с personal: true или sensitive: — ключ лежит в wire открыто"
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  def check_map_key!({:enum, _mod}, _key_opts, where) when is_binary(where), do: :ok
+  def check_map_key!({:type, :string}, _key_opts, where) when is_binary(where), do: :ok
+  def check_map_key!(_spec, key_opts, where) when is_binary(where), do: reject_key!(key_opts, where)
+
+  # ---
+
+  # Wire Prim задаёт kind: Prim со своим kind (`kind: :slug` над `Prim.String`) кодек дампит своей
+  # клаузой `dump_kind/2`, и строка ли это — при сборке неизвестно; такой ключ отвергается.
+  defp string_prim?(mod) do
+    {links, [leaf]} = Enum.split(Prim.chain(mod), -1)
+
+    Enum.all?(links, &(&1.__domain_kind__() == :composite)) and leaf.__domain_kind__() in @string_kinds
+  end
+
+  @spec reject_key!(term(), String.t()) :: no_return()
+
+  defp reject_key!(key_opts, where),
+    do: Helper.Opts.reject!(where, "map: key: ожидается вид с wire-строкой, получено #{inspect(key_opts)}")
+
+  # ===== вложенные спеки =====
+
+  # Спека другого режима (`Core.View`, `Core.Labels.Fields`) вкладывает спеки в той же форме:
+  # `{:list, _}`, `{:set, _}`, `{:map, ключ, значение}`; остальные виды вложенных спек не держат.
+  @doc false
+  @spec children(term()) :: [term()]
+
+  def children({kind, inner}) when kind in @collection_kinds, do: [inner]
+  def children({:map, key, value}), do: [key, value]
+  def children(_spec), do: []
+
+  # Значение словаря без ключа: ключ — вид с wire-строкой, и обход, которому важно значение
+  # (ПДн, вложенный struct, map'а), в ключ не заходит.
+  @doc false
+  @spec values(term()) :: [term()]
+
+  def values({:map, _key, value}), do: [value]
+  def values(spec), do: children(spec)
 
   # ===== субъекты =====
 

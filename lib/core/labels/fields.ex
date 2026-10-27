@@ -417,9 +417,9 @@ defmodule Core.Labels.Fields do
 
     visible = visible(module)
     labelled_maps = for {name, [_ | _]} <- labels(module), do: name
-    not_maps = for {name, spec} <- visible, name in labelled_maps, not map?(spec), do: name
+    not_maps = for {name, spec} <- visible, name in labelled_maps, not free_map?(spec), do: name
     maps = for {name, {:type, :map}} <- visible, name not in labelled_maps, do: name
-    nested_maps = for {name, spec} <- visible, map_inside?(spec), do: name
+    nested_maps = for {name, spec} <- visible, holds_free_map?(spec), do: name
     unlabelled = for {name, spec} <- visible, unlabelled?(spec), do: name
 
     ensure_none!(env, not_maps, "подписи map'ы `[label:, key:, value:]` у поля, которое не map'а")
@@ -465,7 +465,7 @@ defmodule Core.Labels.Fields do
     ensure_none!(env, @change_fields -- fields, "struct изменения без полей")
     ensure_none!(env, fields -- @change_fields, "поля struct'а изменения вне `old_value` / `new_value`")
 
-    if map?(spec) do
+    if free_map?(spec) do
       fail!(
         env,
         "значение изменения — map'а или список, множество или словарь map'ов: в сведения не выходит, " <>
@@ -474,19 +474,15 @@ defmodule Core.Labels.Fields do
     end
   end
 
-  # Map'а на любой глубине: сама спека или внутри списка, множества, значения словаря.
-  defp map?({:type, :map}), do: true
-  defp map?(spec), do: map_inside?(spec)
+  # Свободная map'а (`type: :map`) на любой глубине: сама спека или внутри списка, множества,
+  # значения словаря. Словарь `map:` — не свободная map'а.
+  defp free_map?({:type, :map}), do: true
+  defp free_map?(spec), do: holds_free_map?(spec)
 
-  defp map_inside?({:list, inner}), do: map?(inner)
-  defp map_inside?({:set, inner}), do: map?(inner)
-  defp map_inside?({:map, _key, value}), do: map?(value)
-  defp map_inside?(_spec), do: false
+  defp holds_free_map?(spec), do: Enum.any?(Field.values(spec), &free_map?/1)
 
   defp unlabelled?({:entity, mod}), do: not labelled?(mod)
-  defp unlabelled?({kind, inner}) when kind in ~w(list set)a, do: unlabelled?(inner)
-  defp unlabelled?({:map, _key, value}), do: unlabelled?(value)
-  defp unlabelled?(_spec), do: false
+  defp unlabelled?(spec), do: Enum.any?(Field.values(spec), &unlabelled?/1)
 
   defp ensure_none!(_env, [], _message), do: :ok
   defp ensure_none!(env, fields, message), do: fail!(env, "#{message}: #{inspect(fields)}")
@@ -561,9 +557,7 @@ defmodule Core.Labels.Fields do
   # ---
 
   defp nested_paths({:entity, mod}), do: paths(mod)
-  defp nested_paths({kind, inner}) when kind in ~w(list set)a, do: nested_paths(inner)
-  defp nested_paths({:map, _key, value}), do: nested_paths(value)
-  defp nested_paths(_spec), do: []
+  defp nested_paths(spec), do: Enum.flat_map(Field.values(spec), &nested_paths/1)
 
   defp text(label: label, key: _key, value: _value), do: label
   defp text(label), do: label

@@ -58,6 +58,14 @@ defmodule Core.Codec.PluginFieldsTest do
     defstruct [:counts, :titles, :tags, :owners, :grid]
   end
 
+  defmodule Mark do
+    defstruct [:name, events: []]
+  end
+
+  defmodule Pack do
+    defstruct [:marks]
+  end
+
   defmodule Plugin do
     use Core.Codec.Plugin,
       fields: [
@@ -98,7 +106,9 @@ defmodule Core.Codec.PluginFieldsTest do
          titles: [map: [key: [enum: Status], value: [prim: Name]], optional: true],
          tags: [map: [key: [prim: ID], value: [entity: Tag]], default: %{}],
          owners: [map: [key: [prim: OwnerID], value: [set: [prim: Name]]]],
-         grid: [map: [key: [type: :string], value: [map: [key: [prim: Name], value: [list: [enum: Status]]]]]]}
+         grid: [map: [key: [type: :string], value: [map: [key: [prim: Name], value: [list: [enum: Status]]]]]]},
+        {Mark, name: [prim: Name]},
+        {Pack, marks: [set: [entity: Mark]]}
       ]
   end
 
@@ -309,20 +319,31 @@ defmodule Core.Codec.PluginFieldsTest do
       assert {:error, %Error{module: Status, code: :invalid_value}} =
                Facade.load(Card, %{Facade.dump(card) | "status" => "lost"})
 
-      assert {:error, %Error{module: Status}} = Facade.load(Card, %{Facade.dump(card) | "statuses" => ["lost"]})
+      assert {:error, %Error{module: Card, detail: %{field: :statuses, index: 0}, parent: %Error{module: Status}}} =
+               Facade.load(Card, %{Facade.dump(card) | "statuses" => ["lost"]})
     end
 
-    test "ошибка элемента list: и entity: — итог", %{card: card} do
-      assert {:error, %Error{module: Name}} = Facade.load(Card, %{Facade.dump(card) | "tags" => [%{"name" => ""}]})
-      assert {:error, %Error{module: Name}} = Facade.load(Card, %{Facade.dump(card) | "grid" => [[""]]})
+    test "ошибка элемента list: — ошибка поля с индексом элемента, причина — ошибка элемента", %{card: card} do
+      wire = %{Facade.dump(card) | "tags" => [%{"name" => "a"}, %{"name" => ""}]}
+
+      assert {:error, %Error{module: Card, ns: :codec, code: :invalid_value} = error} = Facade.load(Card, wire)
+      assert error.detail == %{field: :tags, index: 1}
+
+      assert %Error{module: Name} = Error.root(error)
+
+      assert {:error, %Error{} = error} = Facade.load(Card, %{Facade.dump(card) | "grid" => [[""]]})
+      assert [%{field: :grid, index: 0}, %{field: :grid, index: 0}, _name] = Enum.map(error, & &1.detail)
+    end
+
+    test "ошибка entity: — итог", %{card: card} do
       assert {:error, %Error{module: Name}} = Facade.load(Card, %{Facade.dump(card) | "tag" => %{"name" => ""}})
     end
 
-    test "list: не списком — ошибка загрузки", %{card: card} do
-      assert {:error, %Error{module: Card, ns: :codec, code: :invalid_value}} =
+    test "list: не списком — ошибка загрузки поля", %{card: card} do
+      assert {:error, %Error{module: Card, ns: :codec, code: :invalid_value, detail: %{field: :tags}}} =
                Facade.load(Card, Map.delete(Facade.dump(card), "tags"))
 
-      assert {:error, %Error{module: Card, code: :invalid_value}} =
+      assert {:error, %Error{module: Card, code: :invalid_value, detail: %{field: :grid, index: 0}}} =
                Facade.load(Card, %{Facade.dump(card) | "grid" => ["x"]})
     end
 
@@ -355,7 +376,7 @@ defmodule Core.Codec.PluginFieldsTest do
     setup do
       team = %Team{
         roles: MapSet.new([Name.new!("в"), Name.new!("а"), Name.new!("б")]),
-        ranks: MapSet.new(1..40),
+        ranks: MapSet.new([2, 10, 1]),
         tags: MapSet.new([%Tag{name: Name.new!("y")}, %Tag{name: Name.new!("x")}]),
         statuses: MapSet.new([:new, :done]),
         levels: MapSet.new([MapSet.new([Name.new!("б"), Name.new!("а")]), MapSet.new()])
@@ -364,24 +385,32 @@ defmodule Core.Codec.PluginFieldsTest do
       %{team: team}
     end
 
-    test "dump — список, отсортированный по wire элемента", %{team: team} do
+    test "dump — список, отсортированный по JSON-кодировке wire элемента", %{team: team} do
       assert Facade.dump(team) == %{
                "roles" => ["а", "б", "в"],
-               "ranks" => Enum.to_list(1..40),
+               "ranks" => [1, 10, 2],
                "tags" => [%{"name" => "x"}, %{"name" => "y"}],
                "statuses" => [:done, :new],
-               "levels" => [[], ["а", "б"]]
+               "levels" => [["а", "б"], []]
              }
     end
 
     test "dump не зависит от порядка обхода MapSet" do
-      ranks = MapSet.new(1..40)
-      refute MapSet.to_list(ranks) == Enum.to_list(1..40)
+      names = for n <- 1..40, do: "р" <> String.pad_leading(Integer.to_string(n), 2, "0")
+      roles = MapSet.new(names, &Name.new!/1)
+      refute Enum.map(roles, &Prim.unwrap/1) == names
 
-      team = %Team{roles: MapSet.new(), ranks: ranks, tags: MapSet.new(), statuses: nil, levels: MapSet.new()}
+      team = %Team{roles: roles, ranks: MapSet.new(), tags: MapSet.new(), statuses: nil, levels: MapSet.new()}
 
-      assert %{"ranks" => wire} = Facade.dump(team)
-      assert wire == Enum.to_list(1..40)
+      assert %{"roles" => ^names} = Facade.dump(team)
+    end
+
+    test "dump схлопывает элементы с равным wire" do
+      name = Name.new!("а")
+      pack = %Pack{marks: MapSet.new([%Mark{name: name}, %Mark{name: name, events: [:renamed]}])}
+
+      assert MapSet.size(pack.marks) == 2
+      assert Facade.dump(pack) == %{"marks" => [%{"name" => "а"}]}
     end
 
     test "round-trip через фасад, enum из строки — cast", %{team: team} do
@@ -512,7 +541,19 @@ defmodule Core.Codec.PluginFieldsTest do
       assert {:error, %Error{} = error} =
                Facade.load(Stock, %{Facade.dump(stock) | "grid" => %{"ряд" => %{"в" => ["lost"]}}})
 
-      assert [%{field: :grid, key: "ряд"}, %{field: :grid, key: "в"}, _status] = Enum.map(error, & &1.detail)
+      assert [%{field: :grid, key: "ряд"}, %{field: :grid, key: "в"}, %{field: :grid, index: 0}, _status] =
+               Enum.map(error, & &1.detail)
+    end
+
+    test "два wire-ключа, давшие после загрузки один ключ, — ошибка с ключом в пути", %{stock: stock, id: id} do
+      hex = String.replace(id, "-", "")
+      wire = %{Facade.dump(stock) | "tags" => %{id => %{"name" => "x"}, hex => %{"name" => "y"}}}
+
+      assert {:error,
+              %Error{module: Stock, ns: :codec, code: :invalid_value, detail: %{field: :tags, key: ^hex}, parent: nil} =
+                error} = Facade.load(Stock, wire)
+
+      assert error.message =~ "совпал после загрузки с ключом #{inspect(id)}"
     end
 
     test "значение не map — FunctionClauseError", %{stock: stock} do
@@ -890,6 +931,33 @@ defmodule Core.Codec.PluginFieldsTest do
       assert_raise CompileError, ~r/\.T: a: default: у map: — wire-литерал объекта, получено \[\]/, fn ->
         compile_plugin(:DefaultMap, a: [map: [key: [prim: Name], value: [prim: Name]], default: []], b: [prim: Name])
       end
+    end
+
+    test "default: у set: и map: — элементы, ключи и значения литерала по своим видам" do
+      status = Core.Codec.PluginFieldsTest.Status
+
+      for {name, spec, message} <- [
+            {:DefaultSetType, [set: [type: :string], default: ["a", 1]],
+             ~r/\.T: a: default: ожидается string, получено 1$/},
+            {:DefaultSetEnum, [set: [enum: status], default: ["nwe"]],
+             ~r/\.T: a: default: "nwe" не загружается .*Status$/},
+            {:DefaultSetNested, [set: [set: [type: :integer]], default: [[1], 2]],
+             ~r/\.T: a: default: у set: — wire-литерал списка, получено 2$/},
+            {:DefaultMapKey, [map: [key: [prim: Name], value: [type: :integer]], default: %{1 => 1}],
+             ~r/\.T: a: default: ключ: ожидается string, получено 1$/},
+            {:DefaultMapEnumKey, [map: [key: [enum: status], value: [type: :integer]], default: %{"nwe" => 1}],
+             ~r/\.T: a: default: ключ: "nwe" не загружается .*Status$/},
+            {:DefaultMapValue, [map: [key: [type: :string], value: [list: [type: :boolean]]], default: %{"x" => [1]}],
+             ~r/\.T: a: default: ожидается boolean, получено 1$/}
+          ] do
+        assert_raise CompileError, message, fn -> compile_plugin(name, a: spec, b: [prim: Name]) end
+      end
+
+      assert {{:module, _plugin, _bytecode, _result}, []} =
+               compile_plugin(:DefaultSetMapOk,
+                 a: [set: [enum: status], default: ["new", "done"]],
+                 b: [map: [key: [enum: status], value: [set: [prim: Name]]], default: %{"new" => ["x"]}]
+               )
     end
 
     test "ключ map: без wire-строки — CompileError с видом ключа" do

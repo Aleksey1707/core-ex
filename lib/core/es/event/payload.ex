@@ -18,8 +18,8 @@ defmodule Core.Es.Event.Payload do
   атрибут или вызов функции — `CompileError` «ожидается литерал». Модули спеки проверяются в теле
   нагрузки (`fields!/1`), поэтому MAY быть вложены в неё — выше `use`.
 
-  Поле-множество `set:` и поле-словарь `map:` — как у плагина: множество в wire — список,
-  отсортированный по wire элемента, словарь — объект по wire ключа (ADR-0091). Ключ словаря ПДн не
+  Поле-множество `set:` и поле-словарь `map:` — как у плагина: множество в wire — список по
+  JSON-кодировке wire элемента, словарь — объект по wire ключа (ADR-0091). Ключ словаря ПДн не
   бывает (`CompileError` спеки), поэтому ПДн-значение — элемент множества или значение словаря.
 
   `subject:` — субъект ПДн-значения поля (ADR-0073): `:aggregate_id` или имя поля той же нагрузки
@@ -48,7 +48,7 @@ defmodule Core.Es.Event.Payload do
   Кодирует такую нагрузку `Core.Es.Event.Codec` события клаузами, которые собирает этот модуль из
   поштучных блоков значения поля `Core.Codec.Plugin.Fields`: на месте поля с `subject:` — маркер
   `{"$pd": …}` (ADR-0073, ADR-0074). Маркер шифрует wire поля целиком, множество — уже
-  отсортированным: одно значение даёт один открытый текст. В фасаде нагрузка не регистрируется.
+  упорядоченным: одно значение даёт один открытый текст. В фасаде нагрузка не регистрируется.
 
   Макрос занимает в модуле нагрузки имя `@es_payload_fields`: поля спеки нагрузки, которая ещё
   собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей.
@@ -176,9 +176,7 @@ defmodule Core.Es.Event.Payload do
   defp check_subject_optional!(_optional?, _subject_optional?, _subject, _where), do: :ok
 
   defp personal_prim({:prim, mod}), do: if(mod.__domain_personal__(), do: mod)
-  defp personal_prim({kind, inner}) when kind in ~w(list set)a, do: personal_prim(inner)
-  defp personal_prim({:map, _key, value}), do: personal_prim(value)
-  defp personal_prim(_spec), do: nil
+  defp personal_prim(spec), do: Enum.find_value(Field.values(spec), &personal_prim/1)
 
   # ===== Prim субъекта =====
 
@@ -333,7 +331,8 @@ defmodule Core.Es.Event.Payload do
   - `{"$pd": null}` в поле с `subject:` → `%Core.Es.Personal.Destroyed{}` на месте поля целиком;
   - `{"$pd": null}` в поле без `subject:` → `:invalid_value`, `{"$pd": "<строка>"}` в любом поле →
     `:sealed_personal_value` (`ns: :codec`);
-  - ошибка загрузки поля с `subject:` — с отредактированным `detail` по всей цепочке.
+  - ошибка загрузки поля с `subject:` — с отредактированным `detail` по цепочке; путь ошибки плагина
+    по полям (`detail: %{field:, index:}` / `%{field:, key:}`) остаётся.
   """
   @spec load_body(module(), [Field.t()]) :: Macro.t()
 
@@ -415,11 +414,18 @@ defmodule Core.Es.Event.Payload do
   end
 
   # Ошибку загрузки поля с `subject:` строит Prim, плагин сущности или enum без флага `personal:`, и
-  # в её `detail` лежит сырое значение — редактируется вся цепочка.
+  # в её `detail` лежит сырое значение — редактируется цепочка ниже пути ошибки плагина по полям.
   @doc false
   @spec redact(term()) :: term()
 
-  def redact(%Error{} = error), do: Prim.redact_error(error)
+  def redact(%Error{parent: parent} = error) do
+    cond do
+      not Fields.path_error?(error) -> Prim.redact_error(error)
+      is_nil(parent) -> error
+      true -> %{error | parent: redact(parent)}
+    end
+  end
+
   def redact(_reason), do: :redacted
 
   # ===== общее =====

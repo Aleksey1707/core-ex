@@ -281,12 +281,6 @@ defmodule Core.Labels.CompletenessCase do
   defp visit(owner, field, {kind, module}, acc, _families) when kind in ~w(prim enum)a,
     do: place(acc, {kind, owner, field, module})
 
-  defp visit(owner, field, {kind, inner}, acc, families) when kind in ~w(list set)a,
-    do: visit(owner, field, inner, acc, families)
-
-  defp visit(owner, field, {:map, key, value}, acc, families),
-    do: visit(owner, field, value, visit(owner, field, key, acc, families), families)
-
   defp visit(owner, field, {:entity, module}, acc, families),
     do: descend(place(acc, {:struct, owner, field, module}), module, families)
 
@@ -302,7 +296,8 @@ defmodule Core.Labels.CompletenessCase do
     end
   end
 
-  defp visit(_owner, _field, _spec, acc, _families), do: acc
+  defp visit(owner, field, spec, acc, families),
+    do: Enum.reduce(Field.children(spec), acc, &visit(owner, field, &1, &2, families))
 
   defp place({places, seen}, place), do: {[place | places], seen}
 
