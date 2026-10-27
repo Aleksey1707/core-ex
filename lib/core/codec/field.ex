@@ -15,6 +15,13 @@ defmodule Core.Codec.Field do
   `Prim.UUID` и `Prim.Compose` над ними, kind встроенный), `enum:` или `type: :string`; ключ объекта
   лежит в wire открыто, поэтому Prim `personal: true` или `sensitive:` ключом не бывает (ADR-0091).
 
+  Новый вид значения разбирают, кроме нормализатора: `dump` / `load` и сверка со структурой —
+  `Core.Codec.Plugin.Fields`; пере-дамп — `Core.Codec.Plugin.Redump`, `Core.Codec.Redump`; тип и
+  `default:` — `Core.Struct`; ПДн нагрузки — `Core.Es.Event.Payload`; View — `Core.View`,
+  `Core.View.Opts`, `Core.View.Dumper`; подписи — `Core.Labels.Fields`, `Core.Labels.Details`,
+  `Core.Labels.Refs`, `Core.Labels.CompletenessCase`; виды сведений на странице
+  событий — `Core.Web.Event`. Вложенные спеки обходятся через `children/1` / `values/1`.
+
   Модуль внутренний для библиотеки.
   """
 
