@@ -757,9 +757,9 @@ end
 - `events: Family` — опция `use` уровня модуля, модуль семейства событий (`Core.Es.Event.Family`),
   литерал: порождает поле накопленных событий `events` с типом `Core.Es.Events.t(Family.t())` и
   значением по умолчанию `Es.Events.new()` — ключ в `%S{}` можно не указывать. Поле в спеку не
-  входит: плагин по полям его не видит, подписи скрывают его `events: :hidden`, как у ручного
-  `defstruct`. Опция state-stored агрегата («State-stored»); поле `events` в `fields:` рядом с
-  `events:` и не семейство — `CompileError`
+  входит: плагин по полям его не видит, подписи — тоже (решение о нём не объявляется, подпись на
+  нём — `CompileError`). Опция state-stored агрегата («State-stored»); поле `events` в `fields:`
+  рядом с `events:` и не семейство — `CompileError`
 - `default:` не того вида (список на месте `set:`), `default: nil` без `optional: true` и
   значение, в котором есть Prim `personal: true` или `sensitive:` (значение ушло бы в исходник и
   байткод), — `CompileError` `Struct: fields: <поле>: …`; остальные отказы — перечень в

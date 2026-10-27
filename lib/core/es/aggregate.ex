@@ -185,7 +185,12 @@ defmodule Core.Es.Aggregate do
     case @state_keys -- fields do
       [] ->
         ensure_initial_state!(env)
-        reject_events!(env)
+
+        Core.Struct.reject_events!(
+          env,
+          @label,
+          "у event-sourced агрегата нет — состояние полем событий не владеет: события возвращает decide/2"
+        )
 
       missing ->
         raise CompileError,
@@ -218,19 +223,6 @@ defmodule Core.Es.Aggregate do
   defp required_state_fields(aggregate) do
     for %Field{name: name, optional?: false, default: :none} when name != :id <- Field.struct_fields(aggregate) || [],
         do: name
-  end
-
-  defp reject_events!(env) do
-    if Core.Struct.events_family(env.module) do
-      raise CompileError,
-        description:
-          "#{@label}: #{inspect(env.module)}: events: у event-sourced агрегата нет — " <>
-            "состояние полем событий не владеет: события возвращает decide/2",
-        file: env.file,
-        line: env.line
-    end
-
-    :ok
   end
 
   # ===== команда =====

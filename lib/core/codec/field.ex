@@ -273,7 +273,7 @@ defmodule Core.Codec.Field do
       Helper.Opts.reject!(where, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
-    {opts, places} = places!(opts, mode, where)
+    {opts, places} = pop_destroyable!(opts, mode, where)
     if mode == :struct, do: check_struct_keys!(opts, where)
 
     case Keyword.keys(opts) -- (@kind_keys ++ @extra_keys ++ if(mode == :payload, do: [:subject], else: [])) do
@@ -296,18 +296,18 @@ defmodule Core.Codec.Field do
   end
 
   # `destroyable:` снимается со спеки до её разбора: место уничтоженного значения — тип, а не вид.
-  defp places!(opts, :struct, where), do: pop_places!(opts, [], where)
+  defp pop_destroyable!(opts, :struct, where), do: pop_destroyable_places!(opts, [], where)
 
-  defp places!(opts, mode, where) do
+  defp pop_destroyable!(opts, mode, where) do
     if destroyable_key?(opts), do: Helper.Opts.reject!(where, "destroyable: #{mode_text(mode)}")
 
     {opts, []}
   end
 
-  defp pop_places!(opts, place, where) do
+  defp pop_destroyable_places!(opts, place, where) do
     if Keyword.keyword?(opts) do
-      {here, opts} = own_place!(opts, place, where)
-      {opts, nested} = Enum.map_reduce(opts, [], &nested_places!(&1, &2, place, where))
+      {here, opts} = pop_own_place!(opts, place, where)
+      {opts, nested} = Enum.map_reduce(opts, [], &pop_nested_places!(&1, &2, place, where))
 
       {opts, here ++ nested}
     else
@@ -315,7 +315,7 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp own_place!(opts, place, where) do
+  defp pop_own_place!(opts, place, where) do
     case Keyword.fetch(opts, :destroyable) do
       :error ->
         {[], opts}
@@ -328,38 +328,38 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp nested_places!({:list, inner}, acc, place, where) do
-    {inner, places} = pop_places!(inner, place ++ [:list], where)
+  defp pop_nested_places!({:list, inner}, acc, place, where) do
+    {inner, places} = pop_destroyable_places!(inner, place ++ [:list], where)
     {{:list, inner}, acc ++ places}
   end
 
-  defp nested_places!({:set, inner}, acc, place, where) do
+  defp pop_nested_places!({:set, inner}, acc, place, where) do
     reject_place!(inner, place, where, "у элемента set: нет — равные уничтоженные значения схлопываются в множестве")
     {{:set, inner}, acc}
   end
 
-  defp nested_places!({:map, inner}, acc, place, where) do
+  defp pop_nested_places!({:map, inner}, acc, place, where) do
     if Keyword.keyword?(inner) do
-      {inner, places} = Enum.map_reduce(inner, [], &map_places!(&1, &2, place, where))
+      {inner, places} = Enum.map_reduce(inner, [], &pop_map_places!(&1, &2, place, where))
       {{:map, inner}, acc ++ places}
     else
       {{:map, inner}, acc}
     end
   end
 
-  defp nested_places!(entry, acc, _place, _where), do: {entry, acc}
+  defp pop_nested_places!(entry, acc, _place, _where), do: {entry, acc}
 
-  defp map_places!({:key, inner}, acc, place, where) do
+  defp pop_map_places!({:key, inner}, acc, place, where) do
     reject_place!(inner, place, where, "у ключа map: нет — равные уничтоженные значения не идентифицируют запись")
     {{:key, inner}, acc}
   end
 
-  defp map_places!({:value, inner}, acc, place, where) do
-    {inner, places} = pop_places!(inner, place ++ [:value], where)
+  defp pop_map_places!({:value, inner}, acc, place, where) do
+    {inner, places} = pop_destroyable_places!(inner, place ++ [:value], where)
     {{:value, inner}, acc ++ places}
   end
 
-  defp map_places!(entry, acc, _place, _where), do: {entry, acc}
+  defp pop_map_places!(entry, acc, _place, _where), do: {entry, acc}
 
   defp reject_place!(inner, place, where, text) do
     if destroyable_key?(inner), do: Helper.Opts.reject!(where, "#{place_label(place)}destroyable: #{text}")
@@ -367,10 +367,7 @@ defmodule Core.Codec.Field do
     :ok
   end
 
-  defp place_label(place), do: Enum.map_join(place, &"#{place_step(&1)}: ")
-
-  defp place_step(:list), do: "list"
-  defp place_step(:value), do: "map: value"
+  defp place_label(place), do: Enum.map_join(place, &"#{step_text(&1)}: ")
 
   defp destroyable_key?(spec) do
     Keyword.keyword?(spec) and
@@ -644,6 +641,40 @@ defmodule Core.Codec.Field do
   def subjects(fields) when is_list(fields),
     do: for(%__MODULE__{name: name, subject: subject} <- fields, not is_nil(subject), do: {name, subject})
 
+  # ===== уничтожаемые места =====
+
+  # Места `destroyable:` полей структуры по полям и полей сущностей `entity:`, собранных
+  # `Core.Struct`, в их значениях на любой глубине: `[{модуль поля, путь}]`, путь — текстом отказа
+  # (`recipients: list: phone`). Ручной struct сущности и варианты `union:` не обходятся.
+  @doc false
+  @spec destroyable_places(module()) :: [{module(), String.t()}]
+
+  def destroyable_places(module) when is_atom(module), do: owned_places(module, struct_fields(module) || [], [])
+
+  # ---
+
+  defp owned_places(module, fields, prefix) do
+    Enum.flat_map(fields, fn %__MODULE__{name: name, spec: spec, destroyable: places} ->
+      path = prefix ++ [Atom.to_string(name)]
+
+      for(place <- places, do: {module, Enum.join(path ++ Enum.map(place, &step_text/1), ": ")}) ++
+        entity_places(spec, path)
+    end)
+  end
+
+  defp entity_places({:entity, module}, path) do
+    case struct_fields(module) do
+      nil -> []
+      fields -> owned_places(module, fields, path)
+    end
+  end
+
+  defp entity_places(spec, path),
+    do: Enum.flat_map(values(spec), &entity_places(&1, path ++ [step_text(spec_step(spec))]))
+
+  defp spec_step({:map, _key, _value}), do: :value
+  defp spec_step({kind, _inner}), do: kind
+
   # ===== тип =====
 
   @doc false
@@ -690,4 +721,11 @@ defmodule Core.Codec.Field do
 
   defp spec_type({:type, :string}, _places, _place), do: quote(do: String.t())
   defp spec_type({:type, scalar}, _places, _place), do: quote(do: unquote(scalar)())
+
+  # ===== общее =====
+
+  # Шаг места внутри значения поля — как в отказах: значение словаря — `map: value`.
+  defp step_text(:list), do: "list"
+  defp step_text(:set), do: "set"
+  defp step_text(:value), do: "map: value"
 end

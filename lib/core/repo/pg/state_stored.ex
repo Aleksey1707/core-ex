@@ -294,8 +294,8 @@ defmodule Core.Repo.Pg.StateStored do
 
       {_fields, events} ->
         Helper.Opts.reject!(
-          "#{@label}: entity: events",
-          "семейство #{inspect(events)} у #{inspect(entity)} не равно семейству кодека #{inspect(family)}"
+          "#{@label}: entity: #{inspect(entity)}: events",
+          "семейство #{inspect(events)} в use Core.Struct не равно семейству кодека #{inspect(family)}"
         )
     end
   end

@@ -124,9 +124,7 @@ defmodule Core.View.Opts do
       Helper.Opts.reject!(path, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
-    if Keyword.has_key?(opts, :destroyable) do
-      Helper.Opts.reject!(path, "destroyable: у View нет — уничтоженное значение View не загружает")
-    end
+    reject_destroyable!(opts, path)
 
     {kind_key, value} = kind_key!(opts, path)
     optional? = Keyword.get(opts, :optional, false)
@@ -136,6 +134,14 @@ defmodule Core.View.Opts do
     end
 
     {name, spec!(kind_key, value, name, form_names, path), optional?}
+  end
+
+  defp reject_destroyable!(opts, where) do
+    if Keyword.keyword?(opts) and Keyword.has_key?(opts, :destroyable) do
+      Helper.Opts.reject!(where, "destroyable: у View нет — уничтоженное значение View не загружает")
+    end
+
+    :ok
   end
 
   defp kind_key!(opts, path) do
@@ -263,9 +269,7 @@ defmodule Core.View.Opts do
   end
 
   defp element!(label, name, inner, form_names, path) do
-    if Keyword.keyword?(inner) and Keyword.has_key?(inner, :destroyable) do
-      Helper.Opts.reject!("#{path}: #{label}", "destroyable: у View нет — уничтоженное значение View не загружает")
-    end
+    reject_destroyable!(inner, "#{path}: #{label}")
 
     {^name, spec, optional?} = field!(name, inner, form_names, path)
 

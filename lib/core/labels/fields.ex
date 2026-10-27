@@ -40,6 +40,9 @@ defmodule Core.Labels.Fields do
           ]
       end
 
+  Поле событий `events`, порождённое `use Core.Struct, events:`, вне спеки структуры: решение о нём
+  не объявляется, подпись на нём — `CompileError`.
+
   Свободная map'а (`type: :map`) с id в ключах подписывается ключом и значением —
   `[label:, key:, value:]` — и выходит в сведения списком групп «ключ — значение»:
 
@@ -87,8 +90,9 @@ defmodule Core.Labels.Fields do
   (`list: [type: :map]`, `set: [type: :map]`, значение словаря `type: :map`, решение у них только
   `:hidden`), подписи ключа и значения у поля, которое не map'а и не словарь, ключ в них вне
   `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки и
-  структуры по полям — `fields:`; у struct'а без спеки полей — отсутствие `fields:`, видимое поле без
-  спеки, спека скрытого поля или поля вне struct'а, `text:` не захватом функции арности 1.
+  структуры по полям — `fields:`; у структуры по полям с `events:` — подпись поля `events`; у
+  struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки, спека скрытого поля или
+  поля вне struct'а, `text:` не захватом функции арности 1.
 
   Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
   двух опций. Вид значения у `Core.Es.ValueChanged` берётся из его `type:`, у структуры по полям — из
@@ -410,10 +414,11 @@ defmodule Core.Labels.Fields do
       fail!(env, "не struct — `fields:` подписывает поля struct'а")
     end
 
-    fields = Map.keys(module.__struct__()) -- [:__struct__]
+    events = events_field(module)
+    fields = Map.keys(module.__struct__()) -- [:__struct__ | events]
 
     case change(module) do
-      nil -> ensure_labels!(env, fields)
+      nil -> ensure_labels!(env, fields, events)
       {_label, spec} -> ensure_change!(env, fields, spec)
     end
 
@@ -443,10 +448,19 @@ defmodule Core.Labels.Fields do
 
   # ---
 
-  defp ensure_labels!(env, fields) do
+  # Поле событий `events:` структуры по полям — вне её спеки: подписи его не видят.
+  defp events_field(module), do: if(Struct.events_family(module), do: [:events], else: [])
+
+  defp ensure_labels!(env, fields, events) do
     module = env.module
     labels = labels(module)
     labelled = Keyword.keys(labels)
+
+    ensure_none!(
+      env,
+      Enum.filter(labelled, &(&1 in events)),
+      "подпись поля событий — его порождает `use Core.Struct, events:`, решение о нём не нужно"
+    )
 
     ensure_none!(env, fields -- labelled, "поля без подписи или `:hidden`")
     ensure_none!(env, labelled -- fields, "подписи полей вне struct'а")

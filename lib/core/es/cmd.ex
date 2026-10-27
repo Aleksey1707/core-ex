@@ -64,7 +64,7 @@ defmodule Core.Es.Cmd do
       fields ->
         ensure_enforced!(env, fields)
         reject_destroyable!(env)
-        reject_events!(env)
+        Core.Struct.reject_events!(env, @label, "у команды нет — события порождает decide/2 агрегата")
     end
   end
 
@@ -92,57 +92,19 @@ defmodule Core.Es.Cmd do
   end
 
   defp reject_destroyable!(env) do
-    case destroyable_places(env.module, Field.struct_fields(env.module) || [], []) do
+    case Field.destroyable_places(env.module) do
       [] ->
         :ok
 
       [{owner, path} | _rest] ->
         raise CompileError,
           description:
-            "#{@label}: #{inspect(env.module)}: #{Enum.join(path, ": ")}: destroyable: " <>
+            "#{@label}: #{inspect(env.module)}: #{path}: destroyable: " <>
               "#{owner_text(env.module, owner)} нет — уничтоженное ПДн-значение не записывается",
           file: env.file,
           line: env.line
     end
   end
-
-  defp reject_events!(env) do
-    if Core.Struct.events_family(env.module) do
-      raise CompileError,
-        description: "#{@label}: #{inspect(env.module)}: events: у команды нет — события порождает decide/2 агрегата",
-        file: env.file,
-        line: env.line
-    end
-
-    :ok
-  end
-
-  # Места `destroyable:` полей модуля и полей сущностей `entity:` в их значениях на любой глубине:
-  # `[{модуль поля, путь}]`. Ручной struct сущности и варианты `union:` не обходятся.
-  defp destroyable_places(module, fields, prefix) do
-    Enum.flat_map(fields, fn %Field{name: name, spec: spec, destroyable: places} ->
-      path = prefix ++ [name]
-
-      for(place <- places, do: {module, path ++ Enum.map(place, &step_text/1)}) ++ entity_places(spec, path)
-    end)
-  end
-
-  defp entity_places({:entity, module}, path) do
-    case Field.struct_fields(module) do
-      nil -> []
-      fields -> destroyable_places(module, fields, path)
-    end
-  end
-
-  defp entity_places(spec, path),
-    do: Enum.flat_map(Field.values(spec), &entity_places(&1, path ++ [step_text(spec_step(spec))]))
-
-  defp spec_step({:map, _key, _value}), do: :value
-  defp spec_step({kind, _inner}), do: kind
-
-  # Шаг пути — как в отказах `Core.Struct`: значение словаря — `map: value`.
-  defp step_text(:value), do: "map: value"
-  defp step_text(kind), do: Atom.to_string(kind)
 
   defp owner_text(module, module), do: "у команды"
   defp owner_text(_module, owner), do: "у сущности #{inspect(owner)} в команде"

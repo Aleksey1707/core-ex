@@ -150,8 +150,8 @@ defmodule Core.Repo.Pg.StateStoredTest do
 
     test "entity: — семейство events: не равно семейству кодека — CompileError" do
       message =
-        "Repo.Pg.StateStored: entity: events: семейство Core.EsFixture.Account.Event " <>
-          "у Core.Repo.Pg.StateStoredTest.ForeignEventsEntity не равно семейству кодека Core.EventFixture.Event"
+        "Repo.Pg.StateStored: entity: Core.Repo.Pg.StateStoredTest.ForeignEventsEntity: events: " <>
+          "семейство Core.EsFixture.Account.Event в use Core.Struct не равно семейству кодека Core.EventFixture.Event"
 
       assert_raise CompileError, message, fn ->
         compile!(ForeignEvents, entity: ForeignEventsEntity)

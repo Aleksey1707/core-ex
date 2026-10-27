@@ -86,8 +86,8 @@ defmodule Core.Struct do
   событий `events` с типом `Core.Es.Events.t(Family.t())` и значением по умолчанию
   `Es.Events.new()`: ключ в `%Role{}` можно не указывать, новый агрегат начинает с пустой
   коллекции. В спеку полей оно не входит: плагин по полям его не видит, подписи
-  (`use Core.Labels.Fields`) скрывают его `events: :hidden`, как у ручного `defstruct`. Семейство с
-  кодеком событий сверяет `Core.Repo.Pg.StateStored` (ADR-0092).
+  (`use Core.Labels.Fields`) — тоже: решение о нём не объявляется, подпись на нём — `CompileError`.
+  Семейство с кодеком событий сверяет `Core.Repo.Pg.StateStored` (ADR-0092).
 
       defmodule Role do
         use Core.Struct,
@@ -274,6 +274,21 @@ defmodule Core.Struct do
 
   def events_family(module) when is_atom(module),
     do: if(Helper.Module.exports?(module, :__struct_events__, 0), do: module.__struct_events__())
+
+  # Роль, чей модуль полем событий не владеет, отказывает `events:` на `@after_compile`.
+  @doc false
+  @spec reject_events!(Macro.Env.t(), String.t(), String.t()) :: :ok
+
+  def reject_events!(%Macro.Env{module: module} = env, label, text) when is_binary(label) and is_binary(text) do
+    if events_family(module) do
+      raise CompileError,
+        description: "#{label}: #{inspect(module)}: events: #{text}",
+        file: env.file,
+        line: env.line
+    end
+
+    :ok
+  end
 
   # ===== поля =====
 

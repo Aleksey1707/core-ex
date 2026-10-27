@@ -736,6 +736,26 @@ defmodule Core.Labels.FieldsTest do
       assert Fields.paths(module) == [{[:name], "Название"}, {[:note], "Примечание"}]
     end
 
+    test "events: — поле событий подписи не видят, решение о нём не нужно" do
+      {{:module, module, _bytecode, _result}, _binding} =
+        compile_events_struct(:Journal, labels: [name: "Название", note: "Примечание", trace: :hidden])
+
+      assert Fields.labels(module) == [name: "Название", note: "Примечание", trace: :hidden]
+      assert Fields.specs(module) == [name: {:prim, Name}, note: {:type, :string}]
+    end
+
+    test "events: и подпись поля events — CompileError" do
+      for {name, label} <- [HiddenEvents: :hidden, ShownEvents: "События"] do
+        assert_raise CompileError,
+                     ~r/#{name}: подпись поля событий — его порождает `use Core.Struct, events:`.*: \[:events\]$/,
+                     fn ->
+                       compile_events_struct(name,
+                         labels: [name: "Название", note: "Примечание", trace: :hidden, events: label]
+                       )
+                     end
+      end
+    end
+
     test "fields: рядом со структурой — CompileError" do
       assert_raise CompileError,
                    ~r/^Labels.Fields: fields: спека поля и у структуры по полям.*\[:name\]$/,
@@ -891,6 +911,26 @@ defmodule Core.Labels.FieldsTest do
               note: [type: :string, optional: true],
               trace: [type: :string]
             ]
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
+
+  defp compile_events_struct(name, opts) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          use Core.Struct,
+            fields: [
+              name: [prim: Core.LabelsFixture.Name],
+              note: [type: :string, optional: true],
+              trace: [type: :string]
+            ],
+            events: Core.EventFixture.Event
 
           use Core.Labels.Fields, unquote(opts)
         end
