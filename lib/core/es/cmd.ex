@@ -70,10 +70,14 @@ defmodule Core.Es.Cmd do
       missing ->
         raise CompileError,
           description:
-            "#{@label}: #{inspect(env.module)} обязан объявить #{inspect(@stamp_keys)} в " <>
-              "@enforce_keys — автор и момент событий приходят из команды; нет #{inspect(missing)}",
+            "#{@label}: #{inspect(env.module)} обязан объявить #{inspect(@stamp_keys)} " <>
+              "#{stamp_hint(env.module)} — автор и момент событий приходят из команды; нет #{inspect(missing)}",
           file: env.file,
           line: env.line
     end
+  end
+
+  defp stamp_hint(module) do
+    if Core.Codec.Field.struct_fields(module), do: "полями без default:", else: "в @enforce_keys"
   end
 end

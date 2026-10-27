@@ -43,6 +43,17 @@ defmodule Core.Es.CmdTest do
       end
     end
 
+    test "структура по полям без by и с default: у at — CompileError «полями без default:»" do
+      fields = [
+        name: [prim: Core.EsFixture.Account.Name],
+        at: [prim: Core.Es.Event.At, optional: true, default: nil]
+      ]
+
+      assert_raise CompileError, ~r/обязан объявить \[:by, :at\] полями без default:.*нет \[:by, :at\]/, fn ->
+        compile(ByFieldsDefault, nil, quote(do: use(Core.Struct, fields: unquote(fields))))
+      end
+    end
+
     test "без defstruct — CompileError" do
       assert_raise CompileError, ~r/команда — struct: нет defstruct/, fn ->
         compile(NoStruct, nil, nil)
