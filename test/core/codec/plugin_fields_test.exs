@@ -7,19 +7,29 @@ defmodule Core.Codec.PluginFieldsTest do
   alias Core.Version
 
   defmodule Name do
-    use Prim.String, name: "Имя", min_len: 1, max_len: 50
+    use Prim.String,
+      name: "Имя",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule ID do
-    use Prim.UUID, name: "ID", version: 4
+    use Prim.UUID,
+      name: "ID",
+      version: 4
   end
 
   defmodule OwnerID do
-    use Prim.Compose, name: "Владелец", of: ID
+    use Prim.Compose,
+      name: "Владелец",
+      of: ID
   end
 
   defmodule Slug do
-    use Prim.String, name: "Код", max_len: 50, kind: :slug
+    use Prim.String,
+      name: "Код",
+      max_len: 50,
+      kind: :slug
   end
 
   defmodule Item do

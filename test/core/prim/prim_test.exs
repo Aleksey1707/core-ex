@@ -107,7 +107,9 @@ defmodule Core.PrimTest do
       Code.eval_quoted(
         quote do
           defmodule Core.PrimTest.NoCast do
-            use Core.Prim, name: "X", kind: :integer
+            use Core.Prim,
+              name: "X",
+              kind: :integer
           end
         end
       )
@@ -337,7 +339,9 @@ defmodule Core.PrimTest do
   describe "declared?/1" do
     test "Prim, который ещё собирается, — да; модуль без use — нет" do
       defmodule DeclaredPrim do
-        use Core.Prim.String, name: "Объявлен", max_len: 10
+        use Core.Prim.String,
+          name: "Объявлен",
+          max_len: 10
 
         @declared Core.Prim.declared?(__MODULE__)
 

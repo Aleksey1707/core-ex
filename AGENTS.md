@@ -160,7 +160,7 @@ mix docs
 | `xref` | `mix xref graph --format cycles` — храповик на циклы компиляции |
 | `dialyzer` | `mix dialyzer` |
 | `test` | `mix test` после `make infra-up` |
-| `credo` | `mix credo --strict` |
+| `credo` | `mix credo --strict`; конфиг `consumer` — проверки сводов над `fixtures/consumer/lib` |
 | `audit` | `mix deps.audit` — известные CVE в зависимостях |
 
 Тестовая инфраструктура живёт в самой библиотеке: `Core.TestRepo`, `Core.DataCase`,

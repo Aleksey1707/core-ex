@@ -26,19 +26,28 @@ defmodule Core.CodecTest do
   end
 
   defmodule SampleUUID do
-    use Prim.UUID, name: "ID", version: 4
+    use Prim.UUID,
+      name: "ID",
+      version: 4
   end
 
   defmodule SampleString do
-    use Prim.String, name: "Имя", min_len: 1, max_len: 50
+    use Prim.String,
+      name: "Имя",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule SampleInteger do
-    use Prim.Integer, name: "Число", min: 0
+    use Prim.Integer,
+      name: "Число",
+      min: 0
   end
 
   defmodule SampleDecimal do
-    use Prim.Decimal, name: "Цена", min: 0
+    use Prim.Decimal,
+      name: "Цена",
+      min: 0
   end
 
   defmodule SampleDateTime do
@@ -50,23 +59,35 @@ defmodule Core.CodecTest do
   end
 
   defmodule LabelID do
-    use Prim.UUID, name: "Label", version: 4, kind: :label
+    use Prim.UUID,
+      name: "Label",
+      version: 4,
+      kind: :label
   end
 
   defmodule MicroAt do
-    use Prim.DateTime, name: "Момент us", precision: :microsecond
+    use Prim.DateTime,
+      name: "Момент us",
+      precision: :microsecond
   end
 
   defmodule MoscowAt do
-    use Prim.DateTime, name: "Момент МСК", tz: "Europe/Moscow"
+    use Prim.DateTime,
+      name: "Момент МСК",
+      tz: "Europe/Moscow"
   end
 
   defmodule ApproverID do
-    use Prim.Compose, name: "Согласующий", of: SampleUUID
+    use Prim.Compose,
+      name: "Согласующий",
+      of: SampleUUID
   end
 
   defmodule WrappedLabelID do
-    use Prim.Compose, name: "Обёртка", of: SampleUUID, kind: :wrapped_label
+    use Prim.Compose,
+      name: "Обёртка",
+      of: SampleUUID,
+      kind: :wrapped_label
   end
 
   defmodule PriorityProfile do

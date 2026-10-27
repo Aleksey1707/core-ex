@@ -234,7 +234,9 @@ defmodule Core.Web.EventTest do
           quote do
             defmodule Core.Web.EventTest.AttrUserRef do
               @user_ref "ref"
-              use Core.Web.Event, codec: Core.CodecFixture.External, user_ref: @user_ref
+              use Core.Web.Event,
+                codec: Core.CodecFixture.External,
+                user_ref: @user_ref
             end
           end
         )
@@ -257,7 +259,10 @@ defmodule Core.Web.EventTest do
           quote do
             defmodule Core.Web.EventTest.AttrNilUserRef do
               @user_ref nil
-              use Core.Web.Event, codec: Core.CodecFixture.External, user_ref: @user_ref, labels: true
+              use Core.Web.Event,
+                codec: Core.CodecFixture.External,
+                user_ref: @user_ref,
+                labels: true
             end
           end
         )

@@ -7,7 +7,9 @@ defmodule Core.Codec.PluginRedumpTest do
   alias Core.PrimFixture.Sensitive
 
   defmodule ID do
-    use Prim.UUID, name: "Идентификатор", version: 4
+    use Prim.UUID,
+      name: "Идентификатор",
+      version: 4
   end
 
   defmodule At do
@@ -15,7 +17,9 @@ defmodule Core.Codec.PluginRedumpTest do
   end
 
   defmodule Weight do
-    use Prim.Decimal, name: "Вес", min: 0
+    use Prim.Decimal,
+      name: "Вес",
+      min: 0
   end
 
   defmodule Day do
@@ -23,11 +27,17 @@ defmodule Core.Codec.PluginRedumpTest do
   end
 
   defmodule Name do
-    use Prim.String, name: "Имя", min_len: 1, max_len: 50
+    use Prim.String,
+      name: "Имя",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule Label do
-    use Prim.UUID, name: "Метка", version: 4, kind: :label
+    use Prim.UUID,
+      name: "Метка",
+      version: 4,
+      kind: :label
   end
 
   defmodule Status do
@@ -38,7 +48,9 @@ defmodule Core.Codec.PluginRedumpTest do
     | `:active` | действует |
     """
 
-    use Core.Enum, name: "Статус", values: ~w(draft active)a
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(draft active)a
   end
 
   defmodule Shape do

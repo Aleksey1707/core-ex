@@ -35,7 +35,9 @@ defmodule Core.Helper.OptsTest do
     Code.eval_quoted(
       quote do
         defmodule Core.Helper.OptsTest.RequireOk do
-          use Core.Helper.OptsTest.WithRequire, a: 1, b: 2
+          use Core.Helper.OptsTest.WithRequire,
+            a: 1,
+            b: 2
         end
       end
     )
@@ -58,7 +60,9 @@ defmodule Core.Helper.OptsTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Helper.OptsTest.ValidateUnknown do
-            use Core.Helper.OptsTest.WithValidate, name: "X", foo: 1
+            use Core.Helper.OptsTest.WithValidate,
+              name: "X",
+              foo: 1
           end
         end
       )

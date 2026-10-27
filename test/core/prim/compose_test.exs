@@ -5,7 +5,9 @@ defmodule Core.Prim.ComposeTest do
   alias Core.Prim
 
   defmodule BaseID do
-    use Prim.UUID, name: "ID", version: 4
+    use Prim.UUID,
+      name: "ID",
+      version: 4
   end
 
   defmodule ApproverID do

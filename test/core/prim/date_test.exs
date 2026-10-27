@@ -190,7 +190,9 @@ defmodule Core.Prim.DateTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTest.BadTz do
-            use Core.Prim.Date, name: "Дата", tz: "Mars/Olympus"
+            use Core.Prim.Date,
+              name: "Дата",
+              tz: "Mars/Olympus"
           end
         end
       )

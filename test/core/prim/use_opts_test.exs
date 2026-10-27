@@ -2,7 +2,9 @@ defmodule Core.Prim.UseOptsTest do
   use ExUnit.Case, async: true
 
   defmodule Base do
-    use Core.Prim.String, name: "База", max_len: 10
+    use Core.Prim.String,
+      name: "База",
+      max_len: 10
   end
 
   # Минимальный валидный набор опций каждой обёртки, без `name:`.

@@ -51,7 +51,10 @@ defmodule Core.Labels.TextTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.TextTest.AttrWith do
-              use Core.Prim.String, name: "Код", min_len: 1, max_len: 10
+              use Core.Prim.String,
+                name: "Код",
+                min_len: 1,
+                max_len: 10
 
               @text "Текст"
               use Core.Labels.Text, with: @text
@@ -78,7 +81,9 @@ defmodule Core.Labels.TextTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.TextTest.WithID do
-              use Core.Prim.UUID, name: "Id", version: 7
+              use Core.Prim.UUID,
+                name: "Id",
+                version: 7
 
               use Core.Labels.ID, kind: :id
 
@@ -93,7 +98,10 @@ defmodule Core.Labels.TextTest do
   describe "declared?/1" do
     test "Prim с use Core.Labels.Text, который ещё собирается, — да; Prim без него — нет" do
       defmodule DeclaredText do
-        use Core.Prim.String, name: "Объявлен", max_len: 10
+        use Core.Prim.String,
+          name: "Объявлен",
+          max_len: 10
+
         use Core.Labels.Text, with: &Core.LabelsFixture.Texts.unit/1
 
         @declared Core.Labels.Text.declared?(__MODULE__)
@@ -102,7 +110,9 @@ defmodule Core.Labels.TextTest do
       end
 
       defmodule UndeclaredText do
-        use Core.Prim.String, name: "Не объявлен", max_len: 10
+        use Core.Prim.String,
+          name: "Не объявлен",
+          max_len: 10
 
         @declared Core.Labels.Text.declared?(__MODULE__)
 
@@ -122,7 +132,10 @@ defmodule Core.Labels.TextTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(module) do
-          use Core.Prim.String, name: "Код", min_len: 1, max_len: 10
+          use Core.Prim.String,
+            name: "Код",
+            min_len: 1,
+            max_len: 10
 
           use Core.Labels.Text, unquote(opts)
         end

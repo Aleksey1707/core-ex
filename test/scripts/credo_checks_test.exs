@@ -438,3 +438,204 @@ defmodule CredoChecks.OptsSchemaTest do
     |> assert_issues(fn issues -> assert Enum.map(issues, & &1.line_no) == [5, 14] end)
   end
 end
+
+defmodule CredoChecks.UseOptsPerLineTest do
+  use Credo.Test.Case,
+    async: true
+
+  alias CredoChecks.UseOptsPerLine
+
+  setup_all do
+    {:ok, _apps} = Application.ensure_all_started(:credo)
+    :ok
+  end
+
+  test "две опции в строке use — нарушение" do
+    """
+    defmodule A do
+      use Core.Enum, name: "Статус", values: ~w(new done)a
+    end
+    """
+    |> to_source_file()
+    |> run_check(UseOptsPerLine)
+    |> assert_issue(fn issue ->
+      assert issue.line_no == 2
+      assert issue.trigger == "use"
+      assert issue.message =~ "отдельной строке"
+    end)
+  end
+
+  test "опции на строках после use, но две в одной строке или первая в строке use — нарушения" do
+    """
+    defmodule A do
+      use Core.Enum,
+        name: "Статус", values: ~w(new done)a
+
+      use Core.Struct, name: "Заказ",
+        fields: [id: [type: :integer], total: [type: :integer]]
+
+      use Core.Codec, [name: "Кодек", plugins: []]
+    end
+    """
+    |> to_source_file()
+    |> run_check(UseOptsPerLine)
+    |> assert_issues(fn issues -> assert Enum.map(issues, & &1.line_no) == [2, 5, 8] end)
+  end
+
+  test "одна опция в строке use, опции построчно и use без опций — без нарушений" do
+    """
+    defmodule A do
+      use ExUnit.Case, async: true
+      use GenServer
+      use Core.Struct, fields: [id: [type: :integer], total: [type: :integer]]
+
+      use Core.Enum,
+        name: "Статус",
+        values: ~w(new done)a
+
+      quote do
+        use Core.Codec,
+          name: unquote(name),
+          plugins: []
+      end
+    end
+    """
+    |> to_source_file()
+    |> run_check(UseOptsPerLine)
+    |> refute_issues()
+  end
+end
+
+defmodule CredoChecks.EnumValuesTableTest do
+  use Credo.Test.Case,
+    async: true
+
+  alias CredoChecks.EnumValuesTable
+
+  setup_all do
+    {:ok, _apps} = Application.ensure_all_started(:credo)
+    :ok
+  end
+
+  test "значение без строки таблицы — нарушение с перечнем значений" do
+    ~S'''
+    defmodule Status do
+      @moduledoc """
+      Статус
+
+      | Значение | Описание |
+      |---|---|
+      | `:new` | создан |
+      """
+
+      use Core.Enum,
+        name: first_line(@moduledoc),
+        values: ~w(new done failed)a
+    end
+    '''
+    |> to_source_file()
+    |> run_check(EnumValuesTable)
+    |> assert_issue(fn issue ->
+      assert issue.line_no == 10
+      assert issue.message =~ "`:done`, `:failed`"
+    end)
+  end
+
+  test "без таблицы, @moduledoc false, ячейка не в форме inspect и codes: — нарушения" do
+    ~S'''
+    defmodule NoTable do
+      @moduledoc "Статус"
+
+      use Core.Enum,
+        name: "Статус",
+        values: [:new]
+    end
+
+    defmodule Hidden do
+      @moduledoc false
+
+      use Core.Enum,
+        name: "Статус",
+        values: ~w(new)a
+    end
+
+    defmodule BareCell do
+      @moduledoc """
+      Статус
+
+      | Значение | Описание |
+      |---|---|
+      | new | создан |
+      """
+
+      use Core.Enum,
+        name: "Статус",
+        values: ~w(new)a
+    end
+
+    defmodule Kind do
+      @moduledoc """
+      Вид
+
+      | Значение | Код | Описание |
+      |---|---|---|
+      | `:human` | 1 | человек |
+      """
+
+      use Core.Enum,
+        name: "Вид",
+        codes: %{human: 1, car: 2}
+    end
+    '''
+    |> to_source_file()
+    |> run_check(EnumValuesTable)
+    |> assert_issues(fn issues ->
+      assert Enum.map(issues, &{&1.line_no, &1.message =~ "`:new`" or &1.message =~ "`:car`"}) ==
+               [{4, true}, {12, true}, {26, true}, {40, true}]
+    end)
+  end
+
+  test "каждое значение в таблице, значения не литералом и use другого модуля — без нарушений" do
+    ~S'''
+    defmodule Status do
+      @moduledoc """
+      Статус
+
+      Описание выше таблицы.
+
+      | Значение | Описание |
+      |---|---|
+      | `:new` | создан |
+      | `:done` | выполнен |
+      """
+
+      use Core.Enum,
+        name: first_line(@moduledoc),
+        values: ~w(new done)a
+
+      defmodule Nested do
+        @moduledoc "Вложенный модуль без enum"
+      end
+    end
+
+    defmodule Derived do
+      @moduledoc "Статус"
+
+      use Core.Enum,
+        name: "Статус",
+        values: @values
+    end
+
+    defmodule Other do
+      @moduledoc "Не enum"
+
+      use Core.Struct,
+        name: "Структура",
+        values: ~w(a b)a
+    end
+    '''
+    |> to_source_file()
+    |> run_check(EnumValuesTable)
+    |> refute_issues()
+  end
+end

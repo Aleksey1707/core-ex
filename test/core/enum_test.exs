@@ -363,7 +363,9 @@ defmodule Core.EnumTest do
           quote do
             defmodule Core.EnumTest.AttrValues do
               @values ~w(a b)a
-              use Core.Enum, name: "x", values: @values
+              use Core.Enum,
+                name: "x",
+                values: @values
             end
           end
         )
@@ -378,7 +380,9 @@ defmodule Core.EnumTest do
           quote do
             defmodule Core.EnumTest.IntName do
               @n 1
-              use Core.Enum, name: @n, values: ~w(a)a
+              use Core.Enum,
+                name: @n,
+                values: ~w(a)a
             end
           end
         )

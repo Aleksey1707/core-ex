@@ -22,7 +22,9 @@ defmodule Core.Es.EventTest do
 
   defmodule EmptyEvent do
     @moduledoc false
-    use Event, family: Core.EventFixture.Event, payload: nil
+    use Event,
+      family: Core.EventFixture.Event,
+      payload: nil
   end
 
   test "new создаёт событие с нагрузкой" do
@@ -93,7 +95,9 @@ defmodule Core.Es.EventTest do
     test "событие, которое ещё собирается, — да; модуль без use — нет" do
       defmodule DeclaredEvent do
         @moduledoc false
-        use Core.Es.Event, family: Core.EventFixture.Event, payload: nil
+        use Core.Es.Event,
+          family: Core.EventFixture.Event,
+          payload: nil
 
         @declared Core.Es.Event.declared?(__MODULE__)
 
@@ -156,7 +160,9 @@ defmodule Core.Es.EventTest do
           quote do
             defmodule Core.Es.EventTest.AttrPayload do
               @payload Core.Es.EventTest.ValuePayload
-              use Core.Es.Event, family: Core.EventFixture.Event, payload: @payload
+              use Core.Es.Event,
+                family: Core.EventFixture.Event,
+                payload: @payload
             end
           end
         )
@@ -174,7 +180,9 @@ defmodule Core.Es.EventTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Es.EventTest.LatePayload do
-              use Core.Es.Event, family: Core.EventFixture.Event, payload: __MODULE__.Payload
+              use Core.Es.Event,
+                family: Core.EventFixture.Event,
+                payload: __MODULE__.Payload
 
               defmodule Payload do
                 defstruct [:value]

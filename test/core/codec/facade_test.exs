@@ -13,15 +13,22 @@ defmodule Core.Codec.FacadeTest do
   end
 
   defmodule SampleString do
-    use Prim.String, name: "Имя", min_len: 1, max_len: 50
+    use Prim.String,
+      name: "Имя",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule SampleUUID do
-    use Prim.UUID, name: "ID", version: 4
+    use Prim.UUID,
+      name: "ID",
+      version: 4
   end
 
   defmodule ApproverID do
-    use Prim.Compose, name: "Согласующий", of: SampleUUID
+    use Prim.Compose,
+      name: "Согласующий",
+      of: SampleUUID
   end
 
   defmodule UnknownStruct do
@@ -390,7 +397,9 @@ defmodule Core.Codec.FacadeTest do
         quote do
           defmodule Core.Codec.FacadeTest.ExprPluginsFacade do
             @plugins []
-            use Core.Codec.Facade, prim: Core.CodecFixture.Prim.Internal, plugins: @plugins
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: @plugins
           end
         end
       )
@@ -404,7 +413,9 @@ defmodule Core.Codec.FacadeTest do
         quote do
           defmodule Core.Codec.FacadeTest.BadExprPluginsFacade do
             @plugins :plugins
-            use Core.Codec.Facade, prim: Core.CodecFixture.Prim.Internal, plugins: @plugins
+            use Core.Codec.Facade,
+              prim: Core.CodecFixture.Prim.Internal,
+              plugins: @plugins
           end
         end
       )

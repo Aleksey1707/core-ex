@@ -11,7 +11,9 @@ defmodule Core.Prim.DateTimeTest do
   end
 
   defmodule MoscowAt do
-    use Core.Prim.DateTime, name: "Дата", tz: "Europe/Moscow"
+    use Core.Prim.DateTime,
+      name: "Дата",
+      tz: "Europe/Moscow"
   end
 
   defmodule PlainAt do
@@ -19,11 +21,15 @@ defmodule Core.Prim.DateTimeTest do
   end
 
   defmodule MillisecondAt do
-    use Core.Prim.DateTime, name: "Дата ms", precision: :millisecond
+    use Core.Prim.DateTime,
+      name: "Дата ms",
+      precision: :millisecond
   end
 
   defmodule MicrosecondAt do
-    use Core.Prim.DateTime, name: "Дата us", precision: :microsecond
+    use Core.Prim.DateTime,
+      name: "Дата us",
+      precision: :microsecond
   end
 
   defmodule FakeAt do
@@ -209,7 +215,9 @@ defmodule Core.Prim.DateTimeTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTimeTest.BadTz do
-            use Core.Prim.DateTime, name: "Дата", tz: "Mars/Olympus"
+            use Core.Prim.DateTime,
+              name: "Дата",
+              tz: "Mars/Olympus"
           end
         end
       )
@@ -221,7 +229,9 @@ defmodule Core.Prim.DateTimeTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DateTimeTest.BadBound do
-            use Core.Prim.DateTime, name: "Дата", after: "2020-01-01T00:00:00Z"
+            use Core.Prim.DateTime,
+              name: "Дата",
+              after: "2020-01-01T00:00:00Z"
           end
         end
       )

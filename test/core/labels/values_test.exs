@@ -102,7 +102,9 @@ defmodule Core.Labels.ValuesTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.ValuesTest.AttrLabels do
-              use Core.Enum, name: "Статус", values: ~w(new done)a
+              use Core.Enum,
+                name: "Статус",
+                values: ~w(new done)a
 
               @labels [new: "Новый", done: "Готов"]
               use Core.Labels.Values, labels: @labels
@@ -133,7 +135,9 @@ defmodule Core.Labels.ValuesTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(module) do
-          use Core.Enum, name: "Статус", values: ~w(new done)a
+          use Core.Enum,
+            name: "Статус",
+            values: ~w(new done)a
 
           use Core.Labels.Values, unquote(opts)
         end

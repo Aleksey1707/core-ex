@@ -200,7 +200,9 @@ defmodule Core.Labels.FieldsTest do
               defstruct [:city]
 
               @fields "city"
-              use Core.Labels.Fields, fields: @fields, labels: [city: "Город"]
+              use Core.Labels.Fields,
+                fields: @fields,
+                labels: [city: "Город"]
             end
           end
         )
@@ -215,7 +217,9 @@ defmodule Core.Labels.FieldsTest do
               defstruct [:old_value, :new_value]
 
               @value [text: "текст"]
-              use Core.Labels.Fields, change: "Значение", value: @value
+              use Core.Labels.Fields,
+                change: "Значение",
+                value: @value
             end
           end
         )
@@ -230,7 +234,9 @@ defmodule Core.Labels.FieldsTest do
               defstruct [:city]
 
               @fields [city: [prim: Core.LabelsFixture.Name]]
-              use Core.Labels.Fields, fields: @fields, labels: [city: "Город"]
+              use Core.Labels.Fields,
+                fields: @fields,
+                labels: [city: "Город"]
             end
           end
         )

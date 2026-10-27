@@ -197,7 +197,8 @@
   `` `deps/core/docs/rules/app/16-caching.md` `` (см. «Ярус потребителя»);
 - последний H2 файла — `## Связанные правила`.
 
-Проверяется: `make rules-check` (`scripts/rules_lint.exs`).
+Проверяется: `make rules-check` (`scripts/rules_lint.exs`); проговорённое отсутствие проверки — по
+узкому списку фраз (`@unchecked`), в обоих ярусах.
 
 ## Как добавлять правило
 

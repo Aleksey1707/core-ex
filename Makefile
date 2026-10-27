@@ -97,7 +97,7 @@ deps-clean:
 
 .PHONY: credo
 credo:
-	mix credo --strict
+	mix credo --strict && mix credo --strict -C consumer
 
 # Известные CVE в зависимостях.
 .PHONY: audit

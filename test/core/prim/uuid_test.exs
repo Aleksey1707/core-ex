@@ -4,19 +4,27 @@ defmodule Core.Prim.UUIDTest do
   alias Core.CodecFixture.Prim.External
 
   defmodule Id do
-    use Core.Prim.UUID, name: "Идентификатор", version: 4
+    use Core.Prim.UUID,
+      name: "Идентификатор",
+      version: 4
   end
 
   defmodule IdV1 do
-    use Core.Prim.UUID, name: "ID v1", version: 1
+    use Core.Prim.UUID,
+      name: "ID v1",
+      version: 1
   end
 
   defmodule IdV7 do
-    use Core.Prim.UUID, name: "ID v7", version: 7
+    use Core.Prim.UUID,
+      name: "ID v7",
+      version: 7
   end
 
   defmodule AnyVersion do
-    use Core.Prim.UUID, name: "ID", version: nil
+    use Core.Prim.UUID,
+      name: "ID",
+      version: nil
   end
 
   defmodule IdV7NoCheck do
@@ -27,7 +35,9 @@ defmodule Core.Prim.UUIDTest do
   end
 
   defmodule Ref do
-    use Core.Prim.UUID, name: "Ссылка", kind: :ref
+    use Core.Prim.UUID,
+      name: "Ссылка",
+      kind: :ref
   end
 
   defmodule StreamID do
@@ -147,7 +157,9 @@ defmodule Core.Prim.UUIDTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.UUIDTest.IdV3 do
-            use Core.Prim.UUID, name: "ID v3", version: 3
+            use Core.Prim.UUID,
+              name: "ID v3",
+              version: 3
           end
         end
       )
@@ -159,7 +171,9 @@ defmodule Core.Prim.UUIDTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.UUIDTest.BadCheck do
-            use Core.Prim.UUID, name: "ID", check_version: "нет"
+            use Core.Prim.UUID,
+              name: "ID",
+              check_version: "нет"
           end
         end
       )

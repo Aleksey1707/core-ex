@@ -2,15 +2,25 @@ defmodule Core.Prim.DecimalTest do
   use ExUnit.Case, async: true
 
   defmodule Amount do
-    use Core.Prim.Decimal, name: "Сумма", min: 0, max: 100, scale: 2
+    use Core.Prim.Decimal,
+      name: "Сумма",
+      min: 0,
+      max: 100,
+      scale: 2
   end
 
   defmodule Quantity do
-    use Core.Prim.Decimal, name: "Количество", min: 0, scale: 3
+    use Core.Prim.Decimal,
+      name: "Количество",
+      min: 0,
+      scale: 3
   end
 
   defmodule Whole do
-    use Core.Prim.Decimal, name: "Целое", min: 0, scale: 0
+    use Core.Prim.Decimal,
+      name: "Целое",
+      min: 0,
+      scale: 0
   end
 
   defmodule Unbounded do
@@ -18,7 +28,10 @@ defmodule Core.Prim.DecimalTest do
   end
 
   defmodule Tight do
-    use Core.Prim.Decimal, name: "Узкая", min: 0, sec_max_len: 4
+    use Core.Prim.Decimal,
+      name: "Узкая",
+      min: 0,
+      sec_max_len: 4
   end
 
   defmodule Rate do
@@ -158,7 +171,11 @@ defmodule Core.Prim.DecimalTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DecimalTest.TooTight do
-            use Core.Prim.Decimal, name: "X", max: 1000, scale: 2, sec_max_len: 2
+            use Core.Prim.Decimal,
+              name: "X",
+              max: 1000,
+              scale: 2,
+              sec_max_len: 2
           end
         end
       )
@@ -170,7 +187,9 @@ defmodule Core.Prim.DecimalTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DecimalTest.BadScale do
-            use Core.Prim.Decimal, name: "X", scale: -1
+            use Core.Prim.Decimal,
+              name: "X",
+              scale: -1
           end
         end
       )
@@ -182,7 +201,9 @@ defmodule Core.Prim.DecimalTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DecimalTest.BadBound do
-            use Core.Prim.Decimal, name: "X", min: :zero
+            use Core.Prim.Decimal,
+              name: "X",
+              min: :zero
           end
         end
       )
@@ -194,7 +215,10 @@ defmodule Core.Prim.DecimalTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.DecimalTest.BadBounds do
-            use Core.Prim.Decimal, name: "X", min: "10", max: 1
+            use Core.Prim.Decimal,
+              name: "X",
+              min: "10",
+              max: 1
           end
         end
       )

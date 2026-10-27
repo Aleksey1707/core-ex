@@ -193,6 +193,9 @@
           #   CredoChecks.FunctionExported — 20-agreements.md («Экспорт модуля»), scripts/credo_checks.exs
           #   CredoChecks.UseOpts — 20-agreements.md («Опции `use`»), scripts/credo_checks.exs
           #   CredoChecks.OptsSchema — 20-agreements.md («Схема опций функции»), scripts/credo_checks.exs
+          #   CredoChecks.UseOptsPerLine — 20-agreements.md («Стиль кодирования»), scripts/credo_checks.exs
+          #   CredoChecks.EnumValuesTable — 11-domain.md («Описание значений в `@moduledoc`»),
+          #     scripts/credo_checks.exs
           #   LeakyEnvironment — утечка окружения в подпроцессы
           #   MixEnv — runtime-конфиг вместо `Mix.env/0`
           #   PassAsyncInTestCases — 19-testing.md
@@ -209,7 +212,9 @@
           {Credo.Check.Warning.UnsafeToAtom, [files: %{excluded: ["test/"]}]},
           {CredoChecks.FunctionExported, [files: %{excluded: ["lib/core/helper/module.ex"]}]},
           {CredoChecks.UseOpts, [files: %{included: ["lib/"]}]},
-          {CredoChecks.OptsSchema, [files: %{included: ["lib/"]}]}
+          {CredoChecks.OptsSchema, [files: %{included: ["lib/"]}]},
+          {CredoChecks.UseOptsPerLine, []},
+          {CredoChecks.EnumValuesTable, [files: %{included: ["lib/", "test/support/"]}]}
         ],
         disabled: [
           # `_` и `_name` несут разный смысл: первое — «значение не важно вообще»
@@ -248,6 +253,22 @@
           #
           # Custom checks can be created using `mix credo.gen.check`.
           #
+        ]
+      }
+    },
+    %{
+      # Фикстура-потребитель (`fixtures/consumer`, ADR-0014) — вне `included:` основного конфига:
+      # её код намеренно не держится под всеми проверками библиотеки. Здесь — только проверки
+      # сводов, которые потребитель получает вместе с `Core.*` (`mix credo --strict -C consumer`).
+      name: "consumer",
+      files: %{included: ["fixtures/consumer/lib/"], excluded: [~r"/_build/", ~r"/deps/"]},
+      requires: ["scripts/credo_checks.exs"],
+      strict: true,
+      color: true,
+      checks: %{
+        enabled: [
+          {CredoChecks.UseOptsPerLine, []},
+          {CredoChecks.EnumValuesTable, []}
         ]
       }
     }

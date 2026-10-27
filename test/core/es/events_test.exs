@@ -18,12 +18,16 @@ defmodule Core.Es.EventsTest do
 
   defmodule EventA do
     @moduledoc false
-    use Event, family: Core.EventFixture.Event, payload: ValuePayload
+    use Event,
+      family: Core.EventFixture.Event,
+      payload: ValuePayload
   end
 
   defmodule EventB do
     @moduledoc false
-    use Event, family: Core.EventFixture.Event, payload: nil
+    use Event,
+      family: Core.EventFixture.Event,
+      payload: nil
   end
 
   setup do

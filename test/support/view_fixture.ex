@@ -8,13 +8,18 @@ defmodule Core.ViewFixture do
   defmodule ID do
     @moduledoc false
 
-    use Core.Prim.UUID, name: "Идентификатор", version: 4
+    use Core.Prim.UUID,
+      name: "Идентификатор",
+      version: 4
   end
 
   defmodule Name do
     @moduledoc false
 
-    use Core.Prim.String, name: "Название", min_len: 1, max_len: 50
+    use Core.Prim.String,
+      name: "Название",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule CreatedAt do
@@ -26,7 +31,9 @@ defmodule Core.ViewFixture do
   defmodule MeasuredAt do
     @moduledoc false
 
-    use Core.Prim.DateTime, name: "Момент замера", precision: :microsecond
+    use Core.Prim.DateTime,
+      name: "Момент замера",
+      precision: :microsecond
   end
 
   defmodule Day do
@@ -38,7 +45,9 @@ defmodule Core.ViewFixture do
   defmodule Weight do
     @moduledoc false
 
-    use Core.Prim.Decimal, name: "Вес", min: 0
+    use Core.Prim.Decimal,
+      name: "Вес",
+      min: 0
   end
 
   defmodule IDRef do
@@ -68,7 +77,9 @@ defmodule Core.ViewFixture do
     | `:done` | завершён |
     """
 
-    use Core.Enum, name: "Статус", values: ~w(new done)a
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(new done)a
   end
 
   defmodule Specs do

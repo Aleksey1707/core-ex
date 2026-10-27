@@ -34,6 +34,16 @@ defmodule RulesLint do
   @max_len 100
 
   @vague [~r/по возможности/iu, ~r/желательн/iu, ~r/старайтесь/iu]
+
+  # Фразы, которыми проговаривается отсутствие проверки (`00-index.md`, «Оформление»). Список узкий:
+  # те же слова описывают поведение кода («плаг права не проверяет») и обоснование нормы («через
+  # модуль-переменную сборка не проверяет вовсе»), а их проверка не различает.
+  @unchecked [
+    ~r/сборка( (его|этого|их))? не (ловит|проверяет)(?=\s*([.;|]|$))/iu,
+    ~r/дополнительно не проверяет/iu,
+    ~r/(правилом|линтером|сборкой) не проверяется/iu,
+    ~r/линтер[^.;:]* не проверяет/iu
+  ]
   @modality ~r/\b(MUST|SHOULD|MAY)\b/
 
   @link ~r/`(\d\d-[a-z0-9-]+\.md)`/
@@ -86,6 +96,7 @@ defmodule RulesLint do
 
     (Enum.flat_map(files, &(check_file(&1, known, tiers) ++ check_own_tier(&1, @dep_dir))) ++
        Enum.flat_map(app_files, &check_app_file(&1, app_known, tiers)) ++
+       Enum.flat_map(files ++ app_files, &check_unchecked/1) ++
        check_map(files, @dir) ++
        check_map(app_files, @app_dir) ++
        check_skills(files, [@dir]) ++
@@ -294,6 +305,16 @@ defmodule RulesLint do
         Enum.any?(@vague, &Regex.match?(&1, line)),
         not Regex.match?(@modality, line) do
       err(path, no, "расплывчатая формулировка без MUST / SHOULD / MAY")
+    end
+  end
+
+  # Строка `Проверяется:` стоит только у существующей проверки; отсутствие не проговаривается.
+  # Норма из стандарта библиотеки: она действует на оба яруса, а локальный свод потребителя
+  # (режим `--consumer`) проверяется по `app/00-index.md`, где её нет.
+  defp check_unchecked(path) do
+    for {no, line, false, _} <- path |> File.read!() |> String.split("\n") |> mark_fences(),
+        [phrase | _] <- [Enum.find_value(@unchecked, &Regex.run(&1, line))] do
+      err(path, no, "отсутствие проверки проговорено: «#{phrase}» (#{@dir}/#{@index}, «Оформление»)")
     end
   end
 

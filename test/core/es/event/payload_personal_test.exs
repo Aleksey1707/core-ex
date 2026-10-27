@@ -123,7 +123,9 @@ defmodule Core.Es.Event.PayloadPersonalTest do
         compile(
           quote do
             defmodule Core.Es.Event.PayloadPersonalTest.RefID do
-              use Core.Prim.UUID, name: "Ссылка", kind: :ref
+              use Core.Prim.UUID,
+                name: "Ссылка",
+                kind: :ref
             end
           end
         )

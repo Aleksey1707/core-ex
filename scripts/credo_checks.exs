@@ -485,3 +485,191 @@ defmodule CredoChecks.OptsSchema do
     )
   end
 end
+
+defmodule CredoChecks.UseOptsPerLine do
+  @moduledoc false
+
+  use Credo.Check,
+    base_priority: :high,
+    category: :readability,
+    explanations: [
+      check: """
+      В `use` каждая опция стоит на отдельной строке (`docs/rules/20-agreements.md`, «Стиль
+      кодирования»): опции `use` — объявление модуля, и построчно они читаются как таблица.
+      Единственная опция MAY стоять в строке `use` (`use ExUnit.Case, async: true`); от двух и
+      больше — каждая на своей строке, и ни одна не в строке `use`.
+      """
+    ]
+
+  @impl true
+  def run(%SourceFile{} = source_file, params) do
+    ctx = Context.build(source_file, params, __MODULE__)
+
+    {:ok, ast} =
+      source_file
+      |> SourceFile.source()
+      |> Code.string_to_quoted(columns: true, literal_encoder: &{:ok, {:__block__, &2, [&1]}})
+
+    {_ast, issues} = Macro.prewalk(ast, [], &walk(&1, &2, ctx))
+    Enum.reverse(issues)
+  end
+
+  # ---
+
+  defp walk({:use, meta, [_module, opts]} = node, issues, ctx) do
+    lines = opts |> keyword() |> Enum.map(&key_line/1)
+
+    if one_per_line?(lines, meta[:line]),
+      do: {node, issues},
+      else: {node, [issue(ctx, meta) | issues]}
+  end
+
+  defp walk(node, issues, _ctx), do: {node, issues}
+
+  defp one_per_line?([_one], _use_line), do: true
+  defp one_per_line?([], _use_line), do: true
+  defp one_per_line?(lines, use_line), do: use_line not in lines and length(Enum.uniq(lines)) == length(lines)
+
+  defp keyword({:__block__, _meta, [list]}) when is_list(list), do: keyword(list)
+  defp keyword(list) when is_list(list), do: Enum.filter(list, &match?({{:__block__, _meta, [_key]}, _value}, &1))
+  defp keyword(_opts), do: []
+
+  defp key_line({{:__block__, meta, [_key]}, _value}), do: meta[:line]
+
+  defp issue(ctx, meta) do
+    format_issue(ctx,
+      message: "опции use — каждая на отдельной строке, не в строке use",
+      trigger: "use",
+      line_no: meta[:line],
+      column: meta[:column]
+    )
+  end
+end
+
+defmodule CredoChecks.EnumValuesTable do
+  @moduledoc false
+
+  use Credo.Check,
+    base_priority: :high,
+    category: :readability,
+    explanations: [
+      check: """
+      Каждое значение `Core.Enum` описано строкой таблицы `| Значение | … |` в `@moduledoc` своего
+      модуля, первая ячейка — значение в форме `inspect/1` в обратных кавычках (`` `:in_work` ``):
+      `docs/rules/11-domain.md`, «Описание значений в `@moduledoc`». Значения берутся из литерала
+      `values:` / ключей `codes:`; `values:` или `@moduledoc` не литералом — модуль пропускается.
+      """
+    ]
+
+  @values_header "Значение"
+
+  @impl true
+  def run(%SourceFile{} = source_file, params) do
+    ctx = Context.build(source_file, params, __MODULE__)
+
+    {_ast, issues} =
+      Macro.prewalk(SourceFile.ast(source_file), [], fn
+        {:defmodule, _meta, [_name, [do: body]]} = node, acc -> {node, module_issues(own_body(body), ctx) ++ acc}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.sort_by(issues, & &1.line_no)
+  end
+
+  # ---
+
+  defp own_body(body) do
+    Macro.prewalk(body, fn
+      {:defmodule, _meta, _args} -> nil
+      node -> node
+    end)
+  end
+
+  defp module_issues(body, ctx) do
+    with {meta, opts} <- enum_use(body),
+         {:ok, values} <- values(opts),
+         {:ok, doc} <- moduledoc(body) do
+      cells = table_cells(doc)
+
+      case Enum.reject(values, &(cell(&1) in cells)) do
+        [] -> []
+        missing -> [issue(ctx, meta, missing)]
+      end
+    else
+      _skip -> []
+    end
+  end
+
+  defp enum_use(body) do
+    {_ast, found} =
+      Macro.prewalk(body, nil, fn
+        {:use, meta, [{:__aliases__, _alias, [:Core, :Enum]}, opts]} = node, nil when is_list(opts) ->
+          {node, {meta, opts}}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  defp values(opts) do
+    case {Keyword.get(opts, :values), Keyword.get(opts, :codes)} do
+      {values, nil} -> atoms(values)
+      {nil, {:%{}, _meta, pairs}} -> atoms(Enum.map(pairs, &elem(&1, 0)))
+      _other -> :skip
+    end
+  end
+
+  defp atoms({:sigil_w, _meta, [{:<<>>, _bin, [words]}, ~c"a"]}) when is_binary(words),
+    do: {:ok, words |> String.split() |> Enum.map(&String.to_atom/1)}
+
+  defp atoms(list) when is_list(list) do
+    if Enum.all?(list, &is_atom/1), do: {:ok, list}, else: :skip
+  end
+
+  defp atoms(_values), do: :skip
+
+  defp moduledoc(body) do
+    {_ast, doc} =
+      Macro.prewalk(body, {:ok, ""}, fn
+        {:@, _meta, [{:moduledoc, _attr, [doc]}]} = node, _acc -> {node, doc_text(doc)}
+        node, acc -> {node, acc}
+      end)
+
+    doc
+  end
+
+  defp doc_text(doc) when is_binary(doc), do: {:ok, doc}
+  defp doc_text({:sigil_S, _meta, [{:<<>>, _bin, [doc]}, _mods]}) when is_binary(doc), do: {:ok, doc}
+  defp doc_text(false), do: {:ok, ""}
+  defp doc_text(_doc), do: :skip
+
+  defp table_cells(doc) do
+    doc
+    |> String.split("\n")
+    |> Enum.chunk_by(&table_line?/1)
+    |> Enum.filter(&values_table?/1)
+    |> Enum.flat_map(fn [_header, _separator | rows] -> Enum.map(rows, &first_cell/1) end)
+  end
+
+  defp values_table?([header, _separator | _rows]), do: table_line?(header) and first_cell(header) == @values_header
+  defp values_table?(_lines), do: false
+
+  defp table_line?(line), do: String.starts_with?(String.trim_leading(line), "|")
+
+  defp first_cell(line), do: line |> String.split("|", parts: 3) |> Enum.at(1, "") |> String.trim()
+
+  defp cell(value), do: "`#{inspect(value)}`"
+
+  defp issue(ctx, meta, missing) do
+    format_issue(ctx,
+      message:
+        "значения Core.Enum без строки таблицы | Значение | в @moduledoc: " <>
+          Enum.map_join(missing, ", ", &cell/1),
+      trigger: "use",
+      line_no: meta[:line],
+      column: meta[:column]
+    )
+  end
+end

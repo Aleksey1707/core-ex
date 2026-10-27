@@ -22,7 +22,9 @@ defmodule Core.RepoTest do
   end
 
   defmodule SampleID do
-    use Prim.UUID, name: "ID", version: 4
+    use Prim.UUID,
+      name: "ID",
+      version: 4
   end
 
   test "expand_only expands presets" do
@@ -159,7 +161,9 @@ defmodule Core.RepoTest do
       Code.eval_quoted(
         quote do
           defmodule Core.RepoTest.BadView do
-            use Core.Repo, only: :read, view: "view"
+            use Core.Repo,
+              only: :read,
+              view: "view"
           end
         end
       )

@@ -40,7 +40,9 @@ defmodule Core.Labels.EventTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.EventTest.AttrTitle do
-              use Core.Es.Event, family: Core.EventFixture.Event, payload: nil
+              use Core.Es.Event,
+                family: Core.EventFixture.Event,
+                payload: nil
 
               @title "Событие"
               use Core.Labels.Event, title: @title

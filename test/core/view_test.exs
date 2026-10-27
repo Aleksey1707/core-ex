@@ -633,7 +633,10 @@ defmodule Core.ViewTest do
   end
 
   defmodule LabelID do
-    use Core.Prim.UUID, name: "Метка", version: 4, kind: :label
+    use Core.Prim.UUID,
+      name: "Метка",
+      version: 4,
+      kind: :label
   end
 
   defmodule LabelRef do

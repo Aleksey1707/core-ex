@@ -2,11 +2,17 @@ defmodule Core.Prim.IntegerTest do
   use ExUnit.Case, async: true
 
   defmodule Age do
-    use Core.Prim.Integer, name: "Возраст", min: 0, max: 120
+    use Core.Prim.Integer,
+      name: "Возраст",
+      min: 0,
+      max: 120
   end
 
   defmodule Tight do
-    use Core.Prim.Integer, name: "Узкий", min: 0, sec_max_len: 3
+    use Core.Prim.Integer,
+      name: "Узкий",
+      min: 0,
+      sec_max_len: 3
   end
 
   defmodule Score do
@@ -101,7 +107,10 @@ defmodule Core.Prim.IntegerTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.IntegerTest.TooTight do
-            use Core.Prim.Integer, name: "X", max: 1000, sec_max_len: 2
+            use Core.Prim.Integer,
+              name: "X",
+              max: 1000,
+              sec_max_len: 2
           end
         end
       )
@@ -113,7 +122,10 @@ defmodule Core.Prim.IntegerTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.IntegerTest.BadBounds do
-            use Core.Prim.Integer, name: "X", min: 10, max: 1
+            use Core.Prim.Integer,
+              name: "X",
+              min: 10,
+              max: 1
           end
         end
       )
@@ -125,7 +137,9 @@ defmodule Core.Prim.IntegerTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.IntegerTest.BadBound do
-            use Core.Prim.Integer, name: "X", max: "10"
+            use Core.Prim.Integer,
+              name: "X",
+              max: "10"
           end
         end
       )

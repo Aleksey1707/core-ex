@@ -99,10 +99,15 @@ defmodule Core.Labels.IDTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.IDTest.AttrEntity do
-              use Core.Prim.UUID, name: "Id", version: 7
+              use Core.Prim.UUID,
+                name: "Id",
+                version: 7
 
               @entity :item
-              use Core.Labels.ID, kind: :ref, entity: @entity, resolver: Core.LabelsFixture.ItemQuery
+              use Core.Labels.ID,
+                kind: :ref,
+                entity: @entity,
+                resolver: Core.LabelsFixture.ItemQuery
             end
           end
         )
@@ -126,7 +131,9 @@ defmodule Core.Labels.IDTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Labels.IDTest.WithText do
-              use Core.Prim.UUID, name: "Id", version: 7
+              use Core.Prim.UUID,
+                name: "Id",
+                version: 7
 
               use Core.Labels.Text, with: &Kernel.inspect/1
 
@@ -141,7 +148,10 @@ defmodule Core.Labels.IDTest do
   describe "declared?/1" do
     test "Prim с use Core.Labels.ID, который ещё собирается, — да; Prim без него — нет" do
       defmodule DeclaredID do
-        use Core.Prim.UUID, name: "Объявлен", version: 7
+        use Core.Prim.UUID,
+          name: "Объявлен",
+          version: 7
+
         use Core.Labels.ID, kind: :id
 
         @declared Core.Labels.ID.declared?(__MODULE__)
@@ -150,7 +160,9 @@ defmodule Core.Labels.IDTest do
       end
 
       defmodule UndeclaredID do
-        use Core.Prim.UUID, name: "Не объявлен", version: 7
+        use Core.Prim.UUID,
+          name: "Не объявлен",
+          version: 7
 
         @declared Core.Labels.ID.declared?(__MODULE__)
 
@@ -170,7 +182,9 @@ defmodule Core.Labels.IDTest do
     Code.eval_quoted(
       quote do
         defmodule unquote(module) do
-          use Core.Prim.UUID, name: "Id", version: 7
+          use Core.Prim.UUID,
+            name: "Id",
+            version: 7
 
           use Core.Labels.ID, unquote(opts)
         end

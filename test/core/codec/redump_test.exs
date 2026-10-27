@@ -14,7 +14,9 @@ defmodule Core.Codec.RedumpTest do
   end
 
   defmodule ID do
-    use Prim.UUID, name: "Идентификатор", version: 4
+    use Prim.UUID,
+      name: "Идентификатор",
+      version: 4
   end
 
   defmodule At do
@@ -22,7 +24,9 @@ defmodule Core.Codec.RedumpTest do
   end
 
   defmodule Weight do
-    use Prim.Decimal, name: "Вес", min: 0
+    use Prim.Decimal,
+      name: "Вес",
+      min: 0
   end
 
   defmodule Day do
@@ -30,7 +34,10 @@ defmodule Core.Codec.RedumpTest do
   end
 
   defmodule Label do
-    use Prim.UUID, name: "Метка", version: 4, kind: :label
+    use Prim.UUID,
+      name: "Метка",
+      version: 4,
+      kind: :label
   end
 
   @uuid "550e8400-e29b-41d4-a716-446655440000"

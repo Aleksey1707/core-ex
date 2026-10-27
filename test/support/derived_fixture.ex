@@ -28,7 +28,9 @@ defmodule Core.DerivedFixture do
     | `:active` | действует |
     """
 
-    use Core.Enum, name: "Статус", values: ~w(draft active)a
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(draft active)a
   end
 
   defmodule Mark do

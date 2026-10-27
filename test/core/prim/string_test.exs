@@ -19,11 +19,16 @@ defmodule Core.Prim.StringTest do
   end
 
   defmodule SecOnly do
-    use Core.Prim.String, name: "Токен", sec_max_len: 8
+    use Core.Prim.String,
+      name: "Токен",
+      sec_max_len: 8
   end
 
   defmodule Raw do
-    use Core.Prim.String, name: "Сырое", max_len: 10, trim: false
+    use Core.Prim.String,
+      name: "Сырое",
+      max_len: 10,
+      trim: false
   end
 
   defmodule Chained do
@@ -34,7 +39,10 @@ defmodule Core.Prim.StringTest do
   end
 
   defmodule Slug do
-    use Core.Prim.String, name: "Слаг", max_len: 20, kind: :slug
+    use Core.Prim.String,
+      name: "Слаг",
+      max_len: 20,
+      kind: :slug
   end
 
   def only_a("AA"), do: :ok
@@ -141,7 +149,9 @@ defmodule Core.Prim.StringTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.StringTest.NoLimit do
-            use Core.Prim.String, name: "X", min_len: 1
+            use Core.Prim.String,
+              name: "X",
+              min_len: 1
           end
         end
       )
@@ -153,7 +163,10 @@ defmodule Core.Prim.StringTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.StringTest.BadBounds do
-            use Core.Prim.String, name: "X", min_len: 5, max_len: 3
+            use Core.Prim.String,
+              name: "X",
+              min_len: 5,
+              max_len: 3
           end
         end
       )
@@ -165,7 +178,10 @@ defmodule Core.Prim.StringTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.StringTest.BadRe do
-            use Core.Prim.String, name: "X", max_len: 5, re: "^a$"
+            use Core.Prim.String,
+              name: "X",
+              max_len: 5,
+              re: "^a$"
           end
         end
       )
@@ -177,7 +193,9 @@ defmodule Core.Prim.StringTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.StringTest.NoName do
-            use Core.Prim.String, min_len: 1, max_len: 5
+            use Core.Prim.String,
+              min_len: 1,
+              max_len: 5
           end
         end
       )

@@ -195,7 +195,9 @@ defmodule Core.Codec.PluginTest do
         quote do
           defmodule Core.Codec.PluginTest.AttrUnion do
             @family Core.Codec.PluginTest.AttrUnion
-            use Core.Codec.Plugin, types: [Core.Version], union: @family
+            use Core.Codec.Plugin,
+              types: [Core.Version],
+              union: @family
           end
         end
       )
@@ -212,7 +214,9 @@ defmodule Core.Codec.PluginTest do
             end
 
             @types %{Core.Codec.PluginTest.ExprTypes.X => "x"}
-            use Core.Codec.Plugin, types: Map.keys(@types), loadable: false
+            use Core.Codec.Plugin,
+              types: Map.keys(@types),
+              loadable: false
 
             @impl true
             def dump(%Core.Codec.PluginTest.ExprTypes.X{}, _codec), do: :x
@@ -229,7 +233,9 @@ defmodule Core.Codec.PluginTest do
         quote do
           defmodule Core.Codec.PluginTest.BadExprTypes do
             @types :x
-            use Core.Codec.Plugin, types: @types, loadable: false
+            use Core.Codec.Plugin,
+              types: @types,
+              loadable: false
           end
         end
       )
@@ -244,7 +250,9 @@ defmodule Core.Codec.PluginTest do
                      quote do
                        defmodule Core.Codec.PluginTest.BadExprVariants do
                          @variants :x
-                         use Core.Codec.Plugin, union: Core.Codec.PluginTest.BadExprVariants, variants: @variants
+                         use Core.Codec.Plugin,
+                           union: Core.Codec.PluginTest.BadExprVariants,
+                           variants: @variants
                        end
                      end
                    )

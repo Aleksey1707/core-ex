@@ -115,7 +115,7 @@ repos:
 
       - id: mix-credo
         name: "Elixir: mix credo"
-        entry: mix credo --strict
+        entry: make credo
         language: system
         require_serial: true
         pass_filenames: false

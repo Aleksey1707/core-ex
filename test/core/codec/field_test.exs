@@ -5,7 +5,10 @@ defmodule Core.Codec.FieldTest do
   alias Core.Prim
 
   defmodule Name do
-    use Prim.String, name: "Имя", min_len: 1, max_len: 50
+    use Prim.String,
+      name: "Имя",
+      min_len: 1,
+      max_len: 50
   end
 
   defmodule Tag do

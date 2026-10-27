@@ -595,6 +595,9 @@ def load_builtin(mod, raw, _kind) when is_atom(mod), do: mod.new(raw)
 В `use` каждый передаваемый параметр обязан быть на отдельной строке.
 Список атомов должен описываться через ~w(...)a
 
+Проверяется для опций `use`: `mix credo --strict` (`CredoChecks.UseOptsPerLine`,
+`scripts/credo_checks.exs`).
+
 ### Опции `use`
 
 Builder — модуль с `defmacro __using__`. Его опции объявляются атрибутами `@required_keys`,

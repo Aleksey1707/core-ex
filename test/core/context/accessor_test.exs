@@ -129,7 +129,9 @@ defmodule Core.Context.AccessorTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Context.AccessorTest.StringType do
-            use Core.Context.Accessor, key: :x, type: "x"
+            use Core.Context.Accessor,
+              key: :x,
+              type: "x"
           end
         end
       )

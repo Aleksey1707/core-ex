@@ -37,7 +37,9 @@ defmodule Core.PrimFixture do
   defmodule SensitiveRef do
     @moduledoc false
 
-    use Core.Prim.Compose, name: "Ссылка на чувствительную строку", of: Sensitive
+    use Core.Prim.Compose,
+      name: "Ссылка на чувствительную строку",
+      of: Sensitive
   end
 
   # Композит объявлен чувствительным поверх обычного базового Prim: ошибку строит база,
@@ -66,7 +68,9 @@ defmodule Core.PrimFixture do
   defmodule PersonalRef do
     @moduledoc false
 
-    use Core.Prim.Compose, name: "Ссылка на телефон", of: Personal
+    use Core.Prim.Compose,
+      name: "Ссылка на телефон",
+      of: Personal
   end
 
   # Композит объявлен персональным поверх обычного базового Prim: ошибку строит база,
@@ -84,13 +88,19 @@ defmodule Core.PrimFixture do
   defmodule SubjectRef do
     @moduledoc false
 
-    use Core.Prim.Compose, name: "Ссылка на лицо", of: Core.EsFixture.UserID
+    use Core.Prim.Compose,
+      name: "Ссылка на лицо",
+      of: Core.EsFixture.UserID
   end
 
   defmodule SensitiveLabel do
     @moduledoc false
 
-    use Core.Prim.UUID, name: "Чувствительная метка", version: 4, kind: :label, sensitive: true
+    use Core.Prim.UUID,
+      name: "Чувствительная метка",
+      version: 4,
+      kind: :label,
+      sensitive: true
   end
 
   defmodule PersonalSensitive do

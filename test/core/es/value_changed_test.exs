@@ -5,12 +5,18 @@ defmodule Core.Es.ValueChangedTest do
 
   defmodule SampleName do
     @moduledoc false
-    use Prim.String, name: "Имя", min_len: 3, max_len: 100
+    use Prim.String,
+      name: "Имя",
+      min_len: 3,
+      max_len: 100
   end
 
   defmodule SamplePrice do
     @moduledoc false
-    use Prim.Decimal, name: "Цена", min: Decimal.new("0.01"), scale: 2
+    use Prim.Decimal,
+      name: "Цена",
+      min: Decimal.new("0.01"),
+      scale: 2
   end
 
   defmodule Sample do
@@ -109,7 +115,9 @@ defmodule Core.Es.ValueChangedTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Es.ValueChangedTest.AtomNilable do
-              use Core.Es.ValueChanged, type: Core.Es.ValueChangedTest.SampleName, nilable: :yes
+              use Core.Es.ValueChanged,
+                type: Core.Es.ValueChangedTest.SampleName,
+                nilable: :yes
             end
           end
         )
@@ -121,7 +129,9 @@ defmodule Core.Es.ValueChangedTest do
     test "type: и nilable: модуля, который ещё собирается; модуль без use — nil" do
       defmodule DeclaredChange do
         @moduledoc false
-        use Core.Es.ValueChanged, type: Core.Es.ValueChangedTest.SampleName, nilable: true
+        use Core.Es.ValueChanged,
+          type: Core.Es.ValueChangedTest.SampleName,
+          nilable: true
 
         @declared Core.Es.ValueChanged.declared(__MODULE__)
 

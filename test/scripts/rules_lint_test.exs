@@ -60,6 +60,54 @@ defmodule RulesLintTest do
     end
   end
 
+  describe "библиотека: проговорённое отсутствие проверки" do
+    test "фраза об отсутствии проверки в обоих ярусах — нарушение с номером строки", %{tmp_dir: dir} do
+      library(dir)
+      append(dir, "docs/rules/13-repos.md", "Опечатку в ключе сборка не ловит.")
+      append(dir, "docs/rules/12-errors.md", "Сборка этого не ловит.")
+      append(dir, "docs/rules/19-testing.md", "Доступ — `KeyError`, сборка его не ловит.")
+      append(dir, "docs/rules/app/19-testing.md", "Раскладку линтер дерево `test/` не проверяет.")
+
+      assert {out, 1} = lint_library(dir)
+      assert out =~ ~r/docs\/rules\/13-repos\.md:\d+: отсутствие проверки проговорено: «сборка не ловит»/
+      assert out =~ ~r/docs\/rules\/12-errors\.md:\d+: отсутствие проверки проговорено: «Сборка этого не ловит»/
+      assert out =~ ~r/docs\/rules\/19-testing\.md:\d+: отсутствие проверки проговорено: «сборка его не ловит»/
+      assert out =~ ~r/docs\/rules\/app\/19-testing\.md:\d+: отсутствие проверки проговорено: «линтер/
+    end
+
+    test "поведение кода и пример в блоке кода — без нарушений", %{tmp_dir: dir} do
+      library(dir)
+
+      append(dir, "docs/rules/13-repos.md", """
+      `page_stream` доступ не проверяет, а round-trip не ловит сдвиг нумерации.
+
+      ```elixir
+      # плохо — сборка не ловит
+      ```
+      """)
+
+      assert {out, 0} = lint_library(dir)
+      refute out =~ "отсутствие проверки"
+    end
+  end
+
+  defp library(dir) do
+    for path <- ~w(docs/rules .claude/skills AGENTS.md) do
+      File.mkdir_p!(Path.dirname(Path.join(dir, path)))
+      File.cp_r!(Path.join(@root, path), Path.join(dir, path))
+    end
+
+    File.ln_s!("AGENTS.md", Path.join(dir, "CLAUDE.md"))
+  end
+
+  defp append(dir, path, text) do
+    full = Path.join(dir, path)
+    [head, tail] = String.split(File.read!(full), "\n## Связанные правила", parts: 2)
+    File.write!(full, head <> "\n" <> text <> "\n\n## Связанные правила" <> tail)
+  end
+
+  defp lint_library(dir), do: System.cmd("elixir", [@script], cd: dir, env: bare_env(), stderr_to_stdout: true)
+
   defp consumer(dir, index) do
     write(dir, "docs/rules/00-index.md", index)
     write(dir, "AGENTS.md", "# Агенты\n")

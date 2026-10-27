@@ -116,7 +116,10 @@ defmodule Core.Prim.PersonalTest do
         Code.eval_quoted(
           quote do
             defmodule Core.Prim.PersonalTest.BadPersonal do
-              use Core.Prim.String, name: "X", max_len: 10, personal: :yes
+              use Core.Prim.String,
+                name: "X",
+                max_len: 10,
+                personal: :yes
             end
           end
         )
