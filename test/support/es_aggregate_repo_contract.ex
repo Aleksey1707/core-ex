@@ -495,6 +495,29 @@ defmodule Core.EsAggregateRepoContract do
     :ok
   end
 
+  @doc """
+  Дождаться, пока закоммиченные события `es_events` станут видны пачке проекции.
+
+  Пачка видит событие с `xid` ниже `pg_snapshot_xmin` снимка, а снимок — на весь кластер: открытая
+  транзакция с `xid` в другой базе того же сервера (sandbox-тест параллельного прогона с другим
+  `MIX_TEST_PARTITION`) держит событие за пачкой, пока не завершится. Для тестов, где пачку
+  гоняют процессы мимо sandbox теста.
+  """
+  @spec await_visible() :: :ok
+
+  def await_visible do
+    sql = "SELECT 1 FROM es_events WHERE xid >= pg_snapshot_xmin(pg_current_snapshot()) LIMIT 1"
+
+    case Config.dao().query!(sql) do
+      %Postgrex.Result{num_rows: 0} ->
+        :ok
+
+      %Postgrex.Result{} ->
+        Process.sleep(10)
+        await_visible()
+    end
+  end
+
   # ===== счёт запросов =====
 
   @doc """

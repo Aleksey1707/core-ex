@@ -4,7 +4,7 @@ defmodule Core.Es.Projection.SignalTest do
   # время модуля и очистка таблиц после теста.
   use ExUnit.Case, async: false
 
-  import Core.EsAggregateRepoContract, only: [open: 1, rename: 1, write!: 3]
+  import Core.EsAggregateRepoContract, only: [await_visible: 0, open: 1, rename: 1, write!: 3]
 
   alias Core.Config
   alias Core.Es
@@ -78,9 +78,9 @@ defmodule Core.Es.Projection.SignalTest do
 
   test "закоммиченная пачка :processed читателя — sent с count: 1 и repo = dao декларации" do
     assert :ok = Es.Projection.Test.run_until_idle(@projection)
-    start_tree!([@projection])
-
     write!(@account_repo, Account.ID.new(), [open("Счёт")])
+    :ok = await_visible()
+    start_tree!([@projection], idle_min_ms: 10)
 
     assert_receive {:cycle, _measurements, %{projection: "es_fixture", result: :processed}}, @timeout
     assert_received {:sent, %{count: 1}, %{repo: TestRepo}}
@@ -94,9 +94,9 @@ defmodule Core.Es.Projection.SignalTest do
 
   test "notifications: false — ни засева, ни sent на пачку" do
     assert :ok = Es.Projection.Test.run_until_idle(@projection)
-    start_tree!([@projection], notifications: false)
-
     write!(@account_repo, Account.ID.new(), [open("Счёт")])
+    :ok = await_visible()
+    start_tree!([@projection], notifications: false, idle_min_ms: 10)
 
     assert_receive {:cycle, _measurements, %{projection: "es_fixture", result: :processed}}, @timeout
     refute_received {:sent, _measurements, _metadata}
@@ -111,6 +111,7 @@ defmodule Core.Es.Projection.SignalTest do
     # Команды пишутся отдельными `append`: до дерева, чтобы открытие не ушло своей пачкой.
     # `project/1` на переименовании падает — пачка откатывается вместе с открытием.
     write!(@account_repo, Account.ID.new(), [open("Счёт"), rename("Другой")])
+    :ok = await_visible()
     start_tree!([projection], idle_min_ms: 10)
 
     assert_receive {:cycle, _measurements, %{projection: "es_fixture_broken", result: :retry}}, @timeout

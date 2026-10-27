@@ -4,7 +4,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
   # `:auto` на время модуля и очистка таблиц после теста.
   use ExUnit.Case, async: false
 
-  import Core.EsAggregateRepoContract, only: [dump: 1, open: 1, write!: 3]
+  import Core.EsAggregateRepoContract, only: [await_visible: 0, dump: 1, open: 1, write!: 3]
   import Ecto.Query, only: [from: 2]
 
   alias Core.Config
@@ -69,6 +69,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
 
     assert_receive {:cycle, %{projection: "es_fixture", result: :idle}}, @timeout
     assert :ok = commit(older)
+    :ok = await_visible()
 
     assert :ok = @projection.await(Account, account, @timeout)
     assert rows() == [{"account", dump(account), "Счёт", false}]
@@ -79,6 +80,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
     account = Account.ID.new()
     # Дерева ещё нет: `append` читателя не будит.
     write!(@account_repo, account, [open("Счёт")])
+    :ok = await_visible()
     since = db_now()
     start_tree!([@projection], @distant_steps)
     :ok = await_listening(since)
@@ -102,6 +104,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
     # `wake` записи ждёт в очереди читателя, пока ожидание не застало чекпоинт отстающим.
     :ok = :sys.suspend(reader)
     write!(@account_repo, account, [open("Счёт")])
+    :ok = await_visible()
     resumed = after_checkpoint_read(fn -> :sys.resume(reader) end)
 
     assert :ok = @projection.await(Account, account, @timeout)
@@ -116,6 +119,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
 
       assert :processed = Es.Projection.run_once(@projection)
       write!(@account_repo, Account.ID.new(), [open("Счёт")])
+      :ok = await_visible()
       assert :processed = Es.Projection.run_once(@projection)
 
       # Уведомления канала приходят в порядке коммитов: метка первой — пачки в канал не слали.
@@ -131,6 +135,7 @@ defmodule Core.Es.Projection.AwaitCommitTest do
 
       :ok = mark!(notifications: true)
       write!(@account_repo, Account.ID.new(), [open("Счёт")])
+      :ok = await_visible()
       :ok = notify!("метка")
       assert next_notification(listening) == "метка"
 

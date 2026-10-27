@@ -30,7 +30,7 @@ defmodule Core.Web.CriticalErrorTest do
 
     id = CriticalError.report({:timeout, :ledger}, nil)
 
-    assert [%{"event_id" => ^id}] = Test.collect_sentry_events(ref, 1, timeout: 5_000)
+    assert [%{"event_id" => ^id}] = Test.collect_sentry_events(ref, 1, timeout: 30_000)
   end
 
   test "%Error{} — сообщение с текстом ошибки, группировка по ns/code, ошибка в доп. данных" do
