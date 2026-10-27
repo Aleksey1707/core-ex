@@ -20,9 +20,15 @@ defmodule Core.Es.Cmd do
   сам (`@enforce_keys ~w(name at by)a` + `defstruct @enforce_keys`). Типы значений проверяет
   конструктор события при исполнении команды (`Core.Es.Aggregate`).
 
+  Уничтожаемое поле (`destroyable: true`) у команды по полям — `CompileError` с путём до поля:
+  уничтоженное ПДн-значение не записывается, и тип команды его не допускает. Проверяются поля
+  команды, элементы `list:` / `set:` и значения `map:` и поля сущностей `entity:`, собранных
+  `Core.Struct`, на любой глубине; варианты `union:` и ручной struct не обходятся (ADR-0092).
+
   Опций нет.
   """
 
+  alias Core.Codec.Field
   alias Core.Helper
 
   @label "Es.Cmd"
@@ -55,6 +61,7 @@ defmodule Core.Es.Cmd do
 
       fields ->
         ensure_enforced!(env, fields)
+        reject_destroyable!(env)
     end
   end
 
@@ -78,6 +85,51 @@ defmodule Core.Es.Cmd do
   end
 
   defp stamp_hint(module) do
-    if Core.Codec.Field.struct_fields(module), do: "полями без default:", else: "в @enforce_keys"
+    if Field.struct_fields(module), do: "полями без default:", else: "в @enforce_keys"
   end
+
+  defp reject_destroyable!(env) do
+    case destroyable_places(env.module, Field.struct_fields(env.module) || [], []) do
+      [] ->
+        :ok
+
+      [{owner, path} | _rest] ->
+        raise CompileError,
+          description:
+            "#{@label}: #{inspect(env.module)}: #{Enum.join(path, ": ")}: destroyable: " <>
+              "#{owner_text(env.module, owner)} нет — уничтоженное ПДн-значение не записывается",
+          file: env.file,
+          line: env.line
+    end
+  end
+
+  # Места `destroyable:` полей модуля и полей сущностей `entity:` в их значениях на любой глубине:
+  # `[{модуль поля, путь}]`. Ручной struct сущности и варианты `union:` не обходятся.
+  defp destroyable_places(module, fields, prefix) do
+    Enum.flat_map(fields, fn %Field{name: name, spec: spec, destroyable: places} ->
+      path = prefix ++ [name]
+
+      for(place <- places, do: {module, path ++ Enum.map(place, &step_text/1)}) ++ entity_places(spec, path)
+    end)
+  end
+
+  defp entity_places({:entity, module}, path) do
+    case Field.struct_fields(module) do
+      nil -> []
+      fields -> destroyable_places(module, fields, path)
+    end
+  end
+
+  defp entity_places(spec, path),
+    do: Enum.flat_map(Field.values(spec), &entity_places(&1, path ++ [step_text(spec_step(spec))]))
+
+  defp spec_step({:map, _key, _value}), do: :value
+  defp spec_step({kind, _inner}), do: kind
+
+  # Шаг пути — как в отказах `Core.Struct`: значение словаря — `map: value`.
+  defp step_text(:value), do: "map: value"
+  defp step_text(kind), do: Atom.to_string(kind)
+
+  defp owner_text(module, module), do: "у команды"
+  defp owner_text(_module, owner), do: "у сущности #{inspect(owner)} в команде"
 end

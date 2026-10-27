@@ -6,13 +6,13 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `Core.Es.Cmd` на `@after_compile`: при `__struct_fields__/0` — `CompileError`, если `destroyable:` есть у
+- [x] `Core.Es.Cmd` на `@after_compile`: при `__struct_fields__/0` — `CompileError`, если `destroyable:` есть у
       поля команды, у элемента `list:` или значения `map:` её поля, или у поля сущности `entity:`, собранной
       `Core.Struct`, на любой глубине (через `list:` / `map:` / `entity:`). Текст называет путь до поля.
-- [ ] Варианты `union:` не обходятся; ручной `defstruct` команды и сущности не проверяется.
-- [ ] Тесты в `test/core/es/cmd_test.exs` через `use Core.Es.Cmd`: отказ на своём поле, на поле вложенной
+- [x] Варианты `union:` не обходятся; ручной `defstruct` команды и сущности не проверяется.
+- [x] Тесты в `test/core/es/cmd_test.exs` через `use Core.Es.Cmd`: отказ на своём поле, на поле вложенной
       `entity:`, на сущности внутри `list:`; успех на команде с Prim `personal: true` без `destroyable:`.
-- [ ] CHANGELOG: пункт `destroyable:` из 01 дополняется отказом команды.
-- [ ] `make` зелёный.
+- [x] CHANGELOG: пункт `destroyable:` из 01 дополняется отказом команды.
+- [x] `make` зелёный.

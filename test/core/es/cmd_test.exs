@@ -54,6 +54,44 @@ defmodule Core.Es.CmdTest do
       end
     end
 
+    test "destroyable: у поля команды — CompileError с путём до поля" do
+      fields = stamped(holder: [prim: Core.EsFixture.Account.Holder, destroyable: true])
+
+      assert compile_error(OwnDestroyable, fields) ==
+               "Es.Cmd: Core.Es.CmdTest.OwnDestroyable: holder: destroyable: у команды нет — " <>
+                 "уничтоженное ПДн-значение не записывается"
+    end
+
+    test "destroyable: у поля вложенной entity: — CompileError с путём и сущностью" do
+      fields = stamped(recipient: [entity: Core.StructFixture.Recipient])
+
+      assert compile_error(EntityDestroyable, fields) ==
+               "Es.Cmd: Core.Es.CmdTest.EntityDestroyable: recipient: phone: destroyable: " <>
+                 "у сущности Core.StructFixture.Recipient в команде нет — уничтоженное ПДн-значение не записывается"
+    end
+
+    test "destroyable: у сущности внутри list: — CompileError с путём через элемент" do
+      fields = stamped(recipients: [list: [entity: Core.StructFixture.Recipient]])
+
+      assert compile_error(ListDestroyable, fields) =~
+               "Es.Cmd: Core.Es.CmdTest.ListDestroyable: recipients: list: phone: destroyable: у сущности"
+    end
+
+    test "destroyable: у сущности в значении map: — CompileError с путём через значение" do
+      fields = stamped(by_id: [map: [key: [type: :string], value: [entity: Core.StructFixture.Recipient]]])
+
+      assert compile_error(MapDestroyable, fields) =~
+               "Es.Cmd: Core.Es.CmdTest.MapDestroyable: by_id: map: value: phone: destroyable: у сущности"
+    end
+
+    test "Prim personal: true без destroyable: — команда собирается" do
+      fields = stamped(holder: [prim: Core.EsFixture.Account.Holder])
+
+      cmd = compile(Personal, nil, quote(do: use(Core.Struct, fields: unquote(fields))))
+
+      assert %{holder: nil} = struct(cmd)
+    end
+
     test "без defstruct — CompileError" do
       assert_raise CompileError, ~r/команда — struct: нет defstruct/, fn ->
         compile(NoStruct, nil, nil)
@@ -82,6 +120,17 @@ defmodule Core.Es.CmdTest do
   end
 
   # ---
+
+  defp compile_error(name, fields) do
+    error =
+      assert_raise CompileError, fn ->
+        compile(name, nil, quote(do: use(Core.Struct, fields: unquote(fields))))
+      end
+
+    error.description
+  end
+
+  defp stamped(fields), do: fields ++ [by: [prim: Core.EsFixture.UserID], at: [prim: Core.Es.Event.At]]
 
   defp compile(name, enforce, struct) do
     module = Module.concat(__MODULE__, name)
