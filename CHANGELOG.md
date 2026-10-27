@@ -22,6 +22,29 @@
   `holder: [prim: Holder, optional: true]`, стало `holder: [prim: Holder, optional: true,
   destroyable: true]`; у элемента — было `holders: [list: [prim: Holder]]`, стало
   `holders: [list: [prim: Holder, destroyable: true]]`.
+- **`events:` у `use Core.Struct`: state-stored агрегат объявляется структурой по полям целиком.**
+  Поле накопленных событий в языке полей не выражалось, поэтому state-stored агрегат писал
+  `@enforce_keys`, `defstruct` и `@type t` руками — тремя частями, которые расходятся. Теперь
+  `use Core.Struct, events: Role.Event` (модуль `use Core.Es.Event.Family`, литерал) порождает поле
+  `events` с типом `Core.Es.Events.t(Role.Event.t())` и значением по умолчанию
+  `Core.Es.Events.new()`: ключ при сборке `%Role{}` можно не указывать. Поле в спеку не входит:
+  плагин по полям его не видит, подписи `use Core.Labels.Fields` решают о нём `events: :hidden`,
+  как у ручного `defstruct`. `CompileError`: `events:` не семейство событий (`Struct: events: …`),
+  поле `events` в `fields:` рядом с `events:` (`Struct: fields: events: …`), `events:` у состояния
+  event-sourced агрегата (`Es.Aggregate: <агрегат>: events: …`) и у команды
+  (`Es.Cmd: <команда>: events: …`). `use Core.Repo.Pg.StateStored` с `entity:`, собранным
+  `Core.Struct`, требует `events:` с семейством кодека `event_codec:` — иначе `CompileError`
+  `Repo.Pg.StateStored: entity: …`; агрегат с ручным `defstruct` не проверяется и собирается как
+  раньше (ADR-0092).
+  - Правка потребителя у state-stored агрегата на ручном `defstruct` — по желанию: было
+    `@enforce_keys ~w(id version name events)a`, `defstruct @enforce_keys` и
+    `@type t :: %__MODULE__{id: Role.ID.t(), version: Version.t(), name: Role.Name.t(),
+    events: Es.Events.t()}`, стало `use Core.Struct, fields: [id: [prim: Role.ID], version:
+    [prim: Version], name: [prim: Role.Name]], events: Role.Event`; `events: Es.Events.new()` в
+    `to_entity` схемы можно опустить.
+  - У агрегата `entity:`, уже собранного `use Core.Struct` без `events:`, правка обязательна —
+    репозиторий без неё не собирается: было `events: [list: [union: Role.Event], default: []]` в
+    `fields:`, стало `events: Role.Event` в `use`.
 
 ## 0.17.1
 

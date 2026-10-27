@@ -94,10 +94,21 @@ defmodule Core.Repo.Pg.StateStored do
   Опции `entity:` и `id:` обязательны (в `Repo.Pg` они опциональны): по `entity:` строятся
   заголовки переопределённых функций, `id:` сверяется с кодеком.
 
+  Агрегат `entity:` — структура по полям с полем событий `events:` либо ручной `defstruct` с полем
+  `events` (`Core.Es.Events.t()`): события репозиторий берёт из `entity.events`.
+
+      defmodule Role do
+        use Core.Struct,
+          fields: [id: [prim: Role.ID], version: [prim: Core.Version]],
+          events: Role.Event
+      end
+
   На компиляции `CompileError`, если `event_codec:` — не кодек событий с `type:`, Prim
   агрегата кодека (`__es_aggregate_id__/0`) не равен `id:`, семейство кодека называет владельцем
   потока (`aggregate:`) не `entity:`, событие `outbox:`
-  (`__es_event__/0`) не равно семейству кодека, в `errors:` нет clause `:version_mismatch`.
+  (`__es_event__/0`) не равно семейству кодека, в `errors:` нет clause `:version_mismatch`,
+  `entity:` — структура по полям без `events:` или с семейством `events:`, не равным семейству
+  кодека. Ручной `defstruct` по `events` не проверяется.
 
   ## Контракты дочерней схемы
 
@@ -108,6 +119,7 @@ defmodule Core.Repo.Pg.StateStored do
   Макрос занимает имена `@es_event_codec`, `@es_outbox`, `@es_children` и `page_stream/4`.
   """
 
+  alias Core.Codec.Field
   alias Core.Es
   alias Core.Helper
 
@@ -248,6 +260,7 @@ defmodule Core.Repo.Pg.StateStored do
     Es.Store.Opts.ensure_aggregate_id!(event_codec, id, @label)
 
     entity = Helper.Opts.module!(opts, :entity, @label)
+    ensure_events_family!(entity, event_codec.__es_family__())
     Es.Store.Opts.ensure_family_aggregate!(event_codec, entity, @label)
 
     errors = Helper.Opts.module!(opts, :errors, @label, exports: [domain: 3])
@@ -261,6 +274,30 @@ defmodule Core.Repo.Pg.StateStored do
       children: children!(opts),
       behaviour: behaviour!(opts)
     }
+  end
+
+  # Структура по полям объявляет поле событий `events:`; ручной `defstruct` не проверяется.
+  defp ensure_events_family!(entity, family) do
+    case {Field.struct_fields(entity), Core.Struct.events_family(entity)} do
+      {nil, _events} ->
+        :ok
+
+      {_fields, ^family} ->
+        :ok
+
+      {_fields, nil} ->
+        Helper.Opts.reject!(
+          "#{@label}: entity",
+          "#{inspect(entity)} — структура по полям без events: — события агрегата репозиторий пишет из поля " <>
+            "events (use Core.Struct, events: #{inspect(family)})"
+        )
+
+      {_fields, events} ->
+        Helper.Opts.reject!(
+          "#{@label}: entity: events",
+          "семейство #{inspect(events)} у #{inspect(entity)} не равно семейству кодека #{inspect(family)}"
+        )
+    end
   end
 
   defp page_stream_ast(cfg) do

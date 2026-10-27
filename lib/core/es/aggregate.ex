@@ -46,7 +46,8 @@ defmodule Core.Es.Aggregate do
   `id`, есть `default:` (`optional: true, default: nil`); иначе начальное состояние вне
   библиотеки (в тесте) — `struct(Agg, id: id)`. Порядок `use Core.Struct` и
   `use Core.Es.Aggregate` не важен — поля проверяются после сборки модуля. Ручной `defstruct` так
-  не проверяется.
+  не проверяется. Поля событий `events:` (`Core.Struct`) у состояния нет — `CompileError`: события
+  возвращает `decide/2`.
 
       use Core.Struct,
         fields: [
@@ -184,6 +185,7 @@ defmodule Core.Es.Aggregate do
     case @state_keys -- fields do
       [] ->
         ensure_initial_state!(env)
+        reject_events!(env)
 
       missing ->
         raise CompileError,
@@ -216,6 +218,19 @@ defmodule Core.Es.Aggregate do
   defp required_state_fields(aggregate) do
     for %Field{name: name, optional?: false, default: :none} when name != :id <- Field.struct_fields(aggregate) || [],
         do: name
+  end
+
+  defp reject_events!(env) do
+    if Core.Struct.events_family(env.module) do
+      raise CompileError,
+        description:
+          "#{@label}: #{inspect(env.module)}: events: у event-sourced агрегата нет — " <>
+            "состояние полем событий не владеет: события возвращает decide/2",
+        file: env.file,
+        line: env.line
+    end
+
+    :ok
   end
 
   # ===== команда =====

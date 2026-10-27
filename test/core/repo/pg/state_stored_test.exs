@@ -27,6 +27,20 @@ defmodule Core.Repo.Pg.StateStoredTest do
     use Core.Repo, only: :read
   end
 
+  defmodule NoEventsEntity do
+    @moduledoc false
+
+    use Core.Struct, fields: [id: [prim: Core.EventFixture.AggID]]
+  end
+
+  defmodule ForeignEventsEntity do
+    @moduledoc false
+
+    use Core.Struct,
+      fields: [id: [prim: Core.EventFixture.AggID]],
+      events: Core.EsFixture.Account.Event
+  end
+
   defmodule SoloChild do
     @moduledoc false
 
@@ -121,6 +135,27 @@ defmodule Core.Repo.Pg.StateStoredTest do
           "Core.StateStoredFixture.Entity, а не Core.EsFixture.Account"
 
       assert_raise CompileError, message, fn -> compile!(OtherOwner, entity: Core.EsFixture.Account) end
+    end
+
+    test "entity: — структура по полям без events: — CompileError" do
+      message =
+        "Repo.Pg.StateStored: entity: Core.Repo.Pg.StateStoredTest.NoEventsEntity — структура по полям " <>
+          "без events: — события агрегата репозиторий пишет из поля events " <>
+          "(use Core.Struct, events: Core.EventFixture.Event)"
+
+      assert_raise CompileError, message, fn ->
+        compile!(NoEvents, entity: NoEventsEntity)
+      end
+    end
+
+    test "entity: — семейство events: не равно семейству кодека — CompileError" do
+      message =
+        "Repo.Pg.StateStored: entity: events: семейство Core.EsFixture.Account.Event " <>
+          "у Core.Repo.Pg.StateStoredTest.ForeignEventsEntity не равно семейству кодека Core.EventFixture.Event"
+
+      assert_raise CompileError, message, fn ->
+        compile!(ForeignEvents, entity: ForeignEventsEntity)
+      end
     end
 
     test "событие outbox сверяется с семейством кодека" do

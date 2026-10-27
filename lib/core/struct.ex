@@ -81,6 +81,26 @@ defmodule Core.Struct do
   `default:` уничтожаемого поля проверяется как у любого: `%Destroyed{}` значением по умолчанию не
   бывает.
 
+  `events: Family` — опция `use` state-stored агрегата: модуль семейства событий
+  (`use Core.Es.Event.Family`), литерал, проверяется при раскрытии. Порождает поле накопленных
+  событий `events` с типом `Core.Es.Events.t(Family.t())` и значением по умолчанию
+  `Es.Events.new()`: ключ в `%Role{}` можно не указывать, новый агрегат начинает с пустой
+  коллекции. В спеку полей оно не входит: плагин по полям его не видит, подписи
+  (`use Core.Labels.Fields`) скрывают его `events: :hidden`, как у ручного `defstruct`. Семейство с
+  кодеком событий сверяет `Core.Repo.Pg.StateStored` (ADR-0092).
+
+      defmodule Role do
+        use Core.Struct,
+          fields: [
+            id: [prim: Role.ID],
+            version: [prim: Core.Version],
+            name: [prim: Role.Name]
+          ],
+          events: Role.Event
+      end
+
+      %Role{id: id, version: version, name: name}
+
   `default:` — опция-выражение внутри литерального `fields:` (`docs/rules/20-agreements.md`,
   «Опции `use`»): литерал, вызов чистой функции Prim (`Currency.new!("RUB")`,
   `DeliveryID.from_number!(42)`) или атрибут модуля, объявленный выше `use` (`@rub`). Выражение
@@ -100,13 +120,16 @@ defmodule Core.Struct do
 
   - `@enforce_keys` — поля без `default:`;
   - `defstruct` — значения по умолчанию, у поля без `default:` — `nil`;
-  - `@type t` по видам полей;
+  - `@type t` по видам полей, с `events:` — и поле `events`;
   - `__struct_fields__/0` — внутренняя для builder'ов ролей: нормализованные поля спеки, форма — не
-    контракт; у собранного модуля её читает `Core.Codec.Field.struct_fields/1`.
+    контракт; у собранного модуля её читает `Core.Codec.Field.struct_fields/1`;
+  - `__struct_events__/0` — только с `events:`, внутренняя: семейство событий; у собранного модуля
+    её читает `Core.Struct.events_family/1` — роли `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate`
+    и `Core.Es.Cmd`.
 
-  Макрос занимает в модуле имя `@core_struct_fields`: поля спеки структуры, которая ещё собирается,
-  отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей, и подписям
-  хватает `labels:`.
+  Макрос занимает в модуле имена `@core_struct_fields` и `@core_struct_events`: поля спеки
+  структуры, которая ещё собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields`
+  ниже берёт вид полей, и подписям хватает `labels:`.
 
   `fields:`, кроме значений `default:`, — литерал (`docs/rules/20-agreements.md`, «Опции `use`»):
   атрибут или вызов функции — `CompileError` «ожидается литерал». Модули спеки проверяются в теле
@@ -124,7 +147,11 @@ defmodule Core.Struct do
   - ключ `map:` без wire-строки или Prim `personal: true` / `sensitive:` ключом, `map:` без `key:` /
     `value:` или с лишним ключом;
   - несобранный модуль, неизвестное значение `type:`, неизвестный ключ, не ровно один вид;
-  - повтор поля.
+  - повтор поля;
+  - поле `events` рядом с `events:` — его порождает опция.
+
+  `events:` не модуль семейства событий или не литерал — `CompileError` с префиксом
+  `Struct: events: …`.
   """
 
   alias Core.Codec.Field
@@ -134,7 +161,7 @@ defmodule Core.Struct do
 
   @label "Struct"
   @required_keys ~w(fields)a
-  @optional_keys ~w()a
+  @optional_keys ~w(events)a
   @expression_keys [fields: ~w(default)a]
 
   # ===== декларация =====
@@ -144,21 +171,29 @@ defmodule Core.Struct do
     opts = Helper.Opts.expand!(opts, __CALLER__, @label)
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
+    family = events!(opts)
     {fields, defaults} = split_defaults(Keyword.fetch!(opts, :fields))
+    reject_events_field!(fields, family)
 
     [
       quote do
         @core_struct_fields Core.Struct.fields!(unquote(Macro.escape(fields)))
         @core_struct_fields Core.Struct.default!(@core_struct_fields, unquote(defaults))
+        @core_struct_events unquote(family)
       end,
+      events_ast(family),
       quote unquote: false do
         @enforce_keys for %Core.Codec.Field{name: name, default: :none} <- @core_struct_fields, do: name
         defstruct Enum.map(@core_struct_fields, fn
                     %Core.Codec.Field{name: name, default: {:default, value}} -> {name, value}
                     %Core.Codec.Field{name: name, default: :none} -> {name, nil}
-                  end)
+                  end) ++ Core.Struct.events_entries(@core_struct_events)
 
-        @type t :: %__MODULE__{unquote_splicing(Core.Codec.Field.typespec(@core_struct_fields))}
+        @type t :: %__MODULE__{
+                unquote_splicing(
+                  Core.Codec.Field.typespec(@core_struct_fields) ++ Core.Struct.events_typespec(@core_struct_events)
+                )
+              }
 
         @doc false
         @spec __struct_fields__() :: [Core.Codec.Field.t()]
@@ -169,6 +204,43 @@ defmodule Core.Struct do
   end
 
   # ---
+
+  defp events!(opts) do
+    case Keyword.fetch(opts, :events) do
+      :error -> nil
+      {:ok, _family} -> family!(Helper.Opts.module!(opts, :events, @label))
+    end
+  end
+
+  defp family!(module) do
+    if Helper.Module.exports?(module, :__es_codec__, 0),
+      do: module,
+      else:
+        Helper.Opts.reject!(
+          "#{@label}: events",
+          "ожидается семейство событий (use Core.Es.Event.Family), получено #{inspect(module)}"
+        )
+  end
+
+  defp reject_events_field!(fields, family) do
+    if family && Keyword.keyword?(fields) && Keyword.has_key?(fields, :events) do
+      Helper.Opts.reject!(
+        "#{@label}: fields: events",
+        "поле events порождает events: #{inspect(family)} — в fields: оно не объявляется"
+      )
+    end
+  end
+
+  defp events_ast(nil), do: nil
+
+  defp events_ast(family) do
+    quote do
+      @doc false
+      @spec __struct_events__() :: module()
+
+      def __struct_events__, do: unquote(family)
+    end
+  end
 
   defp split_defaults(fields) do
     if Keyword.keyword?(fields),
@@ -182,6 +254,26 @@ defmodule Core.Struct do
     do: {name, if(Keyword.keyword?(spec), do: Keyword.delete(spec, :default), else: spec)}
 
   defp default(spec), do: if(Keyword.keyword?(spec), do: Keyword.fetch(spec, :default), else: :error)
+
+  # ===== events: =====
+
+  @doc false
+  @spec events_entries(module() | nil) :: keyword()
+
+  def events_entries(nil), do: []
+  def events_entries(family) when is_atom(family), do: [events: Core.Es.Events.new()]
+
+  @doc false
+  @spec events_typespec(module() | nil) :: keyword(Macro.t())
+
+  def events_typespec(nil), do: []
+  def events_typespec(family) when is_atom(family), do: [events: quote(do: Core.Es.Events.t(unquote(family).t()))]
+
+  @doc false
+  @spec events_family(module()) :: module() | nil
+
+  def events_family(module) when is_atom(module),
+    do: if(Helper.Module.exports?(module, :__struct_events__, 0), do: module.__struct_events__())
 
   # ===== поля =====
 

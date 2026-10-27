@@ -340,6 +340,15 @@ defmodule Core.StructTest do
     end
   end
 
+  describe "events:" do
+    test "ключ events можно не указывать: пустая коллекция событий" do
+      name = Name.new!("Склад")
+
+      assert %StructFixture.Events{name: ^name, events: []} = %StructFixture.Events{name: name}
+      assert Core.Es.Events.empty?(%StructFixture.Events{name: name}.events)
+    end
+  end
+
   describe "@type t" do
     setup do
       {:ok, types} = Code.Typespec.fetch_types(Wide)
@@ -421,6 +430,15 @@ defmodule Core.StructTest do
 
       assert fields[:by_id] ==
                "%{optional(String.t()) => Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()}"
+    end
+
+    test "events: — поле events с типом коллекции событий семейства" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Events)
+
+      assert struct_type_fields(types) == %{
+               name: "Core.StructFixture.Name.t()",
+               events: "Core.Es.Events.t(Core.EventFixture.Event.t())"
+             }
     end
 
     test "Prim, вложенный выше use, — тип вложенного модуля" do
@@ -539,6 +557,39 @@ defmodule Core.StructTest do
     test "вызов в спеке поля — «ожидается литерал»" do
       assert_raise CompileError, ~r/^Struct: fields: name: ожидается литерал, получено Module.concat/, fn ->
         define(quote(do: [fields: [name: [prim: Module.concat(Core.StructFixture, Name)]]]))
+      end
+    end
+
+    test "поле events в fields: рядом с events: — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: events: поле events порождает events: Core.EventFixture.Event/,
+                   fn ->
+                     define(fields: [events: [type: :map]], events: Core.EventFixture.Event)
+                   end
+    end
+
+    test "events: не семейство событий — CompileError" do
+      assert_raise CompileError,
+                   ~r/^Struct: events: ожидается семейство событий \(use Core.Es.Event.Family\), получено Core.EventFixture.Event.Codec$/,
+                   fn -> define(fields: [name: [prim: Name]], events: Core.EventFixture.Event.Codec) end
+
+      assert_raise CompileError, ~r/^Struct: events: модуль Core.StructFixture.Missing недоступен/, fn ->
+        define(fields: [name: [prim: Name]], events: StructFixture.Missing)
+      end
+    end
+
+    test "events: не литерал — «ожидается литерал»" do
+      assert_raise CompileError, ~r/^Struct: events: ожидается литерал, получено @family$/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.StructTest.AttrEvents do
+              @family Core.EventFixture.Event
+              use Core.Struct,
+                fields: [name: [prim: Core.StructFixture.Name]],
+                events: @family
+            end
+          end
+        )
       end
     end
 

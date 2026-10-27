@@ -514,7 +514,9 @@ end
 Changeset: `@required` / `@optional` через `~w(...)a` → `cast` → `validate_required` →
 `foreign_key_constraint` (и `unique_constraint` при необходимости).
 
-В `to_entity` поле `events: []` — события лежат в хранилище событий, не в строке агрегата.
+В `to_entity` поле `events: []` — события лежат в хранилище событий, не в строке агрегата; у
+агрегата с `use Core.Struct, events:` ключ `events` можно не указывать — пустая коллекция по
+умолчанию.
 
 ## Specs
 
@@ -574,6 +576,10 @@ use Repo.Pg.StateStored,
 | `children:` | нет | `[[schema:, fk:, key:, constraint_errors:], …]`; строки — из `Schema.Child.to_models/1` |
 | `entity:` | да | в `Repo.Pg` опциональна, здесь обязательна (по ней строятся заголовки) |
 | `id:` | да | в `Repo.Pg` опциональна, здесь обязательна: сверяется на компиляции с Prim агрегата кодека |
+
+Поле событий агрегата `entity:` — `entity.events`: у структуры по полям его объявляет
+`use Core.Struct, events:` с семейством кодека `event_codec:`, сверку проводит сборка
+репозитория (`11-domain.md`, «State-stored»); ручной `defstruct` объявляет `events` сам.
 
 `outbox: :none` — агрегат не публикует события наружу: они пишутся в хранилище, записей outbox
 нет, семейство сверять не с чем. Опция остаётся обязательной у обоих write-builder'ов: отказ от

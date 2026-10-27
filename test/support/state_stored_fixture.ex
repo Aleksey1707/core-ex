@@ -11,20 +11,17 @@ defmodule Core.StateStoredFixture do
   defmodule Entity do
     @moduledoc "Агрегат: название, дочерние строки `код => название` и накопленные события."
 
-    alias Core.Es
-    alias Core.EventFixture.AggID
+    alias Core.EventFixture
     alias Core.Version
 
-    @enforce_keys ~w(id version name children events)a
-    defstruct @enforce_keys
-
-    @type t :: %__MODULE__{
-            id: AggID.t(),
-            version: Version.t(),
-            name: String.t(),
-            children: %{optional(String.t()) => String.t()},
-            events: Es.Events.t()
-          }
+    use Core.Struct,
+      fields: [
+        id: [prim: EventFixture.AggID],
+        version: [prim: Version],
+        name: [type: :string],
+        children: [map: [key: [type: :string], value: [type: :string]]]
+      ],
+      events: EventFixture.Event
   end
 
   defmodule Child do

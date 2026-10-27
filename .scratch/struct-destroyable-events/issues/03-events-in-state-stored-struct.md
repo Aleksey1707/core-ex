@@ -7,24 +7,24 @@ ADR-0092.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `events:` — опция-модуль `use Core.Struct`, литерал; при раскрытии проверяется, что это семейство событий
+- [x] `events:` — опция-модуль `use Core.Struct`, литерал; при раскрытии проверяется, что это семейство событий
       (`Core.Es.Event.Family`), иначе `CompileError`.
-- [ ] Порождается ключ `events` со значением `Es.Events.new()` (ключ при сборке `%S{}` необязателен) и
+- [x] Порождается ключ `events` со значением `Es.Events.new()` (ключ при сборке `%S{}` необязателен) и
       `events: Core.Es.Events.t(Family.t())` в `@type t`.
-- [ ] Поле `events` в `fields:` рядом с `events:` — `CompileError`.
-- [ ] `events` не входит в `__struct_fields__/0`; семейство модуль отдаёт внутренней функцией (`@doc false`).
-- [ ] `Repo.Pg.StateStored`: `entity:`, собранный `Core.Struct` без `events:`, — `CompileError`; семейство
+- [x] Поле `events` в `fields:` рядом с `events:` — `CompileError`.
+- [x] `events` не входит в `__struct_fields__/0`; семейство модуль отдаёт внутренней функцией (`@doc false`).
+- [x] `Repo.Pg.StateStored`: `entity:`, собранный `Core.Struct` без `events:`, — `CompileError`; семейство
       `events:` не совпадает с семейством `event_codec:` — `CompileError`. Ручной `defstruct` не проверяется.
-- [ ] `Core.Es.Aggregate` и `Core.Es.Cmd`: `events:` у структуры по полям — `CompileError`.
-- [ ] `Core.StateStoredFixture.Entity` — на `use Core.Struct, events: …`; существующие тесты
+- [x] `Core.Es.Aggregate` и `Core.Es.Cmd`: `events:` у структуры по полям — `CompileError`.
+- [x] `Core.StateStoredFixture.Entity` — на `use Core.Struct, events: …`; существующие тесты
       `Repo.Pg.StateStored` зелёные без правок.
-- [ ] Тесты: тип и значение по умолчанию — в `test/core/struct_test.exs` (`fetch_types/1`, `%S{}`); отказы
+- [x] Тесты: тип и значение по умолчанию — в `test/core/struct_test.exs` (`fetch_types/1`, `%S{}`); отказы
       `Core.Struct` — `Code.eval_quoted`; отказы ролей — в тестах `Repo.Pg.StateStored`, агрегата и команды через
       их `use`.
-- [ ] `@moduledoc` `Core.Struct` и `Repo.Pg.StateStored`; `docs/rules/11-domain.md` (структура по полям) и
+- [x] `@moduledoc` `Core.Struct` и `Repo.Pg.StateStored`; `docs/rules/11-domain.md` (структура по полям) и
       `docs/rules/13-repos.md` (state-stored агрегат): `events:` вместо ручного поля. `make rules-check` зелёный.
-- [ ] CHANGELOG, «Изменения контракта макросов»: `events:`, было → стало для ручного `defstruct` и `@type t`
+- [x] CHANGELOG, «Изменения контракта макросов»: `events:`, было → стало для ручного `defstruct` и `@type t`
       state-stored агрегата.
-- [ ] `make` зелёный.
+- [x] `make` зелёный.

@@ -23,7 +23,9 @@ defmodule Core.Es.Cmd do
   Уничтожаемое поле (`destroyable: true`) у команды по полям — `CompileError` с путём до поля:
   уничтоженное ПДн-значение не записывается, и тип команды его не допускает. Проверяются поля
   команды, элементы `list:` / `set:` и значения `map:` и поля сущностей `entity:`, собранных
-  `Core.Struct`, на любой глубине; варианты `union:` и ручной struct не обходятся (ADR-0092).
+  `Core.Struct`, на любой глубине; варианты `union:` и ручной struct не обходятся (ADR-0092). Поле
+  событий `events:` (`Core.Struct`) у команды — `CompileError`: события порождает `decide/2`
+  агрегата.
 
   Опций нет.
   """
@@ -62,6 +64,7 @@ defmodule Core.Es.Cmd do
       fields ->
         ensure_enforced!(env, fields)
         reject_destroyable!(env)
+        reject_events!(env)
     end
   end
 
@@ -101,6 +104,17 @@ defmodule Core.Es.Cmd do
           file: env.file,
           line: env.line
     end
+  end
+
+  defp reject_events!(env) do
+    if Core.Struct.events_family(env.module) do
+      raise CompileError,
+        description: "#{@label}: #{inspect(env.module)}: events: у команды нет — события порождает decide/2 агрегата",
+        file: env.file,
+        line: env.line
+    end
+
+    :ok
   end
 
   # Места `destroyable:` полей модуля и полей сущностей `entity:` в их значениях на любой глубине:

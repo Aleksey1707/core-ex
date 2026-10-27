@@ -85,6 +85,14 @@ defmodule Core.StructFixture do
       ]
   end
 
+  defmodule Events do
+    @moduledoc false
+
+    use Core.Struct,
+      fields: [name: [prim: Name]],
+      events: Core.EventFixture.Event
+  end
+
   defmodule Defaults do
     @moduledoc false
 

@@ -84,6 +84,24 @@ defmodule Core.Es.CmdTest do
                "Es.Cmd: Core.Es.CmdTest.MapDestroyable: by_id: map: value: phone: destroyable: у сущности"
     end
 
+    test "events: у команды по полям — CompileError" do
+      error =
+        assert_raise CompileError, fn ->
+          compile(
+            WithEvents,
+            nil,
+            quote do
+              use Core.Struct,
+                fields: unquote(stamped([])),
+                events: Core.EsFixture.Account.Event
+            end
+          )
+        end
+
+      assert error.description ==
+               "Es.Cmd: Core.Es.CmdTest.WithEvents: events: у команды нет — события порождает decide/2 агрегата"
+    end
+
     test "Prim personal: true без destroyable: — команда собирается" do
       fields = stamped(holder: [prim: Core.EsFixture.Account.Holder])
 

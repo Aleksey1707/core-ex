@@ -210,6 +210,19 @@ defmodule Core.Es.AggregateTest do
       assert %{id: ^id, version: nil, name: nil} = state
     end
 
+    test "состояние структурой по полям с events: — CompileError" do
+      fields = [id: [prim: Account.ID], version: [prim: Version, optional: true]]
+
+      error =
+        assert_raise CompileError, fn ->
+          compile(WithEvents, [event_codec: Account.Event.Codec], {:fields, fields, events: Account.Event})
+        end
+
+      assert error.description ==
+               "Es.Aggregate: Core.Es.AggregateTest.WithEvents: events: у event-sourced агрегата нет — " <>
+                 "состояние полем событий не владеет: события возвращает decide/2"
+    end
+
     test "состояние структурой по полям: поле с default: без optional: — агрегат собирается, struct/2 даёт значение" do
       fields = [
         id: [prim: Account.ID],
@@ -287,9 +300,11 @@ defmodule Core.Es.AggregateTest do
     )
   end
 
-  defp struct_by_fields({:fields, fields}), do: quote(do: use(Core.Struct, fields: unquote(fields)))
+  defp struct_by_fields({:fields, fields}), do: struct_by_fields({:fields, fields, []})
+  defp struct_by_fields({:fields, fields, opts}), do: quote(do: use(Core.Struct, unquote([fields: fields] ++ opts)))
   defp struct_by_fields(_fields), do: nil
 
   defp manual_struct({:fields, _fields}), do: nil
+  defp manual_struct({:fields, _fields, _opts}), do: nil
   defp manual_struct(fields), do: quote(do: defstruct(unquote(fields)))
 end

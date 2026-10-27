@@ -754,6 +754,12 @@ end
   уничтоженные значения не идентифицируют запись. Значение — только `true`. Плагин по полям,
   нагрузка и View опцию не принимают (`CompileError`); плагин при сверке со структурой её не
   сравнивает и не повторяет. Команда отказывает ей и в поле вложенной сущности («Команда»)
+- `events: Family` — опция `use` уровня модуля, модуль семейства событий (`Core.Es.Event.Family`),
+  литерал: порождает поле накопленных событий `events` с типом `Core.Es.Events.t(Family.t())` и
+  значением по умолчанию `Es.Events.new()` — ключ в `%S{}` можно не указывать. Поле в спеку не
+  входит: плагин по полям его не видит, подписи скрывают его `events: :hidden`, как у ручного
+  `defstruct`. Опция state-stored агрегата («State-stored»); поле `events` в `fields:` рядом с
+  `events:` и не семейство — `CompileError`
 - `default:` не того вида (список на месте `set:`), `default: nil` без `optional: true` и
   значение, в котором есть Prim `personal: true` или `sensitive:` (значение ушло бы в исходник и
   байткод), — `CompileError` `Struct: fields: <поле>: …`; остальные отказы — перечень в
@@ -765,6 +771,7 @@ end
 |---|---|
 | команда `use Core.Es.Cmd` | «Команда» |
 | состояние event-sourced агрегата | «Event-sourced» |
+| состояние state-stored агрегата | «State-stored» |
 | вложенная сущность, вариант семейства с плагином по полям | «Плагин по полям (`fields:`)» |
 | подписи `use Core.Labels.Fields` | «Подписи полей (`Core.Labels.Fields`)» |
 
@@ -795,6 +802,32 @@ use Core.Struct, fields: [created_at: [prim: CreatedAt]]
 - `version` поднимает домен, репозиторий её только проверяет.
 - При мутациях копят uncommitted `events: []` (prepend / append — единообразно в агрегате; flush
   делает `Enum.reverse` при необходимости).
+- Состояние MAY объявляться структурой по полям («Структура по полям (`Core.Struct`)») или
+  ручным `defstruct`. У структуры по полям поле событий MUST объявляться опцией `events:` с
+  семейством кодека событий агрегата, а не полем в `fields:`: репозиторий пишет события из поля
+  `events`, а тип поля называет события, которые агрегат копит.
+
+```elixir
+# плохо — поле событий видом спеки: тип не называет семейство, репозиторий не собирается
+use Core.Struct,
+  fields: [
+    id: [prim: Role.ID],
+    version: [prim: Version],
+    events: [list: [union: Role.Event], default: []]
+  ]
+
+# хорошо
+use Core.Struct,
+  fields: [
+    id: [prim: Role.ID],
+    version: [prim: Version]
+  ],
+  events: Role.Event
+```
+
+Проверяется: `CompileError` в `use Repo.Pg.StateStored` — `entity:` структурой по полям без
+`events:` или с семейством не кодека `event_codec:` (`test/core/repo/pg/state_stored_test.exs`);
+тип и значение по умолчанию поля `events` — `test/core/struct_test.exs`.
 
 ### Event-sourced
 
@@ -810,7 +843,8 @@ use Core.Struct, fields: [created_at: [prim: CreatedAt]]
   (`[type: :boolean, default: false]`) — своему значению по умолчанию. Литерал `%Agg{id: id}` вне
   библиотеки (в тесте) собирается, только если у каждого поля, кроме `id`, есть `default:`
   (например `optional: true, default: nil`), иначе — `struct(Agg, id: id)`. Порядок
-  `use Core.Struct` и `use Core.Es.Aggregate` не важен.
+  `use Core.Struct` и `use Core.Es.Aggregate` не важен. Поля событий у состояния нет: `events:`
+  MUST NOT — события возвращает `decide/2`, а не копит состояние.
 - `decide(команда, состояние)` → `{:ok, [черновик]} | {:error, _}`: `id` события,
   `aggregate_id`, версию, `by` и `at` проставляет библиотека. Команда без изменений —
   `{:ok, []}`.
@@ -850,13 +884,13 @@ use Core.Struct, fields: [created_at: [prim: CreatedAt]]
   `23-personal-data.md`, «Уничтоженное ПДн-значение».
 
 Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`, у
-структуры по полям — поле состояния, кроме `id`, без `optional: true` и без `default:`;
-предупреждение при сборке — у `draft` нагрузка другого события, `draft()` у события с нагрузкой
-или `draft(payload)` у события без неё; на строке `use Core.Es.Aggregate.Repo` — у `evolve/2` нет
-clause события кодека, опечатка в ключе `%{state | …}` или в поле нагрузки без паттерна
-`%Payload{}` (`make consumer-check`); `FunctionClauseError` при исполнении команды — черновик
-события не из кодека агрегата. `evolve/2` на `%Destroyed{}` не проверяет ни сборка, ни case —
-только тест агрегата (`19-testing.md`, «Event-sourced агрегат»).
+структуры по полям — поле состояния, кроме `id`, без `optional: true` и без `default:`, и
+`events:`; предупреждение при сборке — у `draft` нагрузка другого события, `draft()` у события
+с нагрузкой или `draft(payload)` у события без неё; на строке `use Core.Es.Aggregate.Repo` — у
+`evolve/2` нет clause события кодека, опечатка в ключе `%{state | …}` или в поле нагрузки без
+паттерна `%Payload{}` (`make consumer-check`); `FunctionClauseError` при исполнении команды —
+черновик события не из кодека агрегата. `evolve/2` на `%Destroyed{}` не проверяет ни сборка, ни
+case — только тест агрегата (`19-testing.md`, «Event-sourced агрегат»).
 
 ```elixir
 # плохо — голова evolve проверяет статус: инвариант ушёл из decide, а событие при другом
@@ -901,11 +935,12 @@ Struct команды MAY быть структурой по полям («Ст�
 
 Уничтожаемое поле (`destroyable: true`) у команды MUST NOT — ни у её поля, ни у поля сущности
 `entity:` в её значении на любой глубине: уничтоженное ПДн-значение не записывается, и тип команды
-его не допускает. Сущность с уничтожаемым полем — тип состояния, а не команды (ADR-0092).
+его не допускает. Сущность с уничтожаемым полем — тип состояния, а не команды (ADR-0092). Поле
+событий `events:` у команды MUST NOT: события порождает `decide/2` агрегата.
 
 Проверяется: `CompileError` в `use Core.Es.Cmd` — `by` или `at` не в `@enforce_keys`;
 `destroyable:` у поля команды по полям или у поля сущности `entity:`, собранной `Core.Struct`, в её
-значении (кроме вариантов `union:`).
+значении (кроме вариантов `union:`); `events:` у команды по полям.
 
 ```elixir
 defmodule MyApp.Domain.<BC>.Account.Cmd.Rename do
