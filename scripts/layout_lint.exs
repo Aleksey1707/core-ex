@@ -195,7 +195,7 @@ defmodule LayoutLint do
   # Локальные вызовы головы (guard, умолчания) и тела: `f(x)`, `x |> f()`, `x |> f`, `&f/1`.
   # Код `quote` — чужой модуль: из него в счёт идут опции (`bind_quoted:`) и `unquote` — они
   # вычисляются здесь; при `unquote: false` — только опции.
-  defp calls({:quote, _, args}, acc) do
+  defp calls({:quote, _, args}, acc) when is_list(args) do
     {body, quote_opts} = args |> Enum.filter(&is_list/1) |> Enum.concat() |> Keyword.split([:do])
     acc = calls(Keyword.values(quote_opts), acc)
 
