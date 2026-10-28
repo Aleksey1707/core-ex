@@ -431,8 +431,9 @@ errors string↔atom keys). `append` чанкует `insert_all` (лимит п�
   (`10-architecture.md`);
 - непересечение фильтров: два поллера `pollers:` с пересекающимися фильтрами топиков —
   `ArgumentError`. Что считается пересечением — `@doc` у `Outbox.topics_overlap?/2`: два
-  `{:except, _}` пересекаются всегда. Полнота разбиения не проверяется: топики вне фильтров ждут в
-  `pending`.
+  `{:except, _}` пересекаются всегда. Полнота разбиения на старте не проверяется: набор топиков в
+  рантайме недоказуем (`Core.PubSub.OutboxPublisher`). Топик вне фильтров — ошибка конфигурации,
+  её ловит алерт `OutboxOldestNewHigh` (ADR-0093).
 
 Проверяется: `test/core/outbox/supervisor_test.exs`, `test/core/outbox/partition_test.exs`.
 
