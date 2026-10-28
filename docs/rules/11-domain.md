@@ -882,6 +882,12 @@ use Core.Struct,
 - `%Core.Es.Personal.Destroyed{}` в поле нагрузки с `subject:` — `evolve/2` MUST принимать,
   `decide/2` команды, которой нужно уничтоженное значение, отвечает доменной ошибкой:
   `23-personal-data.md`, «Уничтоженное ПДн-значение».
+- Клаузы `decide/2` группируются по команде, клаузы `evolve/2` — по событию: клаузы одной группы
+  MUST идти подряд, порядок групп свободный. Клауза на несколько команд (`%command{} when command
+  in @on_existing`) MAY стоять только головной или хвостовой группой. Маркеры `# ---` и
+  `# ===== … =====` между группами MUST NOT: это клаузы одной функции. Пустая строка группу не
+  размечает — однострочные клаузы соседних групп идут подряд («Однострочные клаузы»,
+  `20-agreements.md`).
 
 Проверяется: `CompileError` в `use Core.Es.Aggregate` без `id` / `version` в `defstruct`, у
 структуры по полям — поле состояния, кроме `id`, без `optional: true` и без `default:`, и
@@ -921,6 +927,39 @@ def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
 Enum.map(role_ids, &Event.RoleGranted.draft/1)
 
 def evolve(state, %Event.Frozen{}), do: %{state | status: :frozen}
+```
+
+```elixir
+# плохо — общая клауза `not_found` стоит между группами, группу `Rename` разрывает `SetHolder`
+def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),
+  do: {:ok, [Event.Opened.draft(Event.Opened.Payload.new(name))]}
+
+def decide(%command{}, %__MODULE__{version: nil}) when command in @on_existing,
+  do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
+
+def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
+def decide(%Cmd.SetHolder{holder: holder}, %__MODULE__{holder: holder}), do: {:ok, []}
+
+def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+  do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
+
+# хорошо — общие клаузы в голове и хвосте, клаузы каждой команды подряд
+def decide(%command{}, %__MODULE__{version: nil}) when command in @on_existing,
+  do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
+
+def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),
+  do: {:ok, [Event.Opened.draft(Event.Opened.Payload.new(name))]}
+
+def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
+
+def decide(%Cmd.Rename{name: name}, %__MODULE__{status: :open}),
+  do: {:ok, [Event.Renamed.draft(Event.Renamed.Payload.new(name))]}
+
+def decide(%Cmd.SetHolder{holder: holder}, %__MODULE__{holder: holder}), do: {:ok, []}
+def decide(%Cmd.Freeze{}, %__MODULE__{status: :open}), do: {:ok, [Event.Frozen.draft()]}
+
+def decide(%command{}, %__MODULE__{} = state) when command in @on_existing,
+  do: {:error, Errors.domain(__MODULE__, :invalid_status, %{status: state.status})}
 ```
 
 ### Команда

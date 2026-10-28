@@ -78,14 +78,14 @@ defmodule Consumer.Domain.Sales.Account do
   @on_existing [Cmd.Rename, Cmd.SetHolder, Cmd.Freeze, Cmd.Close]
 
   @impl true
+  def decide(%command{}, %__MODULE__{version: nil}) when command in @on_existing,
+    do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
+
   def decide(%Cmd.Open{name: name}, %__MODULE__{version: nil}),
     do: {:ok, [Event.Opened.draft(Event.Opened.Payload.new(name))]}
 
   def decide(%Cmd.Open{}, %__MODULE__{} = state),
     do: {:error, Errors.domain(__MODULE__, :already_exists, %{version: Version.value(state.version)})}
-
-  def decide(%command{}, %__MODULE__{version: nil}) when command in @on_existing,
-    do: {:error, Errors.domain(__MODULE__, :not_found, nil)}
 
   def decide(%Cmd.Rename{name: name}, %__MODULE__{name: name}), do: {:ok, []}
 
