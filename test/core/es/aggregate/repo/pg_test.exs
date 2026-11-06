@@ -43,6 +43,62 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
       aggregate: Core.Es.Aggregate.Repo.PgTest.Stranger
   end
 
+  defmodule LoadRepo do
+    @moduledoc false
+
+    use Core.Es.Aggregate.Repo.Pg,
+      behaviour: Core.EsFixture.Account.Repo,
+      errors: Core.EsFixture.Account.Errors,
+      outbox: Core.EsFixture.Account.Outbox
+
+    def cfg, do: es_aggregate_repo()
+  end
+
+  describe "загрузка с верхней границей" do
+    test "без границы — поток до головы" do
+      id = Account.ID.new()
+      state = write!(@repo, id, [open(), rename("Второе")])
+
+      assert {:ok, [^state]} = load_at(id, nil)
+    end
+
+    test "граница — события выше не читаются" do
+      id = Account.ID.new()
+      write!(@repo, id, [open("Первое")])
+      write!(@repo, id, [rename("Второе")])
+      write!(@repo, id, [freeze()])
+      attach_telemetry()
+
+      assert {:ok, [%Account{version: version, name: name, status: :open}]} = load_at(id, 2)
+      assert version == Core.Version.new!(2)
+      assert name == Account.Name.new!("Второе")
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{snapshot: :off}}
+    end
+
+    test "нечитаемое событие выше границы не грузится" do
+      id = Account.ID.new()
+      {opened, opened_state} = execute!(%Account{id: id}, open())
+      insert_rows!(opened)
+      {renamed, _state} = execute!(opened_state, rename("Второе"))
+      insert_rows!(renamed, "account.unknown")
+
+      assert {:ok, [%Account{version: version}]} = load_at(id, 1)
+      assert version == Core.Version.new!(1)
+    end
+
+    test "captures — потолок по наибольшей версии" do
+      id = Account.ID.new()
+      write!(@repo, id, [open(), rename("Второе"), freeze()])
+      attach_telemetry()
+
+      assert {:ok, [%Account{version: version, status: :open}]} = load_at(id, nil, [2])
+      assert version == Core.Version.new!(2)
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{snapshot: :off}}
+    end
+  end
+
   describe "DI" do
     test "реализация резолвится по конвенции <Behaviour>.Pg" do
       assert @repo == Account.Repo.Pg
@@ -276,6 +332,12 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
         compile!(StateStoredBehaviour, behaviour: Core.StateStoredFixture.Repo)
       end
     end
+  end
+
+  defp load_at(id, upper, captures \\ []) do
+    spec = %{state: %Account{id: id}, upper: upper, captures: captures}
+
+    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], true, &{:ok, &1})
   end
 
   def handle_telemetry(event, measurements, metadata, test) do

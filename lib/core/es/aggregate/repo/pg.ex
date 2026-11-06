@@ -174,7 +174,20 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @required_keys ~w(behaviour errors outbox)a
   @optional_keys ~w(repo codec snapshot key_reservations)a
   @expression_keys []
-  @stream_types %{index: :integer, aggregate_id: :binary_id, after_version: :integer}
+  @stream_types %{
+    index: :integer,
+    aggregate_id: :binary_id,
+    after_version: :integer,
+    to_version: :integer,
+    snapshot_to: :integer
+  }
+
+  @typedoc false
+  @type load_spec :: %{
+          state: struct(),
+          upper: pos_integer() | nil,
+          captures: [pos_integer()]
+        }
 
   # ===== объявление =====
 
@@ -424,9 +437,27 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # после него: вне транзакции upsert идёт сразу и в длительность чтения не входит.
   # Сбой хранилища ключей отдаётся вызывающему без замера: потоки не восстановлены.
   defp load(cfg, op, states, opts, verify) do
+    specs = Enum.map(states, &%{state: &1, upper: nil, captures: []})
+    load_at(cfg, op, specs, opts, true, verify)
+  end
+
+  @doc false
+  # Загрузка потоков с верхней границей и срезами: `upper` — потолок версии потока (`nil` — голова),
+  # `captures` — версии-срезы пакета. Потолок срезов — наибольшая, снапшот берётся только не выше
+  # наименьшей. `write_snapshots?` — писать ли снапшоты после загрузки.
+  @spec load_at(
+          map(),
+          atom(),
+          [load_spec()],
+          keyword(),
+          boolean(),
+          ([struct()] -> Result.t([struct()], term()))
+        ) :: Result.t([struct()], term())
+
+  def load_at(cfg, op, specs, opts, write_snapshots?, verify) when is_list(specs) and is_list(opts) do
     start = System.monotonic_time()
 
-    with {:ok, restored} <- restore(cfg, states, opts) do
+    with {:ok, restored} <- restore(cfg, specs, opts) do
       result = verify.(Enum.map(restored, & &1.state))
 
       :telemetry.execute(
@@ -435,7 +466,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
         %{type: cfg.type, op: op, result: result_tag(result)}
       )
 
-      write_snapshots(cfg, restored)
+      write_snapshots(cfg, restored, write_snapshots?)
       result
     end
   end
@@ -445,30 +476,47 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # событий свёрнуто.
   defp restore(_cfg, [], _opts), do: {:ok, []}
 
-  defp restore(cfg, states, opts) do
-    with {:ok, tails} <- read_tails(cfg, states, opts),
-         {:ok, restored} <- refold_rejected(Enum.zip_with(tails, states, &fold_tail(cfg, &2, &1)), cfg, opts) do
+  defp restore(cfg, specs, opts) do
+    with {:ok, tails} <- read_tails(cfg, specs, opts),
+         {:ok, restored} <-
+           refold_rejected(Enum.zip_with(tails, specs, &fold_tail(cfg, &2, &1)), cfg, specs, opts) do
       Enum.each(restored, &emit_fold(cfg, &1))
       {:ok, restored}
     end
   end
 
-  defp read_tails(%{snapshot: nil} = cfg, states, opts) do
-    with {:ok, streams} <- read_streams(cfg, states, opts), do: {:ok, Enum.map(streams, &{nil, &1, false})}
+  defp read_tails(%{snapshot: nil} = cfg, specs, opts) do
+    with {:ok, streams} <- read_streams(cfg, specs, opts), do: {:ok, Enum.map(streams, &{nil, &1, false})}
   end
 
-  defp read_tails(%{type: type} = cfg, states, opts) do
+  defp read_tails(%{type: type} = cfg, specs, opts) do
     marker = Snapshot.marker(cfg)
 
-    from(s in values(streams(cfg, states), @stream_types),
+    cfg
+    |> snapshot_streams(specs, type, marker)
+    |> cfg.dao.all(opts)
+    |> Enum.chunk_by(&elem(&1, 0))
+    |> tails(cfg, specs, marker)
+  end
+
+  defp snapshot_streams(cfg, specs, type, marker) do
+    from(s in values(streams(cfg, specs), @stream_types),
       left_join: sn in Snapshot.Schema,
       on:
         sn.aggregate_type == ^type and sn.aggregate_id == s.aggregate_id and
-          sn.marker == ^marker and sn.aggregate_version > s.after_version,
+          sn.marker == ^marker and sn.aggregate_version > s.after_version and
+          (is_nil(s.snapshot_to) or sn.aggregate_version <= s.snapshot_to)
+    )
+    |> join_tail(type)
+  end
+
+  defp join_tail(query, type) do
+    from([s, sn] in query,
       left_join: e in Schema,
       on:
         e.aggregate_type == ^type and e.aggregate_id == s.aggregate_id and
-          e.aggregate_version > coalesce(sn.aggregate_version, s.after_version),
+          e.aggregate_version > coalesce(sn.aggregate_version, s.after_version) and
+          (is_nil(s.to_version) or e.aggregate_version <= s.to_version),
       order_by: [asc: s.index, asc: e.aggregate_version],
       # Состояние снапшота — только в первой строке потока, а не в каждой строке его хвоста.
       select:
@@ -480,16 +528,13 @@ defmodule Core.Es.Aggregate.Repo.Pg do
            sn.state
          ), e}
     )
-    |> cfg.dao.all(opts)
-    |> Enum.chunk_by(&elem(&1, 0))
-    |> tails(cfg, states, marker)
   end
 
   # У потока без событий после снапшота или состояния одна строка, и событие в ней — `nil`
   # (`left_join`). Шифротексты снапшотов расшифровываются тем же вызовом `open`, что и хвост.
-  defp tails(streams, cfg, states, marker) do
+  defp tails(streams, cfg, specs, marker) do
     snapshots = Enum.map(streams, &stored_snapshot/1)
-    sealed = Snapshot.sealed(cfg, marker, states, snapshots)
+    sealed = Snapshot.sealed(cfg, marker, Enum.map(specs, & &1.state), snapshots)
 
     with {:ok, {loaded, opened}} <- load_streams(cfg, Enum.map(streams, &event_rows/1), sealed) do
       {:ok, Enum.zip_with(Snapshot.put_opened(cfg, snapshots, opened), loaded, &{&1, &2, destroyed_value?(cfg, &2)})}
@@ -505,19 +550,21 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp read_streams(_cfg, [], _opts), do: {:ok, []}
 
-  defp read_streams(cfg, states, opts) do
+  defp read_streams(cfg, specs, opts) do
     rows =
       from(e in Schema,
-        join: s in values(streams(cfg, states), @stream_types),
+        join: s in values(streams(cfg, specs), @stream_types),
         on: e.aggregate_id == s.aggregate_id and e.aggregate_version > s.after_version,
-        where: e.aggregate_type == ^cfg.type,
+        where:
+          e.aggregate_type == ^cfg.type and
+            (is_nil(s.to_version) or e.aggregate_version <= s.to_version),
         order_by: [asc: e.aggregate_version],
         select: {s.index, e}
       )
       |> cfg.dao.all(opts)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
-    streams = for index <- 0..(length(states) - 1)//1, do: Map.get(rows, index, [])
+    streams = for index <- 0..(length(specs) - 1)//1, do: Map.get(rows, index, [])
 
     with {:ok, {loaded, []}} <- load_streams(cfg, streams, []), do: {:ok, loaded}
   end
@@ -531,28 +578,41 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     end
   end
 
-  defp streams(cfg, states) do
-    states
+  defp streams(cfg, specs) do
+    specs
     |> Enum.with_index()
-    |> Enum.map(fn {state, index} ->
-      %{index: index, aggregate_id: cfg.codec.dump(state.id), after_version: after_version(state)}
+    |> Enum.map(fn {spec, index} ->
+      %{
+        index: index,
+        aggregate_id: cfg.codec.dump(spec.state.id),
+        after_version: after_version(spec.state),
+        to_version: to_version(spec),
+        snapshot_to: snapshot_to(spec)
+      }
     end)
   end
+
+  # Потолок потока — верхняя версия или наибольший срез пакета; снапшот — не выше наименьшего.
+  defp to_version(%{captures: [_ | _] = captures, upper: _upper}), do: Enum.max(captures)
+  defp to_version(%{upper: upper}), do: upper
+
+  defp snapshot_to(%{captures: [_ | _] = captures, upper: _upper}), do: Enum.min(captures)
+  defp snapshot_to(%{upper: upper}), do: upper
 
   defp after_version(%{version: nil}), do: 0
   defp after_version(%{version: %Version{} = version}), do: Version.value(version)
 
-  defp fold_tail(%{snapshot: nil} = cfg, state, {nil, events, _destroyed?}),
-    do: restored(:off, cfg.aggregate.fold(state, events), events, false)
+  defp fold_tail(%{snapshot: nil} = cfg, spec, {nil, events, _destroyed?}),
+    do: restored(:off, cfg.aggregate.fold(spec.state, events), events, false)
 
-  defp fold_tail(cfg, state, {nil, events, destroyed?}),
-    do: restored(:miss, cfg.aggregate.fold(state, events), events, destroyed?)
+  defp fold_tail(cfg, spec, {nil, events, destroyed?}),
+    do: restored(:miss, cfg.aggregate.fold(spec.state, events), events, destroyed?)
 
-  defp fold_tail(cfg, state, {snapshot, events, destroyed?}) do
-    case Snapshot.fold(cfg, state, snapshot, events) do
+  defp fold_tail(cfg, spec, {snapshot, events, destroyed?}) do
+    case Snapshot.fold(cfg, spec.state, snapshot, events) do
       {:ok, folded} -> restored(:hit, folded, events, destroyed?)
-      :rejected -> {:rejected, state, false}
-      :destroyed -> {:rejected, state, true}
+      :rejected -> {:rejected, spec.state, false}
+      :destroyed -> {:rejected, spec.state, true}
     end
   end
 
@@ -560,13 +620,24 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp restored(snapshot, state, events, destroyed?),
     do: %{snapshot: snapshot, state: state, events: length(events), destroyed?: destroyed?}
 
-  defp refold_rejected(restored, cfg, opts) do
-    rejected = for {:rejected, state, destroyed?} <- restored, do: {state, destroyed?}
+  defp refold_rejected(restored, cfg, specs, opts) do
+    rejected =
+      restored
+      |> Enum.zip(specs)
+      |> Enum.flat_map(fn
+        {{:rejected, _state, destroyed?}, spec} -> [{spec, destroyed?}]
+        {_stream, _spec} -> []
+      end)
 
     with {:ok, streams} <- read_streams(cfg, Enum.map(rejected, &elem(&1, 0)), opts) do
       refolded =
-        Enum.zip_with(streams, rejected, fn events, {state, destroyed?} ->
-          restored(:rejected, cfg.aggregate.fold(state, events), events, destroyed? or destroyed_value?(cfg, events))
+        Enum.zip_with(streams, rejected, fn events, {spec, destroyed?} ->
+          restored(
+            :rejected,
+            cfg.aggregate.fold(spec.state, events),
+            events,
+            destroyed? or destroyed_value?(cfg, events)
+          )
         end)
 
       {:ok, merge_refolded(restored, refolded)}
@@ -612,9 +683,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     }
   end
 
-  defp write_snapshots(%{snapshot: nil}, _restored), do: :ok
+  defp write_snapshots(_cfg, _restored, false), do: :ok
 
-  defp write_snapshots(%{snapshot: %{every: every}} = cfg, restored) do
+  defp write_snapshots(%{snapshot: nil}, _restored, _write?), do: :ok
+
+  defp write_snapshots(%{snapshot: %{every: every}} = cfg, restored, true) do
     states = for %{state: state, events: events, destroyed?: false} <- restored, events >= every, do: state
     Snapshot.write(cfg, states)
   end

@@ -34,6 +34,18 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       snapshot: [every: 1]
   end
 
+  defmodule LoadRepo do
+    @moduledoc false
+
+    use Core.Es.Aggregate.Repo.Pg,
+      behaviour: Core.EsFixture.Account.Repo,
+      errors: Core.EsFixture.Account.Errors,
+      outbox: Core.EsFixture.Account.Outbox,
+      snapshot: [every: 2]
+
+    def cfg, do: es_aggregate_repo()
+  end
+
   describe "запись снапшота" do
     test "свёрнуто меньше every — снапшота нет" do
       id = Account.ID.new()
@@ -238,6 +250,97 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
     end
   end
 
+  describe "загрузка с верхней границей" do
+    test "снапшот не выше границы — начало свёртки" do
+      id = Account.ID.new()
+      state = append!(%Account{id: id}, [open(), rename("Второе")])
+      assert {:ok, _state} = @repo.get(id, :current, Context.new())
+      assert %Snapshot.Schema{aggregate_version: 2} = snapshot(id)
+      append!(state, [freeze()])
+      attach_telemetry()
+
+      assert {:ok, [%Account{version: version, name: name, status: :frozen}]} = load_at(id, 3)
+      assert version == Core.Version.new!(3)
+      assert name == Account.Name.new!("Второе")
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{snapshot: :hit}}
+    end
+
+    test "снапшот новее границы — поток с начала" do
+      id = Account.ID.new()
+      append!(%Account{id: id}, [open(), rename("Второе"), freeze()])
+      assert {:ok, _state} = @repo.get(id, :current, Context.new())
+      assert %Snapshot.Schema{aggregate_version: 3} = snapshot(id)
+      attach_telemetry()
+
+      assert {:ok, [%Account{version: version, name: name, status: :open}]} = load_at(id, 2)
+      assert version == Core.Version.new!(2)
+      assert name == Account.Name.new!("Второе")
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{snapshot: :miss}}
+    end
+
+    test "перечитывание отвергнутого снапшота — тоже с границей" do
+      id = Account.ID.new()
+      state = append!(%Account{id: id}, [open(), rename("Второе")])
+      assert {:ok, _state} = @repo.get(id, :current, Context.new())
+      append!(state, [freeze(), close()])
+      update_snapshot!(id, state: <<1, 0>>)
+      attach_telemetry()
+
+      log =
+        capture_log(fn ->
+          assert {:ok, [%Account{version: version}]} = load_at(id, 3)
+          assert version == Core.Version.new!(3)
+        end)
+
+      assert log =~ "снапшот агрегата отвергнут: type=account aggregate_id=#{dump(id)}"
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 3}, %{snapshot: :rejected}}
+    end
+
+    test "признак «не писать снапшоты» — ни upsert, ни телеметрии" do
+      id = Account.ID.new()
+      state = append!(%Account{id: id}, [open(), freeze()])
+      attach_telemetry()
+
+      assert {:ok, [^state]} = load_at(id, nil, [], false)
+      assert snapshot(id) == nil
+      refute_received {:telemetry, [:core, :es, :snapshot, :write], _measurements, _metadata}
+
+      assert {:ok, [^state]} = load_at(id, nil, [], true)
+      assert %Snapshot.Schema{aggregate_version: 2} = snapshot(id)
+      assert_received {:telemetry, [:core, :es, :snapshot, :write], %{rows: 1}, %{result: :ok}}
+    end
+
+    test "captures — потолок наибольшая, снапшот не выше наименьшей" do
+      id = Account.ID.new()
+      append!(%Account{id: id}, [open(), rename("Второе"), freeze()])
+      assert {:ok, _state} = @repo.get(id, :current, Context.new())
+      assert %Snapshot.Schema{aggregate_version: 3} = snapshot(id)
+
+      attach_telemetry()
+
+      assert {:ok, [%Account{version: version, status: :frozen}]} = load_at(id, nil, [2, 3])
+      assert version == Core.Version.new!(3)
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 3}, %{snapshot: :miss}}
+    end
+
+    test "captures — снапшот на наименьшей версии используется" do
+      id = Account.ID.new()
+      state = append!(%Account{id: id}, [open(), rename("Второе"), freeze()])
+      assert {:ok, _state} = @repo.get(id, :current, Context.new())
+      append!(state, [close()])
+      attach_telemetry()
+
+      assert {:ok, [%Account{version: version, status: :closed}]} = load_at(id, nil, [3, 4])
+      assert version == Core.Version.new!(4)
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{snapshot: :hit}}
+    end
+  end
+
   def handle_telemetry(event, measurements, metadata, test) do
     if self() == test, do: send(test, {:telemetry, event, measurements, metadata})
   end
@@ -253,6 +356,20 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
     :ok = :telemetry.attach_many(handler, events, &__MODULE__.handle_telemetry/4, self())
     on_exit(fn -> :telemetry.detach(handler) end)
+  end
+
+  defp load_at(id, upper, captures \\ [], write? \\ true) do
+    spec = %{state: %Account{id: id}, upper: upper, captures: captures}
+
+    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], write?, &{:ok, &1})
+  end
+
+  defp append!(state, commands) do
+    Enum.reduce(commands, state, fn command, state ->
+      {events, next} = execute!(state, command)
+      :ok = @repo.append(events, Context.new())
+      next
+    end)
   end
 
   defp snapshot(id),
