@@ -94,7 +94,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
           when is_list(pairs) and is_list(opts) do
         case @es_read_repo.repo.__es_get_many_at__(pairs, context, opts) do
           {:ok, states} when is_list(states) ->
-            {:ok, Enum.map(states, &es_read_repo_to_view!(&1, @es_read_repo.to_view))}
+            views = for state <- states, do: es_read_repo_to_view!(state, @es_read_repo.to_view)
+            {:ok, views}
 
           {:error, reason} ->
             {:error, reason}
