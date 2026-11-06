@@ -43,8 +43,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `{:error, _}` на всю страницу. Реализация и исходы — `Core.Es.Store`, «Страница потока».
 
   ПДн-значения событий чтение расшифровывает пакетом (`Core.Es.Store`, «Загрузка пачки»): сбой
-  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` отдают `{:error, _}` без замера
-  `[:es, :aggregate, :load]`, нечитаемое событие — `Core.Exc`.
+  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` / `get_at` отдают `{:error, _}`
+  без замера `[:es, :aggregate, :load]`, нечитаемое событие — `Core.Exc`.
 
   `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
 
@@ -111,12 +111,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   Имена — `Core.Telemetry.event/1`; span'а у восстановления нет, на нечитаемом потоке события
   не шлются.
 
-  - `[:es, :aggregate, :load]` — на вызов `get` / `get_decision` / `get_many` / `refresh`:
-    измерения `duration` (native, без записи снапшотов и `fun`), `streams`, `events` (свёрнутые),
-    `snapshot_hit`, `snapshot_miss`, `snapshot_rejected` (потоки; без `snapshot:` — нули);
-    метаданные `type` (тип агрегата), `op` (`:get`, `:get_decision`, `:get_many`, `:refresh`),
-    `result` (`:ok`, `:version_mismatch`). У `get_decision` `result` — сверка до решения: пустой
-    поток при `%Version{}` — `:ok`.
+  - `[:es, :aggregate, :load]` — на вызов `get` / `get_decision` / `get_many` / `refresh` /
+    `get_at`: измерения `duration` (native, без записи снапшотов и `fun`), `streams`, `events`
+    (свёрнутые), `snapshot_hit`, `snapshot_miss`, `snapshot_rejected` (потоки; без `snapshot:` —
+    нули); метаданные `type` (тип агрегата), `op` (`:get`, `:get_decision`, `:get_many`,
+    `:refresh`, `:get_at`), `result` (`:ok`, `:version_mismatch`). У `get_decision` `result` —
+    сверка до решения: пустой поток при `%Version{}` — `:ok`.
   - `[:es, :aggregate, :fold]` — на свёрнутый поток: измерение `events`; метаданные `type`,
     `snapshot` (`:hit`, `:miss`, `:rejected`, без `snapshot:` — `:off`).
   - `[:es, :snapshot, :write]` — на upsert снапшотов: измерения `duration` (native), `rows`
@@ -215,6 +215,17 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           {:ok, %unquote(cfg.aggregate){} = state} -> {:ok, state}
           {:error, reason} -> {:error, reason}
         end
+      end
+
+      @doc false
+      def __es_get_at__(
+            %unquote(cfg.id){} = id,
+            %Core.Version{} = version,
+            %Core.Context{} = context,
+            opts \\ []
+          )
+          when is_list(opts) do
+        Core.Es.Aggregate.Repo.Pg.get_at(es_aggregate_repo(), id, version, context, opts)
       end
 
       @doc "Решение `fun` над состоянием агрегата; явная версия на пустом потоке сверяется после решения."
@@ -352,6 +363,15 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     do: load_stream(cfg, :get, struct(cfg.aggregate, id: id), version, opts)
 
   @doc false
+  @spec get_at(map(), struct(), Version.t(), Context.t(), keyword()) :: Result.t(struct())
+
+  def get_at(cfg, id, %Version{} = version, %Context{}, opts) when is_list(opts) do
+    spec = %{state: struct(cfg.aggregate, id: id), upper: Version.value(version), captures: []}
+
+    load_at(cfg, :get_at, [spec], opts, false, fn [state] -> verify_at(cfg, state, version) end)
+  end
+
+  @doc false
   @spec get_decision(
           map(),
           struct(),
@@ -383,6 +403,36 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts),
     do: load_stream(cfg, :refresh, state, version, opts)
+
+  @doc false
+  # Загрузка потоков с верхней границей и срезами: `upper` — потолок версии потока (`nil` — голова),
+  # `captures` — версии-срезы пакета. Потолок срезов — наибольшая, снапшот берётся только не выше
+  # наименьшей. `write_snapshots?` — писать ли снапшоты после загрузки.
+  @spec load_at(
+          map(),
+          atom(),
+          [load_spec()],
+          keyword(),
+          boolean(),
+          ([struct()] -> Result.t([struct()], term()))
+        ) :: Result.t([struct()], term())
+
+  def load_at(cfg, op, specs, opts, write_snapshots?, verify) when is_list(specs) and is_list(opts) do
+    start = System.monotonic_time()
+
+    with {:ok, restored} <- restore(cfg, specs, opts) do
+      result = verify.(Enum.map(restored, & &1.state))
+
+      :telemetry.execute(
+        Telemetry.event([:es, :aggregate, :load]),
+        load_measurements(restored, System.monotonic_time() - start),
+        %{type: cfg.type, op: op, result: result_tag(result)}
+      )
+
+      write_snapshots(cfg, restored, write_snapshots?)
+      result
+    end
+  end
 
   # ---
 
@@ -439,36 +489,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp load(cfg, op, states, opts, verify) do
     specs = Enum.map(states, &%{state: &1, upper: nil, captures: []})
     load_at(cfg, op, specs, opts, true, verify)
-  end
-
-  @doc false
-  # Загрузка потоков с верхней границей и срезами: `upper` — потолок версии потока (`nil` — голова),
-  # `captures` — версии-срезы пакета. Потолок срезов — наибольшая, снапшот берётся только не выше
-  # наименьшей. `write_snapshots?` — писать ли снапшоты после загрузки.
-  @spec load_at(
-          map(),
-          atom(),
-          [load_spec()],
-          keyword(),
-          boolean(),
-          ([struct()] -> Result.t([struct()], term()))
-        ) :: Result.t([struct()], term())
-
-  def load_at(cfg, op, specs, opts, write_snapshots?, verify) when is_list(specs) and is_list(opts) do
-    start = System.monotonic_time()
-
-    with {:ok, restored} <- restore(cfg, specs, opts) do
-      result = verify.(Enum.map(restored, & &1.state))
-
-      :telemetry.execute(
-        Telemetry.event([:es, :aggregate, :load]),
-        load_measurements(restored, System.monotonic_time() - start),
-        %{type: cfg.type, op: op, result: result_tag(result)}
-      )
-
-      write_snapshots(cfg, restored, write_snapshots?)
-      result
-    end
   end
 
   # Все потоки — одним запросом, от снапшота там, где он есть; потоки отвергнутых снапшотов —
@@ -697,6 +717,22 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       nil -> {:ok, state}
       detail -> {:error, version_mismatch(cfg, detail)}
     end
+  end
+
+  # Адрес версии — ссылка на состояние, которого в потоке нет: пустой поток или версия за его
+  # головой. Это не гонка записи, поэтому `source: :address`, и `Es.Transact` отказ не повторяет.
+  defp verify_at(_cfg, %{version: head} = state, %Version{} = version) when head == version,
+    do: {:ok, state}
+
+  defp verify_at(cfg, state, %Version{} = version) do
+    detail = %{
+      aggregate_id: cfg.codec.dump(state.id),
+      expected: Version.value(version),
+      actual: state.version && Version.value(state.version),
+      source: :address
+    }
+
+    {:error, version_mismatch(cfg, detail)}
   end
 
   defp mismatch_detail(_state, :current, _codec), do: nil

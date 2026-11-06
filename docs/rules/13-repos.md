@@ -1205,6 +1205,63 @@ Core.Es.Store.read_stream(Agg.Event.Codec, other_id, limit, offset, context)
 невозможная clause по результату `page_stream/4` репозитория event-sourced агрегата
 (`make consumer-check`).
 
+## Состояние на версии
+
+Копию event-sourced агрегата или его полей на момент события MUST NOT хранить рядом с документом:
+состояние по адресу версии `{id, N}` сворачивает пара модулей read-пути, а наружу уходит только
+представление.
+
+```elixir
+defmodule MyApp.Domain.<BC>.<Aggregate>.<Purpose>.View do
+  use Core.View, fields: [...]
+end
+
+defmodule MyApp.Domain.<BC>.<Aggregate>.<Purpose>.ReadRepo do
+  use Core.Es.Aggregate.ReadRepo,
+    repo: MyApp.Domain.<BC>.<Aggregate>.Repo,
+    view: MyApp.Domain.<BC>.<Aggregate>.<Purpose>.View
+end
+
+defmodule MyApp.Domain.<BC>.<Aggregate>.<Purpose>.ReadRepo.Pg do
+  use Core.Es.Aggregate.ReadRepo.Pg,
+    behaviour: MyApp.Domain.<BC>.<Aggregate>.<Purpose>.ReadRepo,
+    to_view: &MyApp.Domain.<BC>.<Aggregate>.<Purpose>.View.from_state/1
+end
+```
+
+- `repo:` — behaviour write-репозитория event-sourced агрегата; агрегат, кодек событий,
+  снапшоты и каталог ошибок реализация берёт у него по конвенции `<Behaviour>.Pg` («DI»).
+  State-stored агрегат — `CompileError`: его источник истины — строка, свёртки нет.
+- `view:` — `use Core.View`; `to_view:` — захват функции арности 1 `%Agg{} → %View{}`. `%Agg{}`
+  потребитель видит только аргументом `to_view`; наружу — `%View{}` или `{:error, %Error{}}`.
+- Имя — по назначению в каталоге агрегата: `<Aggregate>.<Purpose>.ReadRepo` / `.View` (SHOULD),
+  чтобы не конфликтовать с проецируемой `<Aggregate>.ReadRepo` / `<Aggregate>.View`.
+
+| Функция | Возврат | Исходы |
+|---|---|---|
+| `get_at(id, version, context)` | `Result.t(View.t())` | версия есть в потоке, включая голову, — `%View{}` состояния, свёрнутого до неё включительно; версия за головой или пустой поток — `:version_mismatch` с detail `%{aggregate_id, expected, actual, source: :address}` (`actual: nil` у пустого); `:current` вместо `%Version{}` — `FunctionClauseError` |
+
+- Состояние на версии MUST NOT кешировать ни библиотеке, ни потребителю: после уничтожения ключа
+  субъекта (`Core.Es.Personal.destroy_key/3`) кеш отдал бы ПДн-значение, которое поток уже не
+  открывает. Хранят адрес версии, а читают по нему каждый раз.
+- Чтение MUST NOT звать внутри `Es.Transact.run` / `Transact.run`: `opts` — опции запроса,
+  транзакционных нет, и чтение не втягивается в транзакцию команды и её повторы.
+- Доступ не проверяется и `:not_found` нет, как у страницы потока: права по `Context` решает
+  читающий usecase до чтения.
+- Отказ `source: :address` — не гонка записи: `Es.Transact` повторяет только `source: :storage`.
+- Telemetry — `[:es, :aggregate, :load]` и `[:es, :aggregate, :fold]` с `op: :get_at`; span'а нет.
+
+```elixir
+# плохо — состояние на версии в кеше: после уничтожения ключа вернётся ПДн-значение
+Cache.put({:account_at, id, version}, state)
+
+# хорошо — хранится адрес версии, View читается по нему
+Cache.put({:account_version, id}, version)
+{:ok, view} = @read_repo.get_at(id, version, context)
+```
+
+Проверяется: `test/core/es/aggregate/read_repo/pg_test.exs` — контракт `get_at` через базу.
+
 ## Наименование
 
 Имена схем и таблиц, ключи и soft delete — `deps/core/docs/rules/app/13-repos.md`,

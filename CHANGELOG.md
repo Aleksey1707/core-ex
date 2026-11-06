@@ -16,6 +16,22 @@
   выключение транспорта или очереди в prod откладывало доставку, стало — в prod транспорт и очередь
   на инстансе поллера включены; `@doc`, обещающий ожидание записей, правится.
 
+### Новое
+
+- **Состояние event-sourced агрегата на версии — пара модулей read-пути.** Копию агрегата (или его
+  полей) на момент события больше не нужно держать рядом с документом: адрес версии `{id, N}`
+  читается `get_at(id, %Version{}, context)` → `Result.t(View.t())`. Пара — `use
+  Core.Es.Aggregate.ReadRepo` (`repo:` — behaviour write-репозитория, `view:` — `Core.View`) и `use
+  Core.Es.Aggregate.ReadRepo.Pg` (`behaviour:`, `to_view:` — захват `%Agg{} → %View{}`); реализация
+  write-репозитория резолвится по конвенции `<Behaviour>.Pg`. Состояние сворачивается до версии
+  включительно (снапшот не выше `N`, снапшоты не пишутся), наружу уходит только `%View{}`;
+  `:current` — `FunctionClauseError`. Версия за головой потока или пустой поток —
+  `:version_mismatch` с detail `%{aggregate_id, expected, actual, source: :address}`: `Es.Transact`
+  его не повторяет. `[:es, :aggregate, :load]` и `[:es, :aggregate, :fold]` помечают чтение
+  `op: :get_at`. Норма — `docs/rules/13-repos.md`, «Состояние на версии». Правка потребителя:
+  было — в документе лежала копия полей агрегата на момент события, стало — хранится `{id,
+  version}`, а usecase читает `%View{}` через `<Aggregate>.<Purpose>.ReadRepo.Pg.get_at/4`.
+
 ### Изменения контракта макросов
 
 - **`destroyable: true` у поля `use Core.Struct`.** Поле состояния event-sourced агрегата, куда
