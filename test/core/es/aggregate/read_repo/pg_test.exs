@@ -57,6 +57,38 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
       end
     end
 
+    test "repo: — реализация write-репозитория без wrappers" do
+      write = Module.concat(__MODULE__, "NoWrappersWrite")
+      write_pg = Module.concat(write, Pg)
+      read = Module.concat(__MODULE__, "NoWrappersRead")
+
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(write) do
+            use Core.Es.Aggregate.Repo,
+              aggregate: Core.EsFixture.Account
+          end
+
+          defmodule unquote(write_pg) do
+            def __es_aggregate_repo__, do: unquote(write).__es_aggregate_repo__()
+          end
+
+          defmodule unquote(read) do
+            use Core.Es.Aggregate.ReadRepo,
+              repo: unquote(write),
+              view: View
+          end
+        end
+      )
+
+      message =
+        ~r/^Es\.Aggregate\.ReadRepo\.Pg: repo: модуль .*NoWrappersWrite\.Pg должен экспортировать \[__es_get_at__: 4, __es_get_many_at__: 3\] \(write-репозиторий `use Core\.Es\.Aggregate\.Repo\.Pg`/
+
+      assert_raise CompileError, message, fn ->
+        compile_read_repo_pg!(:no_wrappers, behaviour: read)
+      end
+    end
+
     test "to_view: — не захват функции арности 1" do
       message = ~r/^Es\.Aggregate\.ReadRepo\.Pg: to_view: ожидается захват функции арности 1/
 
@@ -66,6 +98,14 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
 
       assert_raise CompileError, message, fn ->
         compile_read_repo_pg!(:bad_to_view_literal, to_view: :identity)
+      end
+
+      assert_raise CompileError, message, fn ->
+        compile_read_repo_pg!(:bad_to_view_fn, to_view: quote(do: fn _ -> nil end))
+      end
+
+      assert_raise CompileError, message, fn ->
+        compile_read_repo_pg!(:bad_to_view_capture, to_view: quote(do: &Core.EsFixture.Account.execute/2))
       end
     end
 

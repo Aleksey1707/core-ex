@@ -13,8 +13,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   `{:ok, %View{}} | {:error, %Error{}}`. `:current` вместо `%Version{}` — `FunctionClauseError`:
   голова потока читается через `get` write-репозитория. `get_many_at/2,3` принимает список пар
   `{%Agg.ID{}, %Version{}}` и отдаёт представления в порядке пар: один поток читается один раз
-  до наибольшей версии его пар, срез состояния снимается на каждой версии; повтор пары и разные
-  версии одного id разрешены, `[]` — `{:ok, []}` без запросов. Элемент не пара —
+  до наибольшей версии его пар, снятие состояния на версии выполняется для каждой версии; повтор
+  пары и разные версии одного id разрешены, `[]` — `{:ok, []}` без запросов. Элемент не пара —
   `FunctionClauseError`.
 
   Состояние на версии сворачивает `@doc false` путь write-репозитория: снапшот не выше `N`,
@@ -38,6 +38,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
 
   - `behaviour:` — `use Core.Es.Aggregate.ReadRepo`
   - `to_view:` — захват функции арности 1 `%Agg{} → %View{}`
+
+  Макрос занимает в вызывающем модуле имя `@es_read_repo` и приватную `es_read_repo_to_view!/2`.
   """
 
   alias Core.Es.Aggregate.ReadRepo
@@ -55,7 +57,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
     behaviour = behaviour!(opts)
     %{repo: repo, aggregate: aggregate, id: id, view: view} = behaviour.__es_read_repo__()
-    to_view = Keyword.fetch!(opts, :to_view)
+    to_view = to_view_expr!(Keyword.fetch!(opts, :to_view), behaviour)
 
     quote generated: true do
       @behaviour unquote(behaviour)
@@ -67,6 +69,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
         view: unquote(view),
         to_view: Core.Es.Aggregate.ReadRepo.Pg.to_view!(unquote(to_view), unquote(behaviour))
       }
+
+      Core.Es.Aggregate.ReadRepo.Pg.ensure_write_repo!(@es_read_repo.repo, unquote(repo))
 
       @doc "Представление агрегата на версии из свёрнутого до неё состояния."
       @impl true
@@ -113,6 +117,28 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   end
 
   @doc false
+  @spec ensure_write_repo!(module(), module()) :: module()
+
+  def ensure_write_repo!(repo, behaviour) do
+    missing =
+      for {fun, arity} <- [__es_get_at__: 4, __es_get_many_at__: 3],
+          not Helper.Module.exports?(repo, fun, arity),
+          do: {fun, arity}
+
+    case missing do
+      [] ->
+        repo
+
+      missing ->
+        Helper.Opts.reject!(
+          "#{@label}: repo",
+          "модуль #{inspect(repo)} должен экспортировать #{inspect(missing)} " <>
+            "(write-репозиторий `use Core.Es.Aggregate.Repo.Pg`, behaviour: #{inspect(behaviour)})"
+        )
+    end
+  end
+
+  @doc false
   @spec to_view!(term(), module()) :: (struct() -> struct())
 
   def to_view!(fun, _behaviour) when is_function(fun, 1), do: fun
@@ -126,6 +152,26 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   end
 
   # ---
+
+  # Захват `&Mod.fun/1` или локальный `&fun/1` — единственная форма, которая разворачивается в
+  # функцию на этапе раскрытия. Атрибут с захватом проверяется в рантайме тела модуля.
+  defp to_view_expr!(to_view, behaviour) do
+    if capture1?(to_view) or attribute?(to_view) do
+      to_view
+    else
+      Helper.Opts.reject!(
+        "#{@label}: to_view",
+        "ожидается захват функции арности 1 (`&Mod.fun/1`), получено #{Macro.to_string(to_view)} " <>
+          "(behaviour: #{inspect(behaviour)})"
+      )
+    end
+  end
+
+  defp capture1?({:&, _, [{:/, _, [_, 1]}]}), do: true
+  defp capture1?(_), do: false
+
+  defp attribute?({:@, _, [{name, _, _}]}) when is_atom(name), do: true
+  defp attribute?(_), do: false
 
   defp behaviour!(opts) do
     behaviour = Helper.Opts.module!(opts, :behaviour, @label)

@@ -14,7 +14,7 @@ defmodule Consumer.Domain.Sales.Account.AtVersion.View do
   use Core.View,
     fields: [
       id: [prim: Account.ID],
-      version: [prim: Version],
+      version: [type: :pos_integer],
       name: [prim: Account.Name],
       status: [type: :string],
       holder: [type: :map, optional: true]

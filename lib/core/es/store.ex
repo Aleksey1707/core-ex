@@ -161,10 +161,11 @@ defmodule Core.Es.Store do
 
   @typedoc """
   Источник отказа `:version_mismatch`: `:expected` — сверка ожидаемой версии, вызывающий назвал
-  версию, а действительная другая; `:storage` — отказ хранилища, `append/5` не принял пачку.
-  Повтор команды решается по нему (`Core.Es.Transact`).
+  версию, а действительная другая; `:storage` — отказ хранилища, `append/5` не принял пачку;
+  `:address` — адрес версии, которой нет в потоке: чтение состояния на версии (`get_at` /
+  `get_many_at`). Повтор команды решается по нему (`Core.Es.Transact`).
   """
-  @type mismatch_source :: :expected | :storage
+  @type mismatch_source :: :expected | :storage | :address
 
   @typedoc """
   Detail отказа `:version_mismatch`: поток, ожидаемая версия (у `append/5` — первая версия потока

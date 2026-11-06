@@ -32,6 +32,7 @@ defmodule Core.Es.Transact do
   Не повторяются и уходят вызывающему как есть:
 
   - сверка ожидаемой версии — `source: :expected`, в том числе её список у `get_many`;
+  - сверка адреса версии — `source: :address` у `get_at` / `get_many_at`;
   - detail без `source:` — ошибку собрал не write-путь библиотеки;
   - `{:error, reason}`, где `reason` — не `%Core.Error{}`.
 

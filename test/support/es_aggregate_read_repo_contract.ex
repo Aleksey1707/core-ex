@@ -121,7 +121,7 @@ defmodule Core.EsAggregateReadRepoContract do
           assert {:ok, %View{version: 2}} = @read_repo_impl.get_at(id, Version.new!(2), Context.new())
 
           assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2},
-                           %{type: "account", snapshot: @snapshot}}
+                           %{type: "account", op: :get_at, snapshot: @snapshot}}
 
           assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 1, events: 2},
                            %{type: "account", op: :get_at, result: :ok}}
@@ -137,6 +137,21 @@ defmodule Core.EsAggregateReadRepoContract do
 
           assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 1, events: 1},
                            %{op: :get_at, result: :version_mismatch}}
+        end
+
+        test "адрес версии не повторяется: run_counted отдаёт отказ как есть" do
+          id = Account.ID.new()
+          write!(@write_repo_impl, id, [open("Первое")])
+
+          assert {{:error, %Error{code: :version_mismatch, detail: %{source: :address}}}, 0} =
+                   Es.Transact.run_counted(fn ->
+                     @read_repo_impl.get_at(id, Version.new!(2), Context.new())
+                   end)
+
+          assert {{:error, %Error{code: :version_mismatch, detail: [%{source: :address}]}}, 0} =
+                   Es.Transact.run_counted(fn ->
+                     @read_repo_impl.get_many_at([{id, Version.new!(2)}], Context.new())
+                   end)
         end
 
         test "уничтоженное ПДн-значение остаётся уничтоженным на любой версии" do
@@ -245,10 +260,10 @@ defmodule Core.EsAggregateReadRepoContract do
                    @read_repo_impl.get_many_at(pairs, Context.new())
 
           assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2},
-                           %{type: "account", snapshot: @snapshot}}
+                           %{type: "account", op: :get_many_at, snapshot: @snapshot}}
 
           assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1},
-                           %{type: "account", snapshot: @snapshot}}
+                           %{type: "account", op: :get_many_at, snapshot: @snapshot}}
 
           assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 2, events: 3},
                            %{type: "account", op: :get_many_at, result: :ok}}
