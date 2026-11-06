@@ -7,7 +7,7 @@ View и невозможная clause по результату дают пре�
 
 **Blocked by:** 04 (`get_many_at`).
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] В фикстуре-потребителе — read-модель по назначению над её event-sourced агрегатом: behaviour, реализация, View и `to_view`, в каталоге агрегата по SHOULD свода.
 - [ ] Маркеры `# expect:` на опечатку в поле View результата `get_at` и элемента `get_many_at` и на невозможную clause по результату обоих.
