@@ -20,7 +20,7 @@
 
 ## Comments
 
-Реализовано в `26b3468`, влито `1dbae39`. Фикстуры: поведение `Account.Repo.Snapshotted` +
+Реализовано в `db6fc3b`. Фикстуры: поведение `Account.Repo.Snapshotted` +
 `Account.Repo.Snapshotted.Pg` (`snapshot: [every: 2]`) и пара `AtVersion.Snapshotted.ReadRepo` /
 `.ReadRepo.Pg`. Контракт получил `error_module:` и `snapshot:` (ожидаемый исход свёртки). Покрыто:
 снапшот ≤ `N` — `:hit` и хвост, новее `N` — `:miss` и поток с начала, отсутствие записи и

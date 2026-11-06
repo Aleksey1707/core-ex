@@ -21,7 +21,7 @@
 
 ## Comments
 
-Реализовано в `2c4be05`. `use Core.Es.Aggregate.ReadRepo` проверяет `repo:` (маркер
+Реализовано в `cc14149`. `use Core.Es.Aggregate.ReadRepo` проверяет `repo:` (маркер
 `__es_aggregate_repo__/0` + полнота колбэков write-репозитория), `view:` (`__view__/0`);
 `use Core.Es.Aggregate.ReadRepo.Pg` — маркер `__es_read_repo__/0` и колбэки `get_at/3,4` у
 `behaviour:`, арность 1 у `to_view:`. Неизвестные/недостающие опции и нелитералы — через

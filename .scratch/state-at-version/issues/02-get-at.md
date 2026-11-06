@@ -26,7 +26,7 @@
 
 ## Comments
 
-Реализовано в `5841db4`, влито `0e1ff0a`; после review исправлено в `d86c463` (метка `op` у
+Реализовано в `440410d`; после review исправлено в `e790929` (метка `op` у
 `[:es, :aggregate, :fold]`, проверка реализации write-репозитория на `__es_get_at__/4` /
 `__es_get_many_at__/3`, `source: :address` в типах `Core.Es.Store` и в неповторяемых
 `Core.Es.Transact`, арность/форма `to_view:`, `version` View — `pos_integer`). Пара модулей
