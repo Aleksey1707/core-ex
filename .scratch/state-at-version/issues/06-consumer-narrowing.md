@@ -7,9 +7,18 @@ View и невозможная clause по результату дают пре�
 
 **Blocked by:** 04 (`get_many_at`).
 
-**Status:** claimed
+**Status:** resolved
 
 - [ ] В фикстуре-потребителе — read-модель по назначению над её event-sourced агрегатом: behaviour, реализация, View и `to_view`, в каталоге агрегата по SHOULD свода.
 - [ ] Маркеры `# expect:` на опечатку в поле View результата `get_at` и элемента `get_many_at` и на невозможную clause по результату обоих.
 - [ ] `boundary_lint --consumer` и `spec_lint` над фикстурой проходят; `make consumer-check` зелёный.
 - [ ] `make` зелёный.
+
+## Comments
+
+Реализовано в `7a4feac`, влито `9bb085f`. В фикстуре-потребителе — read-модель по назначению
+`Account.AtVersion.{View,ReadRepo,ReadRepo.Pg}` в каталоге агрегата. Сценарии
+`ConsumerTest.StateAtVersion`: опечатка в поле `%View{}` и элемента `get_many_at`, невозможные
+clause по результатам обоих. Попутно `get_many_at` реализации собирает список представлений
+пониманием списка, а не `Enum.map`: иначе вывод типов не сужал элемент до `%View{}` и маркер
+опечатки молчал. `make consumer-check` — 139 ожидаемых предупреждений, лишних нет.
