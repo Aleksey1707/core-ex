@@ -10,7 +10,7 @@
 
 **Blocked by:** 01 (Верхняя граница потока в загрузке write-репозитория).
 
-**Status:** claimed
+**Status:** resolved
 
 - [ ] Behaviour объявляет колбэки `get_at/3,4`, результат сужен до `{:ok, %View{}} | {:error, %Error{}}`; реализация резолвит write-репозиторий `<Behaviour>.Pg` по конвенции DI и берёт у него агрегат, кодек и каталог ошибок; функции `defoverridable`.
 - [ ] `get_at` на версии 1, промежуточной и голове отдаёт View состояния, свёрнутого до этой версии включительно.
@@ -23,3 +23,14 @@
 - [ ] `docs/rules/13-repos.md` — раздел «Состояние на версии»: объявление пары, таблица исходов `get_at`, MUST NOT кешировать состояние на версии (с причиной — уничтожение ключа субъекта), MUST NOT звать внутри `Es.Transact.run` / `Transact.run`, наружу — только View, SHOULD имя `<Aggregate>.<Purpose>.ReadRepo` / `.View` в каталоге агрегата, доступ — читающим usecase до чтения, `:not_found` нет; ссылка из `app/13-repos.md` («Read-модель») и значение `op` в `21-observability.md`; `make rules-check` зелёный.
 - [ ] CHANGELOG, «Новое»: пара модулей, `get_at`, `source: :address` в detail `:version_mismatch`, как заменить копию агрегата адресом версии (было → стало).
 - [ ] `make` зелёный, `make compile-no-optional` зелёный.
+
+## Comments
+
+Реализовано в `5841db4`, влито `0e1ff0a`; после review исправлено в `d86c463` (метка `op` у
+`[:es, :aggregate, :fold]`, проверка реализации write-репозитория на `__es_get_at__/4` /
+`__es_get_many_at__/3`, `source: :address` в типах `Core.Es.Store` и в неповторяемых
+`Core.Es.Transact`, арность/форма `to_view:`, `version` View — `pos_integer`). Пара модулей
+`Core.Es.Aggregate.ReadRepo` / `.Pg`, фикстура `Account.AtVersion.*`, контракт
+`Core.EsAggregateReadRepoContract`, раздел «Состояние на версии» в `13-repos.md`, ссылки из
+`app/13-repos.md` и `21-observability.md`, пункт CHANGELOG. Addressed: `Es.Transact` не повторяет
+`source: :address` — тест `run_counted` в контракте.
