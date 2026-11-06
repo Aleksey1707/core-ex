@@ -8,7 +8,7 @@
 
 **Blocked by:** 02 (`get_at` над write-репозиторием без снапшотов).
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] `CompileError`: `repo:` — не behaviour write-репозитория event-sourced агрегата (`use Core.Es.Aggregate.Repo`), в том числе state-stored репозиторий с `event_codec:`.
 - [ ] `CompileError`: `view:` — не `use Core.View`.
