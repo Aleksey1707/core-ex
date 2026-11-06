@@ -8,6 +8,11 @@ defmodule Core.EsAggregateReadRepoContract do
 
   Хост-модуль — `use Core.DataCase` и
   `use Core.EsAggregateReadRepoContract, impl: <реализация>, repo: <write-реализация>`.
+
+  `error_module:` — модуль поведения write-репозитория, которым строится `:version_mismatch`
+  (по умолчанию `Core.EsFixture.Account.Repo`): у варианта со снапшотами он свой.
+  `snapshot:` — исход свёртки в telemetry `[:es, :aggregate, :fold]` (по умолчанию `:off`;
+  у репозитория со снапшотами без строки — `:miss`).
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
@@ -20,7 +25,12 @@ defmodule Core.EsAggregateReadRepoContract do
   # ===== набор =====
 
   @doc "Подключить набор: `use Core.EsAggregateReadRepoContract, impl: …, repo: …`."
-  defmacro __using__(impl: impl, repo: repo) do
+  defmacro __using__(opts) do
+    impl = Keyword.fetch!(opts, :impl)
+    repo = Keyword.fetch!(opts, :repo)
+    error_module = Keyword.get(opts, :error_module, Account.Repo)
+    snapshot = Keyword.get(opts, :snapshot, :off)
+
     quote do
       alias Core.Context
       alias Core.Error
@@ -34,6 +44,8 @@ defmodule Core.EsAggregateReadRepoContract do
 
       @read_repo_impl unquote(impl)
       @write_repo_impl unquote(repo)
+      @error_module unquote(error_module)
+      @snapshot unquote(snapshot)
 
       unquote(get_at_tests())
     end
@@ -74,7 +86,7 @@ defmodule Core.EsAggregateReadRepoContract do
           id = Account.ID.new()
           write!(@write_repo_impl, id, [open("Первое"), rename("Второе"), freeze()])
 
-          assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
+          assert {:error, %Error{module: @error_module, code: :version_mismatch} = error} =
                    @read_repo_impl.get_at(id, Version.new!(4), Context.new())
 
           assert error.detail == %{aggregate_id: dump(id), expected: 4, actual: 3, source: :address}
@@ -83,7 +95,7 @@ defmodule Core.EsAggregateReadRepoContract do
         test "пустой поток — :version_mismatch с actual: nil и source: :address" do
           id = Account.ID.new()
 
-          assert {:error, %Error{module: Account.Repo, code: :version_mismatch} = error} =
+          assert {:error, %Error{module: @error_module, code: :version_mismatch} = error} =
                    @read_repo_impl.get_at(id, Version.new!(1), Context.new())
 
           assert error.detail == %{aggregate_id: dump(id), expected: 1, actual: nil, source: :address}
@@ -106,7 +118,7 @@ defmodule Core.EsAggregateReadRepoContract do
           assert {:ok, %View{version: 2}} = @read_repo_impl.get_at(id, Version.new!(2), Context.new())
 
           assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2},
-                           %{type: "account", snapshot: :off}}
+                           %{type: "account", snapshot: @snapshot}}
 
           assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 1, events: 2},
                            %{type: "account", op: :get_at, result: :ok}}

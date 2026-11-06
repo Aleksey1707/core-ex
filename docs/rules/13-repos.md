@@ -1244,6 +1244,12 @@ end
 - Состояние на версии MUST NOT кешировать ни библиотеке, ни потребителю: после уничтожения ключа
   субъекта (`Core.Es.Personal.destroy_key/3`) кеш отдал бы ПДн-значение, которое поток уже не
   открывает. Хранят адрес версии, а читают по нему каждый раз.
+- Снапшот write-репозитория (`snapshot:`) — только начало свёртки: версия не выше `N` — свёртка
+  идёт от снапшота (telemetry `[:es, :aggregate, :fold]`, `snapshot: :hit`), версия выше `N` —
+  снапшот пропускается и поток читается с начала (`:miss`). Чтение снапшоты MUST NOT писать:
+  `get_at` не затирает свежий снапшот старым состоянием и не шлёт `[:es, :snapshot, :write]`.
+- Зашифрованный снапшот агрегата с ПДн (`subject: :aggregate_id`) читается тем же путём, что
+  `get`: уничтоженный ключ субъекта не восстанавливает значение, а чтение не пишет новый снапшот.
 - Чтение MUST NOT звать внутри `Es.Transact.run` / `Transact.run`: `opts` — опции запроса,
   транзакционных нет, и чтение не втягивается в транзакцию команды и её повторы.
 - Доступ не проверяется и `:not_found` нет, как у страницы потока: права по `Context` решает
@@ -1260,11 +1266,12 @@ Cache.put({:account_version, id}, version)
 {:ok, view} = @read_repo.get_at(id, version, context)
 ```
 
-Проверяется: `test/core/es/aggregate/read_repo/pg_test.exs` — контракт `get_at` через базу;
-`CompileError` в `use Core.Es.Aggregate.ReadRepo` — `repo:` не behaviour event-sourced агрегата,
-`view:` не `use Core.View`, неизвестные и недостающие опции; в `use Core.Es.Aggregate.ReadRepo.Pg`
-— `behaviour:` не `use Core.Es.Aggregate.ReadRepo`, `to_view:` не захват функции арности 1,
-неизвестные и недостающие опции.
+Проверяется: `test/core/es/aggregate/read_repo/pg_test.exs` и
+`test/core/es/aggregate/read_repo/snapshotted_test.exs` — контракт `get_at` через базу, в том числе
+чтение от снапшота и без его записи; `CompileError` в `use Core.Es.Aggregate.ReadRepo` — `repo:` не
+behaviour event-sourced агрегата, `view:` не `use Core.View`, неизвестные и недостающие опции; в
+`use Core.Es.Aggregate.ReadRepo.Pg` — `behaviour:` не `use Core.Es.Aggregate.ReadRepo`, `to_view:`
+не захват функции арности 1, неизвестные и недостающие опции.
 
 ## Наименование
 
