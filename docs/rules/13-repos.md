@@ -1240,6 +1240,12 @@ end
 | Функция | Возврат | Исходы |
 |---|---|---|
 | `get_at(id, version, context)` | `Result.t(View.t())` | версия есть в потоке, включая голову, — `%View{}` состояния, свёрнутого до неё включительно; версия за головой или пустой поток — `:version_mismatch` с detail `%{aggregate_id, expected, actual, source: :address}` (`actual: nil` у пустого); `:current` вместо `%Version{}` — `FunctionClauseError` |
+| `get_many_at(pairs, context)` | `Result.t([View.t()])` | представления в порядке пар `{%ID{}, %Version{}}`, включая разные версии одного id и повтор пары; `[]` — `{:ok, []}` без запросов; все адреса за головой потоков и пустые потоки — одна `:version_mismatch` со списком detail `source: :address` в порядке пар; элемент не пара (`:current`, чужой id) — `FunctionClauseError` |
+
+- Пакет `get_many_at` читает поток каждого уникального id один раз до наибольшей версии его пар;
+  состояние снимается на каждой запрошенной версии, поэтому запрос один на пакет, а не на пару.
+  Снапшот потока — только не выше наименьшей версии его пар, иначе поток читается с начала.
+  Уникальна пара `{id, N}`, а не id: одинаковые пары разрешены и дают одинаковые `%View{}`.
 
 - Состояние на версии MUST NOT кешировать ни библиотеке, ни потребителю: после уничтожения ключа
   субъекта (`Core.Es.Personal.destroy_key/3`) кеш отдал бы ПДн-значение, которое поток уже не
@@ -1247,7 +1253,8 @@ end
 - Снапшот write-репозитория (`snapshot:`) — только начало свёртки: версия не выше `N` — свёртка
   идёт от снапшота (telemetry `[:es, :aggregate, :fold]`, `snapshot: :hit`), версия выше `N` —
   снапшот пропускается и поток читается с начала (`:miss`). Чтение снапшоты MUST NOT писать:
-  `get_at` не затирает свежий снапшот старым состоянием и не шлёт `[:es, :snapshot, :write]`.
+  `get_at` / `get_many_at` не затирают свежий снапшот старым состоянием и не шлют
+  `[:es, :snapshot, :write]`.
 - Зашифрованный снапшот агрегата с ПДн (`subject: :aggregate_id`) читается тем же путём, что
   `get`: уничтоженный ключ субъекта не восстанавливает значение, а чтение не пишет новый снапшот.
 - Чтение MUST NOT звать внутри `Es.Transact.run` / `Transact.run`: `opts` — опции запроса,
@@ -1255,7 +1262,9 @@ end
 - Доступ не проверяется и `:not_found` нет, как у страницы потока: права по `Context` решает
   читающий usecase до чтения.
 - Отказ `source: :address` — не гонка записи: `Es.Transact` повторяет только `source: :storage`.
-- Telemetry — `[:es, :aggregate, :load]` и `[:es, :aggregate, :fold]` с `op: :get_at`; span'а нет.
+- Telemetry — `[:es, :aggregate, :load]` и `[:es, :aggregate, :fold]` с `op: :get_at` /
+  `:get_many_at`; у пакета один `load` на вызов (`streams` — число уникальных id) и `fold` на
+  каждый поток; span'а нет.
 
 ```elixir
 # плохо — состояние на версии в кеше: после уничтожения ключа вернётся ПДн-значение
@@ -1267,8 +1276,9 @@ Cache.put({:account_version, id}, version)
 ```
 
 Проверяется: `test/core/es/aggregate/read_repo/pg_test.exs` и
-`test/core/es/aggregate/read_repo/snapshotted_test.exs` — контракт `get_at` через базу, в том числе
-чтение от снапшота и без его записи; `CompileError` в `use Core.Es.Aggregate.ReadRepo` — `repo:` не
+`test/core/es/aggregate/read_repo/snapshotted_test.exs` — контракт `get_at` / `get_many_at` через
+базу, в том числе порядок и повторы пар, один поток на id, чтение от снапшота не выше наименьшей
+версии пакета и без его записи; `CompileError` в `use Core.Es.Aggregate.ReadRepo` — `repo:` не
 behaviour event-sourced агрегата, `view:` не `use Core.View`, неизвестные и недостающие опции; в
 `use Core.Es.Aggregate.ReadRepo.Pg` — `behaviour:` не `use Core.Es.Aggregate.ReadRepo`, `to_view:`
 не захват функции арности 1, неизвестные и недостающие опции.

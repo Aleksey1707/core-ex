@@ -88,6 +88,51 @@ defmodule Core.Es.Aggregate.ReadRepo.SnapshottedTest do
       assert {:ok, %View{version: 2, name: "Второе"}} =
                @read_repo.get_at(id, Version.new!(2), Context.new(), timeout: 5_000, log: false)
     end
+
+    test "get_many_at: снапшот на наименьшей версии — начало свёртки пакета" do
+      id = Account.ID.new()
+      state = append!(%Account{id: id}, [open("Первое"), rename("Второе"), freeze()])
+      assert {:ok, _state} = @write_repo.get(id, :current, Context.new())
+      append!(state, [Core.EsAggregateRepoContract.close()])
+      attach_telemetry()
+
+      pairs = [{id, Version.new!(3)}, {id, Version.new!(4)}]
+
+      assert {{:ok,
+               [
+                 %View{version: 3, name: "Второе", status: "frozen"},
+                 %View{version: 4, name: "Второе", status: "closed"}
+               ]}, 1} =
+               Core.EsAggregateRepoContract.count_queries(
+                 fn -> @read_repo.get_many_at(pairs, Context.new()) end,
+                 :select
+               )
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{type: "account", snapshot: :hit}}
+    end
+
+    test "get_many_at: снапшот новее наименьшей версии — свёртка с начала, срезы версий" do
+      id = Account.ID.new()
+      append!(%Account{id: id}, [open("Первое"), rename("Второе"), freeze()])
+      assert {:ok, _state} = @write_repo.get(id, :current, Context.new())
+      assert %Snapshot.Schema{aggregate_version: 3} = snapshot(id)
+      attach_telemetry()
+
+      pairs = [{id, Version.new!(1)}, {id, Version.new!(2)}, {id, Version.new!(3)}]
+
+      assert {{:ok,
+               [
+                 %View{version: 1, name: "Первое", status: "open"},
+                 %View{version: 2, name: "Второе", status: "open"},
+                 %View{version: 3, name: "Второе", status: "frozen"}
+               ]}, 1} =
+               Core.EsAggregateRepoContract.count_queries(
+                 fn -> @read_repo.get_many_at(pairs, Context.new()) end,
+                 :select
+               )
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 3}, %{type: "account", snapshot: :miss}}
+    end
   end
 
   def handle_telemetry(event, measurements, metadata, test) do

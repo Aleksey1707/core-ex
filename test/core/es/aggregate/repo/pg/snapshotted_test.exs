@@ -361,7 +361,9 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
   defp load_at(id, upper, captures \\ [], write? \\ true) do
     spec = %{state: %Account{id: id}, upper: upper, captures: captures}
 
-    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], write?, &{:ok, &1})
+    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], write?, fn restored ->
+      {:ok, Enum.map(restored, & &1.state)}
+    end)
   end
 
   defp append!(state, commands) do

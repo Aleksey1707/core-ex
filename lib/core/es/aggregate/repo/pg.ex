@@ -43,7 +43,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `{:error, _}` на всю страницу. Реализация и исходы — `Core.Es.Store`, «Страница потока».
 
   ПДн-значения событий чтение расшифровывает пакетом (`Core.Es.Store`, «Загрузка пачки»): сбой
-  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` / `get_at` отдают `{:error, _}`
+  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` / `get_at` / `get_many_at`
+  отдают `{:error, _}`
   без замера `[:es, :aggregate, :load]`, нечитаемое событие — `Core.Exc`.
 
   `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
@@ -112,11 +113,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   не шлются.
 
   - `[:es, :aggregate, :load]` — на вызов `get` / `get_decision` / `get_many` / `refresh` /
-    `get_at`: измерения `duration` (native, без записи снапшотов и `fun`), `streams`, `events`
+    `get_at` / `get_many_at`: измерения `duration` (native, без записи снапшотов и `fun`),
+    `streams`, `events`
     (свёрнутые), `snapshot_hit`, `snapshot_miss`, `snapshot_rejected` (потоки; без `snapshot:` —
     нули); метаданные `type` (тип агрегата), `op` (`:get`, `:get_decision`, `:get_many`,
-    `:refresh`, `:get_at`), `result` (`:ok`, `:version_mismatch`). У `get_decision` `result` —
-    сверка до решения: пустой поток при `%Version{}` — `:ok`.
+    `:refresh`, `:get_at`, `:get_many_at`), `result` (`:ok`, `:version_mismatch`). У
+    `get_decision` `result` — сверка до решения: пустой поток при `%Version{}` — `:ok`.
   - `[:es, :aggregate, :fold]` — на свёрнутый поток: измерение `events`; метаданные `type`,
     `snapshot` (`:hit`, `:miss`, `:rejected`, без `snapshot:` — `:off`).
   - `[:es, :snapshot, :write]` — на upsert снапшотов: измерения `duration` (native), `rows`
@@ -226,6 +228,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           )
           when is_list(opts) do
         Core.Es.Aggregate.Repo.Pg.get_at(es_aggregate_repo(), id, version, context, opts)
+      end
+
+      @doc false
+      def __es_get_many_at__(pairs, %Core.Context{} = context, opts \\ [])
+          when is_list(pairs) and is_list(opts) do
+        Core.Es.Aggregate.Repo.Pg.get_many_at(es_aggregate_repo(), pairs, context, opts)
       end
 
       @doc "Решение `fun` над состоянием агрегата; явная версия на пустом потоке сверяется после решения."
@@ -368,7 +376,18 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   def get_at(cfg, id, %Version{} = version, %Context{}, opts) when is_list(opts) do
     spec = %{state: struct(cfg.aggregate, id: id), upper: Version.value(version), captures: []}
 
-    load_at(cfg, :get_at, [spec], opts, false, fn [state] -> verify_at(cfg, state, version) end)
+    load_at(cfg, :get_at, [spec], opts, false, fn [restored] -> verify_at(cfg, restored.state, version) end)
+  end
+
+  @doc false
+  @spec get_many_at(map(), [{struct(), Version.t()}], Context.t(), keyword()) ::
+          Result.t([struct()])
+
+  def get_many_at(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts) do
+    case address_pairs!(cfg, pairs) do
+      [] -> {:ok, []}
+      [_ | _] = pairs -> load_addresses(cfg, pairs, opts)
+    end
   end
 
   @doc false
@@ -407,21 +426,22 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @doc false
   # Загрузка потоков с верхней границей и срезами: `upper` — потолок версии потока (`nil` — голова),
   # `captures` — версии-срезы пакета. Потолок срезов — наибольшая, снапшот берётся только не выше
-  # наименьшей. `write_snapshots?` — писать ли снапшоты после загрузки.
+  # наименьшей. `write_snapshots?` — писать ли снапшоты после загрузки. `verify` получает
+  # восстановленные потоки: `state`, `captures`, `events`, `snapshot`, `destroyed?`.
   @spec load_at(
           map(),
           atom(),
           [load_spec()],
           keyword(),
           boolean(),
-          ([struct()] -> Result.t([struct()], term()))
-        ) :: Result.t([struct()], term())
+          ([map()] -> Result.t(term(), term()))
+        ) :: Result.t(term(), term())
 
   def load_at(cfg, op, specs, opts, write_snapshots?, verify) when is_list(specs) and is_list(opts) do
     start = System.monotonic_time()
 
     with {:ok, restored} <- restore(cfg, specs, opts) do
-      result = verify.(Enum.map(restored, & &1.state))
+      result = verify.(restored)
 
       :telemetry.execute(
         Telemetry.event([:es, :aggregate, :load]),
@@ -435,6 +455,57 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   end
 
   # ---
+
+  defp load_addresses(cfg, pairs, opts) do
+    ids = Enum.uniq(Enum.map(pairs, &elem(&1, 0)))
+    specs = Enum.map(ids, &address_spec(cfg, &1, pairs))
+    verify = fn restored -> verify_addresses(cfg, pairs, Enum.zip(ids, restored)) end
+
+    load_at(cfg, :get_many_at, specs, opts, false, verify)
+  end
+
+  defp address_spec(cfg, id, pairs) do
+    captures = for {^id, version} <- pairs, uniq: true, do: version
+
+    %{state: struct(cfg.aggregate, id: id), upper: nil, captures: Enum.sort(captures)}
+  end
+
+  # Адрес версии — только пара `{%ID{}, %Version{}}`: `:current` и всё прочее — `FunctionClauseError`.
+  defp address_pairs!(cfg, pairs) do
+    id_mod = cfg.id
+
+    Enum.map(pairs, fn
+      {%{__struct__: ^id_mod} = id, %Version{} = version} -> {id, Version.value(version)}
+    end)
+  end
+
+  # Состояние каждой пары — срез её версии; нет среза — адрес за головой потока или на пустом
+  # потоке. Расхождения собираются в одну ошибку в порядке пар.
+  defp verify_addresses(cfg, pairs, streams) do
+    by_id =
+      Map.new(streams, fn {id, restored} ->
+        actual = restored.state.version && Version.value(restored.state.version)
+        {id, %{captures: restored.captures, actual: actual}}
+      end)
+
+    results =
+      Enum.map(pairs, fn {id, expected} ->
+        %{captures: captures, actual: actual} = Map.fetch!(by_id, id)
+
+        case Map.fetch(captures, expected) do
+          {:ok, state} ->
+            {:ok, state}
+
+          :error ->
+            {:error, %{aggregate_id: cfg.codec.dump(id), expected: expected, actual: actual, source: :address}}
+        end
+      end)
+
+    case for {:error, detail} <- results, do: detail do
+      [] -> {:ok, for({:ok, state} <- results, do: state)}
+      details -> {:error, version_mismatch(cfg, details)}
+    end
+  end
 
   defp initial_states!(%{aggregate: aggregate, id: id_mod}, pairs) do
     states =
@@ -488,6 +559,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # Сбой хранилища ключей отдаётся вызывающему без замера: потоки не восстановлены.
   defp load(cfg, op, states, opts, verify) do
     specs = Enum.map(states, &%{state: &1, upper: nil, captures: []})
+    verify = fn restored -> verify.(Enum.map(restored, & &1.state)) end
     load_at(cfg, op, specs, opts, true, verify)
   end
 
@@ -623,22 +695,75 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   defp after_version(%{version: %Version{} = version}), do: Version.value(version)
 
   defp fold_tail(%{snapshot: nil} = cfg, spec, {nil, events, _destroyed?}),
-    do: restored(:off, cfg.aggregate.fold(spec.state, events), events, false)
+    do: restored(:off, cfg, spec, spec.state, events, false)
 
   defp fold_tail(cfg, spec, {nil, events, destroyed?}),
-    do: restored(:miss, cfg.aggregate.fold(spec.state, events), events, destroyed?)
+    do: restored(:miss, cfg, spec, spec.state, events, destroyed?)
 
   defp fold_tail(cfg, spec, {snapshot, events, destroyed?}) do
     case Snapshot.fold(cfg, spec.state, snapshot, events) do
-      {:ok, folded} -> restored(:hit, folded, events, destroyed?)
+      {:ok, folded} -> restored_hit(cfg, spec, snapshot, folded, events, destroyed?)
       :rejected -> {:rejected, spec.state, false}
       :destroyed -> {:rejected, spec.state, true}
     end
   end
 
+  # Без срезов хвост уже свёрнут снапшотом; со срезами — снова от состояния снапшота, без запроса.
+  defp restored_hit(_cfg, %{captures: []}, _snapshot, folded, events, destroyed?),
+    do: restored_folded(:hit, folded, events, destroyed?)
+
+  defp restored_hit(cfg, spec, snapshot, folded, events, destroyed?) do
+    restored(:hit, cfg, spec, snapshot_base(cfg, spec, snapshot, folded), events, destroyed?)
+  end
+
+  defp snapshot_base(cfg, spec, snapshot, _folded) do
+    case Snapshot.fold(cfg, spec.state, snapshot, []) do
+      {:ok, base} -> base
+      _rejected -> spec.state
+    end
+  end
+
   # `destroyed?` — чтение видело уничтоженный снапшот или ПДн-значение: снапшот потока не пишется.
-  defp restored(snapshot, state, events, destroyed?),
-    do: %{snapshot: snapshot, state: state, events: length(events), destroyed?: destroyed?}
+  # `captures` — состояния на срезах версий пакета (`%{version => state}`), у обычного чтения пусто.
+  defp restored(snapshot, cfg, spec, base, events, destroyed?) do
+    {state, captures} = fold_captures(cfg, spec.captures, base, events)
+
+    restored_folded(snapshot, state, events, destroyed?, captures)
+  end
+
+  defp restored_folded(snapshot, state, events, destroyed?, captures \\ %{}) do
+    %{
+      snapshot: snapshot,
+      state: state,
+      events: length(events),
+      destroyed?: destroyed?,
+      captures: captures
+    }
+  end
+
+  # Режем события по границам срезов: каждый отрезок — продолжение свёртки предыдущего, поэтому
+  # свёрнутых событий столько же, а запрос по-прежнему один. Срез выше головы не снимается.
+  defp fold_captures(cfg, [], state, events), do: {cfg.aggregate.fold(state, events), %{}}
+
+  defp fold_captures(cfg, captures, base, events) do
+    {captures, state, rest} =
+      captures
+      |> Enum.sort()
+      |> Enum.uniq()
+      |> Enum.reduce({%{}, base, events}, fn capture, {captures, state, events} ->
+        {upto, rest} = Enum.split_while(events, &(Version.value(&1.aggregate_version) <= capture))
+        state = cfg.aggregate.fold(state, upto)
+
+        captures =
+          if state.version && Version.value(state.version) == capture,
+            do: Map.put(captures, capture, state),
+            else: captures
+
+        {captures, state, rest}
+      end)
+
+    {cfg.aggregate.fold(state, rest), captures}
+  end
 
   defp refold_rejected(restored, cfg, specs, opts) do
     rejected =
@@ -654,7 +779,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
         Enum.zip_with(streams, rejected, fn events, {spec, destroyed?} ->
           restored(
             :rejected,
-            cfg.aggregate.fold(spec.state, events),
+            cfg,
+            spec,
+            spec.state,
             events,
             destroyed? or destroyed_value?(cfg, events)
           )

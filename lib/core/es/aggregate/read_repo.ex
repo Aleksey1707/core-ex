@@ -14,12 +14,13 @@ defmodule Core.Es.Aggregate.ReadRepo do
   библиотеке и наружу уходит только `%View{}`. Решение от него принять нельзя, а
   `%Agg{}` потребитель видит только аргументом `to_view:` реализации.
 
-  Генерирует `@callback get_at/3,4` → `Core.Result.t(view.t())`. Реализация резолвится
+  Генерирует `@callback get_at/3,4` и `get_many_at/2,3` → `Core.Result.t(view.t())` и
+  `Core.Result.t([view.t()])`. Реализация резолвится
   `Core.Config.repo!/1` по конвенции `<Behaviour>.Pg`; агрегат и Prim идентификатора берутся у
   write-репозитория (`__es_aggregate_repo__/0`).
 
   Интроспекция — `__es_read_repo__/0`: по ней `use Core.Es.Aggregate.ReadRepo.Pg` находит
-  write-репозиторий, View и голову `get_at`.
+  write-репозиторий, View и головы `get_at` / `get_many_at`.
 
   Нормы чтения — `docs/rules/13-repos.md`, «Состояние на версии».
 
@@ -39,7 +40,7 @@ defmodule Core.Es.Aggregate.ReadRepo do
   @required_keys ~w(repo view)a
   @optional_keys []
   @expression_keys []
-  @callbacks [get_at: 3, get_at: 4]
+  @callbacks [get_at: 3, get_at: 4, get_many_at: 2, get_many_at: 3]
 
   @doc "Объявить behaviour read-репозитория состояния на версии."
   defmacro __using__(opts) do
@@ -74,6 +75,17 @@ defmodule Core.Es.Aggregate.ReadRepo do
                   context :: Core.Context.t(),
                   opts :: keyword()
                 ) :: Core.Result.t(unquote(view).t())
+
+      @callback get_many_at(
+                  pairs :: [{unquote(id).t(), Core.Version.t()}],
+                  context :: Core.Context.t()
+                ) :: Core.Result.t([unquote(view).t()])
+
+      @callback get_many_at(
+                  pairs :: [{unquote(id).t(), Core.Version.t()}],
+                  context :: Core.Context.t(),
+                  opts :: keyword()
+                ) :: Core.Result.t([unquote(view).t()])
     end
   end
 

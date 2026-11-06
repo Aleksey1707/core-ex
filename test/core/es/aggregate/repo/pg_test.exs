@@ -337,7 +337,9 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
   defp load_at(id, upper, captures \\ []) do
     spec = %{state: %Account{id: id}, upper: upper, captures: captures}
 
-    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], true, &{:ok, &1})
+    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], true, fn restored ->
+      {:ok, Enum.map(restored, & &1.state)}
+    end)
   end
 
   def handle_telemetry(event, measurements, metadata, test) do

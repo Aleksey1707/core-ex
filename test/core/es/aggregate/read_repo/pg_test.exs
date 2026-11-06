@@ -50,7 +50,7 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
       )
 
       message =
-        ~r/^Es\.Aggregate\.ReadRepo\.Pg: behaviour: модуль .*GetAtOnlyReadRepo должен объявлять \[get_at: 4\] \(use Core\.Es\.Aggregate\.ReadRepo\)$/
+        ~r/^Es\.Aggregate\.ReadRepo\.Pg: behaviour: модуль .*GetAtOnlyReadRepo должен объявлять \[get_at: 4, get_many_at: 2, get_many_at: 3\] \(use Core\.Es\.Aggregate\.ReadRepo\)$/
 
       assert_raise CompileError, message, fn ->
         compile_read_repo_pg!(:partial_read_repo, behaviour: behaviour)

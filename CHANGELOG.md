@@ -20,7 +20,10 @@
 
 - **Состояние event-sourced агрегата на версии — пара модулей read-пути.** Копию агрегата (или его
   полей) на момент события больше не нужно держать рядом с документом: адрес версии `{id, N}`
-  читается `get_at(id, %Version{}, context)` → `Result.t(View.t())`. Пара — `use
+  читается `get_at(id, %Version{}, context)` → `Result.t(View.t())`, а пакет адресов —
+  `get_many_at([{id, %Version{}}], context)` → `Result.t([View.t()])` в порядке пар: поток каждого
+  id читается один раз до наибольшей версии его пар, разные версии одного id и повтор пары
+  разрешены, `[]` — `{:ok, []}` без запросов. Пара — `use
   Core.Es.Aggregate.ReadRepo` (`repo:` — behaviour write-репозитория, `view:` — `Core.View`) и `use
   Core.Es.Aggregate.ReadRepo.Pg` (`behaviour:`, `to_view:` — захват `%Agg{} → %View{}`); реализация
   write-репозитория резолвится по конвенции `<Behaviour>.Pg`. Состояние сворачивается до версии
@@ -29,11 +32,14 @@
   снапшот агрегата с ПДн читается как у `get` — уничтоженное значение остаётся уничтоженным.
   Наружу уходит только `%View{}`;
   `:current` — `FunctionClauseError`. Версия за головой потока или пустой поток —
-  `:version_mismatch` с detail `%{aggregate_id, expected, actual, source: :address}`: `Es.Transact`
-  его не повторяет. `[:es, :aggregate, :load]` и `[:es, :aggregate, :fold]` помечают чтение
-  `op: :get_at`. Норма — `docs/rules/13-repos.md`, «Состояние на версии». Правка потребителя:
+  `:version_mismatch` с detail `%{aggregate_id, expected, actual, source: :address}`, у
+  `get_many_at` — одна ошибка со списком detail в порядке пар: `Es.Transact` его не повторяет.
+  `[:es, :aggregate, :load]` и `[:es, :aggregate, :fold]` помечают чтение
+  `op: :get_at` / `:get_many_at`. Норма — `docs/rules/13-repos.md`, «Состояние на версии». Правка
+  потребителя:
   было — в документе лежала копия полей агрегата на момент события, стало — хранится `{id,
-  version}`, а usecase читает `%View{}` через `<Aggregate>.<Purpose>.ReadRepo.Pg.get_at/4`.
+  version}`, а usecase читает `%View{}` через `<Aggregate>.<Purpose>.ReadRepo.Pg.get_at/4` или
+  `get_many_at/3` для списка адресов.
 
 ### Изменения контракта макросов
 

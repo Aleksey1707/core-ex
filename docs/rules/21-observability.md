@@ -107,9 +107,9 @@ Span на периодический опрос (тик поллера, цикл
 `Agg.Process.execute` — в процессе вызывающего, дочерним span'у usecase, а не в процессе, который
 исполняет команду: контекст трейса живёт в pdict вызывающего. Span открывает сам `execute`; режим
 и число повторов — атрибуты, прикладная ошибка — `record_error/1`, доменный отказ статус span'а не
-меняет. У восстановления агрегата (`get` / `get_decision` / `get_many` / `refresh` / `get_at`)
-span'а нет; чтение по версии идёт теми же событиями `[:es, :aggregate, :load]` и
-`[:es, :aggregate, :fold]` с меткой `op: :get_at`.
+меняет. У восстановления агрегата (`get` / `get_decision` / `get_many` / `refresh` / `get_at` /
+`get_many_at`) span'а нет; чтение по версии идёт теми же событиями `[:es, :aggregate, :load]` и
+`[:es, :aggregate, :fold]` с меткой `op: :get_at` / `:get_many_at`.
 
 Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span».
 

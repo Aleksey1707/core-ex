@@ -11,16 +11,22 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
 
   Генерирует `get_at/3,4` с головой `%Agg.ID{}` + `%Version{}` + `%Context{}`:
   `{:ok, %View{}} | {:error, %Error{}}`. `:current` вместо `%Version{}` — `FunctionClauseError`:
-  голова потока читается через `get` write-репозитория.
+  голова потока читается через `get` write-репозитория. `get_many_at/2,3` принимает список пар
+  `{%Agg.ID{}, %Version{}}` и отдаёт представления в порядке пар: один поток читается один раз
+  до наибольшей версии его пар, срез состояния снимается на каждой версии; повтор пары и разные
+  версии одного id разрешены, `[]` — `{:ok, []}` без запросов. Элемент не пара —
+  `FunctionClauseError`.
 
   Состояние на версии сворачивает `@doc false` путь write-репозитория: снапшот не выше `N`,
-  события до `N` включительно, снапшоты не пишутся. Адрес за головой потока или на пустом
-  потоке — `:version_mismatch` каталога `errors:` write-репозитория с `source: :address`.
+  события до `N` включительно, снапшоты не пишутся. У пакета снапшот берётся только не выше
+  наименьшей версии пар id, иначе поток читается с начала. Адрес за головой потока или на пустом
+  потоке — `:version_mismatch` каталога `errors:` write-репозитория с `source: :address`; у пакета
+  это одна ошибка со списком detail в порядке пар.
   `%Agg{}` уходит только аргументом `to_view:`; наружу — `%View{}`.
 
   Реализация write-репозитория резолвится `Core.Config.repo!/1` по конвенции
   `<Behaviour>.Pg` на компиляции. Telemetry — `[:es, :aggregate, :load]` и
-  `[:es, :aggregate, :fold]` с `op: :get_at`; span'а нет.
+  `[:es, :aggregate, :fold]` с `op: :get_at` / `:get_many_at`; span'а нет.
 
   Функции `defoverridable` с сохранением закрытой головы и сужения. Нормы —
   `docs/rules/13-repos.md`, «Состояние на версии».
@@ -82,7 +88,26 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
         end
       end
 
-      defoverridable get_at: 3, get_at: 4
+      @doc "Представления агрегатов на версиях из свёрнутых до них состояний, в порядке пар."
+      @impl true
+      def get_many_at(pairs, %Core.Context{} = context, opts \\ [])
+          when is_list(pairs) and is_list(opts) do
+        case @es_read_repo.repo.__es_get_many_at__(pairs, context, opts) do
+          {:ok, states} when is_list(states) ->
+            {:ok, Enum.map(states, &es_read_repo_to_view!(&1, @es_read_repo.to_view))}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      end
+
+      defp es_read_repo_to_view!(%unquote(aggregate){} = state, to_view) do
+        case to_view.(state) do
+          %unquote(view){} = view -> view
+        end
+      end
+
+      defoverridable get_at: 3, get_at: 4, get_many_at: 2, get_many_at: 3
     end
   end
 
