@@ -34,6 +34,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   - `to_view:` — захват функции арности 1 `%Agg{} → %View{}`
   """
 
+  alias Core.Es.Aggregate.ReadRepo
   alias Core.Helper
 
   @label "Es.Aggregate.ReadRepo.Pg"
@@ -46,7 +47,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
     opts = Helper.Opts.expand!(opts, __CALLER__, @label)
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
-    behaviour = Helper.Opts.module!(opts, :behaviour, @label, exports: [__es_read_repo__: 0])
+    behaviour = behaviour!(opts)
     %{repo: repo, aggregate: aggregate, id: id, view: view} = behaviour.__es_read_repo__()
     to_view = Keyword.fetch!(opts, :to_view)
 
@@ -85,8 +86,6 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
     end
   end
 
-  # ---
-
   @doc false
   @spec to_view!(term(), module()) :: (struct() -> struct())
 
@@ -98,5 +97,30 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
       "ожидается захват функции арности 1 (`&Mod.fun/1`), получено #{inspect(other)} " <>
         "(behaviour: #{inspect(behaviour)})"
     )
+  end
+
+  # ---
+
+  defp behaviour!(opts) do
+    behaviour = Helper.Opts.module!(opts, :behaviour, @label)
+
+    unless Helper.Module.exports?(behaviour, :__es_read_repo__, 0) do
+      Helper.Opts.reject!(
+        "#{@label}: behaviour",
+        "модуль #{inspect(behaviour)} должен экспортировать __es_read_repo__/0 " <>
+          "(use Core.Es.Aggregate.ReadRepo)"
+      )
+    end
+
+    case ReadRepo.callbacks() -- behaviour.behaviour_info(:callbacks) do
+      [] ->
+        behaviour
+
+      missing ->
+        Helper.Opts.reject!(
+          "#{@label}: behaviour",
+          "модуль #{inspect(behaviour)} должен объявлять #{inspect(missing)} (use Core.Es.Aggregate.ReadRepo)"
+        )
+    end
   end
 end

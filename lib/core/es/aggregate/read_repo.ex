@@ -39,6 +39,7 @@ defmodule Core.Es.Aggregate.ReadRepo do
   @required_keys ~w(repo view)a
   @optional_keys []
   @expression_keys []
+  @callbacks [get_at: 3, get_at: 4]
 
   @doc "Объявить behaviour read-репозитория состояния на версии."
   defmacro __using__(opts) do
@@ -46,7 +47,7 @@ defmodule Core.Es.Aggregate.ReadRepo do
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, @label)
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
     repo = repo!(opts)
-    view = Helper.Opts.module!(opts, :view, @label, exports: [__view__: 0])
+    view = view!(opts)
     %{aggregate: aggregate, id: id} = repo.__es_aggregate_repo__()
 
     quote do
@@ -76,19 +77,44 @@ defmodule Core.Es.Aggregate.ReadRepo do
     end
   end
 
+  @doc false
+  @spec callbacks() :: keyword(arity())
+
+  def callbacks, do: @callbacks
+
   # ---
 
   defp repo!(opts) do
-    repo = Helper.Opts.module!(opts, :repo, @label, exports: [__es_aggregate_repo__: 0])
+    repo = Helper.Opts.module!(opts, :repo, @label)
+    ensure_exported!(repo, :__es_aggregate_repo__, 0, "use Core.Es.Aggregate.Repo", "repo")
+    ensure_callbacks!(repo, Es.Aggregate.Repo.callbacks(), "use Core.Es.Aggregate.Repo", "repo")
+    repo
+  end
 
-    case Es.Aggregate.Repo.callbacks() -- repo.behaviour_info(:callbacks) do
+  defp view!(opts) do
+    view = Helper.Opts.module!(opts, :view, @label)
+    ensure_exported!(view, :__view__, 0, "use Core.View", "view")
+    view
+  end
+
+  defp ensure_exported!(module, fun, arity, hint, key) do
+    unless Helper.Module.exports?(module, fun, arity) do
+      Helper.Opts.reject!(
+        "#{@label}: #{key}",
+        "модуль #{inspect(module)} должен экспортировать #{fun}/#{arity} (#{hint})"
+      )
+    end
+  end
+
+  defp ensure_callbacks!(module, callbacks, hint, key) do
+    case callbacks -- module.behaviour_info(:callbacks) do
       [] ->
-        repo
+        :ok
 
       missing ->
         Helper.Opts.reject!(
-          "#{@label}: repo",
-          "#{inspect(repo)} должен объявлять #{inspect(missing)} (use Core.Es.Aggregate.Repo)"
+          "#{@label}: #{key}",
+          "модуль #{inspect(module)} должен объявлять #{inspect(missing)} (#{hint})"
         )
     end
   end

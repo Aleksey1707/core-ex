@@ -1260,7 +1260,11 @@ Cache.put({:account_version, id}, version)
 {:ok, view} = @read_repo.get_at(id, version, context)
 ```
 
-Проверяется: `test/core/es/aggregate/read_repo/pg_test.exs` — контракт `get_at` через базу.
+Проверяется: `test/core/es/aggregate/read_repo/pg_test.exs` — контракт `get_at` через базу;
+`CompileError` в `use Core.Es.Aggregate.ReadRepo` — `repo:` не behaviour event-sourced агрегата,
+`view:` не `use Core.View`, неизвестные и недостающие опции; в `use Core.Es.Aggregate.ReadRepo.Pg`
+— `behaviour:` не `use Core.Es.Aggregate.ReadRepo`, `to_view:` не захват функции арности 1,
+неизвестные и недостающие опции.
 
 ## Наименование
 
