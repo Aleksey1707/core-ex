@@ -8,7 +8,7 @@
 
 **Blocked by:** 03 (`get_at` над write-репозиторием со снапшотами).
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Behaviour объявляет колбэки `get_many_at/2,3` с сужением до `{:ok, [%View{}]} | {:error, %Error{}}`; реализация `defoverridable`.
 - [ ] Результат — в порядке пар; разные версии одного id и одинаковые пары разрешены, каждая пара получает свой View.
