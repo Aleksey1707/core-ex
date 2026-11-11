@@ -13,9 +13,6 @@ defmodule Core.MixProject do
       aliases: aliases(),
       deps: deps(),
       dialyzer: [plt_add_apps: [:mix], ignore_warnings: "dialyzer.ignore.exs"],
-      # cowlib приходит только через тестовую `bypass` (у prom_ex `plug_cowboy` optional);
-      # исправленной версии нет — снять, когда выйдет.
-      hex: [ignore_advisories: ["EEF-CVE-2026-43966"]],
       # Адаптеры брокеров компилируются условно (см. deps): без клиента модуля нет,
       # и ссылка на него из Mq.PromEx — не ошибка, а осознанный no-op.
       elixirc_options: [no_warn_undefined: [Core.Mq.Stream.Reader, Core.Mq.Kafka.Writer, Core.Mq.Kafka.Reader]],
