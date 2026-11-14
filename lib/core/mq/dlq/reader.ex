@@ -34,6 +34,7 @@ defmodule Core.Mq.Dlq.Reader do
   alias Core.Mq
   alias Core.Mq.Dlq.Store
   alias Core.Mq.Message
+  alias Core.Mq.Reader.Poll
   alias Core.Result
 
   require Error
@@ -97,8 +98,12 @@ defmodule Core.Mq.Dlq.Reader do
 
   def get(server, 0), do: GenServer.call(server, :get, @call_timeout)
 
-  def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0),
-    do: poll(server, deadline(timeout))
+  def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
+    case Poll.await(fn -> get(server, 0) end, nil, timeout, @poll_ms) do
+      {:error, :nothing_to_commit} -> :empty
+      result -> result
+    end
+  end
 
   @doc "Пометить запись в работе обработанной."
   @spec commit(t()) :: Result.unit()
@@ -233,26 +238,4 @@ defmodule Core.Mq.Dlq.Reader do
   defp commit_failed(detail) do
     Error.app(code: :commit_failed, ns: :mq, message: "Не удалось пометить запись DLQ обработанной", detail: detail)
   end
-
-  defp poll(server, deadline) do
-    case get(server, 0) do
-      :empty -> idle_or_poll(server, deadline)
-      other -> other
-    end
-  end
-
-  defp idle_or_poll(server, deadline) do
-    if timed_out?(deadline) do
-      :empty
-    else
-      Process.sleep(@poll_ms)
-      poll(server, deadline)
-    end
-  end
-
-  defp deadline(:infinity), do: :infinity
-  defp deadline(ms), do: System.monotonic_time(:millisecond) + ms
-
-  defp timed_out?(:infinity), do: false
-  defp timed_out?(deadline), do: System.monotonic_time(:millisecond) >= deadline
 end

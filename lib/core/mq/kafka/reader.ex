@@ -85,6 +85,7 @@ if Code.ensure_loaded?(:brod) do
     alias Core.Mq.Kafka.Reader.Store
     alias Core.Mq.Lease
     alias Core.Mq.Message
+    alias Core.Mq.Reader.Poll
     alias Core.Result
     alias Core.Telemetry
 
@@ -104,6 +105,8 @@ if Code.ensure_loaded?(:brod) do
     @call_timeout 20_000
     @read_error_reasons ~w(subscribe consumer_down lease)a
     @commit_error_reasons ~w(lease_lost failed)a
+
+    @poll_ms 10
 
     @shutdown_ms 15_000
 
@@ -205,8 +208,12 @@ if Code.ensure_loaded?(:brod) do
 
     def get(server, 0), do: GenServer.call(server, :get, @call_timeout)
 
-    def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0),
-      do: poll(server, deadline(timeout))
+    def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
+      case Poll.await(fn -> get(server, 0) end, fn -> notify_when_ready(server, self()) end, timeout, @poll_ms) do
+        {:error, :nothing_to_commit} -> :empty
+        result -> result
+      end
+    end
 
     @doc "Зафиксировать смещение сообщения в работе."
     @spec commit(t()) :: Result.unit()
@@ -407,28 +414,6 @@ if Code.ensure_loaded?(:brod) do
         buffered: buffered
       }
     end
-
-    defp poll(server, deadline) do
-      case get(server, 0) do
-        :empty -> idle_or_poll(server, deadline)
-        other -> other
-      end
-    end
-
-    defp idle_or_poll(server, deadline) do
-      if timed_out?(deadline) do
-        :empty
-      else
-        Process.sleep(10)
-        poll(server, deadline)
-      end
-    end
-
-    defp deadline(:infinity), do: :infinity
-    defp deadline(ms), do: System.monotonic_time(:millisecond) + ms
-
-    defp timed_out?(:infinity), do: false
-    defp timed_out?(deadline), do: System.monotonic_time(:millisecond) >= deadline
 
     # Срок считается от момента до запроса: Postgres продлевает аренду позже, и локальный срок
     # истекает не позже настоящего. Нода, которая не может продлить аренду (база недоступна),

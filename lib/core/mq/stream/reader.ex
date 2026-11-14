@@ -42,6 +42,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     alias Core.Error
     alias Core.Mq
     alias Core.Mq.Message
+    alias Core.Mq.Reader.Poll
     alias Core.Mq.Stream.Buffer
     alias Core.Mq.Stream.Codec
     alias Core.Result
@@ -53,6 +54,8 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     require Logger
 
     @call_timeout 5_000
+
+    @poll_ms 10
 
     @shutdown_ms 15_000
 
@@ -140,7 +143,10 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     def get(server, timeout)
         when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
-      poll(server, deadline(timeout))
+      case Poll.await(fn -> get(server, 0) end, fn -> notify_when_ready(server, self()) end, timeout, @poll_ms) do
+        {:error, :nothing_to_commit} -> :empty
+        result -> result
+      end
     end
 
     @doc "Зафиксировать offset текущего сообщения."
@@ -617,41 +623,5 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     defp resolve_offset(_state, :next), do: :next
     defp resolve_offset(_state, :last), do: :last
     defp resolve_offset(_state, {:offset, _} = offset), do: offset
-
-    defp poll(server, deadline) do
-      case get(server, 0) do
-        {:ok, _} = ok ->
-          ok
-
-        :empty ->
-          idle_or_poll(server, deadline)
-
-        {:error, _} = err ->
-          err
-      end
-    end
-
-    defp idle_or_poll(server, deadline) do
-      if timed_out?(deadline),
-        do: :empty,
-        else: poll_after_wait(server, deadline)
-    end
-
-    defp poll_after_wait(server, deadline) do
-      Process.sleep(10)
-      poll(server, deadline)
-    end
-
-    defp deadline(:infinity), do: :infinity
-
-    defp deadline(ms) when is_integer(ms) do
-      System.monotonic_time(:millisecond) + ms
-    end
-
-    defp timed_out?(:infinity), do: false
-
-    defp timed_out?(deadline) when is_integer(deadline) do
-      System.monotonic_time(:millisecond) >= deadline
-    end
   end
 end
