@@ -390,7 +390,7 @@ defmodule Core.Outbox.Poller do
     failed_rec = record_delivery_failure(failed, error, max_attempts, at)
     log_delivery_failure(failed_rec, error, max_attempts)
     emit_delivery(failed_rec)
-    released = Enum.map(tail, &Record.release(&1, at))
+    released = Enum.map(tail, &Record.requeue(&1, at))
     published ++ [failed_rec | released]
   end
 
@@ -421,7 +421,7 @@ defmodule Core.Outbox.Poller do
             "id=#{Outbox.ID.format(record.id, :hex)} причина=#{inspect(reason)}"
         )
 
-        Record.release(record, at)
+        Record.requeue(record, at)
     end
   end
 

@@ -357,7 +357,7 @@ ADR-0002.
 - Один Poller + один `Stream.Writer`; concurrency > 1 запрещён (порядок в stream).
 - Порядок publish = `order_by: created_at` при `fetch_and_reserve`.
 - Ошибка на index `i` в батче — fail-stop: `0..i-1` published, `i` failure/retry, `i+1..` →
-  `Record.release` (`:new`, без инкремента attempts).
+  `Record.requeue` (`:new`, без инкремента attempts, токен аренды сохраняется).
 - `Mq.Writer.put_many/2` / `Delivery.publish_many/2` — sequential publish в одном call.
 
 `Outbox.Repo` API: `append`, `fetch_and_reserve`, `save_results`, `release`,

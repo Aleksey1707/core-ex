@@ -69,22 +69,39 @@ defmodule Core.Outbox.RecordTest do
     assert published.locked_until == nil
   end
 
-  test "release снимает lock без attempts и ошибок" do
+  test "requeue возвращает в очередь без attempts и ошибок, сохраняя токен аренды" do
     record = sample_record()
     at = Outbox.UpdatedAt.now!()
+    lease_id = Outbox.LeaseID.new()
 
     assert {:ok, reserved} =
-             Record.reserve(record, Outbox.LockedUntil.now!(), Outbox.LeaseID.new(), at)
+             Record.reserve(record, Outbox.LockedUntil.now!(), lease_id, at)
 
     attempts = reserved.attempts
 
-    released = Record.release(reserved, at)
+    requeued = Record.requeue(reserved, at)
 
-    assert released.status == :new
-    assert released.locked_until == nil
-    assert released.updated_at == at
-    assert released.attempts == attempts
-    assert released.errors == []
+    assert requeued.status == :new
+    assert requeued.locked_until == nil
+    assert requeued.updated_at == at
+    assert requeued.attempts == attempts
+
+    # токен нужен фехтованию: строка ещё будет записана под прежней арендой
+    assert requeued.lease_id == lease_id
+    assert requeued.errors == []
+  end
+
+  test "release — @deprecated-делегат на requeue" do
+    record = sample_record()
+    at = Outbox.UpdatedAt.now!()
+    lease_id = Outbox.LeaseID.new()
+
+    assert {:ok, reserved} =
+             Record.reserve(record, Outbox.LockedUntil.now!(), lease_id, at)
+
+    release = Function.capture(Record, :release, 2)
+
+    assert release.(reserved, at) == Record.requeue(reserved, at)
   end
 
   test "record_failure при attempts < max → :new" do

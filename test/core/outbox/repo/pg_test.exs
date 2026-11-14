@@ -399,7 +399,12 @@ defmodule Core.Outbox.Repo.PgTest do
 
       assert length(batch) == 2
       assert :ok = @repo.release(batch, context)
+
+      # снятие резервации обнуляет токен — этим оно и отличается от `Record.requeue/2`
       assert Enum.all?(batch, &(status_of(&1.id) == :new))
+      assert Enum.all?(batch, &(row_of(&1).lease_id == nil))
+      assert Enum.all?(batch, &(row_of(&1).locked_until == nil))
+      assert Enum.all?(batch, &(row_of(&1).attempts == Outbox.Attempts.value(&1.attempts)))
 
       again =
         @repo.fetch_and_reserve(

@@ -137,15 +137,31 @@ defmodule Core.Outbox.Record do
   end
 
   @doc """
-  Снять аренду без инкремента attempts и без ошибки (хвост батча при fail-stop).
+  Вернуть запись в очередь после обработки (хвост батча при fail-stop).
 
-  `status: :new`, `locked_until: nil`.
+  `status: :new`, `locked_until: nil`, без инкремента attempts и без ошибки. Токен аренды
+  (`lease_id`) сохраняется: строка ещё будет записана под прежней арендой, и её результат
+  примется только при совпадении токена.
+
+  Это не снятие резервации: `Core.Outbox.Repo.release/2` группирует записи по токену,
+  фехтует им и обнуляет `lease_id` — там запись покидает обработку целиком.
   """
-  @spec release(t(), Outbox.UpdatedAt.t()) :: t()
+  @spec requeue(t(), Outbox.UpdatedAt.t()) :: t()
 
-  def release(%__MODULE__{} = record, %Outbox.UpdatedAt{} = at) do
+  def requeue(%__MODULE__{} = record, %Outbox.UpdatedAt{} = at) do
     %{record | status: :new, locked_until: nil, updated_at: at}
   end
+
+  @doc """
+  Устаревшее имя `requeue/2`.
+
+  Оставлено `@deprecated`-делегатом: `Core.Outbox.Record` публичный, и чужой `Delivery`
+  мог звать его. Инвариант тот же — токен аренды сохраняется.
+  """
+  @deprecated "Используйте requeue/2: возврат записи в очередь сохраняет токен аренды"
+  @spec release(t(), Outbox.UpdatedAt.t()) :: t()
+
+  def release(%__MODULE__{} = record, %Outbox.UpdatedAt{} = at), do: requeue(record, at)
 
   @doc """
   Зафиксировать ошибку публикации.
