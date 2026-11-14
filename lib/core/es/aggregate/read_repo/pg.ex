@@ -90,8 +90,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
           opts: opts,
           source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
           write?: false,
-          state: struct(@es_read_repo.aggregate, id: id),
-          verify: fn [restored] -> es_read_repo_verify_at(cfg, restored.state, version) end
+          state: struct(@es_read_repo.aggregate, id: id)
         }
 
         case Core.Es.Aggregate.Load.at(cfg, request, version) do
@@ -118,8 +117,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
           op: :get_many_at,
           opts: opts,
           source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-          write?: false,
-          verify: &es_read_repo_verify_addresses(cfg, pairs, &1)
+          write?: false
         }
 
         case Core.Es.Aggregate.Load.many_at(cfg, request, pairs) do
@@ -130,46 +128,6 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
           {:error, reason} ->
             {:error, reason}
         end
-      end
-
-      defp es_read_repo_verify_at(_cfg, %{version: head} = state, %Core.Version{} = version)
-           when head == version,
-           do: {:ok, state}
-
-      defp es_read_repo_verify_at(cfg, state, %Core.Version{} = version) do
-        detail = es_read_repo_address_detail(cfg, state, Core.Version.value(version))
-
-        {:error, cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)}
-      end
-
-      defp es_read_repo_verify_addresses(cfg, pairs, restored) do
-        by_id = Map.new(restored, &{&1.state.id, &1})
-        id_mod = cfg.id
-
-        results =
-          Enum.map(pairs, fn {%^id_mod{} = id, %Core.Version{} = version} ->
-            expected = Core.Version.value(version)
-            stream = Map.fetch!(by_id, id)
-
-            case Map.fetch(stream.captures, expected) do
-              {:ok, state} -> {:ok, state}
-              :error -> {:error, es_read_repo_address_detail(cfg, stream.state, expected)}
-            end
-          end)
-
-        case for {:error, detail} <- results, do: detail do
-          [] -> {:ok, for({:ok, state} <- results, do: state)}
-          details -> {:error, cfg.errors.domain(cfg.behaviour, :version_mismatch, details)}
-        end
-      end
-
-      defp es_read_repo_address_detail(cfg, state, expected) do
-        %{
-          aggregate_id: cfg.codec.dump(state.id),
-          expected: expected,
-          actual: state.version && Core.Version.value(state.version),
-          source: :address
-        }
       end
 
       defp es_read_repo_to_view!(%unquote(aggregate){} = state, to_view) do

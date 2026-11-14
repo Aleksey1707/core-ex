@@ -45,9 +45,11 @@ defmodule Core.Es.Aggregate.Load do
           required(:opts) => keyword(),
           required(:source) => source(),
           required(:write?) => boolean(),
-          required(:verify) => ([restored()] -> Result.t()),
           optional(:states) => [%{state: struct(), version: Version.expected()}],
-          optional(:state) => struct()
+          optional(:state) => struct(),
+          optional(:born?) => boolean(),
+          optional(:many?) => boolean(),
+          optional(:decide) => (struct() -> Result.t())
         }
 
   @typep spec :: %{
@@ -67,7 +69,7 @@ defmodule Core.Es.Aggregate.Load do
   # ===== чтение =====
 
   @doc false
-  @spec head(map(), request()) :: Result.t([struct()])
+  @spec head(map(), request()) :: Result.t([struct()] | term(), term())
 
   def head(cfg, %{states: states} = request) do
     streams = Enum.map(states, &%{state: &1.state, version: &1.version, upper: nil, captures: []})
@@ -123,11 +125,11 @@ defmodule Core.Es.Aggregate.Load do
 
   @spec run(map(), request(), address()) :: Result.t()
 
-  defp run(cfg, %{op: op} = request, %{streams: streams}) do
+  defp run(cfg, %{op: op} = request, %{streams: streams} = address) do
     start = System.monotonic_time()
 
     with {:ok, restored} <- restore(cfg, request, streams) do
-      result = request.verify.(restored)
+      result = verify(cfg, request, address, restored)
 
       :telemetry.execute(
         Telemetry.event([:es, :aggregate, :load]),
@@ -136,7 +138,7 @@ defmodule Core.Es.Aggregate.Load do
       )
 
       write_snapshots(cfg, restored, request.write?)
-      result
+      decide(cfg, request, address, result)
     end
   end
 
@@ -152,6 +154,88 @@ defmodule Core.Es.Aggregate.Load do
       {:ok, restored}
     end
   end
+
+  # Сверка идёт по мете потока: ожидаемая версия — `request.states`/адрес, фактическая — голова.
+  defp verify(cfg, request, %{kind: :head}, restored), do: verify_head(cfg, request, restored)
+  defp verify(cfg, _request, %{kind: :at, version: version}, [restored]), do: verify_at(cfg, restored, version)
+
+  defp verify(cfg, _request, %{kind: :many_at, pairs: pairs}, restored),
+    do: verify_many_at(cfg, restored, pairs)
+
+  defp verify_head(cfg, request, restored) do
+    born? = Map.get(request, :born?, false)
+    results = Enum.map(restored, &head_result(cfg, &1, born?))
+
+    case for {:error, detail} <- results, do: detail do
+      [] -> {:ok, for({:ok, state} <- results, do: state)}
+      details -> {:error, version_mismatch(cfg, head_details(request, details))}
+    end
+  end
+
+  defp head_details(%{many?: true}, details), do: details
+  defp head_details(_request, [detail]), do: detail
+  defp head_details(_request, details), do: details
+
+  defp head_result(_cfg, %{state: state, meta: %{version: :current}}, _born?), do: {:ok, state}
+
+  defp head_result(cfg, %{state: state, meta: %{version: %Version{} = expected}}, born?) do
+    cond do
+      match?(%Version{}, state.version) and state.version == expected -> {:ok, state}
+      is_nil(state.version) and born? -> {:ok, state}
+      true -> {:error, detail(cfg, state, Version.value(expected), :expected)}
+    end
+  end
+
+  defp verify_at(_cfg, %{state: %{version: version} = state}, %Version{} = version), do: {:ok, state}
+
+  defp verify_at(cfg, %{state: state}, %Version{} = version),
+    do: {:error, version_mismatch(cfg, detail(cfg, state, Version.value(version), :address))}
+
+  # Состояние каждой пары — снятие на её версии; нет — адрес за головой потока или пустой поток.
+  defp verify_many_at(cfg, restored, pairs) do
+    by_id = Map.new(restored, &{&1.state.id, &1})
+    id_mod = cfg.id
+
+    results =
+      Enum.map(pairs, fn {%^id_mod{} = id, expected} ->
+        stream = Map.fetch!(by_id, id)
+
+        case Map.fetch(stream.captures, expected) do
+          {:ok, state} -> {:ok, state}
+          :error -> {:error, detail(cfg, stream.state, expected, :address)}
+        end
+      end)
+
+    case for {:error, detail} <- results, do: detail do
+      [] -> {:ok, for({:ok, state} <- results, do: state)}
+      details -> {:error, version_mismatch(cfg, details)}
+    end
+  end
+
+  # Пустой поток при `%Version{}` — не гонка: отказ или принятие решает `fun` на незаведённом
+  # агрегате, поэтому одиночное чтение головы спрашивает решение после сверки (ADR-0016).
+  defp decide(cfg, %{decide: fun}, %{kind: :head, streams: [%{version: %Version{} = version}]}, {:ok, [state]})
+       when is_nil(state.version) do
+    case fun.(state) do
+      {:ok, _decision} -> {:error, version_mismatch(cfg, detail(cfg, state, Version.value(version), :expected))}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp decide(_cfg, %{decide: fun}, _address, {:ok, [state]}), do: fun.(state)
+
+  defp decide(_cfg, _request, _address, result), do: result
+
+  defp detail(cfg, state, expected, source) do
+    %{
+      aggregate_id: cfg.codec.dump(state.id),
+      expected: expected,
+      actual: state.version && Version.value(state.version),
+      source: source
+    }
+  end
+
+  defp version_mismatch(cfg, detail), do: cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)
 
   defp stream(cfg, spec) do
     %{

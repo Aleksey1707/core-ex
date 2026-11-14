@@ -352,8 +352,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       opts: opts,
       source: &fetch/3,
       write?: true,
-      states: [%{state: struct(cfg.aggregate, id: id), version: version}],
-      verify: fn [restored] -> verify_version(cfg, restored.state, version) end
+      states: [%{state: struct(cfg.aggregate, id: id), version: version}]
     }
 
     with {:ok, [state]} <- Load.head(cfg, request), do: {:ok, state}
@@ -368,8 +367,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       opts: opts,
       source: &fetch/3,
       write?: false,
-      state: struct(cfg.aggregate, id: id),
-      verify: fn [restored] -> verify_at(cfg, restored.state, version) end
+      state: struct(cfg.aggregate, id: id)
     }
 
     Load.at(cfg, request, version)
@@ -386,8 +384,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       op: :get_many_at,
       opts: opts,
       source: &fetch/3,
-      write?: false,
-      verify: &verify_addresses(cfg, pairs, &1)
+      write?: false
     }
 
     Load.many_at(cfg, request, pairs)
@@ -412,10 +409,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       source: &fetch/3,
       write?: true,
       states: [%{state: struct(cfg.aggregate, id: id), version: version}],
-      verify: fn [restored] -> verify_born_version(cfg, restored.state, version) end
+      born?: true,
+      decide: fun
     }
 
-    with {:ok, [state]} <- Load.head(cfg, request), do: decision(cfg, state, version, fun)
+    Load.head(cfg, request)
   end
 
   @doc false
@@ -429,7 +427,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       source: &fetch/3,
       write?: true,
       states: initial_states!(cfg, pairs),
-      verify: fn restored -> verify_versions(cfg, restored, pairs) end
+      many?: true
     }
 
     Load.head(cfg, request)
@@ -445,8 +443,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       opts: opts,
       source: &fetch/3,
       write?: true,
-      states: [%{state: state, version: version}],
-      verify: fn [restored] -> verify_version(cfg, restored.state, version) end
+      states: [%{state: state, version: version}]
     }
 
     with {:ok, [state]} <- Load.head(cfg, request), do: {:ok, state}
@@ -466,99 +463,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       [] -> states
       repeated -> raise ArgumentError, "#{@label}: повтор id в get_many: #{inspect(repeated)}"
     end
-  end
-
-  defp verify_versions(cfg, restored, pairs) do
-    by_id = Map.new(restored, &{&1.state.id, &1})
-    id_mod = cfg.id
-
-    results =
-      Enum.map(pairs, fn {%^id_mod{} = id, version} ->
-        state = Map.fetch!(by_id, id).state
-
-        case mismatch_detail(state, version, cfg.codec) do
-          nil -> {:ok, state}
-          detail -> {:error, detail}
-        end
-      end)
-
-    case for {:error, detail} <- results, do: detail do
-      [] -> {:ok, for({:ok, state} <- results, do: state)}
-      details -> {:error, version_mismatch(cfg, details)}
-    end
-  end
-
-  # Состояние каждой пары — снятие состояния на её версии; нет состояния на версии — адрес за
-  # головой потока или на пустом потоке. Расхождения собираются в одну ошибку в порядке пар.
-  defp verify_addresses(cfg, pairs, restored) do
-    by_id = Map.new(restored, &{&1.state.id, &1})
-    id_mod = cfg.id
-
-    results =
-      Enum.map(pairs, fn {%^id_mod{} = id, %Version{} = version} ->
-        expected = Version.value(version)
-        stream = Map.fetch!(by_id, id)
-
-        case Map.fetch(stream.captures, expected) do
-          {:ok, state} -> {:ok, state}
-          :error -> {:error, address_detail(cfg, stream.state, expected)}
-        end
-      end)
-
-    case for {:error, detail} <- results, do: detail do
-      [] -> {:ok, for({:ok, state} <- results, do: state)}
-      details -> {:error, version_mismatch(cfg, details)}
-    end
-  end
-
-  # Пустой поток при `%Version{}` — не гонка, а ссылка на состояние, которого не было: отказ или
-  # принятие решает `fun` на незаведённом агрегате (ADR-0016).
-  defp verify_born_version(_cfg, %{version: nil} = state, _version), do: {:ok, [state]}
-  defp verify_born_version(cfg, state, version), do: verify_version(cfg, state, version)
-
-  defp decision(cfg, %{version: nil} = state, %Version{} = version, fun) do
-    case fun.(state) do
-      {:ok, _decision} -> {:error, version_mismatch(cfg, mismatch_detail(state, version, cfg.codec))}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp decision(_cfg, state, _version, fun), do: fun.(state)
-
-  defp verify_version(cfg, state, version) do
-    case mismatch_detail(state, version, cfg.codec) do
-      nil -> {:ok, [state]}
-      detail -> {:error, version_mismatch(cfg, detail)}
-    end
-  end
-
-  # Адрес версии — ссылка на состояние, которого в потоке нет: пустой поток или версия за его
-  # головой. Это не гонка записи, поэтому `source: :address`, и `Es.Transact` отказ не повторяет.
-  defp verify_at(_cfg, %{version: head} = state, %Version{} = version) when head == version,
-    do: {:ok, state}
-
-  defp verify_at(cfg, state, %Version{} = version),
-    do: {:error, version_mismatch(cfg, address_detail(cfg, state, Version.value(version)))}
-
-  defp address_detail(cfg, state, expected) do
-    %{
-      aggregate_id: cfg.codec.dump(state.id),
-      expected: expected,
-      actual: state.version && Version.value(state.version),
-      source: :address
-    }
-  end
-
-  defp mismatch_detail(_state, :current, _codec), do: nil
-  defp mismatch_detail(%{version: version}, %Version{} = version, _codec), do: nil
-
-  defp mismatch_detail(state, %Version{} = expected, codec) do
-    %{
-      aggregate_id: codec.dump(state.id),
-      expected: Version.value(expected),
-      actual: state.version && Version.value(state.version),
-      source: :expected
-    }
   end
 
   # ===== источник строк =====
@@ -683,8 +587,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       taken: &cfg.errors.domain(cfg.behaviour, &1, &2)
     }
   end
-
-  # ===== общее =====
 
   defp version_mismatch(cfg, detail),
     do: cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)

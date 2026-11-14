@@ -165,29 +165,43 @@ defmodule Core.Es.Aggregate.LoadTest do
         opts: [],
         source: Rows.source(rows(events)),
         write?: false,
-        state: %Account{id: id},
-        verify: fn [restored] ->
-          case restored.state.version do
-            ^version ->
-              {:ok, restored.state}
-
-            head ->
-              detail = %{
-                aggregate_id: dump(id),
-                expected: Version.value(version),
-                actual: head && Version.value(head),
-                source: :address
-              }
-
-              {:error, Account.Errors.domain(Account.Repo, :version_mismatch, detail)}
-          end
-        end
+        state: %Account{id: id}
       }
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
                Load.at(no_snapshot_cfg(), request, version)
 
       assert error.detail == %{aggregate_id: dump(id), expected: 3, actual: 2, source: :address}
+    end
+
+    test "many_at — расхождения одной ошибкой в порядке пар" do
+      [first, second, empty] = [Account.ID.new(), Account.ID.new(), Account.ID.new()]
+      first_rows = rows(events!(first, [open("Первый")]))
+      second_rows = rows(events!(second, [open("Второй"), rename("Третий")]))
+
+      pairs = [
+        {first, Version.new!(2)},
+        {empty, Version.new!(1)},
+        {second, Version.new!(3)},
+        {first, Version.new!(2)}
+      ]
+
+      request = %{
+        op: :get_many_at,
+        opts: [],
+        source: Rows.source(first_rows ++ second_rows),
+        write?: false
+      }
+
+      assert {:error, %Core.Error{code: :version_mismatch} = error} =
+               Load.many_at(no_snapshot_cfg(), request, pairs)
+
+      assert error.detail == [
+               %{aggregate_id: dump(first), expected: 2, actual: 1, source: :address},
+               %{aggregate_id: dump(empty), expected: 1, actual: nil, source: :address},
+               %{aggregate_id: dump(second), expected: 3, actual: 2, source: :address},
+               %{aggregate_id: dump(first), expected: 2, actual: 1, source: :address}
+             ]
     end
   end
 
@@ -217,8 +231,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       opts: [],
       source: Rows.source(rows),
       write?: false,
-      states: [%{state: %Account{id: id}, version: :current}],
-      verify: fn [restored] -> {:ok, [restored.state]} end
+      states: [%{state: %Account{id: id}, version: :current}]
     }
   end
 
@@ -228,20 +241,16 @@ defmodule Core.Es.Aggregate.LoadTest do
       opts: [],
       source: Rows.source(rows, snapshots),
       write?: false,
-      state: %Account{id: id},
-      verify: fn [restored] -> {:ok, restored.state} end
+      state: %Account{id: id}
     }
   end
 
-  defp many_request(pairs, rows, snapshots \\ []) do
+  defp many_request(_pairs, rows, snapshots \\ []) do
     %{
       op: :get_many_at,
       opts: [],
       source: Rows.source(rows, snapshots),
-      write?: false,
-      verify: fn [restored] ->
-        {:ok, Enum.map(pairs, fn {_id, version} -> Map.fetch!(restored.captures, Version.value(version)) end)}
-      end
+      write?: false
     }
   end
 

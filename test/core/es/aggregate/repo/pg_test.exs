@@ -346,8 +346,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
       opts: [],
       source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
       write?: write?,
-      states: [%{state: %Account{id: id}, version: :current}],
-      verify: fn [restored] -> {:ok, [restored.state]} end
+      states: [%{state: %Account{id: id}, version: :current}]
     }
 
     Core.Es.Aggregate.Load.head(LoadRepo.cfg(), request)
@@ -359,8 +358,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
       opts: [],
       source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
       write?: true,
-      state: %Account{id: id},
-      verify: fn [restored] -> {:ok, restored.state} end
+      state: %Account{id: id}
     }
 
     with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), request, Core.Version.new!(upper)),
@@ -374,8 +372,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
       op: :get,
       opts: [],
       source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: true,
-      verify: fn [restored] -> {:ok, Enum.map(captures, &Map.fetch!(restored.captures, &1))} end
+      write?: true
     }
 
     Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), request, pairs)
