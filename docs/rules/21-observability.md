@@ -449,6 +449,15 @@ timestamp чанка, из которого пришло сообщение в `
 
 Проверяется: `test/core/mq/prom_ex_test.exs`, describe «возраст pending stream reader».
 
+### Запись DLQ в работе
+
+Gauge `mq_dlq_reader_pending` (`Core.Mq.PromEx`, опция `dlq_readers:`) — есть ли у DLQ-читателя
+запись в работе (0|1): `get` её захватил, `commit` ещё не пометил. Отдельного алерта нет: мёртвые и
+возвращённые в очередь записи видны по `mq_dlq_count`. Агрегировать SHOULD через `max` по
+`(component, topic)`: так же сводит плагин повтор пары на ноде.
+
+Проверяется: `test/core/mq/prom_ex_test.exs`, describe «DLQ reader».
+
 ### Первое событие серии счётчика
 
 Серия `counter` у `telemetry_metrics_prometheus_core` появляется после первого события сразу со

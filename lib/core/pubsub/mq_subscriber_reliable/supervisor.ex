@@ -78,8 +78,8 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   ## Опции
 
   Опции дерева — схема `@tree_opts_schema` над `start_link/1`; те же опции принимают
-  `watch_list/1`, `stream_readers/1` и `kafka_readers/1`. Неизвестная опция, отсутствие
-  обязательной и значение не той формы — `ArgumentError`.
+  `watch_list/1`, `stream_readers/1`, `kafka_readers/1` и `dlq_readers/1`. Неизвестная опция,
+  отсутствие обязательной и значение не той формы — `ArgumentError`.
 
   Опции писателя и читателя MUST содержать `name:` — атом; имена всех процессов дерева MUST
   различаться: имя — `id` ребёнка. Опции подписчика MUST содержать `name:`
@@ -108,6 +108,7 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @owned_keys ~w(reader_module reader dlq_writer dlq_handle subscribe)a
   @stream_reader Core.Mq.Stream.Reader
   @kafka_reader Core.Mq.Kafka.Reader
+  @dlq_reader Core.Mq.Dlq.Reader
 
   @typedoc "Процесс брокера: модуль, его опции и имя — оно же handle."
   @type process :: StartOpts.process()
@@ -125,8 +126,8 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
         }
 
   @typedoc """
-  Элемент `watch:` плагина `Core.Workers.PromEx` и `stream_readers:` / `kafka_readers:` плагина
-  `Core.Mq.PromEx`.
+  Элемент `watch:` плагина `Core.Workers.PromEx` и `stream_readers:` / `kafka_readers:` /
+  `dlq_readers:` плагина `Core.Mq.PromEx`.
   """
   @type watch_item :: %{component: String.t(), name: atom()}
 
@@ -259,7 +260,8 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
 
   Читатель другого модуля в список не попадает: у `Core.Mq.Kafka.Reader` своя группа метрик опроса
-  (`kafka_readers/1`), у прочих её нет. Когда дерево не стартует (`enabled: false`, `topics: []`), элементов нет.
+  (`kafka_readers/1`), у `Core.Mq.Dlq.Reader` — `dlq_readers/1`. Когда дерево не стартует
+  (`enabled: false`, `topics: []`), элементов нет.
 
   ## Опции
 
@@ -284,6 +286,22 @@ defmodule Core.PubSub.MqSubscriberReliable.Supervisor do
   @spec kafka_readers(keyword()) :: [watch_item()]
 
   def kafka_readers(opts) when is_list(opts), do: reader_items(opts, @kafka_reader, fun_label(:kafka_readers))
+
+  @opts_schema @tree_opts_schema
+  @doc """
+  Элементы `dlq_readers:` плагина `Core.Mq.PromEx` — DLQ-читатели дерева с той же меткой, что
+  у `mq_reader` в `watch_list/1`: `component: "mq_reader:<component>:<топик>"`.
+
+  Читатель другого модуля в список не попадает. Когда дерево не стартует (`enabled: false`,
+  `topics: []`), элементов нет.
+
+  ## Опции
+
+  #{Core.Options.docs(@opts_schema)}
+  """
+  @spec dlq_readers(keyword()) :: [watch_item()]
+
+  def dlq_readers(opts) when is_list(opts), do: reader_items(opts, @dlq_reader, fun_label(:dlq_readers))
 
   # ---
 

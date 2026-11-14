@@ -21,11 +21,19 @@ defmodule Core.Mq.ReaderReliable do
   вправе вернуть `:empty`. Reader с заявкой подписчик не опрашивает в простое
   (`Core.PubSub.MqSubscriberReliable`), а следит за ним монитором, поэтому handle такого reader'а —
   процесс, который находит `GenServer.whereis/1`.
+
+  Необязательный `metrics/1` — значения gauge'ей reader'а: карта с `:topic` (строка) и числовыми
+  значениями по остальным ключам. Его предпочитает плагин `Core.Mq.PromEx`, `info/1` остаётся
+  запасным путём: новый читатель даёт метрики, не правя плагин. Reader без обоих метрик плагин
+  пропускает, а не роняет сбор.
   """
 
   alias Core.Error
   alias Core.Mq.Message
   alias Core.Result
+
+  @typedoc "Значения gauge'ей reader'а: `:topic` и числа по ключам метрик."
+  @type metrics :: %{required(:topic) => String.t(), optional(atom()) => number()}
 
   @type t :: term()
 
@@ -33,6 +41,7 @@ defmodule Core.Mq.ReaderReliable do
   @callback commit(t()) :: Result.unit()
   @callback default_poll_interval_ms() :: pos_integer()
   @callback notify_when_ready(t(), pid()) :: Result.t(reference())
+  @callback metrics(t()) :: metrics()
 
-  @optional_callbacks default_poll_interval_ms: 0, notify_when_ready: 2
+  @optional_callbacks default_poll_interval_ms: 0, notify_when_ready: 2, metrics: 1
 end

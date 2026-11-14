@@ -10,7 +10,35 @@ defmodule Core.Mq.PromExTest do
 
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts[:info], name: opts[:name])
     def init(info), do: {:ok, info}
+    def info(pid), do: GenServer.call(pid, :info)
     def handle_call(:info, _from, info), do: {:reply, info, info}
+  end
+
+  defmodule CrashingReader do
+    use GenServer
+
+    def start_link(opts), do: GenServer.start_link(__MODULE__, :ok, name: opts[:name])
+    def init(:ok), do: {:ok, :ok}
+    def info(pid), do: GenServer.call(pid, :info)
+    def handle_call(:info, _from, _state), do: exit(:down)
+  end
+
+  defmodule MetricsReader do
+    use GenServer
+
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts[:state], name: opts[:name])
+    def init(state), do: {:ok, state}
+    def metrics(pid), do: GenServer.call(pid, :metrics)
+    def info(pid), do: GenServer.call(pid, :info)
+    def handle_call(:metrics, _from, state), do: {:reply, state.metrics, state}
+    def handle_call(:info, _from, state), do: {:reply, state.info, state}
+  end
+
+  defmodule BareReader do
+    use GenServer
+
+    def start_link(opts), do: GenServer.start_link(__MODULE__, :ok, name: opts[:name])
+    def init(:ok), do: {:ok, :ok}
   end
 
   @readers {__MODULE__, :readers, []}
@@ -118,8 +146,7 @@ defmodule Core.Mq.PromExTest do
     info = %{reader_info() | buffer_len: 1}
 
     start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
-    down = spawn(fn -> receive do: (_call -> exit(:down)) end)
-    Process.register(down, :mq_promex_second)
+    start_supervised!(%{id: :second, start: {CrashingReader, :start_link, [[name: :mq_promex_second]]}})
     handler_id = "mq-promex-collect-#{inspect(self())}"
 
     :ok =
@@ -150,6 +177,105 @@ defmodule Core.Mq.PromExTest do
     })
 
     assert capture_log(fn -> PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end) == ""
+  end
+
+  describe "источник метрик reader'а" do
+    @buffer [:prom_ex, :plugin, :mq, :reader, :buffer_len]
+    @pending [:prom_ex, :plugin, :mq, :reader, :pending]
+    @age [:prom_ex, :plugin, :mq, :reader, :pending_age_seconds]
+    @subscribed [:prom_ex, :plugin, :mq, :reader, :subscribed]
+
+    test "metrics/1 предпочтительнее info/1" do
+      on_exit(&reset_labels/0)
+
+      state = %{
+        metrics: %{
+          topic: "orders",
+          buffer_len: 7,
+          chunk_remaining: 3,
+          pending: 1,
+          pending_age_seconds: 2,
+          subscribed: 0
+        },
+        info: %{reader_info() | buffer_len: 99}
+      }
+
+      start_supervised!(%{
+        id: :metrics,
+        start: {MetricsReader, :start_link, [[name: :mq_promex_metrics, state: state]]}
+      })
+
+      attach([@buffer, @pending, @age, @subscribed])
+      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :metrics_reader, []})
+
+      meta = %{component: "orders", topic: "orders"}
+      assert_receive {:telemetry, @buffer, %{value: 7}, ^meta}
+      assert_receive {:telemetry, @pending, %{value: 1}, ^meta}
+      assert_receive {:telemetry, @age, %{value: 2}, ^meta}
+      assert_receive {:telemetry, @subscribed, %{value: 0}, ^meta}
+    end
+
+    test "info/1 — запасной путь: модуль выведен из живого процесса" do
+      start_supervised!(%{
+        id: :info,
+        start: {StubReader, :start_link, [[name: :mq_promex_info, info: %{reader_info() | buffer_len: 4}]]}
+      })
+
+      attach([@buffer])
+      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :info_reader, []})
+
+      assert_receive {:telemetry, @buffer, %{value: 4}, %{component: "orders", topic: "orders"}}
+    end
+
+    test "читатель без metrics/1 и info/1 пропускается, сбор не падает" do
+      start_supervised!(%{id: :bare, start: {BareReader, :start_link, [[name: :mq_promex_bare]]}})
+
+      attach([@buffer])
+      log = capture_log(fn -> assert :ok = PromEx.execute_reader_metrics({__MODULE__, :bare_reader, []}) end)
+
+      assert log == ""
+      refute_received {:telemetry, @buffer, _, _}
+    end
+  end
+
+  describe "DLQ reader" do
+    @dlq_pending [:prom_ex, :plugin, :mq, :dlq_reader, :pending]
+    @dlq_readers {__MODULE__, :dlq_readers, []}
+
+    test "dlq_readers: строит группу с gauge pending" do
+      assert [%{group_name: :mq_dlq_reader_poll_metrics, metrics: [metric]}] =
+               PromEx.polling_metrics(otp_app: :core, dlq_readers: @dlq_readers)
+
+      assert %Telemetry.Metrics.LastValue{
+               name: [:core, :prom_ex, :mq, :dlq_reader, :pending],
+               event_name: @dlq_pending,
+               tags: [:component, :topic]
+             } = metric
+    end
+
+    test "pending — максимум по component и topic" do
+      on_exit(&reset_labels/0)
+
+      start_supervised!(%{
+        id: :first,
+        start:
+          {MetricsReader, :start_link,
+           [[name: :mq_promex_dlq_first, state: %{metrics: %{topic: "orders.dlq", pending: 0}}]]}
+      })
+
+      start_supervised!(%{
+        id: :second,
+        start:
+          {MetricsReader, :start_link,
+           [[name: :mq_promex_dlq_second, state: %{metrics: %{topic: "orders.dlq", pending: 1}}]]}
+      })
+
+      attach([@dlq_pending])
+      log = capture_log(fn -> assert :ok = PromEx.execute_dlq_reader_metrics(@dlq_readers) end)
+
+      assert log =~ "source=mq_dlq_readers"
+      assert_receive {:telemetry, @dlq_pending, %{value: 1}, %{component: "orders", topic: "orders.dlq"}}
+    end
   end
 
   describe "возраст pending stream reader" do
@@ -287,7 +413,24 @@ defmodule Core.Mq.PromExTest do
   def single, do: [%{component: "orders", name: :mq_promex_first}]
 
   @doc false
+  def metrics_reader, do: [%{component: "orders", name: :mq_promex_metrics, module: MetricsReader}]
+
+  @doc false
+  def info_reader, do: [%{component: "orders", name: :mq_promex_info}]
+
+  @doc false
+  def bare_reader, do: [%{component: "orders", name: :mq_promex_bare}]
+
+  @doc false
   def kafka_readers, do: [%{component: "orders", name: :mq_promex_kafka}]
+
+  @doc false
+  def dlq_readers do
+    [
+      %{component: "orders", name: :mq_promex_dlq_first},
+      %{component: "orders", name: :mq_promex_dlq_second}
+    ]
+  end
 
   defp reset_labels do
     for {{Core.PromEx.Labels, _source} = key, _value} <- :persistent_term.get(), do: :persistent_term.erase(key)

@@ -276,6 +276,23 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
     end
   end
 
+  describe "dlq_readers/1" do
+    test "только DLQ-читатели, метка — как у mq_reader в watch_list/1" do
+      opts = dlq_orders_opts()
+      reader = %{component: "mq_reader:catalog:orders", name: @orders_reader}
+
+      assert MqSubscriberReliable.Supervisor.dlq_readers(opts) == [reader]
+      assert MqSubscriberReliable.Supervisor.stream_readers(opts) == []
+      assert MqSubscriberReliable.Supervisor.kafka_readers(opts) == []
+      assert reader in MqSubscriberReliable.Supervisor.watch_list(opts)
+    end
+
+    test "дерево не стартует — пусто" do
+      assert MqSubscriberReliable.Supervisor.dlq_readers(Keyword.put(dlq_orders_opts(), :enabled, false)) == []
+      assert MqSubscriberReliable.Supervisor.dlq_readers(Keyword.put(dlq_orders_opts(), :topics, [])) == []
+    end
+  end
+
   # ---
 
   defp tree_opts(overrides \\ []) do
@@ -312,6 +329,12 @@ defmodule Core.PubSub.MqSubscriberReliable.SupervisorTest do
   defp kafka_orders_opts do
     Keyword.update!(tree_opts(), :topics, fn [products, orders] ->
       [products, Keyword.put(orders, :reader, {Core.Mq.Kafka.Reader, name: @orders_reader})]
+    end)
+  end
+
+  defp dlq_orders_opts do
+    Keyword.update!(tree_opts(), :topics, fn [products, orders] ->
+      [products, Keyword.put(orders, :reader, {Core.Mq.Dlq.Reader, name: @orders_reader})]
     end)
   end
 

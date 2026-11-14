@@ -12,6 +12,10 @@ defmodule Core.Mq.PromEx do
   потребителя, а не моменту сборки метрик (`10-architecture.md`). Без опции
   polling-группа не строится.
 
+  Элемент списка вправе нести `module:` — модуль читателя; без него модуль выводится из
+  живого процесса (`:"$initial_call"`). Плагин зовёт `metrics/1`, если модуль его экспортирует,
+  иначе `info/1`; читатель без обоих пропускается молча.
+
   `reader_pending_age_seconds` — сейчас минус timestamp чанка, из которого пришло сообщение в
   `pending` (прочитано, но не подтверждено `commit`); пустой `pending` — 0, поэтому на тихом топике
   gauge не растёт. Timestamp ставит брокер при записи чанка: gauge меряет возраст сообщения, а не
@@ -43,13 +47,17 @@ defmodule Core.Mq.PromEx do
   число записей DLQ в Postgres по `subscriber`, `topic` и `status` (`dead` / `requeued` /
   `processed`, `Core.Mq.Dlq.counts/1`). Без опции группа не строится. Каждая нода считает одну
   таблицу: агрегировать — `max`, а не `sum`.
+
+  Опция `dlq_readers:` — MFA-провайдер DLQ-читателей в той же форме, что `stream_readers:`
+  (`Core.PubSub.MqSubscriberReliable.Supervisor.dlq_readers/1`): gauge
+  `dlq_reader_pending{component, topic}` — есть ли у читателя запись в работе (0|1). Без опции
+  группа не строится.
   """
 
   use PromEx.Plugin
 
+  alias Core.Helper.Module, as: Export
   alias Core.Mq.Dlq
-  alias Core.Mq.Kafka
-  alias Core.Mq.Stream.Reader
   alias Core.PromEx.Labels
   alias Core.PromEx.Safe
   alias Core.Telemetry
@@ -60,6 +68,7 @@ defmodule Core.Mq.PromEx do
   @pending_age_event [:prom_ex, :plugin, :mq, :reader, :pending_age_seconds]
   @subscribed_event [:prom_ex, :plugin, :mq, :reader, :subscribed]
   @dlq_count_event [:prom_ex, :plugin, :mq, :dlq, :count]
+  @dlq_reader_pending_event [:prom_ex, :plugin, :mq, :dlq_reader, :pending]
   @kafka_lease_event [:prom_ex, :plugin, :mq, :kafka_reader, :lease]
   @kafka_lag_messages_event [:prom_ex, :plugin, :mq, :kafka_reader, :lag_messages]
   @kafka_lag_seconds_event [:prom_ex, :plugin, :mq, :kafka_reader, :lag_seconds]
@@ -187,6 +196,7 @@ defmodule Core.Mq.PromEx do
   def polling_metrics(opts) do
     reader_groups(opts, Keyword.get(opts, :stream_readers)) ++
       kafka_reader_groups(opts, Keyword.get(opts, :kafka_readers)) ++
+      dlq_reader_groups(opts, Keyword.get(opts, :dlq_readers)) ++
       dlq_groups(opts, Keyword.get(opts, :dlq_repo))
   end
 
@@ -230,8 +240,23 @@ defmodule Core.Mq.PromEx do
   end
 
   @doc false
-  @spec execute_dlq_metrics(module()) :: :ok
+  @spec execute_dlq_reader_metrics({module(), atom(), [term()]}) :: :ok
 
+  def execute_dlq_reader_metrics({mod, fun, args}) when is_atom(mod) and is_atom(fun) do
+    Safe.execute(:mq, :dlq_readers, "mq dlq readers", fn ->
+      groups =
+        mod
+        |> apply(fun, args)
+        |> Enum.flat_map(&dlq_reader_sample/1)
+        |> Labels.group(&{&1.component, &1.topic})
+
+      Labels.report("mq_dlq_readers mfa=#{inspect({mod, fun, args})}", groups)
+      Enum.each(groups, &emit_dlq_reader_group/1)
+    end)
+  end
+
+  @doc false
+  @spec execute_dlq_metrics(module()) :: :ok
   def execute_dlq_metrics(repo) when is_atom(repo) do
     Safe.execute(:mq, :dlq, "mq dlq", fn ->
       Enum.each(Dlq.counts(repo), fn %{count: count} = row ->
@@ -304,13 +329,41 @@ defmodule Core.Mq.PromEx do
     )
   end
 
-  defp reader_sample(%{component: component, name: name}, now) do
+  defp reader_sample(%{component: component, name: name} = entry, now) do
     Safe.collect(:mq, :readers, "mq reader #{component}", fn ->
-      case Process.whereis(name) do
-        pid when is_pid(pid) -> [sample(component, name, Reader.info(pid), now)]
-        nil -> []
+      case reader_info(entry) do
+        {:ok, info} -> [sample(component, name, info, now)]
+        :skip -> []
       end
     end)
+  end
+
+  defp reader_info(%{name: name} = entry) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) ->
+        module = reader_module(entry, pid)
+
+        cond do
+          not is_atom(module) or is_nil(module) -> :skip
+          Export.exports?(module, :metrics, 1) -> {:ok, module.metrics(pid)}
+          Export.exports?(module, :info, 1) -> {:ok, module.info(pid)}
+          true -> :skip
+        end
+
+      nil ->
+        :skip
+    end
+  end
+
+  defp reader_module(%{module: module}, _pid) when is_atom(module) and not is_nil(module), do: module
+
+  defp reader_module(_entry, pid) do
+    with {:dictionary, dictionary} <- Process.info(pid, :dictionary),
+         {_, {module, _fun, _arity}} <- List.keyfind(dictionary, :"$initial_call", 0) do
+      module
+    else
+      _ -> nil
+    end
   end
 
   defp sample(component, name, info, now) do
@@ -320,11 +373,20 @@ defmodule Core.Mq.PromEx do
       topic: info.topic,
       buffer_len: info.buffer_len,
       chunk_remaining: info.chunk_remaining,
-      pending: flag(info.pending?),
-      pending_age_seconds: pending_age_seconds(info.pending_ts, now),
-      subscribed: flag(info.subscribed?)
+      pending: pending_flag(info),
+      pending_age_seconds: pending_age(info, now),
+      subscribed: subscribed_flag(info)
     }
   end
+
+  defp pending_flag(%{pending: pending}) when is_number(pending), do: pending
+  defp pending_flag(%{pending?: pending?}), do: flag(pending?)
+
+  defp subscribed_flag(%{subscribed: subscribed}) when is_number(subscribed), do: subscribed
+  defp subscribed_flag(%{subscribed?: subscribed?}), do: flag(subscribed?)
+
+  defp pending_age(%{pending_age_seconds: seconds}, _now) when is_number(seconds), do: seconds
+  defp pending_age(%{pending_ts: ts}, now), do: pending_age_seconds(ts, now)
 
   defp pending_age_seconds(nil, _now), do: 0
   defp pending_age_seconds(ts, now) when is_integer(ts), do: max(now - ts, 0) / 1_000
@@ -391,11 +453,11 @@ defmodule Core.Mq.PromEx do
     ]
   end
 
-  defp kafka_reader_sample(%{component: component, name: name}, now) do
+  defp kafka_reader_sample(%{component: component, name: name} = entry, now) do
     Safe.collect(:mq, :kafka_readers, "mq kafka reader #{component}", fn ->
-      case Process.whereis(name) do
-        pid when is_pid(pid) -> [kafka_sample(component, name, Kafka.Reader.info(pid), now)]
-        nil -> []
+      case reader_info(entry) do
+        {:ok, info} -> [kafka_sample(component, name, info, now)]
+        :skip -> []
       end
     end)
   end
@@ -447,6 +509,47 @@ defmodule Core.Mq.PromEx do
       [] -> :ok
       known -> :telemetry.execute(event, %{value: Enum.max(known)}, meta)
     end
+  end
+
+  defp dlq_reader_groups(_opts, nil), do: []
+
+  defp dlq_reader_groups(opts, {mod, fun, args}) when is_atom(mod) and is_atom(fun) and is_list(args) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :mq))
+    poll_rate = Keyword.get(opts, :poll_rate, 5_000)
+
+    [
+      Polling.build(
+        :mq_dlq_reader_poll_metrics,
+        poll_rate,
+        {__MODULE__, :execute_dlq_reader_metrics, [{mod, fun, args}]},
+        [
+          last_value(
+            metric_prefix ++ [:dlq_reader, :pending],
+            event_name: @dlq_reader_pending_event,
+            description: "Есть ли у DLQ-читателя запись в работе: захвачена, но не закоммичена (0|1)",
+            measurement: :value,
+            tags: [:component, :topic],
+            tag_values: &reader_tag_values/1
+          )
+        ],
+        detach_on_error: false
+      )
+    ]
+  end
+
+  defp dlq_reader_sample(%{component: component, name: name} = entry) do
+    Safe.collect(:mq, :dlq_readers, "mq dlq reader #{component}", fn ->
+      case reader_info(entry) do
+        {:ok, info} -> [%{component: component, name: name, topic: info.topic, pending: pending_flag(info)}]
+        :skip -> []
+      end
+    end)
+  end
+
+  defp emit_dlq_reader_group({{component, topic}, samples}) do
+    meta = %{component: component, topic: topic}
+    :telemetry.execute(@dlq_reader_pending_event, %{value: Enum.max(values(samples, :pending))}, meta)
   end
 
   defp dlq_groups(_opts, nil), do: []

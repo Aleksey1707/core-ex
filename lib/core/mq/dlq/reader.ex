@@ -22,6 +22,8 @@ defmodule Core.Mq.Dlq.Reader do
   подписчик без `poll_interval_ms:` опрашивает этот читатель раз в 5 с
   (`default_poll_interval_ms/0`), а не раз в 100 мс, как читатели брокеров.
 
+  `metrics/1` отдаёт `topic` и `pending` (0|1): запись захвачена, но не закоммичена.
+
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
 
@@ -118,6 +120,12 @@ defmodule Core.Mq.Dlq.Reader do
   def default_poll_interval_ms, do: @default_poll_interval_ms
 
   @doc false
+  @spec metrics(t()) :: Core.Mq.ReaderReliable.metrics()
+
+  @impl true
+  def metrics(server), do: GenServer.call(server, :metrics, @call_timeout)
+
+  @doc false
   @spec init(keyword()) :: {:ok, %__MODULE__{}}
 
   @impl true
@@ -141,6 +149,10 @@ defmodule Core.Mq.Dlq.Reader do
 
   @doc false
   @impl true
+  def handle_call(:metrics, _from, state) do
+    {:reply, %{topic: state.topic_name, pending: pending_flag(state.pending)}, state}
+  end
+
   def handle_call(:get, _from, state) do
     case safe(fn -> take(state) end, &read_failed/1) do
       {:ok, message, state} -> {:reply, {:ok, message}, state}
@@ -177,6 +189,9 @@ defmodule Core.Mq.Dlq.Reader do
   end
 
   # ---
+
+  defp pending_flag(nil), do: 0
+  defp pending_flag(_pending), do: 1
 
   defp take(%__MODULE__{pending: nil} = state) do
     case Store.claim(state.repo, state.subscriber, state.topic_name, state.lease, state.lease_ttl_ms) do
