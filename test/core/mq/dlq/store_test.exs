@@ -55,7 +55,10 @@ defmodule Core.Mq.Dlq.StoreTest do
       assert {:ok, %{id: ^id}} = Store.claim(TestRepo, sub, topic, fresh, @ttl_ms)
 
       assert :lost = Store.hold(TestRepo, id, stale, @ttl_ms)
-      assert {:error, %Error{code: :dlq_lease_lost}} = Store.commit(TestRepo, id, stale)
+
+      assert {:error, %Error{code: :lease_lost, ns: :mq, detail: %{scope: :dlq, id: ^id}}} =
+               Store.commit(TestRepo, id, stale)
+
       assert :ok = Store.hold(TestRepo, id, fresh, @ttl_ms)
       assert :ok = Store.commit(TestRepo, id, fresh)
       assert status(id) == "processed"

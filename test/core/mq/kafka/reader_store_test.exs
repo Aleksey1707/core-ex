@@ -53,7 +53,9 @@ defmodule Core.Mq.Kafka.Reader.StoreTest do
     assert :ok = Store.acquire(TestRepo, sub, topic, fresh, @ttl_ms)
     assert Store.offsets(TestRepo, sub, topic) == %{0 => 5}
 
-    assert {:error, %Error{code: :kafka_lease_lost}} = Store.commit(TestRepo, sub, topic, stale, 0, 9)
+    assert {:error, %Error{code: :lease_lost, ns: :mq, detail: %{scope: :kafka, topic: ^topic, partition: 0}}} =
+             Store.commit(TestRepo, sub, topic, stale, 0, 9)
+
     assert :taken = Store.acquire(TestRepo, sub, topic, stale, @ttl_ms)
 
     assert :ok = Store.commit(TestRepo, sub, topic, fresh, 0, 6)
@@ -65,7 +67,9 @@ defmodule Core.Mq.Kafka.Reader.StoreTest do
     :ok = Store.acquire(TestRepo, sub, topic, lease, @ttl_ms)
     expire!(sub, topic)
 
-    assert {:error, %Error{code: :kafka_lease_lost}} = Store.commit(TestRepo, sub, topic, lease, 0, 1)
+    assert {:error, %Error{code: :lease_lost, ns: :mq, detail: %{scope: :kafka, topic: ^topic, partition: 0}}} =
+             Store.commit(TestRepo, sub, topic, lease, 0, 1)
+
     assert :ok = Store.acquire(TestRepo, sub, topic, lease, @ttl_ms)
     assert :ok = Store.commit(TestRepo, sub, topic, lease, 0, 1)
   end

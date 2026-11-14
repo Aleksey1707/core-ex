@@ -131,7 +131,7 @@ defmodule Core.Mq.Kafka.ReaderTest do
 
     log =
       capture_log(fn ->
-        assert {:error, %Error{code: :kafka_lease_lost}} = Reader.commit(reader)
+        assert {:error, %Error{code: :lease_lost}} = Reader.commit(reader)
       end)
 
     assert log =~ "аренда"
@@ -254,7 +254,7 @@ defmodule Core.Mq.Kafka.ReaderTest do
     assert %{partitions: %{0 => %{high_wm_offset: 9, committed_offset: 4, committed_ts: nil}}} = Reader.info(reader)
 
     take_over!()
-    capture_log(fn -> assert {:error, %Error{code: :kafka_lease_lost}} = Reader.commit(reader) end)
+    capture_log(fn -> assert {:error, %Error{code: :lease_lost}} = Reader.commit(reader) end)
 
     assert %{lease?: false, partitions: %{0 => partition}} = Reader.info(reader)
     assert partition == %{high_wm_offset: nil, committed_offset: nil, committed_ts: nil, buffered: 0}
@@ -349,7 +349,7 @@ defmodule Core.Mq.Kafka.ReaderTest do
       attach_telemetry(@events)
 
       take_over!()
-      capture_log(fn -> assert {:error, %Error{code: :kafka_lease_lost}} = Reader.commit(reader) end)
+      capture_log(fn -> assert {:error, %Error{code: :lease_lost}} = Reader.commit(reader) end)
 
       assert_receive {:telemetry, [_, _, _, :commit_error], %{count: 1}, %{topic: @topic, reason: :lease_lost}}
     end

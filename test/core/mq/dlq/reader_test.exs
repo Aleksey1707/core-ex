@@ -45,7 +45,7 @@ defmodule Core.Mq.Dlq.ReaderTest do
 
     TestRepo.query!("UPDATE mq_dlq SET lease_id = $1 WHERE body = 'b'", [Store.new_lease()])
 
-    capture_log(fn -> assert {:error, %Error{code: :dlq_lease_lost}} = Dlq.Reader.commit(reader) end)
+    capture_log(fn -> assert {:error, %Error{code: :lease_lost}} = Dlq.Reader.commit(reader) end)
     assert {:error, %Error{code: :nothing_to_commit}} = Dlq.Reader.commit(reader)
   end
 

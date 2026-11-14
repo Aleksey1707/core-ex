@@ -376,9 +376,9 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Mq.Stream.Reader` | `:mq` | `:app` | `:not_reliable`, `:nothing_to_commit`, `:commit_failed` |
 | `Core.Mq.Stream.Writer` | `:mq` | `:app` | `:publish_unconfirmed`, `:producer_setup_failed` |
 | `Core.Mq.Kafka.Writer` | `:mq` | `:app` | `:kafka_publish_failed` |
-| `Core.Mq.Kafka.Reader` | `:mq` | `:app` | `:nothing_to_commit`, `:commit_failed`, `:kafka_lease_lost` |
+| `Core.Mq.Kafka.Reader` | `:mq` | `:app` | `:nothing_to_commit`, `:commit_failed`, `:lease_lost` |
 | `Core.Mq.Dlq.Writer` | `:mq` | `:app` | `:dlq_write_failed` |
-| `Core.Mq.Dlq.Reader` | `:mq` | `:app` | `:nothing_to_commit`, `:commit_failed`, `:dlq_read_failed`, `:dlq_lease_lost` |
+| `Core.Mq.Dlq.Reader` | `:mq` | `:app` | `:nothing_to_commit`, `:commit_failed`, `:dlq_read_failed`, `:lease_lost` |
 | `Core.PubSub.MqSubscriberReliable` | `:pubsub` | `:app` | `:already_subscribed`, `:reader_unavailable`, `:dlq_publish_failed`, `:handler_crashed`, `:unexpected_handler_result` |
 | `Core.Outbox.Poller`, `Core.Outbox.Cleaner` | `:outbox` | `:app` | `:cycle_failed`, `:cycle_exit` |
 | `Core.Outbox.Delivery.Mq` | `:outbox` | `:app` | `:encode_payload_failed` |

@@ -12,7 +12,7 @@ defmodule Core.Mq.Dlq.Reader do
   работе — одна запись на читатель, и `get` без `commit` отдаёт её же, продлевая захват. Запись,
   захват которой перехватила другая нода, читатель бросает с `warning` и берёт следующую.
   `commit` помечает запись `processed`, не удаляя её; у перехваченной —
-  `{:error, %Error{code: :dlq_lease_lost}}`. Две ноды с читателем одного топика читают разные
+  `{:error, %Error{code: :lease_lost}}`. Две ноды с читателем одного топика читают разные
   записи — порядок между ними не держится, как и порядок относительно исходного топика.
   Штатная остановка отдаёт захват сразу.
 
@@ -153,7 +153,7 @@ defmodule Core.Mq.Dlq.Reader do
       :ok ->
         {:reply, :ok, %{state | pending: nil}}
 
-      {:error, %Error{code: :dlq_lease_lost} = error} ->
+      {:error, %Error{code: :lease_lost} = error} ->
         log_lost(state, id)
         {:reply, {:error, error}, %{state | pending: nil}}
 

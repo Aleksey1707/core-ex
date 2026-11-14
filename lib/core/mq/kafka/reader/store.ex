@@ -13,10 +13,8 @@ defmodule Core.Mq.Kafka.Reader.Store do
   Сбой Postgres — исключение `Ecto`: вызывающий (`Kafka.Reader`) ловит его сам.
   """
 
-  alias Core.Error
+  alias Core.Mq.Lease
   alias Core.Result
-
-  require Error
 
   @acquire_sql "INSERT INTO mq_kafka_leases AS l (subscriber_name, topic, lease_id, locked_until, updated_at) " <>
                  "VALUES ($1, $2, $3, clock_timestamp() + $4::integer * interval '1 millisecond', " <>
@@ -37,15 +35,12 @@ defmodule Core.Mq.Kafka.Reader.Store do
 
   @offsets_sql "SELECT partition, next_offset FROM mq_kafka_offsets WHERE subscriber_name = $1 AND topic = $2"
 
-  @typedoc "Fencing-токен аренды — UUID в 16 байтах."
-  @type lease :: <<_::128>>
-
   # ===== аренда =====
 
   @doc "Новый fencing-токен: нода берёт им аренду, которой не владеет."
-  @spec new_lease() :: lease()
+  @spec new_lease() :: Lease.token()
 
-  def new_lease, do: Ecto.UUID.bingenerate()
+  def new_lease, do: Lease.new_token()
 
   @doc """
   Взять аренду токеном `lease` или продлить её на `ttl_ms`.
@@ -53,7 +48,7 @@ defmodule Core.Mq.Kafka.Reader.Store do
   `:taken` — аренда жива у другого токена. Свою аренду токен продлевает и после истечения
   срока, если её никто не перехватил: исключительность владения при этом не прерывалась.
   """
-  @spec acquire(Ecto.Repo.t(), String.t(), String.t(), lease(), pos_integer()) :: :ok | :taken
+  @spec acquire(Ecto.Repo.t(), String.t(), String.t(), Lease.token(), pos_integer()) :: :ok | :taken
 
   def acquire(repo, subscriber, topic, <<_::128>> = lease, ttl_ms)
       when is_atom(repo) and is_binary(subscriber) and is_binary(topic) and is_integer(ttl_ms) and ttl_ms > 0 do
@@ -64,7 +59,7 @@ defmodule Core.Mq.Kafka.Reader.Store do
   end
 
   @doc "Отдать аренду сразу: следующая нода берёт её, не дожидаясь срока. Чужой токен — без эффекта."
-  @spec release(Ecto.Repo.t(), String.t(), String.t(), lease()) :: :ok
+  @spec release(Ecto.Repo.t(), String.t(), String.t(), Lease.token()) :: :ok
 
   def release(repo, subscriber, topic, <<_::128>> = lease)
       when is_atom(repo) and is_binary(subscriber) and is_binary(topic) do
@@ -85,10 +80,10 @@ defmodule Core.Mq.Kafka.Reader.Store do
   @doc """
   Записать следующее смещение партиции под арендой `lease`.
 
-  `{:error, %Error{code: :kafka_lease_lost}}` — аренда истекла или перешла к другому токену,
+  `{:error, %Error{code: :lease_lost}}` — аренда истекла или перешла к другому токену,
   смещение не записано.
   """
-  @spec commit(Ecto.Repo.t(), String.t(), String.t(), lease(), non_neg_integer(), non_neg_integer()) ::
+  @spec commit(Ecto.Repo.t(), String.t(), String.t(), Lease.token(), non_neg_integer(), non_neg_integer()) ::
           Result.unit()
 
   def commit(repo, subscriber, topic, <<_::128>> = lease, partition, next_offset)
@@ -99,13 +94,7 @@ defmodule Core.Mq.Kafka.Reader.Store do
         :ok
 
       %{num_rows: 0} ->
-        {:error,
-         Error.app(
-           code: :kafka_lease_lost,
-           ns: :mq,
-           message: "Аренда топика Kafka потеряна: смещение не записано",
-           detail: %{topic: topic, partition: partition}
-         )}
+        {:error, Lease.lost_error(:kafka, %{topic: topic, partition: partition})}
     end
   end
 end

@@ -27,7 +27,7 @@ if Code.ensure_loaded?(:brod) do
 
     Топик читает одна нода — владелец аренды строкой с fencing-токеном. Нода без аренды не
     подписана и отдаёт `:empty`, пробуя взять аренду раз в треть `lease_ttl_ms`. `commit`
-    устаревшей ноды — `{:error, %Error{code: :kafka_lease_lost}}`, сообщение повторит новый
+    устаревшей ноды — `{:error, %Error{code: :lease_lost}}`, сообщение повторит новый
     владелец. Потеря аренды — отписка от партиций, сброс буфера и сообщения в работе. Штатная
     остановка отдаёт аренду сразу.
 
@@ -83,6 +83,7 @@ if Code.ensure_loaded?(:brod) do
     alias Core.Error
     alias Core.Mq
     alias Core.Mq.Kafka.Reader.Store
+    alias Core.Mq.Lease
     alias Core.Mq.Message
     alias Core.Result
     alias Core.Telemetry
@@ -435,19 +436,20 @@ if Code.ensure_loaded?(:brod) do
     defp lease_tick(state) do
       Process.send_after(self(), :lease, div(state.lease_ttl_ms, 3))
 
-      hold_lease(state, System.monotonic_time(:millisecond))
+      hold_lease(state)
     end
 
     defp leased?(%__MODULE__{lease: nil}), do: false
     defp leased?(%__MODULE__{lease_deadline: deadline}), do: System.monotonic_time(:millisecond) < deadline
 
-    defp hold_lease(%__MODULE__{lease: nil} = state, started) do
+    defp hold_lease(%__MODULE__{lease: nil} = state) do
       lease = Store.new_lease()
+      deadline = Lease.deadline(state.lease_ttl_ms)
 
       case acquire(state, lease) do
         :ok ->
           Logger.info("kafka reader: аренда взята topic=#{state.topic_name} subscriber=#{state.subscriber}")
-          subscribe(%{state | lease: lease, lease_deadline: started + state.lease_ttl_ms})
+          subscribe(%{state | lease: lease, lease_deadline: deadline})
 
         :taken ->
           state
@@ -458,10 +460,12 @@ if Code.ensure_loaded?(:brod) do
       end
     end
 
-    defp hold_lease(%__MODULE__{} = state, started) do
+    defp hold_lease(%__MODULE__{} = state) do
+      deadline = Lease.deadline(state.lease_ttl_ms)
+
       case acquire(state, state.lease) do
         :ok ->
-          %{state | lease_deadline: started + state.lease_ttl_ms}
+          %{state | lease_deadline: deadline}
 
         :taken ->
           Logger.warning("kafka reader: аренда перехвачена topic=#{state.topic_name} subscriber=#{state.subscriber}")
@@ -803,7 +807,7 @@ if Code.ensure_loaded?(:brod) do
           _ = brod_call(fn -> :brod.consume_ack(state.client, state.topic_name, partition, offset) end)
           {:ok, state}
 
-        {:error, %Error{code: :kafka_lease_lost} = error} ->
+        {:error, %Error{code: :lease_lost} = error} ->
           Logger.warning(
             "kafka reader: commit отклонён, аренда потеряна: topic=#{state.topic_name} " <>
               "subscriber=#{state.subscriber} partition=#{partition} offset=#{offset}"

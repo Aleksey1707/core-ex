@@ -11,10 +11,8 @@ defmodule Core.Mq.Dlq.Store do
   Сбой Postgres — исключение `Ecto`: вызывающий ловит его сам.
   """
 
-  alias Core.Error
+  alias Core.Mq.Lease
   alias Core.Result
-
-  require Error
 
   @insert_sql "INSERT INTO mq_dlq (subscriber_name, topic, key, header_names, header_values, body, " <>
                 "source_partition, source_offset, reason, error, attempts, status, created_at) " <>
@@ -35,9 +33,6 @@ defmodule Core.Mq.Dlq.Store do
 
   @commit_sql "UPDATE mq_dlq SET status = 'processed', processed_at = clock_timestamp(), " <>
                 "lease_id = NULL, locked_until = NULL WHERE id = $1 AND lease_id = $2 AND status = 'requeued'"
-
-  @typedoc "Fencing-токен захвата — UUID в 16 байтах."
-  @type lease :: <<_::128>>
 
   @typedoc "Строка на запись: заголовки — пары по индексу, позиция — `nil`, если её нет."
   @type row :: %{
@@ -93,12 +88,12 @@ defmodule Core.Mq.Dlq.Store do
   # ===== чтение =====
 
   @doc "Новый fencing-токен: читатель захватывает им записи."
-  @spec new_lease() :: lease()
+  @spec new_lease() :: Lease.token()
 
-  def new_lease, do: Ecto.UUID.bingenerate()
+  def new_lease, do: Lease.new_token()
 
   @doc "Захватить старейшую свободную запись `requeued` топика подписчика на `ttl_ms`."
-  @spec claim(Ecto.Repo.t(), String.t(), String.t(), lease(), pos_integer()) :: {:ok, claimed()} | :none
+  @spec claim(Ecto.Repo.t(), String.t(), String.t(), Lease.token(), pos_integer()) :: {:ok, claimed()} | :none
 
   def claim(repo, subscriber, topic, <<_::128>> = lease, ttl_ms)
       when is_atom(repo) and is_binary(subscriber) and is_binary(topic) and is_integer(ttl_ms) and ttl_ms > 0 do
@@ -121,7 +116,7 @@ defmodule Core.Mq.Dlq.Store do
   end
 
   @doc "Продлить свой захват записи; `:lost` — запись перехвачена или уже не `requeued`."
-  @spec hold(Ecto.Repo.t(), pos_integer(), lease(), pos_integer()) :: :ok | :lost
+  @spec hold(Ecto.Repo.t(), pos_integer(), Lease.token(), pos_integer()) :: :ok | :lost
 
   def hold(repo, id, <<_::128>> = lease, ttl_ms)
       when is_atom(repo) and is_integer(id) and is_integer(ttl_ms) and ttl_ms > 0 do
@@ -132,7 +127,7 @@ defmodule Core.Mq.Dlq.Store do
   end
 
   @doc "Отдать захват сразу: запись берёт следующий читатель, не дожидаясь срока."
-  @spec release(Ecto.Repo.t(), pos_integer(), lease()) :: :ok
+  @spec release(Ecto.Repo.t(), pos_integer(), Lease.token()) :: :ok
 
   def release(repo, id, <<_::128>> = lease) when is_atom(repo) and is_integer(id) do
     _ = Ecto.Adapters.SQL.query!(repo, @release_sql, [id, lease])
@@ -142,10 +137,10 @@ defmodule Core.Mq.Dlq.Store do
   @doc """
   Пометить захваченную запись `processed`.
 
-  `{:error, %Error{code: :dlq_lease_lost}}` — запись перехвачена другим токеном или уже не
+  `{:error, %Error{code: :lease_lost}}` — запись перехвачена другим токеном или уже не
   `requeued`, статус не изменён.
   """
-  @spec commit(Ecto.Repo.t(), pos_integer(), lease()) :: Result.unit()
+  @spec commit(Ecto.Repo.t(), pos_integer(), Lease.token()) :: Result.unit()
 
   def commit(repo, id, <<_::128>> = lease) when is_atom(repo) and is_integer(id) do
     case Ecto.Adapters.SQL.query!(repo, @commit_sql, [id, lease]) do
@@ -153,13 +148,7 @@ defmodule Core.Mq.Dlq.Store do
         :ok
 
       %{num_rows: 0} ->
-        {:error,
-         Error.app(
-           code: :dlq_lease_lost,
-           ns: :mq,
-           message: "Захват записи DLQ потерян: запись не помечена обработанной",
-           detail: %{id: id}
-         )}
+        {:error, Lease.lost_error(:dlq, %{id: id})}
     end
   end
 end
