@@ -15,6 +15,9 @@ defmodule Core.Codec.FieldTest do
     defstruct [:name]
   end
 
+  defmodule Family do
+  end
+
   defmodule Status do
     use Core.Enum,
       name: "Статус",
@@ -202,5 +205,82 @@ defmodule Core.Codec.FieldTest do
         Field.normalize!([a: [prim: Name, subject: "b"]], :payload, @where)
       end
     end
+  end
+
+  describe "вид × хост" do
+    @kinds ~w(prim enum entity union list set map type view form jsonb)a
+    @hosts [
+      struct: {"структура по полям", ~w(prim enum entity union list set map type)a},
+      plugin: {"Codec-плагин по полям", ~w(prim enum entity union list set map type)a},
+      payload: {"нагрузка события", ~w(prim enum entity union list set map type)a},
+      labels: {"подписи", ~w(prim enum entity union list set map type)a},
+      view: {"View", ~w(prim enum type view form list set map jsonb)a}
+    ]
+
+    test "Field.kinds — объединение видов" do
+      assert Enum.sort(Field.kinds()) == Enum.sort(@kinds)
+    end
+
+    test "допустимый вид проходит, чужой — CompileError с хостом и видом" do
+      for {host, {name, allowed}} <- @hosts, kind <- @kinds do
+        case compile(host, kind) do
+          :ok ->
+            assert kind in allowed, "#{name} не должен принимать #{kind}:"
+
+          {:error, %CompileError{description: description}} ->
+            refute kind in allowed, "#{name} должен принимать #{kind}: #{description}"
+            assert description =~ name, "нет имени хоста #{name}: #{description}"
+            assert description =~ "#{kind}", "нет вида #{kind}: #{description}"
+        end
+      end
+    end
+
+    test "вложенный вид проверяется по allowlist того же хоста" do
+      assert_raise CompileError, ~r/W: a: list: Codec-плагин по полям: вид view: недопустим/, fn ->
+        Field.normalize!([a: [list: [view: Core.ViewFixture.Nested]]], :plugin, @where)
+      end
+    end
+
+    defp compile(:view, kind) do
+      forms = if kind == :form, do: [form: [x: [type: :string]]], else: []
+
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(
+                      Module.concat(
+                        __MODULE__,
+                        :"Kinds#{System.unique_integer([:positive])}"
+                      )
+                    ) do
+            use Core.View,
+              fields: [a: unquote(Macro.escape(spec_opts(kind)))],
+              forms: unquote(Macro.escape(forms))
+          end
+        end
+      )
+
+      :ok
+    rescue
+      error in CompileError -> {:error, error}
+    end
+
+    defp compile(host, kind) do
+      Field.normalize!([a: spec_opts(kind)], host, @where)
+      :ok
+    rescue
+      error in CompileError -> {:error, error}
+    end
+
+    defp spec_opts(:prim), do: [prim: Name]
+    defp spec_opts(:enum), do: [enum: Status]
+    defp spec_opts(:entity), do: [entity: Tag]
+    defp spec_opts(:union), do: [union: Family]
+    defp spec_opts(:list), do: [list: [prim: Name]]
+    defp spec_opts(:set), do: [set: [prim: Name]]
+    defp spec_opts(:map), do: [map: [key: [type: :string], value: [prim: Name]]]
+    defp spec_opts(:type), do: [type: :string]
+    defp spec_opts(:view), do: [view: Core.ViewFixture.Nested]
+    defp spec_opts(:form), do: [form: :form]
+    defp spec_opts(:jsonb), do: [jsonb: {Core.ViewFixture.Specs, :payload_spec}]
   end
 end

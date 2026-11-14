@@ -31,7 +31,24 @@ defmodule Core.Codec.Field do
   alias Core.Prim
 
   @label "Codec.Plugin"
-  @kind_keys ~w(prim enum entity union list set map type)a
+  @host_kinds [
+    struct: ~w(prim enum entity union list set map type)a,
+    plugin: ~w(prim enum entity union list set map type)a,
+    payload: ~w(prim enum entity union list set map type)a,
+    labels: ~w(prim enum entity union list set map type)a,
+    view: ~w(prim enum type view form list set map jsonb)a
+  ]
+  @kinds @host_kinds
+         |> Keyword.values()
+         |> Enum.concat()
+         |> Enum.uniq()
+  @host_names %{
+    struct: "структура по полям",
+    plugin: "Codec-плагин по полям",
+    payload: "нагрузка события",
+    labels: "подписи",
+    view: "View"
+  }
   @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
   @type_values FieldCheck.type_values()
@@ -115,6 +132,24 @@ defmodule Core.Codec.Field do
     do: Helper.Opts.reject!("#{@label}: fields", "ожидается список пар {Тип, спека}, получено #{inspect(other)}")
 
   @doc false
+  @spec kinds() :: [atom()]
+
+  def kinds, do: @kinds
+
+  @doc false
+  @spec kind_key!(keyword(), atom(), String.t()) :: {atom(), term()}
+
+  def kind_key!(opts, host, where) when is_list(opts) and is_atom(host) and is_binary(where) do
+    allowed = kinds!(host)
+    opts = Keyword.delete(opts, :optional)
+
+    case foreign_kind(Keyword.keys(opts), allowed) do
+      nil -> kind_value!(opts, allowed, where)
+      kind -> reject_foreign!(kind, host, allowed, where, "")
+    end
+  end
+
+  @doc false
   @spec normalize!(term(), mode(), String.t()) :: [t()]
 
   def normalize!(spec, :payload, where) when is_binary(where) do
@@ -163,7 +198,7 @@ defmodule Core.Codec.Field do
     cond do
       Prim.prim?(mod) -> {:prim, mod}
       Core.Enum.enum?(mod) -> {:enum, mod}
-      true -> kind_spec!(:entity, mod, where)
+      true -> kind_spec!(:entity, mod, :plugin, where)
     end
   end
 
@@ -185,6 +220,35 @@ defmodule Core.Codec.Field do
   end
 
   # ---
+
+  defp kinds!(:dump_only), do: Keyword.fetch!(@host_kinds, :plugin)
+  defp kinds!(host), do: Keyword.fetch!(@host_kinds, host)
+
+  defp host_name(:dump_only), do: Map.fetch!(@host_names, :plugin)
+  defp host_name(host), do: Map.fetch!(@host_names, host)
+
+  defp foreign_kind(keys, allowed), do: Enum.find(keys, &(&1 in @kinds and &1 not in allowed))
+
+  @spec reject_foreign!(atom(), atom(), [atom()], String.t(), String.t()) :: no_return()
+
+  defp reject_foreign!(kind, host, allowed, where, prefix) do
+    Helper.Opts.reject!(
+      where,
+      "#{prefix}#{host_name(host)}: вид #{kind}: недопустим — ожидается ровно один из " <>
+        Enum.map_join(allowed, "/", &"#{&1}:")
+    )
+  end
+
+  defp kinds_text(allowed, other),
+    do: "ожидается ровно один из #{Enum.map_join(allowed, "/", &"#{&1}:")}, получено #{inspect(other)}"
+
+  defp kind_value!([{kind, value}], allowed, where) do
+    if kind in allowed,
+      do: {kind, value},
+      else: Helper.Opts.reject!(where, kinds_text(allowed, [{kind, value}]))
+  end
+
+  defp kind_value!(other, allowed, where), do: Helper.Opts.reject!(where, kinds_text(allowed, other))
 
   defp pair!({type, spec}) when is_atom(type) and not is_nil(type), do: {type, spec}
 
@@ -276,12 +340,14 @@ defmodule Core.Codec.Field do
     {opts, places} = pop_destroyable!(opts, mode, where)
     if mode == :struct, do: check_struct_keys!(opts, where)
 
-    case Keyword.keys(opts) -- (@kind_keys ++ @extra_keys ++ if(mode == :payload, do: [:subject], else: [])) do
+    extra = @extra_keys ++ if(mode == :payload, do: [:subject], else: [])
+
+    case Keyword.keys(opts) -- (@kinds ++ extra) do
       [] -> :ok
       unknown -> Helper.Opts.reject!(where, "неизвестные ключи #{inspect(unknown)}")
     end
 
-    spec = spec!(opts, where)
+    spec = spec!(opts, mode, extra, where)
     optional? = optional!(opts, where)
 
     %__MODULE__{
@@ -391,37 +457,29 @@ defmodule Core.Codec.Field do
     :ok
   end
 
-  defp spec!(opts, where) do
-    case Keyword.take(opts, @kind_keys) do
-      [{kind, value}] ->
-        kind_spec!(kind, value, where)
-
-      other ->
-        Helper.Opts.reject!(
-          where,
-          "ожидается ровно один из #{Enum.map_join(@kind_keys, "/", &"#{&1}:")}, получено #{inspect(other)}"
-        )
-    end
+  defp spec!(opts, mode, extra, where) do
+    {kind, value} = kind_key!(Keyword.drop(opts, extra), mode, where)
+    kind_spec!(kind, value, mode, where)
   end
 
-  defp kind_spec!(:prim, mod, where) do
+  defp kind_spec!(:prim, mod, _mode, where) do
     FieldCheck.prim!(mod, where)
     {:prim, mod}
   end
 
-  defp kind_spec!(:enum, mod, where) do
+  defp kind_spec!(:enum, mod, _mode, where) do
     FieldCheck.enum!(mod, where)
     {:enum, mod}
   end
 
-  defp kind_spec!(:entity, mod, where) do
+  defp kind_spec!(:entity, mod, _mode, where) do
     struct_module!(mod, where)
     {:entity, mod}
   end
 
   # Семейство struct не имеет: struct здесь — вариант или Prim, а модуль `Core.Enum` — enum, и поле
   # с ними работало бы на одном значении и молча ломалось на остальных.
-  defp kind_spec!(:union, mod, where) do
+  defp kind_spec!(:union, mod, _mode, where) do
     FieldCheck.module!(mod, where)
 
     cond do
@@ -436,24 +494,24 @@ defmodule Core.Codec.Field do
     end
   end
 
-  defp kind_spec!(kind, inner, where) when kind in @collection_kinds,
-    do: {kind, element_spec!("#{kind}", "элемента", inner, where)}
+  defp kind_spec!(kind, inner, mode, where) when kind in @collection_kinds,
+    do: {kind, element_spec!("#{kind}", "элемента", inner, mode, where)}
 
-  defp kind_spec!(:map, inner, where) do
+  defp kind_spec!(:map, inner, mode, where) do
     {key_opts, value_opts} = map_opts!(inner, where)
-    key = element_spec!("map: key", "ключа", key_opts, where)
+    key = element_spec!("map: key", "ключа", key_opts, mode, where)
     check_map_key!(key, key_opts, where)
 
-    {:map, key, element_spec!("map: value", "значения", value_opts, where)}
+    {:map, key, element_spec!("map: value", "значения", value_opts, mode, where)}
   end
 
-  defp kind_spec!(:type, type, _where) when type in @type_values, do: {:type, type}
+  defp kind_spec!(:type, type, _mode, _where) when type in @type_values, do: {:type, type}
 
-  defp kind_spec!(:type, type, where) do
+  defp kind_spec!(:type, type, _mode, where) do
     Helper.Opts.reject!(where, "неизвестный type: #{inspect(type)}, ожидается один из #{inspect(@type_values)}")
   end
 
-  defp element_spec!(label, role, inner, where) do
+  defp element_spec!(label, role, inner, mode, where) do
     if not Keyword.keyword?(inner) do
       Helper.Opts.reject!(where, "#{label}: ожидается keyword-спека #{role}, получено #{inspect(inner)}")
     end
@@ -462,9 +520,17 @@ defmodule Core.Codec.Field do
       Helper.Opts.reject!(where, "optional: задаётся у самого поля, не в #{label}:")
     end
 
-    case Keyword.keys(inner) -- @kind_keys do
-      [] -> spec!(inner, where)
-      unknown -> Helper.Opts.reject!(where, "#{label}: неизвестные ключи #{inspect(unknown)}")
+    allowed = kinds!(mode)
+
+    case foreign_kind(Keyword.keys(inner), allowed) do
+      nil ->
+        case Keyword.keys(inner) -- allowed do
+          [] -> spec!(inner, mode, [], where)
+          unknown -> Helper.Opts.reject!(where, "#{label}: неизвестные ключи #{inspect(unknown)}")
+        end
+
+      kind ->
+        reject_foreign!(kind, mode, allowed, where, "#{label}: ")
     end
   end
 

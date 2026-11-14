@@ -16,7 +16,6 @@ defmodule Core.View.Opts do
 
   @label "View"
   @type_values FieldCheck.type_values()
-  @kind_keys ~w(prim enum type view form list set map jsonb)a
   @collection_kinds ~w(list set)a
 
   @prim_type_asts %{
@@ -126,7 +125,7 @@ defmodule Core.View.Opts do
 
     reject_destroyable!(opts, path)
 
-    {kind_key, value} = kind_key!(opts, path)
+    {kind_key, value} = Field.kind_key!(opts, :view, path)
     optional? = Keyword.get(opts, :optional, false)
 
     if not is_boolean(optional?) do
@@ -142,19 +141,6 @@ defmodule Core.View.Opts do
     end
 
     :ok
-  end
-
-  defp kind_key!(opts, path) do
-    case Keyword.drop(opts, ~w(optional)a) do
-      [{key, value}] when key in @kind_keys ->
-        {key, value}
-
-      other ->
-        Helper.Opts.reject!(
-          path,
-          "ожидается ровно один из #{Enum.map_join(@kind_keys, "/", &"#{&1}:")}, получено #{inspect(other)}"
-        )
-    end
   end
 
   defp spec!(:prim, mod, _name, _form_names, path) do
