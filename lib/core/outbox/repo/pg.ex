@@ -23,9 +23,9 @@ defmodule Core.Outbox.Repo.Pg do
 
   @persist_chunk_size 500
 
-  # Поля, которыми владеет `Core.Outbox.Record`: репозиторий пишет их значения,
-  # а не пересчитывает переходы в SQL.
-  @lifecycle_fields ~w(status attempts errors locked_until lease_id published_at updated_at)a
+  # Поля, которыми владеет `Core.Outbox.Record` при сохранении результата: репозиторий
+  # пишет их значения, а не пересчитывает переходы в SQL.
+  @result_fields ~w(status attempts errors locked_until lease_id published_at updated_at)a
 
   @doc "Добавить записи outbox; после commit — wake поллеров из отметки `Core.Outbox.Supervisor`."
   @spec append([Record.t()], Context.t(), keyword()) :: :ok
@@ -360,7 +360,7 @@ defmodule Core.Outbox.Repo.Pg do
   end
 
   # Резервация меняет только lifecycle-поля. Upsert строки целиком переписывал бы
-  # `payload` и `headers` на каждую попытку публикации — write amplification на самой
+  # `payload` и `errors` на каждую попытку публикации — write amplification на самой
   # горячей таблице очереди. Значения (включая `attempts`) посчитал `Record.reserve/4`;
   # SQL их только сохраняет, поэтому инкремента здесь нет. Пачка разнородна по
   # `attempts` (`:new` → 1, просроченный `:in_work` → 2), и записи с одинаковым
@@ -369,23 +369,36 @@ defmodule Core.Outbox.Repo.Pg do
 
   defp mark_reserved!(records) do
     records
-    |> Enum.group_by(&lifecycle_set/1)
+    |> Enum.group_by(&reserve_set/1)
     |> Enum.each(fn {set, group} -> write_lifecycle(group, set) end)
 
     :ok
   end
 
+  # Резервация не трогает `errors` и `published_at`: их значения не входят в переход.
+  defp reserve_set(%Record{} = record) do
+    codec = Config.codec()
+
+    [
+      status: record.status,
+      attempts: codec.dump(record.attempts),
+      locked_until: codec.dump(record.locked_until),
+      lease_id: codec.dump(record.lease_id),
+      updated_at: codec.dump(record.updated_at)
+    ]
+  end
+
   # Записи с одинаковым набором lifecycle-значений и одной арендой пишутся
   # одним UPDATE: при fail-stop это published-префикс, requeued-хвост и одна
   # проваленная запись — три группы вместо построчных.
-  defp result_group(%Record{} = record), do: {dump_lease(record), lifecycle_set(record)}
+  defp result_group(%Record{} = record), do: {dump_lease(record), result_set(record)}
 
-  # Единственный источник значений полей — структура (`Schema.to_model!/1`): ни
-  # `attempts`, ни `lease_id`, ни `locked_until` здесь не пересчитываются.
-  defp lifecycle_set(%Record{} = record) do
+  # Единственный источник значений полей результата — структура (`Schema.to_model!/1`):
+  # ни `attempts`, ни `lease_id`, ни `locked_until` здесь не пересчитываются.
+  defp result_set(%Record{} = record) do
     row = Schema.to_model!(record)
 
-    Enum.map(@lifecycle_fields, fn field -> {field, Map.fetch!(row, field)} end)
+    Enum.map(@result_fields, fn field -> {field, Map.fetch!(row, field)} end)
   end
 
   defp write_lifecycle(records, set) do

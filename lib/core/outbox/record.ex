@@ -1,6 +1,12 @@
 defmodule Core.Outbox.Record do
   @moduledoc """
   Запись transactional outbox и операции жизненного цикла.
+
+  Переходы (`reserve/4`, `mark_published/3`, `record_failure/4`, `requeue/2`) — единственный
+  владелец lifecycle-полей: репозиторий сохраняет посчитанные значения и не повторяет
+  арифметику в SQL. Токен аренды структура сохраняет во всех переходах: им `save_results`
+  фехтует запись результата. Снимают токен только `Core.Outbox.Repo.release/2` (снятие
+  резервации) и `requeue_failed/2` (административный возврат `:failed`).
   """
 
   import Core.Guard

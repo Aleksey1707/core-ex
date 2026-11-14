@@ -3,7 +3,7 @@ defmodule Core.Outbox.Poller do
   Polling delivery worker: reserve → publish_many → save_results.
 
   Один sequential publisher: порядок в брокере = `order_by: created_at` reserve.
-  При ошибке в середине батча — fail-stop (хвост `release` без attempts).
+  При ошибке в середине батча — fail-stop (хвост `requeue` без attempts).
 
   После `:processed` — drain (`schedule(0)`). При `:retry` (хоть одна запись пачки не
   опубликована), idle или ошибке цикла — adaptive backoff от `idle_min_ms` до

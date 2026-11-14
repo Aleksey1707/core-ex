@@ -627,12 +627,6 @@ defmodule Core.Outbox.Repo.PgTest do
     test "снимает аренду и очищает историю ошибок", %{context: context} do
       failed = fail_record("f1", context)
 
-      # `fail_poisoned/2` помечает строку `:failed` мимо кодека и аренду не снимает —
-      # именно такая строка доживает до requeue с непустым `lease_id`.
-      {1, _} =
-        from(r in Schema, where: r.id == ^dump_id(failed))
-        |> TestRepo.update_all(set: [lease_id: Ecto.UUID.generate()])
-
       row = row_of(failed)
       assert row.lease_id != nil
       assert [%{"attempt" => 1}] = row.errors

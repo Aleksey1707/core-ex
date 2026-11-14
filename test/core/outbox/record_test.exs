@@ -54,6 +54,37 @@ defmodule Core.Outbox.RecordTest do
     assert reserved.updated_at == at
   end
 
+  test "таблица переходов: статус, attempts и токен аренды" do
+    at = Outbox.UpdatedAt.now!()
+    lease_id = Outbox.LeaseID.new()
+    locked_until = Outbox.LockedUntil.now!()
+    {:ok, reserved} = Record.reserve(sample_record(), locked_until, lease_id, at)
+    {:ok, message} = Outbox.ErrorMessage.create("boom")
+    {:ok, failed_at_max} = Record.record_failure(reserved, message, Outbox.Attempts.new!(1), at)
+    {:ok, retried} = Record.record_failure(reserved, message, Outbox.Attempts.new!(3), at)
+
+    transitions = [
+      {"reserve", reserved, :in_work, 1, lease_id},
+      {"requeue", Record.requeue(reserved, at), :new, 1, lease_id},
+      {"mark_published", Record.mark_published(reserved, Outbox.PublishedAt.now!(), at), :published, 1, lease_id},
+      {"record_failure/max", failed_at_max, :failed, 1, lease_id},
+      {"record_failure/retry", retried, :new, 1, lease_id}
+    ]
+
+    Enum.each(transitions, fn {name, record, status, attempts, token} ->
+      assert record.status == status, name
+      assert Outbox.Attempts.value(record.attempts) == attempts, name
+      assert record.lease_id == token, name
+    end)
+
+    assert reserved.locked_until == locked_until
+
+    # одна резервация — один прирост; следующая попытка добавляет ещё один
+    requeued = Record.requeue(reserved, at)
+    assert {:ok, again} = Record.reserve(requeued, locked_until, Outbox.LeaseID.new(), at)
+    assert Outbox.Attempts.value(again.attempts) == 2
+  end
+
   test "mark_published очищает lock" do
     record = sample_record()
     at = Outbox.UpdatedAt.now!()
