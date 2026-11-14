@@ -24,6 +24,9 @@ defmodule Core.Repo.Sc do
   не трогают. Кэш — оптимизация write-пути: без эталона `Children.sync` идёт широким diff, и
   корректность записи от этого не страдает.
 
+  `init/1` идемпотентен в процессе-владельце: живая своя таблица переиспользуется вместе с
+  эталонами. В чужом процессе он создаёт собственную таблицу, а прежнюю не трогает.
+
   Эталон в ETS расходится с БД только при прямом `Repo.Pg.put_baseline/3` внутри транзакции:
   штатная запись регистрирует эталон после commit (`Helper.AfterCommit.register/1`).
   """
@@ -34,11 +37,18 @@ defmodule Core.Repo.Sc do
 
   # ===== таблица =====
 
-  @doc "Включить снэпшот-кэш для контекста (создаёт приватную ETS-таблицу)."
+  @doc """
+  Включить снэпшот-кэш для контекста (создаёт приватную ETS-таблицу).
+
+  В процессе-владельце идемпотентен: контекст с живой своей таблицей возвращается как есть.
+  """
   @spec init(Context.t()) :: Context.t()
 
   def init(context) do
-    Context.put(context, @context_key, :ets.new(:shadow_copy, [:set, :private]))
+    case own_table(context) do
+      nil -> Context.put(context, @context_key, :ets.new(:shadow_copy, [:set, :private]))
+      _tid -> context
+    end
   end
 
   @doc """

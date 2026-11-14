@@ -110,6 +110,38 @@ defmodule Core.Repo.ScTest do
     assert Repo.Sc.find(stale, Entity, "1") == nil
   end
 
+  test "init/1 идемпотентен в процессе-владельце" do
+    ctx = Context.new() |> Repo.Sc.init()
+    tid = Context.find(ctx, :shadow_copy)
+    entity = %Entity{id: "1", name: "a"}
+    Repo.Sc.put(ctx, entity)
+
+    assert ^ctx = Repo.Sc.init(ctx)
+    assert Context.find(ctx, :shadow_copy) == tid
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
+  end
+
+  test "init/1 в чужом процессе создаёт свою таблицу, прежняя жива" do
+    ctx = Context.new() |> Repo.Sc.init()
+    tid = Context.find(ctx, :shadow_copy)
+    entity = %Entity{id: "1", name: "a"}
+    Repo.Sc.put(ctx, entity)
+
+    result =
+      Task.async(fn ->
+        foreign = Repo.Sc.init(ctx)
+        foreign_tid = Context.find(foreign, :shadow_copy)
+        {foreign_tid, :ets.info(foreign_tid, :owner) == self(), Repo.Sc.find(foreign, Entity, "1")}
+      end)
+      |> Task.await()
+
+    assert {foreign_tid, true, nil} = result
+    assert is_reference(foreign_tid)
+    assert foreign_tid != tid
+    assert :ets.info(tid) != :undefined
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
+  end
+
   test "put/find из чужого процесса — no-op и nil, таблица владельца цела" do
     ctx = Context.new() |> Repo.Sc.init()
     tid = Context.find(ctx, :shadow_copy)
