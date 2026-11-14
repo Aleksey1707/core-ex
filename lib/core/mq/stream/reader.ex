@@ -143,10 +143,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     def get(server, timeout)
         when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
-      case Poll.await(fn -> get(server, 0) end, fn -> notify_when_ready(server, self()) end, timeout, @poll_ms) do
-        {:error, :nothing_to_commit} -> :empty
-        result -> result
-      end
+      Poll.await_empty(fn -> get(server, 0) end, nil, timeout, @poll_ms)
     end
 
     @doc "Зафиксировать offset текущего сообщения."

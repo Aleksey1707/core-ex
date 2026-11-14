@@ -21,21 +21,24 @@ defmodule Core.Mq.Stream.ReaderContractTest do
   end
 
   def start_reader(context) do
-    Process.put(:reader_contract_writer, context.writer)
-    Process.put(:reader_contract_topic, context.topic)
+    reader =
+      start_supervised!(
+        {Core.Mq.Stream.Reader,
+         connection: Connection,
+         topic: context.topic,
+         subscriber_name: Mq.SubscriberName.new!("reader-contract-#{System.unique_integer([:positive])}"),
+         reliable?: true,
+         initial_offset: :first}
+      )
 
-    start_supervised!(
-      {Core.Mq.Stream.Reader,
-       connection: Connection,
-       topic: context.topic,
-       subscriber_name: Mq.SubscriberName.new!("reader-contract-#{System.unique_integer([:positive])}"),
-       reliable?: true,
-       initial_offset: :first}
-    )
+    sink = {context.writer, context.topic}
+    Process.put(:reader_contract_sinks, Map.put(Process.get(:reader_contract_sinks, %{}), reader, sink))
+    reader
   end
 
-  def publish(_reader, body) do
-    {:ok, message} = Message.new(Process.get(:reader_contract_topic), %{}, body, nil)
-    Writer.put(Process.get(:reader_contract_writer), message)
+  def publish(reader, body) do
+    {writer, topic} = Process.get(:reader_contract_sinks) |> Map.fetch!(reader)
+    {:ok, message} = Message.new(topic, %{}, body, nil)
+    Writer.put(writer, message)
   end
 end

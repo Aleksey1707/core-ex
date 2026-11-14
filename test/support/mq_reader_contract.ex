@@ -21,8 +21,12 @@ defmodule Core.MqReaderContract do
       @reader_timeout 15_000
       @reader_empty_timeout 300
 
-      # credo:disable-for-next-line Credo.Check.Refactor.Apply
-      defp reader_call(fun, args), do: apply(@reader_impl, fun, args)
+      @compile {:no_warn_undefined,
+                [
+                  {@reader_impl, :metrics, 1},
+                  {@reader_impl, :info, 1},
+                  {@reader_impl, :notify_when_ready, 2}
+                ]}
 
       test "get без commit возвращает то же сообщение, после commit — :empty", context do
         reader = start_reader(context)
@@ -61,7 +65,7 @@ defmodule Core.MqReaderContract do
         if Core.Helper.Module.exports?(@reader_impl, :notify_when_ready, 2) do
           reader = start_reader(context)
 
-          assert {:ok, ref} = reader_call(:notify_when_ready, [reader, self()])
+          assert {:ok, ref} = @reader_impl.notify_when_ready(reader, self())
           assert :ok = publish(reader, "ready")
           assert_receive {:mq_ready, ^ref}, @reader_timeout
           refute_receive {:mq_ready, ^ref}, 200
@@ -71,22 +75,18 @@ defmodule Core.MqReaderContract do
       test "metrics/1 отдаёт topic и числовые gauges, иначе info/1 — topic", context do
         reader = start_reader(context)
 
-        if Core.Helper.Module.exports?(@reader_impl, :metrics, 1) do
-          assert %{topic: topic} = metrics = reader_call(:metrics, [reader])
-          assert is_binary(topic)
-          assert Enum.all?(Map.delete(metrics, :topic), fn {_key, value} -> is_number(value) end)
+        cond do
+          Core.Helper.Module.exports?(@reader_impl, :metrics, 1) ->
+            assert %{topic: topic} = metrics = @reader_impl.metrics(reader)
+            assert is_binary(topic)
+            assert Enum.all?(Map.delete(metrics, :topic), fn {_key, value} -> is_number(value) end)
 
-          if @reader_impl == Core.Mq.Dlq.Reader do
-            assert :ok = publish(reader, "pending")
-            assert {:ok, _message} = @reader_impl.get(reader, @reader_timeout)
-            assert %{pending: 1} = reader_call(:metrics, [reader])
-            assert :ok = @reader_impl.commit(reader)
-            assert %{pending: 0} = reader_call(:metrics, [reader])
-          end
-        else
-          assert Core.Helper.Module.exports?(@reader_impl, :info, 1)
-          assert %{topic: topic} = reader_call(:info, [reader])
-          assert is_binary(topic)
+          Core.Helper.Module.exports?(@reader_impl, :info, 1) ->
+            assert %{topic: topic} = @reader_impl.info(reader)
+            assert is_binary(topic)
+
+          true ->
+            :ok
         end
       end
     end

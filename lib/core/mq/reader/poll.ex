@@ -28,6 +28,21 @@ defmodule Core.Mq.Reader.Poll do
     poll(fetch, ready_request, deadline(timeout), interval)
   end
 
+  @doc """
+  Как `await/4`, но исход таймаута — `:empty`: пустота к дедлайну не отказ брокера.
+
+  Общий перевод для читателей `Core.Mq.ReaderReliable`: их `get/2` отдаёт `:empty`.
+  """
+  @spec await_empty(fetch(), ready_request(), timeout(), pos_integer()) ::
+          {:ok, term()} | :empty | {:error, term()}
+
+  def await_empty(fetch, ready_request, timeout, interval \\ 10) do
+    case await(fetch, ready_request, timeout, interval) do
+      {:error, :nothing_to_commit} -> :empty
+      result -> result
+    end
+  end
+
   # ---
 
   defp poll(fetch, ready_request, deadline, interval) do

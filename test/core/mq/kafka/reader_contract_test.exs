@@ -25,21 +25,24 @@ defmodule Core.Mq.Kafka.ReaderContractTest do
   end
 
   def start_reader(context) do
-    Process.put(:reader_contract_client, context.client)
-    Process.put(:reader_contract_topic, context.topic)
+    reader =
+      start_supervised!(
+        {Core.Mq.Kafka.Reader,
+         client: context.client,
+         topic: Mq.Topic.new!(context.topic),
+         subscriber_name: Mq.SubscriberName.new!("kafka_reader_contract"),
+         repo: TestRepo}
+      )
 
-    start_supervised!(
-      {Core.Mq.Kafka.Reader,
-       client: context.client,
-       topic: Mq.Topic.new!(context.topic),
-       subscriber_name: Mq.SubscriberName.new!("kafka_reader_contract"),
-       repo: TestRepo}
-    )
+    sink = {context.client, Mq.Topic.new!(context.topic)}
+    Process.put(:reader_contract_sinks, Map.put(Process.get(:reader_contract_sinks, %{}), reader, sink))
+    reader
   end
 
-  def publish(_reader, body) do
-    {:ok, message} = Message.new(Mq.Topic.new!(Process.get(:reader_contract_topic)), %{}, body, nil)
-    Writer.put_many(Process.get(:reader_contract_client), [message])
+  def publish(reader, body) do
+    {client, topic} = Process.get(:reader_contract_sinks) |> Map.fetch!(reader)
+    {:ok, message} = Message.new(topic, %{}, body, nil)
+    Writer.put_many(client, [message])
   end
 
   defp create_topic(topic, partitions) do

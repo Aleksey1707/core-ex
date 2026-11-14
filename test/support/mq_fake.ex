@@ -166,13 +166,15 @@ defmodule Core.MqFake do
 
     @doc false
     @impl true
+    def get(name, 0) when is_atom(name), do: get(%__MODULE__{agent: name}, 0)
+
+    def get(%__MODULE__{} = reader, 0), do: take(reader)
+
     def get(name, timeout) when is_atom(name), do: get(%__MODULE__{agent: name}, timeout)
 
-    def get(%__MODULE__{agent: agent}, _timeout) do
-      case Agent.get(agent, & &1) do
-        [] -> :empty
-        [message | _rest] -> {:ok, message}
-      end
+    def get(%__MODULE__{} = reader, timeout)
+        when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
+      Core.Mq.Reader.Poll.await_empty(fn -> take(reader) end, nil, timeout)
     end
 
     @doc false
@@ -184,6 +186,15 @@ defmodule Core.MqFake do
         [] -> []
         [_committed | rest] -> rest
       end)
+    end
+
+    # ---
+
+    defp take(%__MODULE__{agent: agent}) do
+      case Agent.get(agent, & &1) do
+        [] -> :empty
+        [message | _rest] -> {:ok, message}
+      end
     end
   end
 
@@ -221,11 +232,11 @@ defmodule Core.MqFake do
 
     @doc false
     @impl true
-    def get(name, _timeout) when is_atom(name) do
-      case Agent.get(name, & &1.messages) do
-        [] -> :empty
-        [message | _rest] -> {:ok, message}
-      end
+    def get(name, 0) when is_atom(name), do: take(name)
+
+    def get(name, timeout)
+        when is_atom(name) and (timeout == :infinity or (is_integer(timeout) and timeout > 0)) do
+      Core.Mq.Reader.Poll.await_empty(fn -> take(name) end, nil, timeout)
     end
 
     @doc false
@@ -246,6 +257,13 @@ defmodule Core.MqFake do
     end
 
     # ---
+
+    defp take(name) do
+      case Agent.get(name, & &1.messages) do
+        [] -> :empty
+        [message | _rest] -> {:ok, message}
+      end
+    end
 
     defp notify(%{messages: [_ | _], ready_request: {pid, ref}} = state) do
       send(pid, {:mq_ready, ref})

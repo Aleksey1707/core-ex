@@ -215,6 +215,26 @@ defmodule Core.Mq.PromExTest do
       assert_receive {:telemetry, @subscribed, %{value: 0}, ^meta}
     end
 
+    test "metrics/1 с частичной картой: недостающие значения — 0" do
+      on_exit(&reset_labels/0)
+
+      state = %{metrics: %{topic: "orders", pending: 1}, info: %{reader_info() | buffer_len: 99}}
+
+      start_supervised!(%{
+        id: :partial,
+        start: {MetricsReader, :start_link, [[name: :mq_promex_partial, state: state]]}
+      })
+
+      attach([@buffer, @pending, @age, @subscribed])
+      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :partial_reader, []})
+
+      meta = %{component: "orders", topic: "orders"}
+      assert_receive {:telemetry, @buffer, %{value: 0}, ^meta}
+      assert_receive {:telemetry, @pending, %{value: 1}, ^meta}
+      assert_receive {:telemetry, @age, %{value: 0}, ^meta}
+      assert_receive {:telemetry, @subscribed, %{value: 0}, ^meta}
+    end
+
     test "info/1 — запасной путь: модуль выведен из живого процесса" do
       start_supervised!(%{
         id: :info,
@@ -414,6 +434,9 @@ defmodule Core.Mq.PromExTest do
 
   @doc false
   def metrics_reader, do: [%{component: "orders", name: :mq_promex_metrics, module: MetricsReader}]
+
+  @doc false
+  def partial_reader, do: [%{component: "orders", name: :mq_promex_partial, module: MetricsReader}]
 
   @doc false
   def info_reader, do: [%{component: "orders", name: :mq_promex_info}]

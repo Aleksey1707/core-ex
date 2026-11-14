@@ -25,6 +25,11 @@ defmodule Core.Mq.Reader.PollTest do
     assert System.monotonic_time(:millisecond) - started >= 40
   end
 
+  test "await_empty переводит таймаут в :empty, await оставляет :nothing_to_commit" do
+    assert :empty = Poll.await_empty(fn -> :empty end, nil, 30, 10)
+    assert {:error, :nothing_to_commit} = Poll.await(fn -> :empty end, nil, 30, 10)
+  end
+
   test "опрос по интервалу не превращается в busy-loop" do
     {fetch, calls} = scripted_fetch([:empty])
     started = System.monotonic_time(:millisecond)

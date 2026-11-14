@@ -317,6 +317,18 @@ defmodule Core.Mq.Kafka.ReaderTest do
 
       refute_receive {:mq_ready, _}, 50
     end
+
+    test "get с таймаутом не перебивает чужую заявку", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+
+      assert {:ok, ref} = Reader.notify_when_ready(reader, self())
+      assert :empty = Reader.get(reader, 50)
+
+      :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", []}], 1)
+
+      assert_receive {:mq_ready, ^ref}
+    end
   end
 
   describe "события метрик" do

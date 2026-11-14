@@ -101,10 +101,7 @@ defmodule Core.Mq.Dlq.Reader do
   def get(server, 0), do: GenServer.call(server, :get, @call_timeout)
 
   def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
-    case Poll.await(fn -> get(server, 0) end, nil, timeout, @poll_ms) do
-      {:error, :nothing_to_commit} -> :empty
-      result -> result
-    end
+    Poll.await_empty(fn -> get(server, 0) end, nil, timeout, @poll_ms)
   end
 
   @doc "Пометить запись в работе обработанной."
@@ -233,8 +230,8 @@ defmodule Core.Mq.Dlq.Reader do
 
   defp log_lost(state, id) do
     Logger.warning(
-      "dlq reader: захват записи перехвачен, запись брошена: id=#{id} topic=#{state.topic_name} " <>
-        "subscriber=#{state.subscriber}"
+      "dlq reader: аренда потеряна, захват записи перехвачен, запись брошена: id=#{id} " <>
+        "topic=#{state.topic_name} subscriber=#{state.subscriber}"
     )
   end
 

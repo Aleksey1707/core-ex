@@ -41,6 +41,7 @@ defmodule Core.Mq.Dlq.ReaderTest do
     TestRepo.query!("UPDATE mq_dlq SET lease_id = $1 WHERE body = 'a'", [Store.new_lease()])
 
     log = capture_log(fn -> assert {:ok, %Mq.Message{body: "b"}} = Dlq.Reader.get(reader, 0) end)
+    assert log =~ "аренда потеряна"
     assert log =~ "захват записи перехвачен"
 
     TestRepo.query!("UPDATE mq_dlq SET lease_id = $1 WHERE body = 'b'", [Store.new_lease()])

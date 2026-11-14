@@ -396,6 +396,16 @@ defmodule Core.Mq.Stream.ReaderTest do
       assert_received {:mq_ready, ^ref}
       refute_received {:mq_ready, ^old_ref}
     end
+
+    test "get с таймаутом не перебивает чужую заявку", %{reader: reader, topic: topic} do
+      assert {:ok, ref} = Stream.Reader.notify_when_ready(reader, self())
+
+      assert :empty = Stream.Reader.get(reader, 50)
+
+      deliver(reader, 0, encoded_many(topic, 0, 1))
+
+      assert_received {:mq_ready, ^ref}
+    end
   end
 
   describe "подписка вне init/1" do

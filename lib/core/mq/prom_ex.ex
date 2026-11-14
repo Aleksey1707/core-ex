@@ -370,9 +370,9 @@ defmodule Core.Mq.PromEx do
     %{
       component: component,
       name: name,
-      topic: info.topic,
-      buffer_len: info.buffer_len,
-      chunk_remaining: info.chunk_remaining,
+      topic: Map.get(info, :topic, nil),
+      buffer_len: Map.get(info, :buffer_len, 0),
+      chunk_remaining: Map.get(info, :chunk_remaining, 0),
       pending: pending_flag(info),
       pending_age_seconds: pending_age(info, now),
       subscribed: subscribed_flag(info)
@@ -381,12 +381,15 @@ defmodule Core.Mq.PromEx do
 
   defp pending_flag(%{pending: pending}) when is_number(pending), do: pending
   defp pending_flag(%{pending?: pending?}), do: flag(pending?)
+  defp pending_flag(_info), do: 0
 
   defp subscribed_flag(%{subscribed: subscribed}) when is_number(subscribed), do: subscribed
   defp subscribed_flag(%{subscribed?: subscribed?}), do: flag(subscribed?)
+  defp subscribed_flag(_info), do: 0
 
   defp pending_age(%{pending_age_seconds: seconds}, _now) when is_number(seconds), do: seconds
   defp pending_age(%{pending_ts: ts}, now), do: pending_age_seconds(ts, now)
+  defp pending_age(_info, _now), do: 0
 
   defp pending_age_seconds(nil, _now), do: 0
   defp pending_age_seconds(ts, now) when is_integer(ts), do: max(now - ts, 0) / 1_000
