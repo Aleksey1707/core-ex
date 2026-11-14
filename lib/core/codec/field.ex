@@ -137,6 +137,11 @@ defmodule Core.Codec.Field do
   def kinds, do: @kinds
 
   @doc false
+  @spec kinds(atom()) :: [atom()]
+
+  def kinds(host) when is_atom(host), do: kinds!(host)
+
+  @doc false
   @spec kind_key!(keyword(), atom(), String.t()) :: {atom(), term()}
 
   def kind_key!(opts, host, where) when is_list(opts) and is_atom(host) and is_binary(where) do

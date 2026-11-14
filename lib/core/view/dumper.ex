@@ -8,22 +8,18 @@ defmodule Core.View.Dumper do
   не-список на месте `list:` возвращаются без изменений.
   """
 
-  alias Core.Helper
-  alias Core.View.Opts
-
-  @label "View"
-  @item_vars ~w(item_0 item_1 item_2 item_3)a
+  alias Core.View.Field
 
   @doc false
-  @spec codec_ast(module(), [Opts.field()], [{atom(), [Opts.field()]}]) :: Macro.t()
+  @spec codec_ast(module(), [Field.t()], [{atom(), [Field.t()]}]) :: Macro.t()
 
   def codec_ast(view, fields, forms) do
     codec = codec_var(fields_need_codec?(fields))
     value = Macro.var(:view, __MODULE__)
 
     pairs =
-      Enum.map(fields, fn {name, spec, _optional?} ->
-        {name, dump_ast(spec, field_access(value, name), codec, 0)}
+      Enum.map(fields, fn %Field{name: name, dump_ast: dump_ast} ->
+        {name, dump_ast.(field_access(value, name), codec)}
       end)
 
     quote do
@@ -89,8 +85,8 @@ defmodule Core.View.Dumper do
     form = Macro.var(:form, __MODULE__)
 
     pairs =
-      Enum.map(fields, fn {field, spec, _optional?} ->
-        {field, dump_ast(spec, form_access(form, field), codec, 0)}
+      Enum.map(fields, fn %Field{name: field, dump_ast: dump_ast} ->
+        {field, dump_ast.(form_access(form, field), codec)}
       end)
 
     quote do
@@ -100,93 +96,10 @@ defmodule Core.View.Dumper do
     end
   end
 
-  defp dump_ast({:prim, mod, _kind}, value, codec, _depth) do
-    quote do
-      Core.Codec.Helper.dump_raw(unquote(mod), unquote(value), unquote(codec))
-    end
-  end
-
-  defp dump_ast({:enum, _mod}, value, _codec, _depth), do: value
-  defp dump_ast({:type, _type}, value, _codec, _depth), do: value
-
-  defp dump_ast({:view, _mod}, value, codec, _depth) do
-    quote(do: Core.Codec.Helper.dump_optional(unquote(value), unquote(codec)))
-  end
-
-  defp dump_ast({:form, name}, value, codec, _depth) do
-    quote(do: dump_form(unquote(name), unquote(value), unquote(codec)))
-  end
-
-  defp dump_ast({:jsonb, type}, value, codec, _depth) when is_atom(type) do
-    quote do
-      Core.Codec.Redump.run(unquote(value), {:codec, unquote(type)}, unquote(codec))
-    end
-  end
-
-  defp dump_ast({:jsonb, {mod, fun}}, value, codec, _depth) do
-    quote do
-      Core.Codec.Redump.run(unquote(value), unquote(mod).unquote(fun)(), unquote(codec))
-    end
-  end
-
-  defp dump_ast({:list, inner}, value, codec, depth) do
-    item = Macro.var(item_var!(depth), __MODULE__)
-
-    quote do
-      Core.View.Dumper.map_list(unquote(value), fn unquote(item) ->
-        unquote(dump_ast(inner, item, codec, depth + 1))
-      end)
-    end
-  end
-
-  defp dump_ast({:set, inner}, value, codec, depth) do
-    item = Macro.var(item_var!(depth), __MODULE__)
-
-    quote do
-      Core.View.Dumper.map_set(unquote(value), fn unquote(item) ->
-        unquote(dump_ast(inner, item, codec, depth + 1))
-      end)
-    end
-  end
-
-  # Ключ — вид с wire-строкой: Prim дампится по профилю, enum — строкой, как его пишет плагин по полям.
-  defp dump_ast({:map, key, inner}, value, codec, depth) do
-    key_var = Macro.var(:key, __MODULE__)
-    item = Macro.var(item_var!(depth), __MODULE__)
-
-    quote do
-      Core.View.Dumper.map_dict(
-        unquote(value),
-        fn unquote(key_var) -> unquote(key_dump_ast(key, key_var, codec)) end,
-        fn unquote(item) -> unquote(dump_ast(inner, item, codec, depth + 1)) end
-      )
-    end
-  end
-
-  # Дамп тотален: строковый ключ jsonb-формы проходит как есть.
-  defp key_dump_ast({:enum, _mod}, key, _codec) do
-    quote do
-      if is_atom(unquote(key)) and not is_nil(unquote(key)),
-        do: Core.Codec.Helper.enum_key(unquote(key)),
-        else: unquote(key)
-    end
-  end
-
-  defp key_dump_ast(spec, key, codec), do: dump_ast(spec, key, codec, 0)
-
-  defp fields_need_codec?(fields) do
-    Enum.any?(fields, fn {_name, spec, _optional?} -> Opts.needs_codec?(spec) end)
-  end
+  defp fields_need_codec?(fields), do: Enum.any?(fields, & &1.needs_codec?)
 
   defp codec_var(true), do: Macro.var(:codec, __MODULE__)
   defp codec_var(false), do: Macro.var(:_codec, __MODULE__)
-
-  # Имена переменных элементов перечислены заранее: собирать их интерполяцией значило бы
-  # заводить атомы в рантайме. Вложенность глубже — не форма представления, а недосмотр.
-  defp item_var!(depth) when depth < length(@item_vars), do: Enum.at(@item_vars, depth)
-
-  defp item_var!(depth),
-    do: Helper.Opts.reject!(@label, "вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})")
 
   defp field_access(value, name), do: {{:., [], [value, name]}, [no_parens: true], []}
 

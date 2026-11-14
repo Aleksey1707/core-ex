@@ -18,40 +18,11 @@ defmodule Core.View.Opts do
   @type_values FieldCheck.type_values()
   @collection_kinds ~w(list set)a
 
-  @prim_type_asts %{
-    uuid: quote(do: String.t()),
-    string: quote(do: String.t()),
-    datetime: quote(do: DateTime.t()),
-    date: quote(do: Date.t()),
-    decimal: quote(do: Decimal.t()),
-    integer: quote(do: integer())
-  }
-
-  @coercible_kinds Codec.coercible_kinds()
-
-  # Kind, приводимый профилем, обязан быть и типизируем: поле объявляется Prim-модулем, а
-  # значит новый native kind в `Core.Codec` без typespec оставил бы структуру без типа.
-  @untyped_kinds @coercible_kinds -- Map.keys(@prim_type_asts)
-
-  if @untyped_kinds != [] do
-    raise CompileError,
-      description: "#{@label}: нет typespec для kinds #{inspect(@untyped_kinds)}"
-  end
-
   @typedoc "Нормализованная спека значения поля."
-  @type spec ::
-          {:prim, module(), atom()}
-          | {:enum, module()}
-          | {:type, atom()}
-          | {:view, module()}
-          | {:form, atom()}
-          | {:list, spec()}
-          | {:set, spec()}
-          | {:map, spec(), spec()}
-          | {:jsonb, module() | {module(), atom()}}
+  @type spec :: Core.View.Field.spec()
 
-  @typedoc "Нормализованное поле: имя, спека значения, признак необязательности."
-  @type field :: {atom(), spec(), boolean()}
+  @typedoc "Нормализованное поле: имя, спека значения, признак необязательности и проекции."
+  @type field :: Core.View.Field.t()
 
   @doc "Проверить и нормализовать `forms:` — именованные map-формы вложенных значений."
   @spec forms!(term()) :: [{atom(), [field()]}]
@@ -84,41 +55,22 @@ defmodule Core.View.Opts do
   @spec used_forms([field()]) :: MapSet.t(atom())
 
   def used_forms(fields) do
-    Enum.reduce(fields, MapSet.new(), fn {_name, spec, _optional?}, acc ->
+    Enum.reduce(fields, MapSet.new(), fn %Core.View.Field{spec: spec}, acc ->
       collect_forms(spec, acc)
     end)
   end
 
-  @doc "Typespec значения поля `prim:` по kind его Prim."
-  @spec prim_type_ast(atom()) :: Macro.t()
-
-  def prim_type_ast(kind) when is_atom(kind), do: Map.fetch!(@prim_type_asts, kind)
-
   @doc false
-  @spec shaped?(spec()) :: boolean()
+  @spec field!(atom(), keyword(), [atom()], String.t()) :: field()
 
-  def shaped?({:set, _inner}), do: true
-  def shaped?({:map, _key, _value}), do: true
-  def shaped?({:list, inner}), do: shaped?(inner)
-  def shaped?(_spec), do: false
-
-  @doc "Спека требует `codec` для дампа (иначе значение уходит как есть)."
-  @spec needs_codec?(spec()) :: boolean()
-
-  def needs_codec?({:prim, _mod, _kind}), do: true
-  def needs_codec?({:enum, _mod}), do: false
-  def needs_codec?({:type, _type}), do: false
-  def needs_codec?({:view, _mod}), do: true
-  def needs_codec?({:form, _name}), do: true
-  def needs_codec?({:jsonb, _spec_ref}), do: true
-  def needs_codec?({kind, _inner} = spec) when kind in @collection_kinds, do: nested_codec?(spec)
-  def needs_codec?({:map, _key, _value} = spec), do: nested_codec?(spec)
+  def field!(name, opts, form_names, path) when is_atom(name) do
+    {name, spec, optional?} = spec_field!(name, opts, form_names, path)
+    Core.View.Field.build(name, spec, optional?)
+  end
 
   # ---
 
-  defp nested_codec?(spec), do: Enum.any?(Field.children(spec), &needs_codec?/1)
-
-  defp field!(name, opts, form_names, path) when is_atom(name) do
+  defp spec_field!(name, opts, form_names, path) when is_atom(name) do
     if not Keyword.keyword?(opts) do
       Helper.Opts.reject!(path, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
@@ -257,7 +209,7 @@ defmodule Core.View.Opts do
   defp element!(label, name, inner, form_names, path) do
     reject_destroyable!(inner, "#{path}: #{label}")
 
-    {^name, spec, optional?} = field!(name, inner, form_names, path)
+    {^name, spec, optional?} = spec_field!(name, inner, form_names, path)
 
     if optional? do
       Helper.Opts.reject!("#{path}: #{label}", "optional: задаётся у самого поля, не в #{label}:")

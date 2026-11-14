@@ -75,6 +75,7 @@ defmodule Core.View do
 
   alias Core.Helper
   alias Core.View.Dumper
+  alias Core.View.Field
   alias Core.View.Opts
 
   @label "View"
@@ -188,8 +189,8 @@ defmodule Core.View do
   end
 
   defp struct_ast(fields) do
-    required = for {name, _spec, false} <- fields, do: name
-    all = Enum.map(fields, fn {name, _spec, _optional?} -> name end)
+    required = for %Field{name: name, optional?: false} <- fields, do: name
+    all = Enum.map(fields, & &1.name)
 
     quote do
       @enforce_keys unquote(required)
@@ -216,27 +217,16 @@ defmodule Core.View do
   defp map_type_ast(fields), do: {:%{}, [], type_pairs(fields)}
 
   defp type_pairs(fields) do
-    Enum.map(fields, fn {name, spec, optional?} ->
-      {name, optional_type_ast(type_ast(spec), optional?)}
+    Enum.map(fields, fn %Field{name: name, type_ast: type, optional?: optional?} ->
+      {name, optional_type_ast(type, optional?)}
     end)
   end
 
   defp optional_type_ast(type, false), do: type
   defp optional_type_ast(type, true), do: quote(do: unquote(type) | nil)
 
-  defp type_ast({:prim, _mod, kind}), do: Opts.prim_type_ast(kind)
-  defp type_ast({:enum, mod}), do: quote(do: unquote(mod).t())
-  defp type_ast({:view, mod}), do: quote(do: unquote(mod).t())
-  defp type_ast({:type, :string}), do: quote(do: String.t())
-  defp type_ast({:type, type}), do: {type, [], []}
-  defp type_ast({:form, name}), do: {name, [], []}
-  defp type_ast({:list, inner}), do: quote(do: [unquote(type_ast(inner))])
-  defp type_ast({:set, inner}), do: quote(do: MapSet.t(unquote(type_ast(inner))))
-  defp type_ast({:map, key, value}), do: quote(do: %{optional(unquote(type_ast(key))) => unquote(type_ast(value))})
-  defp type_ast({:jsonb, _spec_ref}), do: quote(do: map())
-
   defp new_ast(fields) do
-    declared = Enum.map(fields, fn {name, _spec, _optional?} -> name end)
+    declared = Enum.map(fields, & &1.name)
 
     quote do
       @doc "Собрать представление из keyword-списка полей."
@@ -252,14 +242,14 @@ defmodule Core.View do
 
   defp new_pairs(fields) do
     Enum.map(fields, fn
-      {name, spec, false} -> {name, shape_ast(spec, quote(do: Keyword.fetch!(opts, unquote(name))))}
-      {name, spec, true} -> {name, shape_ast(spec, quote(do: Keyword.get(opts, unquote(name))))}
+      %Field{name: name, optional?: false} = field ->
+        {name, shape_ast(field, quote(do: Keyword.fetch!(opts, unquote(name))))}
+
+      %Field{name: name, optional?: true} = field ->
+        {name, shape_ast(field, quote(do: Keyword.get(opts, unquote(name))))}
     end)
   end
 
-  defp shape_ast(spec, value) do
-    if Opts.shaped?(spec),
-      do: quote(do: Core.View.shape(unquote(Macro.escape(spec)), unquote(value))),
-      else: value
-  end
+  defp shape_ast(%Field{shape?: false}, value), do: value
+  defp shape_ast(%Field{shape?: true, shape_ast: shape_ast}, value), do: shape_ast.(value)
 end

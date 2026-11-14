@@ -241,6 +241,29 @@ defmodule Core.ViewFixture do
       ]
   end
 
+  defmodule AllKinds do
+    @moduledoc false
+
+    use Core.View,
+      fields: [
+        prim: [prim: Core.ViewFixture.ID],
+        enum: [enum: Core.ViewFixture.Status],
+        type: [type: :pos_integer],
+        view: [view: Core.ViewFixture.Nested],
+        form: [form: :mark],
+        list: [list: [prim: Core.ViewFixture.ID]],
+        set: [set: [prim: Core.ViewFixture.ID]],
+        map: [map: [key: [prim: Core.ViewFixture.ID], value: [enum: Core.ViewFixture.Status]]],
+        jsonb: [jsonb: {Core.ViewFixture.Specs, :payload_spec}]
+      ],
+      forms: [
+        mark: [
+          code: [type: :string],
+          at: [prim: Core.ViewFixture.CreatedAt]
+        ]
+      ]
+  end
+
   defmodule Bag do
     @moduledoc false
 
@@ -268,6 +291,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.External,
       plugins: [
+        Core.ViewFixture.AllKinds.Codec,
         Core.ViewFixture.Bag.Codec,
         Core.ViewFixture.Free.Codec,
         Core.ViewFixture.Listy.Codec,
@@ -287,6 +311,7 @@ defmodule Core.ViewFixture do
     use Core.Codec.Facade,
       prim: Core.CodecFixture.Prim.Internal,
       plugins: [
+        Core.ViewFixture.AllKinds.Codec,
         Core.ViewFixture.Bag.Codec,
         Core.ViewFixture.Free.Codec,
         Core.ViewFixture.Listy.Codec,
