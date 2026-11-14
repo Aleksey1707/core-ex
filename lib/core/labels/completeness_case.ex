@@ -64,6 +64,9 @@ defmodule Core.Labels.CompletenessCase do
   @optional_keys ~w(async)a
   @expression_keys ~w()a
 
+  # Виды с модулем значения, которые обход не раскрывает: Prim и Enum.
+  @leaf_kinds Field.value_module_kinds() -- Field.group_kinds()
+
   @typedoc "Пробел: модуль-владелец, поле и модуль значения без объявления."
   @type place :: {module(), atom(), module()}
 
@@ -278,7 +281,7 @@ defmodule Core.Labels.CompletenessCase do
     if Core.Prim.prim?(payload), do: {:prim, payload}, else: {:entity, payload}
   end
 
-  defp visit(owner, field, {kind, module}, acc, _families) when kind in ~w(prim enum)a,
+  defp visit(owner, field, {kind, module}, acc, _families) when kind in @leaf_kinds,
     do: place(acc, {kind, owner, field, module})
 
   defp visit(owner, field, {:entity, module}, acc, families),

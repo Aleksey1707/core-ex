@@ -993,6 +993,46 @@ defmodule Core.LabelsFixture do
       use Core.Labels.Event, title: "Позиции сгруппированы"
     end
 
+    defmodule Kinds do
+      @moduledoc "Событие с полем каждого вида подписей: вид × сведения, ссылки и полнота."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка с полем каждого вида подписей."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            prim: [prim: LabelsFixture.ItemID],
+            enum: [enum: LabelsFixture.Status],
+            entity: [entity: LabelsFixture.Seal],
+            union: [union: LabelsFixture.Shape],
+            list: [list: [prim: LabelsFixture.ItemID]],
+            set: [set: [prim: LabelsFixture.ItemID]],
+            map: [map: [key: [prim: LabelsFixture.ItemID], value: [enum: LabelsFixture.Status]]],
+            type: [type: :string]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            prim: "Prim",
+            enum: "Enum",
+            entity: "Entity",
+            union: "Union",
+            list: "List",
+            set: "Set",
+            map: [label: "Map", key: "Ключ", value: "Значение"],
+            type: "Type"
+          ]
+      end
+
+      use Core.Es.Event,
+        family: Family,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Все виды полей"
+    end
+
     defmodule Closed do
       @moduledoc "Событие без нагрузки."
 
@@ -1021,6 +1061,7 @@ defmodule Core.LabelsFixture do
       Event.HolderChanged => "labels.holder_changed",
       Event.Renamed => "labels.renamed",
       Event.Grouped => "labels.grouped",
+      Event.Kinds => "labels.kinds",
       Event.Closed => "labels.closed"
     }
 

@@ -49,6 +49,10 @@ defmodule Core.Codec.Field do
     labels: "подписи",
     view: "View"
   }
+  # Семантические группы видов для обходов подписей: у видов с модулем значения значение задаёт
+  # модуль, у группы оно раскрывается полями struct'а (`entity:` — объект, `union:` — вариант).
+  @value_module_kinds ~w(prim enum entity union)a
+  @group_kinds ~w(entity union)a
   @extra_keys ~w(optional wire default)a
   @skipped_keys ~w(__struct__ events)a
   @type_values FieldCheck.type_values()
@@ -140,6 +144,16 @@ defmodule Core.Codec.Field do
   @spec kinds(atom()) :: [atom()]
 
   def kinds(host) when is_atom(host), do: kinds!(host)
+
+  @doc false
+  @spec value_module_kinds() :: [atom()]
+
+  def value_module_kinds, do: @value_module_kinds
+
+  @doc false
+  @spec group_kinds() :: [atom()]
+
+  def group_kinds, do: @group_kinds
 
   @doc false
   @spec kind_key!(keyword(), atom(), String.t()) :: {atom(), term()}

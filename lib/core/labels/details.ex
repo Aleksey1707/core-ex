@@ -59,6 +59,7 @@ defmodule Core.Labels.Details do
   изменения — `%{kind: :destroyed}`: вид задаёт форму `value`, а значения у поля нет.
   """
 
+  alias Core.Codec.Field
   alias Core.Es
   alias Core.Es.Personal.Destroyed
   alias Core.Helper.FieldCheck
@@ -92,6 +93,9 @@ defmodule Core.Labels.Details do
 
   # Значения, чей порядок задаёт `compare/2` модуля, а не порядок термов.
   @comparable Kind.scalars()
+
+  # Виды, значение которых раскрывается сведениями полей struct'а.
+  @group_kinds Field.group_kinds()
 
   # Свободная map'а выходит подписями ключа и значения, а не видом `type:`: вида у неё нет, но ответ на неё дан.
   @type_kinds [
@@ -175,7 +179,7 @@ defmodule Core.Labels.Details do
   defp shape({:prim, module}), do: prim_shape(module)
   defp shape({:enum, _module}), do: %{kind: :text}
   defp shape({:text, _fun}), do: %{kind: :text}
-  defp shape({kind, _module}) when kind in ~w(entity union)a, do: %{kind: :group}
+  defp shape({kind, _module}) when kind in @group_kinds, do: %{kind: :group}
   defp shape({:list, _inner}), do: %{kind: :list}
   defp shape({:set, _inner}), do: %{kind: :set}
   defp shape({:map, _key, _value}), do: %{kind: :map}
@@ -214,7 +218,7 @@ defmodule Core.Labels.Details do
   defp value({:enum, module}, value), do: module.label(value)
   defp value({:text, fun}, value), do: fun.(value)
   defp value({:prim, module}, prim), do: prim_value(module, prim)
-  defp value({kind, _module}, struct) when kind in ~w(entity union)a, do: struct_details(struct)
+  defp value({kind, _module}, struct) when kind in @group_kinds, do: struct_details(struct)
   defp value({:list, inner}, items), do: Enum.map(items, &item(inner, &1))
   defp value({:set, inner}, set), do: for(element <- sorted(set, inner), do: item(inner, element))
   defp value({:map, key, inner}, map), do: pairs(map, key, inner)
