@@ -17,7 +17,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   пары и разные версии одного id разрешены, `[]` — `{:ok, []}` без запросов. Элемент не пара —
   `FunctionClauseError`.
 
-  Состояние на версии сворачивает `@doc false` путь write-репозитория: снапшот не выше `N`,
+  Состояние на версии сворачивает внутренний движок `Core.Es.Aggregate.Load`: снапшот не выше `N`,
   события до `N` включительно, снапшоты не пишутся. У пакета снапшот берётся только не выше
   наименьшей версии пар id, иначе поток читается с начала. Адрес за головой потока или на пустом
   потоке — `:version_mismatch` каталога `errors:` write-репозитория с `source: :address`; у пакета
@@ -25,7 +25,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   `%Agg{}` уходит только аргументом `to_view:`; наружу — `%View{}`.
 
   Реализация write-репозитория резолвится `Core.Config.repo!/1` по конвенции
-  `<Behaviour>.Pg` на компиляции. Telemetry — `[:es, :aggregate, :load]` и
+  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию чтения (`__es_aggregate_repo__/0`).
+  Telemetry — `[:es, :aggregate, :load]` и
   `[:es, :aggregate, :fold]` с `op: :get_at` / `:get_many_at`; span'а нет.
 
   Функции `defoverridable` с сохранением закрытой головы и сужения. Нормы —
@@ -66,6 +67,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
 
       @es_read_repo %{
         repo: Core.Config.repo!(unquote(repo)),
+        aggregate: unquote(aggregate),
         view: unquote(view),
         to_view: Core.Es.Aggregate.ReadRepo.Pg.to_view!(unquote(to_view), unquote(behaviour))
       }
@@ -81,7 +83,18 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
             opts \\ []
           )
           when is_list(opts) do
-        case @es_read_repo.repo.__es_get_at__(id, version, context, opts) do
+        cfg = @es_read_repo.repo.__es_aggregate_repo__()
+
+        request = %{
+          op: :get_at,
+          opts: opts,
+          source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
+          write?: false,
+          state: struct(@es_read_repo.aggregate, id: id),
+          verify: fn [restored] -> es_read_repo_verify_at(cfg, restored.state, version) end
+        }
+
+        case Core.Es.Aggregate.Load.at(cfg, request, version) do
           {:ok, %unquote(aggregate){} = state} ->
             case @es_read_repo.to_view.(state) do
               %unquote(view){} = view -> {:ok, view}
@@ -94,9 +107,22 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
 
       @doc "Представления агрегатов на версиях из свёрнутых до них состояний, в порядке пар."
       @impl true
-      def get_many_at(pairs, %Core.Context{} = context, opts \\ [])
-          when is_list(pairs) and is_list(opts) do
-        case @es_read_repo.repo.__es_get_many_at__(pairs, context, opts) do
+      def get_many_at(pairs, context, opts \\ [])
+
+      def get_many_at([], %Core.Context{}, opts) when is_list(opts), do: {:ok, []}
+
+      def get_many_at([_ | _] = pairs, %Core.Context{}, opts) when is_list(opts) do
+        cfg = @es_read_repo.repo.__es_aggregate_repo__()
+
+        request = %{
+          op: :get_many_at,
+          opts: opts,
+          source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
+          write?: false,
+          verify: &es_read_repo_verify_addresses(cfg, pairs, &1)
+        }
+
+        case Core.Es.Aggregate.Load.many_at(cfg, request, pairs) do
           {:ok, states} when is_list(states) ->
             views = for state <- states, do: es_read_repo_to_view!(state, @es_read_repo.to_view)
             {:ok, views}
@@ -104,6 +130,46 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
           {:error, reason} ->
             {:error, reason}
         end
+      end
+
+      defp es_read_repo_verify_at(_cfg, %{version: head} = state, %Core.Version{} = version)
+           when head == version,
+           do: {:ok, state}
+
+      defp es_read_repo_verify_at(cfg, state, %Core.Version{} = version) do
+        detail = es_read_repo_address_detail(cfg, state, Core.Version.value(version))
+
+        {:error, cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)}
+      end
+
+      defp es_read_repo_verify_addresses(cfg, pairs, restored) do
+        by_id = Map.new(restored, &{&1.state.id, &1})
+        id_mod = cfg.id
+
+        results =
+          Enum.map(pairs, fn {%^id_mod{} = id, %Core.Version{} = version} ->
+            expected = Core.Version.value(version)
+            stream = Map.fetch!(by_id, id)
+
+            case Map.fetch(stream.captures, expected) do
+              {:ok, state} -> {:ok, state}
+              :error -> {:error, es_read_repo_address_detail(cfg, stream.state, expected)}
+            end
+          end)
+
+        case for {:error, detail} <- results, do: detail do
+          [] -> {:ok, for({:ok, state} <- results, do: state)}
+          details -> {:error, cfg.errors.domain(cfg.behaviour, :version_mismatch, details)}
+        end
+      end
+
+      defp es_read_repo_address_detail(cfg, state, expected) do
+        %{
+          aggregate_id: cfg.codec.dump(state.id),
+          expected: expected,
+          actual: state.version && Core.Version.value(state.version),
+          source: :address
+        }
       end
 
       defp es_read_repo_to_view!(%unquote(aggregate){} = state, to_view) do
@@ -120,22 +186,15 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   @spec ensure_write_repo!(module(), module()) :: module()
 
   def ensure_write_repo!(repo, behaviour) do
-    missing =
-      for {fun, arity} <- [__es_get_at__: 4, __es_get_many_at__: 3],
-          not Helper.Module.exports?(repo, fun, arity),
-          do: {fun, arity}
-
-    case missing do
-      [] ->
-        repo
-
-      missing ->
-        Helper.Opts.reject!(
-          "#{@label}: repo",
-          "модуль #{inspect(repo)} должен экспортировать #{inspect(missing)} " <>
-            "(write-репозиторий `use Core.Es.Aggregate.Repo.Pg`, behaviour: #{inspect(behaviour)})"
-        )
+    unless Helper.Module.exports?(repo, :__es_aggregate_repo__, 0) do
+      Helper.Opts.reject!(
+        "#{@label}: repo",
+        "модуль #{inspect(repo)} должен экспортировать [__es_aggregate_repo__: 0] " <>
+          "(write-репозиторий `use Core.Es.Aggregate.Repo.Pg`, behaviour: #{inspect(behaviour)})"
+      )
     end
+
+    repo
   end
 
   @doc false

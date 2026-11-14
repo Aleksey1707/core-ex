@@ -154,7 +154,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   — не список модулей ключа, у модуля ключа `aggregate:` не равен агрегату behaviour, в `errors:`
   нет clause его `code:`, область повторяется.
 
-  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo` и приватную `es_aggregate_repo/0`.
+  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную
+  `es_aggregate_repo/0` и `@doc false` `__es_aggregate_repo__/0` — полную конфигурацию чтения.
   """
 
   import Core.Version, only: [is_version: 1]
@@ -209,23 +210,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           {:ok, %unquote(cfg.aggregate){} = state} -> {:ok, state}
           {:error, reason} -> {:error, reason}
         end
-      end
-
-      @doc false
-      def __es_get_at__(
-            %unquote(cfg.id){} = id,
-            %Core.Version{} = version,
-            %Core.Context{} = context,
-            opts \\ []
-          )
-          when is_list(opts) do
-        Core.Es.Aggregate.Repo.Pg.get_at(es_aggregate_repo(), id, version, context, opts)
-      end
-
-      @doc false
-      def __es_get_many_at__(pairs, %Core.Context{} = context, opts \\ [])
-          when is_list(pairs) and is_list(opts) do
-        Core.Es.Aggregate.Repo.Pg.get_many_at(es_aggregate_repo(), pairs, context, opts)
       end
 
       @doc "Решение `fun` над состоянием агрегата; явная версия на пустом потоке сверяется после решения."
@@ -299,8 +283,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
                      refresh: 4,
                      page_stream: 4
 
-      defp es_aggregate_repo,
+      @doc false
+      def __es_aggregate_repo__,
         do: Map.merge(@es_aggregate_repo, %{dao: unquote(dao), codec: unquote(codec)})
+
+      defp es_aggregate_repo, do: __es_aggregate_repo__()
     end
   end
 

@@ -70,7 +70,6 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
           end
 
           defmodule unquote(write_pg) do
-            def __es_aggregate_repo__, do: unquote(write).__es_aggregate_repo__()
           end
 
           defmodule unquote(read) do
@@ -82,7 +81,7 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
       )
 
       message =
-        ~r/^Es\.Aggregate\.ReadRepo\.Pg: repo: модуль .*NoWrappersWrite\.Pg должен экспортировать \[__es_get_at__: 4, __es_get_many_at__: 3\] \(write-репозиторий `use Core\.Es\.Aggregate\.Repo\.Pg`/
+        ~r/^Es\.Aggregate\.ReadRepo\.Pg: repo: модуль .*NoWrappersWrite\.Pg должен экспортировать \[__es_aggregate_repo__: 0\] \(write-репозиторий `use Core\.Es\.Aggregate\.Repo\.Pg`/
 
       assert_raise CompileError, message, fn ->
         compile_read_repo_pg!(:no_wrappers, behaviour: read)

@@ -28,6 +28,15 @@
   ключ. Правка потребителя: добавить `config :core, clock: Core.Clock.Test` в `config/test.exs`,
   если её нет.
 
+### Изменения контракта макросов
+
+- **Скрытые хуки чтения у write-репозитория event-sourced агрегата убраны.** `use
+  Core.Es.Aggregate.Repo.Pg` больше не генерирует `__es_get_at__/4` и `__es_get_many_at__/3`:
+  чтение состояния на версии идёт одним внутренним движком библиотеки через `ReadRepo`.
+  Публичные функции write-репозитория и его behaviour не изменились, потребителю править нечего.
+  Если код звал хук напрямую — было `repo.__es_get_at__(id, version, context)`, стало
+  `<Aggregate>.<Purpose>.ReadRepo.Pg.get_at(id, version, context)`.
+
 ## 0.18.0
 
 ### Ломающие изменения контракта
