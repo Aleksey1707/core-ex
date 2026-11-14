@@ -6,6 +6,10 @@ defmodule Core.Prim.Date do
   `validate:`, `sensitive:`, `personal:`. Дополнительно генерирует `today/0`, `today!/0` и
   `from/1`, `from!/1` (из date- или datetime-Prim, с приведением в `tz:`).
 
+  `Result` у `today/0` несёт только доменные отказы `new/1`, включая bounds `after:` / `before:`.
+  Неверный `tz:` — `ArgumentError` от `DateTime.shift_zone!/2`: ошибку конфигурации отсекает
+  `Core.Config.validate!/0` на старте.
+
   Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:` — проверяются в
   теле модуля; остальные опции — литералы.
   """
@@ -38,41 +42,27 @@ defmodule Core.Prim.Date do
 
       @tz unquote(Keyword.get(opts, :tz))
 
-      @doc "Сегодняшняя дата доменного времени (`Core.Clock`) в tz модуля/конфига."
+      @doc """
+      Сегодняшняя дата доменного времени (`Core.Clock`) в tz модуля/конфига.
+
+      `Result` несёт только доменные отказы `new/1` (включая bounds `after:` / `before:`).
+      Неверный `tz:` — `ArgumentError` от `DateTime.shift_zone!/2`.
+      """
       @spec today() :: Core.Result.t(t())
 
       def today do
         tz = @tz || Core.Config.tz()
 
-        case DateTime.shift_zone(Core.Clock.now(), tz) do
-          {:ok, dt} ->
-            new(DateTime.to_date(dt))
-
-          {:error, _} ->
-            {:error,
-             Prim.wrap_error(
-               __MODULE__,
-               name(),
-               :invalid_date,
-               "невалидное значение",
-               tz
-             )}
-        end
+        new(DateTime.to_date(DateTime.shift_zone!(Core.Clock.now(), tz)))
       end
 
-      @doc "Сегодняшняя дата; при ошибке — raise."
+      @doc "Сегодняшняя дата; при отказе `new/1` — raise."
       @spec today!() :: t()
 
-      unquote(
-        quote generated: true do
-          def today! do
-            case today() do
-              {:ok, %__MODULE__{} = prim} -> prim
-              {:error, %Core.Error{} = error} -> raise Core.Exc, error
-            end
-          end
-        end
-      )
+      def today! do
+        %__MODULE__{} = prim = Result.unwrap!(today())
+        prim
+      end
 
       @doc """
       Собрать из другого date/datetime-Prim (полный pipeline целевого `new/1`).
