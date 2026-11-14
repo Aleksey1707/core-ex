@@ -163,13 +163,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Context
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Aggregate.Load
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
-  alias Core.Es.Personal.Destroyed
   alias Core.Es.Store.Schema
   alias Core.Helper
   alias Core.Helper.Transact
   alias Core.Result
-  alias Core.Telemetry
   alias Core.Version
 
   @label "Es.Aggregate.Repo.Pg"
@@ -183,13 +182,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     to_version: :integer,
     snapshot_to: :integer
   }
-
-  @typedoc false
-  @type load_spec :: %{
-          state: struct(),
-          upper: pos_integer() | nil,
-          captures: [pos_integer()]
-        }
 
   # ===== объявление =====
 
@@ -367,27 +359,51 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @spec get(map(), struct(), Version.expected(), Context.t(), keyword()) ::
           Result.t(struct())
 
-  def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts),
-    do: load_stream(cfg, :get, struct(cfg.aggregate, id: id), version, opts)
+  def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts) do
+    request = %{
+      op: :get,
+      opts: opts,
+      source: &fetch/3,
+      write?: true,
+      states: [%{state: struct(cfg.aggregate, id: id), version: version}],
+      verify: fn [restored] -> verify_version(cfg, restored.state, version) end
+    }
+
+    with {:ok, [state]} <- Load.head(cfg, request), do: {:ok, state}
+  end
 
   @doc false
   @spec get_at(map(), struct(), Version.t(), Context.t(), keyword()) :: Result.t(struct())
 
   def get_at(cfg, id, %Version{} = version, %Context{}, opts) when is_list(opts) do
-    spec = %{state: struct(cfg.aggregate, id: id), upper: Version.value(version), captures: []}
+    request = %{
+      op: :get_at,
+      opts: opts,
+      source: &fetch/3,
+      write?: false,
+      state: struct(cfg.aggregate, id: id),
+      verify: fn [restored] -> verify_at(cfg, restored.state, version) end
+    }
 
-    load_at(cfg, :get_at, [spec], opts, false, fn [restored] -> verify_at(cfg, restored.state, version) end)
+    Load.at(cfg, request, version)
   end
 
   @doc false
   @spec get_many_at(map(), [{struct(), Version.t()}], Context.t(), keyword()) ::
           Result.t([struct()])
 
-  def get_many_at(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts) do
-    case address_pairs(cfg, pairs) do
-      [] -> {:ok, []}
-      [_ | _] = pairs -> load_addresses(cfg, pairs, opts)
-    end
+  def get_many_at(_cfg, [], %Context{}, opts) when is_list(opts), do: {:ok, []}
+
+  def get_many_at(cfg, [_ | _] = pairs, %Context{}, opts) when is_list(opts) do
+    request = %{
+      op: :get_many_at,
+      opts: opts,
+      source: &fetch/3,
+      write?: false,
+      verify: &verify_addresses(cfg, pairs, &1)
+    }
+
+    Load.many_at(cfg, request, pairs)
   end
 
   @doc false
@@ -403,98 +419,79 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def get_decision(cfg, id, version, %Context{}, fun, opts)
       when is_version(version) and is_function(fun, 1) and is_list(opts) do
-    verify = fn [state] -> verify_born_version(cfg, state, version) end
+    request = %{
+      op: :get_decision,
+      opts: opts,
+      source: &fetch/3,
+      write?: true,
+      states: [%{state: struct(cfg.aggregate, id: id), version: version}],
+      verify: fn [restored] -> verify_born_version(cfg, restored.state, version) end
+    }
 
-    with {:ok, state} <- load(cfg, :get_decision, [struct(cfg.aggregate, id: id)], opts, verify),
-         do: decision(cfg, state, version, fun)
+    with {:ok, [state]} <- Load.head(cfg, request), do: decision(cfg, state, version, fun)
   end
 
   @doc false
   @spec get_many(map(), [{struct(), Version.expected()}], Context.t(), keyword()) ::
           Result.t([struct()])
 
-  def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts),
-    do: load(cfg, :get_many, initial_states!(cfg, pairs), opts, &verify_versions(cfg, &1, pairs))
+  def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts) do
+    request = %{
+      op: :get_many,
+      opts: opts,
+      source: &fetch/3,
+      write?: true,
+      states: initial_states!(cfg, pairs),
+      verify: fn restored -> verify_versions(cfg, restored, pairs) end
+    }
+
+    Load.head(cfg, request)
+  end
 
   @doc false
   @spec refresh(map(), struct(), Version.expected(), Context.t(), keyword()) ::
           Result.t(struct())
 
-  def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts),
-    do: load_stream(cfg, :refresh, state, version, opts)
+  def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts) do
+    request = %{
+      op: :refresh,
+      opts: opts,
+      source: &fetch/3,
+      write?: true,
+      states: [%{state: state, version: version}],
+      verify: fn [restored] -> verify_version(cfg, restored.state, version) end
+    }
 
-  @doc false
-  # Загрузка потоков с верхней границей и версиями пакета: `upper` — потолок версии потока
-  # (`nil` — голова), `captures` — версии, на которых снимается состояние. Потолок версий пакета —
-  # наибольшая, снапшот берётся только не выше наименьшей. `write_snapshots?` — писать ли
-  # снапшоты после загрузки. `verify` получает восстановленные потоки: `state`, `captures`,
-  # `events`, `snapshot`, `destroyed?`.
-  @spec load_at(
-          map(),
-          atom(),
-          [load_spec()],
-          keyword(),
-          boolean(),
-          ([map()] -> Result.t())
-        ) :: Result.t()
-
-  def load_at(cfg, op, specs, opts, write_snapshots?, verify) when is_list(specs) and is_list(opts) do
-    start = System.monotonic_time()
-
-    with {:ok, restored} <- restore(cfg, specs, opts, op) do
-      result = verify.(restored)
-
-      :telemetry.execute(
-        Telemetry.event([:es, :aggregate, :load]),
-        load_measurements(restored, System.monotonic_time() - start),
-        %{type: cfg.type, op: op, result: result_tag(result)}
-      )
-
-      write_snapshots(cfg, restored, write_snapshots?)
-      result
-    end
+    with {:ok, [state]} <- Load.head(cfg, request), do: {:ok, state}
   end
 
   # ---
 
-  defp load_addresses(cfg, pairs, opts) do
-    ids = Enum.uniq(Enum.map(pairs, &elem(&1, 0)))
-    specs = Enum.map(ids, &address_spec(cfg, &1, pairs))
-    verify = fn restored -> verify_addresses(cfg, pairs, Enum.zip(ids, restored)) end
+  defp initial_states!(%{aggregate: aggregate, id: id_mod}, pairs) do
+    states =
+      Enum.map(pairs, fn {%^id_mod{} = id, version} when is_version(version) ->
+        %{state: struct(aggregate, id: id), version: version}
+      end)
 
-    load_at(cfg, :get_many_at, specs, opts, false, verify)
+    ids = Enum.map(states, & &1.state.id)
+
+    case ids -- Enum.uniq(ids) do
+      [] -> states
+      repeated -> raise ArgumentError, "#{@label}: повтор id в get_many: #{inspect(repeated)}"
+    end
   end
 
-  defp address_spec(cfg, id, pairs) do
-    captures = for {^id, version} <- pairs, uniq: true, do: version
-
-    %{state: struct(cfg.aggregate, id: id), upper: nil, captures: Enum.sort(captures)}
-  end
-
-  # Адрес версии — только пара `{%ID{}, %Version{}}`: `:current` и всё прочее — `FunctionClauseError`.
-  defp address_pairs(cfg, pairs) do
+  defp verify_versions(cfg, restored, pairs) do
+    by_id = Map.new(restored, &{&1.state.id, &1})
     id_mod = cfg.id
 
-    Enum.map(pairs, fn
-      {%{__struct__: ^id_mod} = id, %Version{} = version} -> {id, Version.value(version)}
-    end)
-  end
-
-  # Состояние каждой пары — снятие состояния на её версии; нет состояния на версии — адрес за
-  # головой потока или на пустом потоке. Расхождения собираются в одну ошибку в порядке пар.
-  defp verify_addresses(cfg, pairs, streams) do
-    by_id = Map.new(streams, fn {id, restored} -> {id, restored} end)
-
     results =
-      Enum.map(pairs, fn {id, expected} ->
-        restored = Map.fetch!(by_id, id)
+      Enum.map(pairs, fn {%^id_mod{} = id, version} ->
+        state = Map.fetch!(by_id, id).state
 
-        case Map.fetch(restored.captures, expected) do
-          {:ok, state} ->
-            {:ok, state}
-
-          :error ->
-            {:error, address_detail(cfg, restored.state, expected)}
+        case mismatch_detail(state, version, cfg.codec) do
+          nil -> {:ok, state}
+          detail -> {:error, detail}
         end
       end)
 
@@ -504,42 +501,32 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     end
   end
 
-  defp initial_states!(%{aggregate: aggregate, id: id_mod}, pairs) do
-    states =
-      Enum.map(pairs, fn {%^id_mod{} = id, version} when is_version(version) ->
-        struct(aggregate, id: id)
+  # Состояние каждой пары — снятие состояния на её версии; нет состояния на версии — адрес за
+  # головой потока или на пустом потоке. Расхождения собираются в одну ошибку в порядке пар.
+  defp verify_addresses(cfg, pairs, restored) do
+    by_id = Map.new(restored, &{&1.state.id, &1})
+    id_mod = cfg.id
+
+    results =
+      Enum.map(pairs, fn {%^id_mod{} = id, %Version{} = version} ->
+        expected = Version.value(version)
+        stream = Map.fetch!(by_id, id)
+
+        case Map.fetch(stream.captures, expected) do
+          {:ok, state} -> {:ok, state}
+          :error -> {:error, address_detail(cfg, stream.state, expected)}
+        end
       end)
 
-    ids = Enum.map(states, & &1.id)
-
-    case ids -- Enum.uniq(ids) do
-      [] -> states
-      repeated -> raise ArgumentError, "#{@label}: повтор id в get_many: #{inspect(repeated)}"
-    end
-  end
-
-  defp verify_versions(cfg, states, pairs) do
-    codec = cfg.codec
-
-    details =
-      states
-      |> Enum.zip(pairs)
-      |> Enum.flat_map(fn {state, {_id, version}} ->
-        List.wrap(mismatch_detail(state, version, codec))
-      end)
-
-    case details do
-      [] -> {:ok, states}
+    case for {:error, detail} <- results, do: detail do
+      [] -> {:ok, for({:ok, state} <- results, do: state)}
       details -> {:error, version_mismatch(cfg, details)}
     end
   end
 
-  defp load_stream(cfg, op, state, version, opts),
-    do: load(cfg, op, [state], opts, fn [state] -> verify_version(cfg, state, version) end)
-
   # Пустой поток при `%Version{}` — не гонка, а ссылка на состояние, которого не было: отказ или
   # принятие решает `fun` на незаведённом агрегате (ADR-0016).
-  defp verify_born_version(_cfg, %{version: nil} = state, _version), do: {:ok, state}
+  defp verify_born_version(_cfg, %{version: nil} = state, _version), do: {:ok, [state]}
   defp verify_born_version(cfg, state, version), do: verify_version(cfg, state, version)
 
   defp decision(cfg, %{version: nil} = state, %Version{} = version, fun) do
@@ -551,290 +538,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp decision(_cfg, state, _version, fun), do: fun.(state)
 
-  # Восстановление и сверка версий — один замер `[:es, :aggregate, :load]`; снапшоты пишутся
-  # после него: вне транзакции upsert идёт сразу и в длительность чтения не входит.
-  # Сбой хранилища ключей отдаётся вызывающему без замера: потоки не восстановлены.
-  defp load(cfg, op, states, opts, verify) do
-    specs = Enum.map(states, &%{state: &1, upper: nil, captures: []})
-    verify = fn restored -> verify.(Enum.map(restored, & &1.state)) end
-    load_at(cfg, op, specs, opts, true, verify)
-  end
-
-  # Все потоки — одним запросом, от снапшота там, где он есть; потоки отвергнутых снапшотов —
-  # вторым запросом целиком. Поток — `%{snapshot, state, events}`: как свёрнут, во что и сколько
-  # событий свёрнуто.
-  defp restore(_cfg, [], _opts, _op), do: {:ok, []}
-
-  defp restore(cfg, specs, opts, op) do
-    with {:ok, tails} <- read_tails(cfg, specs, opts),
-         {:ok, restored} <-
-           refold_rejected(Enum.zip_with(tails, specs, &fold_tail(cfg, &2, &1)), cfg, specs, opts) do
-      Enum.each(restored, &emit_fold(cfg, op, &1))
-      {:ok, restored}
-    end
-  end
-
-  defp read_tails(%{snapshot: nil} = cfg, specs, opts) do
-    with {:ok, streams} <- read_streams(cfg, specs, opts), do: {:ok, Enum.map(streams, &{nil, &1, false})}
-  end
-
-  defp read_tails(%{type: type} = cfg, specs, opts) do
-    marker = Snapshot.marker(cfg)
-
-    cfg
-    |> snapshot_streams(specs, type, marker)
-    |> cfg.dao.all(opts)
-    |> Enum.chunk_by(&elem(&1, 0))
-    |> tails(cfg, specs, marker)
-  end
-
-  defp snapshot_streams(cfg, specs, type, marker) do
-    from(s in values(streams(cfg, specs), @stream_types),
-      left_join: sn in Snapshot.Schema,
-      on:
-        sn.aggregate_type == ^type and sn.aggregate_id == s.aggregate_id and
-          sn.marker == ^marker and sn.aggregate_version > s.after_version and
-          (is_nil(s.snapshot_to) or sn.aggregate_version <= s.snapshot_to)
-    )
-    |> join_tail(type)
-  end
-
-  defp join_tail(query, type) do
-    from([s, sn] in query,
-      left_join: e in Schema,
-      on:
-        e.aggregate_type == ^type and e.aggregate_id == s.aggregate_id and
-          e.aggregate_version > coalesce(sn.aggregate_version, s.after_version) and
-          (is_nil(s.to_version) or e.aggregate_version <= s.to_version),
-      order_by: [asc: s.index, asc: e.aggregate_version],
-      # Состояние снапшота — только в первой строке потока, а не в каждой строке его хвоста.
-      select:
-        {s.index, sn.aggregate_version,
-         fragment(
-           "CASE WHEN row_number() OVER (PARTITION BY ? ORDER BY ?) = 1 THEN ? END",
-           s.index,
-           e.aggregate_version,
-           sn.state
-         ), e}
-    )
-  end
-
-  # У потока без событий после снапшота или состояния одна строка, и событие в ней — `nil`
-  # (`left_join`). Шифротексты снапшотов расшифровываются тем же вызовом `open`, что и хвост.
-  defp tails(streams, cfg, specs, marker) do
-    snapshots = Enum.map(streams, &stored_snapshot/1)
-    sealed = Snapshot.sealed(cfg, marker, Enum.map(specs, & &1.state), snapshots)
-
-    with {:ok, {loaded, opened}} <- load_streams(cfg, Enum.map(streams, &event_rows/1), sealed) do
-      {:ok, Enum.zip_with(Snapshot.put_opened(cfg, snapshots, opened), loaded, &{&1, &2, destroyed_value?(cfg, &2)})}
-    end
-  end
-
-  defp event_rows(stream), do: for({_index, _version, _state, %Schema{} = row} <- stream, do: row)
-
-  defp stored_snapshot([{_index, nil, nil, _row} | _rows]), do: nil
-
-  defp stored_snapshot([{_index, version, state, _row} | _rows]) when is_integer(version) and is_binary(state),
-    do: {version, state}
-
-  defp read_streams(_cfg, [], _opts), do: {:ok, []}
-
-  defp read_streams(cfg, specs, opts) do
-    rows =
-      from(e in Schema,
-        join: s in values(streams(cfg, specs), @stream_types),
-        on: e.aggregate_id == s.aggregate_id and e.aggregate_version > s.after_version,
-        where:
-          e.aggregate_type == ^cfg.type and
-            (is_nil(s.to_version) or e.aggregate_version <= s.to_version),
-        order_by: [asc: e.aggregate_version],
-        select: {s.index, e}
-      )
-      |> cfg.dao.all(opts)
-      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
-
-    streams = for index <- 0..(length(specs) - 1)//1, do: Map.get(rows, index, [])
-
-    with {:ok, {loaded, []}} <- load_streams(cfg, streams, []), do: {:ok, loaded}
-  end
-
-  # Строки всех потоков запроса — одной пачкой; события раскладываются обратно по потокам.
-  defp load_streams(cfg, streams, sealed) do
-    with {:ok, {events, opened}} <-
-           Es.Store.load_fold_rows(Enum.concat(streams), cfg.event_codec, cfg.codec, sealed) do
-      {loaded, []} = Enum.map_reduce(streams, events, &Enum.split(&2, length(&1)))
-      {:ok, {loaded, opened}}
-    end
-  end
-
-  defp streams(cfg, specs) do
-    specs
-    |> Enum.with_index()
-    |> Enum.map(fn {spec, index} ->
-      %{
-        index: index,
-        aggregate_id: cfg.codec.dump(spec.state.id),
-        after_version: after_version(spec.state),
-        to_version: to_version(spec),
-        snapshot_to: snapshot_to(spec)
-      }
-    end)
-  end
-
-  # Потолок потока — верхняя версия или наибольшая версия пакета; снапшот — не выше наименьшей.
-  defp to_version(%{captures: [_ | _] = captures, upper: _upper}), do: Enum.max(captures)
-  defp to_version(%{upper: upper}), do: upper
-
-  defp snapshot_to(%{captures: [_ | _] = captures, upper: _upper}), do: Enum.min(captures)
-  defp snapshot_to(%{upper: upper}), do: upper
-
-  defp after_version(%{version: nil}), do: 0
-  defp after_version(%{version: %Version{} = version}), do: Version.value(version)
-
-  defp fold_tail(%{snapshot: nil} = cfg, spec, {nil, events, _destroyed?}),
-    do: restored_stream(:off, cfg, spec, spec.state, events, false)
-
-  defp fold_tail(cfg, spec, {nil, events, destroyed?}),
-    do: restored_stream(:miss, cfg, spec, spec.state, events, destroyed?)
-
-  # Без версий пакета снапшот сворачивается вместе с хвостом одним `Snapshot.fold`. С версиями
-  # пакета — только базовое состояние снапшота, а хвост один раз режется по границам версий.
-  defp fold_tail(cfg, %{captures: []} = spec, {snapshot, events, destroyed?}) do
-    case Snapshot.fold(cfg, spec.state, snapshot, events) do
-      {:ok, state} -> restored_state(:hit, state, events, destroyed?, %{})
-      :rejected -> {:rejected, spec.state, false}
-      :destroyed -> {:rejected, spec.state, true}
-    end
-  end
-
-  defp fold_tail(cfg, spec, {snapshot, events, destroyed?}) do
-    case Snapshot.fold(cfg, spec.state, snapshot, []) do
-      {:ok, base} -> restored_stream(:hit, cfg, spec, base, events, destroyed?)
-      :rejected -> {:rejected, spec.state, false}
-      :destroyed -> {:rejected, spec.state, true}
-    end
-  end
-
-  # `destroyed?` — чтение видело уничтоженный снапшот или ПДн-значение: снапшот потока не пишется.
-  # `captures` — состояния на версиях пакета (`%{version => state}`), у обычного чтения пусто.
-  defp restored_stream(snapshot, cfg, spec, base, events, destroyed?) do
-    {state, captures} = fold_captures(cfg, spec.captures, base, events)
-
-    restored_state(snapshot, state, events, destroyed?, captures)
-  end
-
-  defp restored_state(snapshot, state, events, destroyed?, captures) do
-    %{
-      snapshot: snapshot,
-      state: state,
-      events: length(events),
-      destroyed?: destroyed?,
-      captures: captures
-    }
-  end
-
-  # Режем события по границам версий пакета: каждый отрезок — продолжение свёртки предыдущего,
-  # поэтому свёрнутых событий столько же, а запрос по-прежнему один. Версия выше головы не
-  # снимается.
-  defp fold_captures(cfg, [], state, events), do: {cfg.aggregate.fold(state, events), %{}}
-
-  defp fold_captures(cfg, captures, base, events) do
-    {captures, state, rest} =
-      captures
-      |> Enum.sort()
-      |> Enum.uniq()
-      |> Enum.reduce({%{}, base, events}, fn capture, {captures, state, events} ->
-        {upto, rest} = Enum.split_while(events, &(Version.value(&1.aggregate_version) <= capture))
-        state = cfg.aggregate.fold(state, upto)
-
-        captures =
-          if state.version && Version.value(state.version) == capture,
-            do: Map.put(captures, capture, state),
-            else: captures
-
-        {captures, state, rest}
-      end)
-
-    {cfg.aggregate.fold(state, rest), captures}
-  end
-
-  defp refold_rejected(restored, cfg, specs, opts) do
-    rejected =
-      restored
-      |> Enum.zip(specs)
-      |> Enum.flat_map(fn
-        {{:rejected, _state, destroyed?}, spec} -> [{spec, destroyed?}]
-        {_stream, _spec} -> []
-      end)
-
-    with {:ok, streams} <- read_streams(cfg, Enum.map(rejected, &elem(&1, 0)), opts) do
-      refolded =
-        Enum.zip_with(streams, rejected, fn events, {spec, destroyed?} ->
-          restored_stream(
-            :rejected,
-            cfg,
-            spec,
-            spec.state,
-            events,
-            destroyed? or destroyed_value?(cfg, events)
-          )
-        end)
-
-      {:ok, merge_refolded(restored, refolded)}
-    end
-  end
-
-  # Поле с `subject:` — только на верхнем уровне нагрузки.
-  defp destroyed_value?(%{snapshot: %{sealed: false}}, _events), do: false
-
-  defp destroyed_value?(_cfg, events) do
-    Enum.any?(events, fn
-      %{payload: %_{} = payload} -> Enum.any?(Map.from_struct(payload), &match?({_field, %Destroyed{}}, &1))
-      _event -> false
-    end)
-  end
-
-  defp merge_refolded([{:rejected, _state, _destroyed?} | restored], [stream | refolded]),
-    do: [stream | merge_refolded(restored, refolded)]
-
-  defp merge_refolded([stream | restored], refolded),
-    do: [stream | merge_refolded(restored, refolded)]
-
-  defp merge_refolded([], []), do: []
-
-  defp emit_fold(cfg, op, %{snapshot: snapshot, events: events}) do
-    :telemetry.execute(
-      Telemetry.event([:es, :aggregate, :fold]),
-      %{events: events},
-      %{type: cfg.type, op: op, snapshot: snapshot}
-    )
-  end
-
-  defp load_measurements(restored, duration) do
-    counts = Enum.frequencies_by(restored, & &1.snapshot)
-
-    %{
-      duration: duration,
-      streams: length(restored),
-      events: Enum.sum_by(restored, & &1.events),
-      snapshot_hit: Map.get(counts, :hit, 0),
-      snapshot_miss: Map.get(counts, :miss, 0),
-      snapshot_rejected: Map.get(counts, :rejected, 0)
-    }
-  end
-
-  defp write_snapshots(_cfg, _restored, false), do: :ok
-
-  defp write_snapshots(%{snapshot: nil}, _restored, _write?), do: :ok
-
-  defp write_snapshots(%{snapshot: %{every: every}} = cfg, restored, true) do
-    states = for %{state: state, events: events, destroyed?: false} <- restored, events >= every, do: state
-    Snapshot.write(cfg, states)
-  end
-
   defp verify_version(cfg, state, version) do
     case mismatch_detail(state, version, cfg.codec) do
-      nil -> {:ok, state}
+      nil -> {:ok, [state]}
       detail -> {:error, version_mismatch(cfg, detail)}
     end
   end
@@ -868,8 +574,103 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     }
   end
 
-  defp result_tag({:ok, _}), do: :ok
-  defp result_tag({:error, %Error{code: :version_mismatch}}), do: :version_mismatch
+  # ===== источник строк =====
+
+  @doc false
+  @spec fetch(map(), [Load.meta()], keyword()) :: [Load.triple()]
+
+  def fetch(%{snapshot: nil} = cfg, metas, opts), do: read_streams(cfg, metas, opts)
+
+  def fetch(cfg, metas, opts) do
+    streams =
+      metas
+      |> snapshot_streams(cfg.type, Snapshot.marker(cfg))
+      |> cfg.dao.all(opts)
+      |> Enum.chunk_by(&elem(&1, 0))
+      |> Map.new(fn [row | _] = stream -> {elem(row, 0), stream} end)
+
+    for {meta, index} <- Enum.with_index(metas) do
+      stream = Map.get(streams, index, [])
+      {meta, stored_snapshot(stream), event_rows(stream)}
+    end
+  end
+
+  # ---
+
+  defp snapshot_streams(metas, type, marker) do
+    from(s in values(streams(metas), @stream_types),
+      left_join: sn in Snapshot.Schema,
+      on:
+        sn.aggregate_type == ^type and sn.aggregate_id == s.aggregate_id and
+          sn.marker == ^marker and sn.aggregate_version > s.after_version and
+          (is_nil(s.snapshot_to) or sn.aggregate_version <= s.snapshot_to)
+    )
+    |> join_tail(type)
+  end
+
+  defp join_tail(query, type) do
+    from([s, sn] in query,
+      left_join: e in Schema,
+      on:
+        e.aggregate_type == ^type and e.aggregate_id == s.aggregate_id and
+          e.aggregate_version > coalesce(sn.aggregate_version, s.after_version) and
+          (is_nil(s.to_version) or e.aggregate_version <= s.to_version),
+      order_by: [asc: s.index, asc: e.aggregate_version],
+      # Состояние снапшота — только в первой строке потока, а не в каждой строке его хвоста.
+      select:
+        {s.index, sn.aggregate_version,
+         fragment(
+           "CASE WHEN row_number() OVER (PARTITION BY ? ORDER BY ?) = 1 THEN ? END",
+           s.index,
+           e.aggregate_version,
+           sn.state
+         ), e}
+    )
+  end
+
+  # У потока без событий после снапшота или состояния одна строка, и событие в ней — `nil`
+  # (`left_join`).
+  defp event_rows(stream), do: for({_index, _version, _state, %Schema{} = row} <- stream, do: row)
+
+  defp stored_snapshot([]), do: nil
+  defp stored_snapshot([{_index, nil, nil, _row} | _rows]), do: nil
+
+  defp stored_snapshot([{_index, version, state, _row} | _rows]) when is_integer(version) and is_binary(state),
+    do: {version, state}
+
+  defp read_streams(_cfg, [], _opts), do: []
+
+  defp read_streams(cfg, metas, opts) do
+    rows =
+      from(e in Schema,
+        join: s in values(streams(metas), @stream_types),
+        on: e.aggregate_id == s.aggregate_id and e.aggregate_version > s.after_version,
+        where:
+          e.aggregate_type == ^cfg.type and
+            (is_nil(s.to_version) or e.aggregate_version <= s.to_version),
+        order_by: [asc: e.aggregate_version],
+        select: {s.index, e}
+      )
+      |> cfg.dao.all(opts)
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    for {meta, index} <- Enum.with_index(metas), do: {meta, nil, Map.get(rows, index, [])}
+  end
+
+  defp streams(metas) do
+    metas
+    |> Enum.with_index()
+    |> Enum.map(fn {meta, index} ->
+      %{
+        index: index,
+        aggregate_id: meta.aggregate_id,
+        after_version: meta.after_version,
+        to_version: meta.to_version,
+        # Отвергнутый снапшот читается без join'а: потолок снапшота — его же начало.
+        snapshot_to: if(meta.snapshot?, do: meta.snapshot_to, else: meta.after_version)
+      }
+    end)
+  end
 
   # ===== запись =====
 

@@ -321,8 +321,14 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
       attach_telemetry()
 
-      assert {:ok, [%Account{version: version, status: :frozen}]} = load_at(id, nil, [2, 3])
-      assert version == Core.Version.new!(3)
+      assert {:ok,
+              [
+                %Account{version: second, status: :open},
+                %Account{version: third, status: :frozen}
+              ]} = load_at(id, nil, [2, 3])
+
+      assert second == Core.Version.new!(2)
+      assert third == Core.Version.new!(3)
 
       assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 3}, %{snapshot: :miss}}
     end
@@ -334,8 +340,14 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       append!(state, [close()])
       attach_telemetry()
 
-      assert {:ok, [%Account{version: version, status: :closed}]} = load_at(id, nil, [3, 4])
-      assert version == Core.Version.new!(4)
+      assert {:ok,
+              [
+                %Account{version: third, status: :frozen},
+                %Account{version: fourth, status: :closed}
+              ]} = load_at(id, nil, [3, 4])
+
+      assert third == Core.Version.new!(3)
+      assert fourth == Core.Version.new!(4)
 
       assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{snapshot: :hit}}
     end
@@ -358,12 +370,51 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
-  defp load_at(id, upper, captures \\ [], write? \\ true) do
-    spec = %{state: %Account{id: id}, upper: upper, captures: captures}
+  defp load_at(id, upper, captures \\ [], write? \\ true)
 
-    Core.Es.Aggregate.Repo.Pg.load_at(LoadRepo.cfg(), :get, [spec], [], write?, fn restored ->
-      {:ok, Enum.map(restored, & &1.state)}
-    end)
+  defp load_at(id, nil, [], write?), do: load_head(id, write?)
+  defp load_at(id, upper, [], write?) when is_integer(upper), do: load_version(id, upper, write?)
+  defp load_at(id, nil, captures, write?), do: load_versions(id, captures, write?)
+
+  defp load_head(id, write?) do
+    request = %{
+      op: :get,
+      opts: [],
+      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
+      write?: write?,
+      states: [%{state: %Account{id: id}, version: :current}],
+      verify: fn [restored] -> {:ok, [restored.state]} end
+    }
+
+    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), request)
+  end
+
+  defp load_version(id, upper, write?) do
+    request = %{
+      op: :get,
+      opts: [],
+      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
+      write?: write?,
+      state: %Account{id: id},
+      verify: fn [restored] -> {:ok, restored.state} end
+    }
+
+    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), request, Core.Version.new!(upper)),
+         do: {:ok, [state]}
+  end
+
+  defp load_versions(id, captures, write?) do
+    pairs = Enum.map(captures, &{id, Core.Version.new!(&1)})
+
+    request = %{
+      op: :get,
+      opts: [],
+      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
+      write?: write?,
+      verify: fn [restored] -> {:ok, Enum.map(captures, &Map.fetch!(restored.captures, &1))} end
+    }
+
+    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), request, pairs)
   end
 
   defp append!(state, commands) do
