@@ -43,14 +43,8 @@ defmodule Core.Codec.Plugin.Fields do
   """
 
   alias Core.Codec.Field
+  alias Core.Codec.Plugin.Fields.Kind
   alias Core.Error
-  alias Core.Result
-
-  require Error
-
-  @facade_kinds ~w(prim entity union)a
-  @pattern_kinds ~w(prim entity)a
-  @collection_kinds ~w(list set)a
 
   # ===== dump =====
 
@@ -78,10 +72,7 @@ defmodule Core.Codec.Plugin.Fields do
   @spec dump_pairs([Field.t()]) :: [{String.t(), Macro.t()}]
 
   def dump_pairs(fields),
-    do:
-      Enum.map(fields, fn %Field{name: name, spec: spec, optional?: optional?, wire: wire} ->
-        {wire, dump_value(spec, var(name), optional?)}
-      end)
+    do: Enum.map(fields, &{&1.wire, Kind.dump(&1, var(&1.name))})
 
   @doc false
   @spec new_args([Field.t()]) :: [Macro.t()]
@@ -120,116 +111,27 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec dump_pattern(Field.t()) :: {atom(), Macro.t()}
 
-  def dump_pattern(%Field{name: name, spec: {kind, mod}, optional?: false}) when kind in @pattern_kinds,
-    do: {name, quote(generated: true, do: %unquote(mod){} = unquote(var(name)))}
-
-  def dump_pattern(%Field{name: name, spec: {:set, _inner}, optional?: false}),
-    do: {name, quote(generated: true, do: %MapSet{} = unquote(var(name)))}
-
-  def dump_pattern(%Field{name: name, spec: {:map, _key, _value}, optional?: false}),
-    do: {name, quote(generated: true, do: %{} = unquote(var(name)))}
-
-  def dump_pattern(%Field{name: name}), do: {name, var(name)}
+  def dump_pattern(%Field{name: name} = field), do: {name, Kind.pattern(field)}
 
   @doc false
   @spec field_guard(Field.t()) :: [Macro.t()]
 
-  def field_guard(%Field{spec: {kind, _mod}, optional?: false}) when kind in @pattern_kinds, do: []
-  def field_guard(%Field{spec: {:set, _inner}, optional?: false}), do: []
-
-  def field_guard(%Field{name: name, spec: {:map, _key, _value}, optional?: false}),
-    do: [quote(generated: true, do: not is_struct(unquote(var(name))))]
-
-  def field_guard(%Field{name: name, spec: spec, optional?: false}), do: [value_guard(spec, var(name))]
-
-  def field_guard(%Field{name: name, spec: spec, optional?: true}) do
-    value = var(name)
-
-    [quote(generated: true, do: is_nil(unquote(value)) or unquote(value_guard(spec, value)))]
+  def field_guard(%Field{} = field) do
+    case Kind.guard(field) do
+      true -> []
+      guard -> [guard]
+    end
   end
 
   @doc false
   @spec value_guard(Field.spec(), Macro.t()) :: Macro.t()
 
-  def value_guard({kind, mod}, value) when kind in @pattern_kinds,
-    do: quote(generated: true, do: is_struct(unquote(value), unquote(mod)))
-
-  def value_guard({:union, _family}, value), do: quote(generated: true, do: is_struct(unquote(value)))
-
-  def value_guard({:enum, _mod}, value),
-    do: quote(generated: true, do: is_atom(unquote(value)) and not is_nil(unquote(value)))
-
-  def value_guard({:list, _inner}, value), do: quote(generated: true, do: is_list(unquote(value)))
-  def value_guard({:set, _inner}, value), do: quote(generated: true, do: is_struct(unquote(value), MapSet))
-
-  def value_guard({:map, _key, _value}, value),
-    do: quote(generated: true, do: is_map(unquote(value)) and not is_struct(unquote(value)))
-
-  def value_guard({:type, :string}, value), do: quote(generated: true, do: is_binary(unquote(value)))
-  def value_guard({:type, :boolean}, value), do: quote(generated: true, do: is_boolean(unquote(value)))
-  def value_guard({:type, :integer}, value), do: quote(generated: true, do: is_integer(unquote(value)))
-  def value_guard({:type, :map}, value), do: quote(generated: true, do: is_map(unquote(value)))
-
-  def value_guard({:type, :pos_integer}, value),
-    do: quote(generated: true, do: is_integer(unquote(value)) and unquote(value) > 0)
-
-  def value_guard({:type, :non_neg_integer}, value),
-    do: quote(generated: true, do: is_integer(unquote(value)) and unquote(value) >= 0)
+  def value_guard(spec, value), do: Kind.value_guard(spec, value)
 
   @doc false
   @spec dump_value(Field.spec(), Macro.t(), boolean()) :: Macro.t()
 
-  def dump_value(spec, value, optional?) do
-    cond do
-      as_is?(spec) ->
-        value
-
-      optional? ->
-        quote(generated: true, do: if(is_nil(unquote(value)), do: nil, else: unquote(dump_expr(spec, value))))
-
-      true ->
-        dump_expr(spec, value)
-    end
-  end
-
-  # ---
-
-  defp dump_expr({kind, _mod}, value) when kind in @facade_kinds,
-    do: quote(generated: true, do: unquote(codec_var()).dump(unquote(value)))
-
-  defp dump_expr({:list, inner}, value) do
-    item = item_var()
-
-    quote(
-      generated: true,
-      do: Enum.map(unquote(value), fn unquote(item) -> unquote(dump_value(inner, item, false)) end)
-    )
-  end
-
-  # Порядок обхода `MapSet` зависит от числа элементов и не совпадает с порядком их wire: одно
-  # значение давало бы разный список (ADR-0091).
-  defp dump_expr({:set, inner}, value),
-    do: quote(generated: true, do: Core.Codec.Helper.set_wire(unquote(dump_expr({:list, inner}, value))))
-
-  defp dump_expr({:map, key, inner}, value) do
-    key_item = key_var()
-    item = item_var()
-
-    quote generated: true do
-      Map.new(unquote(value), fn {unquote(key_item), unquote(item)} ->
-        {unquote(dump_key(key, key_item)), unquote(dump_value(inner, item, false))}
-      end)
-    end
-  end
-
-  defp dump_key({:enum, _mod}, key), do: quote(generated: true, do: Core.Codec.Helper.enum_key(unquote(key)))
-  defp dump_key(spec, key), do: dump_value(spec, key, false)
-
-  defp as_is?({kind, _}) when kind in ~w(enum type)a, do: true
-  defp as_is?({:list, inner}), do: as_is?(inner)
-  defp as_is?({:set, _inner}), do: false
-  defp as_is?({:map, _key, _value}), do: false
-  defp as_is?({_kind, _mod}), do: false
+  def dump_value(spec, value, optional?), do: Kind.dump(spec_field(spec, optional?), value)
 
   # ===== load =====
 
@@ -258,14 +160,14 @@ defmodule Core.Codec.Plugin.Fields do
 
   # ---
 
-  defp load_step(type, %Field{name: name, spec: spec, optional?: optional?, wire: wire, default: default}) do
+  defp load_step(type, %Field{name: name, wire: wire, default: default} = field) do
     raw =
       with_default(
         quote(generated: true, do: Core.Helper.Map.field(unquote(wire_var()), unquote(wire_key(wire)))),
         default
       )
 
-    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(load_value(type, name, spec, raw, optional?)))
+    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(Kind.load(field, type, raw)))
   end
 
   defp with_default(raw, :none), do: raw
@@ -284,58 +186,7 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec load_value(module(), atom(), Field.spec(), Macro.t(), boolean()) :: Macro.t()
 
-  def load_value(_type, _name, {:type, _scalar}, raw, _optional?), do: quote(generated: true, do: {:ok, unquote(raw)})
-
-  def load_value(_type, _name, {kind, mod}, raw, true) when kind in @facade_kinds,
-    do: quote(generated: true, do: Core.Codec.Helper.load_optional(unquote(mod), unquote(raw), unquote(codec_var())))
-
-  def load_value(_type, _name, {:enum, mod}, raw, true),
-    do: quote(generated: true, do: unquote(mod).cast_optional(unquote(raw)))
-
-  def load_value(type, name, spec, raw, true) do
-    quote generated: true do
-      case unquote(raw) do
-        nil -> {:ok, nil}
-        raw -> unquote(load_value(type, name, spec, quote(generated: true, do: raw), false))
-      end
-    end
-  end
-
-  def load_value(_type, _name, {kind, mod}, raw, false) when kind in @facade_kinds,
-    do: quote(generated: true, do: unquote(codec_var()).load(unquote(mod), unquote(raw)))
-
-  def load_value(_type, _name, {:enum, mod}, raw, false),
-    do: quote(generated: true, do: unquote(mod).cast(unquote(raw)))
-
-  def load_value(type, name, {kind, inner}, raw, false) when kind in @collection_kinds do
-    item = item_var()
-
-    quote generated: true do
-      Core.Codec.Plugin.Fields.unquote(loader(kind))(unquote(type), unquote(name), unquote(raw), fn unquote(item) ->
-        unquote(load_value(type, name, inner, item, false))
-      end)
-    end
-  end
-
-  def load_value(type, name, {:map, key, inner}, raw, false) do
-    key_item = key_var()
-    item = item_var()
-
-    quote generated: true do
-      Core.Codec.Plugin.Fields.load_map(
-        unquote(type),
-        unquote(name),
-        unquote(raw),
-        fn unquote(key_item) -> unquote(load_value(type, name, key, key_item, false)) end,
-        fn unquote(item) -> unquote(load_value(type, name, inner, item, false)) end
-      )
-    end
-  end
-
-  # ---
-
-  defp loader(:list), do: :load_list
-  defp loader(:set), do: :load_set
+  def load_value(type, name, spec, raw, optional?), do: Kind.load(spec_field(spec, optional?, name), type, raw)
 
   # ===== wire-ключ =====
 
@@ -346,102 +197,6 @@ defmodule Core.Codec.Plugin.Fields do
 
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   def wire_key(wire) when is_binary(wire), do: String.to_atom(wire)
-
-  # ===== загрузка списка =====
-
-  @doc false
-  @spec load_list(module(), atom(), term(), (term() -> Result.t())) :: Result.t([term()])
-
-  def load_list(type, name, raw, fun) when is_list(raw) and is_function(fun, 1) do
-    raw
-    |> Enum.with_index()
-    |> Result.traverse(fn {item, index} ->
-      Result.map_error(fun.(item), &item_error(type, name, {:index, index}, "элемент", &1))
-    end)
-  end
-
-  def load_list(type, name, _raw, _fun) when is_atom(type) and is_atom(name) do
-    {:error,
-     Error.domain(type,
-       code: :invalid_value,
-       ns: :codec,
-       message: "#{inspect(type)}: поле #{name} — ожидается список",
-       detail: %{field: name}
-     )}
-  end
-
-  # ===== загрузка множества =====
-
-  @doc false
-  @spec load_set(module(), atom(), term(), (term() -> Result.t())) :: Result.t(MapSet.t())
-
-  def load_set(type, name, raw, fun) when is_list(raw) and is_function(fun, 1),
-    do: Result.map(load_list(type, name, raw, fun), &MapSet.new/1)
-
-  def load_set(type, name, _raw, _fun) when is_atom(type) and is_atom(name) do
-    {:error,
-     Error.domain(type,
-       code: :invalid_value,
-       ns: :codec,
-       message: "#{inspect(type)}: поле #{name} — ожидается список элементов множества",
-       detail: %{field: name}
-     )}
-  end
-
-  # ===== загрузка словаря =====
-
-  @doc false
-  @spec load_map(module(), atom(), term(), (term() -> Result.t()), (term() -> Result.t())) :: Result.t(map())
-
-  def load_map(type, name, raw, key_fun, value_fun)
-      when is_map(raw) and not is_struct(raw) and is_function(key_fun, 1) and is_function(value_fun, 1) do
-    raw
-    |> Map.to_list()
-    |> Result.traverse(fn {key, value} ->
-      with {:ok, loaded} <- Result.map_error(key_fun.(key), &item_error(type, name, {:key, key}, "ключ", &1)),
-           {:ok, item} <- Result.map_error(value_fun.(value), &item_error(type, name, {:key, key}, "значение", &1)),
-           do: {:ok, {key, loaded, item}}
-    end)
-    |> Result.and_then(&collect_pairs(type, name, &1))
-  end
-
-  def load_map(type, name, _raw, _key_fun, _value_fun) when is_atom(type) and is_atom(name) do
-    {:error,
-     Error.domain(type,
-       code: :invalid_value,
-       ns: :codec,
-       message: "#{inspect(type)}: поле #{name} — ожидается объект словаря",
-       detail: %{field: name}
-     )}
-  end
-
-  # ---
-
-  # Prim ключа нормализует значение (UUID с дефисами и без): два wire-ключа дали бы один ключ, и
-  # значение одного из них молча пропало бы.
-  defp collect_pairs(type, name, pairs) do
-    pairs
-    |> Enum.reduce_while({%{}, %{}}, fn {key, loaded, item}, {map, wires} ->
-      case Map.fetch(wires, loaded) do
-        {:ok, first} -> {:halt, {:error, key_clash(type, name, key, first)}}
-        :error -> {:cont, {Map.put(map, loaded, item), Map.put(wires, loaded, key)}}
-      end
-    end)
-    |> case do
-      {:error, error} -> {:error, error}
-      {map, _wires} -> {:ok, map}
-    end
-  end
-
-  defp key_clash(type, name, key, first) do
-    Error.domain(type,
-      code: :invalid_value,
-      ns: :codec,
-      message:
-        "#{inspect(type)}: поле #{name}[#{inspect(key)}] — ключ совпал после загрузки с ключом #{inspect(first)}",
-      detail: %{field: name, key: key}
-    )
-  end
 
   # ===== путь ошибки =====
 
@@ -461,12 +216,12 @@ defmodule Core.Codec.Plugin.Fields do
   @doc false
   @spec var(atom()) :: Macro.t()
 
-  def var(name) when is_atom(name), do: Macro.var(name, Core.Codec.Plugin.Fields.Value)
+  def var(name) when is_atom(name), do: Kind.var(name)
 
   @doc false
   @spec codec_var() :: Macro.t()
 
-  def codec_var, do: Macro.var(:codec, __MODULE__)
+  def codec_var, do: Kind.codec_var()
 
   @doc false
   @spec wire_var() :: Macro.t()
@@ -475,17 +230,16 @@ defmodule Core.Codec.Plugin.Fields do
 
   # ===== общее =====
 
-  defp item_var, do: Macro.var(:item, __MODULE__)
-  defp key_var, do: Macro.var(:key, __MODULE__)
-
-  # Путь — место в wire: индекс элемента множества (у `MapSet` порядка нет) или wire-ключ словаря.
-  defp item_error(type, name, {segment, at}, what, %Error{} = reason) do
-    Error.domain(type,
-      code: :invalid_value,
-      ns: :codec,
-      message: "#{inspect(type)}: поле #{name}[#{inspect(at)}] — #{what} не загружается",
-      detail: %{:field => name, segment => at},
-      parent: reason
-    )
+  # Поле-путь для спеки без собственной строки спеки: имя и `optional:` нужны операциям адаптера.
+  defp spec_field(spec, optional?, name \\ :value) do
+    %Field{
+      name: name,
+      spec: spec,
+      optional?: optional?,
+      wire: "",
+      default: :none,
+      subject: nil,
+      destroyable: []
+    }
   end
 end
