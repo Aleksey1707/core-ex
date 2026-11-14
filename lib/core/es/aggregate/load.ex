@@ -40,7 +40,7 @@ defmodule Core.Es.Aggregate.Load do
         }
 
   @typedoc false
-  @type request :: %{
+  @type request(decision, reason) :: %{
           required(:op) => atom(),
           required(:opts) => keyword(),
           required(:source) => source(),
@@ -49,8 +49,11 @@ defmodule Core.Es.Aggregate.Load do
           optional(:state) => struct(),
           optional(:born?) => boolean(),
           optional(:many?) => boolean(),
-          optional(:decide) => (struct() -> Result.t())
+          optional(:decide) => (struct() -> Result.t(decision, reason))
         }
+
+  @typedoc false
+  @type request :: request(term(), term())
 
   @typep spec :: %{
            state: struct(),
@@ -69,7 +72,8 @@ defmodule Core.Es.Aggregate.Load do
   # ===== чтение =====
 
   @doc false
-  @spec head(map(), request()) :: Result.t([struct()] | term(), term())
+  @spec head(map(), request(decision, reason)) :: Result.t([struct()] | decision, reason | Error.t())
+        when decision: var, reason: var
 
   def head(cfg, %{states: states} = request) do
     streams = Enum.map(states, &%{state: &1.state, version: &1.version, upper: nil, captures: []})

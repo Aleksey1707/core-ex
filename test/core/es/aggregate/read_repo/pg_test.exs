@@ -81,7 +81,7 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
       )
 
       message =
-        ~r/^Es\.Aggregate\.ReadRepo\.Pg: repo: модуль .*NoWrappersWrite\.Pg должен экспортировать \[__es_aggregate_repo__: 0\] \(write-репозиторий `use Core\.Es\.Aggregate\.Repo\.Pg`/
+        ~r/^Es\.Aggregate\.ReadRepo\.Pg: repo: модуль .*NoWrappersWrite\.Pg должен быть собран `use Core\.Es\.Aggregate\.Repo\.Pg` \(behaviour: .*NoWrappersWrite\)$/
 
       assert_raise CompileError, message, fn ->
         compile_read_repo_pg!(:no_wrappers, behaviour: read)

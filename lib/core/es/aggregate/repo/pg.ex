@@ -154,8 +154,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   — не список модулей ключа, у модуля ключа `aggregate:` не равен агрегату behaviour, в `errors:`
   нет clause его `code:`, область повторяется.
 
-  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную
-  `es_aggregate_repo/0` и `@doc false` `__es_aggregate_repo__/0` — полную конфигурацию чтения.
+  Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0`
+  и служебный persisted-атрибут `:es_read_cfg` — конфигурацию чтения для
+  `Core.Es.Aggregate.ReadRepo.Pg`.
   """
 
   import Core.Version, only: [is_version: 1]
@@ -195,10 +196,16 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     dao = Helper.Opts.module_or_config!(opts, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
 
+    read_cfg =
+      Map.merge(cfg, %{dao: Keyword.get(opts, :repo) || :config, codec: Keyword.get(opts, :codec) || :config})
+
     quote generated: true do
       @behaviour unquote(cfg.behaviour)
 
       @es_aggregate_repo unquote(Macro.escape(cfg))
+
+      Module.register_attribute(__MODULE__, :es_read_cfg, persist: true)
+      @es_read_cfg unquote(Macro.escape(read_cfg))
 
       import Core.Version, only: [is_version: 1]
 
@@ -283,11 +290,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
                      refresh: 4,
                      page_stream: 4
 
-      @doc false
-      def __es_aggregate_repo__,
+      defp es_aggregate_repo,
         do: Map.merge(@es_aggregate_repo, %{dao: unquote(dao), codec: unquote(codec)})
-
-      defp es_aggregate_repo, do: __es_aggregate_repo__()
     end
   end
 

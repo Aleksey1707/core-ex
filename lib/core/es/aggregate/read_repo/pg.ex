@@ -25,7 +25,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   `%Agg{}` уходит только аргументом `to_view:`; наружу — `%View{}`.
 
   Реализация write-репозитория резолвится `Core.Config.repo!/1` по конвенции
-  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию чтения (`__es_aggregate_repo__/0`).
+  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию чтения (служебный persisted-атрибут
+  `:es_read_cfg`, который ставит `use Core.Es.Aggregate.Repo.Pg`).
   Telemetry — `[:es, :aggregate, :load]` и
   `[:es, :aggregate, :fold]` с `op: :get_at` / `:get_many_at`; span'а нет.
 
@@ -40,7 +41,9 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   - `behaviour:` — `use Core.Es.Aggregate.ReadRepo`
   - `to_view:` — захват функции арности 1 `%Agg{} → %View{}`
 
-  Макрос занимает в вызывающем модуле имя `@es_read_repo` и приватную `es_read_repo_to_view!/2`.
+  Макрос занимает в вызывающем модуле имя `@es_read_repo`, приватные `es_read_repo_cfg/0`,
+  `resolve/2` и `es_read_repo_to_view!/2`, а также `@es_read_cfg` — конфигурацию чтения из
+  `use Core.Es.Aggregate.Repo.Pg`.
   """
 
   alias Core.Es.Aggregate.ReadRepo
@@ -74,6 +77,12 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
 
       Core.Es.Aggregate.ReadRepo.Pg.ensure_write_repo!(@es_read_repo.repo, unquote(repo))
 
+      @es_read_cfg for(
+                     {:es_read_cfg, [cfg]} <- @es_read_repo.repo.module_info(:attributes),
+                     do: cfg
+                   )
+                   |> hd()
+
       @doc "Представление агрегата на версии из свёрнутого до неё состояния."
       @impl true
       def get_at(
@@ -83,7 +92,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
             opts \\ []
           )
           when is_list(opts) do
-        cfg = @es_read_repo.repo.__es_aggregate_repo__()
+        cfg = es_read_repo_cfg()
 
         request = %{
           op: :get_at,
@@ -111,7 +120,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
       def get_many_at([], %Core.Context{}, opts) when is_list(opts), do: {:ok, []}
 
       def get_many_at([_ | _] = pairs, %Core.Context{}, opts) when is_list(opts) do
-        cfg = @es_read_repo.repo.__es_aggregate_repo__()
+        cfg = es_read_repo_cfg()
 
         request = %{
           op: :get_many_at,
@@ -130,6 +139,14 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
         end
       end
 
+      defp es_read_repo_cfg do
+        %{@es_read_cfg | dao: resolve(:dao, @es_read_cfg.dao), codec: resolve(:codec, @es_read_cfg.codec)}
+      end
+
+      defp resolve(:dao, :config), do: Core.Config.dao()
+      defp resolve(:codec, :config), do: Core.Config.codec()
+      defp resolve(_key, module), do: module
+
       defp es_read_repo_to_view!(%unquote(aggregate){} = state, to_view) do
         case to_view.(state) do
           %unquote(view){} = view -> view
@@ -144,11 +161,11 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   @spec ensure_write_repo!(module(), module()) :: module()
 
   def ensure_write_repo!(repo, behaviour) do
-    unless Helper.Module.exports?(repo, :__es_aggregate_repo__, 0) do
+    unless Enum.any?(repo.module_info(:attributes), &match?({:es_read_cfg, [_]}, &1)) do
       Helper.Opts.reject!(
         "#{@label}: repo",
-        "модуль #{inspect(repo)} должен экспортировать [__es_aggregate_repo__: 0] " <>
-          "(write-репозиторий `use Core.Es.Aggregate.Repo.Pg`, behaviour: #{inspect(behaviour)})"
+        "модуль #{inspect(repo)} должен быть собран `use Core.Es.Aggregate.Repo.Pg` " <>
+          "(behaviour: #{inspect(behaviour)})"
       )
     end
 
