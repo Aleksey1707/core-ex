@@ -30,6 +30,14 @@ defmodule Core.View.FieldTest do
       assert Map.keys(types) == Map.keys(base)
       assert declared_types() == types
     end
+
+    test "полнота таблицы проекций: вид без строки — CompileError сборки" do
+      assert Core.View.Field.check_kinds!(Field.kinds(:view)) == :ok
+
+      assert_raise CompileError, ~r/^View: вид missing: нет всех проекций/, fn ->
+        Core.View.Field.check_kinds!([:missing])
+      end
+    end
   end
 
   # ---

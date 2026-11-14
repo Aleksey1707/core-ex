@@ -13,18 +13,24 @@ defmodule Core.View.Opts do
   alias Core.Helper
   alias Core.Helper.FieldCheck
   alias Core.Prim
+  alias Core.View.Field, as: ViewField
 
   @label "View"
   @type_values FieldCheck.type_values()
   @collection_kinds ~w(list set)a
 
-  @typedoc "Нормализованная спека значения поля."
-  @type spec :: Core.View.Field.spec()
+  @typedoc false
+  @type spec :: ViewField.spec()
 
-  @typedoc "Нормализованное поле: имя, спека значения, признак необязательности и проекции."
-  @type field :: Core.View.Field.t()
+  @typedoc false
+  @type field :: ViewField.t()
 
-  @doc "Проверить и нормализовать `forms:` — именованные map-формы вложенных значений."
+  @doc "Typespec значения поля `prim:` по kind его Prim."
+  @spec prim_type_ast(atom()) :: Macro.t()
+
+  def prim_type_ast(kind) when is_atom(kind), do: ViewField.prim_type_ast(kind)
+
+  @doc false
   @spec forms!(term()) :: [{atom(), [field()]}]
 
   def forms!(forms) do
@@ -38,7 +44,7 @@ defmodule Core.View.Opts do
     Enum.map(forms, fn {name, fields} -> {name, fields!(fields, names, "forms: #{name}")} end)
   end
 
-  @doc "Проверить и нормализовать `fields:` — поля представления."
+  @doc false
   @spec fields!(term(), [atom()], String.t()) :: [field()]
 
   def fields!(fields, form_names, label \\ "fields") do
@@ -51,24 +57,21 @@ defmodule Core.View.Opts do
     Enum.map(fields, fn {name, opts} -> field!(name, opts, form_names, "#{@label}: #{label}: #{name}") end)
   end
 
-  @doc "Формы, на которые ссылается хотя бы одна спека."
+  @doc false
   @spec used_forms([field()]) :: MapSet.t(atom())
 
   def used_forms(fields) do
-    Enum.reduce(fields, MapSet.new(), fn %Core.View.Field{spec: spec}, acc ->
+    Enum.reduce(fields, MapSet.new(), fn %ViewField{spec: spec}, acc ->
       collect_forms(spec, acc)
     end)
   end
 
-  @doc false
-  @spec field!(atom(), keyword(), [atom()], String.t()) :: field()
-
-  def field!(name, opts, form_names, path) when is_atom(name) do
-    {name, spec, optional?} = spec_field!(name, opts, form_names, path)
-    Core.View.Field.build(name, spec, optional?)
-  end
-
   # ---
+
+  defp field!(name, opts, form_names, path) when is_atom(name) do
+    {name, spec, optional?} = spec_field!(name, opts, form_names, path)
+    ViewField.build(name, spec, optional?)
+  end
 
   defp spec_field!(name, opts, form_names, path) when is_atom(name) do
     if not Keyword.keyword?(opts) do

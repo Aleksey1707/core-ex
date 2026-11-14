@@ -229,14 +229,14 @@ defmodule Core.Codec.FieldTest do
 
           {:error, %CompileError{description: description}} ->
             refute kind in allowed, "#{name} должен принимать #{kind}: #{description}"
-            assert description =~ name, "нет имени хоста #{name}: #{description}"
+            assert description =~ "недопустим в хосте «#{name}»", "нет имени хоста #{name}: #{description}"
             assert description =~ "#{kind}", "нет вида #{kind}: #{description}"
         end
       end
     end
 
     test "вложенный вид проверяется по allowlist того же хоста" do
-      assert_raise CompileError, ~r/W: a: list: Codec-плагин по полям: вид view: недопустим/, fn ->
+      assert_raise CompileError, ~r/W: a: list: вид view: недопустим в хосте «Codec-плагин по полям»/, fn ->
         Field.normalize!([a: [list: [view: Core.ViewFixture.Nested]]], :plugin, @where)
       end
     end

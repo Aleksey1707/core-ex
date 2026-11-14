@@ -3,25 +3,29 @@ defmodule Core.Codec.Field do
   Поле спеки полей и её грамматика: нормализатор keyword-спеки и его проверки.
 
   Спеку говорят Codec-плагин по полям (`use Core.Codec.Plugin, fields:`), варианты семейства,
-  нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged` и подписи
-  (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Поле объявляется keyword-спекой с
-  ровно одним kind-ключом (`prim:` / `enum:` / `entity:` / `union:` / `list:` / `set:` / `map:` / `type:`)
-  и ключами `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина, `subject:` у
-  нагрузки (ADR-0056, ADR-0073), `destroyable: true` у структуры — и у её элемента `list:` и значения
-  `map:` (ADR-0092). У структуры `wire:` и `subject:` нет: кодека у неё нет; `default:` у
-  неё — выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле `Core.Struct`
-  (ADR-0090).
+  нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged`, подписи
+  (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Виды языка — одна таблица
+  (`kinds/0`), у каждого хоста свой allowlist; вид вне его — `CompileError` с именем хоста. Поле
+  объявляется keyword-спекой с ровно одним kind-ключом из allowlist хоста (`prim:` / `enum:` /
+  `entity:` / `union:` / `list:` / `set:` / `map:` / `type:`, у View ещё `view:` / `form:` /
+  `jsonb:`) и ключами `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина,
+  `subject:` у нагрузки (ADR-0056, ADR-0073), `destroyable: true` у структуры — и у её элемента
+  `list:` и значения `map:` (ADR-0092). У структуры `wire:` и `subject:` нет: кодека у неё нет;
+  `default:` у неё — выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле
+  `Core.Struct` (ADR-0090).
 
   Ключ словаря (`map: [key:, value:]`) — вид с wire-строкой: Prim со строковой базой (`Prim.String`,
   `Prim.UUID` и `Prim.Compose` над ними, kind встроенный), `enum:` или `type: :string`; ключ объекта
   лежит в wire открыто, поэтому Prim `personal: true` или `sensitive:` ключом не бывает (ADR-0091).
 
-  Новый вид значения разбирают, кроме нормализатора: `dump` / `load` и сверка со структурой —
-  `Core.Codec.Plugin.Fields`; пере-дамп — `Core.Codec.Plugin.Redump`, `Core.Codec.Redump`; тип и
-  `default:` — `Core.Struct`; ПДн нагрузки — `Core.Es.Event.Payload`; View — `Core.View`,
-  `Core.View.Opts`, `Core.View.Dumper`; подписи — `Core.Labels.Fields`, `Core.Labels.Details`,
-  `Core.Labels.Refs`, `Core.Labels.CompletenessCase`; виды сведений на странице
-  событий — `Core.Web.Event`. Вложенные спеки обходятся через `children/1` / `values/1`.
+  Новый вид значения разбирают, кроме нормализатора: операции вида — адаптер
+  `Core.Codec.Plugin.Fields.Kind` (`pattern` / `guard` / `dump` / `load`), `dump` / `load` и сверка
+  со структурой — `Core.Codec.Plugin.Fields`; пере-дамп — `Core.Codec.Plugin.Redump`,
+  `Core.Codec.Redump`; тип и `default:` — `Core.Struct`; ПДн нагрузки — `Core.Es.Event.Payload`;
+  проекции View — `Core.View.Field`, а `Core.View`, `Core.View.Opts`, `Core.View.Dumper` собирают из
+  них код; подписи — `Core.Labels.Fields`, `Core.Labels.Details`, `Core.Labels.Refs`,
+  `Core.Labels.CompletenessCase`; виды сведений на странице событий — `Core.Web.Event`. Вложенные
+  спеки обходятся через `children/1` / `values/1`.
 
   Модуль внутренний для библиотеки.
   """
@@ -31,11 +35,12 @@ defmodule Core.Codec.Field do
   alias Core.Prim
 
   @label "Codec.Plugin"
+  @base_kinds ~w(prim enum entity union list set map type)a
   @host_kinds [
-    struct: ~w(prim enum entity union list set map type)a,
-    plugin: ~w(prim enum entity union list set map type)a,
-    payload: ~w(prim enum entity union list set map type)a,
-    labels: ~w(prim enum entity union list set map type)a,
+    struct: @base_kinds,
+    plugin: @base_kinds,
+    payload: @base_kinds,
+    labels: @base_kinds,
     view: ~w(prim enum type view form list set map jsonb)a
   ]
   @kinds @host_kinds
@@ -253,7 +258,7 @@ defmodule Core.Codec.Field do
   defp reject_foreign!(kind, host, allowed, where, prefix) do
     Helper.Opts.reject!(
       where,
-      "#{prefix}#{host_name(host)}: вид #{kind}: недопустим — ожидается ровно один из " <>
+      "#{prefix}вид #{kind}: недопустим в хосте «#{host_name(host)}» — ожидается ровно один из " <>
         Enum.map_join(allowed, "/", &"#{&1}:")
     )
   end

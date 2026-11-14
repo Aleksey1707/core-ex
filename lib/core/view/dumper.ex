@@ -19,7 +19,7 @@ defmodule Core.View.Dumper do
 
     pairs =
       Enum.map(fields, fn %Field{name: name, dump_ast: dump_ast} ->
-        {name, dump_ast.(field_access(value, name), codec)}
+        {name, Field.bind_dump(dump_ast, field_access(value, name), codec)}
       end)
 
     quote do
@@ -86,7 +86,7 @@ defmodule Core.View.Dumper do
 
     pairs =
       Enum.map(fields, fn %Field{name: field, dump_ast: dump_ast} ->
-        {field, dump_ast.(form_access(form, field), codec)}
+        {field, Field.bind_dump(dump_ast, form_access(form, field), codec)}
       end)
 
     quote do

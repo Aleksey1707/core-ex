@@ -8,6 +8,12 @@ defmodule Core.View.Field do
   @label "View"
   @item_vars ~w(item_0 item_1 item_2 item_3)a
 
+  # Placeholder'ы AST: подставляются при генерации `new/1` и дампа. Контекст различим, чтобы
+  # значение формы не совпало со значением дампа случайно.
+  @shape_var Macro.var(:value, :view_shape)
+  @dump_value_var Macro.var(:value, :view_dump)
+  @dump_codec_var Macro.var(:codec, :view_dump)
+
   @prim_type_asts %{
     uuid: quote(do: String.t()),
     string: quote(do: String.t()),
@@ -40,19 +46,6 @@ defmodule Core.View.Field do
     jsonb: %{type: :jsonb, shape?: false, needs_codec?: true, dump: :jsonb}
   }
 
-  for kind <- Field.kinds(:view) do
-    case Map.get(@projections, kind) do
-      %{type: type, dump: dump, shape?: shape?, needs_codec?: codec?}
-      when is_atom(type) and is_atom(dump) and shape? in [true, false, :nested] and
-             codec? in [true, false, :nested] ->
-        :ok
-
-      _ ->
-        raise CompileError,
-          description: "#{@label}: вид #{kind}: нет всех проекций (тип, форма, дамп, признаки)"
-    end
-  end
-
   @enforce_keys ~w(name spec optional? type_ast shape_ast dump_ast shape? needs_codec?)a
   defstruct @enforce_keys
 
@@ -69,10 +62,10 @@ defmodule Core.View.Field do
           | {:jsonb, module() | {module(), atom()}}
 
   @typedoc false
-  @type dump_ast :: (Macro.t(), Macro.t() -> Macro.t())
+  @type dump_ast :: Macro.t()
 
   @typedoc false
-  @type shape_ast :: (Macro.t() -> Macro.t())
+  @type shape_ast :: Macro.t() | nil
 
   @typedoc false
   @type t :: %__MODULE__{
@@ -80,11 +73,29 @@ defmodule Core.View.Field do
           spec: spec(),
           optional?: boolean(),
           type_ast: Macro.t(),
-          shape_ast: shape_ast() | nil,
+          shape_ast: shape_ast(),
           dump_ast: dump_ast(),
           shape?: boolean(),
           needs_codec?: boolean()
         }
+
+  @doc false
+  @spec check_kinds!([atom()]) :: :ok
+
+  def check_kinds!(kinds) when is_list(kinds) do
+    Enum.each(kinds, fn kind ->
+      case Map.get(@projections, kind) do
+        %{type: type, dump: dump, shape?: shape?, needs_codec?: codec?}
+        when is_atom(type) and is_atom(dump) and shape? in [true, false, :nested] and
+               codec? in [true, false, :nested] ->
+          :ok
+
+        _ ->
+          raise CompileError,
+            description: "#{@label}: вид #{kind}: нет всех проекций (тип, форма, дамп, признаки)"
+      end
+    end)
+  end
 
   @doc false
   @spec build(atom(), spec(), boolean()) :: t()
@@ -104,14 +115,41 @@ defmodule Core.View.Field do
     }
   end
 
+  @doc false
+  @spec prim_type_ast(atom()) :: Macro.t()
+
+  def prim_type_ast(kind) when is_atom(kind), do: Map.fetch!(@prim_type_asts, kind)
+
+  # Подстановка placeholder'ов — точной var-нодой: сгенерированный код остаётся прямыми
+  # выражениями, без runtime-замыканий в IR.
+  @doc false
+  @spec bind_shape(Macro.t(), Macro.t()) :: Macro.t()
+
+  def bind_shape(ast, value), do: subst(ast, %{@shape_var => value})
+
+  @doc false
+  @spec bind_dump(Macro.t(), Macro.t(), Macro.t()) :: Macro.t()
+
+  def bind_dump(ast, value, codec), do: subst(ast, %{@dump_value_var => value, @dump_codec_var => codec})
+
   # ---
+
+  defp subst(ast, bindings) do
+    Macro.prewalk(ast, fn
+      {name, _meta, context} = node when is_atom(name) and is_atom(context) ->
+        Map.get(bindings, node, node)
+
+      node ->
+        node
+    end)
+  end
 
   defp type_ast(spec) do
     %{type: tag} = projection(spec)
     type(tag, spec)
   end
 
-  defp type(:prim, {:prim, _mod, kind}), do: Map.fetch!(@prim_type_asts, kind)
+  defp type(:prim, {:prim, _mod, kind}), do: prim_type_ast(kind)
   defp type(:enum, {:enum, mod}), do: quote(do: unquote(mod).t())
   defp type(:view, {:view, mod}), do: quote(do: unquote(mod).t())
   defp type(:type, {:type, :string}), do: quote(do: String.t())
@@ -122,15 +160,12 @@ defmodule Core.View.Field do
   defp type(:map, {:map, key, value}), do: quote(do: %{optional(unquote(type_ast(key))) => unquote(type_ast(value))})
   defp type(:jsonb, {:jsonb, _spec_ref}), do: quote(do: map())
 
-  defp shape_ast(spec, true) do
-    fn value ->
-      quote(do: Core.View.shape(unquote(Macro.escape(spec)), unquote(value)))
-    end
-  end
+  defp shape_ast(spec, true),
+    do: quote(do: Core.View.shape(unquote(Macro.escape(spec)), unquote(@shape_var)))
 
   defp shape_ast(_spec, false), do: nil
 
-  defp dump_ast(spec), do: fn value, codec -> dump_expr(spec, value, codec, 0) end
+  defp dump_ast(spec), do: dump_expr(spec, @dump_value_var, @dump_codec_var, 0)
 
   defp dump_expr(spec, value, codec, depth) do
     %{dump: tag} = projection(spec)
@@ -239,3 +274,7 @@ defmodule Core.View.Field do
   defp item_var!(depth),
     do: Helper.Opts.reject!(@label, "вложенность списков #{depth} глубже допустимой (#{length(@item_vars)})")
 end
+
+# Полнота таблицы проверяется на сборке: функцию своего модуля нельзя вызвать в его теле, а
+# отдельная функция нужна тесту и читается как контракт таблицы.
+Core.View.Field.check_kinds!(Core.Codec.Field.kinds(:view))

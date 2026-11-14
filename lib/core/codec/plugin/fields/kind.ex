@@ -2,9 +2,10 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   @moduledoc false
 
   # Адаптер вида поля: одна строка таблицы на вид — операции плагина по полям (шаблон
-  # сопоставления, guard, дамп, загрузка) и признак «guard вида пропускает любой struct».
-  # Полнота сверяется с allowlist плагина из `Core.Codec.Field` на сборке: вид без строки или без
-  # операции — `CompileError`.
+  # сопоставления, guard, дамп, загрузка), признак «guard вида пропускает любой struct» и
+  # признак «дамп не обходит значение»: `true` — значение уходит как есть, `:nested` — как
+  # есть, если и элемент тоже, `false` — обход. Полнота сверяется с allowlist плагина из
+  # `Core.Codec.Field` на сборке: вид без строки или без операции — `CompileError`.
 
   alias Core.Codec.Field
   alias Core.Codec.Helper
@@ -14,23 +15,24 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   require Error
 
   @label "Codec.Plugin"
-  @operations ~w(pattern guard struct dump load)a
+  @operations ~w(pattern guard struct dump load as_is)a
 
   @adapters %{
-    prim: %{pattern: :struct, guard: :struct, struct: :never, dump: :codec, load: :codec},
-    enum: %{pattern: :value, guard: :atom, struct: :never, dump: :as_is, load: :enum},
-    entity: %{pattern: :struct, guard: :struct, struct: :never, dump: :codec, load: :codec},
-    union: %{pattern: :value, guard: :struct_any, struct: :any, dump: :codec, load: :codec},
-    list: %{pattern: :value, guard: :list, struct: :never, dump: :list, load: :list},
-    set: %{pattern: :map_set, guard: :map_set, struct: :never, dump: :set, load: :set},
-    map: %{pattern: :map, guard: :map, struct: :never, dump: :map, load: :map},
-    type: %{pattern: :value, guard: :type, struct: :map_type, dump: :as_is, load: :as_is}
+    prim: %{pattern: :struct, guard: :struct, struct: :never, dump: :codec, load: :codec, as_is: false},
+    enum: %{pattern: :value, guard: :atom, struct: :never, dump: :as_is, load: :enum, as_is: true},
+    entity: %{pattern: :struct, guard: :struct, struct: :never, dump: :codec, load: :codec, as_is: false},
+    union: %{pattern: :value, guard: :struct_any, struct: :any, dump: :codec, load: :codec, as_is: false},
+    list: %{pattern: :value, guard: :list, struct: :never, dump: :list, load: :list, as_is: :nested},
+    set: %{pattern: :map_set, guard: :map_set, struct: :never, dump: :set, load: :set, as_is: false},
+    map: %{pattern: :map, guard: :map, struct: :never, dump: :map, load: :map, as_is: false},
+    type: %{pattern: :value, guard: :type, struct: :map_type, dump: :as_is, load: :as_is, as_is: true}
   }
 
   for kind <- Field.kinds(:plugin) do
     row = Map.get(@adapters, kind)
 
-    unless is_map(row) and Enum.all?(@operations, &is_atom(Map.get(row, &1))) do
+    unless is_map(row) and Enum.all?(@operations, &is_atom(Map.get(row, &1))) and
+             Map.get(row, :as_is) in [true, false, :nested] do
       raise CompileError,
         description: "#{@label}: вид #{kind}: нет адаптера со всеми операциями"
     end
@@ -83,16 +85,14 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   @spec dump(Field.t(), Macro.t()) :: Macro.t()
 
   def dump(%Field{spec: spec, optional?: optional?} = field, value) do
-    case tag(spec, :dump) do
-      :as_is ->
-        value
+    if as_is?(spec) do
+      value
+    else
+      expr = dump!(tag(spec, :dump), field, value)
 
-      tag ->
-        expr = dump!(tag, field, value)
-
-        if optional?,
-          do: quote(generated: true, do: if(is_nil(unquote(value)), do: nil, else: unquote(expr))),
-          else: expr
+      if optional?,
+        do: quote(generated: true, do: if(is_nil(unquote(value)), do: nil, else: unquote(expr))),
+        else: expr
     end
   end
 
@@ -110,8 +110,8 @@ defmodule Core.Codec.Plugin.Fields.Kind do
       :enum ->
         quote(generated: true, do: unquote(elem(spec, 1)).cast_optional(unquote(raw)))
 
-      tag ->
-        nullable_load(tag, field, type, raw)
+      operation ->
+        nullable_load(operation, field, type, raw)
     end
   end
 
@@ -202,6 +202,15 @@ defmodule Core.Codec.Plugin.Fields.Kind do
 
   defp dump_key(field, key), do: dump(field, key)
 
+  # Дамп без обхода: у `enum` и `type` значение уже wire-формы, у `list:` — если и элемент
+  # такой. `set` и `map` обходятся всегда: их форма — не список и не map значения поля.
+  defp as_is?(spec) do
+    case tag(spec, :as_is) do
+      :nested -> Enum.all?(Field.children(spec), &as_is?/1)
+      flag -> flag
+    end
+  end
+
   defp load!(:as_is, _field, _type, raw), do: quote(generated: true, do: {:ok, unquote(raw)})
 
   defp load!(:codec, %Field{spec: {_kind, mod}}, _type, raw),
@@ -251,14 +260,14 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp nullable_load(tag, field, type, raw) do
+  defp nullable_load(operation, field, type, raw) do
     raw_var = Macro.var(:raw, __MODULE__)
     field = %{field | optional?: false}
 
     quote generated: true do
       case unquote(raw) do
         nil -> {:ok, nil}
-        unquote(raw_var) -> unquote(load!(tag, field, type, raw_var))
+        unquote(raw_var) -> unquote(load!(operation, field, type, raw_var))
       end
     end
   end

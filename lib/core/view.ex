@@ -251,5 +251,5 @@ defmodule Core.View do
   end
 
   defp shape_ast(%Field{shape?: false}, value), do: value
-  defp shape_ast(%Field{shape?: true, shape_ast: shape_ast}, value), do: shape_ast.(value)
+  defp shape_ast(%Field{shape?: true, shape_ast: shape_ast}, value), do: Field.bind_shape(shape_ast, value)
 end
