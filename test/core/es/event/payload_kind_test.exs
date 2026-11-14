@@ -2,7 +2,11 @@ defmodule Core.Es.Event.PayloadKindTest do
   use ExUnit.Case, async: true
 
   alias Core.Codec.Field
+  alias Core.CodecFixture.Internal, as: InCodec
   alias Core.DerivedFixture
+  alias Core.Es.Personal.Destroyed
+  alias Core.Es.Personal.Marker
+  alias Core.EsFixture.PayloadKinds
   alias Core.EventFixture
   alias Core.Version
 
@@ -129,6 +133,27 @@ defmodule Core.Es.Event.PayloadKindTest do
     end
   end
 
+  test "вид с subject: × операция: new/N, dump и load дают уничтоженное значение" do
+    event = subject_event()
+
+    for kind <- Field.kinds(:payload) do
+      key = Atom.to_string(kind)
+      payload = %{event.payload | kind => %Destroyed{}}
+      destroyed = %{event | payload: payload}
+
+      assert_raise FunctionClauseError, fn ->
+        apply(PayloadKinds.Payload, :new, List.replace_at(subject_args(), kind_index(kind), %Destroyed{}))
+      end
+
+      assert %{^key => %Marker{destroyed: true}} = PayloadKinds.Codec.dump(destroyed, InCodec)["payload"]
+
+      wire = put_payload(subject_wire(), kind, %{"$pd" => nil})
+
+      assert {:ok, %PayloadKinds.Changed{payload: %{^kind => %Destroyed{}}}} =
+               PayloadKinds.Codec.load(PayloadKinds.Changed, wire, InCodec)
+    end
+  end
+
   # ---
 
   defp payload_args do
@@ -156,6 +181,56 @@ defmodule Core.Es.Event.PayloadKindTest do
       type: -1
     }
   end
+
+  defp subject_event do
+    PayloadKinds.Changed.new(
+      PayloadKinds.Payload.new(
+        EventFixture.Name.new!("а"),
+        :active,
+        %DerivedFixture.Place{name: EventFixture.Name.new!("место"), floor: 1},
+        %DerivedFixture.Mark.Star{size: 2},
+        [EventFixture.Name.new!("б")],
+        MapSet.new([EventFixture.Name.new!("в")]),
+        %{EventFixture.Name.new!("к") => 1},
+        %{"к" => 1}
+      ),
+      EventFixture.AggID.new(),
+      Version.new!(1),
+      EventFixture.ActorID.new(),
+      at()
+    )
+  end
+
+  defp subject_args do
+    [
+      EventFixture.Name.new!("а"),
+      :active,
+      %DerivedFixture.Place{name: EventFixture.Name.new!("место"), floor: 1},
+      %DerivedFixture.Mark.Star{size: 2},
+      [EventFixture.Name.new!("б")],
+      MapSet.new([EventFixture.Name.new!("в")]),
+      %{EventFixture.Name.new!("к") => 1},
+      %{"к" => 1}
+    ]
+  end
+
+  # Конверт после расшифровки: на месте маркера — его открытое wire-значение.
+  defp subject_wire do
+    dumped = PayloadKinds.Codec.dump(subject_event(), InCodec)
+
+    payload =
+      Map.new(dumped["payload"], fn
+        {key, %Marker{value: value}} -> {key, value}
+        {key, value} -> {key, value}
+      end)
+
+    %{dumped | "payload" => payload}
+  end
+
+  defp kind_index(kind), do: Enum.find_index(PayloadKinds.Payload.__es_payload_fields__(), &(&1.name == kind))
+
+  defp put_payload(wire, kind, value),
+    do: Map.update!(wire, "payload", &Map.put(&1, Atom.to_string(kind), value))
 
   defp at, do: Core.Es.Event.At.new!(@at)
 end

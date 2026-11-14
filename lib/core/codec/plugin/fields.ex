@@ -129,6 +129,11 @@ defmodule Core.Codec.Plugin.Fields do
   def value_guard(spec, value), do: Kind.value_guard(spec, value)
 
   @doc false
+  @spec admits_struct?(Field.spec()) :: boolean()
+
+  def admits_struct?(spec), do: Kind.admits_struct?(spec)
+
+  @doc false
   @spec dump_value(Field.spec(), Macro.t(), boolean()) :: Macro.t()
 
   def dump_value(spec, value, optional?), do: Kind.dump(spec_field(spec, optional?), value)

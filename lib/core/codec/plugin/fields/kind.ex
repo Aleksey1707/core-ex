@@ -1,9 +1,10 @@
 defmodule Core.Codec.Plugin.Fields.Kind do
   @moduledoc false
 
-  # Адаптер вида поля: одна строка таблицы на вид и четыре операции плагина по полям —
-  # шаблон сопоставления, guard, дамп и загрузка. Полнота сверяется с allowlist плагина из
-  # `Core.Codec.Field` на сборке: вид без строки или без операции — `CompileError`.
+  # Адаптер вида поля: одна строка таблицы на вид — операции плагина по полям (шаблон
+  # сопоставления, guard, дамп, загрузка) и признак «guard вида пропускает любой struct».
+  # Полнота сверяется с allowlist плагина из `Core.Codec.Field` на сборке: вид без строки или без
+  # операции — `CompileError`.
 
   alias Core.Codec.Field
   alias Core.Codec.Helper
@@ -13,17 +14,17 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   require Error
 
   @label "Codec.Plugin"
-  @operations ~w(pattern guard dump load)a
+  @operations ~w(pattern guard struct dump load)a
 
   @adapters %{
-    prim: %{pattern: :struct, guard: :struct, dump: :codec, load: :codec},
-    enum: %{pattern: :value, guard: :atom, dump: :as_is, load: :enum},
-    entity: %{pattern: :struct, guard: :struct, dump: :codec, load: :codec},
-    union: %{pattern: :value, guard: :struct_any, dump: :codec, load: :codec},
-    list: %{pattern: :value, guard: :list, dump: :list, load: :list},
-    set: %{pattern: :map_set, guard: :map_set, dump: :set, load: :set},
-    map: %{pattern: :map, guard: :map, dump: :map, load: :map},
-    type: %{pattern: :value, guard: :type, dump: :as_is, load: :as_is}
+    prim: %{pattern: :struct, guard: :struct, struct: :never, dump: :codec, load: :codec},
+    enum: %{pattern: :value, guard: :atom, struct: :never, dump: :as_is, load: :enum},
+    entity: %{pattern: :struct, guard: :struct, struct: :never, dump: :codec, load: :codec},
+    union: %{pattern: :value, guard: :struct_any, struct: :any, dump: :codec, load: :codec},
+    list: %{pattern: :value, guard: :list, struct: :never, dump: :list, load: :list},
+    set: %{pattern: :map_set, guard: :map_set, struct: :never, dump: :set, load: :set},
+    map: %{pattern: :map, guard: :map, struct: :never, dump: :map, load: :map},
+    type: %{pattern: :value, guard: :type, struct: :map_type, dump: :as_is, load: :as_is}
   }
 
   for kind <- Field.kinds(:plugin) do
@@ -63,6 +64,20 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   @spec value_guard(Field.spec(), Macro.t()) :: Macro.t()
 
   def value_guard(spec, value), do: value_guard!(tag(spec, :guard), spec, value)
+
+  # Пропускает ли guard вида любое значение-struct: у `union:` — `is_struct/1`, у `type: :map` —
+  # `is_map/1`. Нужен нагрузке события: `%Core.Es.Personal.Destroyed{}` в поле с `subject:` такой
+  # guard не ловит.
+  @doc false
+  @spec admits_struct?(Field.spec()) :: boolean()
+
+  def admits_struct?(spec) do
+    case tag(spec, :struct) do
+      :never -> false
+      :any -> true
+      :map_type -> match?({:type, :map}, spec)
+    end
+  end
 
   @doc false
   @spec dump(Field.t(), Macro.t()) :: Macro.t()

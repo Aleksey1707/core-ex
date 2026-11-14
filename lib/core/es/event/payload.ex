@@ -218,8 +218,8 @@ defmodule Core.Es.Event.Payload do
 
   def new_guard(fields) do
     destroyed =
-      for %Field{name: name, spec: {kind, _value}, subject: subject} <- fields,
-          not is_nil(subject) and kind in ~w(union type)a,
+      for %Field{name: name, subject: subject, spec: spec} <- fields,
+          not is_nil(subject) and Fields.admits_struct?(spec),
           do: quote(generated: true, do: not is_struct(unquote(Fields.var(name)), Core.Es.Personal.Destroyed))
 
     Fields.and_guards(Enum.flat_map(fields, &Fields.field_guard/1) ++ destroyed ++ subject_guards(fields))

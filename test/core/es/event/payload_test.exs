@@ -91,6 +91,18 @@ defmodule Core.Es.Event.PayloadTest do
       end
     end
 
+    test "вид вне allowlist нагрузки — CompileError с именем хоста" do
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: name: нагрузка события: вид view: недопустим/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Es.Event.PayloadTest.ViewField do
+              use Core.Es.Event.Payload, fields: [name: [view: Core.ViewFixture.Nested]]
+            end
+          end
+        )
+      end
+    end
+
     test "опечатка в ключе — при раскрытии, с меткой" do
       assert_raise CompileError,
                    ~r/^Es.Event.Payload: нет обязательных опций: \[:fields\]; неизвестные опции: \[:field\]$/,
