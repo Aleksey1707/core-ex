@@ -121,6 +121,25 @@ defmodule Core.Repo.ScTest do
     assert Repo.Sc.find(ctx, Entity, "1") == entity
   end
 
+  test "init/1 поверх мёртвой своей таблицы создаёт новую" do
+    ctx = Context.new() |> Repo.Sc.init()
+    dead = Context.find(ctx, :shadow_copy)
+    entity = %Entity{id: "1", name: "a"}
+    Repo.Sc.put(ctx, entity)
+    :ets.delete(dead)
+
+    ctx = Repo.Sc.init(ctx)
+    tid = Context.find(ctx, :shadow_copy)
+
+    assert is_reference(tid)
+    assert tid != dead
+    assert :ets.info(dead) == :undefined
+    assert :ets.info(tid) != :undefined
+
+    assert ^entity = Repo.Sc.put(ctx, entity)
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
+  end
+
   test "init/1 в чужом процессе создаёт свою таблицу, прежняя жива" do
     ctx = Context.new() |> Repo.Sc.init()
     tid = Context.find(ctx, :shadow_copy)

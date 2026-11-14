@@ -59,10 +59,16 @@ defmodule Core.Prim.Date do
       @doc "Сегодняшняя дата; при отказе `new/1` — raise."
       @spec today!() :: t()
 
-      def today! do
-        %__MODULE__{} = prim = Result.unwrap!(today())
-        prim
-      end
+      unquote(
+        quote generated: true do
+          def today! do
+            case today() do
+              {:ok, %__MODULE__{} = prim} -> prim
+              {:error, %Core.Error{} = error} -> raise Core.Exc, error
+            end
+          end
+        end
+      )
 
       @doc """
       Собрать из другого date/datetime-Prim (полный pipeline целевого `new/1`).

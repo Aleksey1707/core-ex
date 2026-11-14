@@ -625,7 +625,8 @@ end
 Доменное время (`11-domain.md`, «Доменное время (`Core.Clock`)») тест останавливает и сдвигает
 через `Core.Clock.Test`, когда момент нельзя передать аргументом: история с истечением срока
 через usecase или HTTP. Подключение — `config :core, clock: Core.Clock.Test` в `config/test.exs` и
-`:ok = Core.Clock.Test.start()` в `test/test_helper.exs`.
+`:ok = Core.Clock.Test.start()` в `test/test_helper.exs`. Без строки конфигурации `start/0`
+отказывает (`ArgumentError`), молчаливого фолбэка на системные часы нет.
 
 - `freeze/1` останавливает время процесса теста, `advance/1` сдвигает остановленное на `Duration`
   или keyword `DateTime.shift/2`; `advance/1` без `freeze/1` — `ArgumentError`.

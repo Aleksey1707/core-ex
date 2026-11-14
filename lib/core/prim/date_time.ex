@@ -18,6 +18,7 @@ defmodule Core.Prim.DateTime do
   @behaviour Core.Mutator
 
   alias Core.Config
+  alias Core.Error
   alias Core.Prim
   alias Core.Result
 
@@ -65,10 +66,16 @@ defmodule Core.Prim.DateTime do
       @doc "Текущее время; при отказе `new/1` — raise."
       @spec now!() :: t()
 
-      def now! do
-        %__MODULE__{} = prim = Result.unwrap!(now())
-        prim
-      end
+      unquote(
+        quote generated: true do
+          def now! do
+            case now() do
+              {:ok, %__MODULE__{} = prim} -> prim
+              {:error, %Error{} = error} -> raise Core.Exc, error
+            end
+          end
+        end
+      )
 
       @doc "Собрать из другого datetime-Prim (полный pipeline целевого `new/1`)."
       @spec from(term()) :: Core.Result.t(t())
