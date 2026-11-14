@@ -18,6 +18,14 @@ defmodule Core.Repo.Sc do
   Жизненный цикл кэша — `init/1` → `clear/1` → `delete/1`; каждая из трёх возвращает контекст,
   и дальше работать нужно именно с ним: контекст неизменяем, а старая копия держит ссылку на
   уже удалённую таблицу.
+
+  Таблица принадлежит процессу, который вызвал `init/1`. Приватная ETS доступна только владельцу:
+  в чужом процессе `put/2` — no-op, `find/3` — `nil`, `delete/1` и `clear/1` чужую живую таблицу
+  не трогают. Кэш — оптимизация write-пути: без эталона `Children.sync` идёт широким diff, и
+  корректность записи от этого не страдает.
+
+  Эталон в ETS расходится с БД только при прямом `Repo.Pg.put_baseline/3` внутри транзакции:
+  штатная запись регистрирует эталон после commit (`Helper.AfterCommit.register/1`).
   """
 
   alias Core.Context
@@ -36,14 +44,19 @@ defmodule Core.Repo.Sc do
   @doc """
   Удалить ETS-таблицу shadow copy и снять ключ с контекста.
 
-  No-op, если кэш не включён или таблица уже удалена.
+  No-op, если кэш не включён или таблица уже удалена. Чужую живую таблицу не удаляет и ключ
+  с контекста не снимает.
   """
   @spec delete(Context.t()) :: Context.t()
 
   def delete(context) do
-    case Context.find(context, @context_key) do
-      nil -> context
-      tid -> do_delete(tid, context)
+    case own_table(context) do
+      nil ->
+        forget_dead(context)
+
+      tid ->
+        :ets.delete(tid)
+        Context.delete(context, @context_key)
     end
   end
 
@@ -51,36 +64,39 @@ defmodule Core.Repo.Sc do
   Забыть все эталоны, оставив кэш включённым.
 
   Возвращает тот же контекст; если таблица уже удалена — контекст без мёртвого ключа.
-  No-op, если кэш не включён.
+  No-op, если кэш не включён. Чужую живую таблицу не чистит.
   """
   @spec clear(Context.t()) :: Context.t()
 
   def clear(context) do
-    case Context.find(context, @context_key) do
-      nil -> context
-      tid -> do_clear(tid, context)
+    case own_table(context) do
+      nil ->
+        forget_dead(context)
+
+      tid ->
+        :ets.delete_all_objects(tid)
+        context
     end
   end
 
   # ---
 
-  @spec do_delete(:ets.tid(), Context.t()) :: Context.t()
+  @spec forget_dead(Context.t()) :: Context.t()
 
-  defp do_delete(tid, context) do
-    if alive?(tid), do: :ets.delete(tid)
-    Context.delete(context, @context_key)
-  end
-
-  @spec do_clear(:ets.tid(), Context.t()) :: Context.t()
-
-  defp do_clear(tid, context) do
-    if alive?(tid) do
-      :ets.delete_all_objects(tid)
-      context
-    else
-      Context.delete(context, @context_key)
+  defp forget_dead(context) do
+    case Context.find(context, @context_key) do
+      nil -> context
+      tid -> drop_dead_key(tid, context)
     end
   end
+
+  @spec drop_dead_key(:ets.tid(), Context.t()) :: Context.t()
+
+  defp drop_dead_key(tid, context) do
+    if alive?(tid), do: context, else: Context.delete(context, @context_key)
+  end
+
+  defp alive?(table), do: :ets.info(table) != :undefined
 
   # ===== запись =====
 
@@ -90,27 +106,18 @@ defmodule Core.Repo.Sc do
   Перезаписывает предыдущий эталон: и повторное чтение, и запись обязаны его обновить — иначе
   следующая запись считала бы diff дочерних строк от устаревшей копии.
 
-  No-op, если кэш не включён или таблица уже удалена (`delete/1` на другой копии контекста).
-
-  После отката транзакции эталон в ETS расходится с БД — такой контекст непригоден для
-  последующих записей.
+  No-op, если кэш не включён, таблица уже удалена (`delete/1` на другой копии контекста) или
+  принадлежит другому процессу.
   """
   @spec put(Context.t(), struct()) :: struct()
 
   def put(context, %mod{id: id} = entity) do
-    case Context.find(context, @context_key) do
+    case own_table(context) do
       nil -> :ok
-      table -> insert(table, {{mod, id}, entity})
+      table -> :ets.insert(table, {{mod, id}, entity})
     end
 
     entity
-  end
-
-  # ---
-
-  defp insert(table, record) do
-    if alive?(table), do: :ets.insert(table, record)
-    :ok
   end
 
   # ===== чтение =====
@@ -118,22 +125,18 @@ defmodule Core.Repo.Sc do
   @doc """
   Вернуть ранее зафиксированный эталон сущности `module` по id.
 
-  `nil`, если кэш не включён, таблица уже удалена или записи нет.
+  `nil`, если кэш не включён, таблица уже удалена, принадлежит другому процессу или записи нет.
   """
   @spec find(Context.t(), module(), term()) :: struct() | nil
 
   def find(context, module, id) when is_atom(module) do
-    case Context.find(context, @context_key) do
+    case own_table(context) do
       nil -> nil
-      table -> lookup(table, {module, id})
+      table -> do_lookup(table, {module, id})
     end
   end
 
   # ---
-
-  defp lookup(table, key) do
-    if alive?(table), do: do_lookup(table, key)
-  end
 
   defp do_lookup(table, key) do
     case :ets.lookup(table, key) do
@@ -144,5 +147,14 @@ defmodule Core.Repo.Sc do
 
   # ===== общее =====
 
-  defp alive?(table), do: :ets.info(table) != :undefined
+  defp own_table(context) do
+    tid = Context.find(context, @context_key)
+
+    with true <- is_reference(tid),
+         true <- :ets.info(tid, :owner) == self() do
+      tid
+    else
+      _ -> nil
+    end
+  end
 end

@@ -110,6 +110,42 @@ defmodule Core.Repo.ScTest do
     assert Repo.Sc.find(stale, Entity, "1") == nil
   end
 
+  test "put/find из чужого процесса — no-op и nil, таблица владельца цела" do
+    ctx = Context.new() |> Repo.Sc.init()
+    tid = Context.find(ctx, :shadow_copy)
+    entity = %Entity{id: "1", name: "a"}
+    foreign = %Entity{id: "2", name: "b"}
+    Repo.Sc.put(ctx, entity)
+
+    result =
+      Task.async(fn ->
+        {Repo.Sc.put(ctx, foreign), Repo.Sc.find(ctx, Entity, "2"), Repo.Sc.find(ctx, Entity, "1")}
+      end)
+      |> Task.await()
+
+    assert {^foreign, nil, nil} = result
+    assert :ets.info(tid, :owner) == self()
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
+    assert Repo.Sc.find(ctx, Entity, "2") == nil
+  end
+
+  test "delete/clear из чужого процесса не трогают чужую живую таблицу" do
+    ctx = Context.new() |> Repo.Sc.init()
+    tid = Context.find(ctx, :shadow_copy)
+    entity = %Entity{id: "1", name: "a"}
+    Repo.Sc.put(ctx, entity)
+
+    result =
+      Task.async(fn -> {Repo.Sc.delete(ctx), Repo.Sc.clear(ctx)} end)
+      |> Task.await()
+
+    assert {deleted, cleared} = result
+    assert Context.find(deleted, :shadow_copy) == tid
+    assert Context.find(cleared, :shadow_copy) == tid
+    assert :ets.info(tid) != :undefined
+    assert Repo.Sc.find(ctx, Entity, "1") == entity
+  end
+
   test "clear/1 no-op без init и снимает мёртвый ключ после delete/1" do
     empty = Context.new()
 
