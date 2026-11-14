@@ -411,6 +411,13 @@ nullable-колонка, новый индекс `concurrently`; переиме�
 Перехваченная после истечения аренды запись и удалённая `Cleaner` строка не обновляются и
 не воскресают (upsert здесь запрещён) — расхождение уходит в `warning`.
 
+**Переходы записи** считает `Core.Outbox.Record` (`reserve` / `mark_published` /
+`record_failure` / `requeue`); `Repo.Pg` сохраняет посчитанные `status`, `attempts`, `errors`,
+`locked_until`, `lease_id`, `published_at`, `updated_at` и не повторяет арифметику в SQL.
+`attempts` растёт в момент резервации, поэтому падение процесса до `save_results` попытку
+учитывает и `max_attempts` остаётся предохранителем. Исключение — неразобранная кодеком
+строка: структуры для неё нет, и `:failed` она получает SQL-инкрементом.
+
 **Порядок внутри пачки** — `order_by: [created_at, id]`: `created_at` ставится на каждое событие
 отдельно и может совпасть в микросекунде, `id` (UUIDv7) даёт tiebreaker. Часть ошибок — `Error.app`
 + `raise Exc`. Persist `Record` в Schema — через `Outbox.Codec` / `InCodec.load`/`dump` (remap JSON

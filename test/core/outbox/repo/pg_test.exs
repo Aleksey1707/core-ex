@@ -81,6 +81,9 @@ defmodule Core.Outbox.Repo.PgTest do
         context
       )
 
+    # попытку посчитала резервация: падение процесса до save_results её не теряет
+    assert row_of(reserved).attempts == 1
+
     past =
       DateTime.utc_now()
       |> DateTime.add(-120, :second)
@@ -98,6 +101,7 @@ defmodule Core.Outbox.Repo.PgTest do
 
     assert Outbox.ID.format(reclaimed.id, :full) == Outbox.ID.format(reserved.id, :full)
     assert Outbox.Attempts.value(reclaimed.attempts) == 2
+    assert row_of(reclaimed).attempts == 2
   end
 
   test "fetch_and_reserve сливает просроченный in_work и new в общем порядке", %{
@@ -178,16 +182,19 @@ defmodule Core.Outbox.Repo.PgTest do
         context
       )
 
-    assert row_of(reserved).lease_id != nil
+    token = row_of(reserved).lease_id
+    assert token != nil
 
     at = Outbox.UpdatedAt.now!()
     published = Record.mark_published(reserved, Outbox.PublishedAt.now!(), at)
     assert :ok = @repo.save_results([published], context)
 
-    # запись результата снимает аренду — иначе строка осталась бы с чужим токеном
+    # репозиторий пишет значения структуры: счётчик не растёт второй раз, токен не
+    # сбрасывается SQL-ом — снимает его только `release`/`requeue_failed`
     published_row = row_of(record)
     assert published_row.status == :published
-    assert published_row.lease_id == nil
+    assert published_row.attempts == Outbox.Attempts.value(reserved.attempts)
+    assert published_row.lease_id == token
     assert published_row.locked_until == nil
 
     assert [] ==
@@ -207,6 +214,8 @@ defmodule Core.Outbox.Repo.PgTest do
         context
       )
 
+    fail_token = row_of(reserved_fail).lease_id
+
     assert {:ok, message} = Outbox.ErrorMessage.create("nope")
 
     assert {:ok, failed} =
@@ -222,7 +231,8 @@ defmodule Core.Outbox.Repo.PgTest do
 
     failed_row = row_of(failed_src)
     assert failed_row.status == :failed
-    assert failed_row.lease_id == nil
+    assert failed_row.attempts == Outbox.Attempts.value(failed.attempts)
+    assert failed_row.lease_id == fail_token
 
     assert [] ==
              @repo.fetch_and_reserve(
@@ -230,6 +240,48 @@ defmodule Core.Outbox.Repo.PgTest do
                Outbox.LockDuration.new!(30),
                context
              )
+  end
+
+  test "save_results одной пачкой пишет published, failed и requeued", %{context: context} do
+    records = Enum.map(1..3, fn i -> build_record("mix_#{i}") end)
+    assert :ok = @repo.append(records, context)
+
+    [first, second, third] =
+      @repo.fetch_and_reserve(
+        Outbox.BatchSize.new!(3),
+        Outbox.LockDuration.new!(30),
+        context
+      )
+
+    at = Outbox.UpdatedAt.now!()
+    {:ok, message} = Outbox.ErrorMessage.create("boom")
+    {:ok, failed} = Record.record_failure(second, message, Outbox.Attempts.new!(1), at)
+
+    results = [
+      Record.mark_published(first, Outbox.PublishedAt.now!(), at),
+      failed,
+      Record.requeue(third, at)
+    ]
+
+    assert :ok = @repo.save_results(results, context)
+
+    # три группы значений — три исхода; хвост вернулся в очередь под прежним токеном
+    assert status_of(first.id) == :published
+    assert status_of(second.id) == :failed
+    assert status_of(third.id) == :new
+
+    assert [again] =
+             @repo.fetch_and_reserve(
+               Outbox.BatchSize.new!(10),
+               Outbox.LockDuration.new!(30),
+               context
+             )
+
+    assert again.id == third.id
+
+    # повтор — следующая попытка: резервация инкрементит счётчик ещё раз
+    assert Outbox.Attempts.value(again.attempts) == 2
+    assert Outbox.Attempts.value(failed.attempts) == 1
   end
 
   test "delete_published_before удаляет старые published", %{context: context} do

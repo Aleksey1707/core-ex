@@ -23,6 +23,10 @@ defmodule Core.Outbox.Repo.Pg do
 
   @persist_chunk_size 500
 
+  # Поля, которыми владеет `Core.Outbox.Record`: репозиторий пишет их значения,
+  # а не пересчитывает переходы в SQL.
+  @lifecycle_fields ~w(status attempts errors locked_until lease_id published_at updated_at)a
+
   @doc "Добавить записи outbox; после commit — wake поллеров из отметки `Core.Outbox.Supervisor`."
   @spec append([Record.t()], Context.t(), keyword()) :: :ok
 
@@ -210,7 +214,7 @@ defmodule Core.Outbox.Repo.Pg do
 
       {records, poisoned} = reserve_rows(rows, lease)
       fail_poisoned(poisoned, lease.updated_at)
-      mark_reserved!(records, lease)
+      mark_reserved!(records)
       {:ok, records}
     end)
   end
@@ -334,6 +338,9 @@ defmodule Core.Outbox.Repo.Pg do
   defp mark_row_failed(row, error, updated_at_utc) do
     entry = Jason.encode!([%{attempt: row.attempts + 1, message: Error.format_chain(error)}])
 
+    # Исключение из правила «пишем значения структуры»: строку не разобрал кодек,
+    # структуры нет, поэтому `attempts` инкрементится SQL-ом — передать вычисленное
+    # значение некому.
     {_count, _} =
       from(r in Schema,
         where: r.id == ^row.id,
@@ -353,50 +360,43 @@ defmodule Core.Outbox.Repo.Pg do
   end
 
   # Резервация меняет только lifecycle-поля. Upsert строки целиком переписывал бы
-  # `payload` и `errors` на каждую попытку публикации — write amplification на самой
-  # горячей таблице очереди. Инкремент `attempts` в строке совпадает с инкрементом в
-  # структуре (`Record.reserve/4`): обе получены из одной строки под `FOR UPDATE SKIP LOCKED`.
-  defp mark_reserved!([], _lease), do: :ok
+  # `payload` и `headers` на каждую попытку публикации — write amplification на самой
+  # горячей таблице очереди. Значения (включая `attempts`) посчитал `Record.reserve/4`;
+  # SQL их только сохраняет, поэтому инкремента здесь нет. Пачка разнородна по
+  # `attempts` (`:new` → 1, просроченный `:in_work` → 2), и записи с одинаковым
+  # набором значений по-прежнему пишутся одним `UPDATE`.
+  defp mark_reserved!([]), do: :ok
 
-  defp mark_reserved!(records, lease) do
-    codec = Config.codec()
+  defp mark_reserved!(records) do
+    records
+    |> Enum.group_by(&lifecycle_set/1)
+    |> Enum.each(fn {set, group} -> write_lifecycle(group, set) end)
 
-    set = [
-      status: :in_work,
-      locked_until: codec.dump(lease.locked_until),
-      lease_id: codec.dump(lease.lease_id),
-      updated_at: codec.dump(lease.updated_at)
-    ]
+    :ok
+  end
 
+  # Записи с одинаковым набором lifecycle-значений и одной арендой пишутся
+  # одним UPDATE: при fail-stop это published-префикс, requeued-хвост и одна
+  # проваленная запись — три группы вместо построчных.
+  defp result_group(%Record{} = record), do: {dump_lease(record), lifecycle_set(record)}
+
+  # Единственный источник значений полей — структура (`Schema.to_model!/1`): ни
+  # `attempts`, ни `lease_id`, ни `locked_until` здесь не пересчитываются.
+  defp lifecycle_set(%Record{} = record) do
+    row = Schema.to_model!(record)
+
+    Enum.map(@lifecycle_fields, fn field -> {field, Map.fetch!(row, field)} end)
+  end
+
+  defp write_lifecycle(records, set) do
     records
     |> Enum.map(&dump_id/1)
     |> Enum.chunk_every(@persist_chunk_size)
     |> Enum.each(fn ids ->
       {_count, _} =
         from(r in Schema, where: r.id in ^ids)
-        |> Config.dao().update_all(set: set, inc: [attempts: 1])
+        |> Config.dao().update_all(set: set)
     end)
-
-    :ok
-  end
-
-  # Записи с одинаковым набором устанавливаемых значений и одной арендой пишутся
-  # одним UPDATE: при fail-stop это published-префикс, released-хвост и одна
-  # проваленная запись — три запроса вместо построчных.
-  defp result_group(%Record{} = record) do
-    row = Schema.to_model!(record)
-
-    set = [
-      status: row.status,
-      attempts: row.attempts,
-      errors: row.errors,
-      locked_until: nil,
-      lease_id: nil,
-      published_at: row.published_at,
-      updated_at: row.updated_at
-    ]
-
-    {row.lease_id, set}
   end
 
   defp write_result_group(lease, set, records) do
