@@ -282,8 +282,9 @@ end
 
 Тестовые часы включаются строкой конфигурации и стартом сервера владения: `config/test.exs` MUST
 задавать `config :core, clock: Core.Clock.Test`, `test/test_helper.exs` MUST звать
-`:ok = Core.Clock.Test.start()` до `ExUnit.start/1`. Без часов тест не остановит доменное время, и
-история с истечением срока через usecase или HTTP не проверяется. В prod ключ не задаётся:
+`:ok = Core.Clock.Test.start()` до `ExUnit.start/1`. Без строки конфигурации `start/0` отказывает:
+молчаливого фолбэка на системные часы нет — `freeze/1` не подменил бы доменное время, и история
+с истечением срока через usecase или HTTP не проверялась бы. В prod ключ не задаётся:
 системные часы — умолчание `Core.Config`. `freeze` / `advance` / `allow` и когда глобальный режим —
 `deps/core/docs/rules/19-testing.md`, «Время».
 

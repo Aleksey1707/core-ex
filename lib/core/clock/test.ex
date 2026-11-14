@@ -3,7 +3,8 @@ defmodule Core.Clock.Test do
   Тестовые часы: реализация `Core.Clock`, которая останавливает и сдвигает доменное время
   процесса-владельца (ADR-0083).
 
-  Подключение — строка конфигурации и старт сервера владения:
+  Подключение — строка конфигурации и старт сервера владения; без строки конфигурации `start/0`
+  отказывает, иначе `freeze/1` не действовал бы, а тест на истечение срока стал бы флейки:
 
       # config/test.exs
       config :core, clock: Core.Clock.Test
@@ -25,10 +26,17 @@ defmodule Core.Clock.Test do
 
   # ===== управление =====
 
-  @doc "Запустить сервер владения; зовётся один раз в `test_helper.exs`, повторный вызов — `:ok`."
+  @doc """
+  Запустить сервер владения; зовётся один раз в `test_helper.exs`, повторный вызов — `:ok`.
+
+  Без `config :core, clock: Core.Clock.Test` — `ArgumentError`: `Core.Clock.now/0` шёл бы в
+  системные часы, и `freeze/1` не действовал бы.
+  """
   @spec start() :: :ok
 
   def start do
+    ensure_configured!()
+
     case NimbleOwnership.start_link(name: @server) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
@@ -105,6 +113,15 @@ defmodule Core.Clock.Test do
   def private, do: NimbleOwnership.set_mode_to_private(@server)
 
   # ---
+
+  defp ensure_configured! do
+    if Core.Config.clock() != __MODULE__ do
+      raise ArgumentError,
+            "Core.Clock.Test.start/0: не задан `config :core, clock: Core.Clock.Test` " <>
+              "в `config/test.exs` — без него доменное время идёт по системным часам, " <>
+              "а `freeze/1` и `advance/1` не действуют"
+    end
+  end
 
   defp access(pid) do
     case owner(callers(pid)) do

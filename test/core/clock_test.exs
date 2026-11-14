@@ -139,6 +139,33 @@ defmodule Core.ClockTest do
   end
 end
 
+defmodule Core.ClockStartTest do
+  # Подмена app env видна всем процессам VM: параллельный тест увидел бы чужой `:clock`.
+  use ExUnit.Case, async: false
+
+  alias Core.Clock
+
+  test "start/0 отказывает без config :core, clock: Core.Clock.Test" do
+    previous = Application.fetch_env(:core, :clock)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:core, :clock, value)
+        :error -> Application.delete_env(:core, :clock)
+      end
+    end)
+
+    Application.put_env(:core, :clock, Clock.System)
+
+    assert_raise ArgumentError, ~r/config :core, clock: Core\.Clock\.Test/, fn -> Clock.Test.start() end
+  end
+
+  test "start/0 в тестовой конфигурации — :ok и идемпотентен" do
+    assert :ok = Clock.Test.start()
+    assert :ok = Clock.Test.start()
+  end
+end
+
 defmodule Core.ClockGlobalTest do
   # Глобальный режим виден всем процессам VM: параллельный тест увидел бы это время.
   use ExUnit.Case, async: false
