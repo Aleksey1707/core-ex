@@ -18,8 +18,7 @@ defmodule Core.Es.Aggregate.Load.Plan do
           aggregate_id: binary(),
           after_version: non_neg_integer(),
           to_version: pos_integer() | nil,
-          snapshot_to: pos_integer() | nil,
-          snapshot?: boolean()
+          snapshot_to: pos_integer() | nil
         }
 
   @typedoc false
@@ -62,34 +61,10 @@ defmodule Core.Es.Aggregate.Load.Plan do
     streams =
       for %{aggregate_id: address, after_version: after_version} = stream <- streams,
           MapSet.member?(wanted, address),
-          do: %{stream | snapshot?: false, snapshot_to: after_version}
+          do: %{stream | snapshot_to: after_version}
 
     %{plan | streams: streams}
   end
-
-  @doc false
-  @spec snapshot(stream(), [{pos_integer(), binary()}]) :: {pos_integer(), binary()} | nil
-
-  def snapshot(%{snapshot?: false}, _candidates), do: nil
-
-  def snapshot(%{after_version: after_version, snapshot_to: snapshot_to}, candidates) do
-    matches =
-      for {version, _binary} = candidate <- candidates,
-          version > after_version,
-          is_nil(snapshot_to) or version <= snapshot_to,
-          do: candidate
-
-    case matches do
-      [] -> nil
-      matches -> Enum.max_by(matches, &elem(&1, 0))
-    end
-  end
-
-  @doc false
-  @spec tail_from(stream(), Snapshot.stored() | nil) :: non_neg_integer()
-
-  def tail_from(%{after_version: after_version}, nil), do: after_version
-  def tail_from(%{after_version: after_version}, {version, _binary}), do: max(after_version, version)
 
   # ---
 
@@ -100,8 +75,7 @@ defmodule Core.Es.Aggregate.Load.Plan do
       aggregate_id: cfg.codec.dump(spec.state.id),
       after_version: after_version,
       to_version: to_version(spec),
-      snapshot_to: if(snapshot?, do: snapshot_to(spec), else: after_version),
-      snapshot?: snapshot?
+      snapshot_to: if(snapshot?, do: snapshot_to(spec), else: after_version)
     }
   end
 

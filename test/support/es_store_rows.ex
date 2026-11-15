@@ -4,9 +4,10 @@ defmodule Core.Es.Store.Rows do
 
   `rows/1` строит строки в форме хранилища, `fetch/3` реализует
   `Core.Es.Aggregate.Load.Source`: выбирает строки и снапшот каждого потока по готовым границам
-  плана. Снапшоты тестовый источник не пишет (`writes_snapshots?/0` — `false`), поэтому чтение
-  головы на нём заявку не правит. Опции: `rows:` — строки, `snapshots:` — `{id, version, state}`,
-  `order: :reverse` — обратный порядок потоков.
+  плана теми же двумя сравнениями, что SQL (`> after_version`, `<= snapshot_to`), и опирается на
+  инвариант «одна строка снапшота на поток». Снапшоты тестовый источник не пишет
+  (`writes_snapshots?/0` — `false`), поэтому чтение головы на нём заявку не правит. Опции: `rows:` —
+  строки, `snapshots:` — `{id, version, state}`, `order: :reverse` — обратный порядок потоков.
   """
 
   @behaviour Core.Es.Aggregate.Load.Source
@@ -54,13 +55,8 @@ defmodule Core.Es.Store.Rows do
   defp by_id, do: Core.Config.codec().dump(Core.EsFixture.UserID.new())
 
   defp triple(cfg, stream, rows, snapshots) do
-    candidates =
-      for {id, version, state} <- snapshots,
-          cfg.codec.dump(id) == stream.aggregate_id,
-          do: {version, :erlang.term_to_binary(state)}
-
-    snapshot = Plan.snapshot(stream, candidates)
-    from_version = Plan.tail_from(stream, snapshot)
+    snapshot = snapshot(cfg, stream, snapshots)
+    from_version = tail_from(stream, snapshot)
 
     events =
       for row <- rows,
@@ -71,4 +67,18 @@ defmodule Core.Es.Store.Rows do
 
     {stream, snapshot, events}
   end
+
+  # В продакшене на поток одна строка снапшота (первичный ключ `es_snapshots`): источник повторяет
+  # два сравнения SQL и не выбирает «последний из многих».
+  defp snapshot(cfg, stream, snapshots) do
+    Enum.find_value(snapshots, fn {id, version, state} ->
+      if cfg.codec.dump(id) == stream.aggregate_id and
+           version > stream.after_version and
+           (is_nil(stream.snapshot_to) or version <= stream.snapshot_to),
+         do: {version, :erlang.term_to_binary(state)}
+    end)
+  end
+
+  defp tail_from(_stream, {version, _binary}), do: version
+  defp tail_from(stream, nil), do: stream.after_version
 end
