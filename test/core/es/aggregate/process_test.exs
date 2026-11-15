@@ -1030,6 +1030,29 @@ defmodule Core.Es.Aggregate.ProcessTest do
     end
   end
 
+  describe "компиляция" do
+    test "repo: — реализация behaviour без `use Core.Es.Aggregate.Repo.Pg` — CompileError" do
+      behaviour = Module.concat(__MODULE__, "ManualRepo")
+      impl = Module.concat(behaviour, Pg)
+
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(behaviour) do
+            use Core.Es.Aggregate.Repo, aggregate: Core.EsFixture.Account
+          end
+
+          defmodule unquote(impl) do
+          end
+        end
+      )
+
+      message =
+        ~r/^Es\.Aggregate\.Process: repo: модуль .*ManualRepo\.Pg должен быть собран `use Core\.Es\.Aggregate\.Repo\.Pg` \(behaviour: .*ManualRepo\)$/
+
+      assert_raise CompileError, message, fn -> compile_process!(behaviour) end
+    end
+  end
+
   describe "span" do
     setup do
       :ok = OtelFixture.attach()
@@ -1132,6 +1155,18 @@ defmodule Core.Es.Aggregate.ProcessTest do
   defp start_tree!(process, opts \\ []) do
     {:ok, _tree} = start_supervised({process, [enabled: true] ++ opts})
     :ok
+  end
+
+  defp compile_process!(repo) do
+    process = Module.concat(__MODULE__, "ManualProcess")
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(process) do
+          use Core.Es.Aggregate.Process, repo: unquote(repo)
+        end
+      end
+    )
   end
 
   # Колбэк команды: сообщает тесту процесс, в котором исполняется.

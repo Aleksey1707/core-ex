@@ -4,9 +4,10 @@ defmodule Core.Es.Store.Write.Plan do
 
   Обязательные поля `event_codec`, `outbox`, `mismatch` задают поток и отказ записи. Остальные —
   свойства builder'а: `continuous?` — непрерывность потока, `key_reservations` — объявления модулей
-  ключей, `taken` — ошибка занятого ключа. Резервы ключа и ошибка занятого ключа задаются вместе:
-  builder ставит оба поля или ни одного, поэтому опечатка в ключе — ошибка сборки, а не тихий
-  пропуск резервов.
+  ключей, `taken` — ошибка занятого ключа, `dao` — репозиторий записи событий (по умолчанию
+  `Core.Config.dao/0`, прочитанный в рантайме). Резервы ключа и ошибка занятого ключа задаются
+  вместе: builder ставит оба поля или ни одного, поэтому опечатка в ключе — ошибка сборки, а не
+  тихий пропуск резервов.
   """
 
   alias Core.Error
@@ -18,10 +19,11 @@ defmodule Core.Es.Store.Write.Plan do
           mismatch: (Es.Store.mismatch_detail() -> Error.t()),
           continuous?: boolean(),
           key_reservations: [Es.KeyReservation.declaration()],
-          taken: (atom(), map() -> Error.t()) | nil
+          taken: (atom(), map() -> Error.t()) | nil,
+          dao: module() | nil
         }
 
   @enforce_keys [:event_codec, :outbox, :mismatch]
 
-  defstruct @enforce_keys ++ [continuous?: false, key_reservations: [], taken: nil]
+  defstruct @enforce_keys ++ [continuous?: false, key_reservations: [], taken: nil, dao: nil]
 end

@@ -25,9 +25,10 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   `%Agg{}` уходит только аргументом `to_view:`; наружу — `%View{}`.
 
   Реализация write-репозитория резолвится `Core.Config.repo!/1` по конвенции
-  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию чтения структурой
+  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию репозитория структурой
   `Core.Es.Aggregate.Repo.Pg.Config` служебной `__es_read_cfg__/0`
-  (её ставит `use Core.Es.Aggregate.Repo.Pg`; наличие проверяется на компиляции).
+  (её ставит `use Core.Es.Aggregate.Repo.Pg`; наличие проверяет на компиляции
+  `Core.Es.Aggregate.Repo.Pg.ensure_impl!/3` — та же проверка у процесса агрегата).
   Telemetry — `[:es, :aggregate, :load]` и
   `[:es, :aggregate, :fold]` с `op: :get_at` / `:get_many_at`; span'а нет.
 
@@ -73,7 +74,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
         to_view: Core.Es.Aggregate.ReadRepo.Pg.to_view!(unquote(to_view), unquote(behaviour))
       }
 
-      Core.Es.Aggregate.ReadRepo.Pg.ensure_write_repo!(@es_read_repo.repo, unquote(repo))
+      Core.Es.Aggregate.Repo.Pg.ensure_impl!(@es_read_repo.repo, unquote(repo), unquote(@label))
 
       @doc "Представление агрегата на версии из свёрнутого до неё состояния."
       @impl true
@@ -126,21 +127,6 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
 
       defoverridable get_at: 3, get_at: 4, get_many_at: 2, get_many_at: 3
     end
-  end
-
-  @doc false
-  @spec ensure_write_repo!(module(), module()) :: module()
-
-  def ensure_write_repo!(repo, behaviour) do
-    unless Helper.Module.exports?(repo, :__es_read_cfg__, 0) do
-      Helper.Opts.reject!(
-        "#{@label}: repo",
-        "модуль #{inspect(repo)} должен быть собран `use Core.Es.Aggregate.Repo.Pg` " <>
-          "(behaviour: #{inspect(behaviour)})"
-      )
-    end
-
-    repo
   end
 
   @doc false

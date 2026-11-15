@@ -1,7 +1,7 @@
 defmodule Core.Es.Aggregate.Repo.Pg.Config do
   @moduledoc """
-  Конфигурация чтения event-sourced агрегата: единственная форма, которую получают движок чтения,
-  план, снапшоты и read-репозиторий.
+  Конфигурация репозитория event-sourced агрегата: единственная форма, которую получают движок
+  чтения, план, снапшоты, read-репозиторий и процесс агрегата — чтение и команда.
 
   `use Core.Es.Aggregate.Repo.Pg` собирает базовую структуру на компиляции; вызов конфигурации
   (`__es_read_cfg__/0` и внутренняя `es_aggregate_repo/0`) — `resolve/4`, который только подставляет
@@ -30,7 +30,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.Config do
   defstruct @enforce_keys ++ [dao: nil, codec: nil, source: nil]
 
   @typedoc """
-  Конфигурация чтения с резолвом зависимостей; `snapshot: nil` — снапшоты выключены.
+  Конфигурация репозитория с резолвом зависимостей; `snapshot: nil` — снапшоты выключены.
   """
   @type t :: %__MODULE__{
           behaviour: module(),

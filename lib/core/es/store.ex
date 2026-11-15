@@ -5,11 +5,12 @@ defmodule Core.Es.Store do
 
   Поток событий — тип агрегата (`type:` кодека событий) и `aggregate_id`. Глобальная позиция
   события — пара `(xid, number)` (`docs/adr/0008-shared-event-table-xid8-position.md`).
-  Репозиторий и фасад кодека — `Core.Config.dao/0` и `Core.Config.codec/0`.
+  Репозиторий записи — `dao:` вызова, по умолчанию `Core.Config.dao/0`; фасад кодека —
+  `Core.Config.codec/0`.
 
   ## Запись
 
-  `append/5` пишет пачку событий нескольких потоков одного типа агрегата в транзакции `DAO`
+  `append/5` пишет пачку событий нескольких потоков одного типа агрегата в транзакции `dao:`
   вызывающего: чанками по 500 событий, каждый чанк — один `insert_all` из `VALUES` с
   `on_conflict: :nothing` и сверкой числа строк. Пачка отвергается, если хоть одно событие не
   прошло проверку:
@@ -185,6 +186,11 @@ defmodule Core.Es.Store do
       type: :boolean,
       default: false,
       doc: "Непрерывность потока: первая версия потока в пачке — наибольшая версия потока + 1."
+    ],
+    dao: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`module()`",
+      doc: "Репозиторий записи событий; по умолчанию `Core.Config.dao/0` в рантайме вызова."
     ]
   ]
   @doc """
@@ -213,19 +219,20 @@ defmodule Core.Es.Store do
   def append(event_codec, [_ | _] = events, %Context{}, mismatch, opts)
       when is_atom(event_codec) and is_function(mismatch, 1) and is_list(opts) do
     continuous? = Keyword.fetch!(opts, :continuous?)
+    dao = Keyword.get(opts, :dao) || Config.dao()
     type = event_codec.__es_type__()
     rows = to_rows(events, event_codec)
     ensure_ordered!(rows, continuous?)
 
-    with {:ok, rows} <- seal_rows(rows), do: write(rows, type, continuous?, mismatch)
+    with {:ok, rows} <- seal_rows(rows), do: write(rows, type, continuous?, mismatch, dao)
   end
 
   # ---
 
-  defp write(rows, type, continuous?, mismatch) do
-    case write_chunks(Enum.chunk_every(rows, @chunk_size), type, continuous?) do
+  defp write(rows, type, continuous?, mismatch, dao) do
+    case write_chunks(Enum.chunk_every(rows, @chunk_size), type, continuous?, dao) do
       :ok -> AfterCommit.register(fn -> Es.Projection.Registry.wake(type) end)
-      {:refused, aggregate_id} -> {:error, mismatch.(mismatch_detail(type, aggregate_id, rows))}
+      {:refused, aggregate_id} -> {:error, mismatch.(mismatch_detail(type, aggregate_id, rows, dao))}
     end
   end
 
@@ -289,11 +296,11 @@ defmodule Core.Es.Store do
           "Es.Store: версии потока #{id} в пачке не по возрастанию: #{last} → #{version}"
   end
 
-  defp write_chunks([], _type, _continuous?), do: :ok
+  defp write_chunks([], _type, _continuous?, _dao), do: :ok
 
-  defp write_chunks([chunk | rest], type, continuous?) do
-    case write_chunk(chunk, type, continuous?) do
-      :ok -> write_chunks(rest, type, continuous?)
+  defp write_chunks([chunk | rest], type, continuous?, dao) do
+    case write_chunk(chunk, type, continuous?, dao) do
+      :ok -> write_chunks(rest, type, continuous?, dao)
       {:refused, _aggregate_id} = refused -> refused
     end
   end
@@ -301,11 +308,11 @@ defmodule Core.Es.Store do
   # Все проверки чанка — условия того же `INSERT … SELECT`: отказ не поднимает исключение
   # Postgres и не переводит транзакцию в aborted. `returning` нужен пути отказа — найти поток,
   # события которого не записаны.
-  defp write_chunk(chunk, type, continuous?) do
+  defp write_chunk(chunk, type, continuous?, dao) do
     rows = put_first_versions(chunk)
     expected = length(rows)
 
-    case Config.dao().insert_all(Schema, chunk_query(rows, type, continuous?),
+    case dao.insert_all(Schema, chunk_query(rows, type, continuous?),
            on_conflict: :nothing,
            returning: [:aggregate_id, :aggregate_version]
          ) do
@@ -378,21 +385,21 @@ defmodule Core.Es.Store do
     aggregate_id
   end
 
-  defp mismatch_detail(type, aggregate_id, rows) do
+  defp mismatch_detail(type, aggregate_id, rows, dao) do
     %{
       aggregate_id: aggregate_id,
       expected: Map.fetch!(first_versions(rows), aggregate_id),
-      actual: head_version(type, aggregate_id),
+      actual: head_version(type, aggregate_id, dao),
       source: :storage
     }
   end
 
-  defp head_version(type, aggregate_id) do
+  defp head_version(type, aggregate_id, dao) do
     from(e in Schema,
       where: e.aggregate_type == ^type and e.aggregate_id == ^aggregate_id,
       select: max(e.aggregate_version)
     )
-    |> Config.dao().one()
+    |> dao.one()
   end
 
   defp first_versions(rows),

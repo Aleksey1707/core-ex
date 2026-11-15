@@ -2,6 +2,7 @@
 # поднимает его supervisor, стартуют здесь.
 
 {:ok, _pid} = Core.TestRepo.start_link()
+{:ok, _second_pid} = Core.TestRepoSecond.start_link()
 
 :ok = Core.Clock.Test.start()
 
@@ -20,6 +21,7 @@ for [table] <- tables,
 end
 
 Ecto.Adapters.SQL.Sandbox.mode(Core.TestRepo, :manual)
+Ecto.Adapters.SQL.Sandbox.mode(Core.TestRepoSecond, :manual)
 
 # `lazy: true` — коннект откладывается до первого `Connection.connect/0`, поэтому
 # процесс поднимается и без живого брокера (тесты `:rabbit_stream` исключены по умолчанию).

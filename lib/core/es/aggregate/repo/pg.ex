@@ -134,10 +134,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   - `errors:` — каталог ошибок с clause `:version_mismatch`
   - `outbox:` — `<Aggregate>.Outbox` (`use Core.Es.Outbox`) либо `:none`: агрегат не публикует
     события наружу, записей outbox нет
-  - `repo:` — Ecto-репозиторий транзакции `append` и восстановления состояния (`get` /
-    `get_decision` / `get_many` / `refresh`); по умолчанию `Core.Config.dao/0` в рантайме. Сами
-    события `Core.Es.Store.append/5` пишет, а страницу потока `page_stream` читает через
-    `Core.Config.dao/0`
+  - `repo:` — Ecto-репозиторий транзакции команды (`append`, повтор и guard «вне транзакции») и
+    восстановления состояния (`get` / `get_decision` / `get_many` / `refresh`); по умолчанию
+    `Core.Config.dao/0` в рантайме. События `Core.Es.Store.append/5` пишет на этом же `repo:`, а
+    страницу потока `page_stream` читает через `Core.Config.dao/0`
   - `codec:` — фасад дампа id и вложенных значений событий при восстановлении состояния; по умолчанию
     `Core.Config.codec/0` в рантайме. Страница потока грузится через `Core.Config.codec/0`
   - `snapshot:` — `[every: N, version: V]`, без опции снапшоты выключены: `every:` — сколько
@@ -156,7 +156,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0`
   и служебную `__es_read_cfg__/0` — `%Core.Es.Aggregate.Repo.Pg.Config{}` для
-  `Core.Es.Aggregate.ReadRepo.Pg`.
+  `Core.Es.Aggregate.ReadRepo.Pg` и процесса агрегата: конфигурация репозитория — чтение и
+  команда.
   """
 
   @behaviour Core.Es.Aggregate.Load.Source
@@ -303,6 +304,25 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       @doc false
       def __es_read_cfg__, do: es_aggregate_repo()
     end
+  end
+
+  # ---
+
+  # Одна проверка «реализация собрана `use Core.Es.Aggregate.Repo.Pg`» на два билдера: read-репозиторий
+  # и процесс агрегата. Без `__es_read_cfg__/0` у реализации неоткуда взять `dao` и `codec` команды.
+  @doc false
+  @spec ensure_impl!(module(), module(), String.t()) :: module()
+
+  def ensure_impl!(repo, behaviour, label) do
+    unless Helper.Module.exports?(repo, :__es_read_cfg__, 0) do
+      Helper.Opts.reject!(
+        "#{label}: repo",
+        "модуль #{inspect(repo)} должен быть собран `use Core.Es.Aggregate.Repo.Pg` " <>
+          "(behaviour: #{inspect(behaviour)})"
+      )
+    end
+
+    repo
   end
 
   # ---
@@ -521,7 +541,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       mismatch: &version_mismatch(cfg, &1),
       continuous?: true,
       key_reservations: cfg.key_reservations,
-      taken: &cfg.errors.domain(cfg.behaviour, &1, &2)
+      taken: &cfg.errors.domain(cfg.behaviour, &1, &2),
+      dao: cfg.dao
     }
   end
 

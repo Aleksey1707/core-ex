@@ -1,8 +1,9 @@
 defmodule Core.Es.Aggregate.Process.Execution do
   @moduledoc """
   Исполнение команды процесса агрегата: транзакция «состояние → `Agg.execute/2` → `append` →
-  колбэк» и повтор после отказа записи. Транзакцию с повтором держит `Core.Es.Transact`, здесь —
-  тело попытки и дедлайн команды: он проверяется на обеих границах попытки — до чтения, чтобы
+  колбэк» и повтор после отказа записи. Транзакцию с повтором держит `Core.Es.Transact` на `dao`
+  конфигурации реализации репозитория (ADR-0095), здесь — тело попытки и дедлайн команды: он
+  проверяется на обеих границах попытки — до чтения, чтобы
   попытка после дедлайна не шла, и перед commit, чтобы записи после дедлайна не было. Одно на оба
   режима `Core.Es.Aggregate.Process`: в вызывающем процессе (`enabled: false`) решение всегда идёт
   через `get_decision`, в процессе на id (`Core.Es.Aggregate.Process.Server`) закэшированный
@@ -14,8 +15,16 @@ defmodule Core.Es.Aggregate.Process.Execution do
   alias Core.Result
   alias Core.Version
 
-  @typedoc "Адрес агрегата в span, предел повторов и дедлайн команды — мс монотонного времени."
-  @type target :: %{aggregate_id: String.t(), limit: pos_integer(), deadline: integer() | nil}
+  @typedoc """
+  Адрес агрегата в span, `dao` транзакции и проверки «вне транзакции», предел повторов и дедлайн
+  команды — мс монотонного времени.
+  """
+  @type target :: %{
+          aggregate_id: String.t(),
+          dao: module(),
+          limit: pos_integer(),
+          deadline: integer() | nil
+        }
 
   @typedoc """
   Исход команды: состояние агрегата после commit, её ошибка или `:expired` — дедлайн истёк до
@@ -45,7 +54,10 @@ defmodule Core.Es.Aggregate.Process.Execution do
 
   def run(cfg, call, target, cached) when is_struct(cached) or is_nil(cached) do
     {result, retries} =
-      Es.Transact.run_counted(fn -> attempt(cfg, call, target, cached) end, retries: target.limit)
+      Es.Transact.run_counted(fn -> attempt(cfg, call, target, cached) end,
+        retries: target.limit,
+        dao: target.dao
+      )
 
     {outcome(result), retries}
   end

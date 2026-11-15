@@ -41,7 +41,7 @@ defmodule Core.Es.Store.Write do
     events = Es.Operation.stamp(events, context)
 
     with {:ok, records} <- outbox.from_events(events),
-         :ok <- Es.Store.append(event_codec, events, context, mismatch, continuous?: plan.continuous?),
+         :ok <- Es.Store.append(event_codec, events, context, mismatch, write_opts(plan)),
          :ok <- reserve(plan, events, context),
          {:ok, records} <- Es.Personal.Wire.seal_records(records) do
       Config.outbox_repo().append(records, context, opts)
@@ -49,6 +49,11 @@ defmodule Core.Es.Store.Write do
   end
 
   # ---
+
+  # `dao` — из builder'а записи (у event-sourced репозитория — `repo:`), иначе общий репозиторий
+  # приложения. С `opts` вызова не смешивается: те уходят в запись outbox.
+  defp write_opts(%Plan{continuous?: continuous?, dao: dao}),
+    do: [continuous?: continuous?, dao: dao || Config.dao()]
 
   defp reserve(%Plan{key_reservations: []}, _events, _context), do: :ok
 

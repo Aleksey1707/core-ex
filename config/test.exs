@@ -11,6 +11,18 @@ config :core,
 
 config :core, ecto_repos: [Core.TestRepo]
 
+# Второй репозиторий — только для тестов: та же база, другое соединение.
+config :core, Core.TestRepoSecond,
+  priv: "priv/repo",
+  username: "core",
+  password: "core",
+  hostname: "localhost",
+  port: String.to_integer(System.get_env("POSTGRES_PORT", "5433")),
+  database: "core_test#{System.get_env("MIX_TEST_PARTITION")}",
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: 2,
+  queue_target: 5_000
+
 config :core, Core.TestRepo,
   # Не `priv/test_repo`: миграции здесь — ещё и исполняемая спецификация таблиц
   # Core для приложений-потребителей, путь должен читаться.

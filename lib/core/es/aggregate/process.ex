@@ -23,11 +23,12 @@ defmodule Core.Es.Aggregate.Process do
   ## Команда
 
   `execute(id, version, command, context, fun, opts)` → `{:ok, Version.t() | nil} |
-  {:error, Error.t()}`; `fun` и `opts` необязательны. Одна транзакция `Core.Es.Transact` на
-  `Core.Config.dao/0`: состояние агрегата → `Agg.execute/2` → `append(events, context)` →
-  `fun.(events)`. Решение идёт через `get_decision(id, version, context, &Agg.execute(&1,
-  command))` репозитория; процесс на id дочитывает закэшированный заведённый агрегат
-  `refresh(state, version, context)`, а незаведённый — снова через `get_decision`. Колбэк —
+  {:error, Error.t()}`; `fun` и `opts` необязательны. Одна транзакция `Core.Es.Transact` на `dao`
+  конфигурации реализации репозитория (`repo:` → `__es_read_cfg__/0`; ADR-0095): состояние
+  агрегата → `Agg.execute/2` → `append(events, context)` → `fun.(events)`. Решение идёт через
+  `get_decision(id, version, context, &Agg.execute(&1, command))` репозитория; процесс на id
+  дочитывает закэшированный заведённый агрегат `refresh(state, version, context)`, а незаведённый
+  — снова через `get_decision`. Колбэк —
   сопутствующие записи (Oban, `DAO`) под ограничениями `Transact.run`, возвращает
   `:ok | {:error, _}`. Ошибка `decide`, `append` или колбэка откатывает транзакцию: отказ
   хранилища повторяется, остальное уходит вызывающему. Команда одна: цепочку команд исполняет
@@ -54,8 +55,8 @@ defmodule Core.Es.Aggregate.Process do
   - `%Version{}` на пустом потоке (ADR-0016) — ошибка `decide`, если он команду отклоняет, и
     `:version_mismatch` с `actual: nil`, если принимает, в том числе без событий: без `append`,
     колбэка и повтора.
-  - Вызов внутри транзакции — `ArgumentError`: команда идёт своей транзакцией, и откат попытки
-    отменил бы внешнюю.
+  - Вызов внутри транзакции `dao` репозитория — `ArgumentError`: команда идёт своей транзакцией,
+    и откат попытки отменил бы внешнюю.
   - Нет отметки старта — `RuntimeError`: `{Agg.Process, opts}` не стоит в дереве супервизии.
   - Неизвестная опция `opts` или недопустимое значение — `ArgumentError`.
 
@@ -123,10 +124,12 @@ defmodule Core.Es.Aggregate.Process do
 
   ## Opts
 
-  - `repo:` — behaviour write-репозитория агрегата (`use Core.Es.Aggregate.Repo`)
+  - `repo:` — behaviour write-репозитория агрегата (`use Core.Es.Aggregate.Repo`); `dao` и
+    `codec` команды — из конфигурации его реализации (`__es_read_cfg__/0`)
 
   На компиляции `CompileError`, если `repo:` — не behaviour `use Core.Es.Aggregate.Repo`, у
-  кодека событий агрегата нет `type:` или реализация репозитория недоступна.
+  кодека событий агрегата нет `type:`, реализация репозитория недоступна или не собрана
+  `use Core.Es.Aggregate.Repo.Pg`.
 
   Макрос занимает в вызывающем модуле имя `@es_aggregate_process`, а на ноде — имена процессов
   `<Agg.Process>.Registry` и `<Agg.Process>.Supervisor`.
@@ -136,7 +139,6 @@ defmodule Core.Es.Aggregate.Process do
 
   use Core.Options
 
-  alias Core.Config
   alias Core.Context
   alias Core.Error
   alias Core.Es
@@ -235,6 +237,12 @@ defmodule Core.Es.Aggregate.Process do
         supervisor: unquote(child_name(process, "Supervisor"))
       }
 
+      Core.Es.Aggregate.Repo.Pg.ensure_impl!(
+        @es_aggregate_process.repo,
+        unquote(behaviour),
+        unquote(@label)
+      )
+
       @doc """
       Исполнить команду агрегата одной транзакцией: состояние → `execute/2` → `append` →
       `fun.(events)`; отказ хранилища повторяется. Успех — версия после commit.
@@ -311,13 +319,15 @@ defmodule Core.Es.Aggregate.Process do
 
   def execute(process, cfg, call, opts) when is_atom(process) and is_list(opts) do
     timeout = Keyword.fetch!(opts, :timeout)
-    ensure_outside_transaction!(Config.dao().in_transaction?(), process)
+    %{dao: dao, codec: codec} = cfg.repo.__es_read_cfg__()
+    ensure_outside_transaction!(dao.in_transaction?(), process)
     options = started!(mark(process), process)
     mode = mode(options)
 
     target = %{
-      aggregate_id: Config.codec().dump(call.id),
+      aggregate_id: codec.dump(call.id),
       limit: options.retries,
+      dao: dao,
       deadline: deadline(mode, timeout)
     }
 

@@ -74,6 +74,11 @@ defmodule Core.EsFixture.Account.RacyRepo.Pg do
   @impl true
   defdelegate page_stream(id, limit, offset, context), to: Account.Repo.Pg
 
+  @doc false
+  @spec __es_read_cfg__() :: Core.Es.Aggregate.Repo.Pg.Config.t()
+
+  defdelegate __es_read_cfg__(), to: Account.Repo.Pg
+
   @doc "Записать события; перед поставленной гонкой — конкурирующее событие."
   @spec append([Es.Event.t()], Context.t(), keyword()) :: Result.unit()
 
