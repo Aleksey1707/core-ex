@@ -6,10 +6,10 @@
 
 **Blocked by:** 06.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `CompletenessCase` использует обход объявлений из `Walk`; свой `walk`/`visit`/`descend` удалён.
-- [ ] Сбор семейств вариантов и проверка расхождений «plugin × объявление» сохранены.
-- [ ] Добавлена фикстура с `hidden`, `text:`, `union`, `set`/`map` и `change`; скрытое и `text:` трактуются одинаково во всех трёх выходах.
-- [ ] Тесты ратчета зелёные; `make` зелёный.
-- [ ] JSON и `Core.Web` в `Core.Labels` не попали; CHANGELOG не пополняется.
+- [x] `CompletenessCase` использует обход объявлений из `Walk`; свой `walk`/`visit`/`descend` удалён.
+- [x] Сбор семейств вариантов и проверка расхождений «plugin × объявление» сохранены.
+- [x] Добавлена фикстура с `hidden`, `text:`, `union`, `set`/`map` и `change`; скрытое и `text:` трактуются одинаково во всех трёх выходах.
+- [x] Тесты ратчета зелёные; `make` зелёный.
+- [x] JSON и `Core.Web` в `Core.Labels` не попали; CHANGELOG не пополняется.
