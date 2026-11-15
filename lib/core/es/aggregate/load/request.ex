@@ -7,35 +7,40 @@ defmodule Core.Es.Aggregate.Load.Request do
   alias Core.Result
   alias Core.Version
 
-  @enforce_keys ~w(op opts)a
+  @enforce_keys ~w(op opts streams)a
 
   defstruct op: nil,
             opts: [],
             source: nil,
-            write_snapshots?: false,
-            states: nil,
-            state: nil,
-            pairs: nil,
+            streams: [],
             version: nil,
+            pairs: nil,
             born?: false,
-            many?: false,
             decide: nil
+
+  @typedoc false
+  @type op :: :get | :get_decision | :get_many | :refresh | :get_at | :get_many_at
 
   @typedoc false
   @type source :: module()
 
   @typedoc false
+  @type stream :: %{
+          state: struct(),
+          version: Version.expected() | nil,
+          upper: pos_integer() | nil,
+          captures: [pos_integer()]
+        }
+
+  @typedoc false
   @type t(decision, reason) :: %__MODULE__{
-          op: atom(),
+          op: op(),
           opts: keyword(),
           source: source(),
-          write_snapshots?: boolean(),
-          states: [%{state: struct(), version: Version.expected()}] | nil,
-          state: struct() | nil,
-          pairs: [{struct(), Version.t()}] | nil,
+          streams: [stream()],
           version: Version.t() | nil,
+          pairs: [{struct(), pos_integer()}] | nil,
           born?: boolean(),
-          many?: boolean(),
           decide: (struct() -> Result.t(decision, reason)) | nil
         }
 
@@ -50,8 +55,7 @@ defmodule Core.Es.Aggregate.Load.Request do
       op: :get,
       opts: opts,
       source: source || cfg.source,
-      write_snapshots?: true,
-      states: [%{state: struct(cfg.aggregate, id: id), version: version}]
+      streams: [head(struct(cfg.aggregate, id: id), version)]
     }
   end
 
@@ -71,8 +75,7 @@ defmodule Core.Es.Aggregate.Load.Request do
       op: :get_decision,
       opts: opts,
       source: source || cfg.source,
-      write_snapshots?: true,
-      states: [%{state: struct(cfg.aggregate, id: id), version: version}],
+      streams: [head(struct(cfg.aggregate, id: id), version)],
       born?: true,
       decide: fun
     }
@@ -86,9 +89,7 @@ defmodule Core.Es.Aggregate.Load.Request do
       op: :get_many,
       opts: opts,
       source: source || cfg.source,
-      write_snapshots?: true,
-      states: initial_states!(cfg, pairs),
-      many?: true
+      streams: for(%{state: state, version: version} <- initial_states!(cfg, pairs), do: head(state, version))
     }
   end
 
@@ -100,8 +101,7 @@ defmodule Core.Es.Aggregate.Load.Request do
       op: :refresh,
       opts: opts,
       source: source || cfg.source,
-      write_snapshots?: true,
-      states: [%{state: state, version: version}]
+      streams: [head(state, version)]
     }
   end
 
@@ -113,7 +113,7 @@ defmodule Core.Es.Aggregate.Load.Request do
       op: :get_at,
       opts: opts,
       source: source || cfg.source,
-      state: struct(cfg.aggregate, id: id),
+      streams: [at(struct(cfg.aggregate, id: id), version)],
       version: version
     }
   end
@@ -122,10 +122,47 @@ defmodule Core.Es.Aggregate.Load.Request do
   @spec get_many_at(Config.t(), [{struct(), Version.t()}], keyword(), source() | nil) :: t(term(), term())
 
   def get_many_at(cfg, pairs, opts, source \\ nil) do
-    %__MODULE__{op: :get_many_at, opts: opts, source: source || cfg.source, pairs: pairs}
+    parsed = parse_pairs!(cfg, pairs)
+
+    %__MODULE__{
+      op: :get_many_at,
+      opts: opts,
+      source: source || cfg.source,
+      streams: many_at(cfg, parsed),
+      pairs: parsed
+    }
   end
 
   # ---
+
+  defp head(state, version), do: %{state: state, version: version, upper: nil, captures: []}
+
+  defp at(state, %Version{} = version),
+    do: %{state: state, version: version, upper: Version.value(version), captures: []}
+
+  defp parse_pairs!(%Config{id: id_mod}, pairs) do
+    Enum.map(pairs, fn
+      {%^id_mod{} = id, %Version{} = version} -> {id, Version.value(version)}
+    end)
+  end
+
+  defp many_at(%Config{} = cfg, parsed) do
+    parsed
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.uniq()
+    |> Enum.map(fn id ->
+      captures =
+        parsed
+        |> Enum.flat_map(fn
+          {^id, version} -> [version]
+          {_other, _version} -> []
+        end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      %{state: struct(cfg.aggregate, id: id), version: nil, upper: nil, captures: captures}
+    end)
+  end
 
   defp initial_states!(%Config{aggregate: aggregate, id: id_mod}, pairs) do
     states =

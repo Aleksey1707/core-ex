@@ -333,18 +333,15 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 3}, %{snapshot: :rejected}}
     end
 
-    test "признак «не писать снапшоты» — ни upsert, ни телеметрии" do
+    test "чтение на версии не пишет снапшот" do
       id = Account.ID.new()
       state = append!(%Account{id: id}, [open(), freeze()])
       attach_telemetry()
 
-      assert {:ok, [^state]} = load_at(id, nil, [], false)
+      assert {:ok, [^state]} = load_at(id, 2)
+
       assert snapshot(id) == nil
       refute_received {:telemetry, [:core, :es, :snapshot, :write], _measurements, _metadata}
-
-      assert {:ok, [^state]} = load_at(id, nil, [], true)
-      assert %Snapshot.Schema{aggregate_version: 2} = snapshot(id)
-      assert_received {:telemetry, [:core, :es, :snapshot, :write], %{rows: 1}, %{result: :ok}}
     end
 
     test "captures — потолок наибольшая, снапшот не выше наименьшей" do
@@ -413,29 +410,23 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
-  defp load_at(id, upper, captures \\ [], write? \\ true)
+  defp load_at(id, upper, captures \\ [])
 
-  defp load_at(id, nil, [], write?), do: load_head(id, write?)
-  defp load_at(id, upper, [], write?) when is_integer(upper), do: load_version(id, upper, write?)
-  defp load_at(id, nil, captures, write?), do: load_versions(id, captures, write?)
+  defp load_at(id, upper, []) when is_integer(upper), do: load_version(id, upper)
+  defp load_at(id, nil, captures), do: load_versions(id, captures)
 
-  defp load_head(id, write?) do
-    request = Request.get(LoadRepo.cfg(), id, :current, [], LoadRepo.cfg().source)
-    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), %{request | write_snapshots?: write?})
-  end
-
-  defp load_version(id, upper, write?) do
+  defp load_version(id, upper) do
     request = Request.get_at(LoadRepo.cfg(), id, Core.Version.new!(upper), [], LoadRepo.cfg().source)
 
-    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), %{request | write_snapshots?: write?}),
+    with {:ok, state} <- Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request),
          do: {:ok, [state]}
   end
 
-  defp load_versions(id, captures, write?) do
+  defp load_versions(id, captures) do
     pairs = Enum.map(captures, &{id, Core.Version.new!(&1)})
     request = Request.get_many_at(LoadRepo.cfg(), pairs, [], LoadRepo.cfg().source)
 
-    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), %{request | write_snapshots?: write?})
+    Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request)
   end
 
   defp append!(state, commands) do

@@ -353,19 +353,19 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
 
   defp load_at(id, upper, captures \\ [])
 
-  defp load_at(id, nil, []), do: load_head(id, true)
+  defp load_at(id, nil, []), do: load_head(id)
   defp load_at(id, upper, []) when is_integer(upper), do: load_version(id, upper)
   defp load_at(id, nil, captures), do: load_versions(id, captures)
 
-  defp load_head(id, write?) do
+  defp load_head(id) do
     request = Request.get(LoadRepo.cfg(), id, :current, [], LoadRepo.cfg().source)
-    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), %{request | write_snapshots?: write?})
+    Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request)
   end
 
   defp load_version(id, upper) do
     request = Request.get_at(LoadRepo.cfg(), id, Core.Version.new!(upper), [], LoadRepo.cfg().source)
 
-    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), request),
+    with {:ok, state} <- Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request),
          do: {:ok, [state]}
   end
 
@@ -373,7 +373,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     pairs = Enum.map(captures, &{id, Core.Version.new!(&1)})
     request = Request.get_many_at(LoadRepo.cfg(), pairs, [], LoadRepo.cfg().source)
 
-    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), %{request | write_snapshots?: true})
+    Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request)
   end
 
   def handle_telemetry(event, measurements, metadata, test) do

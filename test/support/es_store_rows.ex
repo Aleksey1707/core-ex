@@ -4,8 +4,9 @@ defmodule Core.Es.Store.Rows do
 
   `rows/1` строит строки в форме хранилища, `fetch/3` реализует
   `Core.Es.Aggregate.Load.Source`: выбирает строки и снапшот каждого потока по готовым границам
-  плана. Опции: `rows:` — строки, `snapshots:` — `{id, version, state}`, `order: :reverse` —
-  обратный порядок потоков.
+  плана. Снапшоты тестовый источник не пишет (`writes_snapshots?/0` — `false`), поэтому чтение
+  головы на нём заявку не правит. Опции: `rows:` — строки, `snapshots:` — `{id, version, state}`,
+  `order: :reverse` — обратный порядок потоков.
   """
 
   @behaviour Core.Es.Aggregate.Load.Source
@@ -31,6 +32,11 @@ defmodule Core.Es.Store.Rows do
       }
     end
   end
+
+  @spec writes_snapshots?() :: boolean()
+
+  @impl true
+  def writes_snapshots?, do: false
 
   @spec fetch(Config.t(), Plan.t(), keyword()) :: [Core.Es.Aggregate.Load.Source.entry()]
 

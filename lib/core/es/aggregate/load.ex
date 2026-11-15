@@ -42,86 +42,17 @@ defmodule Core.Es.Aggregate.Load do
   @typedoc false
   @type request :: request(term(), term())
 
-  @typep spec :: %{
-           state: struct(),
-           version: Version.expected() | nil,
-           upper: pos_integer() | nil,
-           captures: [pos_integer()]
-         }
-
-  @typep address :: %{
-           required(:kind) => :head | :at | :many_at,
-           required(:streams) => [spec()],
-           optional(:version) => Version.t(),
-           optional(:pairs) => [{struct(), pos_integer()}]
-         }
-
-  # ===== чтение =====
-
   @doc false
-  @spec head(Config.t(), request(decision, reason)) :: Result.t([struct()] | decision, reason | Error.t())
+  @spec run(Config.t(), request(decision, reason)) ::
+          Result.t([struct()] | struct() | decision, reason | Error.t())
         when decision: var, reason: var
 
-  def head(cfg, %Request{states: states} = request) do
-    streams = Enum.map(states, &%{state: &1.state, version: &1.version, upper: nil, captures: []})
-
-    run(cfg, request, %{kind: :head, streams: streams})
-  end
-
-  # ===== версия =====
-
-  @doc false
-  @spec at(Config.t(), request()) :: Result.t(struct())
-
-  def at(cfg, %Request{state: state, version: %Version{} = version} = request) do
-    streams = [%{state: state, version: version, upper: Version.value(version), captures: []}]
-
-    run(cfg, request, %{kind: :at, streams: streams, version: version})
-  end
-
-  @doc false
-  @spec many_at(Config.t(), request()) :: Result.t([struct()])
-
-  def many_at(cfg, %Request{pairs: pairs} = request) do
-    id_mod = cfg.id
-
-    parsed =
-      Enum.map(pairs, fn
-        {%^id_mod{} = id, %Version{} = version} -> {id, Version.value(version)}
-      end)
-
-    ids =
-      parsed
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.uniq()
-
-    streams =
-      Enum.map(ids, fn id ->
-        captures =
-          parsed
-          |> Enum.flat_map(fn
-            {^id, version} -> [version]
-            {_other, _version} -> []
-          end)
-          |> Enum.uniq()
-          |> Enum.sort()
-
-        %{state: struct(cfg.aggregate, id: id), version: nil, upper: nil, captures: captures}
-      end)
-
-    run(cfg, request, %{kind: :many_at, streams: streams, pairs: parsed})
-  end
-
-  # ===== общее =====
-
-  @spec run(Config.t(), request(), address()) :: Result.t()
-
-  defp run(cfg, %{op: op} = request, %{streams: specs} = address) do
+  def run(cfg, %Request{op: op, streams: specs} = request) do
     start = System.monotonic_time()
-    plan = Plan.new(cfg, request.write_snapshots?, specs)
+    plan = Plan.new(cfg, writes_snapshots?(request), specs)
 
     with {:ok, restored} <- restore(cfg, plan, request, specs) do
-      result = verify(cfg, request, address, restored)
+      result = verify(cfg, request, restored)
 
       :telemetry.execute(
         Telemetry.event([:es, :aggregate, :load]),
@@ -130,9 +61,15 @@ defmodule Core.Es.Aggregate.Load do
       )
 
       write_snapshots(cfg, plan, restored)
-      decide(cfg, request, address, result)
+      decide(cfg, request, result)
     end
   end
+
+  # ---
+
+  # Политика записи снапшота — свойство операции и возможность источника строк.
+  defp writes_snapshots?(%Request{op: op, source: source}),
+    do: op in [:get, :get_decision, :get_many, :refresh] and source.writes_snapshots?()
 
   defp restore(_cfg, _plan, _request, []), do: {:ok, []}
 
@@ -147,12 +84,12 @@ defmodule Core.Es.Aggregate.Load do
     end
   end
 
-  # Сверка идёт по мете потока: ожидаемая версия — `request.states`/адрес, фактическая — голова.
-  defp verify(cfg, request, %{kind: :head}, restored), do: verify_head(cfg, request, restored)
-  defp verify(cfg, _request, %{kind: :at, version: version}, [restored]), do: verify_at(cfg, restored, version)
+  # Сверка идёт по мете потока: ожидаемая версия — `request.streams`/адрес, фактическая — голова.
+  defp verify(cfg, %{op: :get_at, version: version}, [restored]), do: verify_at(cfg, restored, version)
 
-  defp verify(cfg, _request, %{kind: :many_at, pairs: pairs}, restored),
-    do: verify_many_at(cfg, restored, pairs)
+  defp verify(cfg, %{op: :get_many_at, pairs: pairs}, restored), do: verify_many_at(cfg, restored, pairs)
+
+  defp verify(cfg, request, restored), do: verify_head(cfg, request, restored)
 
   defp verify_head(cfg, request, restored) do
     born? = request.born?
@@ -164,7 +101,7 @@ defmodule Core.Es.Aggregate.Load do
     end
   end
 
-  defp head_details(%{many?: true}, details), do: details
+  defp head_details(%{op: :get_many}, details), do: details
   defp head_details(_request, [detail]), do: detail
   defp head_details(_request, details), do: details
 
@@ -206,7 +143,7 @@ defmodule Core.Es.Aggregate.Load do
 
   # Пустой поток при `%Version{}` — не гонка: отказ или принятие решает `fun` на незаведённом
   # агрегате, поэтому одиночное чтение головы спрашивает решение после сверки (ADR-0016).
-  defp decide(cfg, %{decide: fun}, %{kind: :head, streams: [%{version: %Version{} = version}]}, {:ok, [state]})
+  defp decide(cfg, %{decide: fun, streams: [%{version: %Version{} = version}]}, {:ok, [state]})
        when is_function(fun, 1) and is_nil(state.version) do
     case fun.(state) do
       {:ok, _decision} -> {:error, version_mismatch(cfg, detail(cfg, state, Version.value(version), :expected))}
@@ -214,9 +151,9 @@ defmodule Core.Es.Aggregate.Load do
     end
   end
 
-  defp decide(_cfg, %{decide: fun}, _address, {:ok, [state]}) when is_function(fun, 1), do: fun.(state)
+  defp decide(_cfg, %{decide: fun}, {:ok, [state]}) when is_function(fun, 1), do: fun.(state)
 
-  defp decide(_cfg, _request, _address, result), do: result
+  defp decide(_cfg, _request, result), do: result
 
   defp detail(cfg, state, expected, source) do
     %{

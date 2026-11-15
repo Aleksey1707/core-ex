@@ -359,7 +359,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t(struct())
 
   def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts) do
-    with {:ok, [state]} <- Load.head(cfg, Request.get(cfg, id, version, opts)), do: {:ok, state}
+    with {:ok, [state]} <- Load.run(cfg, Request.get(cfg, id, version, opts)), do: {:ok, state}
   end
 
   @doc false
@@ -375,7 +375,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def get_decision(cfg, id, version, %Context{}, fun, opts)
       when is_version(version) and is_function(fun, 1) and is_list(opts) do
-    Load.head(cfg, Request.get_decision(cfg, id, version, fun, opts))
+    Load.run(cfg, Request.get_decision(cfg, id, version, fun, opts))
   end
 
   @doc false
@@ -383,7 +383,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t([struct()])
 
   def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts) do
-    Load.head(cfg, Request.get_many(cfg, pairs, opts))
+    Load.run(cfg, Request.get_many(cfg, pairs, opts))
   end
 
   @doc false
@@ -391,10 +391,16 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t(struct())
 
   def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts) do
-    with {:ok, [state]} <- Load.head(cfg, Request.refresh(cfg, state, version, opts)), do: {:ok, state}
+    with {:ok, [state]} <- Load.run(cfg, Request.refresh(cfg, state, version, opts)), do: {:ok, state}
   end
 
   # ===== источник строк =====
+
+  @doc false
+  @spec writes_snapshots?() :: boolean()
+
+  @impl true
+  def writes_snapshots?, do: true
 
   @doc false
   @spec fetch(Config.t(), Load.Plan.t(), keyword()) :: [Load.triple()]

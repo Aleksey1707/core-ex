@@ -29,7 +29,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, %Account{version: version, name: name, status: :open}} =
-               Load.at(no_snapshot_cfg(), at_request(id, Version.new!(2), rows(events)))
+               Load.run(no_snapshot_cfg(), at_request(id, Version.new!(2), rows(events)))
 
       assert version == Version.new!(2)
       assert name == Account.Name.new!("Второе")
@@ -43,7 +43,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       unknown = unknown_row(id, 2)
 
       assert {:ok, %Account{version: version}} =
-               Load.at(no_snapshot_cfg(), at_request(id, Version.new!(1), rows([opened]) ++ [unknown]))
+               Load.run(no_snapshot_cfg(), at_request(id, Version.new!(1), rows([opened]) ++ [unknown]))
 
       assert version == Version.new!(1)
     end
@@ -58,7 +58,7 @@ defmodule Core.Es.Aggregate.LoadTest do
               [
                 %Account{version: second, status: :open},
                 %Account{version: third, status: :frozen}
-              ]} = Load.many_at(no_snapshot_cfg(), many_request(pairs, rows(events) ++ [unknown_row(id, 4)]))
+              ]} = Load.run(no_snapshot_cfg(), many_request(pairs, rows(events) ++ [unknown_row(id, 4)]))
 
       assert second == Version.new!(2)
       assert third == Version.new!(3)
@@ -70,7 +70,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       id = Account.ID.new()
 
       assert_raise FunctionClauseError, fn ->
-        Load.many_at(no_snapshot_cfg(), many_request([{id, :current}], []))
+        Load.run(no_snapshot_cfg(), many_request([{id, :current}], []))
       end
     end
   end
@@ -83,7 +83,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, %Account{version: version, name: name, status: :frozen}} =
-               Load.at(cfg(), at_request(id, Version.new!(3), rows(events), snapshots))
+               Load.run(cfg(), at_request(id, Version.new!(3), rows(events), snapshots))
 
       assert version == Version.new!(3)
       assert name == Account.Name.new!("Второе")
@@ -102,7 +102,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, %Account{version: version, name: name, status: :open}} =
-               Load.at(cfg(), at_request(id, Version.new!(2), rows(events), snapshots))
+               Load.run(cfg(), at_request(id, Version.new!(2), rows(events), snapshots))
 
       assert version == Version.new!(2)
       assert name == Account.Name.new!("Второе")
@@ -118,7 +118,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, [%Account{version: second}, %Account{version: third}]} =
-               Load.many_at(cfg(), many_request(pairs, rows(events), snapshots))
+               Load.run(cfg(), many_request(pairs, rows(events), snapshots))
 
       assert second == Version.new!(2)
       assert third == Version.new!(3)
@@ -134,7 +134,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, [%Account{version: third, status: :frozen}, %Account{version: fourth, status: :closed}]} =
-               Load.many_at(cfg(), many_request(pairs, rows(events), snapshots))
+               Load.run(cfg(), many_request(pairs, rows(events), snapshots))
 
       assert third == Version.new!(3)
       assert fourth == Version.new!(4)
@@ -148,7 +148,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, %Account{version: version, name: name, status: :frozen}} =
-               Load.at(cfg(), at_request(id, Version.new!(3), rows(events), [{id, 2, :corrupt}]))
+               Load.run(cfg(), at_request(id, Version.new!(3), rows(events), [{id, 2, :corrupt}]))
 
       assert version == Version.new!(3)
       assert name == Account.Name.new!("Второе")
@@ -168,7 +168,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       :erlang.trace_pattern(marker, true, [])
       on_exit(fn -> :erlang.trace_pattern(marker, false, []) end)
 
-      assert {:ok, _state} = Load.head(cfg(), head_request(id, rows(events)))
+      assert {:ok, _state} = Load.run(cfg(), head_request(id, rows(events)))
 
       :erlang.trace(self(), false, [:call])
       :erlang.trace_pattern(marker, false, [])
@@ -190,10 +190,9 @@ defmodule Core.Es.Aggregate.LoadTest do
       pairs = [{first, Version.new!(2)}, {second, Version.new!(2)}]
       rows = rows(first_events ++ second_events)
       request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots, order: :reverse], Rows)
-      request = %{request | write_snapshots?: false}
       attach_telemetry()
 
-      assert {:ok, [first_state, second_state]} = Load.many_at(cfg(), request)
+      assert {:ok, [first_state, second_state]} = Load.run(cfg(), request)
       assert first_state.name == Account.Name.new!("Первый два")
       assert second_state.name == Account.Name.new!("Второй два")
 
@@ -212,7 +211,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       attach_telemetry()
 
       assert {:ok, [%Account{id: ^id, version: nil}]} =
-               Load.head(no_snapshot_cfg(), head_request(id, []))
+               Load.run(no_snapshot_cfg(), head_request(id, []))
 
       assert_received {:telemetry, [:core, :es, :aggregate, :load], %{streams: 1, events: 0}, %{op: :get, result: :ok}}
 
@@ -225,10 +224,9 @@ defmodule Core.Es.Aggregate.LoadTest do
       version = Version.new!(3)
 
       request = Request.get_at(LoadRepo.cfg(), id, version, [rows: rows(events)], Rows)
-      request = %{request | write_snapshots?: false}
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
-               Load.at(no_snapshot_cfg(), request)
+               Load.run(no_snapshot_cfg(), request)
 
       assert error.detail == %{aggregate_id: dump(id), expected: 3, actual: 2, source: :address}
     end
@@ -246,10 +244,9 @@ defmodule Core.Es.Aggregate.LoadTest do
       ]
 
       request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: first_rows ++ second_rows], Rows)
-      request = %{request | write_snapshots?: false}
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
-               Load.many_at(no_snapshot_cfg(), request)
+               Load.run(no_snapshot_cfg(), request)
 
       assert error.detail == [
                %{aggregate_id: dump(first), expected: 2, actual: 1, source: :address},
@@ -289,20 +286,13 @@ defmodule Core.Es.Aggregate.LoadTest do
 
   defp no_snapshot_cfg, do: %{LoadRepo.cfg() | snapshot: nil}
 
-  defp head_request(id, rows) do
-    request = Request.get(LoadRepo.cfg(), id, :current, [rows: rows], Rows)
-    %{request | write_snapshots?: false}
-  end
+  defp head_request(id, rows), do: Request.get(LoadRepo.cfg(), id, :current, [rows: rows], Rows)
 
-  defp at_request(id, version, rows, snapshots \\ []) do
-    request = Request.get_at(LoadRepo.cfg(), id, version, [rows: rows, snapshots: snapshots], Rows)
-    %{request | write_snapshots?: false}
-  end
+  defp at_request(id, version, rows, snapshots \\ []),
+    do: Request.get_at(LoadRepo.cfg(), id, version, [rows: rows, snapshots: snapshots], Rows)
 
-  defp many_request(pairs, rows, snapshots \\ []) do
-    request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots], Rows)
-    %{request | write_snapshots?: false}
-  end
+  defp many_request(pairs, rows, snapshots \\ []),
+    do: Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots], Rows)
 
   defp events!(id, commands) do
     {events, _state} =

@@ -87,7 +87,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
         cfg = @es_read_repo.repo.__es_read_cfg__()
         request = Core.Es.Aggregate.Load.Request.get_at(cfg, id, version, opts)
 
-        case Core.Es.Aggregate.Load.at(cfg, request) do
+        case Core.Es.Aggregate.Load.run(cfg, request) do
           {:ok, %unquote(aggregate){} = state} ->
             case @es_read_repo.to_view.(state) do
               %unquote(view){} = view -> {:ok, view}
@@ -108,7 +108,7 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
         cfg = @es_read_repo.repo.__es_read_cfg__()
         request = Core.Es.Aggregate.Load.Request.get_many_at(cfg, pairs, opts)
 
-        case Core.Es.Aggregate.Load.many_at(cfg, request) do
+        case Core.Es.Aggregate.Load.run(cfg, request) do
           {:ok, states} when is_list(states) ->
             views = for state <- states, do: es_read_repo_to_view!(state, @es_read_repo.to_view)
             {:ok, views}

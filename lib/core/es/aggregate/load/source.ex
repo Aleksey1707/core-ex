@@ -10,4 +10,7 @@ defmodule Core.Es.Aggregate.Load.Source do
   @type entry :: {Plan.stream(), Snapshot.stored() | nil, [Schema.t()]}
 
   @callback fetch(Config.t(), Plan.t(), keyword()) :: [entry()]
+
+  @doc "Умеет ли источник писать снапшоты после чтения."
+  @callback writes_snapshots?() :: boolean()
 end
