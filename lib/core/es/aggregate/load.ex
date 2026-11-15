@@ -270,7 +270,7 @@ defmodule Core.Es.Aggregate.Load do
     sealed = Snapshot.sealed(cfg, plan, [meta.state], [snapshot])
 
     with {:ok, {events, opened}} <- Es.Store.load_fold_rows(rows, cfg.event_codec, cfg.codec, sealed),
-         do: {:ok, fold_stream(cfg, meta, Snapshot.opened(cfg, plan, snapshot, opened), events)}
+         do: {:ok, fold_stream(cfg, meta, Snapshot.opened(plan, snapshot, opened), events)}
   end
 
   defp fold_stream(%{snapshot: nil} = cfg, meta, _snapshot, events),

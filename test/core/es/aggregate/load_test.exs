@@ -191,10 +191,18 @@ defmodule Core.Es.Aggregate.LoadTest do
       rows = rows(first_events ++ second_events)
       request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots, order: :reverse], Rows)
       request = %{request | write_snapshots?: false}
+      attach_telemetry()
 
       assert {:ok, [first_state, second_state]} = Load.many_at(cfg(), request)
       assert first_state.name == Account.Name.new!("Первый два")
       assert second_state.name == Account.Name.new!("Второй два")
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{snapshot: :hit}}
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{snapshot: :hit}}
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :load],
+                       %{streams: 2, events: 2, snapshot_hit: 2, snapshot_miss: 0, snapshot_rejected: 0},
+                       %{op: :get_many_at, result: :ok}}
     end
   end
 

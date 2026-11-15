@@ -84,6 +84,12 @@ defmodule Core.Es.Aggregate.Load.Plan do
     end
   end
 
+  @doc false
+  @spec tail_from(stream(), Snapshot.stored() | nil) :: non_neg_integer()
+
+  def tail_from(%{after_version: after_version}, nil), do: after_version
+  def tail_from(%{after_version: after_version}, {version, _binary}), do: max(after_version, version)
+
   # ---
 
   defp stream(cfg, spec, snapshot?) do

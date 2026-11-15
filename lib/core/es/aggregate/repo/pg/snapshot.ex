@@ -125,13 +125,13 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   @doc """
   Снапшот потока после расшифровки: исход `open` этого потока; `nil` — снапшота нет.
   """
-  @spec opened(map(), map(), stored() | nil, [KeyStore.opened()]) :: opened() | nil
+  @spec opened(map(), stored() | nil, [KeyStore.opened()]) :: opened() | nil
 
-  def opened(_cfg, _plan, nil, _opened), do: nil
+  def opened(_plan, nil, _opened), do: nil
 
-  def opened(_cfg, %{sealed?: false}, {version, binary}, []), do: {version, {:ok, binary}}
+  def opened(%{sealed?: false}, {version, binary}, []), do: {version, {:ok, binary}}
 
-  def opened(_cfg, %{sealed?: true}, {version, _binary}, [outcome]), do: {version, outcome}
+  def opened(%{sealed?: true}, {version, _binary}, [outcome]), do: {version, outcome}
 
   @doc """
   Свернуть события хвоста `events` от снапшота `{version, opened}` потока состояния `initial`.

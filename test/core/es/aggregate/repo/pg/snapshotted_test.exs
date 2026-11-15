@@ -91,6 +91,30 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert %Snapshot.Schema{aggregate_version: 2} = snapshot(id)
     end
 
+    test "маркер снапшота считается один раз за чтение с записью" do
+      id = Account.ID.new()
+      write!(@repo, id, [open(), freeze()])
+      trace = {Snapshot, :marker, 1}
+      parent = self()
+      tracer = spawn(fn -> forward_marker(parent) end)
+      on_exit(fn -> Process.exit(tracer, :kill) end)
+
+      :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+      :erlang.trace_pattern(trace, true, [])
+      on_exit(fn -> :erlang.trace_pattern(trace, false, []) end)
+
+      assert {:ok, _state} = @repo.get(id, :current, Context.new())
+
+      :erlang.trace(self(), false, [:call])
+      :erlang.trace_pattern(trace, false, [])
+
+      assert_receive :marker, 500
+      refute_receive :marker, 100
+
+      assert %Snapshot.Schema{marker: marker} = snapshot(id)
+      assert marker == Snapshot.marker(@repo.__es_read_cfg__())
+    end
+
     test "get_many — один upsert на все потоки" do
       ids = for _ <- 1..3, do: Account.ID.new()
       Enum.each(ids, &write!(@repo, &1, [open(), freeze()]))
@@ -356,6 +380,15 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
   def handle_telemetry(event, measurements, metadata, test) do
     if self() == test, do: send(test, {:telemetry, event, measurements, metadata})
+  end
+
+  defp forward_marker(test) do
+    receive do
+      {:trace, _pid, :call, {Snapshot, :marker, [_]}} -> send(test, :marker)
+      _other -> :ok
+    end
+
+    forward_marker(test)
   end
 
   defp attach_telemetry do

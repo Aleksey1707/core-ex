@@ -31,9 +31,9 @@ defmodule Core.Es.Store.Rows do
     end
   end
 
-  @impl true
   @spec fetch(map(), Plan.t(), keyword()) :: [Core.Es.Aggregate.Load.Source.entry()]
 
+  @impl true
   def fetch(cfg, %Plan{streams: streams}, opts) do
     rows = Keyword.fetch!(opts, :rows)
     snapshots = Keyword.get(opts, :snapshots, [])
@@ -53,7 +53,7 @@ defmodule Core.Es.Store.Rows do
           do: {version, :erlang.term_to_binary(state)}
 
     snapshot = Plan.snapshot(stream, candidates)
-    from_version = from_version(stream, snapshot)
+    from_version = Plan.tail_from(stream, snapshot)
 
     events =
       for row <- rows,
@@ -64,7 +64,4 @@ defmodule Core.Es.Store.Rows do
 
     {stream, snapshot, events}
   end
-
-  defp from_version(stream, nil), do: stream.after_version
-  defp from_version(stream, {version, _binary}), do: max(stream.after_version, version)
 end

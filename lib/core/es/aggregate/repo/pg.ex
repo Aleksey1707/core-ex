@@ -43,9 +43,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `{:error, _}` на всю страницу. Реализация и исходы — `Core.Es.Store`, «Страница потока».
 
   ПДн-значения событий чтение расшифровывает пакетом (`Core.Es.Store`, «Загрузка пачки»): сбой
-  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` / `get_at` / `get_many_at`
-  отдают `{:error, _}`
-  без замера `[:es, :aggregate, :load]`, нечитаемое событие — `Core.Exc`.
+  хранилища ключей `get` / `get_decision` / `get_many` / `refresh` отдают `{:error, _}`
+  без замера `[:es, :aggregate, :load]`, нечитаемое событие — `Core.Exc`. Чтение на версии
+  (`get_at` / `get_many_at`) идёт через read-репозиторий и расшифровывает так же.
 
   `opts` — опции запроса и транзакции, у `page_stream` их нет. Функции `defoverridable`.
 
@@ -112,9 +112,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   Имена — `Core.Telemetry.event/1`; span'а у восстановления нет, на нечитаемом потоке события
   не шлются.
 
-  - `[:es, :aggregate, :load]` — на вызов `get` / `get_decision` / `get_many` / `refresh` /
-    `get_at` / `get_many_at`: измерения `duration` (native, без записи снапшотов и `fun`),
-    `streams`, `events`
+  - `[:es, :aggregate, :load]` — на вызов `get` / `get_decision` / `get_many` / `refresh`, а также
+    на чтение на версии через read-репозиторий (`get_at` / `get_many_at`): измерения `duration`
+    (native, без записи снапшотов и `fun`), `streams`, `events`
     (свёрнутые), `snapshot_hit`, `snapshot_miss`, `snapshot_rejected` (потоки; без `snapshot:` —
     нули); метаданные `type` (тип агрегата), `op` (`:get`, `:get_decision`, `:get_many`,
     `:refresh`, `:get_at`, `:get_many_at`), `result` (`:ok`, `:version_mismatch`). У
@@ -394,9 +394,9 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # ===== источник строк =====
 
   @doc false
-  @impl true
   @spec fetch(map(), Load.Plan.t(), keyword()) :: [Load.triple()]
 
+  @impl true
   def fetch(%{snapshot: nil} = cfg, %Load.Plan{streams: streams}, opts), do: read_streams(cfg, streams, opts)
 
   def fetch(cfg, %Load.Plan{streams: streams, marker: marker}, opts) do
