@@ -6,6 +6,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
   alias Core.Config
   alias Core.Context
+  alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Personal.Port
   alias Core.EsFixture.Account
@@ -377,41 +378,22 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
   defp load_at(id, nil, captures, write?), do: load_versions(id, captures, write?)
 
   defp load_head(id, write?) do
-    request = %{
-      op: :get,
-      opts: [],
-      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: write?,
-      states: [%{state: %Account{id: id}, version: :current}]
-    }
-
-    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), request)
+    request = Request.get(LoadRepo.cfg(), id, :current, [], LoadRepo.cfg().source)
+    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), %{request | write_snapshots?: write?})
   end
 
   defp load_version(id, upper, write?) do
-    request = %{
-      op: :get,
-      opts: [],
-      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: write?,
-      state: %Account{id: id}
-    }
+    request = Request.get_at(LoadRepo.cfg(), id, Core.Version.new!(upper), [], LoadRepo.cfg().source)
 
-    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), request, Core.Version.new!(upper)),
+    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), %{request | write_snapshots?: write?}),
          do: {:ok, [state]}
   end
 
   defp load_versions(id, captures, write?) do
     pairs = Enum.map(captures, &{id, Core.Version.new!(&1)})
+    request = Request.get_many_at(LoadRepo.cfg(), pairs, [], LoadRepo.cfg().source)
 
-    request = %{
-      op: :get,
-      opts: [],
-      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: write?
-    }
-
-    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), request, pairs)
+    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), %{request | write_snapshots?: write?})
   end
 
   defp append!(state, commands) do

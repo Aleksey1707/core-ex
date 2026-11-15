@@ -155,8 +155,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   нет clause его `code:`, область повторяется.
 
   Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0`
-  и служебный persisted-атрибут `:es_read_cfg` — конфигурацию чтения для
-  `Core.Es.Aggregate.ReadRepo.Pg`.
+  и служебную `__es_read_cfg__/0` — конфигурацию чтения для `Core.Es.Aggregate.ReadRepo.Pg`.
   """
 
   import Core.Version, only: [is_version: 1]
@@ -166,6 +165,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Aggregate.Load
+  alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Store.Schema
   alias Core.Es.Store.Write.Plan
@@ -197,16 +197,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     dao = Helper.Opts.module_or_config!(opts, :repo, :dao, @label)
     codec = Helper.Opts.module_or_config!(opts, :codec, :codec, @label)
 
-    read_cfg =
-      Map.merge(cfg, %{dao: Keyword.get(opts, :repo) || :config, codec: Keyword.get(opts, :codec) || :config})
-
     quote generated: true do
       @behaviour unquote(cfg.behaviour)
 
       @es_aggregate_repo unquote(Macro.escape(cfg))
-
-      Module.register_attribute(__MODULE__, :es_read_cfg, persist: true)
-      @es_read_cfg unquote(Macro.escape(read_cfg))
 
       import Core.Version, only: [is_version: 1]
 
@@ -291,8 +285,16 @@ defmodule Core.Es.Aggregate.Repo.Pg do
                      refresh: 4,
                      page_stream: 4
 
-      defp es_aggregate_repo,
-        do: Map.merge(@es_aggregate_repo, %{dao: unquote(dao), codec: unquote(codec)})
+      defp es_aggregate_repo do
+        Map.merge(@es_aggregate_repo, %{
+          dao: unquote(dao),
+          codec: unquote(codec),
+          source: &Core.Es.Aggregate.Repo.Pg.fetch/3
+        })
+      end
+
+      @doc false
+      def __es_read_cfg__, do: es_aggregate_repo()
     end
   end
 
@@ -352,47 +354,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t(struct())
 
   def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts) do
-    request = %{
-      op: :get,
-      opts: opts,
-      source: &fetch/3,
-      write?: true,
-      states: [%{state: struct(cfg.aggregate, id: id), version: version}]
-    }
-
-    with {:ok, [state]} <- Load.head(cfg, request), do: {:ok, state}
-  end
-
-  @doc false
-  @spec get_at(map(), struct(), Version.t(), Context.t(), keyword()) :: Result.t(struct())
-
-  def get_at(cfg, id, %Version{} = version, %Context{}, opts) when is_list(opts) do
-    request = %{
-      op: :get_at,
-      opts: opts,
-      source: &fetch/3,
-      write?: false,
-      state: struct(cfg.aggregate, id: id)
-    }
-
-    Load.at(cfg, request, version)
-  end
-
-  @doc false
-  @spec get_many_at(map(), [{struct(), Version.t()}], Context.t(), keyword()) ::
-          Result.t([struct()])
-
-  def get_many_at(_cfg, [], %Context{}, opts) when is_list(opts), do: {:ok, []}
-
-  def get_many_at(cfg, [_ | _] = pairs, %Context{}, opts) when is_list(opts) do
-    request = %{
-      op: :get_many_at,
-      opts: opts,
-      source: &fetch/3,
-      write?: false
-    }
-
-    Load.many_at(cfg, request, pairs)
+    with {:ok, [state]} <- Load.head(cfg, Request.get(cfg, id, version, opts)), do: {:ok, state}
   end
 
   @doc false
@@ -408,17 +370,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def get_decision(cfg, id, version, %Context{}, fun, opts)
       when is_version(version) and is_function(fun, 1) and is_list(opts) do
-    request = %{
-      op: :get_decision,
-      opts: opts,
-      source: &fetch/3,
-      write?: true,
-      states: [%{state: struct(cfg.aggregate, id: id), version: version}],
-      born?: true,
-      decide: fun
-    }
-
-    Load.head(cfg, request)
+    Load.head(cfg, Request.get_decision(cfg, id, version, fun, opts))
   end
 
   @doc false
@@ -426,16 +378,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t([struct()])
 
   def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts) do
-    request = %{
-      op: :get_many,
-      opts: opts,
-      source: &fetch/3,
-      write?: true,
-      states: initial_states!(cfg, pairs),
-      many?: true
-    }
-
-    Load.head(cfg, request)
+    Load.head(cfg, Request.get_many(cfg, pairs, opts))
   end
 
   @doc false
@@ -443,31 +386,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t(struct())
 
   def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts) do
-    request = %{
-      op: :refresh,
-      opts: opts,
-      source: &fetch/3,
-      write?: true,
-      states: [%{state: state, version: version}]
-    }
-
-    with {:ok, [state]} <- Load.head(cfg, request), do: {:ok, state}
-  end
-
-  # ---
-
-  defp initial_states!(%{aggregate: aggregate, id: id_mod}, pairs) do
-    states =
-      Enum.map(pairs, fn {%^id_mod{} = id, version} when is_version(version) ->
-        %{state: struct(aggregate, id: id), version: version}
-      end)
-
-    ids = Enum.map(states, & &1.state.id)
-
-    case ids -- Enum.uniq(ids) do
-      [] -> states
-      repeated -> raise ArgumentError, "#{@label}: повтор id в get_many: #{inspect(repeated)}"
-    end
+    with {:ok, [state]} <- Load.head(cfg, Request.refresh(cfg, state, version, opts)), do: {:ok, state}
   end
 
   # ===== источник строк =====

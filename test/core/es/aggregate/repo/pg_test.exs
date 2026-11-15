@@ -5,6 +5,7 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
   alias Core.Config
   alias Core.Context
   alias Core.Error
+  alias Core.Es.Aggregate.Load.Request
   alias Core.EsFixture.Account
   alias Core.Telemetry
 
@@ -341,41 +342,22 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
   defp load_at(id, nil, captures), do: load_versions(id, captures)
 
   defp load_head(id, write?) do
-    request = %{
-      op: :get,
-      opts: [],
-      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: write?,
-      states: [%{state: %Account{id: id}, version: :current}]
-    }
-
-    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), request)
+    request = Request.get(LoadRepo.cfg(), id, :current, [], LoadRepo.cfg().source)
+    Core.Es.Aggregate.Load.head(LoadRepo.cfg(), %{request | write_snapshots?: write?})
   end
 
   defp load_version(id, upper) do
-    request = %{
-      op: :get,
-      opts: [],
-      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: true,
-      state: %Account{id: id}
-    }
+    request = Request.get_at(LoadRepo.cfg(), id, Core.Version.new!(upper), [], LoadRepo.cfg().source)
 
-    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), request, Core.Version.new!(upper)),
+    with {:ok, state} <- Core.Es.Aggregate.Load.at(LoadRepo.cfg(), request),
          do: {:ok, [state]}
   end
 
   defp load_versions(id, captures) do
     pairs = Enum.map(captures, &{id, Core.Version.new!(&1)})
+    request = Request.get_many_at(LoadRepo.cfg(), pairs, [], LoadRepo.cfg().source)
 
-    request = %{
-      op: :get,
-      opts: [],
-      source: &Core.Es.Aggregate.Repo.Pg.fetch/3,
-      write?: true
-    }
-
-    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), request, pairs)
+    Core.Es.Aggregate.Load.many_at(LoadRepo.cfg(), %{request | write_snapshots?: true})
   end
 
   def handle_telemetry(event, measurements, metadata, test) do

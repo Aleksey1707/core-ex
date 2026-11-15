@@ -3,6 +3,7 @@ defmodule Core.Es.Aggregate.Load do
 
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Personal.Destroyed
   alias Core.Es.Store.Schema
@@ -40,17 +41,7 @@ defmodule Core.Es.Aggregate.Load do
         }
 
   @typedoc false
-  @type request(decision, reason) :: %{
-          required(:op) => atom(),
-          required(:opts) => keyword(),
-          required(:source) => source(),
-          required(:write?) => boolean(),
-          optional(:states) => [%{state: struct(), version: Version.expected()}],
-          optional(:state) => struct(),
-          optional(:born?) => boolean(),
-          optional(:many?) => boolean(),
-          optional(:decide) => (struct() -> Result.t(decision, reason))
-        }
+  @type request(decision, reason) :: Request.t(decision, reason)
 
   @typedoc false
   @type request :: request(term(), term())
@@ -75,7 +66,7 @@ defmodule Core.Es.Aggregate.Load do
   @spec head(map(), request(decision, reason)) :: Result.t([struct()] | decision, reason | Error.t())
         when decision: var, reason: var
 
-  def head(cfg, %{states: states} = request) do
+  def head(cfg, %Request{states: states} = request) do
     streams = Enum.map(states, &%{state: &1.state, version: &1.version, upper: nil, captures: []})
 
     run(cfg, request, %{kind: :head, streams: streams})
@@ -84,18 +75,18 @@ defmodule Core.Es.Aggregate.Load do
   # ===== версия =====
 
   @doc false
-  @spec at(map(), request(), Version.t()) :: Result.t(struct())
+  @spec at(map(), request()) :: Result.t(struct())
 
-  def at(cfg, %{state: state} = request, %Version{} = version) do
+  def at(cfg, %Request{state: state, version: %Version{} = version} = request) do
     streams = [%{state: state, version: version, upper: Version.value(version), captures: []}]
 
     run(cfg, request, %{kind: :at, streams: streams, version: version})
   end
 
   @doc false
-  @spec many_at(map(), request(), [{struct(), Version.t()}]) :: Result.t([struct()])
+  @spec many_at(map(), request()) :: Result.t([struct()])
 
-  def many_at(cfg, request, pairs) do
+  def many_at(cfg, %Request{pairs: pairs} = request) do
     id_mod = cfg.id
 
     parsed =
@@ -141,7 +132,7 @@ defmodule Core.Es.Aggregate.Load do
         %{type: cfg.type, op: op, result: result_tag(result)}
       )
 
-      write_snapshots(cfg, restored, request.write?)
+      write_snapshots(cfg, restored, request.write_snapshots?)
       decide(cfg, request, address, result)
     end
   end
@@ -167,7 +158,7 @@ defmodule Core.Es.Aggregate.Load do
     do: verify_many_at(cfg, restored, pairs)
 
   defp verify_head(cfg, request, restored) do
-    born? = Map.get(request, :born?, false)
+    born? = request.born?
     results = Enum.map(restored, &head_result(cfg, &1, born?))
 
     case for {:error, detail} <- results, do: detail do
@@ -219,14 +210,14 @@ defmodule Core.Es.Aggregate.Load do
   # Пустой поток при `%Version{}` — не гонка: отказ или принятие решает `fun` на незаведённом
   # агрегате, поэтому одиночное чтение головы спрашивает решение после сверки (ADR-0016).
   defp decide(cfg, %{decide: fun}, %{kind: :head, streams: [%{version: %Version{} = version}]}, {:ok, [state]})
-       when is_nil(state.version) do
+       when is_function(fun, 1) and is_nil(state.version) do
     case fun.(state) do
       {:ok, _decision} -> {:error, version_mismatch(cfg, detail(cfg, state, Version.value(version), :expected))}
       {:error, _reason} = error -> error
     end
   end
 
-  defp decide(_cfg, %{decide: fun}, _address, {:ok, [state]}), do: fun.(state)
+  defp decide(_cfg, %{decide: fun}, _address, {:ok, [state]}) when is_function(fun, 1), do: fun.(state)
 
   defp decide(_cfg, _request, _address, result), do: result
 

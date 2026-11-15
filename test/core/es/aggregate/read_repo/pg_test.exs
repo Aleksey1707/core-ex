@@ -88,6 +88,39 @@ defmodule Core.Es.Aggregate.ReadRepo.PgTest do
       end
     end
 
+    test "repo: — конфигурация чтения берётся функцией __es_read_cfg__/0, а не атрибутом" do
+      write = Module.concat(__MODULE__, "AttrOnlyWrite")
+      write_pg = Module.concat(write, Pg)
+      read = Module.concat(__MODULE__, "AttrOnlyRead")
+
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(write) do
+            use Core.Es.Aggregate.Repo,
+              aggregate: Core.EsFixture.Account
+          end
+
+          defmodule unquote(write_pg) do
+            Module.register_attribute(__MODULE__, :es_read_cfg, persist: true)
+            @es_read_cfg %{}
+          end
+
+          defmodule unquote(read) do
+            use Core.Es.Aggregate.ReadRepo,
+              repo: unquote(write),
+              view: View
+          end
+        end
+      )
+
+      message =
+        ~r/^Es\.Aggregate\.ReadRepo\.Pg: repo: модуль .*AttrOnlyWrite\.Pg должен быть собран `use Core\.Es\.Aggregate\.Repo\.Pg` \(behaviour: .*AttrOnlyWrite\)$/
+
+      assert_raise CompileError, message, fn ->
+        compile_read_repo_pg!(:attr_only, behaviour: read)
+      end
+    end
+
     test "to_view: — не захват функции арности 1" do
       message = ~r/^Es\.Aggregate\.ReadRepo\.Pg: to_view: ожидается захват функции арности 1/
 
