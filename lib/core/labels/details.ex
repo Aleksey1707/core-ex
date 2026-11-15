@@ -63,8 +63,8 @@ defmodule Core.Labels.Details do
   alias Core.Es
   alias Core.Es.Personal.Destroyed
   alias Core.Helper.FieldCheck
-  alias Core.Labels.Fields
   alias Core.Labels.Kind
+  alias Core.Labels.Walk
 
   @typedoc "Вид значения сведения."
   @type kind :: :text | :number | :date | :datetime | :user | :ref | :group | :list | :set | :map | :destroyed
@@ -119,62 +119,53 @@ defmodule Core.Labels.Details do
   defp details(event, payload) do
     case event.__label_payload__() do
       nil -> struct_details(payload)
-      label -> [detail(label, {:prim, event.__es_payload__()}, payload)]
+      label -> [describe(Walk.entry(label, {:prim, event.__es_payload__()}, payload))]
     end
   end
 
   defp struct_details(%module{} = struct) do
-    case Fields.change(module) do
-      nil -> fields_details(module, struct)
-      {label, spec} -> [change_detail(label, spec, struct)]
+    case Walk.values(module, struct) do
+      {:fields, nodes} -> Enum.map(nodes, &describe/1)
+      {:change, node} -> [describe(node)]
     end
   end
 
-  defp fields_details(module, struct) do
-    labels = Fields.labels(module)
+  defp describe(%{data: {:change, old, new}} = node),
+    do: %{label: node.label, kind: :change, old: item(old), new: item(new)}
 
-    for {name, spec} <- Fields.specs(module),
-        do: field_detail(Keyword.fetch!(labels, name), spec, Map.fetch!(struct, name))
-  end
+  defp describe(node), do: item(node)
 
-  defp field_detail([label: label, key: _key, value: _value], {:type, :map}, %Destroyed{}),
-    do: %{label: label, kind: :destroyed}
+  defp item(%{data: :leaf} = node), do: labelled(leaf(node), node.label)
 
-  defp field_detail([label: label, key: key, value: value], {:type, :map}, map),
-    do: %{label: label, kind: :list, value: map_items(map, key, value)}
+  defp item(%{data: {:group, nodes}} = node),
+    do: labelled(%{kind: :group, value: Enum.map(nodes, &describe/1)}, node.label)
 
-  defp field_detail([label: label, key: key_label, value: value_label], {:map, _key, _value} = spec, map) do
-    case detail(label, spec, map) do
-      %{value: [_ | _] = pairs} = detail -> %{detail | value: Enum.map(pairs, &label_pair(&1, key_label, value_label))}
-      detail -> detail
-    end
-  end
+  defp item(%{data: {:list, nodes}} = node), do: labelled(%{kind: :list, value: Enum.map(nodes, &item/1)}, node.label)
 
-  defp field_detail(label, spec, value), do: detail(label, spec, value)
+  defp item(%{data: {:set, nodes}} = node),
+    do: labelled(%{kind: :set, value: Enum.map(sorted(nodes), &item/1)}, node.label)
 
-  defp label_pair(%{key: key, value: value}, key_label, value_label),
-    do: %{key: Map.put(key, :label, key_label), value: Map.put(value, :label, value_label)}
+  defp item(%{data: {:map, pairs}, spec: {:type, :map}} = node),
+    do: labelled(%{kind: :list, value: Enum.map(pairs, &free_pair/1)}, node.label)
 
-  defp map_items(nil, _key, _value), do: nil
+  defp item(%{data: {:map, pairs}} = node),
+    do: labelled(%{kind: :map, value: Enum.map(sorted_pairs(pairs), &pair/1)}, node.label)
 
-  defp map_items(map, key_label, value_label) when is_map(map) do
-    for {key, value} <- map,
-        do: %{kind: :group, value: [inferred(key_label, key), inferred(value_label, value)]}
-  end
+  defp labelled(item, nil), do: item
+  defp labelled(item, label), do: Map.put(item, :label, label)
 
-  # У map'ы спеки ключей и значений нет: вид — по самому значению.
-  defp inferred(label, %module{} = prim), do: detail(label, {:prim, module}, prim)
-  defp inferred(label, flag) when is_boolean(flag), do: detail(label, {:type, :boolean}, flag)
-  defp inferred(label, number) when is_number(number), do: %{label: label, kind: :number, value: number}
-  defp inferred(label, text) when is_binary(text) or is_nil(text), do: %{label: label, kind: :text, value: text}
+  defp leaf(%{value: %Destroyed{}}), do: %{kind: :destroyed}
 
-  defp change_detail(label, spec, %{old_value: old, new_value: new}),
-    do: %{label: label, kind: :change, old: item(spec, old), new: item(spec, new)}
+  defp leaf(%{spec: spec, value: value}),
+    do: Map.put(shape_of(spec, value), :value, leaf_value(spec, value))
 
-  defp detail(label, spec, value), do: Map.put(item(spec, value), :label, label)
+  defp pair(%{key: key, value: value}), do: %{key: item(key), value: item(value)}
 
-  defp item(_spec, %Destroyed{}), do: %{kind: :destroyed}
-  defp item(spec, value), do: Map.put(shape(spec), :value, value(spec, value))
+  defp free_pair(%{key: key, value: value}), do: %{kind: :group, value: [describe(key), describe(value)]}
+
+  defp shape_of({:type, :map}, _value), do: %{kind: :list}
+  defp shape_of(nil, value), do: shape(inferred(value))
+  defp shape_of(spec, _value), do: shape(spec)
 
   defp shape({:prim, module}), do: prim_shape(module)
   defp shape({:enum, _module}), do: %{kind: :text}
@@ -212,17 +203,19 @@ defmodule Core.Labels.Details do
     defp type_kind(unquote(type)), do: unquote(kind)
   end
 
-  defp value(_spec, nil), do: nil
-  defp value({:type, :boolean}, true), do: "Да"
-  defp value({:type, :boolean}, false), do: "Нет"
-  defp value({:enum, module}, value), do: module.label(value)
-  defp value({:text, fun}, value), do: fun.(value)
-  defp value({:prim, module}, prim), do: prim_value(module, prim)
-  defp value({kind, _module}, struct) when kind in @group_kinds, do: struct_details(struct)
-  defp value({:list, inner}, items), do: Enum.map(items, &item(inner, &1))
-  defp value({:set, inner}, set), do: for(element <- sorted(set, inner), do: item(inner, element))
-  defp value({:map, key, inner}, map), do: pairs(map, key, inner)
-  defp value(_spec, value), do: value
+  defp leaf_value(_spec, nil), do: nil
+  defp leaf_value({:type, :boolean}, true), do: "Да"
+  defp leaf_value({:type, :boolean}, false), do: "Нет"
+  defp leaf_value({:enum, module}, value), do: module.label(value)
+  defp leaf_value({:text, fun}, value), do: fun.(value)
+  defp leaf_value({:prim, module}, prim), do: prim_value(module, prim)
+  defp leaf_value(nil, value), do: leaf_value(inferred(value), value)
+  defp leaf_value(_spec, value), do: value
+
+  defp inferred(%module{}), do: {:prim, module}
+  defp inferred(flag) when is_boolean(flag), do: {:type, :boolean}
+  defp inferred(number) when is_number(number), do: {:type, :integer}
+  defp inferred(text) when is_binary(text) or is_nil(text), do: {:type, :string}
 
   defp prim_value(module, prim) do
     case Kind.of(module) do
@@ -232,12 +225,9 @@ defmodule Core.Labels.Details do
     end
   end
 
-  defp sorted(set, inner), do: Enum.sort_by(set, &order(inner, &1), &before?/2)
+  defp sorted(nodes), do: Enum.sort_by(nodes, &order(&1.spec, &1.value), &before?/2)
 
-  defp pairs(map, key, inner) do
-    for {key_value, value} <- Enum.sort_by(map, fn {key_value, _value} -> order(key, key_value) end, &before?/2),
-        do: %{key: item(key, key_value), value: item(inner, value)}
-  end
+  defp sorted_pairs(pairs), do: Enum.sort_by(pairs, &order(&1.key.spec, &1.key.value), &before?/2)
 
   defp order({:prim, _module}, prim), do: Core.Prim.unwrap(prim)
   defp order(_spec, value), do: value
