@@ -12,6 +12,25 @@ defmodule Core.Es.TransactTest do
 
   @aggregate_id "01a0b23b-fb87-786a-9ea7-ed1aca28440a"
 
+  defmodule TrackingDao do
+    @moduledoc false
+
+    def transact(fun, opts \\ []) do
+      send(self(), {:transact, __MODULE__})
+      TestRepo.transact(fun, opts)
+    end
+
+    def in_transaction?, do: TestRepo.in_transaction?()
+  end
+
+  defmodule InTransactionDao do
+    @moduledoc false
+
+    def transact(_fun, _opts \\ []), do: raise("транзакция не должна открываться")
+
+    def in_transaction?, do: true
+  end
+
   describe "run/2" do
     test "без отказа — результат fun одной попыткой" do
       log = capture_at(:debug, fn -> assert Es.Transact.run(fn -> {:ok, :done} end) == {:ok, :done} end)
@@ -91,12 +110,51 @@ defmodule Core.Es.TransactTest do
     end
   end
 
+  describe "dao:" do
+    test "повтор идёт на заданном dao:" do
+      log =
+        capture_at(:debug, fn ->
+          assert Es.Transact.run(refusing(2, :storage), dao: TrackingDao) == :ok
+        end)
+
+      assert log =~ "retry=2"
+
+      assert_received {:transact, TrackingDao}
+      assert_received {:transact, TrackingDao}
+      assert_received {:transact, TrackingDao}
+      refute_received {:transact, _}
+    end
+
+    test "внутри транзакции dao: — ArgumentError по тому же dao" do
+      assert_raise ArgumentError, ~r/run вызван внутри транзакции/, fn ->
+        Transact.run(TestRepo, fn -> Es.Transact.run(fn -> :ok end, dao: TrackingDao) end)
+      end
+    end
+
+    test "открытая транзакция заданного dao — ArgumentError вне транзакции Config.dao/0" do
+      assert_raise ArgumentError, ~r/run вызван внутри транзакции/, fn ->
+        Es.Transact.run(fn -> :ok end, dao: InTransactionDao)
+      end
+    end
+
+    test "dao: не модуль — ArgumentError" do
+      error = assert_raise ArgumentError, fn -> Es.Transact.run(fn -> :ok end, dao: 1) end
+
+      assert Exception.message(error) =~ ~r/^Core\.Es\.Transact\.run\/2: invalid value for :dao option/
+    end
+  end
+
   describe "run_counted/2" do
     test "число повторов — измерение telemetry вызывающего" do
       assert Es.Transact.run_counted(fn -> :ok end) == {:ok, 0}
 
       assert capture_at(:debug, fn -> assert Es.Transact.run_counted(refusing(2, :storage)) == {:ok, 2} end) =~
                "retry=2"
+    end
+
+    test "dao: — транзакция идёт на заданном репозитории" do
+      assert Es.Transact.run_counted(fn -> :ok end, dao: TrackingDao) == {:ok, 0}
+      assert_received {:transact, TrackingDao}
     end
   end
 

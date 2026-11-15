@@ -8,8 +8,9 @@ defmodule Core.Es.Transact do
              do: @repo.append(events, context)
       end)
 
-  `fun` исполняется в транзакции `Core.Config.dao/0` (`Core.Helper.Transact.run/3`) и, если она
-  отказала отказом хранилища, повторяется целиком новой транзакцией — до `retries:` повторов.
+  `fun` исполняется в транзакции `dao:` (`Core.Helper.Transact.run/3`; по умолчанию
+  `Core.Config.dao/0`, прочитанный в рантайме вызова) и, если она отказала отказом хранилища,
+  повторяется целиком новой транзакцией — до `retries:` повторов.
   Колбэк MUST быть идемпотентным: при повторе он зовётся заново, включая сопутствующие записи.
 
   ## Повтор
@@ -38,12 +39,12 @@ defmodule Core.Es.Transact do
 
   ## Исходы
 
-  - `run/2` — результат `fun`, `run_counted/2` — `{результат, число повторов}` для telemetry
-    вызывающего.
+  - `run/2` — публичный вход: результат `fun`. `run_counted/2` — внутренний вход библиотеки
+    (`@doc false`): `{результат, число повторов}` для telemetry процесса агрегата.
   - Повтор — `debug`, исчерпание `retries:` — `warning` и ошибка последней попытки вызывающему.
     Паузы между попытками нет: отказ снимается чужим commit'ом, который уже произошёл.
-  - Вызов внутри открытой транзакции — `ArgumentError`: повтор идёт новой транзакцией, и откат
-    попытки отменил бы внешнюю.
+  - Вызов внутри открытой транзакции `dao:` — `ArgumentError`: повтор идёт новой транзакцией, и
+    откат попытки отменил бы внешнюю.
   """
 
   alias Core.Config
@@ -55,9 +56,16 @@ defmodule Core.Es.Transact do
   use Core.Options
 
   @label "Es.Transact"
-  @retries_schema [retries: [type: :pos_integer, default: 3, doc: "Предел повторов после отказа хранилища."]]
+  @opts [
+    retries: [type: :pos_integer, default: 3, doc: "Предел повторов после отказа хранилища."],
+    dao: [
+      type: {:custom, Core.Options.Type, :module, []},
+      type_doc: "`module()`",
+      doc: "Репозиторий транзакции и проверки «вне транзакции»; по умолчанию `Core.Config.dao/0`."
+    ]
+  ]
 
-  @opts_schema @retries_schema
+  @opts_schema @opts
   @doc """
   Исполнить `fun` в транзакции команды с повтором после отказа хранилища: результат `fun`.
 
@@ -68,28 +76,24 @@ defmodule Core.Es.Transact do
   @spec run((-> result), keyword()) :: result when result: var
 
   def run(fun, opts \\ []) when is_function(fun, 0) and is_list(opts) do
-    {result, _retries} = retrying(fun, Keyword.fetch!(opts, :retries))
+    {result, _retries} = retrying(fun, dao(opts), Keyword.fetch!(opts, :retries))
     result
   end
 
-  @opts_schema @retries_schema
-  @doc """
-  То же, что `run/2`, плюс число повторов — измерение telemetry вызывающего.
-
-  ## Опции
-
-  #{Core.Options.docs(@opts_schema)}
-  """
+  @opts_schema @opts
+  @doc false
   @spec run_counted((-> result), keyword()) :: {result, non_neg_integer()} when result: var
 
   def run_counted(fun, opts \\ []) when is_function(fun, 0) and is_list(opts),
-    do: retrying(fun, Keyword.fetch!(opts, :retries))
+    do: retrying(fun, dao(opts), Keyword.fetch!(opts, :retries))
 
   # ---
 
-  defp retrying(fun, limit) do
-    ensure_outside_transaction!(Config.dao().in_transaction?())
-    attempt(fun, limit, 0)
+  defp dao(opts), do: Keyword.get(opts, :dao) || Config.dao()
+
+  defp retrying(fun, dao, limit) do
+    ensure_outside_transaction!(dao.in_transaction?())
+    attempt(fun, dao, limit, 0)
   end
 
   defp ensure_outside_transaction!(false), do: :ok
@@ -100,11 +104,11 @@ defmodule Core.Es.Transact do
             "попытки отменил бы внешнюю"
   end
 
-  defp attempt(fun, limit, retries) do
-    result = Helper.Transact.run(Config.dao(), fun)
+  defp attempt(fun, dao, limit, retries) do
+    result = Helper.Transact.run(dao, fun)
 
     case refusal(result) do
-      {:storage, aggregate_id} -> refused(fun, limit, retries, aggregate_id, result)
+      {:storage, aggregate_id} -> refused(fun, dao, limit, retries, aggregate_id, result)
       :none -> {result, retries}
     end
   end
@@ -121,16 +125,16 @@ defmodule Core.Es.Transact do
 
   defp storage_refusal(_detail), do: :none
 
-  defp refused(fun, limit, retries, aggregate_id, _result) when retries < limit do
+  defp refused(fun, dao, limit, retries, aggregate_id, _result) when retries < limit do
     Logger.debug(
       "транзакция команды: повтор после отказа записи: aggregate_id=#{aggregate_id} " <>
         "retry=#{retries + 1}"
     )
 
-    attempt(fun, limit, retries + 1)
+    attempt(fun, dao, limit, retries + 1)
   end
 
-  defp refused(_fun, _limit, retries, aggregate_id, result) do
+  defp refused(_fun, _dao, _limit, retries, aggregate_id, result) do
     Logger.warning(
       "транзакция команды: повторы после отказа записи исчерпаны: " <>
         "aggregate_id=#{aggregate_id} retries=#{retries}"
