@@ -13,11 +13,14 @@ defmodule Core.Es.ProjectionCase do
   `ACCESS EXCLUSIVE` до конца sandbox-транзакции.
 
   Фикстура модуля из `events:` — `<тип агрегата>/<текущий тег>.json` от корня `fixtures:`; тип
-  агрегата и тег берутся из кодека события, фикстуру грузит он же с фасадом `codec:` проекции. Тег в
-  `type` фикстуры сверяется с текущим: фикстуры источников `upcasts:` не прогоняются, апкаст
-  проверяет `Core.Es.EventCompatCase`. Нет фикстуры, в ней чужой тег или она не грузится — провал
-  теста с путями. Событие уничтожения ключа `Core.Es.Personal.Event.KeyDestroyed` case строит сам
-  (`Core.Es.Personal.Test.key_destroyed/2`), его фикстура не ищется.
+  агрегата и тег берутся из кодека события. Грузит её тот же шаг хранилища событий, что и путь
+  чтения: все `{"$pd": …}` конверта расшифровываются одним вызовом `open`, затем событие грузит
+  кодек семейства с фасадом `codec:` проекции; уничтоженный ключ даёт
+  `%Core.Es.Personal.Destroyed{}` на месте поля. Тег в `type` фикстуры сверяется с текущим:
+  фикстуры источников `upcasts:` не прогоняются, апкаст проверяет `Core.Es.EventCompatCase`. Нет
+  фикстуры, в ней чужой тег или она не грузится — провал теста с путями. Событие уничтожения ключа
+  `Core.Es.Personal.Event.KeyDestroyed` case строит сам (`Core.Es.Personal.Test.key_destroyed/2`),
+  его фикстура не ищется.
 
   ## Генерируемые тесты
 
@@ -68,6 +71,7 @@ defmodule Core.Es.ProjectionCase do
   alias Core.Es.Personal.Event.KeyDestroyed
   alias Core.Es.Personal.Marker
   alias Core.Es.Personal.SubjectID
+  alias Core.Es.Store
   alias Core.Helper
   alias Core.Helper.Savepoint
   alias Core.Helper.Transact
@@ -467,8 +471,16 @@ defmodule Core.Es.ProjectionCase do
     with {:ok, body} <- File.read(path),
          {:ok, data} <- Jason.decode(body),
          :ok <- check_type(data, tag) do
-      event_codec.load(event_codec.__es_family__(), data, codec)
+      load_through_store(event_codec, data, codec)
     end
+  end
+
+  # Тот же шаг, что у пути чтения: расшифровка всех `$pd` конверта одним вызовом `open`, затем
+  # загрузка кодеком семейства с фасадом проекции для вложенных значений.
+  defp load_through_store(event_codec, data, codec) do
+    load = fn _event_codec, wire -> event_codec.load(event_codec.__es_family__(), wire, codec) end
+
+    with {:ok, [loaded]} <- Store.load_wires([{event_codec, data}], load), do: loaded
   end
 
   defp check_type(%{"type" => type}, tag) when type != tag, do: {:error, %{type: type}}

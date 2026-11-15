@@ -7,10 +7,12 @@ defmodule Core.Es.ProjectionCaseTest do
   alias Core.EsFixture
   alias Core.EsFixture.Account
   alias Core.EventFixture
+  alias Core.PersonalGoldenFixture
 
   require Error
 
   @fixtures "test/support/fixtures/events"
+  @sealed "test/support/fixtures/events_sealed"
 
   # Сломанный каталог фикстур: фикстур счёта нет вовсе, у `fixture.closed` — тоже.
   @broken "test/support/fixtures/events_broken"
@@ -50,11 +52,12 @@ defmodule Core.Es.ProjectionCaseTest do
     import Ecto.Query, only: [from: 2]
 
     alias Core.Config
+    alias Core.Es.Personal.Destroyed
     alias Core.EsFixture.PersonalBrokenProjection.Holder
 
     def put(id, value) do
-      codec = Config.codec()
-      {1, nil} = Config.dao().insert_all(Holder, [%{aggregate_id: codec.dump(id), holder: codec.dump(value)}])
+      row = %{aggregate_id: Config.codec().dump(id), holder: holder(value)}
+      {1, nil} = Config.dao().insert_all(Holder, [row])
       :ok
     end
 
@@ -63,6 +66,10 @@ defmodule Core.Es.ProjectionCaseTest do
       {_count, nil} = Config.dao().delete_all(from(h in Holder, where: h.aggregate_id == ^id))
       :ok
     end
+
+    # Уничтоженное ПДн-значение — не ПДн: строка остаётся без владельца.
+    defp holder(%Destroyed{}), do: nil
+    defp holder(value), do: Config.codec().dump(value)
   end
 
   defmodule Unpersonal do
@@ -143,6 +150,32 @@ defmodule Core.Es.ProjectionCaseTest do
 
       assert {:error, %{personal_left: [{^path, [{"public.fixture_broken_projection_holders", "holder", :holder}]}]}} =
                ProjectionCase.check_personal(Unpersonal, @fixtures)
+    end
+
+    test "фикстура с запечатанным ПДн-значением расшифрована и записана открытой" do
+      :ok = PersonalGoldenFixture.put!()
+      path = Path.join(@sealed, "account/account.holder_set.json")
+      left = [{"public.fixture_broken_projection_holders", "holder", :holder}]
+
+      assert {:error, %{personal_left: [{^path, ^left}]}} = ProjectionCase.check_personal(Unpersonal, @sealed)
+    end
+
+    test "ключа субъекта нет — фикстура не грузится с той же ошибкой, что в проде" do
+      path = Path.join(@sealed, "account/account.holder_set.json")
+
+      assert {:error, %{failed: [{^path, %Error{code: :unreadable_personal_value}}]}} =
+               ProjectionCase.check_personal(Unpersonal, @sealed)
+    end
+
+    test "ключ субъекта уничтожен — фикстура грузится уничтоженным значением, открытых ПДн нет" do
+      :ok = PersonalGoldenFixture.put!()
+      :ok = PersonalGoldenFixture.destroy!()
+
+      assert :ok = ProjectionCase.check_personal(Unpersonal, @sealed)
+
+      # project/1 записал строку без владельца, а не упал на %Destroyed{}: clear/0 её не чистит.
+      assert {:error, %{not_cleared: [{"public.fixture_broken_projection_holders", 1}]}} =
+               ProjectionCase.check_clear(Unpersonal, @sealed)
     end
   end
 
