@@ -178,6 +178,28 @@ defmodule Core.Web.EventTest do
       refute_received {:get_names, _resolver, _ids}
     end
 
+    test "plain-профиль без user_ref: словарь не читается, неразрешённый id — не отказ" do
+      by = LabelsUserID.new()
+      event = LabelsEvent.Closed.new(EventAggID.new(), Version.new(), by, At.now!())
+      page = %Pagination.Result{items: [event], total: 1}
+
+      assert {:ok, %Pagination.Result{items: [one], total: 1}} = Plain.to_wire_page(page, Context.new())
+      assert one.by == External.dump(by)
+      refute_received {:get_names, _resolver, _ids}
+    end
+
+    test "профиль с user_ref: словарь читается и резолвер получает автора" do
+      by = LabelsUserID.new()
+      event = LabelsEvent.Closed.new(EventAggID.new(), Version.new(), by, At.now!())
+      page = %Pagination.Result{items: [event], total: 1}
+
+      assert {:ok, %Pagination.Result{items: [one]}} =
+               WebEvent.to_wire_page(page, Context.new(%{names: %{by => "Автор"}}))
+
+      assert one.by == %{id: External.dump(by), login: "Автор"}
+      assert_received {:get_names, UserQuery, [^by]}
+    end
+
     test "отказ резолвера — итог функции, а не частичный словарь" do
       [first, second] = [ItemID.new(), ItemID.new()]
       by = LabelsUserID.new()

@@ -1,21 +1,5 @@
 defmodule Core.Labels.Walk do
-  @moduledoc """
-  Обход объявленной видимой формы (ADR-0063): значения — для сведений (`Core.Labels.Details`) и
-  словаря ссылок (`Core.Labels.Refs`), объявления — для ратчета полноты
-  (`Core.Labels.CompletenessCase`).
-
-  Обход значений разбирает struct по его объявлениям (`Core.Labels.Fields`) и отдаёт дерево видимых
-  значений: подпись поля, спека и значение, а у контейнера — раскрытые элементы. Правила видимости
-  живут здесь: `:hidden` в дерево не попадает, `text:` выходит листом, struct и `union:` — группой
-  своих видимых полей, `list:` и `set:` — элементами, `map:` и `type: :map` — парами ключ — значение;
-  struct изменения (`change:`) — одной записью со сторонами `old` / `new`.
-
-  Обход объявлений идёт от событий кодеков по спеке нагрузки: во вложенные struct'ы, списки,
-  множества, ключи и значения словарей и варианты семейства. Место объявления — `{вид, владелец,
-  поле, модуль}`; скрытые поля не обходятся, `text:` листом не даёт модуля.
-
-  Модуль внутренний для библиотеки.
-  """
+  @moduledoc false
 
   alias Core.Codec.Field
   alias Core.Es.Personal.Destroyed
@@ -71,12 +55,6 @@ defmodule Core.Labels.Walk do
   @spec entry(label(), Fields.spec(), term()) :: entry()
 
   def entry(label, spec, value), do: node(label, spec, value)
-
-  @doc "Спека выходит текстом функции (`text:` на любой глубине), а не ссылкой или группой."
-  @spec text?(Fields.spec()) :: boolean()
-
-  def text?({:text, _fun}), do: true
-  def text?(spec), do: Enum.any?(Field.values(spec), &text?/1)
 
   # ---
 

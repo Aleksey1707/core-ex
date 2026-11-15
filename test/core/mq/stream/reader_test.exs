@@ -436,6 +436,23 @@ defmodule Core.Mq.Stream.ReaderTest do
       refute_received {:mq_ready, ^old_ref}
     end
 
+    test "get с таймаутом не перебивает чужую заявку", %{reader: reader, topic: topic} do
+      assert {:ok, ref} = Stream.Reader.notify_when_ready(reader, self())
+
+      task = Task.async(fn -> Stream.Reader.get(reader, 2_000) end)
+
+      # `get` упирается в занятый слот и переходит на опрос, не заменяя чужую заявку.
+      Process.sleep(50)
+      assert %{ready_request: {pid, ^ref}} = :sys.get_state(reader)
+      assert pid == self()
+      assert Process.alive?(task.pid)
+
+      deliver(reader, 0, encoded_many(topic, 0, 1))
+
+      assert_received {:mq_ready, ^ref}
+      assert {:ok, %Mq.Message{body: "body-0"}} = Task.await(task)
+    end
+
     test "get с таймаутом ставит заявку на процесс вызывающего", %{reader: reader, topic: topic} do
       task = Task.async(fn -> Stream.Reader.get(reader, 2_000) end)
 

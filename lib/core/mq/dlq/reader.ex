@@ -125,7 +125,7 @@ defmodule Core.Mq.Dlq.Reader do
 
   Остаётся до ломающего выпуска.
   """
-  @doc deprecated: "Используйте snapshot/1: общие gauge'и PromEx читает из снимка"
+  @deprecated "Используйте snapshot/1: общие gauge'и PromEx читает из снимка"
   @spec metrics(t()) :: Core.Mq.ReaderReliable.metrics()
 
   @impl true

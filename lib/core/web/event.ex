@@ -263,7 +263,7 @@ defmodule Core.Web.Event do
         true -> unquote(labelled())
       end
 
-      unquote(page(labels?))
+      unquote(page(labels?, not is_nil(user_ref)))
     end
   end
 
@@ -285,26 +285,38 @@ defmodule Core.Web.Event do
     end
   end
 
-  defp page(labels?) do
+  defp page(labels?, refs?) do
     type =
       case labels? do
         false -> quote(do: Core.Web.Event.t())
         true -> quote(do: Core.Web.Event.labelled())
       end
 
+    body =
+      if refs? do
+        quote generated: true do
+          case Core.Labels.Refs.get(page, context) do
+            {:ok, refs} -> {:ok, Core.Pagination.Result.map(page, &to_wire(&1, refs))}
+            {:error, error} -> {:error, error}
+          end
+        end
+      else
+        quote generated: true do
+          {:ok, Core.Pagination.Result.map(page, &to_wire(&1, %{}))}
+        end
+      end
+
     quote generated: true do
       @doc """
       Страница событий для JSON: словарь ссылок собирается со всей страницы один раз, затем
-      `to_wire/2` применяется к элементам; `total` и порядок сохраняются.
+      `to_wire/2` применяется к элементам; `total` и порядок сохраняются. Профиль без подписей и
+      без `user_ref:` словарь не читает — ссылок в `to_wire/2` нет.
       """
       @spec to_wire_page(Core.Pagination.Result.t(Core.Es.Event.t()), Core.Context.t()) ::
               Core.Result.t(Core.Pagination.Result.t(unquote(type)))
 
       def to_wire_page(%Core.Pagination.Result{} = page, %Core.Context{} = context) do
-        case Core.Labels.Refs.get(page, context) do
-          {:ok, refs} -> {:ok, Core.Pagination.Result.map(page, &to_wire(&1, refs))}
-          {:error, error} -> {:error, error}
-        end
+        unquote(body)
       end
     end
   end

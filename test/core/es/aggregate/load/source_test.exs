@@ -39,14 +39,24 @@ defmodule Core.Es.Aggregate.Load.SourceTest do
   end
 
   describe "контракт источника строк" do
-    test "фикстура держит одну строку снапшота на поток", %{snapshots: snapshots} do
-      counts =
-        snapshots
-        |> Enum.map(&elem(&1, 0))
-        |> Enum.frequencies()
-        |> Map.values()
+    test "тройка граничного случая: версия снапшота и версии строк хвоста", context do
+      %{cfg: cfg, id: id, other: other, rows: rows, snapshots: snapshots} = context
 
-      assert Enum.all?(counts, &(&1 == 1))
+      cases = [
+        {:hit, id, nil, nil, false, {3, [4]}},
+        {:below_address, id, Version.new!(3), nil, false, {nil, [4]}},
+        {:above_ceiling, id, nil, 2, false, {nil, [1, 2]}},
+        {:absent, other, nil, nil, false, {nil, [1, 2]}},
+        {:rejected, id, nil, nil, true, {nil, [1, 2, 3, 4]}}
+      ]
+
+      for {name, stream_id, version, upper, refold?, expected} <- cases do
+        plan = plan(cfg, stream_id, version, upper)
+        plan = if refold?, do: Plan.refold(plan, [dump(stream_id)]), else: plan
+
+        assert triple(Rows.fetch(cfg, plan, rows: rows, snapshots: snapshots)) == expected,
+               "случай #{name}: версия снапшота и версии строк хвоста"
+      end
     end
 
     test "SQL и тестовый адаптер дают одинаковые тройки на границах снапшота", context do

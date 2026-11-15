@@ -4,8 +4,10 @@ defmodule Core.Es.Aggregate.Repo.Pg.Config do
   план, снапшоты и read-репозиторий.
 
   `use Core.Es.Aggregate.Repo.Pg` собирает базовую структуру на компиляции; вызов конфигурации
-  (`__es_read_cfg__/0` и внутренняя `es_aggregate_repo/0`) делает struct update и резолвит `dao`,
-  `codec` и источник строк в одной точке — `resolve/4`. В базовой структуре эти три поля — `nil`.
+  (`__es_read_cfg__/0` и внутренняя `es_aggregate_repo/0`) — `resolve/4`, который только подставляет
+  уже разрешённые значения `dao`, `codec` и источника строк. Сами значения читает сгенерированный
+  репозиторий: `Core.Config` — на вызове `es_aggregate_repo/0`, если опции `repo:` / `codec:` не
+  заданы. В базовой структуре эти три поля — `nil`.
 
   Все остальные поля обязательны: пропущенная настройка — ошибка сборки репозитория, а не тихий
   `nil`. Правка ключа — `%{@cfg | …}`.
@@ -40,9 +42,9 @@ defmodule Core.Es.Aggregate.Repo.Pg.Config do
           outbox: module(),
           snapshot: Settings.t() | nil,
           key_reservations: [module()],
-          dao: module(),
-          codec: module(),
-          source: module()
+          dao: module() | nil,
+          codec: module() | nil,
+          source: module() | nil
         }
 
   @doc """

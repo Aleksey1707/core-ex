@@ -203,7 +203,8 @@ if Code.ensure_loaded?(:brod) do
     @doc """
     Прочитать следующее сообщение; `timeout` — сколько ждать его появления.
 
-    Ожидание идёт заявкой на готовность (`notify_when_ready/2`) на процесс вызывающего.
+    Ожидание идёт заявкой на готовность на процесс вызывающего; чужая заявка не перебивается —
+    занятый слот переводит ожидание на опрос.
     """
     @spec get(t(), timeout()) :: {:ok, Message.t()} | :empty | {:error, Error.t()}
 
@@ -213,7 +214,9 @@ if Code.ensure_loaded?(:brod) do
     def get(server, 0), do: GenServer.call(server, :get, @call_timeout)
 
     def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
-      Poll.await_empty(fn -> get(server, 0) end, fn -> notify_when_ready(server, self()) end, timeout, @poll_ms)
+      ready = fn -> GenServer.call(server, {:wait_once, self()}, @call_timeout) end
+
+      Poll.await_empty(fn -> get(server, 0) end, ready, timeout, @poll_ms)
     end
 
     @doc "Зафиксировать смещение сообщения в работе."
@@ -239,7 +242,7 @@ if Code.ensure_loaded?(:brod) do
     Отсюда читает Kafka-ветку аренды и лагов `Core.Mq.PromEx`; общие gauge'и плагин берёт из
     `snapshot/1`, поэтому `info/1` как их источник устарел.
     """
-    @doc deprecated: "Как источник общих метрик используйте snapshot/1"
+    @deprecated "Как источник общих метрик используйте snapshot/1"
     @spec info(t()) :: %{
             lease?: boolean(),
             pending?: boolean(),
@@ -304,6 +307,13 @@ if Code.ensure_loaded?(:brod) do
     def handle_call({:notify_when_ready, pid}, _from, state) do
       ref = make_ref()
       {:reply, {:ok, ref}, notify_if_ready(%{state | ready_request: {pid, ref}})}
+    end
+
+    def handle_call({:wait_once, pid}, _from, state) do
+      case reserve(state, pid) do
+        {:ok, ref, state} -> {:reply, {:ok, ref}, notify_if_ready(state)}
+        {:error, :busy} -> {:reply, {:error, :busy}, state}
+      end
     end
 
     def handle_call(:info, _from, state) do
@@ -747,6 +757,16 @@ if Code.ensure_loaded?(:brod) do
     end
 
     defp notify_if_ready(state), do: state
+
+    # Занятый слот чужой живой заявки не перебивается: ожидание вызывающего переходит на опрос.
+    defp reserve(%__MODULE__{ready_request: nil} = state, pid) do
+      ref = make_ref()
+      {:ok, ref, %{state | ready_request: {pid, ref}}}
+    end
+
+    defp reserve(%__MODULE__{ready_request: {owner, _ref}} = state, pid) do
+      if Process.alive?(owner), do: {:error, :busy}, else: reserve(%{state | ready_request: nil}, pid)
+    end
 
     defp ready?(state) do
       leased?(state) and

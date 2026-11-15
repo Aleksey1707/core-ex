@@ -457,7 +457,9 @@ defmodule Core.Mq.PromEx do
         module = reader_module(entry, pid)
 
         if is_atom(module) and not is_nil(module) and Export.exports?(module, :info, 1),
-          do: {:ok, module.info(pid)},
+          # `info/1` помечен `@deprecated`, но Kafka-ветке аренды и лагов нужна именно его форма.
+          # credo:disable-for-next-line Credo.Check.Refactor.Apply
+          do: {:ok, apply(module, :info, [pid])},
           else: :skip
 
       nil ->

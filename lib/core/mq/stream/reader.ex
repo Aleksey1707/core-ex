@@ -134,7 +134,8 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     @doc """
     Прочитать следующее сообщение.
 
-    С таймаутом ожидание идёт заявкой на готовность (`notify_when_ready/2`) на процесс вызывающего.
+    С таймаутом ожидание идёт заявкой на готовность на процесс вызывающего; чужая заявка не
+    перебивается — занятый слот переводит ожидание на опрос.
     """
     @spec get(t(), timeout()) :: {:ok, Message.t()} | :empty | {:error, Error.t()}
 
@@ -147,7 +148,9 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     def get(server, timeout)
         when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
-      Poll.await_empty(fn -> get(server, 0) end, fn -> notify_when_ready(server, self()) end, timeout, @poll_ms)
+      ready = fn -> GenServer.call(server, {:wait_once, self()}, @call_timeout) end
+
+      Poll.await_empty(fn -> get(server, 0) end, ready, timeout, @poll_ms)
     end
 
     @doc "Зафиксировать offset текущего сообщения."
@@ -176,7 +179,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     `pending_ts` — timestamp чанка сообщения в `pending`: мс Unix-времени по часам ноды брокера на
     момент записи чанка; `nil` без `pending`.
     """
-    @doc deprecated: "Как источник метрик используйте snapshot/1"
+    @deprecated "Как источник метрик используйте snapshot/1"
     @spec info(t()) :: %{
             buffer_len: non_neg_integer(),
             chunk_remaining: non_neg_integer(),
@@ -237,6 +240,13 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     def handle_call({:notify_when_ready, pid}, _from, state) do
       ref = make_ref()
       {:reply, {:ok, ref}, notify_if_ready(%{state | ready_request: {pid, ref}})}
+    end
+
+    def handle_call({:wait_once, pid}, _from, state) do
+      case reserve(state, pid) do
+        {:ok, ref, state} -> {:reply, {:ok, ref}, notify_if_ready(state)}
+        {:error, :busy} -> {:reply, {:error, :busy}, state}
+      end
     end
 
     def handle_call(:info, _from, state) do
@@ -514,6 +524,16 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     defp notify_if_ready(state), do: state
+
+    # Занятый слот чужой живой заявки не перебивается: ожидание вызывающего переходит на опрос.
+    defp reserve(%__MODULE__{ready_request: nil} = state, pid) do
+      ref = make_ref()
+      {:ok, ref, %{state | ready_request: {pid, ref}}}
+    end
+
+    defp reserve(%__MODULE__{ready_request: {owner, _ref}} = state, pid) do
+      if Process.alive?(owner), do: {:error, :busy}, else: reserve(%{state | ready_request: nil}, pid)
+    end
 
     defp ready?(%__MODULE__{subscription_id: nil}), do: false
     defp ready?(%__MODULE__{pending: nil, buffer: buffer}), do: Buffer.len(buffer) > 0

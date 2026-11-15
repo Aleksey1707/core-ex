@@ -19,7 +19,7 @@ defmodule Core.Labels.Refs do
   (`Core.Labels.Fields`), у варианта семейства — его поля, у struct'а изменения — стороны `old_value`
   и `new_value`, у контейнеров — элементы и пары своих видов. Скрытое поле в обход не попадает, и
   резолвер его не получает. `text:` выходит листом: id в нём ссылкой не выходит. Struct без
-  объявления полей в обход не идёт — сведений у него нет, и ссылок тоже.
+  объявления полей обходится целиком.
 
   Словарь не шире сведений: каждый его id, кроме автора события, есть в сведениях. В `Date`,
   `DateTime`, `NaiveDateTime`, `Time`, `Decimal`, Prim без вида id, id `kind: :id` и Prim с
@@ -65,12 +65,23 @@ defmodule Core.Labels.Refs do
   defp visit(%module{} = value, groups) do
     cond do
       Core.Prim.prim?(module) -> prim(module, value, groups)
+      module in Kind.scalars() -> groups
       Fields.labelled?(module) -> walk(Walk.values(module, value), groups)
-      true -> groups
+      true -> raw(Map.from_struct(value), groups)
     end
   end
 
   defp visit(_value, groups), do: groups
+
+  # Struct без объявления полей обходится целиком: поля, списки, множества и пары map'ы.
+  defp raw(%MapSet{} = set, groups), do: raw(MapSet.to_list(set), groups)
+  defp raw(%_{} = value, groups), do: visit(value, groups)
+
+  defp raw(map, groups) when is_map(map),
+    do: Enum.reduce(map, groups, fn {key, value}, acc -> raw(value, raw(key, acc)) end)
+
+  defp raw(list, groups) when is_list(list), do: Enum.reduce(list, groups, &raw/2)
+  defp raw(_term, groups), do: groups
 
   defp walk({:fields, nodes}, groups), do: Enum.reduce(nodes, groups, &entry/2)
   defp walk({:change, node}, groups), do: entry(node, groups)

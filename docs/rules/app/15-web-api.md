@@ -478,9 +478,11 @@ end
 Действует, если приложение отдаёт страницу событий агрегата.
 
 Событие страницы событий MUST дампиться модулем приложения с `use Core.Web.Event`
-(`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»): экшен страницы событий передаёт его
-`to_wire/2` в `Response.page_data/2` вместе со словарём ссылок страницы (`Core.Labels.Refs.get/2` в
-usecase). Свой презентер события MUST NOT: поля, их имена, camelCase нагрузки и форма автора —
+(`deps/core/docs/rules/10-architecture.md`, «Граница HTTP»). Страницу собирает предпочтительно
+`to_wire_page/2`: словарь ссылок страницы (`Core.Labels.Refs.get/2`) функция собирает сама со всей
+страницы. Конверт — по-прежнему `Response.page_data/2`, для готовой wire-формы элемента — с
+identity. `to_wire/2` со словарём остаётся для точечной сборки одного элемента и правки его
+результата. Свой презентер события MUST NOT: поля, их имена, camelCase нагрузки и форма автора —
 контракт клиента, общий для всех приложений, и ручная копия расходится с ним молча.
 
 Схема события — тот же модуль с `use Core.Web.Event`: с `open_api_spex` он и есть схема события, а
@@ -520,7 +522,8 @@ defmodule MyAppWeb.Schemas.Event do
     ]
 end
 
-json(conn, Response.success(Response.page_data(page, &Event.to_wire(&1, refs))))
+with {:ok, wire} <- Event.to_wire_page(page, context),
+     do: json(conn, Response.success(Response.page_data(wire, & &1)))
 
 # в operation/2
 responses: [ok: {"События", "application/json", Response.Schema.page(MyAppWeb.Schemas.Event)}]

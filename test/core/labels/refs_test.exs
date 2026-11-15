@@ -1,5 +1,5 @@
 defmodule Core.Labels.RefsTest.Plain do
-  @moduledoc "Struct без объявления сведений — в словарь ссылок не идёт."
+  @moduledoc "Struct без объявления сведений — в словаре ссылок обходится целиком."
 
   defstruct [:item]
 end
@@ -96,13 +96,15 @@ defmodule Core.Labels.RefsTest do
     assert Enum.sort(users) == Enum.sort([by, signer])
   end
 
-  test "struct без объявления полей в обход не идёт: словарь — только автор" do
+  test "struct без объявления полей обходится целиком: id из него резолвится" do
     item = ItemID.new()
     by = UserID.new()
     event = %BareEvent{payload: %Plain{item: item}, by: by}
 
-    assert Refs.get(event, context(%{by => "Автор", item => "Позиция"})) == {:ok, %{by => "Автор"}}
-    refute_received {:get_names, ItemQuery, _ids}
+    assert Refs.get(event, context(%{by => "Автор", item => "Позиция"})) ==
+             {:ok, %{by => "Автор", item => "Позиция"}}
+
+    assert_received {:get_names, ItemQuery, [^item]}
   end
 
   test "id только под `text:` резолвер не получает: поле, список, множество, значение изменения и список значений" do
