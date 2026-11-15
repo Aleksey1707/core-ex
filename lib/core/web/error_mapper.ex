@@ -40,6 +40,7 @@ defmodule Core.Web.ErrorMapper do
   @auth_codes ~w(unauthorized auth_failed invalid_token session_not_found)a
   @unauthorized "Не авторизован"
   @critical "Произошла непредвиденная ошибка"
+  @unavailable "Сервис временно недоступен"
 
   @auth_opts [
     auth_codes: [
@@ -74,6 +75,7 @@ defmodule Core.Web.ErrorMapper do
   |---|---|---|---|---|
   | `%Error{kind: :domain, code: :version_mismatch}` | 412 | `"<ns>/version_mismatch"` | `message` | — |
   | `%Error{kind: :domain, code: :access_denied}` | 403 | `"<ns>/access_denied"` | `message` | — |
+  | `%Error{kind: :app, code: :deadline_exceeded}` | 503 | `"service_unavailable"` | константа | `:warning` |
   | `%Error{code: c}`, `c` в `auth_codes:` | 401 | `"not_authorized"` | константа | `:debug` |
   | `%Error{kind: :domain}` | 400 | `"<ns>/<code>"` ошибки | `message` | — |
   | `%Error{kind: :app}` | 500 | `"internal_error"` | шаблон, как у `critical/1` | `:error` |
@@ -81,7 +83,10 @@ defmodule Core.Web.ErrorMapper do
 
   Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту
   показывать нельзя, и она обязана попасть в лог (`12-errors.md`), поэтому `kind: :app`
-  с любым кодом уходит в 500.
+  с любым кодом, кроме `:deadline_exceeded`, уходит в 500. Дедлайн команды — перегрузка, а не
+  критическая ошибка: 503 с константным текстом, `message` ошибки наружу не уходит, уровень
+  `:warning`, и отчёт `Core.Web.CriticalError` не зовётся — потребитель зовёт его только на
+  `:error`.
 
   Доменный `:not_found` своей строки не имеет и уходит 400 по строке `kind: :domain`, а не 404.
   `:not_found` домен отдаёт и на ресурс из URI, и на запись, на которую ссылается тело команды,
@@ -103,6 +108,9 @@ defmodule Core.Web.ErrorMapper do
 
   def map(%Error{kind: :domain, code: :version_mismatch} = error, _opts), do: {412, Response.error(error), nil}
   def map(%Error{kind: :domain, code: :access_denied} = error, _opts), do: {403, Response.error(error), nil}
+
+  def map(%Error{kind: :app, code: :deadline_exceeded}, _opts),
+    do: {503, Response.error(:service_unavailable, @unavailable), :warning}
 
   def map(%Error{code: code} = error, opts) do
     if code in Keyword.fetch!(opts, :auth_codes),

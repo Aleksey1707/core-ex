@@ -10,7 +10,7 @@ defmodule Core.Web.ErrorMapperTest do
     Error.domain(code: code, ns: :test, message: message)
   end
 
-  defp app(code), do: Error.app(code: code, ns: :test)
+  defp app(code, message \\ nil), do: Error.app(code: code, ns: :test, message: message)
 
   defp body(code, message, data \\ %{}),
     do: %{status: "error", data: data, code: code, message: message}
@@ -55,6 +55,13 @@ defmodule Core.Web.ErrorMapperTest do
 
   test "прикладная ошибка → 500 с шаблоном и error-логом" do
     assert {500, @critical, :error} == Web.ErrorMapper.map(app(:write_failed))
+  end
+
+  test "дедлайн команды → 503 константой и warning-логом, без отчёта о критической ошибке" do
+    error = app(:deadline_exceeded, "секрет: user=42")
+
+    assert {503, body("service_unavailable", "Сервис временно недоступен"), :warning} ==
+             Web.ErrorMapper.map(error)
   end
 
   test "не-%Error{} → 500" do

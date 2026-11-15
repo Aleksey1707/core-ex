@@ -3,7 +3,8 @@ defmodule Core.Web.Response do
   Обёртка ответа API: `%{status: "ok", data}` / `%{status: "error", data, code, message}`.
 
   `code` ошибки — строка: `"<ns>/<code>"` доменной `%Error{}` (`error/1`), константа
-  `Core.Web.ErrorMapper` (`"internal_error"`, `"not_authorized"`, `"invalid_params"`) или имя
+  `Core.Web.ErrorMapper` (`"internal_error"`, `"not_authorized"`, `"invalid_params"`,
+  `"service_unavailable"`) или имя
   HTTP-статуса ошибки, не дошедшей до контроллера (`Core.Web.ErrorMapper.by_status/2`). Решение —
   ADR-0062, ADR-0067, ADR-0068.
 

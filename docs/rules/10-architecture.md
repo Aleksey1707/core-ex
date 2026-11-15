@@ -201,10 +201,15 @@ Sentry (ADR-0071): то, что в таблице помечено «при `ope
 | `%Error{code: c}` любого `kind`, `c` в `auth_codes:` | 401 | `"not_authorized"` | константа | `:debug` |
 | `%Error{kind: :domain}` | 400 | `"<ns>/<code>"` ошибки | `message` | — |
 | `%Error{kind: :app}` с любым `code` | 500 | `"internal_error"` | шаблон | `:error` |
+| `%Error{kind: :app, code: :deadline_exceeded}` | 503 | `"service_unavailable"` | константа | `:warning` |
 | прочее (не `%Error{}`) | 500 | `"internal_error"` | шаблон | `:error` |
 
 - Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту показывать
   нельзя, и она обязана попасть в лог (`12-errors.md`).
+- Дедлайн команды — исключение из строки `kind: :app`: 503 с константным текстом, `message`
+  ошибки наружу не уходит, уровень лога `:warning`; отчёт `Core.Web.CriticalError` не зовётся —
+  перегрузка не критическая ошибка. `Retry-After` — опция потребителя, не требование библиотеки
+  (`deps/core/docs/rules/app/15-web-api.md`, «Дедлайн команды»).
 - Доменный `:not_found` — 400 по строке `kind: :domain`; своя строка 404 в
   `Core.Web.ErrorMapper.map/2` MUST NOT. `:not_found` домен отдаёт и на ресурс из URI, и на запись,
   на которую ссылается тело команды, а по `%Error{}` маппер их не различит: 404 на существующий

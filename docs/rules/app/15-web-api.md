@@ -327,6 +327,23 @@ def respond(conn, {:accepted, id, version}, _render), do: accepted(conn, id, ver
 def respond(conn, :unchanged, _render), do: send_resp(conn, 204, "")
 ```
 
+## Дедлайн команды
+
+Истёкший дедлайн команды event-sourced агрегата приходит из usecase ошибкой
+`%Error{kind: :app, ns: :es, code: :deadline_exceeded}`
+(`deps/core/docs/adr/0096-command-outcomes-deadline-as-error.md`).
+
+- Ответ MUST быть 503: такую ошибку разбирает строка `Core.Web.ErrorMapper.map/2` —
+  `{503, обёртка ответа, :warning}`. Код обёртки — константа `"service_unavailable"`, текст —
+  константа маппера; `message` и `detail` прикладной ошибки наружу MUST NOT: в них идентификатор
+  агрегата и прочий контекст команды.
+- Уровень лога — `:warning`, и `Core.Web.CriticalError` на нём MUST NOT зваться:
+  `FallbackController` и `ErrorJSON` зовут отчёт только на `:error` (`21-observability.md`,
+  «Служба учёта ошибок»). `ErrorJSON` на статусе 503 отдаёт прежний `by_status(503)` без записи.
+- Своя клоза `map/1` для дедлайна MUST NOT: строка общая для всех приложений, и код ответа —
+  часть контракта клиента.
+- `Retry-After` MAY ставить приложение; библиотека его не требует и не ставит.
+
 ## FallbackController
 
 `FallbackController` таблицы статусов не содержит: он зовёт маппер приложения, отправляет

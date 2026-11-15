@@ -68,6 +68,9 @@
   команды (при `enabled: false` raise, при `enabled: true` exit). После остановки дерева
   `enabled: true` даёт `RuntimeError` «дерево остановлено», `enabled: false` работает. Telemetry
   `result` — `:ok`, `:version_mismatch`, `:error`; `:exit` остаётся только за смертью процесса.
+  На HTTP-границе ошибка дедлайна — 503 с константным кодом и текстом (`Core.Web.ErrorMapper`),
+  уровень лога `:warning`; `message` прикладной ошибки наружу не уходит, отчёт о критической
+  ошибке не зовётся, а `Retry-After` приложение ставит по своему решению.
   Правка потребителя: было `catch_exit(Process.execute(...))`, стало `{:error, %Error{}}` в той же
   ветке, что и остальные отказы; `timeout:` теперь действует и при `enabled: false`; кто полагался
   на exit при остановленном дереве — ловит `RuntimeError` или не останавливает дерево под вызовом.
