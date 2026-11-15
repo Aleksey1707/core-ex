@@ -92,7 +92,11 @@ defmodule Core.Mq.Dlq.Reader do
     GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
   end
 
-  @doc "Прочитать следующую возвращённую запись; `timeout` — сколько ждать её появления."
+  @doc """
+  Прочитать следующую возвращённую запись; `timeout` — сколько ждать её появления.
+
+  Ожидание идёт опросом базы с интервалом: заявки на готовность у DLQ-читателя нет.
+  """
   @spec get(t(), timeout()) :: {:ok, Message.t()} | :empty | {:error, Error.t()}
 
   @impl true

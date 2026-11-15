@@ -32,6 +32,11 @@ defmodule Core.Mq.Dlq.ReaderTest do
     assert {:ok, %Mq.Message{body: "late"}} = Task.await(task)
   end
 
+  test "get с таймаутом опрашивает базу: заявки на готовность нет", %{reader: reader} do
+    refute Core.Helper.Module.exports?(Dlq.Reader, :notify_when_ready, 2)
+    assert :empty = Dlq.Reader.get(reader, 120)
+  end
+
   test "перехваченная запись брошена с warning, commit её отклонён", %{reader: reader, subscriber: subscriber} do
     insert!(subscriber, "a")
     insert!(subscriber, "b")

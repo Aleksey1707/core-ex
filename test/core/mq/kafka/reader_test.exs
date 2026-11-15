@@ -318,16 +318,23 @@ defmodule Core.Mq.Kafka.ReaderTest do
       refute_receive {:mq_ready, _}, 50
     end
 
-    test "get с таймаутом не перебивает чужую заявку", %{client: client} do
+    test "get с таймаутом ставит заявку на процесс вызывающего", %{client: client} do
       reader = start_reader!(client)
       await_subscribed(client, 0)
 
-      assert {:ok, ref} = Reader.notify_when_ready(reader, self())
-      assert :empty = Reader.get(reader, 50)
+      task = Task.async(fn -> Reader.get(reader, 2_000) end)
+
+      await(fn ->
+        case :sys.get_state(reader) do
+          %{ready_request: {pid, _ref}} -> pid == task.pid
+          _other -> false
+        end
+      end)
 
       :ok = KafkaFake.deliver(client, @topic, 0, [{0, "k", "a", []}], 1)
 
-      assert_receive {:mq_ready, ^ref}
+      assert {:ok, %{body: "a"}} = Task.await(task)
+      assert %{ready_request: nil} = :sys.get_state(reader)
     end
   end
 

@@ -200,7 +200,11 @@ if Code.ensure_loaded?(:brod) do
       GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
     end
 
-    @doc "Прочитать следующее сообщение; `timeout` — сколько ждать его появления."
+    @doc """
+    Прочитать следующее сообщение; `timeout` — сколько ждать его появления.
+
+    Ожидание идёт заявкой на готовность (`notify_when_ready/2`) на процесс вызывающего.
+    """
     @spec get(t(), timeout()) :: {:ok, Message.t()} | :empty | {:error, Error.t()}
 
     @impl true
@@ -209,7 +213,7 @@ if Code.ensure_loaded?(:brod) do
     def get(server, 0), do: GenServer.call(server, :get, @call_timeout)
 
     def get(server, timeout) when timeout == :infinity or (is_integer(timeout) and timeout > 0) do
-      Poll.await_empty(fn -> get(server, 0) end, nil, timeout, @poll_ms)
+      Poll.await_empty(fn -> get(server, 0) end, fn -> notify_when_ready(server, self()) end, timeout, @poll_ms)
     end
 
     @doc "Зафиксировать смещение сообщения в работе."
