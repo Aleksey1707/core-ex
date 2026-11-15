@@ -5,6 +5,7 @@ defmodule Core.Es.Store.WriteTest do
   alias Core.Context
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Store.Write.Plan
   alias Core.EventFixture
   alias Core.EventFixture.AggID
   alias Core.Helper.Transact
@@ -32,7 +33,7 @@ defmodule Core.Es.Store.WriteTest do
     test "без резервов ключей шаг резервов пропускается, построитель занятого ключа не нужен" do
       id = AggID.new()
 
-      assert :ok = append(path(%{key_reservations: []}), [event(id, 1)], Context.new())
+      assert :ok = append(path(key_reservations: []), [event(id, 1)], Context.new())
       assert [_] = Es.Store.Test.events!(@codec, id)
     end
 
@@ -50,7 +51,7 @@ defmodule Core.Es.Store.WriteTest do
       id = AggID.new()
 
       assert {:error, %Error{code: :refused, detail: %{expected: 2, actual: nil}}} =
-               append(path(%{continuous?: true}), [event(id, 2)], Context.new())
+               append(path(continuous?: true), [event(id, 2)], Context.new())
 
       assert :ok = append(path(), [event(id, 2)], Context.new())
     end
@@ -61,8 +62,9 @@ defmodule Core.Es.Store.WriteTest do
   defp append(path, events, context),
     do: Transact.run(Config.dao(), fn -> Es.Store.Write.append(path, events, context, []) end)
 
-  defp path(overrides \\ %{}),
-    do: Map.merge(%{event_codec: @codec, outbox: StateStoredFixture.Outbox, mismatch: &refused/1}, overrides)
+  defp path(overrides \\ []) do
+    struct!(%Plan{event_codec: @codec, outbox: StateStoredFixture.Outbox, mismatch: &refused/1}, overrides)
+  end
 
   defp refused(detail),
     do: Error.domain(__MODULE__, code: :refused, ns: :fake, message: "Отказ записи", detail: detail)

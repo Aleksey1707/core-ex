@@ -1,8 +1,8 @@
 defmodule Core.ConstraintErrorsFixture do
   @moduledoc """
   Репозитории тестов `Core.Repo.ConstraintErrorsCase`: write-репозиторий, чьи `constraint_errors`
-  сходятся с `changeset/2` и с ограничениями БД, такой же write-репозиторий с записью только через
-  `save/3` (`only: ~w(get save)a`) и read-репозиторий без `constraint_errors`.
+  сходятся с `changeset/2` и с ограничениями БД, такой же write-репозиторий с `save/3`
+  (`only: ~w(get insert update save)a`) и read-репозиторий без `constraint_errors`.
 
   Таблицы — миграция `priv/repo/migrations/20260917130000_create_constraint_errors_fixture.exs`.
   Агрегат, кодек событий и outbox — `Core.StateStoredFixture` и `Core.EventFixture`: case-модуль
@@ -128,16 +128,16 @@ defmodule Core.ConstraintErrorsFixture do
   end
 
   defmodule SaveRepo do
-    @moduledoc "Write-behaviour агрегата с записью только через `save/3`."
+    @moduledoc "Write-behaviour агрегата, объявляющий `save/3` (вместе с `insert` / `update`)."
 
     use Core.Repo,
-      only: ~w(get save)a,
+      only: ~w(get insert update save)a,
       entity: Core.StateStoredFixture.Entity,
       id: Core.EventFixture.AggID
   end
 
   defmodule SaveRepo.Pg do
-    @moduledoc "Write-репозиторий без `insert` / `update`: маппинг на каждое ограничение строки."
+    @moduledoc "Write-репозиторий с `save`: маппинг на каждое ограничение строки."
 
     alias Core.ConstraintErrorsFixture.Errors
     alias Core.ConstraintErrorsFixture.Schema

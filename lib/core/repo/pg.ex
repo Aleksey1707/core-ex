@@ -3,12 +3,19 @@ defmodule Core.Repo.Pg do
   Generic PostgreSQL-реализация Repo behaviour: `use Core.Repo.Pg, ...`.
 
   Макрос генерирует методы, объявленные в `behaviour:`, каждый — `defoverridable`, и кладёт в
-  вызывающий модуль конфиг `@pg`. Реализации (`get/5`, `insert/4`, `save/4`, `version_error/4`,
-  ...) публичны и принимают `@pg` первым аргументом — так их зовут модули, переопределившие
-  метод.
+  вызывающий модуль конфиг `@pg` — `%Core.Repo.Pg.Config{}`. Реализации (`get/5`, `insert/4`,
+  `save/4`, `version_error/4`, ...) публичны и принимают `@pg` первым аргументом — так их зовут
+  модули, переопределившие метод.
 
-  Макрос занимает в вызывающем модуле имена `@pg`, `@id_type`, `@entity_type` и добавляет
-  `alias Context/Pagination/Repo/Version` + `import Version, only: [is_version: 1]`.
+  Точка переопределения записи — `persist/2,3`: `save/2,3` делегирует в него, а `persist` по
+  умолчанию решает «insert или update» (`Repo.Pg.persist/5`) и зовёт **модульные** `insert`/
+  `update`. Модуль, переопределивший `insert`/`update`, получает свой `save` без ручного
+  переопределения. Поэтому `use Core.Repo.Pg` с `save` в `only:` требует `insert` и `update`
+  в том же наборе — иначе выбор ветки не определено чем закончить.
+
+  Макрос занимает в вызывающем модуле имена `@pg`, `@id_type`, `@entity_type` и
+  `persist/2,3`; добавляет `alias Context/Pagination/Repo/Version` +
+  `import Version, only: [is_version: 1]`.
 
   ## Опции
 
@@ -27,9 +34,9 @@ defmodule Core.Repo.Pg do
     при откате транзакции эталон остался бы «как будто записано».
   - `find_many/4` отдаёт только найденные записи: и `not_found`, и `version_mismatch`
     отбрасываются молча. Строгий вариант — `get_many/4`.
-  - `save/4` вызывает `insert/4` и `update/4` **этого** модуля, а не переопределённые в
-    вызывающем. Модуль, переопределивший `insert`/`update` (запись детей, flush событий),
-    обязан переопределить и `save`.
+  - `save/4` — политика записи вне макроса: выбирает между generic `insert/4` и `update/4`,
+    потому что у вызывающего нет модуля реализации. Сгенерированный `save/2,3` идёт через
+    `persist/2,3` и зовёт переопределённые в модуле `insert`/`update`.
   - Ни один метод не открывает транзакцию: `save/4` — это 2-3 запроса, `delete/5` — 2.
     Атомарность обеспечивает call site (`Helper.Transact.run/3`).
   - `constraint_errors:` объявляется типом ограничения (`unique:` / `foreign_key:` / `check:` /
@@ -65,6 +72,7 @@ defmodule Core.Repo.Pg do
   alias Core.Helper
   alias Core.Pagination
   alias Core.Repo
+  alias Core.Repo.Pg.Config
   alias Core.Result
   alias Core.Version
 
@@ -105,6 +113,7 @@ defmodule Core.Repo.Pg do
     constraint_errors = normalize_constraint_errors!(Keyword.get(opts, :constraint_errors, []))
     validate_constraint_error_codes!(errors, constraint_errors, "#{@label}: constraint_errors")
     validate_mappers!(opts, only)
+    validate_save_methods!(only)
 
     schema = Keyword.fetch!(opts, :schema)
 
@@ -117,7 +126,7 @@ defmodule Core.Repo.Pg do
       @id_type unquote(Keyword.get(opts, :id))
       @entity_type unquote(Keyword.get(opts, :entity))
 
-      @pg %{
+      @pg %Core.Repo.Pg.Config{
         dao: unquote(Keyword.get(opts, :repo)),
         module: unquote(behaviour),
         schema: unquote(schema),
@@ -233,9 +242,14 @@ defmodule Core.Repo.Pg do
         @impl true
         def save(entity, %Context{} = context, opts \\ [])
             when (@entity_type == nil or is_struct(entity, @entity_type)) and is_list(opts),
-            do: Repo.Pg.save(@pg, entity, context, opts)
+            do: persist(entity, context, opts)
 
-        defoverridable save: 2, save: 3
+        @doc "Выбрать insert или update по факту строки; точка переопределения записи."
+        def persist(entity, %Context{} = context, opts \\ [])
+            when (@entity_type == nil or is_struct(entity, @entity_type)) and is_list(opts),
+            do: Repo.Pg.persist(@pg, __MODULE__, entity, context, opts)
+
+        defoverridable save: 2, save: 3, persist: 2, persist: 3
       end
 
       if :delete in only do
@@ -367,6 +381,25 @@ defmodule Core.Repo.Pg do
         "#{@label}: shadow_copy?",
         "недопустим с to_view: — read-путь не кладёт представление эталоном в Repo.Sc"
       )
+    end
+
+    :ok
+  end
+
+  # `save` выбирает между `insert` и `update`: без одной из веток вызов не определено чем
+  # закончить, поэтому набор методов проверяется до генерации.
+  defp validate_save_methods!(only) do
+    if :save in only do
+      case ~w(insert update)a -- only do
+        [] ->
+          :ok
+
+        missing ->
+          Helper.Opts.reject!(
+            "#{@label}: only",
+            "save выбирает между insert и update — вместе с save нужны #{inspect(missing)}"
+          )
+      end
     end
 
     :ok
@@ -506,13 +539,13 @@ defmodule Core.Repo.Pg do
   Резолв рантаймовый: без `repo:` макрос не имеет права требовать конфигурацию
   потребителя на этапе компиляции (`10-architecture.md`).
   """
-  @spec dao(map()) :: module()
+  @spec dao(Config.t()) :: module()
 
   def dao(%{dao: nil}), do: Core.Config.dao()
   def dao(%{dao: dao}), do: dao
 
   @doc "Получить сущность по id и version."
-  @spec get(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
+  @spec get(Config.t(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           Result.t(struct())
 
   def get(pg, id, version, context, opts \\ []) do
@@ -531,7 +564,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Получить сущность; при ошибке — raise."
-  @spec get!(map(), term(), Version.expected(), Context.t(), Repo.opts()) :: struct()
+  @spec get!(Config.t(), term(), Version.expected(), Context.t(), Repo.opts()) :: struct()
 
   def get!(pg, id, version, context, opts \\ []) do
     Result.unwrap!(get(pg, id, version, context, opts))
@@ -544,7 +577,7 @@ defmodule Core.Repo.Pg do
   `detail` попадает в `not_found` / `version_mismatch` вместо id.
   """
   @spec get_by(
-          map(),
+          Config.t(),
           Ecto.Query.dynamic_expr(),
           term(),
           Version.expected(),
@@ -566,7 +599,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Список сущностей в scope."
-  @spec list(map(), Context.t(), Repo.opts()) :: [struct()]
+  @spec list(Config.t(), Context.t(), Repo.opts()) :: [struct()]
 
   def list(pg, context, opts \\ []) do
     dao(pg).all(read_scope(pg, context), opts)
@@ -580,7 +613,7 @@ defmodule Core.Repo.Pg do
   к `read_scope` (query + `default_filters`). Отсутствующие ключи просто не попадают
   в результат — это `find`-семантика, не `get`.
   """
-  @spec list_by(map(), Ecto.Query.dynamic_expr(), Context.t(), Repo.opts()) :: [struct()]
+  @spec list_by(Config.t(), Ecto.Query.dynamic_expr(), Context.t(), Repo.opts()) :: [struct()]
 
   def list_by(pg, filter, context, opts \\ []) do
     from(x in read_scope(pg, context), where: ^filter)
@@ -589,7 +622,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Страница сущностей (limit/offset)."
-  @spec page(map(), Pagination.Limit.t(), Pagination.Offset.t(), Context.t(), Repo.opts()) ::
+  @spec page(Config.t(), Pagination.Limit.t(), Pagination.Offset.t(), Context.t(), Repo.opts()) ::
           Pagination.Result.t(struct())
 
   def page(pg, %Pagination.Limit{} = limit, %Pagination.Offset{} = offset, context, opts \\ []),
@@ -602,7 +635,7 @@ defmodule Core.Repo.Pg do
   `read_scope`, и `total` считается по нему же, а не по всему scope.
   """
   @spec page_by(
-          map(),
+          Config.t(),
           Ecto.Query.dynamic_expr(),
           Pagination.Limit.t(),
           Pagination.Offset.t(),
@@ -626,7 +659,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Найти сущности по парам id/version (без incomplete)."
-  @spec find_many(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
+  @spec find_many(Config.t(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
           Result.t([struct()])
 
   def find_many(pg, pairs, context, opts \\ []) do
@@ -639,7 +672,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Получить все сущности по парам id/version."
-  @spec get_many(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
+  @spec get_many(Config.t(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
           Result.t([struct()])
 
   def get_many(pg, pairs, context, opts \\ []) do
@@ -659,7 +692,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Проверить существование по id и version."
-  @spec exists?(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
+  @spec exists?(Config.t(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           Result.t(boolean())
 
   def exists?(pg, id, version, context, opts \\ [])
@@ -685,7 +718,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Проверить существование всех пар id/version."
-  @spec exists_all?(map(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
+  @spec exists_all?(Config.t(), [{term(), Version.expected()}], Context.t(), Repo.opts()) ::
           Result.t(boolean())
 
   def exists_all?(pg, pairs, context, opts \\ []) do
@@ -701,13 +734,13 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Число сущностей в scope."
-  @spec count(map(), Context.t(), Repo.opts()) :: non_neg_integer()
+  @spec count(Config.t(), Context.t(), Repo.opts()) :: non_neg_integer()
 
   def count(pg, context, opts \\ []),
     do: dao(pg).aggregate(write_scope(pg, context), :count, opts)
 
   @doc "Вставить сущность; вернуть её же и положить эталоном в `Repo.Sc` после commit."
-  @spec insert(map(), struct(), Context.t(), Repo.opts()) ::
+  @spec insert(Config.t(), struct(), Context.t(), Repo.opts()) ::
           Result.t(struct())
 
   def insert(pg, entity, context, opts \\ []) do
@@ -718,7 +751,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Обновить сущность; вернуть её же и положить эталоном в `Repo.Sc` после commit."
-  @spec update(map(), struct(), Context.t(), Repo.opts()) ::
+  @spec update(Config.t(), struct(), Context.t(), Repo.opts()) ::
           Result.t(struct())
 
   def update(pg, entity, context, opts \\ []) do
@@ -743,7 +776,7 @@ defmodule Core.Repo.Pg do
 
   Эталон в `Repo.Sc` не кладётся: пачка не читалась, сверять её не с чем.
   """
-  @spec insert_many(map(), [struct()], Context.t(), Repo.opts()) :: non_neg_integer()
+  @spec insert_many(Config.t(), [struct()], Context.t(), Repo.opts()) :: non_neg_integer()
 
   def insert_many(pg, entities, context, opts \\ [])
 
@@ -758,7 +791,7 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Удалить сущность по id и version."
-  @spec delete(map(), term(), Version.expected(), Context.t(), Repo.opts()) ::
+  @spec delete(Config.t(), term(), Version.expected(), Context.t(), Repo.opts()) ::
           Result.unit()
 
   def delete(pg, id, version, context, opts \\ []) do
@@ -778,18 +811,39 @@ defmodule Core.Repo.Pg do
   end
 
   @doc "Сохранить сущность (insert или update)."
-  @spec save(map(), struct(), Context.t(), Repo.opts()) ::
+  @spec save(Config.t(), struct(), Context.t(), Repo.opts()) ::
           Result.t(struct())
 
   def save(pg, entity, context, opts \\ []) do
-    case known_to_exist?(pg, entity, context, opts) do
+    case exists_for_write?(pg, entity, context, opts) do
       {:ok, true} -> update(pg, entity, context, opts)
       {:ok, false} -> insert(pg, entity, context, opts)
     end
   end
 
+  @doc false
+  @spec persist(Config.t(), module(), struct(), Context.t(), Repo.opts()) ::
+          Result.t(struct())
+
+  def persist(pg, module, entity, context, opts) do
+    case exists_for_write?(pg, entity, context, opts) do
+      {:ok, true} -> module.update(entity, context, opts)
+      {:ok, false} -> module.insert(entity, context, opts)
+    end
+  end
+
+  @doc false
+  @spec exists_for_write?(Config.t(), struct(), Context.t(), Repo.opts()) ::
+          Result.t(boolean())
+
+  def exists_for_write?(pg, entity, context, opts) do
+    if baseline(pg, entity, context) != nil,
+      do: {:ok, true},
+      else: exists?(pg, entity.id, :current, context, opts)
+  end
+
   @doc "Ошибка несовпадения версии строки с ожидаемой, либо `nil`."
-  @spec version_error(map(), term(), struct(), Version.expected()) :: Error.t() | nil
+  @spec version_error(Config.t(), term(), struct(), Version.expected()) :: Error.t() | nil
 
   def version_error(pg, id, row, version) do
     if version_matches?(pg, row, version) do
@@ -813,7 +867,7 @@ defmodule Core.Repo.Pg do
   агрегаты) обязаны строить запрос **поверх** него: собранный мимо scope запрос молча
   обходит `default_filters` — то есть soft-delete и ACL-фильтры.
   """
-  @spec read_scope(map(), Context.t()) :: Ecto.Query.t()
+  @spec read_scope(Config.t(), Context.t()) :: Ecto.Query.t()
 
   def read_scope(%{query: query, default_filters: default_filters}, context) do
     from(x in query, where: ^default_filters.(context))
@@ -824,7 +878,7 @@ defmodule Core.Repo.Pg do
 
   `nil` при `shadow_copy?: false`, при выключенном кэше и когда эталон ещё не положен.
   """
-  @spec baseline(map(), struct(), Context.t()) :: struct() | nil
+  @spec baseline(Config.t(), struct(), Context.t()) :: struct() | nil
 
   def baseline(%{shadow_copy?: false}, _entity, _context), do: nil
   def baseline(%{shadow_copy?: true}, %mod{id: id}, context), do: Repo.Sc.find(context, mod, id)
@@ -834,7 +888,7 @@ defmodule Core.Repo.Pg do
 
   No-op при `shadow_copy?: false`.
   """
-  @spec put_baseline(map(), struct(), Context.t()) :: struct()
+  @spec put_baseline(Config.t(), struct(), Context.t()) :: struct()
 
   def put_baseline(%{shadow_copy?: false}, entity, _context), do: entity
   def put_baseline(%{shadow_copy?: true}, entity, context), do: Repo.Sc.put(context, entity)
@@ -1066,12 +1120,6 @@ defmodule Core.Repo.Pg do
     |> exclude(:order_by)
     |> exclude(:preload)
     |> exclude(:select)
-  end
-
-  defp known_to_exist?(pg, entity, context, opts) do
-    if baseline(pg, entity, context) != nil,
-      do: {:ok, true},
-      else: exists?(pg, entity.id, :current, context, opts)
   end
 
   defp version_matches?(_pg, _row, :current), do: true

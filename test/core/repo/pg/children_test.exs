@@ -72,7 +72,20 @@ defmodule Core.Repo.Pg.ChildrenTest do
     end
   end
 
-  @pg %{dao: Dao, to_id: &Function.identity/1, module: __MODULE__, errors: __MODULE__}
+  @pg %Core.Repo.Pg.Config{
+    dao: Dao,
+    module: __MODULE__,
+    schema: __MODULE__,
+    query: __MODULE__,
+    default_filters: &Function.identity/1,
+    to_entity: &Function.identity/1,
+    to_model: &Function.identity/1,
+    to_id: &Function.identity/1,
+    version_field: :version,
+    shadow_copy?: false,
+    errors: __MODULE__,
+    constraint_errors: %{}
+  }
 
   describe "plan/3" do
     test "пустой набор с обеих сторон" do

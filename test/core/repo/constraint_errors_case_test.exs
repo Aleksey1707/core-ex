@@ -46,7 +46,7 @@ defmodule Core.Repo.ConstraintErrorsCaseTest do
       ]
   end
 
-  # Запись только через save/3: маппинг по полю, которого нет в changeset/2.
+  # Write через save: маппинг по полю, которого нет в changeset/2.
   defmodule MismappedSave do
     @moduledoc false
 
@@ -142,7 +142,7 @@ defmodule Core.Repo.ConstraintErrorsCaseTest do
                ConstraintErrorsCase.check_mapping_declared([@write, @read, Mismapped])
     end
 
-    test "репозиторий с записью только через save/3 — write-путь" do
+    test "репозиторий с save — write-путь" do
       assert {:error, %{undeclared: [{MismappedSave, {:unique, :title}}]}} =
                ConstraintErrorsCase.check_mapping_declared([@save, @read, MismappedSave])
     end
@@ -184,7 +184,7 @@ defmodule Core.Repo.ConstraintErrorsCaseTest do
                ConstraintErrorsCase.check_read_repos([@write, @read, MappedReadRepo])
     end
 
-    test "репозиторий с записью только через save/3 — не read" do
+    test "репозиторий с save — не read" do
       assert :ok = ConstraintErrorsCase.check_read_repos([@save, MismappedSave])
     end
   end

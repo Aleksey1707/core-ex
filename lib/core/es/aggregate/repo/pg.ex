@@ -168,6 +168,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Es.Aggregate.Load
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Store.Schema
+  alias Core.Es.Store.Write.Plan
   alias Core.Helper
   alias Core.Helper.Transact
   alias Core.Result
@@ -582,7 +583,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # ---
 
   defp write_path(cfg) do
-    %{
+    %Plan{
       event_codec: cfg.event_codec,
       outbox: cfg.outbox,
       mismatch: &version_mismatch(cfg, &1),

@@ -3,6 +3,7 @@ defmodule Core.Repo.PgTest do
 
   alias Core.Context
   alias Core.Error
+  alias Core.Repo.Pg.Config
   alias Core.Version
 
   require Error
@@ -150,9 +151,19 @@ defmodule Core.Repo.PgTest do
   defmodule StubDao do
     def insert(changeset, _opts), do: {:ok, Ecto.Changeset.apply_changes(changeset)}
 
+    def exists?(_query, _opts), do: false
+
     def one(_query, _opts), do: %WriteSchema{id: "1", name: "старое"}
 
     def update(changeset, _opts), do: {:ok, Ecto.Changeset.apply_changes(changeset)}
+  end
+
+  defmodule OverridingInsert do
+    @moduledoc false
+
+    def insert(_entity, _context, _opts), do: raise("модульный insert не должен вызываться")
+
+    def update(_entity, _context, _opts), do: raise("модульный update не должен вызываться")
   end
 
   defmodule FailingDao do
@@ -204,7 +215,7 @@ defmodule Core.Repo.PgTest do
   end
 
   defp write_pg(to_entity) do
-    %{
+    %Config{
       dao: StubDao,
       module: __MODULE__,
       schema: WriteSchema,
@@ -253,7 +264,7 @@ defmodule Core.Repo.PgTest do
                    Code.eval_quoted(
                      quote do
                        defmodule Core.Repo.PgTest.NoModelBehaviour do
-                         use Core.Repo, only: [:get, :save]
+                         use Core.Repo, only: [:get, :insert, :update, :save]
                        end
 
                        defmodule Core.Repo.PgTest.NoModel do
@@ -274,7 +285,7 @@ defmodule Core.Repo.PgTest do
       Code.eval_quoted(
         quote do
           defmodule Core.Repo.PgTest.ViewWriteBehaviour do
-            use Core.Repo, only: [:get, :save]
+            use Core.Repo, only: [:get, :insert, :update, :save]
           end
 
           defmodule Core.Repo.PgTest.ViewWrite do
@@ -712,6 +723,13 @@ defmodule Core.Repo.PgTest do
     assert {:ok, ^entity} = Core.Repo.Pg.update(pg, entity, Context.new())
   end
 
+  test "save/4 вне макроса выбирает generic insert/update, а не методы модуля реализации" do
+    pg = %{write_pg(raising_to_entity()) | module: OverridingInsert}
+    entity = %{id: "1", name: "новое"}
+
+    assert {:ok, ^entity} = Core.Repo.Pg.save(pg, entity, Context.new())
+  end
+
   test "insert кладёт входной агрегат эталоном в Repo.Sc" do
     pg = shadow_pg()
     context = Core.Repo.Sc.init(Context.new())
@@ -790,6 +808,31 @@ defmodule Core.Repo.PgTest do
   end
 
   describe "опции use" do
+    test "save без insert/update в only: — отказ сборки" do
+      message =
+        ~r/^Repo\.Pg: only: save выбирает между insert и update — вместе с save нужны \[:insert, :update\]$/
+
+      assert_raise CompileError, message, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Repo.PgTest.SaveOnlyBehaviour do
+              use Core.Repo, only: [:get, :save]
+            end
+
+            defmodule Core.Repo.PgTest.SaveOnly do
+              use Core.Repo.Pg,
+                behaviour: Core.Repo.PgTest.SaveOnlyBehaviour,
+                schema: Core.Repo.PgTest.FakeSchema,
+                to_entity: &Function.identity/1,
+                to_model: &Function.identity/1,
+                default_filters: &Core.Repo.PgTest.always_true/1,
+                errors: Core.Repo.PgTest.Errors
+            end
+          end
+        )
+      end
+    end
+
     test "опечатка в ключе — при раскрытии, с меткой" do
       assert_raise CompileError, ~r/^Repo\.Pg: неизвестные опции: \[:shadow_copy\]$/, fn ->
         expand_using(view_opts(shadow_copy: true))
@@ -875,7 +918,7 @@ defmodule Core.Repo.PgTest do
   end
 
   defp versioned_pg do
-    %{
+    %Config{
       dao: VersionedDao,
       module: __MODULE__,
       schema: VersionedSchema,

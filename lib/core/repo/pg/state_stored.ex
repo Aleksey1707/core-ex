@@ -20,7 +20,7 @@ defmodule Core.Repo.Pg.StateStored do
         children: [[schema: Schema.Permission, fk: :role_id]]
 
   Надстройка над `Core.Repo.Pg`: свои опции макрос забирает себе, остальные передаёт
-  в `use Repo.Pg` как есть, затем переопределяет `insert/3`, `update/3` и `save/3` и добавляет
+  в `use Repo.Pg` как есть, затем переопределяет `insert/3`, `update/3` и `persist/3` и добавляет
   страницу потока `page_stream/4`.
 
   Опции — опции `Repo.Pg` плюс свои ключи (`docs/rules/20-agreements.md`, «Опции `use`»). При
@@ -45,8 +45,9 @@ defmodule Core.Repo.Pg.StateStored do
   `Repo.Sc` именно то, что им передали, и очистка событий после записи разошлась бы с
   эталоном. В `flush_events/3` уходит исходный агрегат — события нужны там непустыми.
 
-  `save/3` переопределяется обязательно: `Repo.Pg.save/4` зовёт `Repo.Pg.insert/update`,
-  а не переопределённые в модуле, то есть записал бы строку без детей и без событий.
+  `persist/3` переопределяется обязательно: `Repo.Pg.persist/5` зовёт модульные `insert`/`update`,
+  а выбор «строка уже есть или её ещё нет» идёт в одной транзакции со своей записью — между
+  проверкой и записью строку могли создать или удалить, и ветка ушла бы не туда.
 
   ## События
 
@@ -116,7 +117,8 @@ defmodule Core.Repo.Pg.StateStored do
   - `query:` прогружает дочерние ассоциации целиком и без фильтров: эталон в `Repo.Sc` — это
     прочитанный агрегат, и неполный эталон даст diff с пропущенными удалениями.
 
-  Макрос занимает имена `@es_event_codec`, `@es_outbox`, `@es_children` и `page_stream/4`.
+  Макрос занимает имена `@es_event_codec`, `@es_outbox`, `@es_children`, `page_stream/4` и
+  `persist/2,3` (точка переопределения записи из `Repo.Pg`).
   """
 
   alias Core.Codec.Field
@@ -192,32 +194,20 @@ defmodule Core.Repo.Pg.StateStored do
       end
 
       @doc "Сохранить агрегат (insert или update) с записью событий."
-      @impl true
-      def save(%unquote(cfg.entity){} = entity, %Core.Context{} = context, opts \\ [])
+      def persist(%unquote(cfg.entity){} = entity, %Core.Context{} = context, opts \\ [])
           when is_list(opts) do
         # Проверка существования и запись — в одной транзакции: между ними строку
         # могли создать или удалить, и ветка ушла бы не туда.
         Core.Helper.Transact.run(
           unquote(dao),
-          fn ->
-            case known_to_exist?(entity, context, opts) do
-              {:ok, true} -> __MODULE__.update(entity, context, opts)
-              {:ok, false} -> __MODULE__.insert(entity, context, opts)
-            end
-          end,
+          fn -> Core.Repo.Pg.persist(@pg, __MODULE__, entity, context, opts) end,
           opts
         )
       end
 
       unquote(page_stream_ast(cfg))
 
-      defoverridable insert: 2, insert: 3, update: 2, update: 3, save: 2, save: 3, page_stream: 4
-
-      defp known_to_exist?(entity, context, opts) do
-        if Core.Repo.Pg.baseline(@pg, entity, context) != nil,
-          do: {:ok, true},
-          else: Core.Repo.Pg.exists?(@pg, entity.id, :current, context, opts)
-      end
+      defoverridable insert: 2, insert: 3, update: 2, update: 3, persist: 2, persist: 3, page_stream: 4
 
       # Защита агрегата с событиями от потерянного обновления — сам факт события:
       # `Core.Es.Store.append` отвергает занятую версию потока, а `optimistic_lock` на строке
@@ -241,8 +231,13 @@ defmodule Core.Repo.Pg.StateStored do
       end
 
       defp do_flush_events(events, context, opts) do
-        path = %{event_codec: @es_event_codec, outbox: @es_outbox, mismatch: &version_mismatch/1}
-        Core.Es.Store.Write.append(path, events, context, opts)
+        plan = %Core.Es.Store.Write.Plan{
+          event_codec: @es_event_codec,
+          outbox: @es_outbox,
+          mismatch: &version_mismatch/1
+        }
+
+        Core.Es.Store.Write.append(plan, events, context, opts)
       end
 
       defp version_mismatch(detail),

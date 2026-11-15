@@ -235,7 +235,8 @@ end
 - Репозиторий записи актора читает через `use Core.Repo.Pg` со своими `default_filters`, а запись
   делегирует в `<Aggregate>.Repo.Pg`: usecase актора получает агрегат только через свой
   репозиторий, и чужая запись даёт `:not_found` без проверки на каждом call site. Узкий актор MAY
-  не иметь `insert` — только `update` / `save`.
+  не иметь `insert` — только `update`; `save` требует `insert` и `update` в том же наборе
+  (`deps/core/docs/rules/13-repos.md`).
 - State-stored агрегат с событиями пишет `use Core.Repo.Pg.StateStored` каталога агрегата; у
   event-sourced агрегата репозитория записи актора нет («Event-sourced агрегат»).
 

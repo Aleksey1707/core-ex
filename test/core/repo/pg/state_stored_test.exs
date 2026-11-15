@@ -81,6 +81,49 @@ defmodule Core.Repo.Pg.StateStoredTest do
       family: Core.EsFixture.Account.Event
   end
 
+  defmodule OverridingRepo do
+    @moduledoc "Write-behaviour агрегата для репозитория с переопределёнными `insert`/`update`."
+
+    use Core.Repo,
+      only: ~w(get insert update save)a,
+      entity: Core.StateStoredFixture.Entity,
+      id: Core.EventFixture.AggID
+  end
+
+  defmodule OverridingRepo.Pg do
+    @moduledoc "Репозиторий, переопределивший только `insert`/`update`: `save` обязан пройти через них."
+
+    alias Core.EventFixture
+    alias Core.StateStoredFixture.Child
+    alias Core.StateStoredFixture.Entity
+    alias Core.StateStoredFixture.Schema
+
+    use Core.Repo.Pg.StateStored,
+      behaviour: Core.Repo.Pg.StateStoredTest.OverridingRepo,
+      schema: Schema,
+      to_entity: &Schema.to_entity!/1,
+      to_model: &Schema.to_model!/1,
+      to_id: &Schema.dump_id/1,
+      query: Schema.base_query(),
+      shadow_copy?: true,
+      id: EventFixture.AggID,
+      entity: Entity,
+      errors: EventFixture.Errors,
+      event_codec: EventFixture.Event.Codec,
+      outbox: Core.StateStoredFixture.Outbox,
+      children: [[schema: Child, fk: :entity_id]]
+
+    def insert(entity, context, opts) do
+      send(self(), :insert_via_override)
+      super(entity, context, opts)
+    end
+
+    def update(entity, context, opts) do
+      send(self(), :update_via_override)
+      super(entity, context, opts)
+    end
+  end
+
   describe "компиляция" do
     test "требует event_codec и outbox" do
       assert_raise CompileError,
@@ -280,6 +323,42 @@ defmodule Core.Repo.Pg.StateStoredTest do
 
       assert wires(Es.Store.Test.events!(@codec, id)) == wires([created])
       assert outbox_names(id) == []
+    end
+
+    test "save идёт через переопределённые только insert/update: строка, дети, события и outbox" do
+      id = AggID.new()
+      created = event(EventFixture.created(), id, 1)
+      renamed = event(EventFixture.created("Переименован"), id, 2)
+
+      assert {:ok, written} = OverridingRepo.Pg.save(entity(id, 1, [created]), Context.new())
+      assert_received :insert_via_override
+      refute_received :update_via_override
+      assert Es.Events.empty?(written.events)
+      assert {:ok, ^written} = OverridingRepo.Pg.get(id, :current, Context.new())
+
+      assert {:ok, _} = OverridingRepo.Pg.save(%{entity(id, 2, [renamed]) | name: "Переименован"}, Context.new())
+      assert_received :update_via_override
+      assert {:ok, %Entity{name: "Переименован"}} = OverridingRepo.Pg.get(id, :current, Context.new())
+      assert wires(Es.Store.Test.events!(@codec, id)) == wires([created, renamed])
+      assert outbox_names(id) == [@codec.type(created), @codec.type(renamed)]
+    end
+
+    test "save без ручного переопределения: эталон в Repo.Sc после commit, возврат входного агрегата" do
+      id = AggID.new()
+      context = Repo.Sc.init(Context.new())
+      created = event(EventFixture.created(), id, 1)
+      renamed = event(EventFixture.created("Переименован"), id, 2)
+
+      inserted = entity(id, 1, [created])
+      assert {:ok, %Entity{events: events} = written} = @repo.save(inserted, context)
+      assert Es.Events.empty?(events)
+      assert Repo.Sc.find(context, Entity, id) == written
+
+      updated = entity(id, 2, [renamed])
+      assert {:ok, %Entity{events: events} = written} = @repo.save(updated, context)
+      assert Es.Events.empty?(events)
+      assert Repo.Sc.find(context, Entity, id) == written
+      assert wires(Es.Store.Test.events!(@codec, id)) == wires([created, renamed])
     end
 
     test "поток не с 1 и с разрывами: агрегат создан без события, мутация без события" do
