@@ -113,36 +113,25 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   Шифротексты снапшотов `snapshots` потоков `states` к расшифровке вместе с хвостом событий:
   `{шифротекст, адрес}` в порядке потоков со снапшотом; у нешифрованных снапшотов — `[]`.
   """
-  @spec sealed(map(), String.t(), [struct()], [stored() | nil]) :: [{binary(), binary()}]
+  @spec sealed(map(), map(), [struct()], [stored() | nil]) :: [{binary(), binary()}]
 
-  def sealed(%{snapshot: %{sealed: false}}, _marker, _states, _snapshots), do: []
+  def sealed(_cfg, %{sealed?: false}, _states, _snapshots), do: []
 
-  def sealed(cfg, marker, states, snapshots) when is_binary(marker) and is_list(states) and is_list(snapshots) do
+  def sealed(cfg, %{marker: marker}, states, snapshots)
+      when is_binary(marker) and is_list(states) and is_list(snapshots) do
     for {%{id: id}, {version, binary}} <- Enum.zip(states, snapshots), do: {binary, aad(cfg, marker, id, version)}
   end
 
   @doc """
-  Снапшоты после расшифровки: исходы `opened` по порядку встают на место шифротекстов; у
-  нешифрованных снапшотов `opened` — `[]`, а binary становится `{:ok, binary}`.
+  Снапшот потока после расшифровки: исход `open` этого потока; `nil` — снапшота нет.
   """
-  @spec put_opened(map(), [stored() | nil], [KeyStore.opened()]) :: [opened() | nil]
+  @spec opened(map(), map(), stored() | nil, [KeyStore.opened()]) :: opened() | nil
 
-  def put_opened(%{snapshot: %{sealed: false}}, snapshots, []) when is_list(snapshots) do
-    Enum.map(snapshots, fn
-      nil -> nil
-      {version, binary} -> {version, {:ok, binary}}
-    end)
-  end
+  def opened(_cfg, _plan, nil, _opened), do: nil
 
-  def put_opened(%{snapshot: %{sealed: true}}, snapshots, opened) when is_list(snapshots) and is_list(opened) do
-    {snapshots, []} =
-      Enum.map_reduce(snapshots, opened, fn
-        nil, opened -> {nil, opened}
-        {version, _binary}, [outcome | opened] -> {{version, outcome}, opened}
-      end)
+  def opened(_cfg, %{sealed?: false}, {version, binary}, []), do: {version, {:ok, binary}}
 
-    snapshots
-  end
+  def opened(_cfg, %{sealed?: true}, {version, _binary}, [outcome]), do: {version, outcome}
 
   @doc """
   Свернуть события хвоста `events` от снапшота `{version, opened}` потока состояния `initial`.
@@ -231,18 +220,18 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   своим запросом. Отказ `:subject_destroyed` — снапшот этого субъекта не пишется
   (`Logger.debug`), остальные — повтором `seal` без него.
   """
-  @spec write(map(), [struct()]) :: :ok
+  @spec write(map(), map(), [struct()]) :: :ok
 
-  def write(cfg, states)
+  def write(cfg, plan, states)
 
-  def write(_cfg, []), do: :ok
-  def write(cfg, [_ | _] = states), do: AfterCommit.register(fn -> upsert(cfg, states) end)
+  def write(_cfg, _plan, []), do: :ok
+  def write(cfg, plan, [_ | _] = states), do: AfterCommit.register(fn -> upsert(cfg, plan, states) end)
 
   # ---
 
-  defp upsert(cfg, states) do
+  defp upsert(cfg, plan, states) do
     start = System.monotonic_time()
-    {result, rows} = log_write(insert(cfg, states), cfg, states)
+    {result, rows} = log_write(insert(cfg, plan, states), cfg, states)
 
     :telemetry.execute(
       Telemetry.event([:es, :snapshot, :write]),
@@ -251,22 +240,20 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
     )
   end
 
-  defp insert(cfg, states) do
-    marker = marker(cfg)
-
-    with {:ok, rows} <- rows(cfg, marker, states), do: {:ok, insert_all!(cfg, rows)}
+  defp insert(cfg, plan, states) do
+    with {:ok, rows} <- rows(cfg, plan, states), do: {:ok, insert_all!(cfg, rows)}
   rescue
     exception -> {:error, exception}
   end
 
-  defp rows(%{snapshot: %{sealed: false}} = cfg, marker, states),
+  defp rows(cfg, %{sealed?: false, marker: marker}, states),
     do: {:ok, Enum.map(states, &row(cfg, marker, &1, :erlang.term_to_binary(&1)))}
 
-  defp rows(cfg, marker, states), do: sealed_rows(cfg, marker, states)
+  defp rows(cfg, plan, states), do: sealed_rows(cfg, plan, states)
 
-  defp sealed_rows(_cfg, _marker, []), do: {:ok, []}
+  defp sealed_rows(_cfg, _plan, []), do: {:ok, []}
 
-  defp sealed_rows(cfg, marker, states) do
+  defp sealed_rows(cfg, %{marker: marker} = plan, states) do
     items =
       Enum.map(states, fn state ->
         {cfg.codec.dump(state.id), aad(cfg, marker, state.id, Version.value(state.version)),
@@ -275,23 +262,23 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
 
     case Port.seal(items) do
       {:ok, sealed} -> {:ok, Enum.zip_with(states, sealed, &row(cfg, marker, &1, &2))}
-      {:error, error} -> without_destroyed(cfg, marker, states, error)
+      {:error, error} -> without_destroyed(cfg, plan, states, error)
     end
   end
 
   # Отказ `seal` — на всю пачку: снапшоты остальных субъектов пишутся повтором без уничтоженного.
-  defp without_destroyed(cfg, marker, states, %Error{ns: :key_store, code: :subject_destroyed} = error) do
+  defp without_destroyed(cfg, plan, states, %Error{ns: :key_store, code: :subject_destroyed} = error) do
     case Enum.split_with(states, &(cfg.codec.dump(&1.id) == error.detail.subject)) do
       {[], _states} ->
         {:error, error}
 
       {destroyed, states} ->
         Enum.each(destroyed, &log_destroyed(cfg, &1))
-        sealed_rows(cfg, marker, states)
+        sealed_rows(cfg, plan, states)
     end
   end
 
-  defp without_destroyed(_cfg, _marker, _states, error), do: {:error, error}
+  defp without_destroyed(_cfg, _plan, _states, error), do: {:error, error}
 
   defp log_destroyed(cfg, state) do
     Logger.debug(

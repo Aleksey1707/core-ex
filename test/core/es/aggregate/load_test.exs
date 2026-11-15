@@ -141,6 +141,61 @@ defmodule Core.Es.Aggregate.LoadTest do
 
       assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 1}, %{snapshot: :hit}}
     end
+
+    test "отвергнутый снапшот — повторное чтение без снапшота" do
+      id = Account.ID.new()
+      events = events!(id, [open(), rename("Второе"), freeze()])
+      attach_telemetry()
+
+      assert {:ok, %Account{version: version, name: name, status: :frozen}} =
+               Load.at(cfg(), at_request(id, Version.new!(3), rows(events), [{id, 2, :corrupt}]))
+
+      assert version == Version.new!(3)
+      assert name == Account.Name.new!("Второе")
+
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 3}, %{snapshot: :rejected}}
+    end
+
+    test "маркер снапшота считается один раз за чтение" do
+      id = Account.ID.new()
+      events = events!(id, [open()])
+      marker = {Core.Es.Aggregate.Repo.Pg.Snapshot, :marker, 1}
+      parent = self()
+      tracer = spawn(fn -> forward_marker(parent) end)
+      on_exit(fn -> Process.exit(tracer, :kill) end)
+
+      :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+      :erlang.trace_pattern(marker, true, [])
+      on_exit(fn -> :erlang.trace_pattern(marker, false, []) end)
+
+      assert {:ok, _state} = Load.head(cfg(), head_request(id, rows(events)))
+
+      :erlang.trace(self(), false, [:call])
+      :erlang.trace_pattern(marker, false, [])
+
+      assert_receive :marker, 100
+      refute_receive :marker, 50
+    end
+
+    test "расшифрованный снапшот приходит вместе со своим потоком" do
+      [first, second] = [Account.ID.new(), Account.ID.new()]
+      first_events = events!(first, [open("Первый"), rename("Первый два")])
+      second_events = events!(second, [open("Второй"), rename("Второй два")])
+
+      snapshots = [
+        {first, 1, Account.fold(%Account{id: first}, Enum.take(first_events, 1))},
+        {second, 1, Account.fold(%Account{id: second}, Enum.take(second_events, 1))}
+      ]
+
+      pairs = [{first, Version.new!(2)}, {second, Version.new!(2)}]
+      rows = rows(first_events ++ second_events)
+      request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots, order: :reverse], Rows)
+      request = %{request | write_snapshots?: false}
+
+      assert {:ok, [first_state, second_state]} = Load.many_at(cfg(), request)
+      assert first_state.name == Account.Name.new!("Первый два")
+      assert second_state.name == Account.Name.new!("Второй два")
+    end
   end
 
   describe "пустой поток и адрес" do
@@ -161,7 +216,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       events = events!(id, [open(), rename("Второе")])
       version = Version.new!(3)
 
-      request = Request.get_at(LoadRepo.cfg(), id, version, [], Rows.source(rows(events)))
+      request = Request.get_at(LoadRepo.cfg(), id, version, [rows: rows(events)], Rows)
       request = %{request | write_snapshots?: false}
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
@@ -182,7 +237,7 @@ defmodule Core.Es.Aggregate.LoadTest do
         {first, Version.new!(2)}
       ]
 
-      request = Request.get_many_at(LoadRepo.cfg(), pairs, [], Rows.source(first_rows ++ second_rows))
+      request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: first_rows ++ second_rows], Rows)
       request = %{request | write_snapshots?: false}
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
@@ -199,6 +254,15 @@ defmodule Core.Es.Aggregate.LoadTest do
 
   def handle_telemetry(event, measurements, metadata, test) do
     if self() == test, do: send(test, {:telemetry, event, measurements, metadata})
+  end
+
+  defp forward_marker(test) do
+    receive do
+      {:trace, _pid, :call, {Core.Es.Aggregate.Repo.Pg.Snapshot, :marker, [_]}} -> send(test, :marker)
+      _other -> :ok
+    end
+
+    forward_marker(test)
   end
 
   defp attach_telemetry do
@@ -218,17 +282,17 @@ defmodule Core.Es.Aggregate.LoadTest do
   defp no_snapshot_cfg, do: %{LoadRepo.cfg() | snapshot: nil}
 
   defp head_request(id, rows) do
-    request = Request.get(LoadRepo.cfg(), id, :current, [], Rows.source(rows))
+    request = Request.get(LoadRepo.cfg(), id, :current, [rows: rows], Rows)
     %{request | write_snapshots?: false}
   end
 
   defp at_request(id, version, rows, snapshots \\ []) do
-    request = Request.get_at(LoadRepo.cfg(), id, version, [], Rows.source(rows, snapshots))
+    request = Request.get_at(LoadRepo.cfg(), id, version, [rows: rows, snapshots: snapshots], Rows)
     %{request | write_snapshots?: false}
   end
 
   defp many_request(pairs, rows, snapshots \\ []) do
-    request = Request.get_many_at(LoadRepo.cfg(), pairs, [], Rows.source(rows, snapshots))
+    request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots], Rows)
     %{request | write_snapshots?: false}
   end
 

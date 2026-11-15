@@ -158,6 +158,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   и служебную `__es_read_cfg__/0` — конфигурацию чтения для `Core.Es.Aggregate.ReadRepo.Pg`.
   """
 
+  @behaviour Core.Es.Aggregate.Load.Source
+
   import Core.Version, only: [is_version: 1]
   import Ecto.Query
 
@@ -289,7 +291,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
         Map.merge(@es_aggregate_repo, %{
           dao: unquote(dao),
           codec: unquote(codec),
-          source: &Core.Es.Aggregate.Repo.Pg.fetch/3
+          source: Core.Es.Aggregate.Repo.Pg
         })
       end
 
@@ -392,28 +394,29 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # ===== источник строк =====
 
   @doc false
-  @spec fetch(map(), [Load.meta()], keyword()) :: [Load.triple()]
+  @impl true
+  @spec fetch(map(), Load.Plan.t(), keyword()) :: [Load.triple()]
 
-  def fetch(%{snapshot: nil} = cfg, metas, opts), do: read_streams(cfg, metas, opts)
+  def fetch(%{snapshot: nil} = cfg, %Load.Plan{streams: streams}, opts), do: read_streams(cfg, streams, opts)
 
-  def fetch(cfg, metas, opts) do
-    streams =
-      metas
-      |> snapshot_streams(cfg.type, Snapshot.marker(cfg))
+  def fetch(cfg, %Load.Plan{streams: streams, marker: marker}, opts) do
+    grouped =
+      streams
+      |> snapshot_streams(cfg.type, marker)
       |> cfg.dao.all(opts)
       |> Enum.chunk_by(&elem(&1, 0))
       |> Map.new(fn [row | _] = stream -> {elem(row, 0), stream} end)
 
-    for {meta, index} <- Enum.with_index(metas) do
-      stream = Map.get(streams, index, [])
-      {meta, stored_snapshot(stream), event_rows(stream)}
+    for {stream, index} <- Enum.with_index(streams) do
+      rows = Map.get(grouped, index, [])
+      {stream, stored_snapshot(rows), event_rows(rows)}
     end
   end
 
   # ---
 
-  defp snapshot_streams(metas, type, marker) do
-    from(s in values(streams(metas), @stream_types),
+  defp snapshot_streams(streams, type, marker) do
+    from(s in values(stream_values(streams), @stream_types),
       left_join: sn in Snapshot.Schema,
       on:
         sn.aggregate_type == ^type and sn.aggregate_id == s.aggregate_id and
@@ -455,10 +458,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp read_streams(_cfg, [], _opts), do: []
 
-  defp read_streams(cfg, metas, opts) do
+  defp read_streams(cfg, streams, opts) do
     rows =
       from(e in Schema,
-        join: s in values(streams(metas), @stream_types),
+        join: s in values(stream_values(streams), @stream_types),
         on: e.aggregate_id == s.aggregate_id and e.aggregate_version > s.after_version,
         where:
           e.aggregate_type == ^cfg.type and
@@ -469,20 +472,19 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       |> cfg.dao.all(opts)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
-    for {meta, index} <- Enum.with_index(metas), do: {meta, nil, Map.get(rows, index, [])}
+    for {stream, index} <- Enum.with_index(streams), do: {stream, nil, Map.get(rows, index, [])}
   end
 
-  defp streams(metas) do
-    metas
+  defp stream_values(streams) do
+    streams
     |> Enum.with_index()
-    |> Enum.map(fn {meta, index} ->
+    |> Enum.map(fn {stream, index} ->
       %{
         index: index,
-        aggregate_id: meta.aggregate_id,
-        after_version: meta.after_version,
-        to_version: meta.to_version,
-        # Отвергнутый снапшот читается без join'а: потолок снапшота — его же начало.
-        snapshot_to: if(meta.snapshot?, do: meta.snapshot_to, else: meta.after_version)
+        aggregate_id: stream.aggregate_id,
+        after_version: stream.after_version,
+        to_version: stream.to_version,
+        snapshot_to: stream.snapshot_to
       }
     end)
   end

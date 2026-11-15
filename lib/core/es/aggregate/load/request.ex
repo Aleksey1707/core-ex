@@ -21,7 +21,7 @@ defmodule Core.Es.Aggregate.Load.Request do
             decide: nil
 
   @typedoc false
-  @type source :: (map(), [map()], keyword() -> [{map(), term(), [term()]}])
+  @type source :: module()
 
   @typedoc false
   @type t(decision, reason) :: %__MODULE__{

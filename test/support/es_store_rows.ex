@@ -1,11 +1,16 @@
 defmodule Core.Es.Store.Rows do
   @moduledoc """
-  Строки `es_events` из литературы и заглушка порта `Core.Es.Aggregate.Load`.
+  Строки `es_events` из литературы и тестовый источник строк `Core.Es.Aggregate.Load`.
 
-  `rows/1` строит строки в форме хранилища, `source/2` — функцию-источник, которая отдаёт пары
-  «мета потока + снапшот + строки» без базы.
+  `rows/1` строит строки в форме хранилища, `fetch/3` реализует
+  `Core.Es.Aggregate.Load.Source`: выбирает строки и снапшот каждого потока по готовым границам
+  плана. Опции: `rows:` — строки, `snapshots:` — `{id, version, state}`, `order: :reverse` —
+  обратный порядок потоков.
   """
 
+  @behaviour Core.Es.Aggregate.Load.Source
+
+  alias Core.Es.Aggregate.Load.Plan
   alias Core.Es.Store.Schema
 
   @doc "Строки `es_events` из `{type, aggregate_id, version, tag, payload}`."
@@ -26,55 +31,40 @@ defmodule Core.Es.Store.Rows do
     end
   end
 
-  @doc """
-  Источник строк для `Core.Es.Aggregate.Load`: фильтрует `rows` по мете потока и отдаёт снапшот
-  `{id, version, state}` не выше `snapshot_to`.
-  """
-  @spec source([Schema.t()], [{struct(), pos_integer(), struct()}]) :: Core.Es.Aggregate.Load.source()
+  @impl true
+  @spec fetch(map(), Plan.t(), keyword()) :: [Core.Es.Aggregate.Load.Source.entry()]
 
-  def source(rows, snapshots \\ []) do
-    fn cfg, metas, _opts -> Enum.map(metas, &triple(cfg, &1, rows, snapshots)) end
+  def fetch(cfg, %Plan{streams: streams}, opts) do
+    rows = Keyword.fetch!(opts, :rows)
+    snapshots = Keyword.get(opts, :snapshots, [])
+    streams = if Keyword.get(opts, :order) == :reverse, do: Enum.reverse(streams), else: streams
+
+    Enum.map(streams, &triple(cfg, &1, rows, snapshots))
   end
 
   # ---
 
   defp by_id, do: Core.Config.codec().dump(Core.EsFixture.UserID.new())
 
-  defp triple(cfg, meta, rows, snapshots) do
-    snapshot = snapshot(cfg, meta, snapshots)
-    after_version = after_snapshot(meta.after_version, snapshot)
+  defp triple(cfg, stream, rows, snapshots) do
+    candidates =
+      for {id, version, state} <- snapshots,
+          cfg.codec.dump(id) == stream.aggregate_id,
+          do: {version, :erlang.term_to_binary(state)}
+
+    snapshot = Plan.snapshot(stream, candidates)
+    from_version = from_version(stream, snapshot)
 
     events =
-      Enum.filter(rows, fn row ->
-        row.aggregate_id == meta.aggregate_id and
-          row.aggregate_version > after_version and
-          (is_nil(meta.to_version) or row.aggregate_version <= meta.to_version)
-      end)
+      for row <- rows,
+          row.aggregate_id == stream.aggregate_id,
+          row.aggregate_version > from_version,
+          is_nil(stream.to_version) or row.aggregate_version <= stream.to_version,
+          do: row
 
-    {meta, snapshot, events}
+    {stream, snapshot, events}
   end
 
-  # Хвост начинается после снапшота: порт читает его join'ом от версии снапшота.
-  defp after_snapshot(after_version, nil), do: after_version
-  defp after_snapshot(after_version, {version, _binary}), do: max(after_version, version)
-
-  defp snapshot(_cfg, %{snapshot?: false}, _snapshots), do: nil
-
-  defp snapshot(cfg, meta, snapshots) do
-    matches =
-      for {id, version, state} <- snapshots,
-          cfg.codec.dump(id) == meta.aggregate_id,
-          version > meta.after_version,
-          is_nil(meta.snapshot_to) or version <= meta.snapshot_to,
-          do: {version, state}
-
-    case matches do
-      [] ->
-        nil
-
-      _ ->
-        {version, state} = Enum.max_by(matches, &elem(&1, 0))
-        {version, :erlang.term_to_binary(state)}
-    end
-  end
+  defp from_version(stream, nil), do: stream.after_version
+  defp from_version(stream, {version, _binary}), do: max(stream.after_version, version)
 end

@@ -3,10 +3,11 @@ defmodule Core.Es.Aggregate.Load do
 
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Aggregate.Load.Plan
   alias Core.Es.Aggregate.Load.Request
+  alias Core.Es.Aggregate.Load.Source
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Personal.Destroyed
-  alias Core.Es.Store.Schema
   alias Core.Result
   alias Core.Telemetry
   alias Core.Version
@@ -16,18 +17,11 @@ defmodule Core.Es.Aggregate.Load do
           state: struct(),
           captures: [pos_integer()],
           version: Version.expected() | nil,
-          aggregate_id: binary(),
-          after_version: non_neg_integer(),
-          to_version: pos_integer() | nil,
-          snapshot_to: pos_integer() | nil,
-          snapshot?: boolean()
+          aggregate_id: binary()
         }
 
   @typedoc false
-  @type triple :: {meta(), Snapshot.stored() | nil, [Schema.t()]}
-
-  @typedoc false
-  @type source :: (map(), [meta()], keyword() -> [triple()])
+  @type triple :: Source.entry()
 
   @typedoc false
   @type restored :: %{
@@ -120,10 +114,11 @@ defmodule Core.Es.Aggregate.Load do
 
   @spec run(map(), request(), address()) :: Result.t()
 
-  defp run(cfg, %{op: op} = request, %{streams: streams} = address) do
+  defp run(cfg, %{op: op} = request, %{streams: specs} = address) do
     start = System.monotonic_time()
+    plan = Plan.new(cfg, request.write_snapshots?, specs)
 
-    with {:ok, restored} <- restore(cfg, request, streams) do
+    with {:ok, restored} <- restore(cfg, plan, request, specs) do
       result = verify(cfg, request, address, restored)
 
       :telemetry.execute(
@@ -132,19 +127,19 @@ defmodule Core.Es.Aggregate.Load do
         %{type: cfg.type, op: op, result: result_tag(result)}
       )
 
-      write_snapshots(cfg, restored, request.write_snapshots?)
+      write_snapshots(cfg, plan, restored)
       decide(cfg, request, address, result)
     end
   end
 
-  defp restore(_cfg, _request, []), do: {:ok, []}
+  defp restore(_cfg, _plan, _request, []), do: {:ok, []}
 
-  defp restore(cfg, request, streams) do
-    metas = Enum.map(streams, &stream(cfg, &1))
-    triples = request.source.(cfg, metas, request.opts)
+  defp restore(cfg, plan, request, specs) do
+    metas = Enum.map(specs, &meta(cfg, &1))
+    triples = request.source.fetch(cfg, plan, request.opts)
 
-    with {:ok, restored} <- open_tails(cfg, triples),
-         {:ok, restored} <- refold_rejected(cfg, restored, request.source, request.opts) do
+    with {:ok, restored} <- open_tails(cfg, plan, pair(metas, triples)),
+         {:ok, restored} <- refold_rejected(cfg, plan, restored, request.source, request.opts) do
       Enum.each(restored, &emit_fold(cfg, request.op, &1))
       {:ok, restored}
     end
@@ -232,75 +227,51 @@ defmodule Core.Es.Aggregate.Load do
 
   defp version_mismatch(cfg, detail), do: cfg.errors.domain(cfg.behaviour, :version_mismatch, detail)
 
-  defp stream(cfg, spec) do
+  defp meta(cfg, spec) do
     %{
       state: spec.state,
       captures: spec.captures,
       version: spec.version,
-      aggregate_id: cfg.codec.dump(spec.state.id),
-      after_version: after_version(spec.state),
-      to_version: to_version(spec),
-      snapshot_to: snapshot_to(spec),
-      snapshot?: cfg.snapshot != nil
+      aggregate_id: cfg.codec.dump(spec.state.id)
     }
   end
 
-  # Потолок потока — верхняя версия или наибольшая версия пакета; снапшот — не выше наименьшей.
-  defp to_version(%{captures: [_ | _] = captures}), do: Enum.max(captures)
-  defp to_version(%{upper: upper}), do: upper
+  # Потоки источника сходятся по адресу: порядок выдачи снапшот с потоком не путает.
+  defp pair(metas, triples) do
+    by_address = Map.new(triples, fn {stream, snapshot, rows} -> {stream.aggregate_id, {snapshot, rows}} end)
 
-  defp snapshot_to(%{captures: [_ | _] = captures}), do: Enum.min(captures)
-  defp snapshot_to(%{upper: upper}), do: upper
-
-  defp after_version(%{version: nil}), do: 0
-  defp after_version(%{version: %Version{} = version}), do: Version.value(version)
-
-  # Все строки всех потоков открываются одним вызовом; шифротексты снапшотов — тоже.
-  defp open_tails(%{snapshot: nil} = cfg, triples) do
-    with {:ok, {events, []}} <- load_rows(cfg, triples, []), do: distribute(cfg, triples, events, [])
+    for meta <- metas do
+      {snapshot, rows} = Map.fetch!(by_address, meta.aggregate_id)
+      {meta, snapshot, rows}
+    end
   end
 
-  defp open_tails(cfg, triples) do
-    snapshots = Enum.map(triples, &elem(&1, 1))
-    states = Enum.map(triples, fn {meta, _snapshot, _rows} -> meta.state end)
-    sealed = Snapshot.sealed(cfg, Snapshot.marker(cfg), states, snapshots)
-
-    with {:ok, {events, opened}} <- load_rows(cfg, triples, sealed),
-         do: distribute(cfg, triples, events, opened)
+  # Хвост потока расшифровывается вместе с его снапшотом: исходы не общие и не позиционные.
+  defp open_tails(cfg, plan, triples) do
+    triples
+    |> Enum.reduce_while({:ok, []}, fn {meta, snapshot, rows}, {:ok, acc} ->
+      case open_tail(cfg, plan, meta, snapshot, rows) do
+        {:ok, stream} -> {:cont, {:ok, [stream | acc]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, restored} -> {:ok, Enum.reverse(restored)}
+      error -> error
+    end
   end
 
-  defp load_rows(cfg, triples, sealed) do
-    rows = Enum.flat_map(triples, fn {_meta, _snapshot, rows} -> rows end)
-
-    Es.Store.load_fold_rows(rows, cfg.event_codec, cfg.codec, sealed)
+  defp open_tail(%{snapshot: nil} = cfg, _plan, meta, _snapshot, rows) do
+    with {:ok, {events, []}} <- Es.Store.load_fold_rows(rows, cfg.event_codec, cfg.codec, []),
+         do: {:ok, fold_stream(cfg, meta, nil, events)}
   end
 
-  # События и исходы снапшотов — общие списки на весь вызов; каждый трипл берёт свой отрезок.
-  defp distribute(cfg, triples, events, opened) do
-    {restored, {[], []}} =
-      Enum.map_reduce(triples, {events, opened}, fn triple, acc -> fold_triple(cfg, triple, acc) end)
+  defp open_tail(cfg, plan, meta, snapshot, rows) do
+    sealed = Snapshot.sealed(cfg, plan, [meta.state], [snapshot])
 
-    {:ok, restored}
+    with {:ok, {events, opened}} <- Es.Store.load_fold_rows(rows, cfg.event_codec, cfg.codec, sealed),
+         do: {:ok, fold_stream(cfg, meta, Snapshot.opened(cfg, plan, snapshot, opened), events)}
   end
-
-  defp fold_triple(cfg, {meta, snapshot, rows}, {events, opened}) do
-    {stream_events, rest_events} = Enum.split(events, length(rows))
-    {opened_snapshot, opened} = open_snapshot(cfg, snapshot, opened)
-
-    {fold_stream(cfg, meta, opened_snapshot, stream_events), {rest_events, opened}}
-  end
-
-  defp open_snapshot(_cfg, nil, opened), do: {nil, opened}
-
-  defp open_snapshot(cfg, snapshot, opened) do
-    {outcomes, opened} = take_outcomes(cfg, opened)
-    [opened_snapshot] = Snapshot.put_opened(cfg, [snapshot], outcomes)
-
-    {opened_snapshot, opened}
-  end
-
-  defp take_outcomes(%{snapshot: %{sealed: false}}, opened), do: {[], opened}
-  defp take_outcomes(%{snapshot: %{sealed: true}}, [outcome | opened]), do: {[outcome], opened}
 
   defp fold_stream(%{snapshot: nil} = cfg, meta, _snapshot, events),
     do: restored_stream(:off, cfg, meta, meta.state, events, false)
@@ -339,30 +310,34 @@ defmodule Core.Es.Aggregate.Load do
   end
 
   # Повторное чтение отвергнутых снапшотов — вторым запросом, без снапшотов; замена — по флагу.
-  defp refold_rejected(cfg, restored, source, opts) do
+  defp refold_rejected(cfg, plan, restored, source, opts) do
     rejected = for %{rejected?: true} = stream <- restored, do: stream
 
     case rejected do
       [] -> {:ok, restored}
-      [_ | _] -> refold(cfg, restored, rejected, source, opts)
+      [_ | _] -> refold(cfg, plan, restored, rejected, source, opts)
     end
   end
 
-  defp refold(cfg, restored, rejected, source, opts) do
-    metas = Enum.map(rejected, &%{&1.meta | snapshot?: false})
-    triples = source.(cfg, metas, opts)
+  defp refold(cfg, plan, restored, rejected, source, opts) do
+    plan = Plan.refold(plan, Enum.map(rejected, & &1.meta.aggregate_id))
+    metas = Enum.map(rejected, & &1.meta)
+    triples = source.fetch(cfg, plan, opts)
 
-    with {:ok, refolded} <- open_tails(cfg, triples), do: {:ok, replace_rejected(restored, refolded)}
+    with {:ok, refolded} <- open_tails(cfg, plan, pair(metas, triples)),
+         do: {:ok, replace_rejected(restored, refolded)}
   end
 
   defp replace_rejected(restored, refolded) do
-    {merged, []} =
-      Enum.map_reduce(restored, refolded, fn
-        %{rejected?: true} = stream, [refolded | rest] -> {merge_refolded(stream, refolded), rest}
-        stream, refolded -> {stream, refolded}
-      end)
+    by_address = Map.new(refolded, &{&1.meta.aggregate_id, &1})
 
-    merged
+    Enum.map(restored, fn
+      %{rejected?: true} = placeholder ->
+        merge_refolded(placeholder, Map.fetch!(by_address, placeholder.meta.aggregate_id))
+
+      stream ->
+        stream
+    end)
   end
 
   defp merge_refolded(placeholder, refolded) do
@@ -450,13 +425,13 @@ defmodule Core.Es.Aggregate.Load do
     )
   end
 
-  defp write_snapshots(_cfg, _restored, false), do: :ok
+  defp write_snapshots(%{snapshot: nil}, _plan, _restored), do: :ok
 
-  defp write_snapshots(%{snapshot: nil}, _restored, _write?), do: :ok
+  defp write_snapshots(_cfg, %{write_snapshots?: false}, _restored), do: :ok
 
-  defp write_snapshots(%{snapshot: %{every: every}} = cfg, restored, true) do
+  defp write_snapshots(cfg, %{every: every} = plan, restored) do
     states = for %{state: state, events: events, destroyed?: false} <- restored, events >= every, do: state
-    Snapshot.write(cfg, states)
+    Snapshot.write(cfg, plan, states)
   end
 
   defp result_tag({:ok, _}), do: :ok
