@@ -29,6 +29,9 @@ defmodule Core.Es.ProjectionTest do
   @account_repo Config.repo!(Account.Repo)
   @entity_repo Config.repo!(StateStoredFixture.Repo)
 
+  # Версия выше любых реальных миграций: иначе Ecto предупреждает о порядке отката.
+  @test_migration_version 20_991_231_235_959
+
   defmodule Stranger.Event.Done do
     @moduledoc false
 
@@ -804,7 +807,7 @@ defmodule Core.Es.ProjectionTest do
 
       # Блокировка миграций держит соединение sandbox, которого ждёт процесс миграции.
       assert :ok =
-               Ecto.Migrator.up(TestRepo, 20_260_914_150_000, DeleteCheckpoint,
+               Ecto.Migrator.up(TestRepo, @test_migration_version, DeleteCheckpoint,
                  log: false,
                  migration_lock: false
                )
