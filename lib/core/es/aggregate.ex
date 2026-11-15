@@ -27,7 +27,8 @@ defmodule Core.Es.Aggregate do
     `Event.Mod.draft(payload)` или `Event.Mod.draft()` у события без нагрузки (`Core.Es.Event`,
     «Черновик события»); `{:ok, []}` — команда без изменений.
     Агрегата ещё нет — `version: nil`: `:not_found` / `:already_exists` решает `decide` доменной
-    ошибкой.
+    ошибкой. Причина отказа — только `%Core.Error{}`: иная форма — ошибка контракта, и
+    `execute/2` поднимает `ArgumentError` с агрегатом и модулем команды.
   - `evolve(state, event)` → состояние — применение события: чистый, без проверки инвариантов и
     без catch-all, голова матчит только событие. `id` и `version` результата библиотека
     перезаписывает.
@@ -156,6 +157,7 @@ defmodule Core.Es.Aggregate do
       Исполнить команду или цепочку команд: события решений `decide/2` и состояние после них.
 
       Команда цепочки решает от состояния после предыдущей, первый отказ обрывает цепочку.
+      Причина отказа `decide/2` иной формы, чем `%Core.Error{}`, — `ArgumentError`.
       """
       @spec execute(%__MODULE__{}, struct() | [struct()]) ::
               Core.Result.t({[Core.Es.Event.t()], %__MODULE__{}})
@@ -252,6 +254,11 @@ defmodule Core.Es.Aggregate do
 
       {:error, %Error{}} = error ->
         error
+
+      _other ->
+        raise ArgumentError,
+              "#{@label}: decide/2 агрегата #{inspect(aggregate)} для команды " <>
+                "#{inspect(command.__struct__)} вернул причину не %Core.Error{}"
     end
   end
 

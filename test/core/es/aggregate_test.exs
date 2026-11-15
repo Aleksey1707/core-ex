@@ -31,6 +31,34 @@ defmodule Core.Es.AggregateTest do
     def evolve(state, %Event.Frozen{}), do: %{state | id: nil, version: Version.new!(99)}
   end
 
+  defmodule BadDecision do
+    @moduledoc "Агрегат, чей `decide/2` нарушает контракт причины: возвращает не `%Error{}`."
+
+    use Core.Es.Aggregate,
+      event_codec: Core.EsFixture.Account.Event.Codec
+
+    defstruct id: nil, version: nil
+
+    @impl true
+    def decide(_command, _state), do: {:error, :atom}
+
+    @impl true
+    def evolve(state, %Event.Frozen{}), do: state
+  end
+
+  describe "decide/2 — контракт причины" do
+    test "причина не %Error{} — ArgumentError с агрегатом и командой" do
+      state = struct(BadDecision, id: Account.ID.new())
+
+      for commands <- [close(), [close()]] do
+        error = assert_raise ArgumentError, fn -> BadDecision.execute(state, commands) end
+
+        assert error.message =~ inspect(BadDecision)
+        assert error.message =~ inspect(Cmd.Close)
+      end
+    end
+  end
+
   describe "execute/2" do
     test "создание — событие с id, aggregate_id из состояния, версией 1, by и at из команды" do
       id = Account.ID.new()
@@ -75,7 +103,7 @@ defmodule Core.Es.AggregateTest do
     test "отказ decide/2 — как есть" do
       open = %Cmd.Open{name: Account.Name.new!("Отгрузка"), by: UserID.new(), at: @at}
 
-      assert {:error, %Error{kind: :domain, code: :already_exists}} =
+      assert {:error, %Error{kind: :domain, ns: :account, code: :already_exists, detail: %{version: 1}}} =
                Account.execute(opened(), open)
     end
 
