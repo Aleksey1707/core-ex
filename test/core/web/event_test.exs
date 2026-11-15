@@ -4,10 +4,23 @@ defmodule Core.Web.EventTest do
   import OpenApiSpex.TestAssertions
 
   alias Core.CodecFixture.External
+  alias Core.Context
+  alias Core.Error
   alias Core.Es.Event.At
   alias Core.Es.Personal
   alias Core.EventFixture
+  alias Core.EventFixture.AggID, as: EventAggID
   alias Core.LabelsFixture
+  alias Core.LabelsFixture.AuthorID, as: LabelsAuthorID
+  alias Core.LabelsFixture.BaseUnit
+  alias Core.LabelsFixture.Event, as: LabelsEvent
+  alias Core.LabelsFixture.ItemID
+  alias Core.LabelsFixture.ItemQuery
+  alias Core.LabelsFixture.SnapshotID
+  alias Core.LabelsFixture.Unit
+  alias Core.LabelsFixture.UserID, as: LabelsUserID
+  alias Core.LabelsFixture.UserQuery
+  alias Core.LabelsFixture.WebEvent
   alias Core.Pagination
   alias Core.Version
   alias Core.Web.Response
@@ -110,6 +123,76 @@ defmodule Core.Web.EventTest do
     test "автора нет в словаре ссылок — ArgumentError" do
       assert_raise ArgumentError, ~r/автор события .*: нет в словаре ссылок/, fn ->
         WithUser.to_wire(closed(UserID.new()), %{})
+      end
+    end
+  end
+
+  describe "страница → wire" do
+    test "без подписей: к элементам применён to_wire, total и порядок сохранены" do
+      [first, second] = [noted(UserID.new()), noted(UserID.new())]
+      page = %Pagination.Result{items: [first, second], total: 7}
+
+      assert Plain.to_wire_page(page, Context.new()) ==
+               {:ok,
+                %Pagination.Result{
+                  items: [Plain.to_wire(first, %{}), Plain.to_wire(second, %{})],
+                  total: 7
+                }}
+    end
+
+    test "labels: true — словарь со всей страницы одним вызовом, title и details на месте" do
+      [first, second] = [ItemID.new(), ItemID.new()]
+      by = LabelsUserID.new()
+      events = [linked(first, by), linked(second, by)]
+      names = %{first => "Позиция 1", second => "Позиция 2", by => "Автор"}
+      page = %Pagination.Result{items: events, total: 12}
+
+      assert {:ok, %Pagination.Result{items: [one, two], total: 12}} =
+               WebEvent.to_wire_page(page, Context.new(%{names: names}))
+
+      assert [one.id, two.id] == Enum.map(events, &External.dump(&1.id))
+      assert %{title: "Позиция связана", by: %{id: dumped_by, login: "Автор"}} = one
+      assert dumped_by == External.dump(by)
+
+      assert Enum.any?(
+               one.details,
+               &match?(%{label: "Позиция", kind: "ref", value: %{name: "Позиция 1"}}, &1)
+             )
+
+      assert_received {:get_names, ItemQuery, items}
+      assert Enum.sort(items) == Enum.sort([first, second])
+      assert_received {:get_names, UserQuery, users}
+      assert users == [by]
+      refute_received {:get_names, _resolver, _ids}
+    end
+
+    test "пустая страница — словарь не читается, total сохранён" do
+      for module <- [Plain, WebEvent] do
+        assert module.to_wire_page(%Pagination.Result{items: [], total: 0}, Context.new()) ==
+                 {:ok, %Pagination.Result{items: [], total: 0}}
+      end
+
+      assert WebEvent.to_wire_page(%Pagination.Result{items: [], total: 5}, Context.new()) ==
+               {:ok, %Pagination.Result{items: [], total: 5}}
+
+      refute_received {:get_names, _resolver, _ids}
+    end
+
+    test "отказ резолвера — итог функции, а не частичный словарь" do
+      [first, second] = [ItemID.new(), ItemID.new()]
+      by = LabelsUserID.new()
+      names = %{first => "Позиция 1", by => "Автор"}
+      page = %Pagination.Result{items: [linked(first, by), linked(second, by)], total: 2}
+
+      assert {:error, %Error{code: :not_found, ns: ItemQuery, detail: [^second]}} =
+               WebEvent.to_wire_page(page, Context.new(%{names: names}))
+    end
+
+    test "id вне словаря ссылок — ArgumentError на странице" do
+      page = %Pagination.Result{items: [noted(UserID.new())], total: 1}
+
+      assert_raise ArgumentError, ~r/автор события .*: нет в словаре ссылок/, fn ->
+        WithUser.to_wire_page(page, Context.new())
       end
     end
   end
@@ -341,6 +424,22 @@ defmodule Core.Web.EventTest do
     payload = %Event.Noted.Payload{first_name: "Анна", extra_data: %{"source_kind" => %{"line_no" => 2}}}
 
     Event.Noted.new(payload, AggID.new(), Version.new!(3), by, At.now!())
+  end
+
+  defp linked(item, by) do
+    payload =
+      struct!(
+        LabelsEvent.Linked.Payload,
+        item: item,
+        items: [],
+        owner: by,
+        author: LabelsAuthorID.new!(by),
+        snapshot: SnapshotID.new(),
+        unit: Unit.new!("kg"),
+        base_unit: BaseUnit.new!("pc")
+      )
+
+    LabelsEvent.Linked.new(payload, EventAggID.new(), Version.new(), by, At.now!())
   end
 
   defp user_ref, do: [dump: &WithUser.user_ref/2, schema: UserRef]

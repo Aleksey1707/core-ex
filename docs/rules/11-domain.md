@@ -1548,6 +1548,9 @@ end
   `user_ref:` — `CompileError`
 - `to_wire/2` (событие и словарь ссылок страницы) при `labels: true` добавляет к полям события
   `title` и `details`
+- `to_wire_page/2` — страница событий (`%Core.Pagination.Result{}`) и контекст → `Result.t` со
+  страницей `to_wire/2`: словарь ссылок `Core.Labels.Refs.get/2` собирается со всей страницы один
+  раз, `total` и порядок сохраняются; отказ резолвера — итог функции
 - Вид — строкой; `:number` — строкой с десятичной точкой (integer — `Integer.to_string/1`,
   decimal — нормальная запись, строка кодека — как есть); `:text`, `:date`, `:datetime` — Prim
   дампом `codec:`, строка — как есть

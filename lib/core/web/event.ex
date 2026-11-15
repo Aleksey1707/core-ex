@@ -25,7 +25,9 @@ defmodule Core.Web.Event do
   модуль `schema:` и требование `user_ref:` при `labels: true` проверяются в теле модуля; `codec:` и
   `labels:` — литералы, проверяются при раскрытии `use`.
 
-  Порождает `to_wire/2`: событие и словарь ссылок страницы (`Core.Labels.Refs.get/2`) → map.
+  Порождает `to_wire/2`: событие и словарь ссылок страницы (`Core.Labels.Refs.get/2`) → map, — и
+  `to_wire_page/2`: страница событий и контекст → `Core.Result` со страницей `to_wire/2`, словарь
+  ссылок собирается со всей страницы один раз.
 
   | Поле | На wire |
   |---|---|
@@ -86,8 +88,8 @@ defmodule Core.Web.Event do
   собранный без `open_api_spex` (тела схем строит условный модуль библиотеки; правка —
   `mix deps.compile core --force`).
 
-  Макрос занимает в модуле имя `to_wire/2`, при `open_api_spex` — ещё `schema/0` и, при
-  `labels: true`, вложенный модуль `Detail` с модулями видов.
+  Макрос занимает в модуле имена `to_wire/2` и `to_wire_page/2`, при `open_api_spex` — ещё `schema/0`
+  и, при `labels: true`, вложенный модуль `Detail` с модулями видов.
   """
 
   alias Core.Es
@@ -260,6 +262,8 @@ defmodule Core.Web.Event do
         false -> unquote(plain())
         true -> unquote(labelled())
       end
+
+      unquote(page(labels?))
     end
   end
 
@@ -278,6 +282,30 @@ defmodule Core.Web.Event do
       @spec to_wire(Core.Es.Event.t(), Core.Labels.Refs.t()) :: Core.Web.Event.labelled()
 
       def to_wire(%_{payload: _} = event, refs) when is_map(refs), do: unquote(narrow(@labelled_fields, true))
+    end
+  end
+
+  defp page(labels?) do
+    type =
+      case labels? do
+        false -> quote(do: Core.Web.Event.t())
+        true -> quote(do: Core.Web.Event.labelled())
+      end
+
+    quote generated: true do
+      @doc """
+      Страница событий для JSON: словарь ссылок собирается со всей страницы один раз, затем
+      `to_wire/2` применяется к элементам; `total` и порядок сохраняются.
+      """
+      @spec to_wire_page(Core.Pagination.Result.t(Core.Es.Event.t()), Core.Context.t()) ::
+              Core.Result.t(Core.Pagination.Result.t(unquote(type)))
+
+      def to_wire_page(%Core.Pagination.Result{} = page, %Core.Context{} = context) do
+        case Core.Labels.Refs.get(page, context) do
+          {:ok, refs} -> {:ok, Core.Pagination.Result.map(page, &to_wire(&1, refs))}
+          {:error, error} -> {:error, error}
+        end
+      end
     end
   end
 

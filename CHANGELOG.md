@@ -38,6 +38,13 @@
 
 ### Новое
 
+- **`to_wire_page/2` — страница событий → wire одним вызовом.** Генерируется `use Core.Web.Event`
+  в обоих профилях (`labels: true` и без подписей): `to_wire_page(%Core.Pagination.Result{},
+  %Core.Context{})` → `Core.Result.t(Core.Pagination.Result.t(...))` со страницей wire-элементов.
+  Словарь ссылок (`Core.Labels.Refs.get/2`) собирается со всей страницы один раз, `total` и
+  порядок сохраняются, отказ резолвера — итог функции. Правка потребителя не требуется; было —
+  `Refs.get(page, context)` и `Response.page_data(page, &to_wire(&1, refs))` в usecase, стало —
+  `to_wire_page(page, context)`.
 - **`Core.Repo.Pg.Config` и `Core.Es.Store.Write.Plan` — публичные структуры конфигурации
   записи.** Форма конфигурации репозитория и данные записи пачки событий заданы `@enforce_keys`,
   поэтому опечатка в ключе — ошибка сборки, а не тихий пропуск поведения. Типы
