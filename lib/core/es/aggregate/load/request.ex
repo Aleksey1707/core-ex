@@ -4,7 +4,6 @@ defmodule Core.Es.Aggregate.Load.Request do
   import Core.Version, only: [is_version: 1]
 
   alias Core.Es.Aggregate.Repo.Pg.Config
-  alias Core.Result
   alias Core.Version
 
   @enforce_keys ~w(op opts streams)a
@@ -14,12 +13,10 @@ defmodule Core.Es.Aggregate.Load.Request do
             source: nil,
             streams: [],
             version: nil,
-            pairs: nil,
-            born?: false,
-            decide: nil
+            pairs: nil
 
   @typedoc false
-  @type op :: :get | :get_decision | :get_many | :refresh | :get_at | :get_many_at
+  @type op :: :get | :get_many | :get_at | :get_many_at
 
   @typedoc false
   @type source :: module()
@@ -33,22 +30,17 @@ defmodule Core.Es.Aggregate.Load.Request do
         }
 
   @typedoc false
-  @type t(decision, reason) :: %__MODULE__{
+  @type t :: %__MODULE__{
           op: op(),
           opts: keyword(),
           source: source(),
           streams: [stream()],
           version: Version.t() | nil,
-          pairs: [{struct(), pos_integer()}] | nil,
-          born?: boolean(),
-          decide: (struct() -> Result.t(decision, reason)) | nil
+          pairs: [{struct(), pos_integer()}] | nil
         }
 
-  @typedoc false
-  @type t :: t(term(), term())
-
   @doc false
-  @spec get(Config.t(), struct(), Version.expected(), keyword(), source() | nil) :: t(term(), term())
+  @spec get(Config.t(), struct(), Version.expected(), keyword(), source() | nil) :: t()
 
   def get(cfg, id, version, opts, source \\ nil) do
     %__MODULE__{
@@ -60,29 +52,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec get_decision(
-          Config.t(),
-          struct(),
-          Version.expected(),
-          (struct() -> Result.t(decision, reason)),
-          keyword(),
-          source() | nil
-        ) :: t(decision, reason)
-        when decision: var, reason: var
-
-  def get_decision(cfg, id, version, fun, opts, source \\ nil) do
-    %__MODULE__{
-      op: :get_decision,
-      opts: opts,
-      source: source || cfg.source,
-      streams: [head(struct(cfg.aggregate, id: id), version)],
-      born?: true,
-      decide: fun
-    }
-  end
-
-  @doc false
-  @spec get_many(Config.t(), [{struct(), Version.expected()}], keyword(), source() | nil) :: t(term(), term())
+  @spec get_many(Config.t(), [{struct(), Version.expected()}], keyword(), source() | nil) :: t()
 
   def get_many(cfg, pairs, opts, source \\ nil) do
     %__MODULE__{
@@ -94,19 +64,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec refresh(Config.t(), struct(), Version.expected(), keyword(), source() | nil) :: t(term(), term())
-
-  def refresh(cfg, state, version, opts, source \\ nil) do
-    %__MODULE__{
-      op: :refresh,
-      opts: opts,
-      source: source || cfg.source,
-      streams: [head(state, version)]
-    }
-  end
-
-  @doc false
-  @spec get_at(Config.t(), struct(), Version.t(), keyword(), source() | nil) :: t(term(), term())
+  @spec get_at(Config.t(), struct(), Version.t(), keyword(), source() | nil) :: t()
 
   def get_at(cfg, id, version, opts, source \\ nil) do
     %__MODULE__{
@@ -119,7 +77,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec get_many_at(Config.t(), [{struct(), Version.t()}], keyword(), source() | nil) :: t(term(), term())
+  @spec get_many_at(Config.t(), [{struct(), Version.t()}], keyword(), source() | nil) :: t()
 
   def get_many_at(cfg, pairs, opts, source \\ nil) do
     parsed = parse_pairs!(cfg, pairs)

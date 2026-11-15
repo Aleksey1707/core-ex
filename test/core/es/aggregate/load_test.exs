@@ -22,6 +22,14 @@ defmodule Core.Es.Aggregate.LoadTest do
     def cfg, do: es_aggregate_repo()
   end
 
+  describe "заявка read-model операций" do
+    test "несёт только поля операций чтения" do
+      fields = Request.__struct__() |> Map.from_struct() |> Map.keys() |> Enum.sort()
+
+      assert fields == [:op, :opts, :pairs, :source, :streams, :version]
+    end
+  end
+
   describe "нарезка версий" do
     test "верхняя граница — события выше не читаются" do
       id = Account.ID.new()

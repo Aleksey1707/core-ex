@@ -168,6 +168,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Aggregate.Load
+  alias Core.Es.Aggregate.Load.Decision
   alias Core.Es.Aggregate.Load.Engine
   alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Repo.Pg.Config
@@ -376,7 +377,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   def get_decision(cfg, id, version, %Context{}, fun, opts)
       when is_version(version) and is_function(fun, 1) and is_list(opts) do
-    Load.run(cfg, Request.get_decision(cfg, id, version, fun, opts))
+    Decision.head(cfg, id, version, fun, opts)
   end
 
   @doc false
@@ -392,7 +393,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
           Result.t(struct())
 
   def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts) do
-    with {:ok, [state]} <- Load.run(cfg, Request.refresh(cfg, state, version, opts)), do: {:ok, state}
+    Decision.tail(cfg, state, version, opts)
   end
 
   # ===== источник строк =====

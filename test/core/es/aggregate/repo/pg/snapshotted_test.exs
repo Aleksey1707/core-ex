@@ -145,6 +145,14 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
       assert %Snapshot.Schema{aggregate_version: 2} = snapshot(id)
     end
 
+    test "get_decision пишет по тому же правилу" do
+      id = Account.ID.new()
+      state = write!(@repo, id, [open(), freeze()])
+
+      assert {:ok, ^state} = @repo.get_decision(id, :current, Context.new(), &{:ok, &1})
+      assert %Snapshot.Schema{aggregate_version: 2} = snapshot(id)
+    end
+
     test "снапшот более поздней версии не перетирается" do
       id = Account.ID.new()
       state = write!(@repo, id, [open(), freeze()])

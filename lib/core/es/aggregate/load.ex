@@ -9,23 +9,20 @@ defmodule Core.Es.Aggregate.Load do
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Result
   alias Core.Telemetry
-  alias Core.Version
-
-  @typedoc false
-  @type request(decision, reason) :: Request.t(decision, reason)
-
-  @typedoc false
-  @type request :: request(term(), term())
 
   @doc false
-  @spec run(Config.t(), request(decision, reason)) :: Result.t([struct()] | struct() | decision, reason | Error.t())
-        when decision: var, reason: var
+  @spec run(Config.t(), Request.t()) :: Result.t([struct()] | struct())
 
-  def run(cfg, %Request{op: op} = request) do
+  def run(cfg, %Request{} = request), do: read(cfg, request, writes_snapshots?(request))
+
+  @doc false
+  @spec read(Config.t(), Engine.spec(), boolean()) :: Result.t([struct()] | struct())
+
+  def read(cfg, %{op: op, streams: streams} = spec, snapshots?) do
     start = System.monotonic_time()
-    plan = Plan.new(cfg, writes_snapshots?(request), request.streams)
+    plan = Plan.new(cfg, snapshots?, streams)
 
-    with {:ok, %{restored: restored, result: result}} <- Engine.read(cfg, plan, request) do
+    with {:ok, %{restored: restored, result: result}} <- Engine.read(cfg, plan, spec) do
       :telemetry.execute(
         Telemetry.event([:es, :aggregate, :load]),
         measurements(restored, System.monotonic_time() - start),
@@ -33,7 +30,7 @@ defmodule Core.Es.Aggregate.Load do
       )
 
       write_snapshots(cfg, plan, restored)
-      decide(cfg, request, result)
+      result
     end
   end
 
@@ -41,21 +38,7 @@ defmodule Core.Es.Aggregate.Load do
 
   # Политика записи снапшота — свойство операции и возможность источника строк.
   defp writes_snapshots?(%Request{op: op, source: source}),
-    do: op in [:get, :get_decision, :get_many, :refresh] and source.writes_snapshots?()
-
-  # Пустой поток при `%Version{}` — не гонка: отказ или принятие решает `fun` на незаведённом
-  # агрегате, поэтому одиночное чтение головы спрашивает решение после сверки (ADR-0016).
-  defp decide(cfg, %{decide: fun, streams: [%{version: %Version{} = version}]}, {:ok, [state]})
-       when is_function(fun, 1) and is_nil(state.version) do
-    case fun.(state) do
-      {:ok, _decision} -> {:error, Engine.mismatch(cfg, state, Version.value(version), :expected)}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp decide(_cfg, %{decide: fun}, {:ok, [state]}) when is_function(fun, 1), do: fun.(state)
-
-  defp decide(_cfg, _request, result), do: result
+    do: op in [:get, :get_many] and source.writes_snapshots?()
 
   defp measurements(restored, duration) do
     counts = Enum.frequencies_by(restored, & &1.snapshot)

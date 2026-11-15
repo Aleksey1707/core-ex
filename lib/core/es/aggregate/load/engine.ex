@@ -4,7 +4,6 @@ defmodule Core.Es.Aggregate.Load.Engine do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Aggregate.Load.Plan
-  alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Load.Source
   alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
@@ -18,11 +17,34 @@ defmodule Core.Es.Aggregate.Load.Engine do
   @type entry :: Source.entry()
 
   @typedoc false
+  @type op :: :get | :get_decision | :get_many | :refresh | :get_at | :get_many_at
+
+  @typedoc false
+  @type stream :: %{
+          required(:state) => struct(),
+          required(:version) => Version.expected() | nil,
+          required(:upper) => pos_integer() | nil,
+          required(:captures) => [pos_integer()],
+          optional(:born?) => boolean()
+        }
+
+  @typedoc false
+  @type spec :: %{
+          required(:op) => op(),
+          required(:streams) => [stream()],
+          required(:opts) => keyword(),
+          required(:source) => module(),
+          optional(:version) => Version.t() | nil,
+          optional(:pairs) => [{struct(), pos_integer()}] | nil
+        }
+
+  @typedoc false
   @type meta :: %{
           state: struct(),
           captures: [pos_integer()],
           version: Version.expected() | nil,
-          aggregate_id: binary()
+          aggregate_id: binary(),
+          born?: boolean()
         }
 
   @typedoc false
@@ -43,7 +65,7 @@ defmodule Core.Es.Aggregate.Load.Engine do
         }
 
   @doc false
-  @spec read(Config.t(), Plan.t(), Request.t()) :: Result.t(loaded())
+  @spec read(Config.t(), Plan.t(), spec()) :: Result.t(loaded())
 
   def read(cfg, plan, request) do
     with {:ok, restored} <- restore(cfg, plan, request) do
@@ -79,8 +101,7 @@ defmodule Core.Es.Aggregate.Load.Engine do
   defp verify(cfg, request, restored), do: verify_head(cfg, request, restored)
 
   defp verify_head(cfg, request, restored) do
-    born? = request.born?
-    results = Enum.map(restored, &head_result(cfg, &1, born?))
+    results = Enum.map(restored, &head_result(cfg, &1, &1.meta.born?))
 
     case for {:error, detail} <- results, do: detail do
       [] -> {:ok, for({:ok, state} <- results, do: state)}
@@ -144,7 +165,8 @@ defmodule Core.Es.Aggregate.Load.Engine do
       state: spec.state,
       captures: spec.captures,
       version: spec.version,
-      aggregate_id: cfg.codec.dump(spec.state.id)
+      aggregate_id: cfg.codec.dump(spec.state.id),
+      born?: Map.get(spec, :born?, false)
     }
   end
 
