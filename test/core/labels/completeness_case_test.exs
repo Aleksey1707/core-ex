@@ -14,6 +14,7 @@ defmodule Core.Labels.CompletenessCaseTest do
   # плагин `Core.LabelsBrokenFixture`: в нём по пробелу каждого вида.
   @full [LabelsFixture.Event.Codec, LabelsFixture.Event.ManualFamily.Codec, LabelsFixture.Shape.Codec]
   @broken [LabelsBrokenFixture.Event.Codec, LabelsBrokenFixture.Mark.Codec]
+  @blended [LabelsFixture.Event.ManualFamily.Codec, LabelsFixture.Shape.Codec]
 
   describe "check_found/1" do
     test "события кодеков найдены — :ok" do
@@ -41,6 +42,10 @@ defmodule Core.Labels.CompletenessCaseTest do
       assert :ok = CompletenessCase.check_fields(@full)
     end
 
+    test "скрытое поле не даёт пробела: struct без объявления полей не обходится" do
+      assert :ok = CompletenessCase.check_fields(@blended)
+    end
+
     test "нагрузка и вариант семейства без решения — владелец, поле и struct" do
       assert {:error, %{undecided: undecided}} = CompletenessCase.check_fields(@broken)
 
@@ -54,6 +59,10 @@ defmodule Core.Labels.CompletenessCaseTest do
   describe "check_values/1" do
     test "у каждого Enum подписи — :ok" do
       assert :ok = CompletenessCase.check_values(@full)
+    end
+
+    test "скрытый Enum не даёт пробела: подписи значений не требуются" do
+      assert :ok = CompletenessCase.check_values(@blended)
     end
 
     test "Enum без подписей — каждое поле, где он достижим: список, множество, ключ словаря" do
@@ -71,6 +80,10 @@ defmodule Core.Labels.CompletenessCaseTest do
   describe "check_ids/1" do
     test "у каждого id вид — свой, базы композита или текст — :ok" do
       assert :ok = CompletenessCase.check_ids(@full)
+    end
+
+    test "скрытый id без вида не даёт пробела: поле `:hidden` не обходится" do
+      assert :ok = CompletenessCase.check_ids(@blended)
     end
 
     test "id без вида — владелец, поле и Prim; и в значении словаря" do

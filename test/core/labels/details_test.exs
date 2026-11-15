@@ -13,13 +13,16 @@ defmodule Core.Labels.DetailsTest do
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
+  alias Core.LabelsFixture.Ghost
   alias Core.LabelsFixture.Holder
   alias Core.LabelsFixture.ItemID
   alias Core.LabelsFixture.Line
   alias Core.LabelsFixture.Moment
   alias Core.LabelsFixture.Name
   alias Core.LabelsFixture.Parcel
+  alias Core.LabelsFixture.Quote
   alias Core.LabelsFixture.Shape
+  alias Core.LabelsFixture.Shift
   alias Core.LabelsFixture.SnapshotID
   alias Core.LabelsFixture.Title
   alias Core.LabelsFixture.Unit
@@ -497,6 +500,91 @@ defmodule Core.Labels.DetailsTest do
     closed = Event.Closed.new(AggID.new(), Version.new(), UserID.new(), At.now!())
 
     assert Details.build(closed) == {"Запись закрыта", []}
+  end
+
+  test "скрытое и text: не выходят: hidden, text:, union, set и map" do
+    item = ItemID.new()
+    tagged = ItemID.new()
+    keyed = ItemID.new()
+    pinned = ItemID.new()
+    quoted = ItemID.new()
+    quoted_set = ItemID.new()
+    count = Count.new!(3)
+
+    payload =
+      Event.Blended.Payload.new(
+        item,
+        %Shape.Pin{item: pinned},
+        MapSet.new([tagged]),
+        %{keyed => count},
+        %Quote{origin: quoted, origins: MapSet.new([quoted_set]), ghost: "скрыто"},
+        ItemID.new(),
+        BareID.new(),
+        :one,
+        %Ghost{note: "скрыто"}
+      )
+
+    assert Details.build(event(Event.Blended, payload)) ==
+             {"Смешанная форма",
+              [
+                %{label: "Позиция", kind: :ref, entity: :stock_item, value: item},
+                %{
+                  label: "Фигура",
+                  kind: :group,
+                  value: [%{label: "Позиция", kind: :ref, entity: :stock_item, value: pinned}]
+                },
+                %{label: "Метки", kind: :set, value: [%{kind: :ref, entity: :stock_item, value: tagged}]},
+                %{
+                  label: "Лимиты",
+                  kind: :map,
+                  value: [
+                    %{
+                      key: %{label: "Позиция", kind: :ref, entity: :stock_item, value: keyed},
+                      value: %{label: "Лимит", kind: :number, value: count}
+                    }
+                  ]
+                },
+                %{
+                  label: "Цитата",
+                  kind: :group,
+                  value: [
+                    %{label: "Источник", kind: :text, value: "Позиция"},
+                    %{label: "Источники", kind: :set, value: [%{kind: :text, value: "Позиция"}]}
+                  ]
+                }
+              ]}
+  end
+
+  test "изменение на struct'е: стороны — группа видимых полей, скрытое и text: не выходят" do
+    [old_item, new_item, old_origin, new_origin] = for _ <- 1..4, do: ItemID.new()
+
+    payload = %Event.Shifted.Payload{
+      old_value: %Shift{item: old_item, origin: old_origin, ghost: "скрыто"},
+      new_value: %Shift{item: new_item, origin: new_origin, ghost: "скрыто"}
+    }
+
+    assert Details.build(event(Event.Shifted, payload)) ==
+             {"Позиция передвинута",
+              [
+                %{
+                  label: "Позиция",
+                  kind: :change,
+                  old: %{
+                    kind: :group,
+                    value: [
+                      %{label: "Позиция", kind: :ref, entity: :stock_item, value: old_item},
+                      %{label: "Источник", kind: :text, value: "Позиция"}
+                    ]
+                  },
+                  new: %{
+                    kind: :group,
+                    value: [
+                      %{label: "Позиция", kind: :ref, entity: :stock_item, value: new_item},
+                      %{label: "Источник", kind: :text, value: "Позиция"}
+                    ]
+                  }
+                }
+              ]}
   end
 
   # ---

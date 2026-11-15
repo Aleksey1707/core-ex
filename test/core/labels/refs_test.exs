@@ -11,17 +11,21 @@ defmodule Core.Labels.RefsTest do
   alias Core.Labels.Refs
   alias Core.LabelsFixture.Amount
   alias Core.LabelsFixture.AuthorID
+  alias Core.LabelsFixture.BareID
   alias Core.LabelsFixture.BaseUnit
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
+  alias Core.LabelsFixture.Ghost
   alias Core.LabelsFixture.ItemID
   alias Core.LabelsFixture.ItemQuery
   alias Core.LabelsFixture.Mark
   alias Core.LabelsFixture.Moment
   alias Core.LabelsFixture.Name
+  alias Core.LabelsFixture.Quote
   alias Core.LabelsFixture.Seal
   alias Core.LabelsFixture.Shape
+  alias Core.LabelsFixture.Shift
   alias Core.LabelsFixture.SnapshotID
   alias Core.LabelsFixture.Unit
   alias Core.LabelsFixture.UserID
@@ -86,6 +90,50 @@ defmodule Core.Labels.RefsTest do
       assert Refs.get(event, context(names)) == {:ok, names}
       refute_received {:get_names, ItemQuery, _ids}
     end
+  end
+
+  test "скрытое и text: не резолвятся: hidden, text:, union, set, map и изменение" do
+    by = UserID.new()
+    [item, tagged, keyed, pinned, old_item, new_item] = for _ <- 1..6, do: ItemID.new()
+    [secret, quoted, quoted_set, old_origin, new_origin] = for _ <- 1..5, do: ItemID.new()
+
+    blended =
+      Event.Blended.new(
+        %Event.Blended.Payload{
+          item: item,
+          shape: %Shape.Pin{item: pinned},
+          tags: MapSet.new([tagged]),
+          limits: %{keyed => Count.new!(1)},
+          quote: %Quote{origin: quoted, origins: MapSet.new([quoted_set]), ghost: "скрыто"},
+          secret: secret,
+          digest: BareID.new(),
+          kind: :one,
+          ghost: %Ghost{note: "скрыто"}
+        },
+        AggID.new(),
+        Version.new(),
+        by,
+        At.now!()
+      )
+
+    shifted =
+      Event.Shifted.new(
+        %Event.Shifted.Payload{
+          old_value: %Shift{item: old_item, origin: old_origin, ghost: "скрыто"},
+          new_value: %Shift{item: new_item, origin: new_origin, ghost: "скрыто"}
+        },
+        AggID.new(),
+        Version.new(),
+        by,
+        At.now!()
+      )
+
+    names = Map.new([by, item, tagged, keyed, pinned, old_item, new_item], &{&1, "Имя"})
+
+    assert Refs.get([blended, shifted], context(names)) == {:ok, names}
+    assert_received {:get_names, ItemQuery, ids}
+    assert Enum.sort(ids) == Enum.sort([item, tagged, keyed, pinned, old_item, new_item])
+    assert_received {:get_names, UserQuery, [^by]}
   end
 
   test "каждый id с резолвером из сведений есть в словаре: struct'ы, семейство, изменение, map'а" do

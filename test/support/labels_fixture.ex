@@ -369,6 +369,61 @@ defmodule Core.LabelsFixture do
     def ref(%Core.LabelsFixture.ItemID{}), do: "Позиция"
   end
 
+  defmodule Quote do
+    @moduledoc "Цитата: источник и набор источников выходят текстом, отметка скрыта."
+
+    defstruct [:origin, :origins, :ghost]
+
+    use Core.Labels.Fields,
+      fields: [
+        origin: [text: &Core.LabelsFixture.Texts.ref/1],
+        origins: [set: [text: &Core.LabelsFixture.Texts.ref/1]]
+      ],
+      labels: [
+        origin: "Источник",
+        origins: "Источники",
+        ghost: :hidden
+      ]
+  end
+
+  defmodule Ghost do
+    @moduledoc "Struct без объявления полей: достижим только скрытым полем."
+
+    defstruct [:note]
+  end
+
+  defmodule BareKind do
+    @moduledoc """
+    Вид без подписей значений: достижим только скрытым полем.
+
+    | Значение | Описание |
+    |---|---|
+    | `:one` | первый |
+    | `:two` | второй |
+    """
+
+    use Core.Enum,
+      name: "Вид",
+      values: ~w(one two)a
+  end
+
+  defmodule Shift do
+    @moduledoc "Значение изменения: видимая позиция, `text:`-источник и скрытая отметка."
+
+    defstruct [:item, :origin, :ghost]
+
+    use Core.Labels.Fields,
+      fields: [
+        item: [prim: Core.LabelsFixture.ItemID],
+        origin: [text: &Core.LabelsFixture.Texts.ref/1]
+      ],
+      labels: [
+        item: "Позиция",
+        origin: "Источник",
+        ghost: :hidden
+      ]
+  end
+
   defmodule Event do
     @moduledoc false
 
@@ -1042,6 +1097,71 @@ defmodule Core.LabelsFixture do
 
       use Core.Labels.Event, title: "Запись закрыта"
     end
+
+    defmodule Blended do
+      @moduledoc """
+      Событие со скрытыми полями, `text:`, семейством, множеством и словарём: скрытое и `text:` не
+      выходят ни в сведения, ни в словарь ссылок, ни в ратчет полноты.
+      """
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка: скрытое — id без вида, Enum без подписей и struct без объявления полей."
+
+        use Core.Es.Event.Payload,
+          fields: [
+            item: [prim: LabelsFixture.ItemID],
+            shape: [union: LabelsFixture.Shape],
+            tags: [set: [prim: LabelsFixture.ItemID]],
+            limits: [map: [key: [prim: LabelsFixture.ItemID], value: [prim: LabelsFixture.Count]]],
+            quote: [entity: LabelsFixture.Quote],
+            secret: [prim: LabelsFixture.ItemID],
+            digest: [prim: LabelsFixture.BareID],
+            kind: [enum: LabelsFixture.BareKind],
+            ghost: [entity: LabelsFixture.Ghost]
+          ]
+
+        use Core.Labels.Fields,
+          labels: [
+            item: "Позиция",
+            shape: "Фигура",
+            tags: "Метки",
+            limits: [label: "Лимиты", key: "Позиция", value: "Лимит"],
+            quote: "Цитата",
+            secret: :hidden,
+            digest: :hidden,
+            kind: :hidden,
+            ghost: :hidden
+          ]
+      end
+
+      use Core.Es.Event,
+        family: ManualFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Смешанная форма"
+    end
+
+    defmodule Shifted do
+      @moduledoc "Событие «было → стало» на struct'е со скрытым полем и `text:`-источником."
+
+      defmodule Payload do
+        @moduledoc "Изменение позиции: значение — struct с видимой позицией и текстом источника."
+
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Позиция",
+          value: [entity: Core.LabelsFixture.Shift]
+      end
+
+      use Core.Es.Event,
+        family: ManualFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Позиция передвинута"
+    end
   end
 
   defmodule Event.Codec do
@@ -1091,7 +1211,9 @@ defmodule Core.LabelsFixture do
       Event.Tagged => "labels_manual.tagged",
       Event.Packed => "labels_manual.packed",
       Event.OriginChanged => "labels_manual.origin_changed",
-      Event.TagsChanged => "labels_manual.tags_changed"
+      Event.TagsChanged => "labels_manual.tags_changed",
+      Event.Blended => "labels_manual.blended",
+      Event.Shifted => "labels_manual.shifted"
     }
 
     use Core.Es.Event.Codec,

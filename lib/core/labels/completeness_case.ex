@@ -57,15 +57,13 @@ defmodule Core.Labels.CompletenessCase do
   alias Core.Labels.Fields
   alias Core.Labels.ID
   alias Core.Labels.Kind
+  alias Core.Labels.Walk
   alias Core.Result
 
   @label "Labels.CompletenessCase"
   @required_keys ~w(otp_app)a
   @optional_keys ~w(async)a
   @expression_keys ~w()a
-
-  # Виды с модулем значения, которые обход не раскрывает: Prim и Enum.
-  @leaf_kinds Field.value_module_kinds() -- Field.group_kinds()
 
   @typedoc "Пробел: модуль-владелец, поле и модуль значения без объявления."
   @type place :: {module(), atom(), module()}
@@ -171,7 +169,7 @@ defmodule Core.Labels.CompletenessCase do
   @spec check_found([module()]) :: Result.unit(:empty)
 
   def check_found(modules) when is_list(modules) do
-    case walk(modules).events do
+    case Walk.declarations(modules).events do
       [] -> {:error, :empty}
       [_ | _] -> :ok
     end
@@ -182,7 +180,12 @@ defmodule Core.Labels.CompletenessCase do
 
   def check_titles(modules) when is_list(modules) do
     result(
-      untitled: for(event <- walk(modules).events, not Helper.Module.exports?(event, :__label_title__, 0), do: event)
+      untitled:
+        for(
+          event <- Walk.declarations(modules).events,
+          not Helper.Module.exports?(event, :__label_title__, 0),
+          do: event
+        )
     )
   end
 
@@ -190,7 +193,8 @@ defmodule Core.Labels.CompletenessCase do
   @spec check_authors([module()]) :: Result.unit(unnamed())
 
   def check_authors(modules) when is_list(modules) do
-    unnamed = for event <- walk(modules).events, by = event.__es_by__(), not user?(by), do: {event, :by, by}
+    unnamed =
+      for event <- Walk.declarations(modules).events, by = event.__es_by__(), not user?(by), do: {event, :by, by}
 
     result(unnamed: unnamed)
   end
@@ -200,7 +204,7 @@ defmodule Core.Labels.CompletenessCase do
 
   def check_fields(modules) when is_list(modules) do
     undecided =
-      for {:struct, owner, field, module} <- walk(modules).places,
+      for {:struct, owner, field, module} <- Walk.declarations(modules).places,
           not Fields.labelled?(module),
           do: {owner, field, module}
 
@@ -212,7 +216,7 @@ defmodule Core.Labels.CompletenessCase do
 
   def check_values(modules) when is_list(modules) do
     unlabelled =
-      for {:enum, owner, field, module} <- walk(modules).places,
+      for {:enum, owner, field, module} <- Walk.declarations(modules).places,
           not Helper.Module.exports?(module, :labels, 0),
           do: {owner, field, module}
 
@@ -224,7 +228,9 @@ defmodule Core.Labels.CompletenessCase do
 
   def check_ids(modules) when is_list(modules) do
     unkinded =
-      for {:prim, owner, field, module} <- walk(modules).places, unkinded?(module), do: {owner, field, module}
+      for {:prim, owner, field, module} <- Walk.declarations(modules).places,
+          unkinded?(module),
+          do: {owner, field, module}
 
     result(unkinded: unkinded)
   end
@@ -233,7 +239,7 @@ defmodule Core.Labels.CompletenessCase do
   @spec check_variants([module()]) :: Result.unit(variants())
 
   def check_variants(modules) when is_list(modules) do
-    unknown = for {:family, owner, field, family} <- walk(modules).places, do: {owner, field, family}
+    unknown = for {:family, owner, field, family} <- Walk.declarations(modules).places, do: {owner, field, family}
 
     diverged =
       for plugin <- modules,
@@ -247,74 +253,6 @@ defmodule Core.Labels.CompletenessCase do
   end
 
   # ---
-
-  # Обход от событий кодеков: места `{вид, владелец, поле, модуль}`, где нагрузка достигает модуля.
-  defp walk(modules) do
-    families =
-      for plugin <- modules,
-          Helper.Module.exports?(plugin, :__codec_union__, 0),
-          family = plugin.__codec_union__(),
-          reduce: %{} do
-        acc -> Map.update(acc, family, [plugin], &[plugin | &1])
-      end
-
-    events =
-      for codec <- modules,
-          Core.Es.Event.Codec.codec?(codec),
-          event <- codec.__es_mods__(),
-          uniq: true,
-          do: event
-
-    {places, _seen} = Enum.reduce(events, {[], MapSet.new()}, &visit_event(&1, &2, families))
-
-    %{events: Enum.sort(events), places: places}
-  end
-
-  defp visit_event(event, acc, families) do
-    case event.__es_payload__() do
-      nil -> acc
-      payload -> visit(event, :payload, payload_spec(payload), acc, families)
-    end
-  end
-
-  defp payload_spec(payload) do
-    if Core.Prim.prim?(payload), do: {:prim, payload}, else: {:entity, payload}
-  end
-
-  defp visit(owner, field, {kind, module}, acc, _families) when kind in @leaf_kinds,
-    do: place(acc, {kind, owner, field, module})
-
-  defp visit(owner, field, {:entity, module}, acc, families),
-    do: descend(place(acc, {:struct, owner, field, module}), module, families)
-
-  defp visit(owner, field, {:union, family}, acc, families) do
-    case Map.fetch(families, family) do
-      {:ok, plugins} ->
-        plugins
-        |> Enum.flat_map(& &1.__codec_types__())
-        |> Enum.reduce(acc, &visit(owner, field, {:entity, &1}, &2, families))
-
-      :error ->
-        place(acc, {:family, owner, field, family})
-    end
-  end
-
-  defp visit(owner, field, spec, acc, families),
-    do: Enum.reduce(Field.children(spec), acc, &visit(owner, field, &1, &2, families))
-
-  defp place({places, seen}, place), do: {[place | places], seen}
-
-  defp descend({places, seen} = acc, module, families) do
-    if MapSet.member?(seen, module) or not Fields.labelled?(module) do
-      acc
-    else
-      module
-      |> Fields.visible()
-      |> Enum.reduce({places, MapSet.put(seen, module)}, fn {name, spec}, acc ->
-        visit(module, name, spec, acc, families)
-      end)
-    end
-  end
 
   defp user?(module), do: match?(%{kind: :user}, ID.find(module))
 
