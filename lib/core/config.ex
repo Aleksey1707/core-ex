@@ -72,10 +72,22 @@ defmodule Core.Config do
 
   def dao, do: fetch!(:dao)
 
+  @doc false
+  @spec dao(module() | nil) :: module()
+
+  def dao(nil), do: dao()
+  def dao(dao) when is_atom(dao), do: dao
+
   @doc "Entity-фасад Codec для внутреннего wire (БД / outbox)."
   @spec codec() :: module()
 
   def codec, do: fetch!(:codec)
+
+  @doc false
+  @spec codec(module() | nil) :: module()
+
+  def codec(nil), do: codec()
+  def codec(codec) when is_atom(codec), do: codec
 
   @doc """
   Реализация репозитория для доменного behaviour: из app-env потребителя, иначе `<Behaviour>.Pg`.

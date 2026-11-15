@@ -538,7 +538,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
       continuous?: true,
       key_reservations: cfg.key_reservations,
       taken: &cfg.errors.domain(cfg.behaviour, &1, &2),
-      dao: cfg.dao
+      dao: cfg.dao,
+      codec: cfg.codec
     }
   end
 

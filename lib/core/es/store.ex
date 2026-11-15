@@ -219,7 +219,7 @@ defmodule Core.Es.Store do
   def append(event_codec, [_ | _] = events, %Context{}, mismatch, opts)
       when is_atom(event_codec) and is_function(mismatch, 1) and is_list(opts) do
     continuous? = Keyword.fetch!(opts, :continuous?)
-    dao = Keyword.get(opts, :dao) || Config.dao()
+    dao = Config.dao(Keyword.get(opts, :dao))
     type = event_codec.__es_type__()
     rows = to_rows(events, event_codec)
     ensure_ordered!(rows, continuous?)

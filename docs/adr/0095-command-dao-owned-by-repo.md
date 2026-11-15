@@ -59,8 +59,9 @@ ADR-0019 и ADR-0084.
   проверяет `dao.in_transaction?()` и кладёт `dao` в `target`; `aggregate_id` — `codec.dump(id)`.
 - `Execution.run` передаёт `dao: target.dao` в `Core.Es.Transact.run_counted/2`; повтор целиком
   идёт на том же `dao`.
-- `Repo.Pg.append` передаёт `cfg.dao` плану записи, `Core.Es.Store.append/5` пишет события и
-  читает голову потока на этом `dao`.
+- `Repo.Pg.append` передаёт `cfg.dao` и `cfg.codec` плану записи: `Core.Es.Store.append/5` пишет
+  события и читает голову потока на этом `dao`, а резервы ключей ставятся, переносятся и снимаются
+  в той же транзакции (`Core.Es.KeyReservation.append/5`).
 - `Core.Es.Aggregate.Repo.Pg.ensure_impl!/3` — одна проверка «реализация собрана
   `use Core.Es.Aggregate.Repo.Pg`» (`__es_read_cfg__/0`), её зовут `ReadRepo.Pg` и `Process`.
   Ручная реализация behaviour без этой функции — `CompileError` при объявлении процесса.
@@ -78,6 +79,7 @@ ADR-0019 и ADR-0084.
   соберётся в процессе агрегата. Сообщение — `CompileError` с меткой `Es.Aggregate.Process`.
 - **`page_stream` остаётся на `Core.Config.dao/0`.** Страница потока — read-путь и в это решение
   не входит; у репозитория с `repo:`, отличным от общего, `page_stream` читает общий `dao`.
-- **Записи outbox и резервы ключей остаются на `Core.Config.dao/0`.** Одна транзакция гарантирована
-  для чтения состояния и записи событий; outbox и ключи — отдельная подсистема со своим
-  репозиторием, и её перевод на `dao:` команды — не эта волна.
+- **Записи outbox остаются на `Core.Config.outbox_repo/0`.** `repo:` задаёт `dao` чтения состояния,
+  событий и резервов ключей; репозиторий журнала outbox — отдельная настройка, из `repo:` не
+  следует. Одна транзакция гарантирована для чтения состояния, событий и резервов; у подменённого
+  `outbox_repo` транзакция своя.

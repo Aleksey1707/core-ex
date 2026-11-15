@@ -393,9 +393,14 @@ Fallback-контроллер состав сам не собирает: он о
 | `Core.Es.Event.Message` | `:es` | `:domain` | `:invalid_body` |
 | `Core.Es.Events` | `:events` | `:domain` | `:not_found` |
 | `Core.Es.KeyReservation` | `:es` | `:app` | `:reservation_unresolved` |
+| `Core.Es.Aggregate.Process.Execution` (`Server`) | `:es` | `:app` | `:deadline_exceeded` |
 | `Core.Es.Personal.KeyStore` (порт; своя реализация отказывает тем же кодом) | `:key_store` | `:domain` | `:subject_destroyed` |
 | `Core.Es.Personal.KeyStore.Pg` | `:key_store` | `:app` | `:kek_unknown`, `:key_unresolved`, `:unavailable` |
 | `Core.Es.Projection` (`Batch`, `Checkpoint`, `Await`) | `:es` | `:app` | `:projection_raised`, `:checkpoint_conflict`, `:projection_timeout`, `:projection_rebuilding` |
+
+У `:deadline_exceeded` detail — `%{aggregate_id, phase}`: `aggregate_id` — дамп идентификатора,
+`phase` — `:queue | :read | :commit` (`docs/adr/0096-command-outcomes-deadline-as-error.md`);
+фазу называет граница, заметившая просрочку: очередь процесса на id, чтение и commit.
 
 ## Связанные правила
 

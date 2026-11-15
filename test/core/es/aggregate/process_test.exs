@@ -57,7 +57,13 @@ defmodule Core.Es.Aggregate.ProcessTest do
       )
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
-    on_exit(fn -> Enum.each([Account.Process, Account.RacyProcess, Account.KeyedProcess], &erase_mark/1) end)
+
+    on_exit(fn ->
+      Enum.each(
+        [Account.Process, Account.RacyProcess, Account.KeyedProcess, Account.CodecProcess],
+        &erase_mark/1
+      )
+    end)
   end
 
   describe "старт" do
@@ -378,58 +384,6 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert Registry.lookup(Account.Process.Registry, id) == []
     end
 
-    test "raise в decide роняет процесс: exit вызывающему, stop :error; следующая команда — новый" do
-      start_tree!(Account.Process)
-      id = Account.ID.new()
-      %{at: at, by: by} = open("Счёт")
-      {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
-      assert_received {:ran_in, server}
-      ref = Process.monitor(server)
-
-      {:status, ^server, _module, [_pdict, _sys, _parent, _debug, misc]} = status = :sys.get_status(server)
-      aggregate_id = dump(id)
-
-      assert [%{type: "account", aggregate_id: ^aggregate_id, version: %Version{value: 1}}] =
-               for({:data, [{~c"State", state}]} <- misc, do: state)
-
-      refute inspect(status) =~ "Счёт"
-
-      log =
-        capture_log([colors: [enabled: false]], fn ->
-          assert {{:function_clause, [{Account, :decide, _args, _location} | _stack]}, _call} =
-                   catch_exit(
-                     Account.Process.execute(
-                       id,
-                       :current,
-                       %Unknown{at: at, by: by},
-                       Context.new()
-                     )
-                   )
-
-          assert_receive {:DOWN, ^ref, :process, ^server, {:function_clause, _stacktrace}}
-        end)
-
-      # Отчёт о падении агрегата с ПДн — без запроса команды: вместо него модуль команды.
-      assert log =~ ~r/Last message \(from #PID<[\d.]+>\): Core.Es.Aggregate.ProcessTest.Unknown$/m
-      refute log =~ "enqueued_at"
-
-      assert_received {:stop, %{type: "account", reason: :error}}
-      assert_received {:execute, %{mode: :process, result: :exit}, %{queue: 0, retries: 0}}
-
-      assert {:ok, _version} =
-               Account.Process.execute(
-                 id,
-                 Version.new!(1),
-                 freeze(),
-                 Context.new(),
-                 report(self())
-               )
-
-      assert_received {:ran_in, restarted}
-      assert restarted != server
-      assert stream_tags(id) == ["account.opened", "account.frozen"]
-    end
-
     test "процесс ушёл между командами — :noproc: старт нового и повтор вызова" do
       start_tree!(Account.Process)
       id = Account.ID.new()
@@ -451,37 +405,6 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert restarted != server
       assert_received {:load, %{op: :get_decision, result: :ok}}
       for _start <- 1..2, do: assert_received({:start, %{type: "account"}})
-    end
-
-    test "raise в колбэке после append — exit вызывающему, события и записи колбэка откатываются" do
-      start_tree!(Account.Process)
-      id = Account.ID.new()
-      test_pid = self()
-
-      _log =
-        capture_log(fn ->
-          assert {{%RuntimeError{message: "колбэк"}, _stacktrace}, _call} =
-                   catch_exit(
-                     Account.Process.execute(
-                       id,
-                       :current,
-                       open("Счёт"),
-                       Context.new(),
-                       fn events ->
-                         :ok = record(test_pid).(events)
-                         raise "колбэк"
-                       end
-                     )
-                   )
-        end)
-
-      assert_received {:callback, [%Account.Event.Opened{}]}
-      assert_received {:stop, %{type: "account", reason: :error}}
-      assert names() == []
-      assert stream_tags(id) == []
-
-      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
-      assert stream_tags(id) == ["account.opened"]
     end
 
     test "колбэк вернул {:error, :expired} — ошибка колбэка вызывающему, а не истёкший дедлайн" do
@@ -560,7 +483,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
           end)
 
         assert_receive {:blocked, blocked}
-        pass_time(60)
+        deadline_passed(60)
         send(blocked, :release)
 
         assert {:error, %Error{kind: :app, ns: :es, code: :deadline_exceeded} = error} =
@@ -598,7 +521,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
           end)
 
         assert_receive {:blocked, blocked}
-        pass_time(60)
+        deadline_passed(60)
         send(blocked, :release)
 
         assert {:error, %Error{code: :deadline_exceeded} = error} = Task.await(caller)
@@ -642,7 +565,7 @@ defmodule Core.Es.Aggregate.ProcessTest do
         end)
 
       await_queued(server)
-      pass_time(60)
+      deadline_passed(60)
       send(server, :release)
 
       assert {:error, %Error{code: :deadline_exceeded} = error} = Task.await(caller)
@@ -658,52 +581,175 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:load, %{op: :get_decision}}
       refute_received {:load, _metadata}
     end
+
+    test "process: таймаут GenServer.call — result: :timeout, а не :exit" do
+      start_tree!(Account.Process)
+      id = Account.ID.new()
+      test_pid = self()
+
+      blocker =
+        Task.async(fn ->
+          Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
+            send(test_pid, {:blocked, self()})
+
+            receive do
+              :release -> :ok
+            end
+          end)
+        end)
+
+      assert_receive {:blocked, server}
+
+      caller =
+        Task.async(fn ->
+          catch_exit(Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), nil, timeout: 1))
+        end)
+
+      assert {:timeout, {GenServer, :call, _args}} = Task.await(caller, 5_000)
+
+      send(server, :release)
+      assert {:ok, _version} = Task.await(blocker)
+
+      assert_received {:execute, %{mode: :process, result: :timeout}, %{queue: 0, retries: 0}}
+      refute_received {:execute, %{result: :exit}, _measurements}
+    end
   end
 
   describe "команда" do
-    test "get → execute/2 → append → колбэк с событиями команды" do
-      start!(Account.Process)
-      id = Account.ID.new()
+    for mode <- [:process, :inline] do
+      test "#{mode}: успех — get_decision → execute/2 → append → колбэк с событиями команды" do
+        start_mode!(unquote(mode), Account.Process)
+        id = Account.ID.new()
 
-      assert Account.Process.execute(id, :current, open("Счёт"), Context.new()) == {:ok, Version.new!(1)}
+        assert Account.Process.execute(id, :current, open("Счёт"), Context.new()) == {:ok, Version.new!(1)}
 
-      assert Account.Process.execute(id, Version.new!(1), close(), Context.new(), record(self())) ==
-               {:ok, Version.new!(3)}
+        assert Account.Process.execute(id, Version.new!(1), close(), Context.new(), record(self())) ==
+                 {:ok, Version.new!(3)}
 
-      assert_received {:callback, [%Account.Event.Frozen{}, %Account.Event.Closed{}]}
-      assert stream_tags(id) == ["account.opened", "account.frozen", "account.closed"]
+        assert_received {:callback, [%Account.Event.Frozen{}, %Account.Event.Closed{}]}
+        assert stream_tags(id) == ["account.opened", "account.frozen", "account.closed"]
 
-      assert_received {:execute, %{type: "account", mode: :inline, result: :ok},
-                       %{duration: duration, queue: 0, retries: 0}}
+        assert_received {:execute, %{type: "account", mode: unquote(mode), result: :ok},
+                         %{duration: duration, queue: queue, retries: 0}}
 
-      assert is_integer(duration)
-    end
+        assert is_integer(duration)
+        assert is_integer(queue) and queue >= 0
+      end
 
-    test "колбэк пишет через DAO в транзакции команды и откатывается вместе с ней" do
-      start!(Account.Process)
-      id = Account.ID.new()
-      failed = Error.app(code: :callback_failed, ns: :fake)
+      test "#{mode}: ошибка колбэка {:error, reason} — как есть, записи колбэка и события откачены" do
+        start_mode!(unquote(mode), Account.Process)
+        id = Account.ID.new()
+        reason = {:error, {Es.Aggregate.Process.Execution, :expired}}
 
-      assert {:ok, _version} =
-               Account.Process.execute(id, :current, open("Счёт"), Context.new(), record(self()))
+        assert {:ok, _version} =
+                 Account.Process.execute(id, :current, open("Счёт"), Context.new(), record(self()))
 
-      assert names() == ["events=1"]
+        assert names() == ["events=1"]
 
-      assert {:error, ^failed} =
-               Account.Process.execute(
-                 id,
-                 :current,
-                 rename("Отгрузка"),
-                 Context.new(),
-                 fn events ->
+        assert {:error, ^reason} =
+                 Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), fn events ->
                    :ok = record(self()).(events)
-                   {:error, failed}
-                 end
-               )
+                   {:error, reason}
+                 end)
 
-      assert names() == ["events=1"]
-      assert stream_tags(id) == ["account.opened"]
-      assert_received {:execute, %{result: :error}, %{retries: 0}}
+        assert names() == ["events=1"]
+        assert stream_tags(id) == ["account.opened"]
+        assert_received {:execute, %{mode: unquote(mode), result: :error}, %{retries: 0}}
+      end
+
+      test "#{mode}: отказ decide — {:error, _} без записи и без колбэка" do
+        start_mode!(unquote(mode), Account.Process)
+        id = Account.ID.new()
+
+        assert {:error, %Error{kind: :domain, code: :not_found}} =
+                 Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), record(self()))
+
+        refute_received {:callback, _events}
+        assert stream_tags(id) == []
+        assert_received {:execute, %{mode: unquote(mode), result: :error}, %{retries: 0}}
+      end
+
+      test "#{mode}: raise в decide — исключение, записи нет, следующая команда работает" do
+        start_mode!(unquote(mode), Account.Process)
+        id = Account.ID.new()
+        %{at: at, by: by} = open("Счёт")
+
+        assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new(), report(self()))
+
+        case unquote(mode) do
+          :inline ->
+            assert_raise FunctionClauseError, fn ->
+              Account.Process.execute(id, :current, %Unknown{at: at, by: by}, Context.new())
+            end
+
+          :process ->
+            assert_received {:ran_in, server}
+            ref = Process.monitor(server)
+
+            {:status, ^server, _module, [_pdict, _sys, _parent, _debug, misc]} = status = :sys.get_status(server)
+            aggregate_id = dump(id)
+
+            assert [%{type: "account", aggregate_id: ^aggregate_id, version: %Version{value: 1}}] =
+                     for({:data, [{~c"State", state}]} <- misc, do: state)
+
+            refute inspect(status) =~ "Счёт"
+
+            log =
+              capture_log([colors: [enabled: false]], fn ->
+                assert {{:function_clause, [{Account, :decide, _args, _location} | _stack]}, _call} =
+                         catch_exit(Account.Process.execute(id, :current, %Unknown{at: at, by: by}, Context.new()))
+
+                assert_receive {:DOWN, ^ref, :process, ^server, {:function_clause, _stacktrace}}
+              end)
+
+            # Отчёт о падении агрегата с ПДн — без запроса команды: вместо него модуль команды.
+            assert log =~ ~r/Last message \(from #PID<[\d.]+>\): Core.Es.Aggregate.ProcessTest.Unknown$/m
+            refute log =~ "enqueued_at"
+            assert_received {:stop, %{type: "account", reason: :error}}
+            assert_received {:execute, %{mode: :process, result: :exit}, %{queue: 0, retries: 0}}
+        end
+
+        assert stream_tags(id) == ["account.opened"]
+        assert {:ok, _version} = Account.Process.execute(id, :current, freeze(), Context.new())
+        assert stream_tags(id) == ["account.opened", "account.frozen"]
+      end
+
+      test "#{mode}: raise в колбэке — исключение, откат, следующая команда работает" do
+        start_mode!(unquote(mode), Account.Process)
+        id = Account.ID.new()
+        test_pid = self()
+
+        _log =
+          capture_log(fn ->
+            case unquote(mode) do
+              :inline ->
+                assert_raise RuntimeError, "колбэк", fn ->
+                  Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn events ->
+                    :ok = record(test_pid).(events)
+                    raise "колбэк"
+                  end)
+                end
+
+              :process ->
+                assert {{%RuntimeError{message: "колбэк"}, _stacktrace}, _call} =
+                         catch_exit(
+                           Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn events ->
+                             :ok = record(test_pid).(events)
+                             raise "колбэк"
+                           end)
+                         )
+
+                assert_received {:stop, %{type: "account", reason: :error}}
+            end
+          end)
+
+        assert_received {:callback, [%Account.Event.Opened{}]}
+        assert names() == []
+        assert stream_tags(id) == []
+
+        assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+        assert stream_tags(id) == ["account.opened"]
+      end
     end
 
     test "команда без событий — версия прежняя, на пустом потоке {:ok, nil}" do
@@ -736,51 +782,6 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert stream_tags(id) == []
     end
 
-    test "inline: raise в decide — raise вызывающему, событий нет, следующая команда работает" do
-      start!(Account.Process)
-      id = Account.ID.new()
-      %{at: at, by: by} = open("Счёт")
-
-      assert_raise FunctionClauseError, fn ->
-        Account.Process.execute(id, :current, %Unknown{at: at, by: by}, Context.new())
-      end
-
-      assert stream_tags(id) == []
-
-      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
-      assert stream_tags(id) == ["account.opened"]
-    end
-
-    test "inline: raise в колбэке — raise вызывающему, откат, следующая команда работает" do
-      start!(Account.Process)
-      id = Account.ID.new()
-
-      assert_raise RuntimeError, "колбэк", fn ->
-        Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
-          raise "колбэк"
-        end)
-      end
-
-      assert stream_tags(id) == []
-
-      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
-      assert stream_tags(id) == ["account.opened"]
-    end
-
-    test "inline: ошибка колбэка {:error, reason} — как есть, без обёртки" do
-      start!(Account.Process)
-      id = Account.ID.new()
-      reason = {:error, {Es.Aggregate.Process.Execution, :expired}}
-
-      assert {:error, ^reason} =
-               Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
-                 {:error, reason}
-               end)
-
-      assert stream_tags(id) == []
-      assert_received {:execute, %{mode: :inline, result: :error}, %{retries: 0}}
-    end
-
     test "кеш процесса переживает доменный отказ и отказ колбэка: следующая команда — refresh" do
       start_tree!(Account.Process)
       id = Account.ID.new()
@@ -806,24 +807,6 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:load, %{op: :refresh}}
       refute_received {:load, _metadata}
       assert stream_tags(id) == ["account.opened", "account.renamed"]
-    end
-
-    test "отказ decide — {:error, _} без записи и без колбэка" do
-      start!(Account.Process)
-      id = Account.ID.new()
-
-      assert {:error, %Error{kind: :domain, code: :not_found}} =
-               Account.Process.execute(
-                 id,
-                 :current,
-                 rename("Отгрузка"),
-                 Context.new(),
-                 record(self())
-               )
-
-      refute_received {:callback, _events}
-      assert stream_tags(id) == []
-      assert_received {:execute, %{result: :error}, %{retries: 0}}
     end
   end
 
@@ -1167,6 +1150,21 @@ defmodule Core.Es.Aggregate.ProcessTest do
              }
     end
 
+    test "адрес агрегата в span — из codec репозитория, а не Core.Config.codec/0" do
+      start!(Account.CodecProcess)
+      id = Account.ID.new()
+      _spans = OtelFixture.drain(0)
+
+      assert {:ok, %Version{}} = Account.CodecProcess.execute(id, :current, open("Счёт"), Context.new())
+
+      repo_id = Account.CodecRepo.Pg.__es_read_cfg__().codec.dump(id)
+      assert repo_id == String.upcase(Core.CodecFixture.Internal.dump(id))
+      refute repo_id == Core.Config.codec().dump(id)
+
+      execute = OtelFixture.drain() |> OtelFixture.find("execute account")
+      assert execute.attributes["core.es.aggregate.id"] == repo_id
+    end
+
     test "прикладная ошибка — record_error/1; доменный отказ статус span'а не меняет" do
       start!(Account.Process)
       id = Account.ID.new()
@@ -1383,17 +1381,13 @@ defmodule Core.Es.Aggregate.ProcessTest do
     end
   end
 
-  # Дедлайн — монотонное время: тест продвигает его, не отдавая планировщику (`Process.sleep`
-  # сделал бы ожидание частью проверки поведения).
-  defp pass_time(ms) do
-    deadline = System.monotonic_time(:millisecond) + ms
-    spin(deadline)
-  end
-
-  defp spin(deadline) do
-    if System.monotonic_time(:millisecond) < deadline do
-      :erlang.yield()
-      spin(deadline)
+  # Дедлайн — монотонное время процесса: тест ждёт его истечения таймером, пока команда
+  # заблокирована хуком (`block_load` или колбэк), — без прокрутки времени в цикле и без
+  # `Process.sleep`. Гонки нет: после срабатывания таймера дедлайн уже в прошлом.
+  defp deadline_passed(ms) do
+    receive do
+    after
+      ms -> :ok
     end
   end
 

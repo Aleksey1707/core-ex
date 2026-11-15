@@ -10,6 +10,10 @@ defmodule Core.Es.AggregateTest do
   alias Core.EventFixture
   alias Core.Version
 
+  alias __MODULE__.DecisionProbe
+
+  require Error
+
   @at Es.Event.At.new!(~U[2026-09-01 10:00:00Z])
 
   defmodule Tampering do
@@ -56,6 +60,51 @@ defmodule Core.Es.AggregateTest do
         assert error.message =~ inspect(BadDecision)
         assert error.message =~ inspect(Cmd.Close)
       end
+    end
+
+    test "{:error, %Error{}} — как есть" do
+      state = struct(BadDecision, id: Account.ID.new())
+      error = Error.domain(BadDecision, code: :not_found, ns: :test, message: "нет")
+
+      assert {:error, ^error} = DecisionProbe.apply_decision(BadDecision, state, close(), {:error, error})
+    end
+
+    test "{:ok, не список} — своё сообщение про форму результата" do
+      state = struct(BadDecision, id: Account.ID.new())
+
+      error =
+        assert_raise ArgumentError, fn ->
+          DecisionProbe.apply_decision(BadDecision, state, close(), {:ok, Event.Frozen.draft()})
+        end
+
+      assert error.message =~ "вернул {:ok, _} без списка результатов"
+      assert error.message =~ inspect(BadDecision)
+      assert error.message =~ inspect(Cmd.Close)
+    end
+
+    test "{:error, причина не %Error{}} — сообщение про причину" do
+      state = struct(BadDecision, id: Account.ID.new())
+
+      error =
+        assert_raise ArgumentError, fn ->
+          DecisionProbe.apply_decision(BadDecision, state, close(), {:error, :atom})
+        end
+
+      assert error.message =~ "вернул {:error, _} с причиной не %Core.Error{}"
+      assert error.message =~ ":atom"
+      assert error.message =~ inspect(BadDecision)
+      assert error.message =~ inspect(Cmd.Close)
+    end
+
+    test "исход вне {:ok, список} | {:error, %Error{}} — своё сообщение" do
+      state = struct(BadDecision, id: Account.ID.new())
+
+      error = assert_raise ArgumentError, fn -> DecisionProbe.apply_decision(BadDecision, state, close(), :skip) end
+
+      assert error.message =~ "вернул исход вне {:ok, [результаты]} | {:error, %Core.Error{}}"
+      assert error.message =~ ":skip"
+      assert error.message =~ inspect(BadDecision)
+      assert error.message =~ inspect(Cmd.Close)
     end
   end
 
@@ -307,6 +356,16 @@ defmodule Core.Es.AggregateTest do
   end
 
   defp close, do: %Cmd.Close{by: UserID.new(), at: @at}
+
+  # Формы, невозможные по спеке `apply_decision/4`, передаются параметром: клоз-сайт не видит тип
+  # решения, поэтому компилятор не предупреждает, а проверяется поведение точки применения решения.
+  defmodule DecisionProbe do
+    @moduledoc false
+
+    @spec apply_decision(module(), struct(), struct(), term()) :: Core.Result.t({[struct()], struct()})
+    def apply_decision(aggregate, state, command, decision),
+      do: Core.Es.Aggregate.apply_decision(aggregate, state, command, decision)
+  end
 
   defp compile(name, opts, fields) do
     Code.eval_quoted(

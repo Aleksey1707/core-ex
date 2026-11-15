@@ -87,8 +87,9 @@ defmodule Core.Es.KeyReservation do
   ключи сталкиваются независимо от вида, а `find/2` отдаёт id владельца в Prim идентификатора
   агрегата своего модуля ключа, даже если ключ занял агрегат другого вида.
 
-  Резервы пишутся и читаются через `Core.Config.dao/0`, id агрегата дампит и грузит
-  `Core.Config.codec/0` — как у `Core.Es.Store`.
+  Резервы пишет `append` репозитория в транзакции `dao` команды (план записи несёт `dao` и `codec`),
+  а читает `find/2` через `Core.Config.dao/0`; id агрегата дампит и грузит `Core.Config.codec/0` —
+  как у `Core.Es.Store`.
 
   ## Ключ из ПДн (`personal: true`)
 
@@ -386,18 +387,23 @@ defmodule Core.Es.KeyReservation do
   # Резервы по событиям пачки — `append` репозитория после записи событий; `taken` строит ошибку
   # отказа из `code:` модуля ключа и detail `%{scope: scope}`.
   @doc false
-  @spec append([declaration()], [Es.Event.t()], Context.t(), (atom(), map() -> Error.t())) ::
+  @spec append([declaration()], [Es.Event.t()], Context.t(), (atom(), map() -> Error.t()), keyword()) ::
           Result.unit()
 
-  def append(declarations, events, context, taken)
+  def append(declarations, events, context, taken, settings \\ [])
 
-  def append([], events, %Context{}, taken) when is_list(events) and is_function(taken, 2), do: :ok
+  def append([], events, %Context{}, taken, settings)
+      when is_list(events) and is_function(taken, 2) and is_list(settings),
+      do: :ok
 
-  def append([_ | _] = declarations, events, %Context{}, taken) when is_list(events) and is_function(taken, 2) do
+  def append([_ | _] = declarations, events, %Context{}, taken, settings)
+      when is_list(events) and is_function(taken, 2) and is_list(settings) do
+    dao = Config.dao(Keyword.get(settings, :dao))
+    codec = Config.codec(Keyword.get(settings, :codec))
     steps = for event <- events, declaration <- declarations, do: {declaration, event, action(declaration, event)}
 
     with {:ok, steps} <- index(steps) do
-      case write(steps, Config.codec()) do
+      case write(steps, codec, dao) do
         :ok -> :ok
         {:taken, declaration} -> {:error, taken.(declaration.code, %{scope: declaration.scope})}
         {:unresolved, declaration, aggregate_id, reason} -> {:error, unresolved(declaration, aggregate_id, reason)}
@@ -443,55 +449,57 @@ defmodule Core.Es.KeyReservation do
 
   defp indexed([step | steps], indexes), do: [step | indexed(steps, indexes)]
 
-  defp write([], _codec), do: :ok
+  defp write([], _codec, _dao), do: :ok
 
-  defp write([{declaration, event, action} | steps], codec) do
+  defp write([{declaration, event, action} | steps], codec, dao) do
     aggregate_id = codec.dump(event.aggregate_id)
 
-    case write_step(declaration, action, aggregate_id) do
-      :ok -> write(steps, codec)
+    case write_step(declaration, action, aggregate_id, dao) do
+      :ok -> write(steps, codec, dao)
       :taken -> {:taken, declaration}
       {:unresolved, reason} -> {:unresolved, declaration, aggregate_id, reason}
     end
   end
 
-  defp write_step(%{scope: scope}, {:reserve, key}, aggregate_id), do: reserve_reported(scope, key, aggregate_id)
-  defp write_step(%{scope: scope}, :release, aggregate_id), do: delete(keys_of(scope, aggregate_id))
-  defp write_step(_declaration, :keep, _aggregate_id), do: :ok
+  defp write_step(%{scope: scope}, {:reserve, key}, aggregate_id, dao),
+    do: reserve_reported(scope, key, aggregate_id, dao)
 
-  defp reserve_reported(scope, key, aggregate_id) do
-    resolved = reserve(scope, key, aggregate_id, 0)
+  defp write_step(%{scope: scope}, :release, aggregate_id, dao), do: delete(keys_of(scope, aggregate_id), dao)
+  defp write_step(_declaration, :keep, _aggregate_id, _dao), do: :ok
+
+  defp reserve_reported(scope, key, aggregate_id, dao) do
+    resolved = reserve(scope, key, aggregate_id, 0, dao)
     emit(scope, resolved)
     resolved
   end
 
   # Сначала снимается прежний ключ агрегата: иначе вставка упёрлась бы в `(scope, aggregate_id)`.
-  defp reserve(scope, key, aggregate_id, retries) do
-    :ok = delete(where(keys_of(scope, aggregate_id), [r], r.key != ^key))
+  defp reserve(scope, key, aggregate_id, retries, dao) do
+    :ok = delete(where(keys_of(scope, aggregate_id), [r], r.key != ^key), dao)
     row = %{scope: scope, key: key, aggregate_id: aggregate_id}
 
-    case Config.dao().insert_all(Schema, [row], on_conflict: :nothing) do
+    case dao.insert_all(Schema, [row], on_conflict: :nothing) do
       {1, _rows} -> :ok
-      {0, _rows} -> refused(scope, key, aggregate_id, retries)
+      {0, _rows} -> refused(scope, key, aggregate_id, retries, dao)
     end
   end
 
-  defp refused(scope, key, aggregate_id, retries) do
-    case outcome(rows_of(scope, key, aggregate_id), key, retries) do
-      :retry -> reserve(scope, key, aggregate_id, retries + 1)
+  defp refused(scope, key, aggregate_id, retries, dao) do
+    case outcome(rows_of(scope, key, aggregate_id, dao), key, retries) do
+      :retry -> reserve(scope, key, aggregate_id, retries + 1, dao)
       resolved -> resolved
     end
   end
 
   # Строки области, которые могли отвергнуть вставку, — новым снимком: он видит и транзакцию,
   # commit которой вставка ждала.
-  defp rows_of(scope, key, aggregate_id) do
+  defp rows_of(scope, key, aggregate_id, dao) do
     from(r in Schema,
       where: r.scope == ^scope,
       where: r.key == ^key or r.aggregate_id == type(^aggregate_id, :binary_id),
       select: %{key: r.key, mine?: r.aggregate_id == type(^aggregate_id, :binary_id)}
     )
-    |> Config.dao().all()
+    |> dao.all()
   end
 
   defp emit(scope, resolved) do
@@ -518,8 +526,8 @@ defmodule Core.Es.KeyReservation do
   defp keys_of(scope, aggregate_id),
     do: from(r in Schema, where: r.scope == ^scope and r.aggregate_id == type(^aggregate_id, :binary_id))
 
-  defp delete(query) do
-    {_count, nil} = Config.dao().delete_all(query)
+  defp delete(query, dao) do
+    {_count, nil} = dao.delete_all(query)
     :ok
   end
 

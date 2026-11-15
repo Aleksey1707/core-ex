@@ -91,7 +91,7 @@ defmodule Core.Es.Transact do
 
   # ---
 
-  defp dao(opts), do: Keyword.get(opts, :dao) || Config.dao()
+  defp dao(opts), do: Config.dao(Keyword.get(opts, :dao))
 
   defp retrying(fun, dao, limit) do
     ensure_outside_transaction!(dao.in_transaction?())

@@ -53,10 +53,10 @@ defmodule Core.Es.Store.Write do
   # `dao` — из builder'а записи (у event-sourced репозитория — `repo:`), иначе общий репозиторий
   # приложения. С `opts` вызова не смешивается: те уходят в запись outbox.
   defp write_opts(%Plan{continuous?: continuous?, dao: dao}),
-    do: [continuous?: continuous?, dao: dao || Config.dao()]
+    do: [continuous?: continuous?, dao: Config.dao(dao)]
 
   defp reserve(%Plan{key_reservations: []}, _events, _context), do: :ok
 
-  defp reserve(%Plan{key_reservations: [_ | _] = declarations, taken: taken}, events, context),
-    do: Es.KeyReservation.append(declarations, events, context, taken)
+  defp reserve(%Plan{key_reservations: [_ | _] = declarations, taken: taken} = plan, events, context),
+    do: Es.KeyReservation.append(declarations, events, context, taken, dao: plan.dao, codec: plan.codec)
 end

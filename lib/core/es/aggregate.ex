@@ -252,13 +252,25 @@ defmodule Core.Es.Aggregate do
         events = events(aggregate, state, results, by, at)
         {:ok, {events, fold(aggregate, state, events)}}
 
+      {:ok, other} ->
+        raise ArgumentError,
+              "#{@label}: decide/2 агрегата #{inspect(aggregate)} для команды " <>
+                "#{inspect(command.__struct__)} вернул {:ok, _} без списка результатов: #{inspect(other)}"
+
       {:error, %Error{}} = error ->
         error
 
-      _other ->
+      {:error, reason} ->
         raise ArgumentError,
               "#{@label}: decide/2 агрегата #{inspect(aggregate)} для команды " <>
-                "#{inspect(command.__struct__)} вернул причину не %Core.Error{}"
+                "#{inspect(command.__struct__)} вернул {:error, _} с причиной не %Core.Error{}: " <>
+                inspect(reason)
+
+      other ->
+        raise ArgumentError,
+              "#{@label}: decide/2 агрегата #{inspect(aggregate)} для команды " <>
+                "#{inspect(command.__struct__)} вернул исход вне {:ok, [результаты]} | " <>
+                "{:error, %Core.Error{}}: #{inspect(other)}"
     end
   end
 

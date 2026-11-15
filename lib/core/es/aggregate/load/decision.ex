@@ -8,7 +8,8 @@ defmodule Core.Es.Aggregate.Load.Decision do
   alias Core.Result
   alias Core.Version
 
-  @doc "Голова потока и решение `fun` над ней; явная версия на пустом потоке решается здесь."
+  @doc false
+  # Голова потока и решение `fun` над ней; явная версия на пустом потоке решается здесь.
   @spec head(
           Config.t(),
           struct(),
@@ -27,7 +28,8 @@ defmodule Core.Es.Aggregate.Load.Decision do
     end
   end
 
-  @doc "Хвост потока после `state.version` и сверка `version` с головой."
+  @doc false
+  # Хвост потока после `state.version` и сверка `version` с головой.
   @spec tail(Config.t(), struct(), Version.expected(), keyword()) :: Result.t(struct())
 
   def tail(cfg, state, version, opts) do

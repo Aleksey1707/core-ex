@@ -128,7 +128,8 @@ defmodule Core.Es.Aggregate.Process do
   - Telemetry `[:es, :aggregate, :process, :execute]` у вызывающего на вызов: измерения `duration`
     (native), `queue` (native, ожидание в очереди; в вызывающем процессе — 0), `retries`;
     метаданные `type` (тип агрегата), `mode` (`:process`, `:inline`), `result` (`:ok`,
-    `:version_mismatch`, `:error`; `:exit` — только смерть процесса и exit вызывающему, `queue`
+    `:version_mismatch`, `:error`, `:timeout`, `:exit`; `:timeout` — `GenServer.call` не дождался
+    процесса за дедлайн плюс запас, `:exit` — только смерть процесса и exit вызывающему, `queue`
     и `retries` — 0). Истёкший дедлайн — `:error`; код доменной ошибки в метаданные не идёт;
     исключение в вызывающем (`enabled: false`) telemetry не шлёт.
   - `[:es, :aggregate, :process, :start]` — старт процесса на id, `[:es, :aggregate, :process,
@@ -387,7 +388,9 @@ defmodule Core.Es.Aggregate.Process do
 
   defp deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
 
-  # Exit вызывающему — тоже исход вызова: telemetry уходит, а exit летит дальше как был.
+  # Exit вызывающему — тоже исход вызова: telemetry уходит, а exit летит дальше как был. Таймаут
+  # `GenServer.call` (процесс занят дольше дедлайна плюс запас) — отдельный тег: это недоступность
+  # процесса, а `:exit` остаётся только за смертью процесса.
   defp measured(cfg, mode, fun) do
     start = System.monotonic_time()
 
@@ -395,7 +398,7 @@ defmodule Core.Es.Aggregate.Process do
       fun.()
     catch
       :exit, reason ->
-        emit_execute(cfg, mode, :exit, measurements(start, 0, 0))
+        emit_execute(cfg, mode, exit_tag(reason), measurements(start, 0, 0))
         :erlang.raise(:exit, reason, __STACKTRACE__)
     else
       {result, retries, queue} ->
@@ -404,6 +407,9 @@ defmodule Core.Es.Aggregate.Process do
         result
     end
   end
+
+  defp exit_tag({:timeout, _call}), do: :timeout
+  defp exit_tag(_reason), do: :exit
 
   defp dispatch(:inline, cfg, _options, call, target) do
     {result, _state, retries} = Execution.run(cfg, call, target, nil)

@@ -198,10 +198,10 @@ Sentry (ADR-0071): то, что в таблице помечено «при `ope
 |---|---|---|---|---|
 | `%Error{kind: :domain, code: :version_mismatch}` | 412 | `"<ns>/version_mismatch"` | `message` | — |
 | `%Error{kind: :domain, code: :access_denied}` | 403 | `"<ns>/access_denied"` | `message` | — |
+| `%Error{kind: :app, code: :deadline_exceeded}` | 503 | `"service_unavailable"` | константа | `:warning` |
 | `%Error{code: c}` любого `kind`, `c` в `auth_codes:` | 401 | `"not_authorized"` | константа | `:debug` |
 | `%Error{kind: :domain}` | 400 | `"<ns>/<code>"` ошибки | `message` | — |
 | `%Error{kind: :app}` с любым `code` | 500 | `"internal_error"` | шаблон | `:error` |
-| `%Error{kind: :app, code: :deadline_exceeded}` | 503 | `"service_unavailable"` | константа | `:warning` |
 | прочее (не `%Error{}`) | 500 | `"internal_error"` | шаблон | `:error` |
 
 - Статус по `code:` разбирается только у `kind: :domain`: прикладную ошибку клиенту показывать

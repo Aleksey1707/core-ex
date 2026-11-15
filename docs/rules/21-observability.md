@@ -112,10 +112,11 @@ Span на периодический опрос (тик поллера, цикл
 `[:es, :aggregate, :fold]` с меткой `op: :get_at` / `:get_many_at`.
 
 Метаданные `result` события `[:es, :aggregate, :process, :execute]` — `:ok`,
-`:version_mismatch`, `:error`; истёкший дедлайн — `:error` с ответом
-`%Error{code: :deadline_exceeded}`, а `:exit` остаётся только за смертью процесса. Измерения
-`queue` и `retries` у такого вызова настоящие: просрочка в очереди отвечает с измеренным
-ожиданием, а не дропом.
+`:version_mismatch`, `:error`, `:timeout` и `:exit`. Истёкший дедлайн — `:error` с ответом
+`%Error{code: :deadline_exceeded}`; `:timeout` — `GenServer.call` не дождался процесса за дедлайн
+плюс запас 1 000 мс (недоступность процесса, а не дедлайн); `:exit` остаётся только за смертью
+процесса и exit вызывающему. Измерения `queue` и `retries` у вызова без ответа — 0, у просрочки в
+очереди — настоящие: она отвечает с измеренным ожиданием, а не дропом.
 
 Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span» и «дедлайн».
 
