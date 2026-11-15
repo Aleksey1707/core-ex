@@ -24,9 +24,13 @@ defmodule Core.Es.Aggregate.LoadTest do
 
   describe "заявка read-model операций" do
     test "несёт только поля операций чтения" do
-      fields = Request.__struct__() |> Map.from_struct() |> Map.keys() |> Enum.sort()
+      fields =
+        Request.__struct__()
+        |> Map.from_struct()
+        |> Map.keys()
+        |> Enum.sort()
 
-      assert fields == [:op, :opts, :pairs, :source, :streams, :version]
+      assert fields == [:op, :opts, :pairs, :streams, :version]
     end
   end
 
@@ -197,7 +201,7 @@ defmodule Core.Es.Aggregate.LoadTest do
 
       pairs = [{first, Version.new!(2)}, {second, Version.new!(2)}]
       rows = rows(first_events ++ second_events)
-      request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots, order: :reverse], Rows)
+      request = Request.get_many_at(rows_cfg(), pairs, rows: rows, snapshots: snapshots, order: :reverse)
       attach_telemetry()
 
       assert {:ok, [first_state, second_state]} = Load.run(cfg(), request)
@@ -231,7 +235,7 @@ defmodule Core.Es.Aggregate.LoadTest do
       events = events!(id, [open(), rename("Второе")])
       version = Version.new!(3)
 
-      request = Request.get_at(LoadRepo.cfg(), id, version, [rows: rows(events)], Rows)
+      request = Request.get_at(rows_cfg(), id, version, rows: rows(events))
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
                Load.run(no_snapshot_cfg(), request)
@@ -251,7 +255,7 @@ defmodule Core.Es.Aggregate.LoadTest do
         {first, Version.new!(2)}
       ]
 
-      request = Request.get_many_at(LoadRepo.cfg(), pairs, [rows: first_rows ++ second_rows], Rows)
+      request = Request.get_many_at(rows_cfg(), pairs, rows: first_rows ++ second_rows)
 
       assert {:error, %Core.Error{code: :version_mismatch} = error} =
                Load.run(no_snapshot_cfg(), request)
@@ -290,17 +294,19 @@ defmodule Core.Es.Aggregate.LoadTest do
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
-  defp cfg, do: %{LoadRepo.cfg() | snapshot: %{LoadRepo.cfg().snapshot | sealed: false}}
+  defp cfg, do: %{LoadRepo.cfg() | source: Rows, snapshot: %{LoadRepo.cfg().snapshot | sealed: false}}
 
-  defp no_snapshot_cfg, do: %{LoadRepo.cfg() | snapshot: nil}
+  defp no_snapshot_cfg, do: %{LoadRepo.cfg() | source: Rows, snapshot: nil}
 
-  defp head_request(id, rows), do: Request.get(LoadRepo.cfg(), id, :current, [rows: rows], Rows)
+  defp rows_cfg, do: %{LoadRepo.cfg() | source: Rows}
+
+  defp head_request(id, rows), do: Request.get(rows_cfg(), id, :current, rows: rows)
 
   defp at_request(id, version, rows, snapshots \\ []),
-    do: Request.get_at(LoadRepo.cfg(), id, version, [rows: rows, snapshots: snapshots], Rows)
+    do: Request.get_at(rows_cfg(), id, version, rows: rows, snapshots: snapshots)
 
   defp many_request(pairs, rows, snapshots \\ []),
-    do: Request.get_many_at(LoadRepo.cfg(), pairs, [rows: rows, snapshots: snapshots], Rows)
+    do: Request.get_many_at(rows_cfg(), pairs, rows: rows, snapshots: snapshots)
 
   defp events!(id, commands) do
     {events, _state} =

@@ -2,16 +2,15 @@ defmodule Core.Es.Store.Rows do
   @moduledoc """
   Строки `es_events` из литературы и тестовый источник строк `Core.Es.Aggregate.Load`.
 
-  `rows/1` строит строки в форме хранилища, `fetch/3` реализует
-  `Core.Es.Aggregate.Load.Source`: выбирает строки и снапшот каждого потока по готовым границам
+  `rows/1` строит строки в форме хранилища, `fetch/3` — источник строк движка чтения
+  (`Core.Es.Aggregate.Load.Engine`): выбирает строки и снапшот каждого потока по готовым границам
   плана теми же двумя сравнениями, что SQL (`> after_version`, `<= snapshot_to`), и опирается на
   инвариант «одна строка снапшота на поток». Снапшоты тестовый источник не пишет
-  (`writes_snapshots?/0` — `false`), поэтому чтение головы на нём заявку не правит. Опции: `rows:` —
+  (`writes_snapshots?/0` — `false`), поэтому движок на нём снапшоты не пишет. Опции: `rows:` —
   строки, `snapshots:` — `{id, version, state}`, `order: :reverse` — обратный порядок потоков.
   """
 
-  @behaviour Core.Es.Aggregate.Load.Source
-
+  alias Core.Es.Aggregate.Load.Engine
   alias Core.Es.Aggregate.Load.Plan
   alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Store.Schema
@@ -36,12 +35,10 @@ defmodule Core.Es.Store.Rows do
 
   @spec writes_snapshots?() :: boolean()
 
-  @impl true
   def writes_snapshots?, do: false
 
-  @spec fetch(Config.t(), Plan.t(), keyword()) :: [Core.Es.Aggregate.Load.Source.entry()]
+  @spec fetch(Config.t(), Plan.t(), keyword()) :: [Engine.entry()]
 
-  @impl true
   def fetch(cfg, %Plan{streams: streams}, opts) do
     rows = Keyword.fetch!(opts, :rows)
     snapshots = Keyword.get(opts, :snapshots, [])

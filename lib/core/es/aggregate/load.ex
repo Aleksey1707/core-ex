@@ -13,7 +13,11 @@ defmodule Core.Es.Aggregate.Load do
   @doc false
   @spec run(Config.t(), Request.t()) :: Result.t([struct()] | struct())
 
-  def run(cfg, %Request{} = request), do: read(cfg, request, writes_snapshots?(request))
+  def run(cfg, %Request{op: op, opts: opts, streams: streams, version: version, pairs: pairs}) do
+    # Политика записи снапшота — свойство операции и возможность источника строк.
+    snapshots? = op in [:get, :get_many] and cfg.source.writes_snapshots?()
+    read(cfg, %{op: op, opts: opts, streams: streams, version: version, pairs: pairs}, snapshots?)
+  end
 
   @doc false
   @spec read(Config.t(), Engine.spec(), boolean()) :: Result.t([struct()] | struct())
@@ -35,10 +39,6 @@ defmodule Core.Es.Aggregate.Load do
   end
 
   # ---
-
-  # Политика записи снапшота — свойство операции и возможность источника строк.
-  defp writes_snapshots?(%Request{op: op, source: source}),
-    do: op in [:get, :get_many] and source.writes_snapshots?()
 
   defp measurements(restored, duration) do
     counts = Enum.frequencies_by(restored, & &1.snapshot)

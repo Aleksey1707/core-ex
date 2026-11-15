@@ -19,12 +19,7 @@ defmodule Core.Es.Aggregate.Load.Decision do
         when decision: var, reason: var
 
   def head(cfg, id, version, fun, opts) do
-    spec = %{
-      op: :get_decision,
-      opts: opts,
-      source: cfg.source,
-      streams: [stream(struct(cfg.aggregate, id: id), version, true)]
-    }
+    spec = Engine.spec(:get_decision, [stream(struct(cfg.aggregate, id: id), version, true)], opts)
 
     case Load.read(cfg, spec, cfg.source.writes_snapshots?()) do
       {:ok, [state]} -> decide(cfg, state, version, fun)
@@ -36,7 +31,7 @@ defmodule Core.Es.Aggregate.Load.Decision do
   @spec tail(Config.t(), struct(), Version.expected(), keyword()) :: Result.t(struct())
 
   def tail(cfg, state, version, opts) do
-    spec = %{op: :refresh, opts: opts, source: cfg.source, streams: [stream(state, version, false)]}
+    spec = Engine.spec(:refresh, [stream(state, version, false)], opts)
 
     case Load.read(cfg, spec, cfg.source.writes_snapshots?()) do
       {:ok, [refreshed]} -> {:ok, refreshed}

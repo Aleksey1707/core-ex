@@ -160,8 +160,6 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   команда.
   """
 
-  @behaviour Core.Es.Aggregate.Load.Source
-
   import Core.Version, only: [is_version: 1]
   import Ecto.Query
 
@@ -421,13 +419,11 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   @doc false
   @spec writes_snapshots?() :: boolean()
 
-  @impl true
   def writes_snapshots?, do: true
 
   @doc false
   @spec fetch(Config.t(), Load.Plan.t(), keyword()) :: [Engine.entry()]
 
-  @impl true
   def fetch(%Config{snapshot: nil} = cfg, %Load.Plan{streams: streams}, opts), do: read_streams(cfg, streams, opts)
 
   def fetch(cfg, %Load.Plan{streams: streams, marker: marker}, opts) do

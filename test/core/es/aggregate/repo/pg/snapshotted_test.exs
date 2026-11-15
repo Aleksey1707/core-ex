@@ -424,7 +424,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
   defp load_at(id, nil, captures), do: load_versions(id, captures)
 
   defp load_version(id, upper) do
-    request = Request.get_at(LoadRepo.cfg(), id, Core.Version.new!(upper), [], LoadRepo.cfg().source)
+    request = Request.get_at(LoadRepo.cfg(), id, Core.Version.new!(upper), [])
 
     with {:ok, state} <- Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request),
          do: {:ok, [state]}
@@ -432,7 +432,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
 
   defp load_versions(id, captures) do
     pairs = Enum.map(captures, &{id, Core.Version.new!(&1)})
-    request = Request.get_many_at(LoadRepo.cfg(), pairs, [], LoadRepo.cfg().source)
+    request = Request.get_many_at(LoadRepo.cfg(), pairs, [])
 
     Core.Es.Aggregate.Load.run(LoadRepo.cfg(), request)
   end

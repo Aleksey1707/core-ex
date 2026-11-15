@@ -10,16 +10,12 @@ defmodule Core.Es.Aggregate.Load.Request do
 
   defstruct op: nil,
             opts: [],
-            source: nil,
             streams: [],
             version: nil,
             pairs: nil
 
   @typedoc false
   @type op :: :get | :get_many | :get_at | :get_many_at
-
-  @typedoc false
-  @type source :: module()
 
   @typedoc false
   @type stream :: %{
@@ -33,59 +29,54 @@ defmodule Core.Es.Aggregate.Load.Request do
   @type t :: %__MODULE__{
           op: op(),
           opts: keyword(),
-          source: source(),
           streams: [stream()],
           version: Version.t() | nil,
           pairs: [{struct(), pos_integer()}] | nil
         }
 
   @doc false
-  @spec get(Config.t(), struct(), Version.expected(), keyword(), source() | nil) :: t()
+  @spec get(Config.t(), struct(), Version.expected(), keyword()) :: t()
 
-  def get(cfg, id, version, opts, source \\ nil) do
+  def get(cfg, id, version, opts) do
     %__MODULE__{
       op: :get,
       opts: opts,
-      source: source || cfg.source,
       streams: [head(struct(cfg.aggregate, id: id), version)]
     }
   end
 
   @doc false
-  @spec get_many(Config.t(), [{struct(), Version.expected()}], keyword(), source() | nil) :: t()
+  @spec get_many(Config.t(), [{struct(), Version.expected()}], keyword()) :: t()
 
-  def get_many(cfg, pairs, opts, source \\ nil) do
+  def get_many(cfg, pairs, opts) do
     %__MODULE__{
       op: :get_many,
       opts: opts,
-      source: source || cfg.source,
       streams: for(%{state: state, version: version} <- initial_states!(cfg, pairs), do: head(state, version))
     }
   end
 
   @doc false
-  @spec get_at(Config.t(), struct(), Version.t(), keyword(), source() | nil) :: t()
+  @spec get_at(Config.t(), struct(), Version.t(), keyword()) :: t()
 
-  def get_at(cfg, id, version, opts, source \\ nil) do
+  def get_at(cfg, id, version, opts) do
     %__MODULE__{
       op: :get_at,
       opts: opts,
-      source: source || cfg.source,
       streams: [at(struct(cfg.aggregate, id: id), version)],
       version: version
     }
   end
 
   @doc false
-  @spec get_many_at(Config.t(), [{struct(), Version.t()}], keyword(), source() | nil) :: t()
+  @spec get_many_at(Config.t(), [{struct(), Version.t()}], keyword()) :: t()
 
-  def get_many_at(cfg, pairs, opts, source \\ nil) do
+  def get_many_at(cfg, pairs, opts) do
     parsed = parse_pairs!(cfg, pairs)
 
     %__MODULE__{
       op: :get_many_at,
       opts: opts,
-      source: source || cfg.source,
       streams: many_at(cfg, parsed),
       pairs: parsed
     }

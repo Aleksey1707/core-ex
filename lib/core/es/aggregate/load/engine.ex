@@ -4,17 +4,17 @@ defmodule Core.Es.Aggregate.Load.Engine do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Aggregate.Load.Plan
-  alias Core.Es.Aggregate.Load.Source
   alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Aggregate.Repo.Pg.Snapshot.Settings
   alias Core.Es.Personal.Destroyed
+  alias Core.Es.Store.Schema
   alias Core.Result
   alias Core.Telemetry
   alias Core.Version
 
   @typedoc false
-  @type entry :: Source.entry()
+  @type entry :: {Plan.stream(), Snapshot.stored() | nil, [Schema.t()]}
 
   @typedoc false
   @type op :: :get | :get_decision | :get_many | :refresh | :get_at | :get_many_at
@@ -33,7 +33,6 @@ defmodule Core.Es.Aggregate.Load.Engine do
           required(:op) => op(),
           required(:streams) => [stream()],
           required(:opts) => keyword(),
-          required(:source) => module(),
           optional(:version) => Version.t() | nil,
           optional(:pairs) => [{struct(), pos_integer()}] | nil
         }
@@ -65,6 +64,11 @@ defmodule Core.Es.Aggregate.Load.Engine do
         }
 
   @doc false
+  @spec spec(op(), [stream()], keyword()) :: spec()
+
+  def spec(op, streams, opts), do: %{op: op, opts: opts, streams: streams}
+
+  @doc false
   @spec read(Config.t(), Plan.t(), spec()) :: Result.t(loaded())
 
   def read(cfg, plan, request) do
@@ -84,10 +88,10 @@ defmodule Core.Es.Aggregate.Load.Engine do
 
   defp restore(cfg, plan, %{streams: specs} = request) do
     metas = Enum.map(specs, &meta(cfg, &1))
-    triples = request.source.fetch(cfg, plan, request.opts)
+    triples = cfg.source.fetch(cfg, plan, request.opts)
 
     with {:ok, restored} <- open_tails(cfg, plan, pair(metas, triples)),
-         {:ok, restored} <- refold_rejected(cfg, plan, restored, request.source, request.opts) do
+         {:ok, restored} <- refold_rejected(cfg, plan, restored, cfg.source, request.opts) do
       Enum.each(restored, &emit_fold(cfg, request.op, &1))
       {:ok, restored}
     end
