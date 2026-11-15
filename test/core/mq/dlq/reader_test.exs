@@ -37,6 +37,42 @@ defmodule Core.Mq.Dlq.ReaderTest do
     assert :empty = Dlq.Reader.get(reader, 120)
   end
 
+  test "snapshot без сообщения в работе: буфер и чанк — нули, подписки нет", %{reader: reader} do
+    assert %{
+             topic: "orders",
+             buffer_len: 0,
+             chunk_remaining: 0,
+             pending?: false,
+             pending_age_seconds: 0,
+             subscribed?: false,
+             details: %{}
+           } = Dlq.Reader.snapshot(reader)
+  end
+
+  test "snapshot с сообщением в работе: pending, буфер и чанк — нули", %{
+    reader: reader,
+    subscriber: subscriber
+  } do
+    insert!(subscriber, "a")
+    Dlq.requeue(TestRepo, :all)
+
+    assert {:ok, %Mq.Message{body: "a"}} = Dlq.Reader.get(reader, 0)
+
+    assert %{
+             pending?: true,
+             buffer_len: 0,
+             chunk_remaining: 0,
+             pending_age_seconds: 0,
+             subscribed?: false
+           } = Dlq.Reader.snapshot(reader)
+
+    assert %{pending: 1} = Dlq.Reader.metrics(reader)
+
+    assert :ok = Dlq.Reader.commit(reader)
+    assert %{pending?: false} = Dlq.Reader.snapshot(reader)
+    assert %{pending: 0} = Dlq.Reader.metrics(reader)
+  end
+
   test "перехваченная запись брошена с warning, commit её отклонён", %{reader: reader, subscriber: subscriber} do
     insert!(subscriber, "a")
     insert!(subscriber, "b")

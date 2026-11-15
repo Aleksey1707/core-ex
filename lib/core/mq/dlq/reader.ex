@@ -126,6 +126,18 @@ defmodule Core.Mq.Dlq.Reader do
   @impl true
   def metrics(server), do: GenServer.call(server, :metrics, @call_timeout)
 
+  @doc """
+  Снимок состояния reader'а (`Core.Mq.ReaderReliable.snapshot/1`).
+
+  Буфера и чанков у DLQ нет — нули. `subscribed?` — `false`: топик не подписан, а захват записи
+  виден в `pending?`. Возраст сообщения в работе не считается: строка DLQ не несёт времени
+  записи брокером.
+  """
+  @spec snapshot(t()) :: Core.Mq.ReaderReliable.snapshot()
+
+  @impl true
+  def snapshot(server), do: GenServer.call(server, :snapshot, @call_timeout)
+
   @doc false
   @spec init(keyword()) :: {:ok, %__MODULE__{}}
 
@@ -152,6 +164,10 @@ defmodule Core.Mq.Dlq.Reader do
   @impl true
   def handle_call(:metrics, _from, state) do
     {:reply, %{topic: state.topic_name, pending: pending_flag(state.pending)}, state}
+  end
+
+  def handle_call(:snapshot, _from, state) do
+    {:reply, snapshot_of(state), state}
   end
 
   def handle_call(:get, _from, state) do
@@ -193,6 +209,18 @@ defmodule Core.Mq.Dlq.Reader do
 
   defp pending_flag(nil), do: 0
   defp pending_flag(_pending), do: 1
+
+  defp snapshot_of(state) do
+    %{
+      topic: state.topic_name,
+      buffer_len: 0,
+      chunk_remaining: 0,
+      pending?: not is_nil(state.pending),
+      pending_age_seconds: 0,
+      subscribed?: false,
+      details: %{}
+    }
+  end
 
   defp take(%__MODULE__{pending: nil} = state) do
     case Store.claim(state.repo, state.subscriber, state.topic_name, state.lease, state.lease_ttl_ms) do

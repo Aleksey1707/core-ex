@@ -121,13 +121,28 @@ defmodule Core.KafkaFake do
 
   def subscription(client, topic, partition), do: GenServer.call(consumer!(client, topic, partition), :state)
 
-  @doc "Подать подписчику партиции пачку записей `{offset, key, value, headers}`."
-  @spec deliver(atom(), String.t(), non_neg_integer(), [tuple()], non_neg_integer()) :: :ok
+  @doc """
+  Подать подписчику партиции пачку записей `{offset, key, value, headers}`.
 
-  def deliver(client, topic, partition, records, high_wm) do
+  Опция `ts:` — timestamp записей (мс Unix-времени); по умолчанию timestamp записи равен её
+  смещению, как у прежних тестов.
+  """
+  @spec deliver(atom(), String.t(), non_neg_integer(), [tuple()], non_neg_integer(), keyword()) :: :ok
+
+  def deliver(client, topic, partition, records, high_wm, opts \\ []) do
+    ts = Keyword.get(opts, :ts, :offset)
+
     messages =
       for {offset, key, value, headers} <- records,
-          do: kafka_message(offset: offset, key: key, value: value, headers: headers, ts_type: :create, ts: offset)
+          do:
+            kafka_message(
+              offset: offset,
+              key: key,
+              value: value,
+              headers: headers,
+              ts_type: :create,
+              ts: if(ts == :offset, do: offset, else: ts)
+            )
 
     GenServer.call(consumer!(client, topic, partition), {:deliver, messages, high_wm})
   end

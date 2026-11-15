@@ -243,6 +243,18 @@ if Code.ensure_loaded?(:brod) do
 
     def info(server), do: GenServer.call(server, :info, @call_timeout)
 
+    @doc """
+    Снимок состояния reader'а (`Core.Mq.ReaderReliable.snapshot/1`).
+
+    `subscribed?` — аренда топика: без неё нода не подписана. Партиции — `details.partitions`
+    в форме `info/1`. Возраст сообщения в работе считается здесь по `ts` записи брокера, и
+    расхождение часов в минус обрезается до нуля.
+    """
+    @spec snapshot(t()) :: Core.Mq.ReaderReliable.snapshot()
+
+    @impl true
+    def snapshot(server), do: GenServer.call(server, :snapshot, @call_timeout)
+
     @doc false
     @spec init(keyword()) :: {:ok, %__MODULE__{}, {:continue, :lease}}
 
@@ -293,11 +305,14 @@ if Code.ensure_loaded?(:brod) do
         lease?: leased?(state),
         pending?: not is_nil(state.pending),
         topic: state.topic_name,
-        partitions:
-          Map.new(state.stats, fn {partition, stats} -> {partition, partition_info(state, partition, stats)} end)
+        partitions: partitions_info(state)
       }
 
       {:reply, info, state}
+    end
+
+    def handle_call(:snapshot, _from, state) do
+      {:reply, snapshot_of(state), state}
     end
 
     @doc false
@@ -401,6 +416,10 @@ if Code.ensure_loaded?(:brod) do
       %{state | stats: Map.update(state.stats, pending.partition, stats, &Map.merge(&1, stats))}
     end
 
+    defp partitions_info(state) do
+      Map.new(state.stats, fn {partition, stats} -> {partition, partition_info(state, partition, stats)} end)
+    end
+
     defp partition_info(state, partition, stats) do
       buffered =
         case state.partitions do
@@ -414,6 +433,28 @@ if Code.ensure_loaded?(:brod) do
         committed_ts: Map.get(stats, :committed_ts),
         buffered: buffered
       }
+    end
+
+    defp snapshot_of(state) do
+      %{
+        topic: state.topic_name,
+        buffer_len: buffer_len(state),
+        chunk_remaining: 0,
+        pending?: not is_nil(state.pending),
+        pending_age_seconds: pending_age_seconds(state.pending),
+        subscribed?: leased?(state),
+        details: %{partitions: partitions_info(state)}
+      }
+    end
+
+    defp pending_age_seconds(nil), do: 0
+    defp pending_age_seconds(%{ts: ts}) when is_integer(ts), do: max(System.os_time(:millisecond) - ts, 0) / 1_000
+    defp pending_age_seconds(_pending), do: 0
+
+    defp buffer_len(state) do
+      state.partitions
+      |> Map.values()
+      |> Enum.reduce(0, &(:queue.len(&1.buffer) + &2))
     end
 
     # Срок считается от момента до запроса: Postgres продлевает аренду позже, и локальный срок

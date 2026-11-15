@@ -283,6 +283,51 @@ defmodule Core.Mq.Kafka.ReaderTest do
     assert partition == %{high_wm_offset: nil, committed_offset: nil, committed_ts: nil, buffered: 0}
   end
 
+  describe "snapshot" do
+    test "пустой reader: общая форма снимка, партиции в details", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+
+      snapshot = Reader.snapshot(reader)
+      info = Reader.info(reader)
+
+      assert snapshot.topic == info.topic
+      assert snapshot.buffer_len == 0
+      assert snapshot.chunk_remaining == 0
+      refute snapshot.pending?
+      assert snapshot.pending_age_seconds == 0
+      assert snapshot.subscribed? == info.lease?
+      assert snapshot.details.partitions == info.partitions
+    end
+
+    test "snapshot считает возраст pending и показывает буфер партиции", %{client: client} do
+      reader = start_reader!(client)
+      await_subscribed(client, 0)
+
+      :ok =
+        KafkaFake.deliver(
+          client,
+          @topic,
+          0,
+          [{0, "k", "a", []}, {1, "k", "b", []}],
+          2,
+          ts: System.os_time(:millisecond) - 2_500
+        )
+
+      assert {:ok, %{body: "a"}} = Reader.get(reader, 100)
+
+      snapshot = Reader.snapshot(reader)
+
+      assert snapshot.pending?
+      assert_in_delta snapshot.pending_age_seconds, 2.5, 0.5
+      assert snapshot.buffer_len == 1
+      assert snapshot.details.partitions[0].buffered == 1
+
+      assert :ok = Reader.commit(reader)
+      assert %{pending?: false, pending_age_seconds: 0} = Reader.snapshot(reader)
+    end
+  end
+
   describe "заявка на готовность" do
     test "пустой буфер: один ответ на пришедшую пачку", %{client: client} do
       reader = start_reader!(client)
