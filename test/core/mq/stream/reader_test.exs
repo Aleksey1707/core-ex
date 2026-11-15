@@ -117,6 +117,45 @@ defmodule Core.Mq.Stream.ReaderTest do
     assert Stream.Reader.info(reader).pending_ts == 2_000
   end
 
+  test "snapshot отдаёт общую форму снимка без работы", %{reader: reader, topic: topic} do
+    assert %{
+             topic: "reader_test",
+             buffer_len: 0,
+             chunk_remaining: 0,
+             pending?: false,
+             pending_age_seconds: 0,
+             subscribed?: true,
+             details: details
+           } = Stream.Reader.snapshot(reader)
+
+    assert Mq.Topic.value(topic) == "reader_test"
+    assert is_map(details)
+  end
+
+  test "snapshot считает возраст pending в секундах и совпадает с info", %{
+    reader: reader,
+    topic: topic
+  } do
+    deliver(reader, 0, encoded_many(topic, 0, 3), System.os_time(:millisecond) - 2_500)
+    refute Stream.Reader.snapshot(reader).pending?
+
+    assert {:ok, %Mq.Message{}} = Stream.Reader.get(reader, 0)
+
+    info = Stream.Reader.info(reader)
+    snapshot = Stream.Reader.snapshot(reader)
+
+    assert snapshot.buffer_len == info.buffer_len
+    assert snapshot.chunk_remaining == info.chunk_remaining
+    assert snapshot.pending? == info.pending?
+    assert snapshot.subscribed? == info.subscribed?
+    assert snapshot.topic == info.topic
+    assert snapshot.details.dropped_offset == info.dropped_offset
+    assert_in_delta snapshot.pending_age_seconds, 2.5, 0.5
+
+    assert :ok = Stream.Reader.commit(reader)
+    assert %{pending?: false, pending_age_seconds: 0} = Stream.Reader.snapshot(reader)
+  end
+
   test "credit только по исчерпании чанка", %{reader: reader, topic: topic} do
     deliver(reader, 0, encoded_many(topic, 0, 50))
     deliver(reader, 50, encoded_many(topic, 50, 50))
@@ -449,6 +488,7 @@ defmodule Core.Mq.Stream.ReaderTest do
 
       # Первые две попытки подписки провалились, но процесс жив и отдаёт :empty.
       refute Stream.Reader.info(reader).subscribed?
+      refute Stream.Reader.snapshot(reader).subscribed?
       assert :empty = Stream.Reader.get(reader, 0)
 
       assert eventually(fn -> Stream.Reader.info(reader).subscribed? end)

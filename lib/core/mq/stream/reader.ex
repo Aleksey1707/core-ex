@@ -189,6 +189,18 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       GenServer.call(server, :info, @call_timeout)
     end
 
+    @doc """
+    Снимок состояния reader'а (`Core.Mq.ReaderReliable.snapshot/1`).
+
+    Возраст сообщения в работе считается здесь, по часам ноды: `pending_ts` ставит брокер при
+    записи чанка, и расхождение часов в минус обрезается до нуля. `details` несёт накопленный
+    `dropped_offset`.
+    """
+    @spec snapshot(t()) :: Core.Mq.ReaderReliable.snapshot()
+
+    @impl true
+    def snapshot(server), do: GenServer.call(server, :snapshot, @call_timeout)
+
     @doc false
     @spec init(keyword()) :: {:ok, %__MODULE__{}, {:continue, :subscribe}}
 
@@ -237,6 +249,10 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
       }
 
       {:reply, info, state}
+    end
+
+    def handle_call(:snapshot, _from, state) do
+      {:reply, snapshot_of(state), state}
     end
 
     def handle_call(:commit, _from, %{reliable?: false} = state) do
@@ -402,6 +418,23 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
 
     defp pending_ts(nil), do: nil
     defp pending_ts({_offset, ts, _message}), do: ts
+
+    defp snapshot_of(state) do
+      %{
+        topic: state.topic_name,
+        buffer_len: Buffer.len(state.buffer),
+        chunk_remaining: Buffer.remaining(state.buffer),
+        pending?: not is_nil(state.pending),
+        pending_age_seconds: pending_age_seconds(state.pending),
+        subscribed?: not is_nil(state.subscription_id),
+        details: %{dropped_offset: state.dropped_offset}
+      }
+    end
+
+    defp pending_age_seconds(nil), do: 0
+
+    defp pending_age_seconds({_offset, ts, _message}) when is_integer(ts),
+      do: max(System.os_time(:millisecond) - ts, 0) / 1_000
 
     defp store_offset(state, offset) do
       state.connection.store_offset(state.topic_name, state.subscriber, offset)

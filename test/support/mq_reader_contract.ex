@@ -24,6 +24,7 @@ defmodule Core.MqReaderContract do
       @compile {:no_warn_undefined,
                 [
                   {@reader_impl, :metrics, 1},
+                  {@reader_impl, :snapshot, 1},
                   {@reader_impl, :info, 1},
                   {@reader_impl, :notify_when_ready, 2}
                 ]}
@@ -87,6 +88,30 @@ defmodule Core.MqReaderContract do
 
           true ->
             :ok
+        end
+      end
+
+      test "snapshot/1 отдаёт общую форму снимка", context do
+        if Core.Helper.Module.exports?(@reader_impl, :snapshot, 1) do
+          reader = start_reader(context)
+
+          assert %{
+                   topic: topic,
+                   buffer_len: buffer_len,
+                   chunk_remaining: chunk_remaining,
+                   pending?: pending?,
+                   pending_age_seconds: age,
+                   subscribed?: subscribed?,
+                   details: details
+                 } = @reader_impl.snapshot(reader)
+
+          assert is_binary(topic)
+          assert is_integer(buffer_len) and buffer_len >= 0
+          assert is_integer(chunk_remaining) and chunk_remaining >= 0
+          assert is_boolean(pending?)
+          assert is_number(age) and age >= 0
+          assert is_boolean(subscribed?)
+          assert is_map(details)
         end
       end
     end
