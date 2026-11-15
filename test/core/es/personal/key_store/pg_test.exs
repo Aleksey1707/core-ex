@@ -4,28 +4,21 @@ defmodule Core.Es.Personal.KeyStore.PgTest do
   alias Core.Error
   alias Core.Es.Personal.KeyStore.Pg
   alias Core.Es.Personal.Port
+  alias Core.PersonalGoldenFixture
   alias Core.TestRepo
 
   # Golden схемы `1`: строка ключа и `$pd` записаны под KEK версии 1 из `config/test.exs` вне
-  # реализации — `:crypto` по описанию схемы; открытый текст — JSON wire-значения поля.
-  @golden_key_id "0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0"
-  @golden_wrapped "ZWZnaGlqa2xtbm9wR68CiUYj1Y8uZ4rjdAgIUESTMkz6c0n01YUefqvlV9QnF8TsJbNKROdTkOlexYBv"
-  @golden_pd "AQ8eLTxLWkloh3altMPS4fDJysvMzc7P0NHS09SD6PTuFW4GVqytg0oKJFkWNUPjRt64sDqFVm1bKyONh745hynH9j8="
-  @golden_event_id "01a09d85-3b21-7c4e-9d3a-5f1e2b7c8a90"
+  # реализации — `:crypto` по описанию схемы; открытый текст — JSON wire-значения поля. Константы —
+  # `Core.PersonalGoldenFixture`.
   @golden_index "62883963d365744d5388c0bd3eae4a5cb739ec6af5389df7ff86e6e114f5a1ef"
 
   describe "golden схемы 1" do
     test "строка ключа и $pd под KEK фикстуры расшифровываются в известный текст" do
-      {:ok, key_id} = Ecto.UUID.dump(@golden_key_id)
+      :ok = PersonalGoldenFixture.put!(Ecto.UUID.generate())
 
-      TestRepo.query!(
-        "INSERT INTO es_subject_keys (id, subject, wrapped_key, kek_version, created_at) VALUES ($1, $2, $3, 1, $4)",
-        [key_id, Ecto.UUID.generate(), Base.decode64!(@golden_wrapped), NaiveDateTime.utc_now()]
-      )
+      aad = Port.address([PersonalGoldenFixture.event_id(), "holder"])
 
-      aad = Port.address([@golden_event_id, "holder"])
-
-      assert {:ok, [{:ok, ~s("Иван Петров")}]} = Pg.open([{Base.decode64!(@golden_pd), aad}])
+      assert {:ok, [{:ok, ~s("Иван Петров")}]} = Pg.open([{Base.decode64!(PersonalGoldenFixture.pd()), aad}])
     end
 
     test "индекс фиксированных области и частей — фиксированный hex" do

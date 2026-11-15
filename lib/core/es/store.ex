@@ -622,6 +622,14 @@ defmodule Core.Es.Store do
     with {:ok, {loaded, []}} <- load_entries(entries, load, []), do: {:ok, loaded}
   end
 
+  # Событие грузит кодек событий потока, фасад приходит ему только для вложенных значений: поток
+  # кодека, которого нет в `plugins:` фасада (`"core.subject"`), читается так же.
+  @doc false
+  @spec load_event(module(), Es.Event.Codec.wire(), module()) :: Result.t(Es.Event.t())
+
+  def load_event(event_codec, wire, codec) when is_atom(event_codec) and is_atom(codec),
+    do: event_codec.load(event_codec.__es_family__(), wire, codec)
+
   # ---
 
   defp load_entries(entries, load, sealed) do
@@ -631,10 +639,6 @@ defmodule Core.Es.Store do
 
   defp to_wire(:skip), do: :skip
   defp to_wire({event_codec, %Schema{} = row}) when is_atom(event_codec), do: {event_codec, Schema.to_wire(row)}
-
-  # Событие грузит кодек событий потока, фасад приходит ему только для вложенных значений: поток
-  # кодека, которого нет в `plugins:` фасада (`"core.subject"`), читается так же.
-  defp load_event(event_codec, wire, codec), do: event_codec.load(event_codec.__es_family__(), wire, codec)
 
   defp wire(:skip), do: :skip
   defp wire({_key, wire}), do: wire

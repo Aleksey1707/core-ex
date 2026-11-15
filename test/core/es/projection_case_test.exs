@@ -167,6 +167,14 @@ defmodule Core.Es.ProjectionCaseTest do
                ProjectionCase.check_personal(Unpersonal, @sealed)
     end
 
+    test "сбой хранилища ключей — фикстура не грузится с той же ошибкой, что в проде" do
+      TestRepo.query!("SET LOCAL search_path TO no_such_schema")
+      path = Path.join(@sealed, "account/account.holder_set.json")
+
+      assert {:error, %{failed: [{^path, %Error{kind: :app, ns: :key_store, code: :unavailable}}]}} =
+               ProjectionCase.check_personal(Unpersonal, @sealed)
+    end
+
     test "ключ субъекта уничтожен — фикстура грузится уничтоженным значением, открытых ПДн нет" do
       :ok = PersonalGoldenFixture.put!()
       :ok = PersonalGoldenFixture.destroy!()

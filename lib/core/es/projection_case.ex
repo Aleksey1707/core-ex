@@ -478,9 +478,8 @@ defmodule Core.Es.ProjectionCase do
   # Тот же шаг, что у пути чтения: расшифровка всех `$pd` конверта одним вызовом `open`, затем
   # загрузка кодеком семейства с фасадом проекции для вложенных значений.
   defp load_through_store(event_codec, data, codec) do
-    load = fn _event_codec, wire -> event_codec.load(event_codec.__es_family__(), wire, codec) end
-
-    with {:ok, [loaded]} <- Store.load_wires([{event_codec, data}], load), do: loaded
+    with {:ok, [result]} <- Store.load_wires([{event_codec, data}], &Store.load_event(&1, &2, codec)),
+         do: result
   end
 
   defp check_type(%{"type" => type}, tag) when type != tag, do: {:error, %{type: type}}
