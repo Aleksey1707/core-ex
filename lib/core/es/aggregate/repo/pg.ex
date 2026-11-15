@@ -168,6 +168,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Error
   alias Core.Es
   alias Core.Es.Aggregate.Load
+  alias Core.Es.Aggregate.Load.Engine
   alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
@@ -403,7 +404,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   def writes_snapshots?, do: true
 
   @doc false
-  @spec fetch(Config.t(), Load.Plan.t(), keyword()) :: [Load.triple()]
+  @spec fetch(Config.t(), Load.Plan.t(), keyword()) :: [Engine.entry()]
 
   @impl true
   def fetch(%Config{snapshot: nil} = cfg, %Load.Plan{streams: streams}, opts), do: read_streams(cfg, streams, opts)

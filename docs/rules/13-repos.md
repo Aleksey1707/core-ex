@@ -1230,8 +1230,8 @@ Core.Es.Store.read_stream(Agg.Event.Codec, other_id, limit, offset, context)
 состояние по адресу версии `{id, N}` сворачивает пара модулей read-пути, а наружу уходит только
 представление.
 
-Свёртка до версии идёт одним внутренним движком библиотеки `Core.Es.Aggregate.Load`; наружу он не
-выходит, звать его из кода потребителя MUST NOT.
+Свёртка до версии идёт одним внутренним движком библиотеки `Core.Es.Aggregate.Load.Engine`;
+наружу он не выходит, звать его из кода потребителя MUST NOT.
 
 ```elixir
 defmodule MyApp.Domain.<BC>.<Aggregate>.<Purpose>.View do
