@@ -104,6 +104,22 @@ defmodule Core.Es.Aggregate.Repo.PgTest do
     test "реализация резолвится по конвенции <Behaviour>.Pg" do
       assert @repo == Account.Repo.Pg
     end
+
+    test "конфигурация чтения — структура, dao/codec/источник резолвятся вызовом" do
+      cfg = LoadRepo.cfg()
+
+      assert %Core.Es.Aggregate.Repo.Pg.Config{} = cfg
+      assert cfg.dao == Core.Config.dao()
+      assert cfg.codec == Core.Config.codec()
+      assert cfg.source == Core.Es.Aggregate.Repo.Pg
+      assert cfg.snapshot == nil
+    end
+
+    test "базовая конфигурация требует обязательные поля" do
+      assert_raise ArgumentError, fn ->
+        struct!(Core.Es.Aggregate.Repo.Pg.Config, aggregate: Account)
+      end
+    end
   end
 
   describe "telemetry" do

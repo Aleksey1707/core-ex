@@ -1,6 +1,7 @@
 defmodule Core.Es.Aggregate.Load.Plan do
   @moduledoc false
 
+  alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Version
 
@@ -38,7 +39,7 @@ defmodule Core.Es.Aggregate.Load.Plan do
          }
 
   @doc false
-  @spec new(map(), boolean(), [spec()]) :: t()
+  @spec new(Config.t(), boolean(), [spec()]) :: t()
 
   def new(cfg, write_snapshots?, specs) do
     marker = cfg.snapshot && Snapshot.marker(cfg)

@@ -6,7 +6,9 @@ defmodule Core.Es.Aggregate.Load do
   alias Core.Es.Aggregate.Load.Plan
   alias Core.Es.Aggregate.Load.Request
   alias Core.Es.Aggregate.Load.Source
+  alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
+  alias Core.Es.Aggregate.Repo.Pg.Snapshot.Settings
   alias Core.Es.Personal.Destroyed
   alias Core.Result
   alias Core.Telemetry
@@ -57,7 +59,7 @@ defmodule Core.Es.Aggregate.Load do
   # ===== чтение =====
 
   @doc false
-  @spec head(map(), request(decision, reason)) :: Result.t([struct()] | decision, reason | Error.t())
+  @spec head(Config.t(), request(decision, reason)) :: Result.t([struct()] | decision, reason | Error.t())
         when decision: var, reason: var
 
   def head(cfg, %Request{states: states} = request) do
@@ -69,7 +71,7 @@ defmodule Core.Es.Aggregate.Load do
   # ===== версия =====
 
   @doc false
-  @spec at(map(), request()) :: Result.t(struct())
+  @spec at(Config.t(), request()) :: Result.t(struct())
 
   def at(cfg, %Request{state: state, version: %Version{} = version} = request) do
     streams = [%{state: state, version: version, upper: Version.value(version), captures: []}]
@@ -78,7 +80,7 @@ defmodule Core.Es.Aggregate.Load do
   end
 
   @doc false
-  @spec many_at(map(), request()) :: Result.t([struct()])
+  @spec many_at(Config.t(), request()) :: Result.t([struct()])
 
   def many_at(cfg, %Request{pairs: pairs} = request) do
     id_mod = cfg.id
@@ -112,7 +114,7 @@ defmodule Core.Es.Aggregate.Load do
 
   # ===== общее =====
 
-  @spec run(map(), request(), address()) :: Result.t()
+  @spec run(Config.t(), request(), address()) :: Result.t()
 
   defp run(cfg, %{op: op} = request, %{streams: specs} = address) do
     start = System.monotonic_time()
@@ -261,19 +263,19 @@ defmodule Core.Es.Aggregate.Load do
     end
   end
 
-  defp open_tail(%{snapshot: nil} = cfg, _plan, meta, _snapshot, rows) do
+  defp open_tail(%Config{snapshot: nil} = cfg, _plan, meta, _snapshot, rows) do
     with {:ok, {events, []}} <- Es.Store.load_fold_rows(rows, cfg.event_codec, cfg.codec, []),
          do: {:ok, fold_stream(cfg, meta, nil, events)}
   end
 
-  defp open_tail(cfg, plan, meta, snapshot, rows) do
+  defp open_tail(%Config{} = cfg, plan, meta, snapshot, rows) do
     sealed = Snapshot.sealed(cfg, plan, [meta.state], [snapshot])
 
     with {:ok, {events, opened}} <- Es.Store.load_fold_rows(rows, cfg.event_codec, cfg.codec, sealed),
          do: {:ok, fold_stream(cfg, meta, Snapshot.opened(plan, snapshot, opened), events)}
   end
 
-  defp fold_stream(%{snapshot: nil} = cfg, meta, _snapshot, events),
+  defp fold_stream(%Config{snapshot: nil} = cfg, meta, _snapshot, events),
     do: restored_stream(:off, cfg, meta, meta.state, events, false)
 
   defp fold_stream(cfg, meta, nil, events),
@@ -350,7 +352,7 @@ defmodule Core.Es.Aggregate.Load do
   end
 
   # `destroyed?` — чтение видело уничтоженный снапшот или ПДн-значение: снапшот потока не пишется.
-  defp destroyed?(%{snapshot: %{sealed: true}}, events), do: destroyed_value?(events)
+  defp destroyed?(%Config{snapshot: %Settings{sealed: true}}, events), do: destroyed_value?(events)
   defp destroyed?(_cfg, _events), do: false
 
   # Поле с `subject:` — только на верхнем уровне нагрузки.
@@ -425,7 +427,7 @@ defmodule Core.Es.Aggregate.Load do
     )
   end
 
-  defp write_snapshots(%{snapshot: nil}, _plan, _restored), do: :ok
+  defp write_snapshots(%Config{snapshot: nil}, _plan, _restored), do: :ok
 
   defp write_snapshots(_cfg, %{write_snapshots?: false}, _restored), do: :ok
 

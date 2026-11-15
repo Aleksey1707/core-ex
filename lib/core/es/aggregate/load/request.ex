@@ -3,6 +3,7 @@ defmodule Core.Es.Aggregate.Load.Request do
 
   import Core.Version, only: [is_version: 1]
 
+  alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Result
   alias Core.Version
 
@@ -42,7 +43,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   @type t :: t(term(), term())
 
   @doc false
-  @spec get(map(), struct(), Version.expected(), keyword(), source() | nil) :: t(term(), term())
+  @spec get(Config.t(), struct(), Version.expected(), keyword(), source() | nil) :: t(term(), term())
 
   def get(cfg, id, version, opts, source \\ nil) do
     %__MODULE__{
@@ -56,7 +57,7 @@ defmodule Core.Es.Aggregate.Load.Request do
 
   @doc false
   @spec get_decision(
-          map(),
+          Config.t(),
           struct(),
           Version.expected(),
           (struct() -> Result.t(decision, reason)),
@@ -78,7 +79,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec get_many(map(), [{struct(), Version.expected()}], keyword(), source() | nil) :: t(term(), term())
+  @spec get_many(Config.t(), [{struct(), Version.expected()}], keyword(), source() | nil) :: t(term(), term())
 
   def get_many(cfg, pairs, opts, source \\ nil) do
     %__MODULE__{
@@ -92,7 +93,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec refresh(map(), struct(), Version.expected(), keyword(), source() | nil) :: t(term(), term())
+  @spec refresh(Config.t(), struct(), Version.expected(), keyword(), source() | nil) :: t(term(), term())
 
   def refresh(cfg, state, version, opts, source \\ nil) do
     %__MODULE__{
@@ -105,7 +106,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec get_at(map(), struct(), Version.t(), keyword(), source() | nil) :: t(term(), term())
+  @spec get_at(Config.t(), struct(), Version.t(), keyword(), source() | nil) :: t(term(), term())
 
   def get_at(cfg, id, version, opts, source \\ nil) do
     %__MODULE__{
@@ -118,7 +119,7 @@ defmodule Core.Es.Aggregate.Load.Request do
   end
 
   @doc false
-  @spec get_many_at(map(), [{struct(), Version.t()}], keyword(), source() | nil) :: t(term(), term())
+  @spec get_many_at(Config.t(), [{struct(), Version.t()}], keyword(), source() | nil) :: t(term(), term())
 
   def get_many_at(cfg, pairs, opts, source \\ nil) do
     %__MODULE__{op: :get_many_at, opts: opts, source: source || cfg.source, pairs: pairs}
@@ -126,7 +127,7 @@ defmodule Core.Es.Aggregate.Load.Request do
 
   # ---
 
-  defp initial_states!(%{aggregate: aggregate, id: id_mod}, pairs) do
+  defp initial_states!(%Config{aggregate: aggregate, id: id_mod}, pairs) do
     states =
       Enum.map(pairs, fn {%^id_mod{} = id, version} when is_version(version) ->
         %{state: struct(aggregate, id: id), version: version}

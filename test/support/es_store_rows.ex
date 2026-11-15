@@ -11,6 +11,7 @@ defmodule Core.Es.Store.Rows do
   @behaviour Core.Es.Aggregate.Load.Source
 
   alias Core.Es.Aggregate.Load.Plan
+  alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Store.Schema
 
   @doc "Строки `es_events` из `{type, aggregate_id, version, tag, payload}`."
@@ -31,7 +32,7 @@ defmodule Core.Es.Store.Rows do
     end
   end
 
-  @spec fetch(map(), Plan.t(), keyword()) :: [Core.Es.Aggregate.Load.Source.entry()]
+  @spec fetch(Config.t(), Plan.t(), keyword()) :: [Core.Es.Aggregate.Load.Source.entry()]
 
   @impl true
   def fetch(cfg, %Plan{streams: streams}, opts) do

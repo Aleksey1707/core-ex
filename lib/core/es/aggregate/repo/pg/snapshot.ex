@@ -18,7 +18,9 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
 
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot.Schema
+  alias Core.Es.Aggregate.Repo.Pg.Snapshot.Settings
   alias Core.Es.Personal.KeyStore
   alias Core.Es.Personal.Port
   alias Core.Helper
@@ -31,9 +33,6 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   @required_keys ~w(every)a
   @optional_keys ~w(version)a
   @default_version 1
-
-  @typedoc "Настройка снапшотов репозитория; `sealed` — снапшот шифруется под ключом субъекта."
-  @type t :: %{every: pos_integer(), version: integer(), sealed: boolean()}
 
   @typedoc "Снапшот потока: версия и binary состояния."
   @type stored :: {pos_integer(), binary()}
@@ -48,13 +47,13 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
 
   Неверная опция и субъект ПДн-поля не `:aggregate_id` — `CompileError`.
   """
-  @spec opts!(term(), %{optional(module()) => [{atom(), atom()}]}, String.t()) :: t()
+  @spec opts!(term(), %{optional(module()) => [{atom(), atom()}]}, String.t()) :: Settings.t()
 
   def opts!(opts, subjects, label) when is_map(subjects) and is_binary(label) do
     label = "#{label}: snapshot"
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, label)
 
-    %{
+    %Settings{
       every: every!(Keyword.fetch!(opts, :every), label),
       version: version!(Keyword.get(opts, :version, @default_version), label),
       sealed: sealed!(subjects, label)
@@ -100,9 +99,13 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   Считается по коду, который исполняется сейчас, а не на компиляции репозитория: правка любого из
   этих модулей меняет маркер без пересборки репозитория.
   """
-  @spec marker(map()) :: String.t()
+  @spec marker(Config.t()) :: String.t()
 
-  def marker(%{aggregate: aggregate, event_codec: event_codec, snapshot: %{version: version, sealed: sealed}}) do
+  def marker(%Config{
+        aggregate: aggregate,
+        event_codec: event_codec,
+        snapshot: %Settings{version: version, sealed: sealed}
+      }) do
     [aggregate, event_codec | Enum.sort(event_codec.__es_mods__())]
     |> Enum.map(& &1.module_info(:md5))
     |> then(&:erlang.md5([&1, Integer.to_string(version) | sealed_mark(sealed)]))
@@ -113,7 +116,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   Шифротексты снапшотов `snapshots` потоков `states` к расшифровке вместе с хвостом событий:
   `{шифротекст, адрес}` в порядке потоков со снапшотом; у нешифрованных снапшотов — `[]`.
   """
-  @spec sealed(map(), map(), [struct()], [stored() | nil]) :: [{binary(), binary()}]
+  @spec sealed(Config.t(), map(), [struct()], [stored() | nil]) :: [{binary(), binary()}]
 
   def sealed(_cfg, %{sealed?: false}, _states, _snapshots), do: []
 
@@ -141,7 +144,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   или версия — с адресом снапшота, `fold/2` хвоста поднял исключение. Ключ субъекта уничтожен —
   `:destroyed` и `Logger.debug`: поток сворачивается целиком.
   """
-  @spec fold(map(), struct(), opened(), [Es.Event.t()]) :: {:ok, struct()} | :rejected | :destroyed
+  @spec fold(Config.t(), struct(), opened(), [Es.Event.t()]) :: {:ok, struct()} | :rejected | :destroyed
 
   def fold(cfg, %{id: id} = _initial, {version, opened}, events) when is_integer(version) and is_list(events) do
     case fold_snapshot(cfg.aggregate, id, {version, opened}, events) do
@@ -220,7 +223,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   своим запросом. Отказ `:subject_destroyed` — снапшот этого субъекта не пишется
   (`Logger.debug`), остальные — повтором `seal` без него.
   """
-  @spec write(map(), map(), [struct()]) :: :ok
+  @spec write(Config.t(), map(), [struct()]) :: :ok
 
   def write(cfg, plan, states)
 

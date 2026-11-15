@@ -83,8 +83,9 @@ defmodule Core.Es.Personal.SnapshotTest do
     end
 
     test "маркер шифрованного снапшота — свой" do
-      cfg = %{aggregate: Account, event_codec: Account.Event.Codec, snapshot: %{version: 1, sealed: true}}
+      cfg = @repo.__es_read_cfg__()
 
+      assert cfg.snapshot.sealed
       refute Snapshot.marker(cfg) == Snapshot.marker(put_in(cfg.snapshot.sealed, false))
     end
 

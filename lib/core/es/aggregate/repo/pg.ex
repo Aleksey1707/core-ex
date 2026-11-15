@@ -155,7 +155,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   нет clause его `code:`, область повторяется.
 
   Макрос занимает в вызывающем модуле имя `@es_aggregate_repo`, приватную `es_aggregate_repo/0`
-  и служебную `__es_read_cfg__/0` — конфигурацию чтения для `Core.Es.Aggregate.ReadRepo.Pg`.
+  и служебную `__es_read_cfg__/0` — `%Core.Es.Aggregate.Repo.Pg.Config{}` для
+  `Core.Es.Aggregate.ReadRepo.Pg`.
   """
 
   @behaviour Core.Es.Aggregate.Load.Source
@@ -168,6 +169,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   alias Core.Es
   alias Core.Es.Aggregate.Load
   alias Core.Es.Aggregate.Load.Request
+  alias Core.Es.Aggregate.Repo.Pg.Config
   alias Core.Es.Aggregate.Repo.Pg.Snapshot
   alias Core.Es.Store.Schema
   alias Core.Es.Store.Write.Plan
@@ -288,11 +290,12 @@ defmodule Core.Es.Aggregate.Repo.Pg do
                      page_stream: 4
 
       defp es_aggregate_repo do
-        Map.merge(@es_aggregate_repo, %{
-          dao: unquote(dao),
-          codec: unquote(codec),
-          source: Core.Es.Aggregate.Repo.Pg
-        })
+        Core.Es.Aggregate.Repo.Pg.Config.resolve(
+          @es_aggregate_repo,
+          unquote(dao),
+          unquote(codec),
+          Core.Es.Aggregate.Repo.Pg
+        )
       end
 
       @doc false
@@ -313,7 +316,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
     Es.Store.Opts.ensure_version_mismatch!(errors, @label)
 
-    %{
+    %Config{
       behaviour: behaviour,
       aggregate: aggregate,
       id: id,
@@ -352,7 +355,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # ===== чтение =====
 
   @doc false
-  @spec get(map(), struct(), Version.expected(), Context.t(), keyword()) ::
+  @spec get(Config.t(), struct(), Version.expected(), Context.t(), keyword()) ::
           Result.t(struct())
 
   def get(cfg, id, version, %Context{}, opts) when is_version(version) and is_list(opts) do
@@ -361,7 +364,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   @doc false
   @spec get_decision(
-          map(),
+          Config.t(),
           struct(),
           Version.expected(),
           Context.t(),
@@ -376,7 +379,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   end
 
   @doc false
-  @spec get_many(map(), [{struct(), Version.expected()}], Context.t(), keyword()) ::
+  @spec get_many(Config.t(), [{struct(), Version.expected()}], Context.t(), keyword()) ::
           Result.t([struct()])
 
   def get_many(cfg, pairs, %Context{}, opts) when is_list(pairs) and is_list(opts) do
@@ -384,7 +387,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   end
 
   @doc false
-  @spec refresh(map(), struct(), Version.expected(), Context.t(), keyword()) ::
+  @spec refresh(Config.t(), struct(), Version.expected(), Context.t(), keyword()) ::
           Result.t(struct())
 
   def refresh(cfg, state, version, %Context{}, opts) when is_version(version) and is_list(opts) do
@@ -394,10 +397,10 @@ defmodule Core.Es.Aggregate.Repo.Pg do
   # ===== источник строк =====
 
   @doc false
-  @spec fetch(map(), Load.Plan.t(), keyword()) :: [Load.triple()]
+  @spec fetch(Config.t(), Load.Plan.t(), keyword()) :: [Load.triple()]
 
   @impl true
-  def fetch(%{snapshot: nil} = cfg, %Load.Plan{streams: streams}, opts), do: read_streams(cfg, streams, opts)
+  def fetch(%Config{snapshot: nil} = cfg, %Load.Plan{streams: streams}, opts), do: read_streams(cfg, streams, opts)
 
   def fetch(cfg, %Load.Plan{streams: streams, marker: marker}, opts) do
     grouped =

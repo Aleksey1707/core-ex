@@ -47,6 +47,15 @@ defmodule Core.Es.Aggregate.Repo.Pg.SnapshottedTest do
     def cfg, do: es_aggregate_repo()
   end
 
+  describe "конфигурация" do
+    test "snapshot: — вложенная структура every/version/sealed" do
+      assert %Core.Es.Aggregate.Repo.Pg.Snapshot.Settings{every: 2, version: 1, sealed: sealed} =
+               LoadRepo.cfg().snapshot
+
+      assert is_boolean(sealed)
+    end
+  end
+
   describe "запись снапшота" do
     test "свёрнуто меньше every — снапшота нет" do
       id = Account.ID.new()

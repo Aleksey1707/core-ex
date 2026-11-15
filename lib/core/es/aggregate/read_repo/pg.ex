@@ -25,7 +25,8 @@ defmodule Core.Es.Aggregate.ReadRepo.Pg do
   `%Agg{}` уходит только аргументом `to_view:`; наружу — `%View{}`.
 
   Реализация write-репозитория резолвится `Core.Config.repo!/1` по конвенции
-  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию чтения служебной `__es_read_cfg__/0`
+  `<Behaviour>.Pg` на компиляции и отдаёт конфигурацию чтения структурой
+  `Core.Es.Aggregate.Repo.Pg.Config` служебной `__es_read_cfg__/0`
   (её ставит `use Core.Es.Aggregate.Repo.Pg`; наличие проверяется на компиляции).
   Telemetry — `[:es, :aggregate, :load]` и
   `[:es, :aggregate, :fold]` с `op: :get_at` / `:get_many_at`; span'а нет.
