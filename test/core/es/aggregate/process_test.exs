@@ -378,100 +378,6 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert Registry.lookup(Account.Process.Registry, id) == []
     end
 
-    test "команда, простоявшая в очереди до дедлайна, отбрасывается до транзакции" do
-      start_tree!(Account.Process)
-      id = Account.ID.new()
-      test_pid = self()
-      :ok = attach_load()
-
-      blocker =
-        Task.async(fn ->
-          Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
-            send(test_pid, {:blocked, self()})
-
-            receive do
-              :release -> :ok
-            end
-          end)
-        end)
-
-      assert_receive {:blocked, server}
-
-      assert {:timeout, _call} =
-               catch_exit(
-                 Account.Process.execute(
-                   id,
-                   :current,
-                   rename("Отгрузка"),
-                   Context.new(),
-                   record(self()),
-                   timeout: 50
-                 )
-               )
-
-      assert_received {:execute, %{mode: :process, result: :exit}, %{queue: 0, retries: 0}}
-
-      log =
-        capture_log(fn ->
-          send(server, :release)
-          assert {:ok, _version} = Task.await(blocker)
-          assert {:ok, _version} = Account.Process.execute(id, :current, freeze(), Context.new())
-        end)
-
-      assert log =~
-               "процесс агрегата: просроченная команда отброшена: type=account " <>
-                 "aggregate_id=#{dump(id)}"
-
-      assert_received {:load, %{op: :get_decision}}
-      assert_received {:load, %{op: :refresh}}
-      refute_received {:load, _metadata}
-      refute_received {:callback, _events}
-      assert names() == []
-      assert stream_tags(id) == ["account.opened", "account.frozen"]
-    end
-
-    test "дедлайн истёк посреди команды — exit вызывающему, транзакция откатывается до commit" do
-      start_tree!(Account.Process)
-      id = Account.ID.new()
-      test_pid = self()
-
-      caller =
-        Task.async(fn ->
-          catch_exit(
-            Account.Process.execute(
-              id,
-              :current,
-              open("Счёт"),
-              Context.new(),
-              fn events ->
-                :ok = record(test_pid).(events)
-                send(test_pid, {:blocked, self()})
-
-                receive do
-                  :release -> :ok
-                end
-              end,
-              timeout: 50
-            )
-          )
-        end)
-
-      assert_receive {:blocked, server}
-      assert {:timeout, _call} = Task.await(caller)
-
-      log =
-        capture_log(fn ->
-          send(server, :release)
-          assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
-        end)
-
-      assert log =~ "процесс агрегата: просроченная команда отброшена: type=account"
-      assert_received {:callback, [%Account.Event.Opened{}]}
-      assert names() == []
-      assert stream_tags(id) == ["account.opened"]
-      assert_received {:execute, %{mode: :process, result: :exit}, _measurements}
-    end
-
     test "raise в decide роняет процесс: exit вызывающему, stop :error; следующая команда — новый" do
       start_tree!(Account.Process)
       id = Account.ID.new()
@@ -573,6 +479,9 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:stop, %{type: "account", reason: :error}}
       assert names() == []
       assert stream_tags(id) == []
+
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      assert stream_tags(id) == ["account.opened"]
     end
 
     test "колбэк вернул {:error, :expired} — ошибка колбэка вызывающему, а не истёкший дедлайн" do
@@ -622,6 +531,132 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert {:ok, _version} = Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), env)
       assert_received {:env, ^server, metadata, [_table]}
       refute Keyword.has_key?(metadata, :request_id)
+    end
+  end
+
+  describe "дедлайн" do
+    for mode <- [:process, :inline] do
+      test "#{mode}: дедлайн истёк до commit — ошибка phase: :commit, записи нет, следующая команда работает" do
+        start_mode!(unquote(mode), Account.Process)
+        id = Account.ID.new()
+        test_pid = self()
+
+        caller =
+          Task.async(fn ->
+            Account.Process.execute(
+              id,
+              :current,
+              open("Счёт"),
+              Context.new(),
+              fn _events ->
+                send(test_pid, {:blocked, self()})
+
+                receive do
+                  :release -> :ok
+                end
+              end,
+              timeout: 50
+            )
+          end)
+
+        assert_receive {:blocked, blocked}
+        pass_time(60)
+        send(blocked, :release)
+
+        assert {:error, %Error{kind: :app, ns: :es, code: :deadline_exceeded} = error} =
+                 Task.await(caller)
+
+        assert error.detail == %{aggregate_id: dump(id), phase: :commit}
+        assert_received {:execute, %{mode: unquote(mode), result: :error}, %{retries: 0}}
+        refute_received {:execute, %{result: :exit}, _measurements}
+        assert stream_tags(id) == []
+        assert names() == []
+
+        assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+        assert stream_tags(id) == ["account.opened"]
+      end
+
+      test "#{mode}: дедлайн истёк на повторе — ошибка phase: :read, следующая попытка не читает" do
+        start_mode!(unquote(mode), Account.RacyProcess)
+        id = Account.ID.new()
+        test_pid = self()
+        {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
+        :ok = Account.RacyRepo.Pg.race(id, 1)
+        :ok = attach_load()
+        :ok = block_load()
+
+        caller =
+          Task.async(fn ->
+            Account.RacyProcess.execute(
+              id,
+              :current,
+              rename("Отгрузка"),
+              Context.new(),
+              record(test_pid),
+              timeout: 50
+            )
+          end)
+
+        assert_receive {:blocked, blocked}
+        pass_time(60)
+        send(blocked, :release)
+
+        assert {:error, %Error{code: :deadline_exceeded} = error} = Task.await(caller)
+        assert error.detail == %{aggregate_id: dump(id), phase: :read}
+        assert_received {:execute, %{mode: unquote(mode), result: :error}, %{retries: 1}}
+
+        # Повтор после дедлайна не читает: чтение было одно — заблокированное.
+        assert_received {:load, _metadata}
+        refute_received {:load, _metadata}
+        refute_received {:callback, _events}
+        assert names() == []
+        assert stream_tags(id) == ["account.opened"]
+
+        assert {:ok, _version} = Account.RacyProcess.execute(id, :current, freeze(), Context.new())
+        assert stream_tags(id) == ["account.opened", "account.frozen"]
+      end
+    end
+
+    test "process: просрочка в очереди — ответ phase: :queue с измеренным ожиданием, без чтения и записи" do
+      start_tree!(Account.Process)
+      id = Account.ID.new()
+      test_pid = self()
+      :ok = attach_load()
+
+      blocker =
+        Task.async(fn ->
+          Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
+            send(test_pid, {:blocked, self()})
+
+            receive do
+              :release -> :ok
+            end
+          end)
+        end)
+
+      assert_receive {:blocked, server}
+
+      caller =
+        Task.async(fn ->
+          Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), record(test_pid), timeout: 50)
+        end)
+
+      await_queued(server)
+      pass_time(60)
+      send(server, :release)
+
+      assert {:error, %Error{code: :deadline_exceeded} = error} = Task.await(caller)
+      assert error.detail == %{aggregate_id: dump(id), phase: :queue}
+
+      assert_received {:execute, %{mode: :process, result: :error}, %{queue: queue, retries: 0}}
+      assert queue > 0
+
+      assert {:ok, _version} = Task.await(blocker)
+      refute_received {:callback, _events}
+      assert names() == []
+      assert stream_tags(id) == ["account.opened"]
+      assert_received {:load, %{op: :get_decision}}
+      refute_received {:load, _metadata}
     end
   end
 
@@ -699,6 +734,78 @@ defmodule Core.Es.Aggregate.ProcessTest do
       end
 
       assert stream_tags(id) == []
+    end
+
+    test "inline: raise в decide — raise вызывающему, событий нет, следующая команда работает" do
+      start!(Account.Process)
+      id = Account.ID.new()
+      %{at: at, by: by} = open("Счёт")
+
+      assert_raise FunctionClauseError, fn ->
+        Account.Process.execute(id, :current, %Unknown{at: at, by: by}, Context.new())
+      end
+
+      assert stream_tags(id) == []
+
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      assert stream_tags(id) == ["account.opened"]
+    end
+
+    test "inline: raise в колбэке — raise вызывающему, откат, следующая команда работает" do
+      start!(Account.Process)
+      id = Account.ID.new()
+
+      assert_raise RuntimeError, "колбэк", fn ->
+        Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
+          raise "колбэк"
+        end)
+      end
+
+      assert stream_tags(id) == []
+
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      assert stream_tags(id) == ["account.opened"]
+    end
+
+    test "inline: ошибка колбэка {:error, reason} — как есть, без обёртки" do
+      start!(Account.Process)
+      id = Account.ID.new()
+      reason = {:error, {Es.Aggregate.Process.Execution, :expired}}
+
+      assert {:error, ^reason} =
+               Account.Process.execute(id, :current, open("Счёт"), Context.new(), fn _events ->
+                 {:error, reason}
+               end)
+
+      assert stream_tags(id) == []
+      assert_received {:execute, %{mode: :inline, result: :error}, %{retries: 0}}
+    end
+
+    test "кеш процесса переживает доменный отказ и отказ колбэка: следующая команда — refresh" do
+      start_tree!(Account.Process)
+      id = Account.ID.new()
+      failed = Error.app(code: :callback_failed, ns: :fake)
+      :ok = attach_load()
+
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      assert_received {:load, %{op: :get_decision}}
+
+      assert {:error, %Error{code: :already_exists}} =
+               Account.Process.execute(id, :current, open("Счёт"), Context.new())
+
+      assert_received {:load, %{op: :refresh}}
+
+      assert {:error, ^failed} =
+               Account.Process.execute(id, :current, rename("Отгрузка"), Context.new(), fn _events ->
+                 {:error, failed}
+               end)
+
+      assert_received {:load, %{op: :refresh}}
+
+      assert {:ok, _version} = Account.Process.execute(id, :current, rename("Отгрузка"), Context.new())
+      assert_received {:load, %{op: :refresh}}
+      refute_received {:load, _metadata}
+      assert stream_tags(id) == ["account.opened", "account.renamed"]
     end
 
     test "отказ decide — {:error, _} без записи и без колбэка" do
@@ -921,46 +1028,6 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_received {:execute, %{result: :ok}, %{retries: 0}}
       assert_received {:execute, %{result: :version_mismatch}, %{retries: 0}}
     end
-
-    test "дедлайн истёк на попытке — следующая не стартует: без чтения, записи и колбэка" do
-      start_tree!(Account.RacyProcess)
-      id = Account.ID.new()
-      {:ok, _version} = Account.RacyProcess.execute(id, :current, open("Счёт"), Context.new())
-      :ok = Account.RacyRepo.Pg.race(id, 1)
-      :ok = attach_load()
-      :ok = block_load()
-
-      log =
-        capture_log(fn ->
-          assert {:timeout, _call} =
-                   catch_exit(
-                     Account.RacyProcess.execute(
-                       id,
-                       :current,
-                       rename("Отгрузка"),
-                       Context.new(),
-                       record(self()),
-                       timeout: 50
-                     )
-                   )
-
-          # Чтение попытки держится до exit вызывающего: дальше она идёт с истёкшим дедлайном.
-          assert_received {:blocked, server}
-          send(server, :release)
-
-          assert {:ok, _version} = Account.RacyProcess.execute(id, :current, freeze(), Context.new())
-        end)
-
-      assert log =~ "процесс агрегата: просроченная команда отброшена: type=account"
-
-      # Чтения — по одному на попытку: отказавшая попытка команды и команда после неё.
-      for _read <- 1..2, do: assert_received({:load, %{op: :refresh, result: :ok}})
-      refute_received {:load, _metadata}
-      refute_received {:callback, _events}
-      assert names() == []
-      assert stream_tags(id) == ["account.opened", "account.frozen"]
-      assert_received {:execute, %{mode: :process, result: :exit}, _measurements}
-    end
   end
 
   describe "ошибки программиста" do
@@ -978,6 +1045,20 @@ defmodule Core.Es.Aggregate.ProcessTest do
       assert_raise RuntimeError, ~r/ProcessTest\.Unstarted не запущен/, fn ->
         Unstarted.execute(Account.ID.new(), :current, open("Счёт"), Context.new())
       end
+    end
+
+    test "дерево остановлено — RuntimeError «дерево остановлено»; enabled: false работает" do
+      start_tree!(Account.Process)
+      id = Account.ID.new()
+      assert {:ok, _version} = Account.Process.execute(id, :current, open("Счёт"), Context.new())
+      :ok = stop_supervised(Account.Process)
+
+      assert_raise RuntimeError, ~r/дерево остановлено/, fn ->
+        Account.Process.execute(Account.ID.new(), :current, open("Счёт"), Context.new())
+      end
+
+      start!(Account.Process)
+      assert {:ok, _version} = Account.Process.execute(Account.ID.new(), :current, open("Счёт"), Context.new())
     end
 
     test "timeout: не положительное целое — ArgumentError" do
@@ -1152,6 +1233,12 @@ defmodule Core.Es.Aggregate.ProcessTest do
     :ok
   end
 
+  # Один сценарий на оба режима: дерево процессов на id или исполнение в вызывающем.
+  defp start_mode!(mode, process, opts \\ [])
+
+  defp start_mode!(:process, process, opts), do: start_tree!(process, opts)
+  defp start_mode!(:inline, process, opts), do: start!(process, opts)
+
   defp start_tree!(process, opts \\ []) do
     {:ok, _tree} = start_supervised({process, [enabled: true] ++ opts})
     :ok
@@ -1278,6 +1365,37 @@ defmodule Core.Es.Aggregate.ProcessTest do
   end
 
   defp erase_mark(process), do: :persistent_term.erase({Es.Aggregate.Process, process})
+
+  # Запрос команды лежит в mailbox процесса: он уже в очереди, и `queue` будет больше нуля.
+  defp await_queued(server) do
+    if queued?(server) do
+      :ok
+    else
+      :erlang.yield()
+      await_queued(server)
+    end
+  end
+
+  defp queued?(server) do
+    case Process.info(server, :messages) do
+      {:messages, messages} -> Enum.any?(messages, &match?({:"$gen_call", _from, {:execute, _request}}, &1))
+      nil -> false
+    end
+  end
+
+  # Дедлайн — монотонное время: тест продвигает его, не отдавая планировщику (`Process.sleep`
+  # сделал бы ожидание частью проверки поведения).
+  defp pass_time(ms) do
+    deadline = System.monotonic_time(:millisecond) + ms
+    spin(deadline)
+  end
+
+  defp spin(deadline) do
+    if System.monotonic_time(:millisecond) < deadline do
+      :erlang.yield()
+      spin(deadline)
+    end
+  end
 
   # Уровень логов тестов — `:warning`: `info` и `debug` процесса видны только с уровнем его модулей.
   defp capture_at(level, fun) do

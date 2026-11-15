@@ -111,7 +111,13 @@ Span на периодический опрос (тик поллера, цикл
 `get_many_at`) span'а нет; чтение по версии идёт теми же событиями `[:es, :aggregate, :load]` и
 `[:es, :aggregate, :fold]` с меткой `op: :get_at` / `:get_many_at`.
 
-Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span».
+Метаданные `result` события `[:es, :aggregate, :process, :execute]` — `:ok`,
+`:version_mismatch`, `:error`; истёкший дедлайн — `:error` с ответом
+`%Error{code: :deadline_exceeded}`, а `:exit` остаётся только за смертью процесса. Измерения
+`queue` и `retries` у такого вызова настоящие: просрочка в очереди отвечает с измеренным
+ожиданием, а не дропом.
+
+Проверяется: `test/core/es/aggregate/process_test.exs`, describe «span» и «дедлайн».
 
 Внешний вызов (платёжный шлюз, касса, служба доставки, SMS) MUST идти в span'е
 `<system> <operation>` вида `:client` на call site — в процессе вызывающего, дочерним span'у

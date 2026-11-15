@@ -32,6 +32,10 @@ defmodule Core.Es.Aggregate.Process.Server do
   # транзакцию, и дольше команда процесс не держит.
   @shutdown_ms 10_000
 
+  # Запас вызова поверх дедлайна: ответ с ошибкой `phase: :queue` или `phase: :commit` должен
+  # успевать к вызывающему, поэтому `GenServer.call` ждёт дедлайн плюс этот запас.
+  @call_grace_ms 1_000
+
   @enforce_keys ~w(cfg id aggregate_id idle_timeout state_max_age)a
   defstruct @enforce_keys ++ [:state, :read_at]
 
@@ -54,7 +58,7 @@ defmodule Core.Es.Aggregate.Process.Server do
         }
 
   @typedoc "Ответ процесса: результат команды, число повторов и ожидание в очереди (native)."
-  @type reply :: {Execution.result(), non_neg_integer(), non_neg_integer()}
+  @type reply :: {Core.Result.t(Core.Version.t() | nil), non_neg_integer(), non_neg_integer()}
 
   @type t :: %__MODULE__{
           cfg: Core.Es.Aggregate.Process.cfg(),
@@ -72,7 +76,8 @@ defmodule Core.Es.Aggregate.Process.Server do
   Исполнить команду `call` в процессе агрегата: результат, число повторов и ожидание в очереди.
 
   Процесса нет (`:noproc`) или он ушёл по простою, не приняв команду, — старт под
-  `DynamicSupervisor` дерева и один повтор вызова. Истечение дедлайна и падение процесса — exit.
+  `DynamicSupervisor` дерева и один повтор вызова. Истёкший дедлайн приходит ответом
+  `{:error, %Core.Error{code: :deadline_exceeded}}`, падение процесса — exit.
   """
   @spec execute(
           Core.Es.Aggregate.Process.cfg(),
@@ -89,7 +94,7 @@ defmodule Core.Es.Aggregate.Process.Server do
         GenServer.call(
           ensure_started(cfg, options, call.id, target),
           message,
-          remaining(deadline)
+          call_timeout(deadline)
         )
 
       reply ->
@@ -112,7 +117,7 @@ defmodule Core.Es.Aggregate.Process.Server do
   # Процесс, которого нет или который ушёл по простою до ответа, команду не исполнял: её можно
   # отправить заново.
   defp call_registered(registry, id, message, deadline) do
-    GenServer.call({:via, Registry, {registry, id}}, message, remaining(deadline))
+    GenServer.call({:via, Registry, {registry, id}}, message, call_timeout(deadline))
   catch
     :exit, {reason, {GenServer, :call, _args}} when reason in ~w(noproc normal)a -> :gone
   end
@@ -131,6 +136,8 @@ defmodule Core.Es.Aggregate.Process.Server do
       {:error, {:already_started, pid}} -> pid
     end
   end
+
+  defp call_timeout(deadline), do: remaining(deadline) + @call_grace_ms
 
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 
@@ -183,7 +190,7 @@ defmodule Core.Es.Aggregate.Process.Server do
     queue = System.monotonic_time() - request.enqueued_at
 
     if expired?(request.target.deadline),
-      do: dropped(server),
+      do: expired(server, request, queue),
       else: run_command(server, request, queue)
   end
 
@@ -191,15 +198,16 @@ defmodule Core.Es.Aggregate.Process.Server do
 
   defp expired?(deadline), do: System.monotonic_time(:millisecond) >= deadline
 
-  # Вызывающий по истечении дедлайна уже получил exit и ответа не ждёт; брошенная им команда —
-  # признак того, что очередь процесса не успевает.
-  defp dropped(server) do
+  # Дедлайн истёк, пока команда ждала в очереди: она не исполняется, а вызывающий получает
+  # ошибку с фазой `:queue` — команда, которую он уже не ждёт, не должна ни читать, ни писать.
+  defp expired(server, request, queue) do
     Logger.warning(
-      "процесс агрегата: просроченная команда отброшена: type=#{server.cfg.type} " <>
+      "процесс агрегата: команда просрочена в очереди: type=#{server.cfg.type} " <>
         "aggregate_id=#{server.aggregate_id}"
     )
 
-    {:noreply, server, timeout(server)}
+    reply = {{:error, Execution.deadline_error(request.target, :queue)}, 0, queue}
+    {:reply, reply, server, timeout(server)}
   end
 
   defp run_command(server, request, queue) do
@@ -208,14 +216,11 @@ defmodule Core.Es.Aggregate.Process.Server do
     read_at = next_read_at(server, now)
 
     case in_caller_env(server, request) do
-      {{:ok, state} = executed, retries} ->
+      {{:ok, _version} = result, state, retries} when is_struct(state) ->
         server = %{server | state: state, read_at: read_at}
-        {:reply, {Execution.result(executed), retries, queue}, server, timeout(server)}
+        {:reply, {result, retries, queue}, server, timeout(server)}
 
-      {:expired, _retries} ->
-        dropped(server)
-
-      {{:error, _reason} = error, retries} ->
+      {{:error, _reason} = error, nil, retries} ->
         {:reply, {error, retries, queue}, server, timeout(server)}
     end
   end

@@ -57,6 +57,21 @@
   сгенерированной реализацией достаточно `defdelegate __es_read_cfg__(), to: …`. Правка
   потребителя не требуется; тест, рассчитывавший на прежнее расщепление, меняет ожидание.
 
+- **Дедлайн команды — `%Error{}` в обоих режимах, `timeout:` действует и при `enabled: false`.**
+  Было: при `enabled: true` истёкший дедлайн и исключение в решении давали exit вызывающему, при
+  `enabled: false` дедлайн не действовал вовсе, а просрочка в очереди процесса на id молча
+  дропалась. Стало: `execute` возвращает только `{:ok, Version.t() | nil} | {:error, %Error{}}`,
+  истёкший дедлайн — `%Error{kind: :app, ns: :es, code: :deadline_exceeded}` с detail
+  `%{aggregate_id: <дамп>, phase: :queue | :read | :commit}`; после дедлайна нет ни чтения, ни
+  записи, ни commit, а `GenServer.call` ждёт дедлайн плюс запас 1 000 мс. Ошибка колбэка
+  `{:error, reason}` возвращается как есть; исключение в `decide`, `evolve` или колбэке — не исход
+  команды (при `enabled: false` raise, при `enabled: true` exit). После остановки дерева
+  `enabled: true` даёт `RuntimeError` «дерево остановлено», `enabled: false` работает. Telemetry
+  `result` — `:ok`, `:version_mismatch`, `:error`; `:exit` остаётся только за смертью процесса.
+  Правка потребителя: было `catch_exit(Process.execute(...))`, стало `{:error, %Error{}}` в той же
+  ветке, что и остальные отказы; `timeout:` теперь действует и при `enabled: false`; кто полагался
+  на exit при остановленном дереве — ловит `RuntimeError` или не останавливает дерево под вызовом.
+
 ### Новое
 
 - **`to_wire_page/2` — страница событий → wire одним вызовом.** Генерируется `use Core.Web.Event`

@@ -49,6 +49,16 @@ defmodule Core.Es.Aggregate.Process do
     приходит и из `append`, и из колбэка (запись в соседний поток), и повторяется одинаково —
     колбэк обязан быть идемпотентным.
   - Колбэк вернул не `:ok | {:error, _}` — `CaseClauseError` до commit, транзакция откатывается.
+  - Ошибка колбэка `{:error, reason}` возвращается вызывающему как есть, без обёртки: контракт
+    `fun.(events) -> :ok | {:error, _}` не меняется.
+  - Дедлайн `timeout:` — ожидаемый исход, а не exit: `timeout:` действует в обоих режимах, и
+    истёкший дедлайн приходит `{:error, %Error{code: :deadline_exceeded}}` с detail
+    `%{aggregate_id: <дамп>, phase: :queue | :read | :commit}`. После дедлайна нет ни чтения, ни
+    записи, ни commit; фазы — какая граница его заметила: ожидание в очереди процесса на id,
+    проверка до чтения (повтор после дедлайна не стартует) и проверка перед commit.
+  - Исключения в `decide`, `evolve` или колбэке — не исход команды и в контракт не входят:
+    при `enabled: false` исключение поднимается в вызывающем, при `enabled: true` роняет процесс
+    и вызывающий получает exit. Транзакция откатывается, usecase их не ловит.
   - Сверка ожидаемой версии — `:version_mismatch` с `source: :expected` — повтора не даёт
     никогда: `%Version{}` мимо головы непустого потока из `get_decision` или `refresh`, клиент
     видел устаревшее состояние, и повтор его не исправит.
@@ -58,6 +68,8 @@ defmodule Core.Es.Aggregate.Process do
   - Вызов внутри транзакции `dao` репозитория — `ArgumentError`: команда идёт своей транзакцией,
     и откат попытки отменил бы внешнюю.
   - Нет отметки старта — `RuntimeError`: `{Agg.Process, opts}` не стоит в дереве супервизии.
+    Дерево остановлено, а отметка осталась (`enabled: true`) — `RuntimeError` «дерево остановлено»,
+    а не exit из старта дочернего процесса; при `enabled: false` команда работает и без дерева.
   - Неизвестная опция `opts` или недопустимое значение — `ArgumentError`.
 
   ## Процесс на id
@@ -74,12 +86,13 @@ defmodule Core.Es.Aggregate.Process do
   - Окружение вызывающего — только на время команды: OTel-контекст, `Logger.metadata()` и
     `context`, в котором `:shadow_copy` заменён собственной таблицей `Core.Repo.Sc` процесса:
     приватная ETS вызывающего процессу недоступна. `context` между командами не хранится.
-  - `timeout:` — дедлайн: команда, простоявшая в очереди до дедлайна, отбрасывается до
-    транзакции; дедлайн, истёкший до commit, откатывает транзакцию; попытка после дедлайна не
-    идёт — повтор после отказа записи обрывается, не читая и не записывая. Вызывающему по
-    истечении — exit `GenServer.call`, как и при падении процесса.
+  - `timeout:` — дедлайн команды в обоих режимах: команда, простоявшая в очереди до дедлайна,
+    отвечает ошибкой `phase: :queue` и не исполняется; дедлайн, истёкший до commit, откатывает
+    транзакцию с `phase: :commit`; повтор после отказа записи не стартует — `phase: :read`.
+    `GenServer.call` ждёт дедлайн плюс запас 1 000 мс, чтобы ответ с ошибкой успевал к
+    вызывающему; `:infinity` не используется.
   - Исключение в `decide`, `evolve` или колбэке роняет процесс: транзакция откатывается,
-    вызывающему — exit. Процессы `restart: :temporary` — следующая команда стартует новый.
+    вызывающему — exit, следующая команда стартует новый процесс (`restart: :temporary`).
   - Простой `idle_timeout:` — уход `{:stop, :normal}`; снапшот при уходе не пишется.
   - Состояние старше `state_max_age:` выбрасывается перед командой при любом её исходе, и команда
     идёт полным `get_decision`, `debug` «состояние устарело». Возраст считается от последнего
@@ -115,12 +128,13 @@ defmodule Core.Es.Aggregate.Process do
   - Telemetry `[:es, :aggregate, :process, :execute]` у вызывающего на вызов: измерения `duration`
     (native), `queue` (native, ожидание в очереди; в вызывающем процессе — 0), `retries`;
     метаданные `type` (тип агрегата), `mode` (`:process`, `:inline`), `result` (`:ok`,
-    `:version_mismatch`, `:error`, `:exit` — exit вызывающему, `queue` и `retries` — 0). Код
-    доменной ошибки в метаданные не идёт; исключения у вызывающего telemetry не шлют.
+    `:version_mismatch`, `:error`; `:exit` — только смерть процесса и exit вызывающему, `queue`
+    и `retries` — 0). Истёкший дедлайн — `:error`; код доменной ошибки в метаданные не идёт;
+    исключение в вызывающем (`enabled: false`) telemetry не шлёт.
   - `[:es, :aggregate, :process, :start]` — старт процесса на id, `[:es, :aggregate, :process,
     :stop]` — его уход: измерений нет, метаданные `type`, у `:stop` — `reason` (`:idle` — уход без
     команд по простою или устареванию состояния, `:error` — исключение). `debug` на старт и уход
-    без команд, `warning` на отброшенную просроченную команду.
+    без команд, `warning` на просроченную в очереди команду.
 
   ## Opts
 
@@ -310,7 +324,7 @@ defmodule Core.Es.Aggregate.Process do
     timeout: [
       type: :pos_integer,
       default: 5_000,
-      doc: "Дедлайн команды процесса на id, мс; в вызывающем процессе (`enabled: false`) не действует."
+      doc: "Дедлайн команды, мс; действует в обоих режимах."
     ]
   ]
   @doc false
@@ -323,12 +337,13 @@ defmodule Core.Es.Aggregate.Process do
     ensure_outside_transaction!(dao.in_transaction?(), process)
     options = started!(mark(process), process)
     mode = mode(options)
+    :ok = ensure_tree!(mode, process)
 
     target = %{
       aggregate_id: codec.dump(call.id),
       limit: options.retries,
       dao: dao,
-      deadline: deadline(mode, timeout)
+      deadline: deadline(timeout)
     }
 
     Otel.Es.execute(cfg.type, target.aggregate_id, call.command.__struct__, fn ->
@@ -356,8 +371,21 @@ defmodule Core.Es.Aggregate.Process do
   defp mode(%{enabled: true}), do: :process
   defp mode(%{enabled: false}), do: :inline
 
-  defp deadline(:process, timeout), do: System.monotonic_time(:millisecond) + timeout
-  defp deadline(:inline, _timeout), do: nil
+  # Дерево остановлено, а отметка старта осталась (:persistent_term): команду исполнять негде, и
+  # это ошибка программиста, а не exit из старта дочернего процесса.
+  defp ensure_tree!(:inline, _process), do: :ok
+
+  defp ensure_tree!(:process, process) do
+    if Process.whereis(process) do
+      :ok
+    else
+      raise RuntimeError,
+            "#{@label}: #{inspect(process)} — дерево остановлено: процесса-супервизора нет, " <>
+              "команду исполнять негде; верните {#{inspect(process)}, opts} в дерево супервизии"
+    end
+  end
+
+  defp deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
 
   # Exit вызывающему — тоже исход вызова: telemetry уходит, а exit летит дальше как был.
   defp measured(cfg, mode, fun) do
@@ -378,8 +406,8 @@ defmodule Core.Es.Aggregate.Process do
   end
 
   defp dispatch(:inline, cfg, _options, call, target) do
-    {outcome, retries} = Execution.run(cfg, call, target, nil)
-    {Execution.result(outcome), retries, 0}
+    {result, _state, retries} = Execution.run(cfg, call, target, nil)
+    {result, retries, 0}
   end
 
   defp dispatch(:process, cfg, options, call, target),
