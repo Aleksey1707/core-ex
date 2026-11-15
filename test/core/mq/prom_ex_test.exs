@@ -19,11 +19,20 @@ defmodule Core.Mq.PromExTest do
 
     def start_link(opts), do: GenServer.start_link(__MODULE__, :ok, name: opts[:name])
     def init(:ok), do: {:ok, :ok}
-    def info(pid), do: GenServer.call(pid, :info)
-    def handle_call(:info, _from, _state), do: exit(:down)
+    def snapshot(pid), do: GenServer.call(pid, :snapshot)
+    def handle_call(:snapshot, _from, _state), do: exit(:down)
   end
 
-  defmodule MetricsReader do
+  defmodule SnapshotReader do
+    use GenServer
+
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts[:snapshot], name: opts[:name])
+    def init(snapshot), do: {:ok, snapshot}
+    def snapshot(pid), do: GenServer.call(pid, :snapshot)
+    def handle_call(:snapshot, _from, snapshot), do: {:reply, snapshot, snapshot}
+  end
+
+  defmodule LegacyReader do
     use GenServer
 
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts[:state], name: opts[:name])
@@ -112,13 +121,16 @@ defmodule Core.Mq.PromExTest do
   test "повтор component и topic: subscribed — минимум, buffer_len — сумма, error в лог" do
     on_exit(&reset_labels/0)
 
-    info = %{reader_info() | buffer_len: 2, chunk_remaining: 1}
+    snapshot = %{reader_snapshot() | buffer_len: 2, chunk_remaining: 1}
 
-    start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
+    start_supervised!(%{
+      id: :first,
+      start: {SnapshotReader, :start_link, [[name: :mq_promex_first, snapshot: snapshot]]}
+    })
 
     start_supervised!(%{
       id: :second,
-      start: {StubReader, :start_link, [[name: :mq_promex_second, info: %{info | subscribed?: false}]]}
+      start: {SnapshotReader, :start_link, [[name: :mq_promex_second, snapshot: %{snapshot | subscribed?: false}]]}
     })
 
     handler_id = "mq-promex-dup-#{inspect(self())}"
@@ -143,9 +155,13 @@ defmodule Core.Mq.PromExTest do
   end
 
   test "отказ одного reader'а — отказ сбора группы readers, а не component; остальные собраны" do
-    info = %{reader_info() | buffer_len: 1}
+    snapshot = %{reader_snapshot() | buffer_len: 1}
 
-    start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
+    start_supervised!(%{
+      id: :first,
+      start: {SnapshotReader, :start_link, [[name: :mq_promex_first, snapshot: snapshot]]}
+    })
+
     start_supervised!(%{id: :second, start: {CrashingReader, :start_link, [[name: :mq_promex_second]]}})
     handler_id = "mq-promex-collect-#{inspect(self())}"
 
@@ -167,27 +183,68 @@ defmodule Core.Mq.PromExTest do
   end
 
   test "одна component с разными topic — не повтор" do
-    info = reader_info()
+    snapshot = reader_snapshot()
 
-    start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
+    start_supervised!(%{
+      id: :first,
+      start: {SnapshotReader, :start_link, [[name: :mq_promex_first, snapshot: snapshot]]}
+    })
 
     start_supervised!(%{
       id: :second,
-      start: {StubReader, :start_link, [[name: :mq_promex_second, info: %{info | topic: "payments"}]]}
+      start: {SnapshotReader, :start_link, [[name: :mq_promex_second, snapshot: %{snapshot | topic: "payments"}]]}
     })
 
     assert capture_log(fn -> PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end) == ""
   end
 
-  describe "источник метрик reader'а" do
+  describe "снимок состояния reader'а" do
     @buffer [:prom_ex, :plugin, :mq, :reader, :buffer_len]
     @pending [:prom_ex, :plugin, :mq, :reader, :pending]
     @age [:prom_ex, :plugin, :mq, :reader, :pending_age_seconds]
     @subscribed [:prom_ex, :plugin, :mq, :reader, :subscribed]
 
-    test "metrics/1 предпочтительнее info/1" do
+    test "общие gauge'и читаются из snapshot/1" do
       on_exit(&reset_labels/0)
 
+      snapshot = %{
+        reader_snapshot()
+        | buffer_len: 7,
+          chunk_remaining: 3,
+          pending?: true,
+          pending_age_seconds: 2,
+          subscribed?: false
+      }
+
+      start_supervised!(%{
+        id: :snapshot,
+        start: {SnapshotReader, :start_link, [[name: :mq_promex_snapshot, snapshot: snapshot]]}
+      })
+
+      attach([@buffer, @pending, @age, @subscribed])
+      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :snapshot_reader, []})
+
+      meta = %{component: "orders", topic: "orders"}
+      assert_receive {:telemetry, @buffer, %{value: 7}, ^meta}
+      assert_receive {:telemetry, @pending, %{value: 1}, ^meta}
+      assert_receive {:telemetry, @age, %{value: 2}, ^meta}
+      assert_receive {:telemetry, @subscribed, %{value: 0}, ^meta}
+    end
+
+    test "модуль reader'а выведен из живого процесса" do
+      start_supervised!(%{
+        id: :snapshot,
+        start:
+          {SnapshotReader, :start_link, [[name: :mq_promex_inferred, snapshot: %{reader_snapshot() | buffer_len: 4}]]}
+      })
+
+      attach([@buffer])
+      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :inferred_reader, []})
+
+      assert_receive {:telemetry, @buffer, %{value: 4}, %{component: "orders", topic: "orders"}}
+    end
+
+    test "reader без snapshot/1 не наблюдается, даже если отдаёт metrics/1 и info/1" do
       state = %{
         metrics: %{
           topic: "orders",
@@ -197,57 +254,22 @@ defmodule Core.Mq.PromExTest do
           pending_age_seconds: 2,
           subscribed: 0
         },
-        info: %{reader_info() | buffer_len: 99}
+        info: %{topic: "orders", buffer_len: 7, chunk_remaining: 3, pending?: true, subscribed?: false}
       }
 
       start_supervised!(%{
-        id: :metrics,
-        start: {MetricsReader, :start_link, [[name: :mq_promex_metrics, state: state]]}
+        id: :legacy,
+        start: {LegacyReader, :start_link, [[name: :mq_promex_legacy, state: state]]}
       })
 
       attach([@buffer, @pending, @age, @subscribed])
-      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :metrics_reader, []})
+      log = capture_log(fn -> assert :ok = PromEx.execute_reader_metrics({__MODULE__, :legacy_reader, []}) end)
 
-      meta = %{component: "orders", topic: "orders"}
-      assert_receive {:telemetry, @buffer, %{value: 7}, ^meta}
-      assert_receive {:telemetry, @pending, %{value: 1}, ^meta}
-      assert_receive {:telemetry, @age, %{value: 2}, ^meta}
-      assert_receive {:telemetry, @subscribed, %{value: 0}, ^meta}
+      assert log == ""
+      refute_received {:telemetry, _, _, _}
     end
 
-    test "metrics/1 с частичной картой: недостающие значения — 0" do
-      on_exit(&reset_labels/0)
-
-      state = %{metrics: %{topic: "orders", pending: 1}, info: %{reader_info() | buffer_len: 99}}
-
-      start_supervised!(%{
-        id: :partial,
-        start: {MetricsReader, :start_link, [[name: :mq_promex_partial, state: state]]}
-      })
-
-      attach([@buffer, @pending, @age, @subscribed])
-      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :partial_reader, []})
-
-      meta = %{component: "orders", topic: "orders"}
-      assert_receive {:telemetry, @buffer, %{value: 0}, ^meta}
-      assert_receive {:telemetry, @pending, %{value: 1}, ^meta}
-      assert_receive {:telemetry, @age, %{value: 0}, ^meta}
-      assert_receive {:telemetry, @subscribed, %{value: 0}, ^meta}
-    end
-
-    test "info/1 — запасной путь: модуль выведен из живого процесса" do
-      start_supervised!(%{
-        id: :info,
-        start: {StubReader, :start_link, [[name: :mq_promex_info, info: %{reader_info() | buffer_len: 4}]]}
-      })
-
-      attach([@buffer])
-      assert :ok = PromEx.execute_reader_metrics({__MODULE__, :info_reader, []})
-
-      assert_receive {:telemetry, @buffer, %{value: 4}, %{component: "orders", topic: "orders"}}
-    end
-
-    test "читатель без metrics/1 и info/1 пропускается, сбор не падает" do
+    test "читатель без snapshot/1 пропускается, сбор не падает" do
       start_supervised!(%{id: :bare, start: {BareReader, :start_link, [[name: :mq_promex_bare]]}})
 
       attach([@buffer])
@@ -279,15 +301,15 @@ defmodule Core.Mq.PromExTest do
       start_supervised!(%{
         id: :first,
         start:
-          {MetricsReader, :start_link,
-           [[name: :mq_promex_dlq_first, state: %{metrics: %{topic: "orders.dlq", pending: 0}}]]}
+          {SnapshotReader, :start_link,
+           [[name: :mq_promex_dlq_first, snapshot: %{reader_snapshot() | topic: "orders.dlq", pending?: false}]]}
       })
 
       start_supervised!(%{
         id: :second,
         start:
-          {MetricsReader, :start_link,
-           [[name: :mq_promex_dlq_second, state: %{metrics: %{topic: "orders.dlq", pending: 1}}]]}
+          {SnapshotReader, :start_link,
+           [[name: :mq_promex_dlq_second, snapshot: %{reader_snapshot() | topic: "orders.dlq", pending?: true}]]}
       })
 
       attach([@dlq_pending])
@@ -308,30 +330,32 @@ defmodule Core.Mq.PromExTest do
       assert %Telemetry.Metrics.LastValue{tags: [:component, :topic]} = age
     end
 
-    test "сейчас минус время сообщения в pending; при повторе — максимум" do
+    test "возраст берётся из снимка; при повторе — максимум" do
       on_exit(&reset_labels/0)
 
-      now = System.os_time(:millisecond)
-      info = %{reader_info() | pending?: true, pending_ts: now - 5_000}
+      snapshot = %{reader_snapshot() | pending?: true, pending_age_seconds: 5}
 
-      start_supervised!(%{id: :first, start: {StubReader, :start_link, [[name: :mq_promex_first, info: info]]}})
+      start_supervised!(%{
+        id: :first,
+        start: {SnapshotReader, :start_link, [[name: :mq_promex_first, snapshot: snapshot]]}
+      })
 
       start_supervised!(%{
         id: :second,
-        start: {StubReader, :start_link, [[name: :mq_promex_second, info: %{info | pending_ts: now - 1_000}]]}
+        start:
+          {SnapshotReader, :start_link, [[name: :mq_promex_second, snapshot: %{snapshot | pending_age_seconds: 1}]]}
       })
 
       attach([@pending_age])
       capture_log(fn -> assert :ok = PromEx.execute_reader_metrics({__MODULE__, :twins, []}) end)
 
-      assert_receive {:telemetry, @pending_age, %{value: seconds}, %{component: "orders", topic: "orders"}}
-      assert seconds >= 5 and seconds < 60
+      assert_receive {:telemetry, @pending_age, %{value: 5}, %{component: "orders", topic: "orders"}}
     end
 
     test "пустой pending — 0" do
       start_supervised!(%{
         id: :first,
-        start: {StubReader, :start_link, [[name: :mq_promex_first, info: reader_info()]]}
+        start: {SnapshotReader, :start_link, [[name: :mq_promex_first, snapshot: reader_snapshot()]]}
       })
 
       attach([@pending_age])
@@ -433,13 +457,13 @@ defmodule Core.Mq.PromExTest do
   def single, do: [%{component: "orders", name: :mq_promex_first}]
 
   @doc false
-  def metrics_reader, do: [%{component: "orders", name: :mq_promex_metrics, module: MetricsReader}]
+  def snapshot_reader, do: [%{component: "orders", name: :mq_promex_snapshot, module: SnapshotReader}]
 
   @doc false
-  def partial_reader, do: [%{component: "orders", name: :mq_promex_partial, module: MetricsReader}]
+  def legacy_reader, do: [%{component: "orders", name: :mq_promex_legacy, module: LegacyReader}]
 
   @doc false
-  def info_reader, do: [%{component: "orders", name: :mq_promex_info}]
+  def inferred_reader, do: [%{component: "orders", name: :mq_promex_inferred}]
 
   @doc false
   def bare_reader, do: [%{component: "orders", name: :mq_promex_bare}]
@@ -459,15 +483,15 @@ defmodule Core.Mq.PromExTest do
     for {{Core.PromEx.Labels, _source} = key, _value} <- :persistent_term.get(), do: :persistent_term.erase(key)
   end
 
-  defp reader_info do
+  defp reader_snapshot do
     %{
       buffer_len: 0,
       chunk_remaining: 0,
-      dropped_offset: nil,
       pending?: false,
-      pending_ts: nil,
+      pending_age_seconds: 0,
       subscribed?: true,
-      topic: "orders"
+      topic: "orders",
+      details: %{}
     }
   end
 

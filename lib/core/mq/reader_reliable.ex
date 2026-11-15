@@ -27,10 +27,11 @@ defmodule Core.Mq.ReaderReliable do
   подписки/аренды и `details` для подробностей адаптера. Возраст считает reader, поэтому
   плагин не разбирает timestamp чанка.
 
-  Необязательный `metrics/1` — значения gauge'ей reader'а: карта с `:topic` (строка) и числовыми
-  значениями по остальным ключам. Его предпочитает плагин `Core.Mq.PromEx`, `info/1` остаётся
-  запасным путём: новый читатель даёт метрики, не правя плагин. Reader без всех метрик плагин
-  пропускает, а не роняет сбор.
+  Необязательный `metrics/1` — устаревший источник gauge'ей reader'а: карта с `:topic` (строка) и
+  числовыми значениями по остальным ключам. Помечен deprecated и остаётся до ломающего выпуска;
+  `Core.Mq.PromEx` его не зовёт. `info/1` — диагностика адаптера, как источник метрик тоже
+  устарел. Общие gauge'и плагин читает только `snapshot/1`; Kafka-ветка аренды и лагов — `info/1`
+  своей формы. Reader без `snapshot/1` в метриках не наблюдается.
   """
 
   alias Core.Error
@@ -62,6 +63,7 @@ defmodule Core.Mq.ReaderReliable do
   @callback commit(t()) :: Result.unit()
   @callback default_poll_interval_ms() :: pos_integer()
   @callback notify_when_ready(t(), pid()) :: Result.t(reference())
+  @doc deprecated: "Общие gauge'и PromEx читает только из snapshot/1"
   @callback metrics(t()) :: metrics()
   @callback snapshot(t()) :: snapshot()
 

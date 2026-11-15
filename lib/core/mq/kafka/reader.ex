@@ -233,7 +233,13 @@ if Code.ensure_loaded?(:brod) do
     def notify_when_ready(server, pid) when is_pid(pid),
       do: GenServer.call(server, {:notify_when_ready, pid}, @call_timeout)
 
-    @doc "Аренда, сообщение в работе и состояние партиций (для метрик и разбора)."
+    @doc """
+    Аренда, сообщение в работе и состояние партиций.
+
+    Отсюда читает Kafka-ветку аренды и лагов `Core.Mq.PromEx`; общие gauge'и плагин берёт из
+    `snapshot/1`, поэтому `info/1` как их источник устарел.
+    """
+    @doc deprecated: "Как источник общих метрик используйте snapshot/1"
     @spec info(t()) :: %{
             lease?: boolean(),
             pending?: boolean(),

@@ -22,7 +22,7 @@ defmodule Core.Mq.Dlq.Reader do
   подписчик без `poll_interval_ms:` опрашивает этот читатель раз в 5 с
   (`default_poll_interval_ms/0`), а не раз в 100 мс, как читатели брокеров.
 
-  `metrics/1` отдаёт `topic` и `pending` (0|1): запись захвачена, но не закоммичена.
+  `snapshot/1` отдаёт `topic` и `pending?`: запись захвачена, но не закоммичена.
 
   Неизвестная опция, отсутствие обязательной и значение не той формы — `ArgumentError` в `start_link/1`.
   """
@@ -120,7 +120,12 @@ defmodule Core.Mq.Dlq.Reader do
   @impl true
   def default_poll_interval_ms, do: @default_poll_interval_ms
 
-  @doc false
+  @doc """
+  Устаревший источник gauge'ей: `Core.Mq.PromEx` читает `snapshot/1`.
+
+  Остаётся до ломающего выпуска.
+  """
+  @doc deprecated: "Используйте snapshot/1: общие gauge'и PromEx читает из снимка"
   @spec metrics(t()) :: Core.Mq.ReaderReliable.metrics()
 
   @impl true

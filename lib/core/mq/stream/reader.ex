@@ -25,7 +25,7 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     до `:retry_max_ms`. Пока подписки нет, `get` отдаёт `:empty`: подписчик читает после
     каждой заявки на готовность и каждого повтора, и ошибка на каждом чтении залила бы лог. Недоступность видна
     по `warning` самого reader'а (их частота ограничена backoff'ом) и по `subscribed?`
-    в `info/1` (уходит в метрику).
+    в `snapshot/1` (уходит в метрику).
 
     `initial_offset: :stored` (default) без сохранённого offset читает stream с начала
     (`:first`): новый подписчик на живом топике получит всю его историю. Нужен другой
@@ -170,11 +170,13 @@ if Code.ensure_loaded?(RabbitMQStream.OsirisChunk) do
     end
 
     @doc """
-    Состояние буфера и курсора reader (для метрик и разбора).
+    Состояние буфера и курсора reader: диагностика и разбор.
 
+    Общие gauge'и `Core.Mq.PromEx` читает из `snapshot/1`; `info/1` как источник метрик устарел.
     `pending_ts` — timestamp чанка сообщения в `pending`: мс Unix-времени по часам ноды брокера на
     момент записи чанка; `nil` без `pending`.
     """
+    @doc deprecated: "Как источник метрик используйте snapshot/1"
     @spec info(t()) :: %{
             buffer_len: non_neg_integer(),
             chunk_remaining: non_neg_integer(),
