@@ -1,3 +1,15 @@
+defmodule Core.Labels.RefsTest.Plain do
+  @moduledoc "Struct без объявления сведений — в словарь ссылок не идёт."
+
+  defstruct [:item]
+end
+
+defmodule Core.Labels.RefsTest.BareEvent do
+  @moduledoc "Событие с нагрузкой без объявления подписей."
+
+  defstruct [:payload, :by]
+end
+
 defmodule Core.Labels.RefsTest do
   use ExUnit.Case, async: true
 
@@ -9,6 +21,8 @@ defmodule Core.Labels.RefsTest do
   alias Core.Labels.Details
   alias Core.Labels.ID
   alias Core.Labels.Refs
+  alias Core.Labels.RefsTest.BareEvent
+  alias Core.Labels.RefsTest.Plain
   alias Core.LabelsFixture.Amount
   alias Core.LabelsFixture.AuthorID
   alias Core.LabelsFixture.BareID
@@ -80,6 +94,15 @@ defmodule Core.Labels.RefsTest do
     assert_received {:get_names, ItemQuery, [^item]}
     assert_received {:get_names, UserQuery, users}
     assert Enum.sort(users) == Enum.sort([by, signer])
+  end
+
+  test "struct без объявления полей в обход не идёт: словарь — только автор" do
+    item = ItemID.new()
+    by = UserID.new()
+    event = %BareEvent{payload: %Plain{item: item}, by: by}
+
+    assert Refs.get(event, context(%{by => "Автор", item => "Позиция"})) == {:ok, %{by => "Автор"}}
+    refute_received {:get_names, ItemQuery, _ids}
   end
 
   test "id только под `text:` резолвер не получает: поле, список, множество, значение изменения и список значений" do
