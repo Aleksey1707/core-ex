@@ -567,13 +567,21 @@ defmodule Core.ViewTest do
       end
     end
 
-    test "destroyable: — CompileError, и у элемента" do
-      assert_raise CompileError, ~r/^View: fields: id: destroyable: у View нет/, fn ->
+    test "destroyable:, personal: и subject: — CompileError, и у элемента" do
+      assert_raise CompileError, ~r/^View: fields: id: destroyable: удалён/, fn ->
         define(fields: [id: [prim: Core.ViewFixture.ID, destroyable: true]])
       end
 
-      assert_raise CompileError, ~r/^View: fields: tags: list: destroyable: у View нет/, fn ->
+      assert_raise CompileError, ~r/^View: fields: tags: list: destroyable: удалён/, fn ->
         define(fields: [tags: [list: [type: :string, destroyable: true]]])
+      end
+
+      assert_raise CompileError, ~r/^View: fields: id: personal: у View нет/, fn ->
+        define(fields: [id: [prim: Core.ViewFixture.ID, personal: true]])
+      end
+
+      assert_raise CompileError, ~r/^View: fields: tags: list: subject: у View нет/, fn ->
+        define(fields: [tags: [list: [type: :string, subject: :aggregate_id]]])
       end
     end
 

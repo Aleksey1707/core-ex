@@ -25,9 +25,9 @@ defmodule Core.Struct do
 
       %Rename{id: id, name: name, note: nil, at: at, by: by}
 
-  Поле хранит значение своего вида: Prim — сам Prim, а не извлечённое из него значение. Wire у
-  структуры нет — формат наружу задаёт Codec-плагин по полям; конструктора нет — struct собирается
-  литералом `%Rename{}`.
+  Поле хранит значение своего вида: Prim — сам Prim, а не извлечённое из него значение. Формат
+  наружу задаёт Codec-плагин по полям: `wire:` структуры — тот же wire-ключ, что пишет плагин
+  (расхождение — `CompileError`); конструктора нет — struct собирается литералом `%Rename{}`.
 
   | Вид | Значение | В `@type t` |
   |---|---|---|
@@ -56,30 +56,35 @@ defmodule Core.Struct do
   | — | значение | можно не указывать | `T` |
   | `true` | `nil` или значение | можно не указывать | `T \\| nil` |
 
-  `destroyable: true` допускает на месте значения уничтоженное ПДн-значение: к типу добавляется
-  `| Core.Es.Personal.Destroyed.t()` до `| nil` от `optional: true`. Его объявляет состояние
-  event-sourced агрегата там, куда `evolve/2` кладёт значение поля нагрузки с `subject:`: после
-  уничтожения ключа субъекта на этом месте `%Destroyed{}` (ADR-0092). Опция — у поля любого вида, у
-  спеки элемента `list:` и у спеки значения `map:`:
+  `personal: true` делает значение ПДн-местом — на нём шифруется всё значение: поле, элемент `list:`
+  или значение `map:` целиком, без спуска внутрь. ПДн-местом становится и каждое место с Prim
+  `personal: true`; `personal: false` такого не отменяет. `set:` и ключ `map:`, где лист ПДн,
+  поднимают границу: шифруется весь `set:`/`map:`. `subject:` — субъект ПДн (по умолчанию
+  `:aggregate_id`); адресацию разрешает и проверяет нагрузка события.
 
-      defmodule Account do
-        use Core.Struct,
-          fields: [
-            id: [prim: Account.ID],
-            holder: [prim: Account.Holder, optional: true, destroyable: true],
-            phones: [map: [key: [prim: Subject.ID], value: [prim: Phone, destroyable: true]], default: %{}]
-          ]
-      end
+  Структура порождает два типа:
 
-  | Спека | В `@type t` |
-  |---|---|
-  | `[prim: Mod, destroyable: true]` | `Mod.t() \\| Destroyed.t()` |
-  | `[prim: Mod, optional: true, destroyable: true]` | `Mod.t() \\| Destroyed.t() \\| nil` |
-  | `[list: [prim: Mod, destroyable: true]]` | `[Mod.t() \\| Destroyed.t()]` |
-  | `[map: [key: [<вид>], value: [prim: Mod, destroyable: true]]]` | `%{optional(K) => Mod.t() \\| Destroyed.t()}` |
+  | Тип | Что допускает | Где |
+  |---|---|---|
+  | `t()` | чтение: на каждом ПДн-месте ещё `Core.Es.Personal.Destroyed.t()` | свёртка, после уничтожения ключа (ADR-0092) |
+  | `write_t()` | запись: без `Destroyed.t()`; `entity:` ссылается на `write_t()` сущности | команды и другие входы записи |
 
-  `default:` уничтожаемого поля проверяется как у любого: `%Destroyed{}` значением по умолчанию не
-  бывает.
+  Место — путь от поля: поле с `personal: true`, элемент `list:` или значение `map:`.
+
+  | Спека | `t()` | `write_t()` |
+  |---|---|---|
+  | `[prim: Mod, personal: true]` | `Mod.t() \| Destroyed.t()` | `Mod.t()` |
+  | `[prim: Mod, optional: true, personal: true]` | `Mod.t() \| Destroyed.t() \| nil` | `Mod.t() \| nil` |
+  | `[list: [prim: Mod, personal: true]]` | `[Mod.t() \| Destroyed.t()]` | `[Mod.t()]` |
+  | `[map: [key: [<вид>], value: [prim: Mod, personal: true]]]` | `%{optional(K) => Mod.t() \| Destroyed.t()}` | `%{optional(K) => Mod.t()}` |
+
+  Без ПДн-мест `@type write_t :: t()`: тип не дублируется. `Inspect` структуры скрывает каждое
+  ПДн-место плейсхолдером `%Core.Es.Personal.Hidden{}`, а не всё поле: открытые поля и открытые
+  элементы того же списка видны. `%Destroyed{}` печатается обычным struct'ом.
+
+  `default:` — одно типизированное доменное значение поля, оно же значение `defstruct`. Значение,
+  в котором есть Prim `personal: true` или `sensitive:`, в исходник не попадает — `CompileError`;
+  у `optional: true` допустим `default: nil`.
 
   `events: Family` — опция `use` state-stored агрегата: модуль семейства событий
   (`use Core.Es.Event.Family`), литерал, проверяется при раскрытии. Порождает поле накопленных
@@ -120,7 +125,9 @@ defmodule Core.Struct do
 
   - `@enforce_keys` — поля без `default:`;
   - `defstruct` — значения по умолчанию, у поля без `default:` — `nil`;
-  - `@type t` по видам полей, с `events:` — и поле `events`;
+  - `@type t` — тип чтения по видам полей, `@type write_t` — тип записи, с `events:` — и поле
+    `events`;
+  - `Inspect` — только если у структуры есть ПДн-места: скрывает их, остальное печатает как обычно;
   - `__struct_fields__/0` — внутренняя для builder'ов ролей: нормализованные поля спеки, форма — не
     контракт; у собранного модуля её читает `Core.Codec.Field.struct_fields/1`;
   - `__core_fields__/0` — внутренняя: тот же состав полей единым IR (`Core.Field`), форма — не
@@ -139,18 +146,20 @@ defmodule Core.Struct do
 
   `CompileError` с префиксом `Struct: fields: <поле>: …`:
 
-  - `wire:` и `subject:` — без кодека они ничего не значат;
-  - `destroyable:` не `true`, у элемента `set:` и у ключа `map:` — равные уничтоженные значения не
-    идентифицируют запись;
+  - `destroyable:` — удалён: ПДн-место объявляет `personal: true`, а `Destroyed.t()` даёт тип чтения;
   - `default:` не того вида, `default: nil` без `optional: true`;
   - `default:`, в значении которого есть Prim `personal: true` или `sensitive:`, в том числе внутри
     struct и списка, — значение ушло бы в исходник и байткод (`default: nil` у такого поля допустим);
   - `prim:` не Prim, `enum:` не `Core.Enum`, `entity:` не struct, `union:` — struct или `Core.Enum`;
   - ключ `map:` без wire-строки или Prim `personal: true` / `sensitive:` ключом, `map:` без `key:` /
     `value:` или с лишним ключом;
+  - `personal:` не boolean;
   - несобранный модуль, неизвестное значение `type:`, неизвестный ключ, не ровно один вид;
   - повтор поля;
   - поле `events` рядом с `events:` — его порождает опция.
+
+  `wire:` структуры расходится с wire-ключом Codec-плагина — `CompileError` плагина: ключ объявляет
+  структура.
 
   `events:` не модуль семейства событий или не литерал — `CompileError` с префиксом
   `Struct: events: …`.
@@ -179,9 +188,12 @@ defmodule Core.Struct do
 
     [
       quote do
-        @core_struct_fields Core.Struct.fields!(unquote(Macro.escape(fields)))
-        @core_struct_fields Core.Struct.default!(@core_struct_fields, unquote(defaults))
+        {legacy, personal} = Core.Struct.fields!(unquote(Macro.escape(fields)))
+        @core_struct_fields Core.Struct.default!(legacy, unquote(defaults))
         @core_struct_events unquote(family)
+        @core_fields Core.Field.normalize!(@core_struct_fields, :struct, "Struct: fields")
+        @core_fields Core.Field.apply_personal!(@core_fields, personal)
+        @core_inspect_places Core.Field.inspect_places(@core_fields)
       end,
       events_ast(family),
       quote unquote: false do
@@ -191,28 +203,38 @@ defmodule Core.Struct do
                     %Core.Codec.Field{name: name, default: :none} -> {name, nil}
                   end) ++ Core.Struct.events_entries(@core_struct_events)
 
-        @type t :: %__MODULE__{
-                unquote_splicing(
-                  Core.Codec.Field.typespec(@core_struct_fields) ++ Core.Struct.events_typespec(@core_struct_events)
-                )
-              }
-
         @doc false
         @spec __struct_fields__() :: [Core.Codec.Field.t()]
 
         def __struct_fields__, do: @core_struct_fields
 
-        @core_fields Core.Field.normalize!(@core_struct_fields, :struct, "Struct: fields")
+        @before_compile Core.Struct
 
         @doc false
         @spec __core_fields__() :: [Core.Field.t()]
 
         def __core_fields__, do: @core_fields
-      end
+      end,
+      types_ast()
     ]
   end
 
   # ---
+
+  # Команда — вход записи: её `t` уже проекция записи, даже если поле — персональный Prim
+  # (`use Core.Es.Cmd` помечает модуль атрибутом `@core_command`). Пометку читает тело модуля, а не
+  # раскрытие макроса: тело раскрывается целиком до исполнения, и атрибут выше `use` ещё не стоит.
+  defp types_ast do
+    quote unquote: false do
+      if Module.get_attribute(__MODULE__, :core_command) == true do
+        @type t :: unquote(Core.Struct.write_type(@core_fields, @core_struct_events))
+        @type write_t :: t()
+      else
+        @type t :: unquote(Core.Struct.read_type(@core_fields, @core_struct_events))
+        @type write_t :: unquote(Core.Struct.write_type(@core_fields, @core_struct_events))
+      end
+    end
+  end
 
   defp events!(opts) do
     case Keyword.fetch(opts, :events) do
@@ -264,6 +286,68 @@ defmodule Core.Struct do
 
   defp default(spec), do: if(Keyword.keyword?(spec), do: Keyword.fetch(spec, :default), else: :error)
 
+  # ===== Inspect =====
+
+  @doc false
+  defmacro __before_compile__(env) do
+    case Module.get_attribute(env.module, :core_inspect_places) do
+      places when is_map(places) and map_size(places) > 0 ->
+        places = Macro.escape(places)
+
+        quote do
+          defimpl Inspect, for: unquote(env.module) do
+            def inspect(struct, opts), do: Core.Struct.inspect_struct(struct, unquote(places), opts)
+          end
+        end
+
+      _places ->
+        nil
+    end
+  end
+
+  # ---
+
+  @doc false
+  @spec inspect_struct(struct(), map(), Inspect.Opts.t()) :: term()
+
+  def inspect_struct(%module{} = struct, places, opts) when is_map(places) do
+    values =
+      Enum.reduce(places, Map.from_struct(struct), fn {name, paths}, acc ->
+        Map.update!(acc, name, &Core.Field.hide_personal(&1, paths))
+      end)
+
+    infos = for %{field: field} = info <- module.__info__(:struct) || [], field != :__exception__, do: info
+    Inspect.Map.inspect_as_struct(values, Macro.inspect_atom(:literal, module), infos, opts)
+  end
+
+  # ===== типы =====
+
+  @doc false
+  @spec read_type([Field.t()], module() | nil) :: Macro.t()
+
+  def read_type(fields, events) do
+    entries = Core.Field.read_typespec(fields) ++ events_typespec(events)
+
+    quote do
+      %__MODULE__{unquote_splicing(entries)}
+    end
+  end
+
+  @doc false
+  @spec write_type([Field.t()], module() | nil) :: Macro.t()
+
+  def write_type(fields, events) do
+    if Core.Field.personal_places?(fields) do
+      entries = Core.Field.write_typespec(fields) ++ events_typespec(events)
+
+      quote do
+        %__MODULE__{unquote_splicing(entries)}
+      end
+    else
+      quote(do: t())
+    end
+  end
+
   # ===== events: =====
 
   @doc false
@@ -307,13 +391,13 @@ defmodule Core.Struct do
   def declared_fields(module) when is_atom(module), do: Module.get_attribute(module, :core_struct_fields)
 
   @doc false
-  @spec fields!(term()) :: [Field.t()]
+  @spec fields!(term()) :: {[Field.t()], %{{atom(), [atom()]} => boolean()}}
 
   def fields!(spec) do
     where = "#{@label}: fields"
     check_unique!(spec, where)
 
-    Field.normalize!(spec, :struct, where)
+    Core.Field.split!(spec, :struct, where)
   end
 
   # ---

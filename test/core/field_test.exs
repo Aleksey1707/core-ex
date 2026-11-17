@@ -32,6 +32,12 @@ defmodule Core.FieldTest do
       ]
   end
 
+  defmodule UnionFixture do
+    @moduledoc false
+
+    def types, do: [Core.StructFixture.Point, Personal]
+  end
+
   defmodule Raw do
     @moduledoc false
 
@@ -236,6 +242,40 @@ defmodule Core.FieldTest do
       refute type(Field.write_typespec(fields), :holder) =~ "Destroyed"
       refute type(Field.write_typespec(fields), :tags) =~ "Destroyed"
     end
+
+    test "тип записи ссылается на write_t() сущности, тип чтения — на t()" do
+      fields = Field.declare!([point: [entity: Core.StructFixture.Point]], :struct, "S")
+
+      assert type(Field.read_typespec(fields), :point) == "Core.StructFixture.Point.t()"
+      assert type(Field.write_typespec(fields), :point) == "Core.StructFixture.Point.write_t()"
+    end
+
+    test "union: — тип записи из вариантов семейства, тип чтения — struct()" do
+      fields = Field.declare!([shape: [union: UnionFixture]], :struct, "S")
+
+      assert type(Field.read_typespec(fields), :shape) == "struct()"
+
+      assert type(Field.write_typespec(fields), :shape) ==
+               "Core.StructFixture.Point.write_t() | Core.PrimFixture.Personal.t()"
+    end
+
+    test "ПДн-лист set: и ключа map: поднимает Destroyed к контейнеру" do
+      fields =
+        Field.declare!(
+          [
+            roles: [set: [prim: Personal]],
+            by_key: [map: [key: [type: :string, personal: true], value: [prim: Name]]]
+          ],
+          :struct,
+          "S"
+        )
+
+      assert type(Field.read_typespec(fields), :roles) ==
+               "MapSet.t(Core.PrimFixture.Personal.t()) | Core.Es.Personal.Destroyed.t()"
+
+      assert type(Field.read_typespec(fields), :by_key) ==
+               "%{optional(String.t()) => Core.FieldTest.Name.t()} | Core.Es.Personal.Destroyed.t()"
+    end
   end
 
   describe "personal_places/2" do
@@ -312,6 +352,24 @@ defmodule Core.FieldTest do
     end
   end
 
+  describe "inspect_places/1" do
+    test "пути мест поля, элемента списка и контейнера-эскалации" do
+      fields =
+        Field.declare!(
+          [
+            holder: [prim: Personal, personal: true],
+            tags: [list: [prim: Personal]],
+            roles: [set: [prim: Personal]],
+            plain: [list: [prim: Name]]
+          ],
+          :struct,
+          "S"
+        )
+
+      assert Field.inspect_places(fields) == %{holder: [[]], tags: [[:each]], roles: [[]]}
+    end
+  end
+
   describe "обход вида" do
     test "children/1 и values/1 не заходят в ключ словаря" do
       map = {:map, {:type, :string}, {:prim, Personal}}
@@ -339,10 +397,10 @@ defmodule Core.FieldTest do
   end
 
   defp declared(%Field{} = field),
-    do: {field.name, field.spec, field.optional?, field.wire, field.default, field.subject}
+    do: {field.name, field.spec, field.optional?, field.wire, field.default, field.personal, field.subject}
 
   defp declared(%Legacy{} = field) do
-    {field.name, field.spec, field.optional?, field.wire, field.default, subject(field.subject)}
+    {field.name, field.spec, field.optional?, field.wire, field.default, field.personal, subject(field.subject)}
   end
 
   defp subject(nil), do: nil

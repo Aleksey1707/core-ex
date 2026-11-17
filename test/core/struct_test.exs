@@ -398,38 +398,77 @@ defmodule Core.StructTest do
       assert struct_type_fields(types) == %{count: "integer()", note: "Core.StructFixture.Name.t() | nil"}
     end
 
-    test "destroyable: true добавляет | Destroyed.t(), с optional: — ещё | nil" do
-      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Destroyable)
+    test "personal: true добавляет | Destroyed.t(), с optional: — ещё | nil" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Personal)
       fields = struct_type_fields(types)
 
       assert fields[:holder] == "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()"
       assert fields[:phone] == "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t() | nil"
       assert fields[:point] == "Core.StructFixture.Point.t() | Core.Es.Personal.Destroyed.t()"
+      assert fields[:open] == "Core.StructFixture.Name.t()"
     end
 
-    test "destroyable: у поля вложенной сущности — в типе сущности, не в типе поля" do
+    test "personal: у поля вложенной сущности — в типе сущности, не в типе поля" do
       {:ok, types} = Code.Typespec.fetch_types(StructFixture.Recipient)
 
-      assert struct_type_fields(types) == %{phone: "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()"}
+      assert struct_type_fields(types) == %{
+               phone: "Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()",
+               label: "Core.StructFixture.Name.t()"
+             }
 
-      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Destroyable)
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Personal)
 
       assert struct_type_fields(types)[:recipients] == "[Core.StructFixture.Recipient.t()]"
     end
 
-    test "destroyable: у элемента list: и значения map: — к типу элемента и значения" do
-      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Destroyable)
+    test "personal: у элемента list: и значения map: — к типу элемента и значения" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Personal)
       fields = struct_type_fields(types)
 
       assert fields[:names] == "[Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()]"
 
-      assert fields[:matrix] ==
-               "[[Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()] | Core.Es.Personal.Destroyed.t()]"
-
-      assert fields[:tags] == "[Core.StructFixture.Name.t()] | Core.Es.Personal.Destroyed.t()"
+      assert fields[:matrix] == "[[Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()]]"
 
       assert fields[:by_id] ==
                "%{optional(String.t()) => Core.StructFixture.Name.t() | Core.Es.Personal.Destroyed.t()}"
+    end
+
+    test "ПДн-лист set: и ключа map: поднимает место до контейнера" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Personal)
+      fields = struct_type_fields(types)
+
+      assert fields[:roles] == "MapSet.t(Core.PrimFixture.Personal.t()) | Core.Es.Personal.Destroyed.t()"
+
+      assert fields[:by_key] ==
+               "%{optional(String.t()) => Core.StructFixture.Name.t()} | Core.Es.Personal.Destroyed.t()"
+
+      assert fields[:tags] == "[Core.StructFixture.Name.t()] | Core.Es.Personal.Destroyed.t()"
+    end
+
+    test "write_t — без Destroyed, entity: и element: проецируются на write_t()" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Personal)
+      fields = struct_type_fields(types, :write_t)
+
+      refute Enum.any?(fields, fn {_name, type} -> type =~ "Destroyed" end)
+
+      assert fields[:holder] == "Core.StructFixture.Name.t()"
+      assert fields[:phone] == "Core.StructFixture.Name.t() | nil"
+      assert fields[:point] == "Core.StructFixture.Point.write_t()"
+      assert fields[:recipients] == "[Core.StructFixture.Recipient.write_t()]"
+      assert fields[:names] == "[Core.StructFixture.Name.t()]"
+      assert fields[:matrix] == "[[Core.StructFixture.Name.t()]]"
+      assert fields[:tags] == "[Core.StructFixture.Name.t()]"
+      assert fields[:roles] == "MapSet.t(Core.PrimFixture.Personal.t())"
+      assert fields[:by_key] == "%{optional(String.t()) => Core.StructFixture.Name.t()}"
+      assert fields[:by_id] == "%{optional(String.t()) => Core.StructFixture.Name.t()}"
+      assert fields[:open] == "Core.StructFixture.Name.t()"
+    end
+
+    test "без ПДн-мест write_t — буквально t()" do
+      {:ok, types} = Code.Typespec.fetch_types(StructFixture.Wide)
+
+      assert {:type, {:write_t, {:user_type, _meta, :t, []}, []}} =
+               Enum.find(types, &match?({:type, {:write_t, _type, []}}, &1))
     end
 
     test "events: — поле events с типом коллекции событий семейства" do
@@ -445,6 +484,50 @@ defmodule Core.StructTest do
       {:ok, types} = Code.Typespec.fetch_types(StructFixture.Nested)
 
       assert struct_type_fields(types) == %{title: "Core.StructFixture.Nested.Title.t()"}
+    end
+  end
+
+  describe "Inspect" do
+    setup do
+      recipient = struct!(StructFixture.Recipient, phone: phone("+7 999 000"), label: Name.new!("склад"))
+
+      value =
+        struct!(
+          StructFixture.Inspectable,
+          holder: Name.new!("открытое имя"),
+          secret: phone("+7 111 111"),
+          tags: [phone("+7 222 222"), phone("+7 333 333")],
+          step: recipient,
+          sealed: %StructFixture.Point{x: 42}
+        )
+
+      %{value: value}
+    end
+
+    test "значение ПДн-места не попадает в вывод, открытые поля видны", %{value: value} do
+      output = inspect(value)
+
+      refute output =~ "+7 111 111"
+      refute output =~ "+7 222 222"
+      refute output =~ "+7 333 333"
+      refute output =~ "+7 999 000"
+      refute output =~ "42"
+
+      assert output =~ "открытое имя"
+      assert output =~ "склад"
+      assert output =~ "%Core.Es.Personal.Hidden{}"
+    end
+
+    test "скрываются все места списка, а не список целиком", %{value: value} do
+      output = inspect(value)
+
+      assert output =~ "tags: [%Core.Es.Personal.Hidden{}, %Core.Es.Personal.Hidden{}]"
+    end
+
+    test "уничтоженное значение печатается обычным struct'ом", %{value: value} do
+      output = inspect(%{value | secret: %Core.Es.Personal.Destroyed{}})
+
+      assert output =~ "%Core.Es.Personal.Destroyed{}"
     end
   end
 
@@ -465,49 +548,34 @@ defmodule Core.StructTest do
       end
     end
 
-    test "wire: — CompileError" do
-      assert_raise CompileError, ~r/^Struct: fields: name: wire: у структуры по полям нет wire/, fn ->
-        define(fields: [name: [prim: Name, wire: "title"]])
-      end
+    test "wire: и subject: — часть декларации структуры" do
+      mod = define(fields: [name: [prim: Name, wire: "title", subject: :aggregate_id]])
+
+      assert [%Core.Codec.Field{name: :name, wire: "title", subject: :aggregate_id}] =
+               Core.Codec.Field.struct_fields(mod)
     end
 
-    test "subject: — CompileError" do
-      assert_raise CompileError, ~r/^Struct: fields: name: subject: у структуры по полям нет кодека/, fn ->
-        define(fields: [name: [prim: Name, subject: :aggregate_id]])
-      end
-    end
+    test "destroyable: удалён — CompileError с указанием на personal: true" do
+      assert_raise CompileError,
+                   ~r/^Struct: fields: holder: destroyable: удалён — ПДн-место объявляет personal: true/,
+                   fn -> define(fields: [holder: [prim: Name, destroyable: true]]) end
 
-    test "destroyable: не true — CompileError" do
-      assert_raise CompileError, ~r/^Struct: fields: holder: destroyable: ожидается true, получено false$/, fn ->
+      assert_raise CompileError, ~r/^Struct: fields: holder: destroyable: удалён — /, fn ->
         define(fields: [holder: [prim: Name, destroyable: false]])
       end
 
-      assert_raise CompileError, ~r/^Struct: fields: names: list: destroyable: ожидается true, получено :yes$/, fn ->
-        define(fields: [names: [list: [prim: Name, destroyable: :yes]]])
+      assert_raise CompileError, ~r/^Struct: fields: names: destroyable: удалён — /, fn ->
+        define(fields: [names: [list: [prim: Name, destroyable: true]]])
+      end
+
+      assert_raise CompileError, ~r/^Struct: fields: by_id: destroyable: удалён — /, fn ->
+        define(fields: [by_id: [map: [key: [type: :string], value: [prim: Name, destroyable: true]]]])
       end
     end
 
-    test "destroyable: у элемента set: — CompileError" do
-      assert_raise CompileError,
-                   ~r/^Struct: fields: roles: destroyable: у элемента set: нет — равные уничтоженные значения/,
-                   fn -> define(fields: [roles: [set: [prim: Name, destroyable: true]]]) end
-
-      assert_raise CompileError, ~r/^Struct: fields: grid: list: destroyable: у элемента set: нет/, fn ->
-        define(fields: [grid: [list: [set: [list: [prim: Name, destroyable: true]]]]])
-      end
-    end
-
-    test "destroyable: у ключа map: — CompileError" do
-      assert_raise CompileError,
-                   ~r/^Struct: fields: by_id: destroyable: у ключа map: нет — равные уничтоженные .+ запись$/,
-                   fn ->
-                     define(fields: [by_id: [map: [key: [prim: Name, destroyable: true], value: [type: :integer]]]])
-                   end
-    end
-
-    test "default: у уничтожаемого поля проверяется как раньше" do
+    test "default: у ПДн-поля проверяется как раньше" do
       assert_raise CompileError, ~r/^Struct: fields: holder: default: ожидается Prim Core.StructFixture.Name, /, fn ->
-        define(fields: [holder: [prim: Name, destroyable: true, default: "Склад"]])
+        define(fields: [holder: [prim: Name, personal: true, default: "Склад"]])
       end
     end
 
@@ -600,14 +668,17 @@ defmodule Core.StructTest do
     end
   end
 
-  defp struct_type_fields(types) do
-    {:type, {:t, {:type, _, :map, entries}, []}} = Enum.find(types, &match?({:type, {:t, _, []}}, &1))
+  defp struct_type_fields(types, name \\ :t) do
+    {:type, {^name, {:type, _, :map, entries}, []}} =
+      Enum.find(types, &match?({:type, {^name, _, []}}, &1))
 
     for {:type, _, :map_field_exact, [{:atom, _, key}, value]} <- entries,
         key != :__struct__,
         into: %{},
         do: {key, type_to_string(value)}
   end
+
+  defp phone(value), do: Core.PrimFixture.Personal.new!(value)
 
   defp type_to_string(type) do
     {:"::", _, [_name, quoted]} = Code.Typespec.type_to_quoted({:printed, type, []})

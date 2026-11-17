@@ -54,34 +54,34 @@ defmodule Core.Es.CmdTest do
       end
     end
 
-    test "destroyable: у поля команды — CompileError с путём до поля" do
-      fields = stamped(holder: [prim: Core.EsFixture.Account.Holder, destroyable: true])
+    test "personal: true у поля команды — CompileError с путём до поля" do
+      fields = stamped(holder: [prim: Core.EsFixture.Account.Holder, personal: true])
 
-      assert compile_error(OwnDestroyable, fields) ==
-               "Es.Cmd: Core.Es.CmdTest.OwnDestroyable: holder: destroyable: у команды нет — " <>
-                 "уничтоженное ПДн-значение не записывается"
+      assert compile_error(OwnPersonal, fields) ==
+               "Es.Cmd: Core.Es.CmdTest.OwnPersonal: holder: personal: у команды нет — " <>
+                 "ПДн-место в команде не читается"
     end
 
-    test "destroyable: у поля вложенной entity: — CompileError с путём и сущностью" do
+    test "personal: true у поля вложенной entity: — CompileError с путём и сущностью" do
       fields = stamped(recipient: [entity: Core.StructFixture.Recipient])
 
-      assert compile_error(EntityDestroyable, fields) ==
-               "Es.Cmd: Core.Es.CmdTest.EntityDestroyable: recipient: phone: destroyable: " <>
-                 "у сущности Core.StructFixture.Recipient в команде нет — уничтоженное ПДн-значение не записывается"
+      assert compile_error(EntityPersonal, fields) ==
+               "Es.Cmd: Core.Es.CmdTest.EntityPersonal: recipient: phone: personal: " <>
+                 "у сущности Core.StructFixture.Recipient в команде нет — ПДн-место в команде не читается"
     end
 
-    test "destroyable: у сущности внутри list: — CompileError с путём через элемент" do
+    test "personal: true у сущности внутри list: — CompileError с путём через элемент" do
       fields = stamped(recipients: [list: [entity: Core.StructFixture.Recipient]])
 
-      assert compile_error(ListDestroyable, fields) =~
-               "Es.Cmd: Core.Es.CmdTest.ListDestroyable: recipients: list: phone: destroyable: у сущности"
+      assert compile_error(ListPersonal, fields) =~
+               "Es.Cmd: Core.Es.CmdTest.ListPersonal: recipients: list: phone: personal: у сущности"
     end
 
-    test "destroyable: у сущности в значении map: — CompileError с путём через значение" do
+    test "personal: true у сущности в значении map: — CompileError с путём через значение" do
       fields = stamped(by_id: [map: [key: [type: :string], value: [entity: Core.StructFixture.Recipient]]])
 
-      assert compile_error(MapDestroyable, fields) =~
-               "Es.Cmd: Core.Es.CmdTest.MapDestroyable: by_id: map: value: phone: destroyable: у сущности"
+      assert compile_error(MapPersonal, fields) =~
+               "Es.Cmd: Core.Es.CmdTest.MapPersonal: by_id: map: value: phone: personal: у сущности"
     end
 
     test "events: у команды по полям — CompileError" do
@@ -102,12 +102,22 @@ defmodule Core.Es.CmdTest do
                "Es.Cmd: Core.Es.CmdTest.WithEvents: events: у команды нет — события порождает decide/2 агрегата"
     end
 
-    test "Prim personal: true без destroyable: — команда собирается" do
+    test "Prim personal: true без personal: — команда собирается" do
       fields = stamped(holder: [prim: Core.EsFixture.Account.Holder])
 
       cmd = compile(Personal, nil, quote(do: use(Core.Struct, fields: unquote(fields))))
 
       assert %{holder: nil} = struct(cmd)
+    end
+
+    test "t — проекция записи без Destroyed, write_t равен t()" do
+      {:ok, types} = Code.Typespec.fetch_types(Core.StructFixture.Command)
+
+      assert {:type, {:t, {:type, _, :map, entries}, []}} = Enum.find(types, &match?({:type, {:t, _, []}}, &1))
+      refute inspect(entries) =~ "Core.Es.Personal.Destroyed"
+
+      assert {:type, {:write_t, {:user_type, _meta, :t, []}, []}} =
+               Enum.find(types, &match?({:type, {:write_t, _, []}}, &1))
     end
 
     test "без defstruct — CompileError" do

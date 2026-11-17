@@ -78,7 +78,7 @@ defmodule Core.View.Opts do
       Helper.Opts.reject!(path, "ожидается keyword-спека, получено #{inspect(opts)}")
     end
 
-    reject_destroyable!(opts, path)
+    reject_foreign!(opts, path)
 
     {kind_key, value} = Field.kind_key!(opts, :view, path)
     optional? = Keyword.get(opts, :optional, false)
@@ -90,10 +90,18 @@ defmodule Core.View.Opts do
     {name, spec!(kind_key, value, name, form_names, path), optional?}
   end
 
-  defp reject_destroyable!(opts, where) do
-    if Keyword.keyword?(opts) and Keyword.has_key?(opts, :destroyable) do
-      Helper.Opts.reject!(where, "destroyable: у View нет — уничтоженное значение View не загружает")
-    end
+  # View — read-модель: ПДн-место и субъект задают структура по полям и нагрузка события, а
+  # `destroyable:` из языка удалён.
+  @foreign_keys [
+    destroyable: "destroyable: удалён — ПДн-место объявляет personal: true, а уничтоженное значение даёт тип чтения",
+    personal: "personal: у View нет — ПДн-место задают структура по полям и нагрузка события",
+    subject: "subject: у View нет — субъект ПДн задаёт нагрузка события"
+  ]
+
+  defp reject_foreign!(opts, where) do
+    for {key, text} <- @foreign_keys,
+        Keyword.keyword?(opts) and Keyword.has_key?(opts, key),
+        do: Helper.Opts.reject!(where, text)
 
     :ok
   end
@@ -210,7 +218,7 @@ defmodule Core.View.Opts do
   end
 
   defp element!(label, name, inner, form_names, path) do
-    reject_destroyable!(inner, "#{path}: #{label}")
+    reject_foreign!(inner, "#{path}: #{label}")
 
     {^name, spec, optional?} = spec_field!(name, inner, form_names, path)
 

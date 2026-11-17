@@ -67,7 +67,7 @@ defmodule Core.Es.Event.PayloadTest do
     end
 
     test "destroyable: — CompileError" do
-      assert_raise CompileError, ~r/^Es.Event.Payload: fields: name: destroyable: у нагрузки события нет/, fn ->
+      assert_raise CompileError, ~r/^Es.Event.Payload: fields: name: destroyable: удалён/, fn ->
         Code.eval_quoted(
           quote do
             defmodule Core.Es.Event.PayloadTest.Destroyable do

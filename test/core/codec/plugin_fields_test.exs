@@ -49,7 +49,7 @@ defmodule Core.Codec.PluginFieldsTest do
   defmodule Badge do
     use Core.Struct,
       fields: [
-        name: [prim: Name],
+        name: [prim: Name, wire: "title"],
         note: [prim: Name, optional: true],
         status: [enum: Status],
         tags: [list: [prim: Name]]
@@ -810,21 +810,34 @@ defmodule Core.Codec.PluginFieldsTest do
       end
     end
 
-    test "destroyable: структуры плагин не повторяет — собирается" do
+    test "personal: структуры плагин не повторяет — собирается" do
       assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:StructDestroyable, [a: [list: [prim: Name]]],
-                 struct_fields: [a: [list: [prim: Name, destroyable: true], destroyable: true]]
+               compile_plugin(:StructPersonal, [a: [list: [prim: Name]]],
+                 struct_fields: [a: [list: [prim: Name, personal: true], personal: true]]
                )
     end
 
     test "destroyable: в спеке плагина — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: destroyable: у Codec-плагина по полям нет/, fn ->
+      assert_raise CompileError, ~r/\.T: a: destroyable: удалён/, fn ->
         compile_plugin(:PluginDestroyable, a: [prim: Name, destroyable: true], b: [prim: Name])
       end
 
-      assert_raise CompileError, ~r/\.T: a: destroyable: у Codec-плагина по полям нет/, fn ->
+      assert_raise CompileError, ~r/\.T: a: destroyable: удалён/, fn ->
         compile_plugin(:PluginDestroyableItem, a: [list: [prim: Name, destroyable: true]], b: [prim: Name])
       end
+    end
+
+    test "wire-ключ расходится со структурой — CompileError" do
+      assert_raise CompileError,
+                   ~r/\.T: a: wire-ключ расходится со структурой — в структуре "a", в плагине "b"/,
+                   fn ->
+                     compile_plugin(:StructWireMismatch, [a: [prim: Name, wire: "b"]], struct_fields: [a: [prim: Name]])
+                   end
+    end
+
+    test "wire-ключ структуры совпадает с плагином — собирается" do
+      assert {{:module, _plugin, _bytecode, _result}, []} =
+               compile_plugin(:StructWire, [a: [prim: Name, wire: "b"]], struct_fields: [a: [prim: Name, wire: "b"]])
     end
 
     test "ручной struct — сверяются только ключи, вид поля любой" do

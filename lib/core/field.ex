@@ -3,7 +3,9 @@ defmodule Core.Field do
 
   alias Core.Codec.Field, as: Grammar
   alias Core.Field.Meta
+  alias Core.Helper
   alias Core.Helper.Opts
+  alias Core.Prim
 
   @typedoc false
   @type role :: :struct | :payload | :plugin | :view | :labels | :union
@@ -64,13 +66,20 @@ defmodule Core.Field do
   def declare!(_spec, :union, where) when is_binary(where), do: Opts.reject!(where, "у семейства вариантов полей нет")
 
   def declare!(spec, role, where) when role in @declarable and is_binary(where) do
+    {legacy, personal} = split!(spec, role, where)
+    fields = normalize!(legacy, role, where)
+    apply_personal!(fields, personal)
+  end
+
+  @doc false
+  @spec split!(term(), role(), String.t()) :: {[Grammar.t()], %{{atom(), [atom()]} => boolean()}}
+
+  # Разбор без сборки IR: хосту, который держит и старую спеку полей (`%Core.Codec.Field{}`), и
+  # IR, нужны обе формы из одного прохода (`Core.Struct`).
+  def split!(spec, role, where) when role in @declarable and is_binary(where) do
     check_keys!(spec, role, where)
     {clean, personal} = split_personal(spec, role, where)
-
-    clean
-    |> parse!(role, where)
-    |> normalize!(role, where)
-    |> wrap_personal!(personal)
+    {parse!(clean, role, where), personal}
   end
 
   @doc false
@@ -82,6 +91,12 @@ defmodule Core.Field do
 
     Enum.map(fields, &ir(&1, role, where, by_name))
   end
+
+  @doc false
+  @spec apply_personal!([t()], %{{atom(), [atom()]} => boolean()}) :: [t()]
+
+  def apply_personal!(fields, personal) when is_list(fields) and is_map(personal),
+    do: wrap_personal!(fields, personal)
 
   # ---
 
@@ -111,8 +126,7 @@ defmodule Core.Field do
         wire: Atom.to_string(name),
         default: :none,
         subject: nil,
-        personal: nil,
-        destroyable: []
+        personal: nil
       }
     end)
   end
@@ -291,40 +305,114 @@ defmodule Core.Field do
 
   def write_typespec(fields) when is_list(fields), do: typespec(fields, :write)
 
+  @doc false
+  @spec personal_places?([t()]) :: boolean()
+
+  def personal_places?(fields) when is_list(fields), do: personal_places(fields) != []
+
   # ---
 
-  # Тип строит грамматика по тем же местам, что и старый `destroyable:`: `%Destroyed{}` встаёт на
-  # ПДн-место, а порядок `Destroyed | nil` держит `Core.Codec.Field`.
+  # Тип чтения — тот же вид, а на каждом ПДн-месте ещё `Destroyed.t()`; тип записи — проекция вида:
+  # `entity:` ссылается на `write_t()` сущности, `union:` — на типы записи вариантов.
   defp typespec(fields, mode) do
-    fields
-    |> Enum.map(fn %__MODULE__{} = field ->
-      %Grammar{
-        name: field.name,
-        spec: plain(field.spec),
-        optional?: field.optional?,
-        wire: field.wire,
-        default: field.default,
-        subject: nil,
-        personal: field.personal,
-        destroyable: destroyable(field, mode)
-      }
+    Enum.map(fields, fn %__MODULE__{name: name, spec: spec, optional?: optional?} = field ->
+      type = place_type(spec, type_places(field), [], mode)
+      {name, Grammar.union_type([type | if(optional?, do: [nil], else: [])])}
     end)
-    |> Grammar.typespec()
   end
 
-  defp plain({:personal, inner}), do: plain(inner)
-  defp plain({kind, inner}) when kind in @nested_kinds, do: {kind, plain(inner)}
-  defp plain({:map, key, value}), do: {:map, plain(key), plain(value)}
-  defp plain(spec), do: spec
-
-  defp destroyable(%__MODULE__{personal: true}, :read), do: [[]]
-
-  defp destroyable(%__MODULE__{spec: spec}, :read) do
-    {_plan, places} = walk_places(spec, [], [], {nil, %{}})
-    Enum.uniq(places)
+  # Места типа — пути `personal_places/2` от самого поля: спуск в `entity:` тип не повторяет, у
+  # сущности свой `t()` и свои места.
+  defp type_places(%__MODULE__{} = field) do
+    for %{path: [_wire | rest]} <- personal_places([field]), do: rest
   end
 
-  defp destroyable(_field, :write), do: []
+  defp place_type(spec, places, path, :read) do
+    type = spec_type(spec, places, path, :read)
+
+    if path in places, do: Grammar.union_type([type, quote(do: Core.Es.Personal.Destroyed.t())]), else: type
+  end
+
+  defp place_type(spec, places, path, :write), do: spec_type(spec, places, path, :write)
+
+  # Место целиком (`personal: true` у поля, элемента списка или значения словаря): его вид
+  # проецируется без вложенных мест — значение шифруется одним куском.
+  defp spec_type({:personal, inner}, _places, _path, mode), do: spec_type(inner, [], [], mode)
+
+  defp spec_type({:prim, mod}, _places, _path, _mode), do: quote(do: unquote(mod).t())
+  defp spec_type({:enum, mod}, _places, _path, _mode), do: quote(do: unquote(mod).t())
+  defp spec_type({:entity, mod}, _places, _path, :read), do: quote(do: unquote(mod).t())
+  defp spec_type({:entity, mod}, _places, _path, :write), do: entity_write_type(mod)
+  defp spec_type({:union, _family}, _places, _path, :read), do: quote(do: struct())
+  defp spec_type({:union, family}, _places, _path, :write), do: union_write_type(family)
+
+  defp spec_type({:list, inner}, places, path, mode),
+    do: quote(do: [unquote(place_type(inner, places, path ++ [:each], mode))])
+
+  # У элемента `set:` и ключа `map:` своего места нет: ПДн-лист там поднимает границу до контейнера.
+  defp spec_type({:set, inner}, _places, _path, mode),
+    do: quote(do: MapSet.t(unquote(spec_type(inner, [], [], mode))))
+
+  defp spec_type({:map, key, value}, places, path, mode) do
+    key = spec_type(key, [], [], mode)
+    value = place_type(value, places, path ++ [:each], mode)
+
+    quote(do: %{optional(unquote(key)) => unquote(value)})
+  end
+
+  defp spec_type({:type, :string}, _places, _path, _mode), do: quote(do: String.t())
+  defp spec_type({:type, scalar}, _places, _path, _mode), do: quote(do: unquote(scalar)())
+
+  defp entity_write_type(mod) do
+    if write_type?(mod),
+      do: quote(do: unquote(mod).write_t()),
+      else: quote(do: unquote(mod).t())
+  end
+
+  # Декларативная структура порождает `write_t()` вместе с `__core_fields__/0`; у собранного
+  # вручную модуля тип ищем в байткоде (в сборке того же файла его ещё нет).
+  defp write_type?(mod) do
+    Helper.Module.exports?(mod, :__core_fields__, 0) or type?(mod, :write_t)
+  end
+
+  # Тип записи — тип, а не функция: `function_exported?` его не видит, а байткод модуля видит.
+  defp type?(mod, name) do
+    case Code.Typespec.fetch_types(mod) do
+      {:ok, types} -> Enum.any?(types, &match?({:type, {^name, _, []}}, &1))
+      :error -> false
+    end
+  end
+
+  # Семейство без реестра вариантов (`Core.Union`) типа записи не даёт: остаётся `struct()`, как и в
+  # типе чтения. Вариант-Prim — свой `t()`, вариант-структура — `write_t()`.
+  defp union_write_type(family) do
+    case union_variants(family) do
+      [] -> quote(do: struct())
+      variants -> Grammar.union_type(Enum.map(variants, &variant_write_type/1))
+    end
+  end
+
+  defp union_variants(family) do
+    cond do
+      Helper.Module.exports?(family, :__core_variants__, 0) ->
+        variants = Enum.map(family.__core_variants__(), &variant_module/1)
+        Enum.reject(variants, &is_nil/1)
+
+      Helper.Module.exports?(family, :types, 0) ->
+        for mod <- List.wrap(family.types()), is_atom(mod), do: mod
+
+      true ->
+        []
+    end
+  end
+
+  defp variant_module({mod, _rest}) when is_atom(mod), do: mod
+  defp variant_module(mod) when is_atom(mod), do: mod
+  defp variant_module(_variant), do: nil
+
+  defp variant_write_type(mod) do
+    if Prim.prim?(mod), do: quote(do: unquote(mod).t()), else: entity_write_type(mod)
+  end
 
   # ===== ПДн-места =====
 
@@ -343,6 +431,44 @@ defmodule Core.Field do
   def inspect_hidden(fields) when is_list(fields) do
     Meta.inspect_hidden(fields, %{role: nil, name: nil, where: nil, spec: nil, fields: %{}})
   end
+
+  @doc false
+  @spec inspect_places([t()]) :: %{atom() => [[step()]]}
+
+  # Места `Inspect` — пути, которые читает вывод структуры: спуск в `entity:` не повторяется, у
+  # вложенной структуры свой `Inspect`.
+  def inspect_places(fields) when is_list(fields) do
+    fields
+    |> Enum.flat_map(fn %__MODULE__{} = field ->
+      paths =
+        for %{path: [_wire | rest]} <- personal_places([field]), runtime_path?(field.spec, rest), uniq: true, do: rest
+
+      if paths == [], do: [], else: [{field.name, paths}]
+    end)
+    |> Map.new()
+  end
+
+  @doc false
+  @spec hide_personal(term(), [[step()]]) :: term()
+
+  def hide_personal(value, paths) when is_list(paths), do: Enum.reduce(paths, value, &hide_place(&2, &1))
+
+  # ---
+
+  defp runtime_path?(_spec, []), do: true
+  defp runtime_path?({:list, inner}, [:each | rest]), do: runtime_path?(inner, rest)
+  defp runtime_path?({:map, _key, value}, [:each | rest]), do: runtime_path?(value, rest)
+  defp runtime_path?(_spec, _path), do: false
+
+  defp hide_place(nil, _path), do: nil
+  defp hide_place(%Core.Es.Personal.Destroyed{} = value, _path), do: value
+  defp hide_place(_value, []), do: %Core.Es.Personal.Hidden{}
+  defp hide_place(list, [:each | rest]) when is_list(list), do: Enum.map(list, &hide_place(&1, rest))
+
+  defp hide_place(map, [:each | rest]) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {key, value} -> {key, hide_place(value, rest)} end)
+
+  defp hide_place(value, _path), do: value
 
   # ===== обход вида =====
 

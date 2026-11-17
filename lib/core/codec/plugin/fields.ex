@@ -243,8 +243,7 @@ defmodule Core.Codec.Plugin.Fields do
       optional?: optional?,
       wire: "",
       default: :none,
-      subject: nil,
-      destroyable: []
+      subject: nil
     }
   end
 end

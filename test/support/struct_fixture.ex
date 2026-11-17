@@ -66,22 +66,51 @@ defmodule Core.StructFixture do
   defmodule Recipient do
     @moduledoc false
 
-    use Core.Struct, fields: [phone: [prim: Name, destroyable: true]]
+    use Core.Struct, fields: [phone: [prim: Name, personal: true], label: [prim: Name]]
   end
 
-  defmodule Destroyable do
+  defmodule Personal do
     @moduledoc false
 
     use Core.Struct,
       fields: [
-        holder: [prim: Name, destroyable: true],
-        phone: [prim: Name, optional: true, destroyable: true],
-        point: [entity: Point, destroyable: true],
+        holder: [prim: Name, personal: true],
+        phone: [prim: Name, optional: true, personal: true],
+        point: [entity: Point, personal: true],
         recipients: [list: [entity: Recipient]],
-        names: [list: [prim: Name, destroyable: true]],
-        matrix: [list: [list: [prim: Name, destroyable: true], destroyable: true]],
-        tags: [list: [prim: Name], destroyable: true],
-        by_id: [map: [key: [type: :string], value: [prim: Name, destroyable: true]]]
+        names: [list: [prim: Name, personal: true]],
+        matrix: [list: [list: [prim: Name, personal: true]]],
+        tags: [list: [prim: Name], personal: true],
+        roles: [set: [prim: Core.PrimFixture.Personal]],
+        by_key: [map: [key: [type: :string, personal: true], value: [prim: Name]]],
+        by_id: [map: [key: [type: :string], value: [prim: Name, personal: true]]],
+        open: [prim: Name]
+      ]
+  end
+
+  defmodule Inspectable do
+    @moduledoc false
+
+    use Core.Struct,
+      fields: [
+        holder: [prim: Name],
+        secret: [prim: Core.PrimFixture.Personal],
+        tags: [list: [prim: Core.PrimFixture.Personal]],
+        step: [entity: Recipient],
+        sealed: [entity: Point, personal: true]
+      ]
+  end
+
+  defmodule Command do
+    @moduledoc false
+
+    use Core.Es.Cmd
+
+    use Core.Struct,
+      fields: [
+        name: [prim: Core.PrimFixture.Personal],
+        by: [prim: Core.EsFixture.UserID],
+        at: [prim: Core.Es.Event.At]
       ]
   end
 
