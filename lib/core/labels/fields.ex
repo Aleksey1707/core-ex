@@ -40,6 +40,11 @@ defmodule Core.Labels.Fields do
           ]
       end
 
+  Поля декларативного типа — структуры по полям, нагрузки события и изменения
+  (`Core.Es.ValueChanged`) — подписи читают из общей декларации `__core_fields__/0`
+  (`Core.Field.introspect/1`), а не из своего объявления: `fields:` рядом с ней и `value:` рядом с
+  `change:` у такого типа — `CompileError`.
+
   Поле событий `events`, порождённое `use Core.Struct, events:`, вне спеки структуры: решение о нём
   не объявляется, подпись на нём — `CompileError`.
 
@@ -115,8 +120,8 @@ defmodule Core.Labels.Fields do
       end
 
   Сборку ломают: `labels:` или `fields:` вместе с `change:`, ручной struct изменения без `value:`,
-  `value:` у `Core.Es.ValueChanged`, у структуры по полям или без `change:`, разный вид `old_value` и
-  `new_value` у структуры по полям, struct без `old_value` / `new_value` или с полями вне них под
+  `value:` у типа с декларацией изменения или без `change:`, разный вид `old_value` и
+  `new_value` у структуры изменения, struct без `old_value` / `new_value` или с полями вне них под
   `change:`, `use` под `change:` не после `use Core.Es.ValueChanged` или `defstruct`, значение
   изменения — map'а или список, множество или словарь map'ов на любой глубине (в сведения оно не
   выходит, и подписать его нельзя).
@@ -125,8 +130,6 @@ defmodule Core.Labels.Fields do
   """
 
   alias Core.Codec.Field
-  alias Core.Es.Event.Payload
-  alias Core.Es.ValueChanged
   alias Core.Helper
   alias Core.Labels.Check
   alias Core.Struct
@@ -140,15 +143,10 @@ defmodule Core.Labels.Fields do
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
   @type spec :: Field.spec() | {:text, (term() -> String.t())} | {:list, spec()} | {:set, spec()}
 
-  # Объявление модуля под `use`: поля нагрузки (`Core.Es.Event.Payload`), поля структуры по полям
-  # (`Core.Struct`), вид значения изменения (`Core.Es.ValueChanged`), ручной struct (`:struct`) или ничего.
+  # Объявление модуля под `use`: поля декларативного типа — из общей интроспекции
+  # (`Core.Field.introspect/1`), ручной struct — по своему `defstruct` и спеке `fields:`, ничего.
   @typedoc false
-  @type host ::
-          {:payload, [Field.t()]}
-          | {:struct_fields, [Field.t()]}
-          | {:change, [type: module(), nilable: boolean()]}
-          | :struct
-          | :none
+  @type host :: {:declared, [Core.Field.t()]} | :struct | :none
 
   @typedoc false
   @type declared :: %{specs: [{atom(), spec()}], fields: [{atom(), label()}], change: {String.t(), spec()} | nil}
@@ -273,7 +271,7 @@ defmodule Core.Labels.Fields do
   def value!(value) do
     where = "#{@label}: value"
 
-    if text?(value), do: text_spec!(value, where), else: normalize!([value: value], @label).value
+    if text?(value), do: text_spec!(value, where), else: declared!([value: value], @label).value
   end
 
   # ---
@@ -281,9 +279,17 @@ defmodule Core.Labels.Fields do
   defp parse!(fields, where) do
     {texts, rest} = Enum.split_with(fields, fn {_name, opts} -> text?(opts) end)
     texts = Map.new(texts, fn {name, opts} -> {name, text_spec!(opts, "#{where}: #{name}")} end)
-    specs = Map.merge(texts, normalize!(rest, where))
+    specs = Map.merge(texts, declared!(rest, where))
 
     for {name, _opts} <- fields, do: {name, Map.fetch!(specs, name)}
+  end
+
+  defp declared!([], _where), do: %{}
+
+  defp declared!(fields, where) do
+    for %Core.Field{name: name, spec: spec} <- Core.Field.declare!(fields, :labels, where),
+        into: %{},
+        do: {name, grammar_spec(spec)}
   end
 
   defp text?(opts) do
@@ -309,23 +315,17 @@ defmodule Core.Labels.Fields do
     )
   end
 
-  defp normalize!([], _where), do: %{}
-  defp normalize!(fields, where), do: Map.new(pairs(Field.normalize!(fields, :labels, where)))
-
   # ===== решение по объявлению модуля =====
 
   # Объявление модуля известно только телу: `use Core.Es.Event.Payload`, `use Core.Struct` или
-  # `use Core.Es.ValueChanged` выше пишет его атрибутом. Struct нужен уже здесь: без него `use` выше
-  # `use Core.Es.ValueChanged` сошёл бы за ручной struct.
+  # `use Core.Es.ValueChanged` выше пишет общую декларацию полей, её и читает интроспекция.
   @doc false
   @spec host(module()) :: host()
 
   def host(module) when is_atom(module) do
-    case {Payload.declared_fields(module), Struct.declared_fields(module), ValueChanged.declared(module)} do
-      {nil, nil, nil} -> if Module.defines?(module, {:__struct__, 0}), do: :struct, else: :none
-      {nil, nil, changed} -> {:change, changed}
-      {nil, fields, nil} -> {:struct_fields, fields}
-      {fields, nil, nil} -> {:payload, fields}
+    case Core.Field.introspect(module) do
+      nil -> if Module.defines?(module, {:__struct__, 0}), do: :struct, else: :none
+      fields -> {:declared, fields}
     end
   end
 
@@ -340,21 +340,12 @@ defmodule Core.Labels.Fields do
 
   # ---
 
-  defp specs!({:payload, payload}, nil), do: pairs(payload)
+  defp specs!({:declared, fields}, nil), do: pairs(fields)
 
-  defp specs!({:payload, _payload}, specs) do
+  defp specs!({:declared, _fields}, specs) do
     Helper.Opts.reject!(
       "#{@label}: fields",
-      "спека поля и у нагрузки события — вид поля нагрузки задаёт её спека: #{inspect(Keyword.keys(specs))}"
-    )
-  end
-
-  defp specs!({:struct_fields, fields}, nil), do: pairs(fields)
-
-  defp specs!({:struct_fields, _fields}, specs) do
-    Helper.Opts.reject!(
-      "#{@label}: fields",
-      "спека поля и у структуры по полям — вид поля задаёт `use Core.Struct`: #{inspect(Keyword.keys(specs))}"
+      "спека поля и у декларативного типа — вид поля задаёт его `use`: #{inspect(Keyword.keys(specs))}"
     )
   end
 
@@ -375,14 +366,22 @@ defmodule Core.Labels.Fields do
     )
   end
 
-  defp change!({:change, changed}, label, nil),
-    do: {label, Field.value_spec(Keyword.fetch!(changed, :type), "#{@label}: change")}
+  defp change!({:declared, fields}, label, nil), do: change_spec!(fields, label)
 
-  defp change!({:change, _changed}, _label, _value),
-    do: Helper.Opts.reject!(@label, "`value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`")
+  defp change!({:declared, _fields}, _label, _value),
+    do:
+      Helper.Opts.reject!(
+        @label,
+        "`value:` у типа с декларацией изменения — вид значения задаёт декларация (`old_value` / `new_value` или `type:`)"
+      )
 
-  defp change!({:struct_fields, fields}, label, nil) do
-    case Enum.uniq(for %Field{name: name, spec: spec} <- fields, name in @change_fields, do: spec) do
+  defp change!(:struct, _label, nil),
+    do: Helper.Opts.reject!(@label, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
+
+  defp change!(:struct, label, value), do: {label, value}
+
+  defp change_spec!(fields, label) do
+    case Enum.uniq(for %Core.Field{name: name, spec: spec} <- fields, name in @change_fields, do: grammar_spec(spec)) do
       [spec] ->
         {label, spec}
 
@@ -394,13 +393,10 @@ defmodule Core.Labels.Fields do
     end
   end
 
-  defp change!({:struct_fields, _fields}, _label, _value),
-    do: Helper.Opts.reject!(@label, "`value:` у структуры по полям — вид значения задаёт `use Core.Struct`")
-
-  defp change!(_struct, _label, nil),
-    do: Helper.Opts.reject!(@label, "ручной struct изменения без `value:` — вид значения на языке спеки `fields:`")
-
-  defp change!(_struct, label, value), do: {label, value}
+  # Спека объявления подписей — прежняя грамматика `Core.Codec.Field`: её читают обходы сведений.
+  defp pairs(fields) do
+    for %Core.Field{name: name, spec: spec} <- fields, do: {name, grammar_spec(spec)}
+  end
 
   # ===== проверка полноты =====
 
@@ -466,8 +462,7 @@ defmodule Core.Labels.Fields do
     ensure_none!(env, labelled -- fields, "подписи полей вне struct'а")
 
     case host(module) do
-      {:payload, _payload} -> :ok
-      {:struct_fields, _fields} -> :ok
+      {:declared, _fields} -> :ok
       _manual -> ensure_specs!(env, module.__label_specs__(), labels, fields)
     end
   end
@@ -587,5 +582,10 @@ defmodule Core.Labels.Fields do
 
   # ===== общее =====
 
-  defp pairs(fields), do: for(%Field{name: name, spec: spec} <- fields, do: {name, spec})
+  # В подписях вид значения — прежняя грамматика `Core.Codec.Field`: снятое место ПДн
+  # (`{:personal, вид}`) в неё не входит, значение шифруется целиком.
+  defp grammar_spec({:personal, inner}), do: grammar_spec(inner)
+  defp grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}
+  defp grammar_spec({:map, key, value}), do: {:map, grammar_spec(key), grammar_spec(value)}
+  defp grammar_spec(spec), do: spec
 end

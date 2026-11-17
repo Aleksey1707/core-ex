@@ -78,6 +78,23 @@ defmodule Core.ViewTest do
 
       assert keys == Enum.sort(declared_fields())
     end
+
+    test "общая декларация полей — IR, вид Prim без kind своего Prim" do
+      assert [
+               %Core.Field{name: :id, wire: "id", spec: {:prim, ViewFixture.ID}, optional?: false, personal: nil},
+               %Core.Field{name: :name, spec: {:prim, ViewFixture.Name}}
+               | _rest
+             ] = ViewFixture.Sample.__core_fields__()
+
+      assert length(ViewFixture.Sample.__core_fields__()) == length(declared_fields())
+    end
+
+    test "тип представления не расширяется уничтоженным значением" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Sample)
+
+      assert {:type, {:t, _, []}} = Enum.find(types, &match?({:type, {:t, _, []}}, &1))
+      refute inspect(types) =~ "Destroyed"
+    end
   end
 
   describe "кодек представления" do

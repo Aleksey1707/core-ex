@@ -43,8 +43,12 @@ defmodule Core.View do
   у них появляется свой `@type`, на который могут ссылаться read-схемы.
 
   Генерируются `@enforce_keys`, `defstruct`, `@type t`, `new/1` (keyword), маркер
-  `__view__/0` и вложенный `Codec` — dump-only плагин фасада (`loadable: false`),
-  который регистрируется в `Codec.plugins()` наравне с остальными.
+  `__view__/0`, общая декларация полей `__core_fields__/0` (`Core.Field`, внутренняя) и вложенный
+  `Codec` — dump-only плагин фасада (`loadable: false`), который регистрируется в `Codec.plugins()`
+  наравне с остальными.
+
+  `personal:` и `subject:` у View нет — ПДн-место задают структура по полям и нагрузка события, а
+  уничтоженное значение в представление не попадает: его преобразует проекция. Ключи — `CompileError`.
 
   `jsonb: Type` ссылается на спеку типа плагина (`{:codec, Type}`): её выводит плагин по `fields:` /
   `variants:` или объявляет колбэк `redump_spec/1`, разрешает фасад при исполнении. Prim, `Core.Enum` и
@@ -91,16 +95,18 @@ defmodule Core.View do
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
     forms = Opts.forms!(Keyword.get(opts, :forms, []))
-    fields = Opts.fields!(Keyword.fetch!(opts, :fields), Keyword.keys(forms))
-    check_forms_used!(fields, forms)
+    fields = Core.Field.declare!(Keyword.fetch!(opts, :fields), :view, "#{@label}: fields", forms: Keyword.keys(forms))
+    views = view_fields(fields)
+    check_forms_used!(views, forms)
 
     quote do
       unquote(marker_ast())
-      unquote(struct_ast(fields))
+      unquote(struct_ast(views))
       unquote(forms_types_ast(forms))
-      unquote(type_t_ast(fields))
-      unquote(new_ast(fields))
-      unquote(Dumper.codec_ast(view, fields, forms))
+      unquote(type_t_ast(views))
+      unquote(new_ast(views))
+      unquote(core_fields_ast(fields))
+      unquote(Dumper.codec_ast(view, views, forms))
     end
   end
 
@@ -154,6 +160,18 @@ defmodule Core.View do
 
   # ---
 
+  defp view_fields(fields) do
+    Enum.map(fields, fn %Core.Field{name: name, spec: spec, optional?: optional?} ->
+      Field.build(name, view_spec(spec), optional?)
+    end)
+  end
+
+  # IR вида не держит kind Prim: его знает сам Prim, а нужен он типу и таблице проекций.
+  defp view_spec({:prim, mod}), do: {:prim, mod, Core.Prim.leaf(mod).__domain_kind__()}
+  defp view_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, view_spec(inner)}
+  defp view_spec({:map, key, value}), do: {:map, view_spec(key), view_spec(value)}
+  defp view_spec(spec), do: spec
+
   defp check_forms_used!(fields, forms) do
     used = reachable_forms(Opts.used_forms(fields), forms)
 
@@ -185,6 +203,15 @@ defmodule Core.View do
       @spec __view__() :: true
 
       def __view__, do: true
+    end
+  end
+
+  defp core_fields_ast(fields) do
+    quote do
+      @doc false
+      @spec __core_fields__() :: [Core.Field.t()]
+
+      def __core_fields__, do: unquote(Macro.escape(fields))
     end
   end
 

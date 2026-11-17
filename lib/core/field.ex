@@ -61,11 +61,22 @@ defmodule Core.Field do
   # ===== декларация =====
 
   @doc false
-  @spec declare!(term(), role(), String.t()) :: [t()]
+  @spec declare!(term(), role(), String.t(), keyword()) :: [t()]
 
-  def declare!(_spec, :union, where) when is_binary(where), do: Opts.reject!(where, "у семейства вариантов полей нет")
+  def declare!(spec, role, where, context \\ [])
 
-  def declare!(spec, role, where) when role in @declarable and is_binary(where) do
+  def declare!(_spec, :union, where, _context) when is_binary(where),
+    do: Opts.reject!(where, "у семейства вариантов полей нет")
+
+  # View разбирает спека своего хоста: он знает виды `view:` / `form:` / `jsonb:` и сам отвергает
+  # `personal:` / `subject:` текстами роли, поэтому общий `check_keys!` и снятие мест ПДн ему не
+  # нужны.
+  def declare!(spec, :view, where, context) when is_binary(where) and is_list(context) do
+    forms = Keyword.get(context, :forms, [])
+    normalize!(parse!(spec, :view, where, forms), :view, where)
+  end
+
+  def declare!(spec, role, where, _context) when role in @declarable and is_binary(where) do
     {legacy, personal} = split!(spec, role, where)
     fields = normalize!(legacy, role, where)
     apply_personal!(fields, personal)
@@ -79,7 +90,7 @@ defmodule Core.Field do
   def split!(spec, role, where) when role in @declarable and is_binary(where) do
     check_keys!(spec, role, where)
     {clean, personal} = split_personal(spec, role, where)
-    {parse!(clean, role, where), personal}
+    {parse!(clean, role, where, []), personal}
   end
 
   @doc false
@@ -115,9 +126,9 @@ defmodule Core.Field do
     |> Meta.normalize!(legacy, ctx)
   end
 
-  defp parse!(spec, :view, _where) do
+  defp parse!(spec, :view, _where, forms) do
     spec
-    |> Core.View.Opts.fields!([], "fields")
+    |> Core.View.Opts.fields!(forms, "fields")
     |> Enum.map(fn %Core.View.Field{name: name, spec: spec, optional?: optional?} ->
       %Grammar{
         name: name,
@@ -131,7 +142,7 @@ defmodule Core.Field do
     end)
   end
 
-  defp parse!(spec, role, where), do: Grammar.normalize!(spec, role, where)
+  defp parse!(spec, role, where, _forms), do: Grammar.normalize!(spec, role, where)
 
   # Вид View хранит kind Prim ради своего типа и дампа; в IR его нет — вид значения задаёт Prim.
   defp view_spec({:prim, mod, _kind}), do: {:prim, mod}
@@ -290,13 +301,26 @@ defmodule Core.Field do
   @spec introspect(module()) :: [t()] | nil
 
   def introspect(module) when is_atom(module) do
-    if Core.Helper.Module.exports?(module, :__core_fields__, 0), do: module.__core_fields__()
+    if Helper.Module.exports?(module, :__core_fields__, 0),
+      do: module.__core_fields__(),
+      else: under_compilation(module)
   end
 
   @doc false
   @spec union_variants(module()) :: [Core.Union.Variant.t()]
 
   def union_variants(family) when is_atom(family), do: Core.Union.variants(family)
+
+  # ---
+
+  # Модуль, который ещё собирается, держит декларацию в атрибуте `@core_fields`: функцию
+  # `__core_fields__/0` в его же теле вызвать нельзя. Параллельная сборка может закрыть модуль между
+  # проверкой и чтением атрибута — тогда декларации ещё нет.
+  defp under_compilation(module) do
+    if Module.open?(module), do: Module.get_attribute(module, :core_fields)
+  rescue
+    ArgumentError -> nil
+  end
 
   # ===== типы =====
 

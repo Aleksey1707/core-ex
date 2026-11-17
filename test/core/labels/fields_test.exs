@@ -1,7 +1,6 @@
 defmodule Core.Labels.FieldsTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field
   alias Core.Labels.Fields
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Event.Grouped
@@ -97,9 +96,9 @@ defmodule Core.Labels.FieldsTest do
 
   describe "declare!/3 — разбор по объявлению модуля" do
     test "labels: у нагрузки — спека видимых полей из нагрузки" do
-      payload = Field.normalize!([name: [prim: Name], note: [type: :string]], :payload, "нагрузка")
+      payload = Core.Field.declare!([name: [prim: Name], note: [type: :string]], :payload, "нагрузка")
 
-      assert Fields.declare!({:payload, payload}, {:labels, [name: "Название", note: :hidden]}, nil) == %{
+      assert Fields.declare!({:declared, payload}, {:labels, [name: "Название", note: :hidden]}, nil) == %{
                specs: [name: {:prim, Name}, note: {:type, :string}],
                fields: [name: "Название", note: :hidden],
                change: nil
@@ -114,10 +113,10 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "спека и у нагрузки, и в fields: — CompileError" do
-      payload = Field.normalize!([name: [prim: Name]], :payload, "нагрузка")
+      payload = Core.Field.declare!([name: [prim: Name]], :payload, "нагрузка")
 
-      assert_raise CompileError, ~r/^Labels.Fields: fields: спека поля и у нагрузки события/, fn ->
-        Fields.declare!({:payload, payload}, {:labels, [name: "Название"]}, Fields.fields!(name: [prim: Name]))
+      assert_raise CompileError, ~r/^Labels.Fields: fields: спека поля и у декларативного типа/, fn ->
+        Fields.declare!({:declared, payload}, {:labels, [name: "Название"]}, Fields.fields!(name: [prim: Name]))
       end
     end
 
@@ -128,7 +127,9 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "change: у Core.Es.ValueChanged — вид значения из его type:" do
-      assert Fields.declare!({:change, [type: Name, nilable: false]}, {:change, "Название"}, nil) ==
+      changed = Core.Es.ValueChanged.core_fields(Name, false)
+
+      assert Fields.declare!({:declared, changed}, {:change, "Название"}, nil) ==
                %{specs: [], fields: [], change: {"Название", {:prim, Name}}}
     end
 
@@ -247,7 +248,7 @@ defmodule Core.Labels.FieldsTest do
 
   describe "спека fields:" do
     test "у нагрузки события — CompileError" do
-      assert_raise CompileError, ~r/^Labels.Fields: fields: спека поля и у нагрузки события.*\[:name\]$/, fn ->
+      assert_raise CompileError, ~r/^Labels.Fields: fields: спека поля и у декларативного типа.*\[:name\]$/, fn ->
         compile_payload(:Both,
           labels: [name: "Название", note: :hidden],
           fields: [name: [prim: Core.LabelsFixture.Name]]
@@ -588,9 +589,9 @@ defmodule Core.Labels.FieldsTest do
                    end
     end
 
-    test "value: у Core.Es.ValueChanged — CompileError" do
+    test "value: у типа с декларацией изменения — CompileError" do
       assert_raise CompileError,
-                   ~r/^Labels.Fields: `value:` у `Core.Es.ValueChanged` — вид значения задаёт его `type:`$/,
+                   ~r/^Labels.Fields: `value:` у типа с декларацией изменения — вид значения задаёт декларация/,
                    fn ->
                      compile_value_changed(:Typed, change: "Название", value: [prim: Core.LabelsFixture.Name])
                    end
@@ -758,7 +759,7 @@ defmodule Core.Labels.FieldsTest do
 
     test "fields: рядом со структурой — CompileError" do
       assert_raise CompileError,
-                   ~r/^Labels.Fields: fields: спека поля и у структуры по полям.*\[:name\]$/,
+                   ~r/^Labels.Fields: fields: спека поля и у декларативного типа.*\[:name\]$/,
                    fn ->
                      compile_core_struct(:Twice,
                        fields: [name: [prim: Core.LabelsFixture.Name]],
@@ -804,12 +805,14 @@ defmodule Core.Labels.FieldsTest do
     end
 
     test "change: и value: — CompileError" do
-      assert_raise CompileError, ~r/^Labels.Fields: `value:` у структуры по полям — вид значения задаёт/, fn ->
-        compile_core_change(:ChangedValue, [old_value: [prim: Name], new_value: [prim: Name]],
-          change: "Название",
-          value: [prim: Core.LabelsFixture.Count]
-        )
-      end
+      assert_raise CompileError,
+                   ~r/^Labels.Fields: `value:` у типа с декларацией изменения — вид значения задаёт декларация/,
+                   fn ->
+                     compile_core_change(:ChangedValue, [old_value: [prim: Name], new_value: [prim: Name]],
+                       change: "Название",
+                       value: [prim: Core.LabelsFixture.Count]
+                     )
+                   end
     end
 
     test "change: и разный вид old_value / new_value — CompileError" do
@@ -848,6 +851,23 @@ defmodule Core.Labels.FieldsTest do
       compile_payload(:HiddenMap, [labels: [name: "Название", note: :hidden]], :map)
 
     assert Fields.specs(module) == [name: {:prim, Name}]
+  end
+
+  test "использование модуля — вопрос интроспекции, а не роли хоста" do
+    module = Core.LabelsFixture.PersonalPlace
+
+    assert Fields.specs(module) == [name: {:prim, Name}, phones: {:list, {:prim, Core.PrimFixture.Personal}}]
+    assert Fields.paths(module) == [{[:name], "Имя"}, {[:phones], "Телефоны"}]
+  end
+
+  test "ручной struct: fields: разбирается общим конструктором, personal: допустим" do
+    {{:module, module, _bytecode, _result}, _binding} =
+      compile_struct(:PersonalFields,
+        fields: [city: [prim: Name, personal: true], zip: [type: :string]],
+        labels: [city: "Город", zip: "Индекс"]
+      )
+
+    assert Fields.specs(module) == [city: {:prim, Name}, zip: {:type, :string}]
   end
 
   # ---

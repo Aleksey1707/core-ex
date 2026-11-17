@@ -241,6 +241,22 @@ defmodule Core.LabelsFixture do
       ]
   end
 
+  defmodule PersonalPlace do
+    @moduledoc "Декларативный тип с ПДн-местами: подписи читают общую декларацию, места в спеке сняты."
+
+    use Core.Struct,
+      fields: [
+        name: [prim: Core.LabelsFixture.Name, personal: true],
+        phones: [list: [prim: Core.PrimFixture.Personal, personal: true]]
+      ]
+
+    use Core.Labels.Fields,
+      labels: [
+        name: "Имя",
+        phones: "Телефоны"
+      ]
+  end
+
   defmodule Line do
     @moduledoc "Позиция — элемент списка struct'ов."
 
@@ -1010,9 +1026,7 @@ defmodule Core.LabelsFixture do
             new_value: [prim: LabelsFixture.Holder, subject: :aggregate_id]
           ]
 
-        use Core.Labels.Fields,
-          change: "Владелец",
-          value: [prim: LabelsFixture.Holder]
+        use Core.Labels.Fields, change: "Владелец"
       end
 
       use Core.Es.Event,
