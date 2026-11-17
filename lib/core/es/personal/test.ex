@@ -93,9 +93,16 @@ defmodule Core.Es.Personal.Test do
   # ---
 
   defp body(%{"payload" => %{} = payload} = wire, fun),
-    do: through_json(%{wire | "payload" => Map.new(payload, fn {key, value} -> {key, fun.(value)} end)})
+    do: through_json(%{wire | "payload" => walk(payload, fun)})
 
   defp body(wire, _fun), do: through_json(wire)
+
+  # Маркер — на любом ПДн-месте нагрузки: значения и элементы списков обходятся рекурсивно.
+  defp walk(%Marker{} = marker, fun), do: fun.(marker)
+  defp walk(%_{} = value, _fun), do: value
+  defp walk(map, fun) when is_map(map), do: Map.new(map, fn {key, value} -> {key, walk(value, fun)} end)
+  defp walk(list, fun) when is_list(list), do: Enum.map(list, &walk(&1, fun))
+  defp walk(value, _fun), do: value
 
   # Тело — то, что прочтёт `Jason.decode` из файла: строковые ключи, даты строкой.
   defp through_json(wire), do: Jason.decode!(Jason.encode!(wire))

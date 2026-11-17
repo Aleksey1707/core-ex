@@ -8,7 +8,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   `new/1` Prim. Устаревшую форму состояния отсекает маркер, битую — сверка ключей struct с
   `defstruct`, `id` и версии — с адресом строки.
 
-  У агрегата с ПДн в событиях (`__es_subjects__/0` кодека не пуст) снапшот — одно ПДн-значение
+  У агрегата с ПДн в событиях (`__es_personal__/0` кодека не пуст) снапшот — одно ПДн-значение
   субъекта `aggregate_id` (ADR-0076): `term_to_binary` состояния целиком шифрует `seal` хранилища
   ключей (`Core.Es.Personal.Port`), AAD — `Core.Es.Personal.Port.address/1` над типом агрегата,
   `aggregate_id`, версией и маркером. Признак шифрованного снапшота входит в маркер.
@@ -43,20 +43,20 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
   # ===== опции =====
 
   @doc """
-  Опция `snapshot:` → настройка снапшотов; `subjects` — `__es_subjects__/0` кодека событий.
+  Опция `snapshot:` → настройка снапшотов; `plan` — ПДн-план кодека событий (`__es_personal__/0`).
 
-  Неверная опция и субъект ПДн-поля не `:aggregate_id` — `CompileError`.
+  Неверная опция и ПДн-место не под `:aggregate_id` (в том числе вложенное) — `CompileError`.
   """
-  @spec opts!(term(), %{optional(module()) => [{atom(), atom()}]}, String.t()) :: Settings.t()
+  @spec opts!(term(), %{optional(module()) => [Core.Es.Personal.Plan.entry()]}, String.t()) :: Settings.t()
 
-  def opts!(opts, subjects, label) when is_map(subjects) and is_binary(label) do
+  def opts!(opts, plan, label) when is_map(plan) and is_binary(label) do
     label = "#{label}: snapshot"
     Helper.Opts.validate!(opts, @required_keys, @optional_keys, label)
 
     %Settings{
       every: every!(Keyword.fetch!(opts, :every), label),
       version: version!(Keyword.get(opts, :version, @default_version), label),
-      sealed: sealed!(subjects, label)
+      sealed: sealed!(plan, label)
     }
   end
 
@@ -74,18 +74,19 @@ defmodule Core.Es.Aggregate.Repo.Pg.Snapshot do
 
   # Снапшот — одно ПДн-значение одного субъекта: ПДн другого субъекта под ключом агрегата не
   # уничтожались бы вместе со своим ключом.
-  defp sealed!(subjects, label) do
-    fields = for {mod, fields} <- subjects, {field, subject} <- fields, subject != :aggregate_id, do: {mod, field}
+  defp sealed!(plan, label) do
+    places =
+      for {mod, entries} <- plan, %{path: path, subject: subject} <- entries, subject != :aggregate_id, do: {mod, path}
 
-    case Enum.sort(fields) do
+    case Enum.sort(places) do
       [] ->
-        subjects != %{}
+        plan != %{}
 
-      fields ->
+      places ->
         Helper.Opts.reject!(
           label,
           "субъект ПДн-поля — поле нагрузки, а не :aggregate_id: " <>
-            Enum.map_join(fields, ", ", fn {mod, field} -> "#{inspect(mod)}.#{field}" end)
+            Enum.map_join(places, ", ", fn {mod, path} -> "#{inspect(mod)}.#{Enum.join(path, ".")}" end)
         )
     end
   end

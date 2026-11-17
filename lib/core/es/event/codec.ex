@@ -34,16 +34,12 @@ defmodule Core.Es.Event.Codec do
   субъект — ближайший `subject:`, по умолчанию `:aggregate_id`). Кодек отдаёт его
   `__es_personal__/0`.
 
-  На этом шаге шифрование ещё верхнеуровневое: маркер ставится только на поле с `subject:`
-  (ADR-0073, ADR-0074), рекурсивные маркеры — `Personal.Wire` (тикет 07). Поэтому:
-
-  - `dump` кладёт на место значения поля с `subject:` `%Core.Es.Personal.Marker{}` — дамп
-    субъекта и wire-значение поля; `nil` необязательного поля остаётся `nil`,
-    `%Core.Es.Personal.Destroyed{}` — маркер уничтоженного значения. На прочих ПДн-местах
-    уничтоженное значение — отказ записи, непустое значение при `nil` в поле-субъекте — тоже;
-  - `load` превращает `{"$pd": null}` на ПДн-месте шага в `%Core.Es.Personal.Destroyed{}` и
-    редактирует `detail` ошибки поля. `{"$pd": null}` вне ПДн-места — `:invalid_value`,
-    `{"$pd": "<строка>"}` в любом поле — `:sealed_personal_value` (`ns: :codec`).
+  Маркеры ставятся на каждом месте плана: `dump` кладёт на место значения
+  `%Core.Es.Personal.Marker{}` — дамп субъекта и wire-значение места; `nil` необязательного места
+  остаётся `nil`, `%Core.Es.Personal.Destroyed{}` верхнеуровневого поля с `subject:` — маркер
+  уничтоженного значения. Нагрузка-Prim с ПДн — место в корне payload, нагрузка-сущность — места
+  её полей. Шифрование и расшифровку вложенных маркеров делает `Core.Es.Personal.Wire` (ADR-0073,
+  ADR-0074).
 
   `dump_payload/2` или `load_payload/3` в модуле кодека — `CompileError`: нестандартная
   wire-форма нагрузки живёт в плагине её типа, а не в кодеке событий (ADR-0060).
@@ -428,11 +424,28 @@ defmodule Core.Es.Event.Codec do
         }
 
   def personal(derived) when is_list(derived) do
-    for {event, _payload, {:fields, fields}} <- derived,
-        entries = Core.Es.Personal.Plan.entries(fields),
+    for {event, payload, derivation} <- derived,
+        entries = payload_entries(payload, derivation),
         entries != [],
         into: %{},
         do: {event, entries}
+  end
+
+  # Нагрузка-Prim и нагрузка-сущность: ПДн-место — сам payload (путь `[]`), у сущности с общей
+  # декларацией — места её полей от корня payload.
+  @doc false
+  @spec payload_entries(module(), derivation()) :: [Core.Es.Personal.Plan.entry()]
+
+  def payload_entries(_payload, {:fields, fields}), do: Core.Es.Personal.Plan.entries(fields)
+
+  def payload_entries(payload, :prim),
+    do: if(payload.__domain_personal__(), do: [%{path: [], subject: :aggregate_id}], else: [])
+
+  def payload_entries(payload, :plugin) do
+    case Core.Field.introspect(payload) do
+      nil -> []
+      fields -> Core.Es.Personal.Plan.entries(fields)
+    end
   end
 
   # Временный адаптер `__es_subjects__/0`: потребители (снапшоты, проекции, процесс агрегата,
@@ -498,10 +511,41 @@ defmodule Core.Es.Event.Codec do
 
   def dump_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, codec} = {var(:payload), var(:codec)}
+    entries = payload_entries(payload, kind)
+    aggregate? = Enum.any?(entries, &(&1.subject == :aggregate_id))
+    aggregate_id = var(:aggregate_id)
 
-    {[quote(generated: true, do: %unquote(event){payload: %unquote(payload){} = unquote(value)}), codec],
-     quote(generated: true, do: is_atom(unquote(codec))),
-     quote(generated: true, do: unquote(codec).dump(unquote(value)))}
+    inner = quote(do: %unquote(payload){} = unquote(value))
+
+    head =
+      if aggregate?,
+        do: quote(do: %unquote(event){payload: unquote(inner), aggregate_id: unquote(aggregate_id)}),
+        else: quote(do: %unquote(event){payload: unquote(inner)})
+
+    guard =
+      if aggregate?,
+        do: quote(generated: true, do: is_atom(unquote(codec)) and not is_nil(unquote(aggregate_id))),
+        else: quote(generated: true, do: is_atom(unquote(codec)))
+
+    dumped =
+      quote do
+        unquote(codec).dump(unquote(value))
+      end
+
+    body =
+      case entries do
+        [] ->
+          dumped
+
+        entries ->
+          quoted = Macro.escape(entries)
+
+          quote generated: true do
+            Core.Es.Event.Payload.mark_payload(unquote(dumped), unquote(quoted), unquote(aggregate_id_wire(aggregate?)))
+          end
+      end
+
+    {[head, codec], guard, body}
   end
 
   @doc false
@@ -794,6 +838,17 @@ defmodule Core.Es.Event.Codec do
       true -> :plugin
     end
   end
+
+  defp aggregate_id_wire(true) do
+    codec = var(:codec)
+    aggregate_id = var(:aggregate_id)
+
+    quote generated: true do
+      unquote(codec).dump(unquote(aggregate_id))
+    end
+  end
+
+  defp aggregate_id_wire(false), do: nil
 
   defp var(name), do: Macro.var(name, __MODULE__)
 

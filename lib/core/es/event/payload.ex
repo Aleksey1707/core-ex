@@ -52,8 +52,9 @@ defmodule Core.Es.Event.Payload do
     `Core.Field.introspect/1`.
 
   Кодирует такую нагрузку `Core.Es.Event.Codec` клаузами, которые собирает этот модуль из
-  поштучных блоков значения поля `Core.Codec.Plugin.Fields`: на месте поля с `subject:` — маркер
-  `{"$pd": …}` (ADR-0073, ADR-0074). Рекурсивные маркеры и `Personal.Wire` — тикет 07.
+  поштучных блоков значения поля `Core.Codec.Plugin.Fields`: дамп оставляет значения открытыми,
+  затем по `__es_personal__/0` каждое ПДн-место заменяется `%Core.Es.Personal.Marker{}` с
+  субъектом и wire-значением (ADR-0073, ADR-0074). Шифрует маркеры `Core.Es.Personal.Wire`.
 
   Макрос занимает в модуле имя `@es_payload_fields`: поля спеки нагрузки, которая ещё
   собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей.
@@ -259,17 +260,18 @@ defmodule Core.Es.Event.Payload do
     Fields.and_guards([quote(generated: true, do: is_atom(unquote(Fields.codec_var()))) | guards])
   end
 
-  @doc "Тело дампа нагрузки события: на месте значения поля с `subject:` — `%Core.Es.Personal.Marker{}`."
+  @doc """
+  Тело дампа нагрузки события: wire-карта открытых значений, затем маркеры ПДн-мест по плану.
+
+  Значение поля с `subject:`, равное `%Core.Es.Personal.Destroyed{}`, остаётся маркером
+  уничтоженного значения: писатель wire падает на нём, а не пишет открытый текст.
+  """
   @spec dump_body([Core.Field.t()]) :: Macro.t()
 
   def dump_body(fields) do
     pairs =
-      Enum.map(fields, fn
-        %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: nil} ->
-          {wire, Fields.dump_value_ir(spec, Fields.var(name), optional?)}
-
-        %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: subject} ->
-          {wire, marker(spec, Fields.var(name), optional?, subject)}
+      Enum.map(fields, fn %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: subject} ->
+        {wire, dump_field(spec, Fields.var(name), optional?, subject)}
       end)
 
     body = quote(generated: true, do: %{unquote_splicing(pairs)})
@@ -290,15 +292,40 @@ defmodule Core.Es.Event.Payload do
             allow: unquote(Macro.escape(allow))
           )
 
-          unquote(body)
+          Core.Es.Personal.Plan.mark!(
+            unquote(body),
+            unquote(Macro.escape(entries)),
+            unquote(marked_aggregate_id(fields))
+          )
         end
     end
   end
 
   # ---
 
+  defp dump_field(spec, value, optional?, nil), do: Fields.dump_value_ir(spec, value, optional?)
+
+  defp dump_field(spec, value, optional?, subject) do
+    subject = quote(generated: true, do: unquote(Fields.codec_var()).dump(unquote(subject_var(subject))))
+
+    quote generated: true do
+      case unquote(value) do
+        %Core.Es.Personal.Destroyed{} ->
+          %Core.Es.Personal.Marker{subject: unquote(subject), destroyed: true}
+
+        _ ->
+          unquote(Fields.dump_value_ir(spec, value, optional?))
+      end
+    end
+  end
+
+  defp marked_aggregate_id(fields) do
+    if aggregate_subject?(fields),
+      do: quote(generated: true, do: unquote(Fields.codec_var()).dump(unquote(aggregate_id_var())))
+  end
+
   defp aggregate_subject?(fields),
-    do: Enum.any?(fields, &(subject_name(&1.subject) == :aggregate_id))
+    do: Enum.any?(Plan.entries(fields), &(&1.subject == :aggregate_id))
 
   defp dump_pattern(%Core.Field{subject: nil} = field), do: Fields.dump_pattern_ir(field)
   defp dump_pattern(%Core.Field{name: name}), do: {name, Fields.var(name)}
@@ -338,27 +365,9 @@ defmodule Core.Es.Event.Payload do
   # Событие, собранное литералом мимо `new`, — без идентификатора агрегата: ПДн-значение с субъектом
   # `:aggregate_id` без него не дампится.
   defp aggregate_guards(fields) do
-    for %Core.Field{name: name, subject: subject} <- fields,
-        subject_name(subject) == :aggregate_id do
-      quote(generated: true, do: is_nil(unquote(Fields.var(name))) or not is_nil(unquote(aggregate_id_var())))
-    end
-  end
-
-  defp marker(spec, value, optional?, subject) do
-    subject = quote(generated: true, do: unquote(Fields.codec_var()).dump(unquote(subject_var(subject))))
-
-    clauses =
-      quote generated: true do
-        %Core.Es.Personal.Destroyed{} ->
-          %Core.Es.Personal.Marker{subject: unquote(subject), destroyed: true}
-
-        unquote(value) ->
-          %Core.Es.Personal.Marker{subject: unquote(subject), value: unquote(Fields.dump_value_ir(spec, value, false))}
-      end
-
-    clauses = if optional?, do: quote(generated: true, do: (nil -> nil)) ++ clauses, else: clauses
-
-    quote(generated: true, do: case(unquote(value), do: unquote(clauses)))
+    if aggregate_subject?(fields),
+      do: [quote(generated: true, do: not is_nil(unquote(aggregate_id_var())))],
+      else: []
   end
 
   defp subject_var(:aggregate_id), do: aggregate_id_var()
@@ -368,6 +377,25 @@ defmodule Core.Es.Event.Payload do
   defp aggregate_id_var, do: Macro.var(:aggregate_id, __MODULE__)
 
   defp ir_payload_var, do: Macro.var(:ir_payload, __MODULE__)
+
+  # ===== маркеры нагрузки-Prim и нагрузки-сущности =====
+
+  @doc """
+  Wire-значение нагрузки-Prim/сущности → маркеры ПДн-мест по плану кодека.
+
+  Корневое место (`path: []`) — сам payload: значение целиком становится маркером. У сущности
+  с общей декларацией маркеры ставятся на её поля от корня payload.
+  """
+  @spec mark_payload(term(), [Core.Es.Personal.Plan.entry()], String.t() | nil) :: term()
+
+  def mark_payload(wire, [%{path: [], subject: :aggregate_id}], aggregate_id) when is_binary(aggregate_id) do
+    if is_nil(wire), do: nil, else: %Core.Es.Personal.Marker{subject: aggregate_id, value: wire}
+  end
+
+  def mark_payload(wire, entries, aggregate_id) when is_map(wire),
+    do: Plan.mark!(wire, entries, aggregate_id)
+
+  def mark_payload(wire, _entries, _aggregate_id), do: wire
 
   # ===== load =====
 

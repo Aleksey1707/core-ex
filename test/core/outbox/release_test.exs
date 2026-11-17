@@ -74,7 +74,7 @@ defmodule Core.Outbox.ReleaseTest do
       clear_outbox([id])
 
       assert capture_io(fn -> Release.republish_since(:core, @since) end) ==
-               "Переопубликовано в accounts: 1\nПереопубликовано в fixture: 0\n"
+               "Переопубликовано в accounts: 1\nПереопубликовано в fixture: 0\nПереопубликовано в itineraries: 0\n"
 
       assert outbox_rows([derived]) == []
     end

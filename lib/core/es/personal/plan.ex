@@ -6,6 +6,7 @@ defmodule Core.Es.Personal.Plan do
   # для обхода значения), проверки объявления и runtime-отказы записи.
 
   alias Core.Es.Personal.Destroyed
+  alias Core.Es.Personal.Marker
   alias Core.Field
   alias Core.Helper.Opts
 
@@ -64,7 +65,76 @@ defmodule Core.Es.Personal.Plan do
         do: {Map.fetch!(by_wire, wire), subject_name(subject, by_wire)}
   end
 
+  # Маркеры ПДн-значений по плану на dumped wire-карте нагрузки: открытое значение места
+  # заменяется `%Core.Es.Personal.Marker{}` с субъектом; `nil` необязательного места остаётся
+  # `nil`, готовый маркер (уничтоженное значение верхнеуровневого поля) не перезаписывается.
+  @doc false
+  @spec mark!(map(), [entry()], String.t() | nil) :: map()
+
+  def mark!(payload, entries, aggregate_id)
+      when is_map(payload) and is_list(entries) and (is_binary(aggregate_id) or is_nil(aggregate_id)) do
+    Enum.reduce(entries, payload, &mark_entry(&2, &1, payload, aggregate_id))
+  end
+
   # ---
+
+  defp mark_entry(payload, %{path: path, subject: subject}, root, aggregate_id) do
+    mark_at(payload, path, [], %{[] => root}, fn value, ancestors ->
+      marker(value, subject_value(subject, ancestors, root, aggregate_id))
+    end)
+  end
+
+  defp mark_at(value, [], _decl, ancestors, fun), do: fun.(value, ancestors)
+
+  defp mark_at(value, [:each | rest], decl, ancestors, fun) when is_list(value) do
+    Enum.map(
+      value,
+      &mark_at(&1, rest, decl ++ [:each], Map.put(ancestors, decl ++ [:each], &1), fun)
+    )
+  end
+
+  defp mark_at(value, [:each | rest], decl, ancestors, fun) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {key, inner} ->
+      {key, mark_at(inner, rest, decl ++ [:each], Map.put(ancestors, decl ++ [:each], inner), fun)}
+    end)
+  end
+
+  defp mark_at(value, [step | rest], decl, ancestors, fun)
+       when is_atom(step) and is_map(value) and not is_struct(value) do
+    key = Atom.to_string(step)
+
+    case Map.fetch(value, key) do
+      {:ok, inner} ->
+        Map.put(value, key, mark_at(inner, rest, decl ++ [step], Map.put(ancestors, decl ++ [step], inner), fun))
+
+      :error ->
+        value
+    end
+  end
+
+  defp mark_at(value, _path, _decl, _ancestors, _fun), do: value
+
+  defp marker(nil, _subject), do: nil
+  defp marker(%Marker{} = marker, _subject), do: marker
+  defp marker(value, subject), do: %Marker{subject: subject, value: value}
+
+  defp subject_value(:aggregate_id, _ancestors, _root, aggregate_id), do: aggregate_id
+
+  defp subject_value({:path, path}, ancestors, root, _aggregate_id) do
+    prefix = longest_prefix(path, ancestors)
+
+    path
+    |> Enum.drop(length(prefix))
+    |> Enum.reduce(Map.get(ancestors, prefix, root), fn
+      :each, acc -> acc
+      step, acc -> wire_fetch(acc, step)
+    end)
+  end
+
+  # Субъект плана резолвится по dumped wire-карте: её ключи — строки, шаг пути — атом wire-ключа.
+  defp wire_fetch(%{} = value, step) when is_atom(step), do: Map.get(value, Atom.to_string(step))
+  defp wire_fetch(%{} = value, step), do: Map.get(value, step)
+  defp wire_fetch(_value, _step), do: nil
 
   defp validate_fields(fields, scope, root, prefix, plan, uuid_prim, where) do
     Enum.each(fields, fn %Field{} = field ->
@@ -311,14 +381,18 @@ defmodule Core.Es.Personal.Plan do
     end)
   end
 
+  defp fetch(%{} = value, step), do: Map.get(value, step)
+  defp fetch(_value, _step), do: nil
+
+  defp label(path), do: Enum.map_join(path, ".", &if(&1 == :each, do: "each", else: Atom.to_string(&1)))
+
+  # ===== общее =====
+
+  # Путь плана и путь значения: префикс, на котором сошлись место и субъект (в том числе общий
+  # `:each` элемента списка).
   defp longest_prefix(path, ancestors) do
     size = length(path)
 
     Enum.find(Enum.map(0..size, &Enum.take(path, size - &1)), &Map.has_key?(ancestors, &1))
   end
-
-  defp fetch(%{} = value, step), do: Map.get(value, step)
-  defp fetch(_value, _step), do: nil
-
-  defp label(path), do: Enum.map_join(path, ".", &if(&1 == :each, do: "each", else: Atom.to_string(&1)))
 end

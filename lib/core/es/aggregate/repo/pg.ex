@@ -98,8 +98,8 @@ defmodule Core.Es.Aggregate.Repo.Pg do
     `Logger.warning`, успех — `Logger.debug`. `append` снапшоты не пишет.
   - Правку кода, от которого `evolve` зависит вне этих модулей, маркер не видит — поднять
     `version:`.
-  - Агрегат с ПДн в событиях (`__es_subjects__/0` кодека не пуст): `snapshot:` — только если у
-    всех ПДн-полей `subject: :aggregate_id`. Снапшот шифруется всегда — `term_to_binary` состояния
+  - Агрегат с ПДн в событиях (`__es_personal__/0` кодека не пуст): `snapshot:` — только если у
+    всех ПДн-мест `subject: :aggregate_id`, включая вложенные. Снапшот шифруется всегда — `term_to_binary` состояния
     одним ПДн-значением субъекта `aggregate_id` через порт хранилища ключей, AAD — тип, id, версия
     и маркер; признак входит в маркер. Шифротексты снапшотов расшифровываются тем же вызовом
     `open`, что и ПДн-значения хвоста: ключ уничтожен — отказ на `debug` и полная свёртка,
@@ -367,7 +367,7 @@ defmodule Core.Es.Aggregate.Repo.Pg do
 
   defp snapshot!(opts, event_codec) do
     case Keyword.fetch(opts, :snapshot) do
-      {:ok, snapshot} -> Snapshot.opts!(snapshot, event_codec.__es_subjects__(), @label)
+      {:ok, snapshot} -> Snapshot.opts!(snapshot, event_codec.__es_personal__(), @label)
       :error -> nil
     end
   end

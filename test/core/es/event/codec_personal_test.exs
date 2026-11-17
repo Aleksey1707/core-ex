@@ -174,13 +174,13 @@ defmodule Core.Es.Event.CodecPersonalTest do
   end
 
   describe "set: и map: с subject:" do
-    test "dump: маркер множества — список по wire элемента, маркер словаря — объект" do
+    test "dump: маркер множества — список по wire элемента, значения словаря — по месту" do
       event = contacted(["+7 900 000-00-02", "+7 900 000-00-01"], %{"дом" => "+7 900 000-00-03"})
       subject = InCodec.dump(event.aggregate_id)
 
       assert %{"contacts" => contacts, "contact_by_kind" => by_kind} = InCodec.dump(event)["payload"]
       assert contacts == %Marker{subject: subject, value: ["+7 900 000-00-01", "+7 900 000-00-02"]}
-      assert by_kind == %Marker{subject: subject, value: %{"дом" => "+7 900 000-00-03"}}
+      assert by_kind == %{"дом" => %Marker{subject: subject, value: "+7 900 000-00-03"}}
     end
 
     test "открытый текст маркера множества — по wire элемента до шифрования, а не по обходу MapSet" do
@@ -201,13 +201,15 @@ defmodule Core.Es.Event.CodecPersonalTest do
       assert InCodec.load(Contacted, Personal.Test.fixtures(without).open) == {:ok, without}
     end
 
-    test "{\"$pd\": null} → %Destroyed{} на месте множества и словаря целиком" do
-      %{destroyed: wire} = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], %{}))
+    test "{\"$pd\": null}: множество — целиком, значение словаря — по месту" do
+      %{destroyed: wire} = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], %{"дом" => "+7 900 000-00-03"}))
 
-      assert %{"contacts" => %{"$pd" => nil}, "contact_by_kind" => %{"$pd" => nil}} = wire["payload"]
+      assert %{"contacts" => %{"$pd" => nil}, "contact_by_kind" => %{"дом" => %{"$pd" => nil}}} = wire["payload"]
 
-      assert {:ok, %Contacted{payload: %{contacts: %Destroyed{}, contact_by_kind: %Destroyed{}}}} =
-               InCodec.load(Contacted, wire)
+      %{destroyed: only_set} = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], nil))
+
+      assert {:ok, %Contacted{payload: %{contacts: %Destroyed{}, contact_by_kind: nil}}} =
+               InCodec.load(Contacted, only_set)
     end
 
     test "detail ошибки элемента и значения словаря редактируется" do

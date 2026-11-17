@@ -187,8 +187,8 @@ defmodule Core.Es.Aggregate.Process do
       type: {:or, [:pos_integer, {:in, [:infinity]}]},
       type_doc: "`t:pos_integer/0` или `:infinity`",
       doc:
-        "Предельный возраст состояния процесса на id, мс. У агрегата с ПДн в событиях (поле с `subject:` " <>
-          "у кодека, `__es_subjects__/0`) — по умолчанию 300 000, `:infinity` — `ArgumentError`; у агрегата " <>
+        "Предельный возраст состояния процесса на id, мс. У агрегата с ПДн в событиях (ПДн-план " <>
+          "кодека, `__es_personal__/0`) — по умолчанию 300 000, `:infinity` — `ArgumentError`; у агрегата " <>
           "без ПДн — по умолчанию `:infinity`. При `enabled: false` не действует: кеша нет."
     ]
   ]
@@ -202,7 +202,7 @@ defmodule Core.Es.Aggregate.Process do
         }
 
   @typedoc """
-  Объявление `use`: реализация репозитория, агрегат, его тип, ПДн в событиях (поля с `subject:` у
+  Объявление `use`: реализация репозитория, агрегат, его тип, ПДн в событиях (непустой ПДн-план
   кодека) и имена процессов дерева.
   """
   @type cfg :: %{
@@ -247,7 +247,7 @@ defmodule Core.Es.Aggregate.Process do
         repo: Core.Config.repo!(unquote(behaviour)),
         aggregate: unquote(aggregate),
         type: unquote(event_codec.__es_type__()),
-        personal: unquote(event_codec.__es_subjects__() != %{}),
+        personal: unquote(event_codec.__es_personal__() != %{}),
         registry: unquote(child_name(process, "Registry")),
         supervisor: unquote(child_name(process, "Supervisor"))
       }

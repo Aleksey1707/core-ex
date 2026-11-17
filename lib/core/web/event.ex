@@ -433,12 +433,15 @@ defmodule Core.Web.Event do
 
   # ---
 
-  # Маркер ПДн-значения стоит только среди полей нагрузки верхнего уровня (ADR-0073).
-  defp open(payload) when is_map(payload), do: Map.new(payload, fn {key, value} -> {key, open_value(value)} end)
-  defp open(payload), do: payload
+  # Маркеры ПДн-значений дампа стоят на местах нагрузки любой глубины (ADR-0073): снимаются
+  # рекурсивно — у значения-маркера открытая часть, у уничтоженного — признак.
+  defp open(payload), do: open_value(payload)
 
   defp open_value(%Marker{destroyed: true}), do: %{"$destroyed" => true}
   defp open_value(%Marker{value: value}), do: value
+  defp open_value(%_{} = value), do: value
+  defp open_value(map) when is_map(map), do: Map.new(map, fn {key, value} -> {key, open_value(value)} end)
+  defp open_value(list) when is_list(list), do: Enum.map(list, &open_value/1)
   defp open_value(value), do: value
 
   defp by(dumped, _by, _refs, nil), do: dumped
