@@ -27,8 +27,8 @@ defmodule Core.Outbox.Record do
       locked_until: [prim: Core.Outbox.LockedUntil, optional: true, default: nil],
       lease_id: [prim: Core.Outbox.LeaseID, optional: true, default: nil],
       published_at: [prim: Core.Outbox.PublishedAt, optional: true, default: nil],
-      errors: [list: [entity: Core.Outbox.RecordError], default: []],
-      headers: [type: :map, optional: true, default: nil],
+      errors: [list: [entity: Core.Outbox.RecordError]],
+      headers: [map: [key: [type: :string], value: [type: :string]], optional: true, default: nil],
       created_at: [prim: Core.Outbox.CreatedAt],
       updated_at: [prim: Core.Outbox.UpdatedAt, optional: true, default: nil]
     ]
