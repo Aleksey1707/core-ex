@@ -2,12 +2,14 @@ defmodule Core.Es.Personal.Test do
   @moduledoc """
   Тестовая поддержка ПДн в событиях без БД и без хранилища ключей (ADR-0074, ADR-0078).
 
-  - `destroyed/2` — нагрузка или событие с `%Core.Es.Personal.Destroyed{}` в полях с `subject:`:
-    вход `evolve/2` через `fold/2`, `given` и прямого `project/1`. `new/N` нагрузки уничтоженное
-    значение не принимает, а литерал `%Payload{}` поставил бы его и в поле без `subject:`, чего
-    в хранилище не бывает.
+  - `destroyed/2` — нагрузка или событие с `%Core.Es.Personal.Destroyed{}` на каждом ПДн-месте
+    плана (`__es_personal__/0`): вход `evolve/2` через `fold/2`, `given` и прямого `project/1`.
+    `new/N` нагрузки уничтоженное значение не принимает, а литерал `%Payload{}` поставил бы его и
+    вне ПДн-места, чего в хранилище не бывает.
   - `fixtures/1` — тела golden-фикстур события: открытой `<тег>.json` и уничтоженного варианта
-    `destroyed/<тег>.json`. Файлы пишет автор.
+    `destroyed/<тег>.json`. Обе формы строятся по ПДн-плану: открытая — открытые wire-значения
+    мест, уничтоженная — `{"$pd": null}` на каждом месте (в том числе вложенном). Файлы пишет
+    автор.
   - `key_destroyed/2` — событие уничтожения ключа субъекта (ADR-0079): вход прямого `project/1`
     проекции, которая его объявила.
 
@@ -17,7 +19,6 @@ defmodule Core.Es.Personal.Test do
 
   import Core.Guard, only: [is_prim: 1]
 
-  alias Core.Codec.Field
   alias Core.Config
   alias Core.Error
   alias Core.Es
@@ -25,6 +26,7 @@ defmodule Core.Es.Personal.Test do
   alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Event.KeyDestroyed
   alias Core.Es.Personal.Marker
+  alias Core.Es.Personal.Plan
   alias Core.Exc
 
   use Core.Options
@@ -35,11 +37,11 @@ defmodule Core.Es.Personal.Test do
   # ===== уничтоженное значение =====
 
   @doc """
-  Нагрузка (`new/N`) или событие с нагрузкой по полям → то же с `%Destroyed{}` в полях с
-  `subject:`: во всех (`:all`) или в перечисленных.
+  Нагрузка (`new/N`) или событие с нагрузкой по полям → то же с `%Destroyed{}` на каждом ПДн-месте
+  плана: во всех (`:all`) или в местах перечисленных полей верхнего уровня.
 
-  `nil` необязательного поля остаётся `nil`: незаполненное значение не шифруется, и уничтожение
-  ключа его не меняет. Поле без `subject:` или нагрузка без таких полей — `ArgumentError`.
+  `nil` необязательного места остаётся `nil`: незаполненное значение не шифруется, и уничтожение
+  ключа его не меняет. Поле без ПДн-места или нагрузка без мест — `ArgumentError`.
   """
   @spec destroyed(struct(), :all | [atom()]) :: struct()
 
@@ -51,22 +53,45 @@ defmodule Core.Es.Personal.Test do
 
   # ---
 
+  defp destroy(nil, _fields), do: raise(ArgumentError, "nil: нет полей с subject:")
+
   defp destroy(%mod{} = payload, fields) do
-    mod
-    |> names!(subject_fields(mod), fields)
-    |> Enum.reject(&is_nil(Map.fetch!(payload, &1)))
-    |> Enum.reduce(payload, &Map.put(&2, &1, %Destroyed{}))
+    entries = names!(Plan.runtime_places(mod), mod, fields)
+
+    Enum.reduce(entries, payload, &destroy_at(&2, &1.path))
   end
 
-  defp names!(mod, [], _fields), do: raise(ArgumentError, "#{inspect(mod)}: нет полей с subject:")
-  defp names!(_mod, subjects, :all), do: subjects
+  defp names!(entries, mod, fields), do: names!(entries, roots(entries), mod, fields)
 
-  defp names!(mod, subjects, fields) do
-    case fields -- subjects do
-      [] -> fields
+  defp names!([], _roots, mod, _fields), do: raise(ArgumentError, "#{inspect(mod)}: нет полей с subject:")
+  defp names!(entries, _roots, _mod, :all), do: entries
+
+  defp names!(entries, roots, mod, fields) do
+    case fields -- roots do
+      [] -> Enum.filter(entries, &(root(&1) in fields))
       other -> raise ArgumentError, "#{inspect(mod)}: поля #{inspect(other)} без subject:"
     end
   end
+
+  defp roots(entries), do: Enum.uniq(Enum.map(entries, &root/1))
+  defp root(%{path: []}), do: :payload
+  defp root(%{path: [step | _rest]}), do: step
+
+  defp destroy_at(value, []), do: if(is_nil(value), do: nil, else: %Destroyed{})
+
+  defp destroy_at(list, [:each | rest]) when is_list(list),
+    do: Enum.map(list, &destroy_at(&1, rest))
+
+  defp destroy_at(map, [:each | rest]) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {key, value} -> {key, destroy_at(value, rest)} end)
+
+  defp destroy_at(%_{} = struct, [step | rest]) when is_atom(step),
+    do: Map.put(struct, step, destroy_at(Map.fetch!(struct, step), rest))
+
+  defp destroy_at(map, [step | rest]) when is_map(map) and is_atom(step),
+    do: Map.put(map, step, destroy_at(Map.fetch!(map, step), rest))
+
+  defp destroy_at(value, _path), do: value
 
   # ===== тела фикстур =====
 
@@ -74,28 +99,27 @@ defmodule Core.Es.Personal.Test do
   Тела golden-фикстур события (ADR-0078): дамп фасадом `Core.Config.codec/0` в форме JSON-файла.
 
   - `open` — конверт после расшифровки: на месте ПДн-значения его открытое wire-значение;
-  - `destroyed` — тот же конверт с `{"$pd": null}` на месте каждого ПДн-значения; `nil` у события
-    без полей с `subject:`. `null` необязательного поля остаётся `null`, и такой вариант
-    `Core.Es.EventCompatCase` не примет: поля с `subject:` в фикстуре заполняются.
+  - `destroyed` — тот же конверт с `{"$pd": null}` на каждом ПДн-месте плана (`__es_personal__/0`),
+    в том числе вложенном; `nil` у события без ПДн-мест. `null` необязательного места остаётся
+    `null`, и такой вариант `Core.Es.EventCompatCase` не примет: места в фикстуре заполняются.
   """
   @spec fixtures(Es.Event.t()) :: fixtures()
 
   def fixtures(%mod{} = event) do
     wire = Config.codec().dump(event)
 
-    destroyed =
-      if subject_fields(mod.__es_payload__()) != [],
-        do: body(wire, &destroyed_value/1)
+    destroyed = if plan(mod) != [], do: through_json(walk(wire, &destroyed_value/1))
 
-    %{open: body(wire, &open_value/1), destroyed: destroyed}
+    %{open: through_json(walk(wire, &open_value/1)), destroyed: destroyed}
   end
 
   # ---
 
-  defp body(%{"payload" => %{} = payload} = wire, fun),
-    do: through_json(%{wire | "payload" => walk(payload, fun)})
-
-  defp body(wire, _fun), do: through_json(wire)
+  defp plan(mod) when is_atom(mod) do
+    if Core.Helper.Module.exports?(mod, :__es_family__, 0),
+      do: Map.get(mod.__es_family__().__es_codec__().__es_personal__(), mod, []),
+      else: []
+  end
 
   # Маркер — на любом ПДн-месте нагрузки: значения и элементы списков обходятся рекурсивно.
   defp walk(%Marker{} = marker, fun), do: fun.(marker)
@@ -137,13 +161,5 @@ defmodule Core.Es.Personal.Test do
       {:ok, %KeyDestroyed{} = event} -> event
       {:error, %Error{} = error} -> raise Exc, error
     end
-  end
-
-  # ===== общее =====
-
-  defp subject_fields(payload) do
-    if Core.Helper.Module.exports?(payload, :__es_payload_fields__, 0),
-      do: Keyword.keys(Field.subjects(payload.__es_payload_fields__())),
-      else: []
   end
 end

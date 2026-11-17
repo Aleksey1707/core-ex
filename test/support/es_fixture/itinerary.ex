@@ -57,6 +57,15 @@ defmodule Core.EsFixture.Itinerary do
         recipient: [prim: Core.EsFixture.Itinerary.Recipient],
         content: [prim: Core.EsFixture.Itinerary.Content]
       ]
+
+    use Core.Labels.Fields,
+      labels: [
+        channel: "Канал",
+        status: "Статус",
+        attempts: "Попытки",
+        recipient: "Получатель",
+        content: "Содержимое"
+      ]
   end
 
   defmodule Step.Codec do

@@ -71,16 +71,12 @@ defmodule Core.Es.Event.PayloadPersonalTest do
   end
 
   describe "ПДн-план и защита записи" do
-    test "__es_personal__/0 — места с путями и субъектами; __es_subjects__/0 — временный адаптер" do
+    test "__es_personal__/0 — места с путями и субъектами, в том числе вложенные" do
       assert Core.PersonalBrokenFixture.Event.Codec.__es_personal__() == %{
                Core.PersonalBrokenFixture.Event.ContactAdded => [
                  %{path: [:contact, :phone], subject: :aggregate_id}
                ],
                Core.PersonalBrokenFixture.Event.Named => [%{path: [:name], subject: :aggregate_id}]
-             }
-
-      assert Core.PersonalBrokenFixture.Event.Codec.__es_subjects__() == %{
-               Core.PersonalBrokenFixture.Event.Named => [name: :aggregate_id]
              }
     end
 

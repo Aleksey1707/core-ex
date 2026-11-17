@@ -48,6 +48,7 @@ defmodule Core.CodecFixture do
     Core.LabelsFixture.Codec,
     Core.LabelsFixture.Event.Limited.Codec,
     Core.PersonalBrokenFixture.Contact.Codec,
+    Core.PersonalBrokenFixture.Leak.Codec,
     Core.PersonalBrokenFixture.Event.Codec,
     Core.EsFixture.Itinerary.Event.Codec,
     Core.EsFixture.Itinerary.Step.Codec,

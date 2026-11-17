@@ -62,11 +62,20 @@ defmodule Core.Es.EventCompatCaseTest do
   end
 
   describe "check_personal_fields/3" do
-    test "персональный Prim во вложенной сущности поля без subject: — путь к значению" do
-      path = Path.join(@personal, "personal_broken.contact_added.json")
+    test "персональный Prim вне ПДн-места плана — путь к значению" do
+      path = Path.join(@personal, "personal_broken.leaky.json")
 
-      assert {:error, %{failed: [{^path, %{personal: [[:payload, :contact, :phone]]}}]}} =
+      assert {:error, %{failed: [{^path, %{personal: [[:payload, :leak, :phone]]}}]}} =
                EventCompatCase.check_personal_fields(PersonalBrokenFixture.Event.Codec, @personal, InCodec)
+    end
+
+    test "вложенное ПДн-место плана открытой фикстуры — не утечка" do
+      assert :ok =
+               EventCompatCase.check_personal_fields(
+                 Core.EsFixture.Account.Event.Codec,
+                 "test/support/fixtures/events",
+                 InCodec
+               )
     end
   end
 

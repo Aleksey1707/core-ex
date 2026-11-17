@@ -6,6 +6,8 @@ defmodule Core.Web.Event.DetailsTest do
   alias Core.CodecFixture.External
   alias Core.Es.Event.At
   alias Core.Es.Personal
+  alias Core.EsFixture.Itinerary
+  alias Core.EsFixture.Itinerary.Event.Planned
   alias Core.EventFixture.AggID
   alias Core.LabelsFixture.Address
   alias Core.LabelsFixture.Amount
@@ -346,11 +348,34 @@ defmodule Core.Web.Event.DetailsTest do
                "details" => [
                  destroyed("Владелец"),
                  destroyed("Адрес"),
-                 destroyed("Псевдонимы"),
+                 list("Псевдонимы", [%{"kind" => "destroyed"}]),
                  destroyed("Учётная запись"),
                  destroyed("Лимиты")
                ]
              }
+    end
+
+    test "вложенное уничтоженное место — destroyed в группе шага, открытые поля открыты" do
+      event = planned()
+
+      assert wire(Personal.Test.destroyed(event), %{event.by => "Автор"})["details"] == [
+               %{
+                 "label" => "Шаги",
+                 "kind" => "list",
+                 "value" => [
+                   %{
+                     "kind" => "group",
+                     "value" => [
+                       %{"label" => "Канал", "kind" => "text", "value" => "sms"},
+                       %{"label" => "Статус", "kind" => "text", "value" => "pending"},
+                       %{"label" => "Попытки", "kind" => "number", "value" => "1"},
+                       %{"label" => "Получатель", "kind" => "destroyed"},
+                       %{"label" => "Содержимое", "kind" => "destroyed"}
+                     ]
+                   }
+                 ]
+               }
+             ]
     end
 
     test "уничтоженная сторона изменения — элемент destroyed без подписи" do
@@ -447,6 +472,24 @@ defmodule Core.Web.Event.DetailsTest do
       )
 
     event(Event.Contacted, payload)
+  end
+
+  defp planned do
+    step = %Itinerary.Step{
+      channel: "sms",
+      status: "pending",
+      attempts: 1,
+      recipient: Itinerary.Recipient.new!("Иван"),
+      content: Itinerary.Content.new!("Код")
+    }
+
+    Planned.new(
+      Planned.Payload.new([step]),
+      Itinerary.ID.new(),
+      Version.new!(1),
+      Core.EsFixture.UserID.new(),
+      At.new!(~U[2026-11-18 09:00:00.000000Z])
+    )
   end
 
   defp day, do: Day.new!(~D[2026-10-13])

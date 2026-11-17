@@ -109,6 +109,30 @@ defmodule Core.Es.ProjectionCaseTest do
     def clear, do: :ok
   end
 
+  defmodule ItineraryBroken do
+    @moduledoc false
+
+    # Обрабатывает только живые ПДн-значения вложенных мест: уничтоженное — FunctionClauseError.
+    use Core.Es.Projection,
+      name: "projection_case_itinerary_broken",
+      events: [Core.EsFixture.Itinerary.Event.Planned, KeyDestroyed]
+
+    @impl true
+    def project(%Core.EsFixture.Itinerary.Event.Planned{payload: %{steps: steps}}) do
+      Enum.each(steps, fn %{
+                            recipient: %Core.EsFixture.Itinerary.Recipient{},
+                            content: %Core.EsFixture.Itinerary.Content{}
+                          } ->
+        :ok
+      end)
+    end
+
+    def project(%KeyDestroyed{}), do: :ok
+
+    @impl true
+    def clear, do: :ok
+  end
+
   describe "check_destroyed/2" do
     test "проекция принимает уничтоженное значение — :ok" do
       assert :ok = ProjectionCase.check_destroyed(EsFixture.Projection, @fixtures)
@@ -121,8 +145,15 @@ defmodule Core.Es.ProjectionCaseTest do
                ProjectionCase.check_destroyed(EsFixture.PersonalBrokenProjection, @fixtures)
     end
 
-    test "событий с полями subject: нет — :ok" do
+    test "событий с ПДн-местами нет — :ok" do
       assert :ok = ProjectionCase.check_destroyed(Silent, @fixtures)
+    end
+
+    test "забытая обработка уничтоженного вложенного места — провал теста" do
+      path = Path.join(@fixtures, "itinerary/itinerary.planned.json")
+
+      assert {:error, %{destroyed_failed: [{^path, %FunctionClauseError{}}]}} =
+               ProjectionCase.check_destroyed(ItineraryBroken, @fixtures)
     end
   end
 

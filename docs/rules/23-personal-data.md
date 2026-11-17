@@ -126,7 +126,8 @@ fields: [recipient_id: [prim: Order.RecipientID], address: [entity: Order.Addres
 Кодек событий на `dump` кладёт на место значения поля с `subject:` маркер
 `%Core.Es.Personal.Marker{}` — идентификатор субъекта и wire-значение поля. JSON маркер не
 кодирует (`Jason.Encoder` поднимает исключение без значения), `inspect/1` показывает только
-субъекта. Поля с `subject:` по событиям отдаёт `__es_subjects__/0` кодека событий.
+субъекта. ПДн-план по событиям — пути и субъекты, в том числе вложенные места, — отдаёт
+`__es_personal__/0` кодека событий.
 
 Проверяется: `test/core/es/event/payload_personal_test.exs` — `CompileError` разметки;
 `test/core/es/event/codec_personal_test.exs`, describe «dump» и «нагрузка».

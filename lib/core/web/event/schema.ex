@@ -55,7 +55,9 @@ if Code.ensure_loaded?(OpenApiSpex) do
         payload: %OpenApiSpex.Schema{
           nullable: true,
           description:
-            "Нагрузка события, ключи — camelCase; уничтоженное ПДн-значение " <> ~s(поля — {"$destroyed": true})
+            "Нагрузка события, ключи — camelCase; на каждом ПДн-месте, в том числе вложенном " <>
+              "(свойство сущности, элемент списка, значение словаря), уничтоженное значение — " <>
+              ~s({"$destroyed": true})
         },
         at: %OpenApiSpex.Schema{type: :string, format: :"date-time", description: "Момент события"},
         by: by(user)

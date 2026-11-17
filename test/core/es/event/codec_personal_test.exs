@@ -17,12 +17,17 @@ defmodule Core.Es.Event.CodecPersonalTest do
   @holder "Иван Петров"
   @contact "+7 900 000-00-00"
 
-  describe "__es_subjects__/0" do
-    test "поля subject: по модулю события; событий без них в карте нет" do
-      assert Account.Event.Codec.__es_subjects__() == %{Account.Event.HolderSet => [holder: :aggregate_id]}
+  describe "__es_personal__/0" do
+    test "ПДн-места по модулю события; событий без них в карте нет" do
+      assert Account.Event.Codec.__es_personal__() == %{
+               Account.Event.HolderSet => [%{path: [:holder], subject: :aggregate_id}]
+             }
 
-      assert EventFixture.Event.Codec.__es_subjects__() == %{
-               EventFixture.Event.ContactSet => [contact: :person_id, note: :aggregate_id]
+      assert EventFixture.Event.Codec.__es_personal__() == %{
+               EventFixture.Event.ContactSet => [
+                 %{path: [:contact], subject: {:path, [:person_id]}},
+                 %{path: [:note], subject: :aggregate_id}
+               ]
              }
     end
   end

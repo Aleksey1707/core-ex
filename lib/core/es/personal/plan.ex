@@ -64,17 +64,19 @@ defmodule Core.Es.Personal.Plan do
     for %{path: [^step | rest]} = entry <- entries, do: %{entry | path: rest}
   end
 
-  # Временный адаптер `__es_subjects__/0`: только места верхнего уровня, субъект — `:aggregate_id`
-  # или имя поля нагрузки. Уходит вместе с переездом потребителей (07/08).
+  # План нагрузки по её модулю: `:places` — пути wire-ключей объявления (план события),
+  # `:runtime_places` — имена полей (обход значения). Нагрузка-Prim с `personal: true` — корневое
+  # место `path: []`; сущность/плагин с общей декларацией — места её полей; у нагрузки без ПДн —
+  # пусто. Один обход декларации `Core.Field.personal_places/3`, не второй.
   @doc false
-  @spec subjects([Field.t()]) :: [{atom(), atom()}]
+  @spec places(module()) :: [entry()]
 
-  def subjects(fields) when is_list(fields) do
-    by_wire = Map.new(fields, &{wire_step(&1.wire), &1.name})
+  def places(payload) when is_atom(payload), do: payload_places(payload, :wire)
 
-    for %{path: [wire], subject: subject} <- entries(fields),
-        do: {Map.fetch!(by_wire, wire), subject_name(subject, by_wire)}
-  end
+  @doc false
+  @spec runtime_places(module()) :: [entry()]
+
+  def runtime_places(payload) when is_atom(payload), do: payload_places(payload, :name)
 
   # Маркеры ПДн-значений по плану на dumped wire-карте нагрузки: открытое значение места
   # заменяется `%Core.Es.Personal.Marker{}` с субъектом; `nil` необязательного места остаётся
@@ -296,8 +298,18 @@ defmodule Core.Es.Personal.Plan do
   defp uuid_spec?({:personal_false, inner}, uuid_prim), do: uuid_spec?(inner, uuid_prim)
   defp uuid_spec?(_spec, _uuid_prim), do: false
 
-  defp subject_name(:aggregate_id, _by_wire), do: :aggregate_id
-  defp subject_name({:path, [wire | _rest]}, by_wire), do: Map.get(by_wire, wire, wire)
+  defp payload_places(payload, key) do
+    cond do
+      Core.Prim.prim?(payload) ->
+        if payload.__domain_personal__(), do: [%{path: [], subject: :aggregate_id}], else: []
+
+      fields = Field.introspect(payload) ->
+        Field.personal_places(fields, [], key: key)
+
+      true ->
+        []
+    end
+  end
 
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   defp wire_step(wire) when is_binary(wire), do: String.to_atom(wire)

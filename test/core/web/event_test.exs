@@ -8,6 +8,8 @@ defmodule Core.Web.EventTest do
   alias Core.Error
   alias Core.Es.Event.At
   alias Core.Es.Personal
+  alias Core.EsFixture.Itinerary
+  alias Core.EsFixture.Itinerary.Event.Planned
   alias Core.EventFixture
   alias Core.EventFixture.AggID, as: EventAggID
   alias Core.LabelsFixture
@@ -88,6 +90,40 @@ defmodule Core.Web.EventTest do
                json(Plain.to_wire(Personal.Test.destroyed(contacted(person, nil)), %{}))
     end
 
+    test "вложенное уничтоженное место — {\"$destroyed\": true} по пути, соседние поля открыты" do
+      event = planned()
+      wire = Plain.to_wire(Personal.Test.destroyed(event), %{})
+
+      assert %{
+               payload: %{
+                 "steps" => [
+                   %{
+                     "channel" => "sms",
+                     "status" => "pending",
+                     "attempts" => 1,
+                     "recipient" => %{"$destroyed" => true},
+                     "content" => %{"$destroyed" => true}
+                   }
+                 ]
+               }
+             } = wire
+
+      assert json(wire)["payload"]["steps"] == [
+               %{
+                 "channel" => "sms",
+                 "status" => "pending",
+                 "attempts" => 1,
+                 "recipient" => %{"$destroyed" => true},
+                 "content" => %{"$destroyed" => true}
+               }
+             ]
+    end
+
+    test "живое вложенное ПДн — открытым wire-значением" do
+      assert %{payload: %{"steps" => [%{"recipient" => "Иван", "content" => "Код"}]}} =
+               Plain.to_wire(planned(), %{})
+    end
+
     test "Jason.encode дампа в обход Core.Web.Event — отказ на маркере без значения" do
       for event <- [contacted(UserID.new(), nil), Personal.Test.destroyed(contacted(UserID.new(), nil))] do
         assert {:error, %Protocol.UndefinedError{} = error} = Jason.encode(External.dump(event))
@@ -104,6 +140,8 @@ defmodule Core.Web.EventTest do
           do: assert_schema(json(Plain.to_wire(event, %{})), "Plain", spec)
 
       assert schema.properties.payload.description =~ ~s({"$destroyed": true})
+      assert schema.properties.payload.description =~ "вложенном"
+      assert schema.properties.payload.type == nil and schema.properties.payload.nullable == true
     end
   end
 
@@ -462,6 +500,24 @@ defmodule Core.Web.EventTest do
       )
 
     LabelsEvent.Linked.new(payload, EventAggID.new(), Version.new(), by, At.now!())
+  end
+
+  defp planned do
+    step = %Itinerary.Step{
+      channel: "sms",
+      status: "pending",
+      attempts: 1,
+      recipient: Itinerary.Recipient.new!("Иван"),
+      content: Itinerary.Content.new!("Код")
+    }
+
+    Planned.new(
+      Planned.Payload.new([step]),
+      Itinerary.ID.new(),
+      Version.new!(1),
+      Core.EsFixture.UserID.new(),
+      At.new!(~U[2026-11-18 09:00:00.000000Z])
+    )
   end
 
   defp user_ref, do: [dump: &WithUser.user_ref/2, schema: UserRef]

@@ -2,10 +2,16 @@ defmodule Core.Es.Personal.TestTest do
   use ExUnit.Case, async: true
 
   alias Core.CodecFixture.Internal, as: InCodec
+  alias Core.Es
   alias Core.Es.Personal
   alias Core.Es.Personal.Destroyed
   alias Core.EsFixture.Account
+  alias Core.EsFixture.Itinerary
+  alias Core.EsFixture.Itinerary.Event.Planned
+  alias Core.EsFixture.Itinerary.Event.RecipientChanged
+  alias Core.EsFixture.UserID
   alias Core.EventFixture
+  alias Core.Version
 
   describe "destroyed/2" do
     test "событие — %Destroyed{} во всех полях с subject:, остальное как есть" do
@@ -49,6 +55,15 @@ defmodule Core.Es.Personal.TestTest do
         Personal.Test.destroyed(EventFixture.created())
       end
     end
+
+    test "вложенные места списка — %Destroyed{} на каждом, открытые поля шага целы" do
+      event = planned([step("sms", "pending", 1), step("push", "sent", 2)])
+
+      assert %Planned{payload: %Planned.Payload{steps: [first, second]}} = Personal.Test.destroyed(event)
+
+      assert %{recipient: %Destroyed{}, content: %Destroyed{}, channel: "sms", status: "pending"} = first
+      assert %{recipient: %Destroyed{}, content: %Destroyed{}, channel: "push", status: "sent"} = second
+    end
   end
 
   describe "fixtures/1" do
@@ -87,5 +102,72 @@ defmodule Core.Es.Personal.TestTest do
 
       assert %{destroyed: nil} = Personal.Test.fixtures(EventFixture.closed())
     end
+
+    test "вложенные места: открытая форма — открытые значения, уничтоженная — {\"$pd\": null} по пути" do
+      event = planned([step("sms", "pending", 1), step("push", "sent", 2)])
+      %{open: open, destroyed: destroyed} = Personal.Test.fixtures(event)
+
+      assert %{
+               "payload" => %{
+                 "steps" => [
+                   %{"recipient" => "Иван", "content" => "Код", "channel" => "sms"},
+                   %{"recipient" => "Иван", "content" => "Код", "channel" => "push"}
+                 ]
+               }
+             } = open
+
+      assert %{
+               "payload" => %{
+                 "steps" => [
+                   %{"recipient" => %{"$pd" => nil}, "content" => %{"$pd" => nil}, "channel" => "sms"},
+                   %{"recipient" => %{"$pd" => nil}, "content" => %{"$pd" => nil}, "channel" => "push"}
+                 ]
+               }
+             } = destroyed
+
+      assert InCodec.load(Planned, open) == {:ok, event}
+      assert InCodec.load(Planned, destroyed) == {:ok, Personal.Test.destroyed(event)}
+    end
+
+    test "нагрузка-Prim: уничтоженная форма — {\"$pd\": null} в корне payload" do
+      event = recipient_changed()
+      %{open: open, destroyed: destroyed} = Personal.Test.fixtures(event)
+
+      assert %{"payload" => "Иван"} = open
+      assert %{"payload" => %{"$pd" => nil}} = destroyed
+    end
+  end
+
+  # ---
+
+  defp planned(steps) do
+    Planned.new(
+      Planned.Payload.new(steps),
+      Itinerary.ID.new(),
+      Version.new!(1),
+      UserID.new(),
+      Es.Event.At.new!(~U[2026-11-18 09:00:00.000000Z])
+    )
+  end
+
+  defp step(channel, status, attempts),
+    do: %Itinerary.Step{
+      channel: channel,
+      status: status,
+      attempts: attempts,
+      recipient: Itinerary.Recipient.new!("Иван"),
+      content: Itinerary.Content.new!("Код")
+    }
+
+  defp recipient_changed do
+    alias Core.EsFixture.Itinerary.Event.RecipientChanged
+
+    RecipientChanged.new(
+      Itinerary.Recipient.new!("Иван"),
+      Itinerary.ID.new(),
+      Version.new!(1),
+      UserID.new(),
+      Es.Event.At.new!(~U[2026-11-18 09:00:00.000000Z])
+    )
   end
 end

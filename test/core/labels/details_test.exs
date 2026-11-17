@@ -3,6 +3,8 @@ defmodule Core.Labels.DetailsTest do
 
   alias Core.Es.Event.At
   alias Core.Es.Personal
+  alias Core.EsFixture.Itinerary
+  alias Core.EsFixture.Itinerary.Event.Planned
   alias Core.EventFixture.AggID
   alias Core.Labels.Details
   alias Core.LabelsFixture.Address
@@ -486,7 +488,7 @@ defmodule Core.Labels.DetailsTest do
               [
                 %{label: "Владелец", kind: :destroyed},
                 %{label: "Адрес", kind: :destroyed},
-                %{label: "Псевдонимы", kind: :destroyed},
+                %{label: "Псевдонимы", kind: :list, value: [%{kind: :destroyed}]},
                 %{label: "Учётная запись", kind: :destroyed},
                 %{label: "Лимиты", kind: :destroyed}
               ]}
@@ -501,6 +503,46 @@ defmodule Core.Labels.DetailsTest do
                   kind: :change,
                   old: %{kind: :destroyed},
                   new: %{kind: :text, value: Holder.new!("Аня")}
+                }
+              ]}
+  end
+
+  test "вложенное уничтоженное место — destroyed по пути, открытые поля шага и соседние элементы видны" do
+    step = %Itinerary.Step{
+      channel: "sms",
+      status: "pending",
+      attempts: 1,
+      recipient: Itinerary.Recipient.new!("Иван"),
+      content: Itinerary.Content.new!("Код")
+    }
+
+    event =
+      Planned.new(
+        Planned.Payload.new([step]),
+        Itinerary.ID.new(),
+        Version.new!(1),
+        Core.EsFixture.UserID.new(),
+        At.new!(~U[2026-11-18 09:00:00.000000Z])
+      )
+
+    assert Details.build(Personal.Test.destroyed(event)) ==
+             {"Маршрут спланирован",
+              [
+                %{
+                  label: "Шаги",
+                  kind: :list,
+                  value: [
+                    %{
+                      kind: :group,
+                      value: [
+                        %{label: "Канал", kind: :text, value: "sms"},
+                        %{label: "Статус", kind: :text, value: "pending"},
+                        %{label: "Попытки", kind: :number, value: 1},
+                        %{label: "Получатель", kind: :destroyed},
+                        %{label: "Содержимое", kind: :destroyed}
+                      ]
+                    }
+                  ]
                 }
               ]}
   end

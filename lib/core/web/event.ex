@@ -54,12 +54,15 @@ defmodule Core.Web.Event do
   элемента списка, стороны изменения и стороны неподписанного словаря `label` нет; значения нет —
   `value: nil`.
 
-  Маркеры ПДн-значений дампа (`Core.Es.Personal.Marker`, поля с `subject:`) снимает сам `to_wire/2`
-  (ADR-0074): живое значение уходит открытым wire-значением — права на него проверил usecase, —
-  уничтоженное — `{"$destroyed": true}` на месте поля целиком, любого вида. Ключ `$destroyed`
-  camelize не меняет и с wire-ключом поля не совпадает. Сведение поля с уничтоженным значением —
-  вида `"destroyed"` с подписью и без `value`, у стороны изменения — `%{kind: "destroyed"}`. Свой
-  `Jason.encode` дампа в обход `to_wire/2` на маркере отказывает, и значения в тексте отказа нет.
+  Маркеры ПДн-значений дампа (`Core.Es.Personal.Marker`) снимает сам `to_wire/2` (ADR-0074): живое
+  значение уходит открытым wire-значением — права на него проверил usecase, — уничтоженное —
+  `{"$destroyed": true}` на месте ПДн-значения целиком, любого вида. То же — для
+  `%Core.Es.Personal.Destroyed{}` после `load`: он стоит на каждом ПДн-месте плана, в том числе
+  вложенном (свойство сущности, элемент `list:`, значение словаря), и снимается вызовом дампа
+  чтения по общей декларации. Ключ `$destroyed` camelize не меняет и с wire-ключом поля не
+  совпадает. Сведение поля с уничтоженным значением — вида `"destroyed"` с подписью и без `value`,
+  у стороны изменения — `%{kind: "destroyed"}`. Свой `Jason.encode` дампа в обход `to_wire/2` на
+  маркере отказывает, и значения в тексте отказа нет.
 
   Автор или id сведений, которых нет в словаре ссылок при `user_ref:`, — `ArgumentError`: словарь
   собирают с той же страницы событий. Без `user_ref:` словарь не читается — подходит и пустой.
@@ -93,6 +96,7 @@ defmodule Core.Web.Event do
   """
 
   alias Core.Es
+  alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Marker
   alias Core.Helper
   alias Core.Labels.Check
@@ -411,9 +415,9 @@ defmodule Core.Web.Event do
   @doc false
   @spec to_wire(struct(), Core.Labels.Refs.t(), module(), user_dump() | nil, boolean()) :: t() | labelled()
 
-  def to_wire(%_{by: by} = event, refs, codec, user_dump, labels?)
+  def to_wire(%mod{by: by} = event, refs, codec, user_dump, labels?)
       when is_map(refs) and is_atom(codec) and is_boolean(labels?) do
-    fields = Es.Event.Codec.to_fields(codec.dump(event))
+    fields = Es.Event.Codec.to_fields(event_wire(mod, event, codec))
 
     wire = %{
       id: fields.id,
@@ -443,6 +447,109 @@ defmodule Core.Web.Event do
   defp open_value(map) when is_map(map), do: Map.new(map, fn {key, value} -> {key, open_value(value)} end)
   defp open_value(list) when is_list(list), do: Enum.map(list, &open_value/1)
   defp open_value(value), do: value
+
+  # Событие после `load` может нести `%Destroyed{}` на вложенном ПДн-месте: фасад такой дамп
+  # отвергает (уничтоженное не пишется в новое событие), поэтому конверт собирается по общей
+  # декларации, а уничтоженное место выходит признаком. Живое ПДн и все прочие значения — обычным
+  # дампом фасада.
+  defp event_wire(mod, event, codec) do
+    if destroyed?(event.payload) do
+      type = mod.__es_family__().__es_codec__().type(mod)
+      Es.Event.Codec.dump_envelope(event, type, read_dump(event.payload, codec), codec)
+    else
+      codec.dump(event)
+    end
+  end
+
+  defp destroyed?(%Destroyed{}), do: true
+  defp destroyed?(%_{} = value), do: destroyed?(Map.from_struct(value))
+  defp destroyed?(map) when is_map(map), do: Enum.any?(map, fn {_key, value} -> destroyed?(value) end)
+  defp destroyed?(list) when is_list(list), do: Enum.any?(list, &destroyed?/1)
+  defp destroyed?(_value), do: false
+
+  defp read_dump(%Destroyed{}, _codec), do: %{"$destroyed" => true}
+
+  defp read_dump(%mod{} = payload, codec) do
+    case Core.Field.introspect(mod) do
+      nil ->
+        codec.dump(payload)
+
+      fields ->
+        places = Core.Field.personal_places(fields, [], key: :name)
+        dump_fields(fields, payload, places, [], codec)
+    end
+  end
+
+  defp dump_fields(fields, struct, places, path, codec) do
+    Map.new(fields, fn %Core.Field{} = field ->
+      {field.wire, dump_field(field, Map.fetch!(struct, field.name), places, path, codec)}
+    end)
+  end
+
+  defp dump_field(%Core.Field{personal: true} = field, value, _places, _path, codec),
+    do: dump_place(field.spec, value, codec)
+
+  defp dump_field(%Core.Field{} = field, value, places, path, codec),
+    do: dump_value(field.spec, value, places, path ++ [field.name], codec)
+
+  defp dump_value(_spec, nil, _places, _path, _codec), do: nil
+
+  defp dump_value(spec, value, places, path, codec) do
+    if Enum.any?(places, &(&1.path == path)),
+      do: dump_place(spec, value, codec),
+      else: dump_open(spec, value, places, path, codec)
+  end
+
+  defp dump_place(_spec, %Destroyed{}, _codec), do: %{"$destroyed" => true}
+  defp dump_place(_spec, nil, _codec), do: nil
+  defp dump_place(spec, value, codec), do: dump_plain(spec, value, codec)
+
+  defp dump_open({:personal, inner}, value, places, path, codec),
+    do: dump_value(inner, value, places, path, codec)
+
+  defp dump_open({:personal_false, inner}, value, places, path, codec),
+    do: dump_value(inner, value, places, path, codec)
+
+  defp dump_open({:entity, mod}, value, places, path, codec) do
+    case Core.Field.introspect(mod) do
+      nil -> codec.dump(value)
+      fields -> dump_fields(fields, value, places, path, codec)
+    end
+  end
+
+  defp dump_open({:list, inner}, list, places, path, codec) when is_list(list),
+    do: Enum.map(list, &dump_value(inner, &1, places, path ++ [:each], codec))
+
+  defp dump_open({:set, inner}, set, _places, _path, codec),
+    do: Core.Codec.Helper.set_wire(Enum.map(set, &dump_plain(inner, &1, codec)))
+
+  defp dump_open({:map, key, value}, map, places, path, codec) when is_map(map) do
+    Map.new(map, fn {k, v} ->
+      {dump_key(key, k, codec), dump_value(value, v, places, path ++ [:each], codec)}
+    end)
+  end
+
+  defp dump_open(spec, value, _places, _path, codec), do: dump_plain(spec, value, codec)
+
+  defp dump_plain(_spec, nil, _codec), do: nil
+  defp dump_plain({:personal, inner}, value, codec), do: dump_plain(inner, value, codec)
+  defp dump_plain({:personal_false, inner}, value, codec), do: dump_plain(inner, value, codec)
+  defp dump_plain({:prim, _mod}, value, codec), do: codec.dump(value)
+  defp dump_plain({:entity, _mod}, value, codec), do: codec.dump(value)
+  defp dump_plain({:union, _family}, value, codec), do: codec.dump(value)
+  defp dump_plain({:list, inner}, list, codec) when is_list(list), do: Enum.map(list, &dump_plain(inner, &1, codec))
+
+  defp dump_plain({:set, inner}, set, codec),
+    do: Core.Codec.Helper.set_wire(Enum.map(set, &dump_plain(inner, &1, codec)))
+
+  defp dump_plain({:map, key, value}, map, codec) when is_map(map) do
+    Map.new(map, fn {k, v} -> {dump_key(key, k, codec), dump_plain(value, v, codec)} end)
+  end
+
+  defp dump_plain(_spec, value, _codec), do: value
+
+  defp dump_key({:enum, _mod}, key, _codec), do: Core.Codec.Helper.enum_key(key)
+  defp dump_key(spec, key, codec), do: dump_plain(spec, key, codec)
 
   defp by(dumped, _by, _refs, nil), do: dumped
 

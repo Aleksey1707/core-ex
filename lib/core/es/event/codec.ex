@@ -331,14 +331,6 @@ defmodule Core.Es.Event.Codec do
 
       def __es_personal__, do: Core.Es.Event.Codec.personal(@es_derived)
 
-      @doc """
-      Временный адаптер до переезда потребителей: только ПДн-места верхнего уровня, субъект —
-      `:aggregate_id` или имя поля нагрузки. Заменяется `__es_personal__/0`.
-      """
-      @spec __es_subjects__() :: %{optional(module()) => [{atom(), atom()}, ...]}
-
-      def __es_subjects__, do: Core.Es.Event.Codec.subjects(@es_derived)
-
       unquote(derived_clauses())
 
       @before_compile Core.Es.Event.Codec
@@ -446,19 +438,6 @@ defmodule Core.Es.Event.Codec do
       nil -> []
       fields -> Core.Es.Personal.Plan.entries(fields)
     end
-  end
-
-  # Временный адаптер `__es_subjects__/0`: потребители (снапшоты, проекции, процесс агрегата,
-  # case-модули) переезжают на `__es_personal__/0` в 07/08.
-  @doc false
-  @spec subjects([{module(), module(), derivation()}]) :: %{optional(module()) => [{atom(), atom()}]}
-
-  def subjects(derived) when is_list(derived) do
-    for {event, _payload, {:fields, fields}} <- derived,
-        pairs = Core.Es.Personal.Plan.subjects(fields),
-        pairs != [],
-        into: %{},
-        do: {event, pairs}
   end
 
   @doc false

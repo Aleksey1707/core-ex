@@ -1,0 +1,13 @@
+{
+  "aggregate_id": "01a09d51-ad99-773b-b084-909caa85367d",
+  "aggregate_version": 3,
+  "at": "2026-10-18T09:12:30Z",
+  "by": "01a09d51-ada0-76db-881b-1fa7beacf3f2",
+  "event_id": "01a09d51-adcf-77a4-9a3b-4c5d6e7f8a9b",
+  "payload": {
+    "leak": {
+      "phone": "+7 900 000-00-00"
+    }
+  },
+  "type": "personal_broken.leaky"
+}

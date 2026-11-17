@@ -36,15 +36,16 @@ defmodule Core.Es.ProjectionCase do
 
   ### Уничтоженное ПДн-значение
 
-  На каждой фикстуре события с полями `subject:` — `project/1` на её уничтоженном варианте
-  (`Core.Es.Personal.Test.destroyed/2`), затем на открытой, каждый в savepoint с откатом. Открытый
-  прошёл, а уничтоженный дал исключение или `{:error, _}` — провал с путём фикстуры и причиной.
+  На каждой фикстуре события с ПДн-местами плана (`__es_personal__/0`), в том числе вложенными —
+  `project/1` на её уничтоженном варианте (`Core.Es.Personal.Test.destroyed/2`), затем на открытой,
+  каждый в savepoint с откатом. Открытый прошёл, а уничтоженный дал исключение или `{:error, _}` —
+  провал с путём фикстуры и причиной.
 
   ### ПДн после уничтожения ключа
 
-  На каждой фикстуре события с полями `subject:`, в savepoint с откатом: `project/1` на фикстуре,
+  На каждой фикстуре события с ПДн-местами плана, в savepoint с откатом: `project/1` на фикстуре,
   затем на событии уничтожения ключа каждого её субъекта, затем поиск открытых строковых
-  wire-значений ПДн-полей фикстуры в строках таблиц, которые изменил прогон. У проекции с
+  wire-значений ПДн-мест фикстуры в строках таблиц, которые изменил прогон. У проекции с
   `personal: false` события уничтожения ключа нет, и поиск идёт сразу после фикстуры. Находка —
   провал с путём фикстуры, таблицей, колонкой и полем нагрузки; отказ `project/1` на событии
   уничтожения ключа — провал с причиной. Фикстура, на которой отказал сам `project/1`, пропускается.
@@ -369,30 +370,46 @@ defmodule Core.Es.ProjectionCase do
 
   # ===== общее =====
 
-  # ПДн-значения фикстуры — маркеры дампа фасадом в полях нагрузки с `subject:`: субъект и открытое
-  # wire-значение. Фикстура без таких полей в проверки ПДн не идёт.
+  # ПДн-значения фикстуры — маркеры дампа на каждом месте плана кодека (`__es_personal__/0`), в том
+  # числе вложенном: субъект и открытое wire-значение. Фикстура без мест в проверки ПДн не идёт.
   defp personal_fixtures(loaded, codec) do
     for {path, %mod{} = event} <- loaded,
-        wires = subject_wires(mod.__es_payload__()),
-        wires != [],
-        do: {path, event, markers(codec.dump(event), wires)}
+        entries = event_entries(mod),
+        entries != [],
+        do: {path, event, markers(codec.dump(event), entries)}
   end
 
-  defp subject_wires(nil), do: []
-
-  defp subject_wires(payload) do
-    if Helper.Module.exports?(payload, :__es_payload_fields__, 0),
-      do:
-        for(
-          %Core.Codec.Field{name: name, wire: wire, subject: subject} <- payload.__es_payload_fields__(),
-          subject,
-          do: {name, wire}
-        ),
+  # План — кодека семейства события: `codec` проекции — фасад приложения, плана у него нет.
+  defp event_entries(mod) do
+    if Helper.Module.exports?(mod, :__es_family__, 0),
+      do: Map.get(mod.__es_family__().__es_codec__().__es_personal__(), mod, []),
       else: []
   end
 
-  defp markers(%{"payload" => %{} = payload}, wires),
-    do: for({name, wire} <- wires, %Marker{} = marker <- [Map.get(payload, wire)], do: {name, marker})
+  # Маркеры по wire-путям плана: `:each` — элемент списка или значение словаря.
+  defp markers(%{"payload" => payload}, entries) when is_list(entries),
+    do: Enum.flat_map(entries, &markers_at(payload, &1.path, &1.path))
+
+  defp markers_at(value, [], path), do: marker(value, path)
+  defp markers_at(list, [:each | rest], path) when is_list(list), do: Enum.flat_map(list, &markers_at(&1, rest, path))
+
+  defp markers_at(map, [:each | rest], path) when is_map(map) and not is_struct(map),
+    do: Enum.flat_map(map, fn {_key, value} -> markers_at(value, rest, path) end)
+
+  defp markers_at(map, [step | rest], path) when is_map(map) and not is_struct(map) and is_atom(step) do
+    case Map.fetch(map, Atom.to_string(step)) do
+      {:ok, value} -> markers_at(value, rest, path)
+      :error -> []
+    end
+  end
+
+  defp markers_at(_value, _path, _plan), do: []
+
+  defp marker(%Marker{} = marker, path), do: [{field(path), marker}]
+  defp marker(_value, _path), do: []
+
+  defp field([]), do: :payload
+  defp field(path), do: List.last(path)
 
   defp project_or_error(projection, event) do
     projection.project(event)
