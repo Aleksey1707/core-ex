@@ -30,6 +30,8 @@ defmodule Consumer.Codec do
     Consumer.Domain.Sales.Order.Event.Codec,
     Consumer.Domain.Sales.Ping.Event.Codec,
     Consumer.Domain.Sales.Grants.Event.Codec,
+    Consumer.Domain.Sales.Itinerary.Event.Codec,
+    Consumer.Domain.Sales.Itinerary.Step.Codec,
     Consumer.Domain.Sales.Account.Card.Codec,
     Consumer.Domain.Sales.Account.Profile.Codec,
     Consumer.Domain.Sales.Account.Profile.Channel.Codec,

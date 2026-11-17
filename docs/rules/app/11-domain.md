@@ -69,29 +69,30 @@ def plugins, do: @plugins
 
 ## Кодек: по полям или ручной
 
-Контракт объявления по полям — `deps/core/docs/rules/11-domain.md`, «Плагин по полям
-(`fields:`)», «Варианты семейства (`variants:`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»;
+Контракт объявления по полям — `deps/core/docs/rules/11-domain.md`, «Плагин по полям»,
+«Варианты семейства (`Core.Union`)» и «Нагрузка по полям (`Core.Es.Event.Payload`)»;
 почему так — `deps/core/docs/adr/0056-codec-plugin-by-fields.md`,
 `deps/core/docs/adr/0057-union-variants-by-address.md`,
 `deps/core/docs/adr/0058-union-field-open-head.md`,
-`deps/core/docs/adr/0059-derived-redump-spec.md`.
+`deps/core/docs/adr/0059-derived-redump-spec.md`, `deps/core/docs/adr/0097-field-constructor.md`.
 
 - Тип, чья wire-форма совпадает с полями один к одному (с точностью до переименования ключа
-  `wire:`), SHOULD объявляться по полям: сущность и агрегат — спекой `fields:` у
-  `use Core.Codec.Plugin`, нагрузка события — `use Core.Es.Event.Payload, fields:`.
+  `wire:`), SHOULD объявляться по полям: поля — в декларации типа (`use Core.Struct`,
+  `use Core.Es.Event.Payload`), плагин регистрирует тип в `types:` и выводит `dump` / `load` из
+  его `__core_fields__/0`.
 - Семейство union, чей вариант узнаётся по адресу в данных (тег тегированной формы, тег и
-  дискриминатор, дискриминатор без обёртки), SHOULD объявляться `variants:`: разбор тега, выбор
-  варианта, `type/1` / `types/0` и ошибки разбора пишет библиотека. Вариант, чьи поля расходятся с
-  wire, — ручной `{Type, адрес}` с колбэками `dump_variant/2` / `load_variant/3`, а не ручной
-  плагин целиком.
-- Поле, которое хранит вариант семейства, SHOULD объявляться видом `union: Family` в спеке полей
-  типа или нагрузки, а не ручной обёрткой над `codec.dump/1` / `codec.load(Family, raw)`: такая
-  обёртка — единственное, что держит тип с остальными полями один к одному ручным. Повреждённую
-  форму и адрес вне семейства отвечает загрузка семейства (`:invalid_value` / `:unknown_tag`), свой
-  код ошибки обёртки уходит.
+  дискриминатор, дискриминатор без обёртки), SHOULD объявляться `use Core.Union, variants:`:
+  разбор тега, выбор варианта, `type/1` / `types/0` и ошибки разбора пишет библиотека. Вариант, чьи
+  поля расходятся с wire, — ручной `{Type, адрес}` с колбэками `dump_variant/2` / `load_variant/3`,
+  а не ручной плагин целиком.
+- Поле, которое хранит вариант семейства, SHOULD объявляться видом `union: Family` в декларации
+  типа, а не ручной обёрткой над `codec.dump/1` / `codec.load(Family, raw)`: такая обёртка —
+  единственное, что держит тип с остальными полями один к одному ручным. Повреждённую форму и
+  адрес вне семейства отвечает загрузка семейства (`:invalid_value` / `:unknown_tag`), свой код
+  ошибки обёртки уходит.
 - `load(Variant, wire)` MUST принимать ту же форму, что отдаёт `dump(variant)`: тегированную форму,
   а не голые поля, — `load(T, dump(x)) == {:ok, x}` и для варианта. Сгенерированная загрузка так и
-  устроена; ручной плагин с асимметричным `load(Variant, поля)` переводится на `variants:`.
+  устроена; ручной плагин с асимметричным `load(Variant, поля)` переводится на `Core.Union`.
 - Ручной плагин — для расхождения сильнее переименования ключа: словарь, вычисляемое или сжатое
   поле, межполевой инвариант, который должен выполняться при загрузке.
 - Нагрузка события — value object со своим плагином — SHOULD объявляться самим типом
@@ -99,8 +100,8 @@ def plugins, do: @plugins
   передаёт её фасаду без клауз. Нестандартная wire-форма нагрузки — ручной плагин её типа в
   `<Aggregate>.Codec`; клаузы `dump_payload/2` / `load_payload/3` в кодеке событий — `CompileError`
   (`deps/core/docs/rules/11-domain.md`, «Нагрузка-сущность»).
-- Спеку пере-дампа jsonb (`Core.Codec.Redump`) типа по полям, варианта и семейства с `variants:`
-  выводит плагин: ручная спека такого типа MUST NOT — View ссылается на тип `jsonb: Type`. Ручной
+- Спеку пере-дампа jsonb (`Core.Codec.Redump`) декларативного типа и семейства выводит плагин:
+  ручная спека такого типа MUST NOT — View ссылается на тип `jsonb: Type`. Ручной
   плагин объявляет спеку колбэком `redump_spec/1`, а не функцией `<форма>_redump_spec/0`; на спеку
   типа другого плагина ручная спека ссылается узлом `{:codec, Type}`, а не вызовом его функции
   (`deps/core/docs/rules/13-repos.md`, «jsonb-нагрузка на read-пути»).
@@ -115,9 +116,15 @@ def load(Order.Item, wire, codec) do
        do: {:ok, %Order.Item{id: id, name: name}}
 end
 
-# хорошо
-use Core.Codec.Plugin,
-  fields: [{Order.Item, id: [prim: Order.Item.ID], name: [prim: Order.Item.Name]}]
+# хорошо — декларация полей у типа, плагин регистрирует тип
+defmodule Order.Item do
+  use Core.Struct,
+    fields: [id: [prim: Order.Item.ID], name: [prim: Order.Item.Name]]
+end
+
+defmodule Order.Codec do
+  use Core.Codec.Plugin, types: [Order.Item]
+end
 
 # плохо — разбор тега и выбор варианта руками
 def load(Order.Discount, wire, codec) when is_map(wire) do
@@ -128,13 +135,16 @@ def load(Order.Discount, wire, codec) when is_map(wire) do
   end
 end
 
-# хорошо — семейство вариантами
-use Core.Codec.Plugin,
-  union: Order.Discount,
-  variants: [
-    {Order.Discount.Fixed, "fixed", amount: [prim: Order.Amount]},
-    {Order.Discount.Percent, "percent", value: [prim: Order.Discount.Rate]}
-  ]
+# хорошо — семейство объявляет варианты в своём модуле
+defmodule Order.Discount do
+  use Core.Union,
+    variants: [
+      {Order.Discount.Fixed, "fixed"},
+      {Order.Discount.Percent, "percent"}
+    ]
+end
+
+use Core.Codec.Plugin, union: Order.Discount
 
 # плохо — поле с вариантом семейства держит тип ручным ради обёртки
 def dump(%Order.Line{id: id, discount: discount}, codec),
@@ -146,9 +156,9 @@ def load(Order.Line, wire, codec) do
        do: {:ok, %Order.Line{id: id, discount: discount}}
 end
 
-# хорошо — поле видом union:
-use Core.Codec.Plugin,
-  fields: [{Order.Line, id: [prim: Order.Line.ID], discount: [union: Order.Discount, optional: true]}]
+# хорошо — поле видом union: в декларации типа
+use Core.Struct,
+  fields: [id: [prim: Order.Line.ID], discount: [union: Order.Discount, optional: true]]
 
 # хорошо — нагрузка-value object: событие объявляет её тип, кодек события клауз не пишет
 use Core.Es.Event,
@@ -163,7 +173,7 @@ def snapshot_redump_spec,
 
 use Core.View, fields: [snapshot: [jsonb: {Order.Line.Codec, :snapshot_redump_spec}]]
 
-# хорошо — спеку выводит плагин по полям, View ссылается на тип
+# хорошо — спеку выводит плагин из декларации типа, View ссылается на тип
 use Core.View, fields: [snapshot: [jsonb: Order.Line]]
 
 # хорошо — ручной плагин: колбэк, чужой тип — ссылкой {:codec, _}

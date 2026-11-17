@@ -238,9 +238,9 @@ config :logger, :default_formatter, metadata: [:request_id, :trace_id, :span_id]
 ## Персональные данные в выводе
 
 Библиотека не выводит ПДн-значение в своей форме ни в лог, ни в span, ни в `%Error{}.detail`, ни в
-отчёт о падении, ни в событие службы учёта ошибок. Своя форма — Prim с `personal: true`, поле
-нагрузки события с `subject:` и маркер ПДн-значения; что скрыто у каждой —
-`23-personal-data.md`, «Разметка» и «Поле нагрузки события (`subject:`)».
+отчёт о падении, ни в событие службы учёта ошибок. Своя форма — Prim с `personal: true`, ПДн-место
+декларации (плейсхолдер `%Core.Es.Personal.Hidden{}`) и маркер ПДн-значения; что скрыто у каждой —
+`23-personal-data.md`, «Разметка» и «ПДн-место».
 
 `%Error{}`, состояние процесса и аргументы, напечатанные через `inspect/1`, значения не несут.
 
@@ -277,7 +277,7 @@ Core.Otel.set_attributes(%{"client.id" => InCodec.dump(client.id)})
 
 Проверяется: `test/core/prim/personal_test.exs` — `refute inspect(...) =~` для Prim и `detail`
 отказа; `test/core/es/event/codec_personal_test.exs` — `inspect/1` нагрузки и маркера, `detail`
-ошибки `load` под полем с `subject:`, `Jason.Encoder` маркера;
+ошибки `load` под ПДн-местом, `Jason.Encoder` маркера;
 `test/core/es/aggregate/process/server_test.exs`, describe «format_status/1», и
 `test/core/es/aggregate/process_test.exs`, тест «raise в decide роняет процесс» — отчёт о падении и
 `:sys.get_status/1` процесса агрегата с ПДн; `test/core/es/personal/events_test.exs`, describe

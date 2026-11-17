@@ -111,14 +111,14 @@ use Core.Es.KeyReservation,
 дальше, решает приложение.
 
 - Подписчик, перекладывающий ПДн события агрегата другого контекста в свой агрегат, MUST
-  размечать поле своего события `subject:` на тот же идентификатор субъекта, что у производителя:
+  размечать поле своего события ПДн-местом с тем же идентификатором субъекта, что у производителя:
   одно уничтожение ключа закрывает оба контекста. Свой идентификатор того же лица MUST NOT — его
   ключ уничтожение у производителя не тронет, и копия ПДн переживёт его.
 - Реакция, которой нужно само ПДн, на уничтоженном значении MUST отвечать `{:skip, reason}`:
   сообщение записано до уничтожения ключа, и ни повтор, ни DLQ значения не вернут. `{:error, _}`
   и `{:reject, _}` на `%Destroyed{}` — MUST NOT.
 - Интеграционное событие — запись outbox, которую собирает usecase, — библиотека не шифрует:
-  разметки `subject:` в нём нет. ПДн в нём SHOULD NOT: это передача ПДн третьему лицу, уничтожение
+  ПДн-мест в нём нет. ПДн в нём SHOULD NOT: это передача ПДн третьему лицу, уничтожение
   ключа до получателя не доходит, и основание передачи — решение приложения.
 - Другое приложение на `:core` — тоже интеграция: хранилище ключей у него своё, и
   `Core.Es.Event.Message.load/2` его сообщения не расшифрует. Ему уходит интеграционное событие, а
@@ -126,10 +126,26 @@ use Core.Es.KeyReservation,
 
 ```elixir
 # плохо — свой идентификатор лица: уничтожение ключа покупателя не закрывает копию телефона
-fields: [contact_id: [prim: <Aggregate>.ContactID], phone: [prim: <Aggregate>.Phone, subject: :contact_id]]
+defmodule Contacted do
+  defmodule Payload do
+    use Core.Es.Event.Payload,
+      fields: [
+        contact_id: [prim: <Aggregate>.ContactID],
+        phone: [prim: <Aggregate>.Phone, subject: {:payload, :contact_id}]
+      ]
+  end
+end
 
 # хорошо — тот же субъект, что в событии производителя
-fields: [customer_id: [prim: <Aggregate>.CustomerID], phone: [prim: <Aggregate>.Phone, subject: :customer_id]]
+defmodule Contacted do
+  defmodule Payload do
+    use Core.Es.Event.Payload,
+      fields: [
+        customer_id: [prim: <Aggregate>.CustomerID],
+        phone: [prim: <Aggregate>.Phone, subject: {:payload, :customer_id}]
+      ]
+  end
+end
 
 # плохо — уничтоженное значение уходит в повтор, а затем в DLQ
 def on_message(%Order.Event.Placed{payload: %{phone: %Destroyed{}}}, _data, _context),

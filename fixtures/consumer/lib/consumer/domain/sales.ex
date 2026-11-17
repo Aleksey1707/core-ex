@@ -6,7 +6,9 @@ defmodule Consumer.Domain.Sales do
     `upcasts:`, модули ключа `NameKey` и из ПДн `HolderKey`, процесс), `Order` (enum `Status` отдельным
     файлом в guard `is_enum/2` самого агрегата), `Ping` (события без нагрузки),
     `Grants` (два события делят модуль нагрузки, нагрузки по полям с `union:` и с `set:` / `map:`,
-    состояние и команда `Cmd.Assign` — структуры по полям с `set:` / `map:`), `NeverFails` и
+    состояние и команда `Cmd.Assign` — структуры по полям с `set:` / `map:`), `Itinerary`
+    (синтетические шаги маршрута: открытые `channel` / `status` / `attempts` рядом с вложенными
+    ПДн-местами `recipient` / `content`; типы чтения и записи шага), `NeverFails` и
     `AlwaysFails` (`decide` никогда не ошибается / только ошибается); события `Parcel` без агрегата
     (владелец потока — struct `Parcel`).
   - Акторы: `Client` — usecases в каталоге каждого агрегата и read-модели.
@@ -27,11 +29,13 @@ defmodule Consumer.Domain.Sales do
       Activity.Client.Usecases,
       AlwaysFails.Client.Usecases,
       Grants.Client.Usecases,
+      Itinerary.Client.Usecases,
       NeverFails.Client.Usecases,
       Order.Client.Usecases,
       Ping.Client.Usecases,
       Account.ID,
       Grants.ID,
+      Itinerary.ID,
       Order.ID,
       Parcel.ID,
       Ping.ID,
@@ -40,11 +44,14 @@ defmodule Consumer.Domain.Sales do
       Values.UserID,
       {Account.Event, []},
       {Grants.Event, []},
+      {Itinerary.Event, []},
       {Order.Event, []},
       {Parcel.Event, []},
       {Ping.Event, []},
       Account.Outbox,
+      Itinerary.Outbox,
       Order.Outbox,
+      Itinerary.Step.Codec,
       Account.Card.Codec,
       Account.Profile.Codec,
       Account.Profile.Channel.Codec,
