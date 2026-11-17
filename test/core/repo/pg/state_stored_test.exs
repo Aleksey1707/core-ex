@@ -544,8 +544,12 @@ defmodule Core.Repo.Pg.StateStoredTest do
       :telemetry.attach(
         handler,
         Telemetry.event([:es, :personal, :call]),
-        fn _event, _measurements, metadata, _config -> send(test, {:personal_call, metadata.op}) end,
-        nil
+        fn _event, _measurements, metadata, config ->
+          # Порт зовётся в процессе вызывающего: события соседних async-тестов в почту этого теста
+          # не попадают, иначе `refute_received` ловит чужой вызов.
+          if self() == config, do: send(test, {:personal_call, metadata.op})
+        end,
+        self()
       )
 
     on_exit(fn -> :telemetry.detach(handler) end)
