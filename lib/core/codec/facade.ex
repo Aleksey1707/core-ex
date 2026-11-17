@@ -151,6 +151,12 @@ defmodule Core.Codec.Facade do
         end
 
         @doc false
+        @spec __codec_prim__() :: module()
+
+        @impl true
+        def __codec_prim__, do: @prim
+
+        @doc false
         if Core.Codec.Facade.redump?(@plugins),
           do: @spec(__codec_redump__(module()) :: Core.Codec.Redump.spec()),
           else: @spec(__codec_redump__(module()) :: no_return())

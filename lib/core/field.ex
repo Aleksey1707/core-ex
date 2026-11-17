@@ -293,6 +293,11 @@ defmodule Core.Field do
     if Core.Helper.Module.exports?(module, :__core_fields__, 0), do: module.__core_fields__()
   end
 
+  @doc false
+  @spec union_variants(module()) :: [Core.Union.Variant.t()]
+
+  def union_variants(family) when is_atom(family), do: Core.Union.variants(family)
+
   # ===== типы =====
 
   @doc false
@@ -383,35 +388,46 @@ defmodule Core.Field do
     end
   end
 
-  # Семейство без реестра вариантов (`Core.Union`) типа записи не даёт: остаётся `struct()`, как и в
-  # типе чтения. Вариант-Prim — свой `t()`, вариант-структура — `write_t()`.
+  # Семейство без реестра вариантов (`Core.Union`) типа записи не даёт: остаётся `struct()`.
+  # Варианты — из `__core_variants__/0`, у плагина-семейства без реестра — из `types/0`.
   defp union_write_type(family) do
-    case union_variants(family) do
+    case union_write_variants(family) do
       [] -> quote(do: struct())
       variants -> Grammar.union_type(Enum.map(variants, &variant_write_type/1))
     end
   end
 
-  defp union_variants(family) do
-    cond do
-      Helper.Module.exports?(family, :__core_variants__, 0) ->
-        variants = Enum.map(family.__core_variants__(), &variant_module/1)
-        Enum.reject(variants, &is_nil/1)
-
-      Helper.Module.exports?(family, :types, 0) ->
-        for mod <- List.wrap(family.types()), is_atom(mod), do: mod
-
-      true ->
-        []
+  defp union_write_variants(family) do
+    case union_variants(family) do
+      [] -> plugin_write_variants(family)
+      variants -> Enum.map(variants, &{&1.module, &1.kind})
     end
   end
 
-  defp variant_module({mod, _rest}) when is_atom(mod), do: mod
-  defp variant_module(mod) when is_atom(mod), do: mod
-  defp variant_module(_variant), do: nil
+  defp plugin_write_variants(family) do
+    if Helper.Module.exports?(family, :types, 0),
+      do: for(mod <- List.wrap(family.types()), is_atom(mod), do: {mod, variant_kind(mod)}),
+      else: []
+  end
 
-  defp variant_write_type(mod) do
-    if Prim.prim?(mod), do: quote(do: unquote(mod).t()), else: entity_write_type(mod)
+  defp variant_kind(mod) do
+    cond do
+      Prim.prim?(mod) -> :prim
+      Helper.Module.exports?(mod, :__core_fields__, 0) -> :domain
+      true -> :manual
+    end
+  end
+
+  # Тип читается из байткода: у модуля, собранного в том же файле, его может ещё не быть — тогда
+  # остаётся структурный тип `%Мод{}`, а не несуществующая ссылка.
+  defp variant_write_type({mod, :prim}), do: quote(do: unquote(mod).t())
+
+  defp variant_write_type({mod, _kind}) do
+    cond do
+      write_type?(mod) -> quote(do: unquote(mod).write_t())
+      type?(mod, :t) -> quote(do: unquote(mod).t())
+      true -> quote(do: %unquote(mod){})
+    end
   end
 
   # ===== ПДн-места =====

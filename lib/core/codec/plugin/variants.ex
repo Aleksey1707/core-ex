@@ -4,7 +4,10 @@ defmodule Core.Codec.Plugin.Variants do
   генерация `dump/2` / `load/3` вариантов и загрузки по семейству.
 
   Вариант — `{Mod, адрес, спека}` (поля по спеке, как у `fields:`) или `{Mod, адрес}` (поля пишут
-  колбэки `dump_variant/2` / `load_variant/3`). Адрес:
+  колбэки `dump_variant/2` / `load_variant/3`). Состав берётся и из модуля семейства
+  (`use Core.Union`): `union: Family` без `variants:` отдаёт `Family.__core_variants__()` — поля
+  декларативного варианта из его `__core_fields__/0`, вариант-Prim грузится и дампится своим
+  кодеком. Адрес:
 
   | Адрес | Wire |
   |---|---|
@@ -22,6 +25,7 @@ defmodule Core.Codec.Plugin.Variants do
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Helper
+  alias Core.Prim
   alias Core.Result
 
   require Error
@@ -36,8 +40,14 @@ defmodule Core.Codec.Plugin.Variants do
   @typedoc "Нормализованный адрес: тегированная форма (с дискриминатором или без) либо форма без обёртки."
   @type place :: {:tagged, String.t(), discriminator() | nil} | {:inline, discriminator()}
 
-  @typedoc "Вариант: модуль, адрес как объявлен, нормализованный адрес, поля по спеке или `:manual`."
-  @type variant :: {module(), term(), place(), [Field.t()] | :manual}
+  @typedoc """
+  Источник полей варианта: спека `variants:` плагина, IR декларативной структуры (`:domain`),
+  значение Prim (`:prim`, wire — дамп Prim) или ручные колбэки (`:manual`).
+  """
+  @type source :: [Field.t()] | {:domain, [map()]} | :prim | :manual
+
+  @typedoc "Вариант: модуль, адрес как объявлен, нормализованный адрес и источник полей."
+  @type variant :: {module(), term(), place(), source()}
 
   @typedoc "Индекс выбора варианта по wire."
   @type index ::
@@ -67,7 +77,7 @@ defmodule Core.Codec.Plugin.Variants do
   def variants!(variants, _union) when is_list(variants) and variants != [] do
     parsed = Enum.map(variants, &variant!/1)
     Helper.FieldCheck.unique!(Enum.map(parsed, &elem(&1, 0)), @where)
-    check_places!(parsed)
+    check_places!(Enum.map(parsed, &{elem(&1, 0), elem(&1, 2)}))
 
     parsed
   end
@@ -76,91 +86,70 @@ defmodule Core.Codec.Plugin.Variants do
     do: Helper.Opts.reject!(@where, "ожидается непустой список {Тип, адрес, спека}, получено #{inspect(other)}")
 
   @doc false
-  @spec index([variant()]) :: index()
+  @spec union_variants(module() | nil) :: [variant()]
 
-  def index([{_mod, _address, {:inline, {key, _value}}, _fields} | _rest] = variants) do
-    {:inline, key, Map.new(variants, fn {mod, _address, {:inline, {_key, value}}, _fields} -> {string(value), mod} end)}
-  end
+  def union_variants(nil), do: []
 
-  def index(variants) do
-    by_tag =
-      variants
-      |> Enum.group_by(fn {_mod, _address, {:tagged, tag, _disc}, _fields} -> tag end)
-      |> Map.new(fn {tag, members} -> {tag, tag_entry(members)} end)
-
-    {:tagged, by_tag}
+  def union_variants(family) when is_atom(family) do
+    if Helper.Module.exports?(family, :__core_variants__, 0),
+      do: Enum.map(family.__core_variants__(), &union_variant!/1),
+      else: []
   end
 
   @doc false
-  @spec type_by_mod([variant()]) :: %{module() => String.t()}
+  @spec union_variants!(module() | nil, [variant()]) :: [variant()]
 
-  def type_by_mod(variants), do: Map.new(variants, fn {mod, _address, place, _fields} -> {mod, type(place)} end)
+  # Состав семейства объявлен в его модуле (`use Core.Union`); явные `variants:` плагина старше —
+  # так старый путь остаётся рабочим, пока его не удалят.
+  def union_variants!(nil, variants), do: variants
+  def union_variants!(_union, variants) when variants != [], do: variants
+  def union_variants!(union, []), do: union_variants(union)
 
   @doc false
-  @spec introspection([variant()]) :: [{module(), term(), [Field.t()] | :manual}]
+  @spec address!(term(), String.t()) :: place()
 
-  def introspection(variants), do: Enum.map(variants, fn {mod, address, _place, fields} -> {mod, address, fields} end)
+  def address!(tag, _where) when is_binary(tag) and tag != "", do: {:tagged, tag, nil}
 
-  # ---
-
-  defp variant!({mod, address, spec}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@where}: #{inspect(mod)}"
-    place = place!(address, where)
-    disc = disc(place)
-    Field.struct_module!(mod, where)
-    check_default!(mod, disc, where)
-
-    fields = Field.variant_fields!(mod, spec, List.wrap(disc && elem(disc, 0)), where)
-    check_clash!(fields, disc, where)
-
-    {mod, address, place, fields}
-  end
-
-  defp variant!({mod, address}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@where}: #{inspect(mod)}"
-    place = place!(address, where)
-    Field.struct_module!(mod, where)
-    check_default!(mod, disc(place), where)
-
-    {mod, address, place, :manual}
-  end
-
-  defp variant!(other),
-    do: Helper.Opts.reject!(@where, "ожидается {Тип, адрес, спека} или {Тип, адрес}, получено #{inspect(other)}")
-
-  defp place!(tag, _where) when is_binary(tag) and tag != "", do: {:tagged, tag, nil}
-
-  defp place!({tag, [{key, value}]}, where) when is_binary(tag) and tag != "",
+  def address!({tag, [{key, value}]}, where) when is_binary(tag) and tag != "",
     do: {:tagged, tag, disc!({key, value}, where)}
 
-  defp place!([{key, value}], where), do: {:inline, disc!({key, value}, where)}
+  def address!([{key, value}], where), do: {:inline, disc!({key, value}, where)}
 
-  defp place!({tag, disc}, where) when is_binary(tag) and is_list(disc) do
+  def address!({tag, disc}, where) when is_binary(tag) and is_list(disc) do
     Helper.Opts.reject!(where, "дискриминатор: ожидается одна пара ключ: значение, получено #{inspect(disc)}")
   end
 
-  defp place!(other, where) do
+  def address!(other, where) do
     Helper.Opts.reject!(
       where,
       "адрес: ожидается \"тег\", {\"тег\", ключ: значение} или [ключ: значение], получено #{inspect(other)}"
     )
   end
 
-  defp disc!({key, value} = disc, _where)
-       when is_atom(key) and
-              ((is_atom(value) and value not in [nil, true, false]) or (is_binary(value) and value != "")),
-       do: disc
+  @doc false
+  @spec check_places!([{module(), place()}], String.t()) :: :ok
 
-  defp disc!(other, where) do
-    Helper.Opts.reject!(
-      where,
-      "дискриминатор: ожидается ключ-атом и значение атомом или строкой, получено #{inspect(other)}"
-    )
+  def check_places!(variants, where \\ @where) when is_list(variants) and is_binary(where) do
+    forms = Enum.map(variants, fn {_mod, place} -> elem(place, 0) end)
+
+    case Enum.uniq(forms) do
+      [:tagged] ->
+        check_tags!(variants, where)
+
+      [:inline] ->
+        check_discs!(variants, where)
+
+      _mixed ->
+        Helper.Opts.reject!(where, "адреса одной формы: тегированная или без обёртки, варианты #{names(variants)}")
+    end
   end
 
-  defp check_default!(_mod, nil, _where), do: :ok
+  @doc false
+  @spec check_default!(module(), discriminator() | nil, String.t()) :: :ok
 
-  defp check_default!(mod, {key, value}, where) do
+  def check_default!(_mod, nil, _where), do: :ok
+
+  def check_default!(mod, {key, value}, where) do
     case Map.fetch(mod.__struct__(), key) do
       {:ok, ^value} ->
         :ok
@@ -176,41 +165,135 @@ defmodule Core.Codec.Plugin.Variants do
     end
   end
 
-  defp check_clash!(_fields, nil, _where), do: :ok
+  @doc false
+  @spec check_wire_clash!([String.t()], discriminator() | nil, String.t()) :: :ok
 
-  defp check_clash!(fields, {key, _value}, where) do
+  def check_wire_clash!(_wires, nil, _where), do: :ok
+
+  def check_wire_clash!(wires, {key, _value}, where) when is_list(wires) do
     wire = Atom.to_string(key)
 
-    if Enum.any?(fields, &match?(%Field{wire: ^wire}, &1)) do
+    if wire in wires do
       Helper.Opts.reject!(where, "wire-ключ #{inspect(wire)} занят дискриминатором")
+    end
+
+    :ok
+  end
+
+  @doc false
+  @spec index([variant()]) :: index()
+
+  def index([{_mod, _address, {:inline, {key, _value}}, _source} | _rest] = variants) do
+    {:inline, key, Map.new(variants, fn {mod, _address, {:inline, {_key, value}}, _source} -> {string(value), mod} end)}
+  end
+
+  def index(variants) do
+    by_tag =
+      variants
+      |> Enum.group_by(fn {_mod, _address, {:tagged, tag, _disc}, _source} -> tag end)
+      |> Map.new(fn {tag, members} -> {tag, tag_entry(members)} end)
+
+    {:tagged, by_tag}
+  end
+
+  @doc false
+  @spec type_by_mod([variant()]) :: %{module() => String.t()}
+
+  def type_by_mod(variants), do: Map.new(variants, fn {mod, _address, place, _source} -> {mod, place_type(place)} end)
+
+  @doc false
+  @spec introspection([variant()]) :: [{module(), term(), [Field.t()] | :manual | :union}]
+
+  def introspection(variants) do
+    Enum.map(variants, fn
+      {mod, address, _place, fields} when is_list(fields) -> {mod, address, fields}
+      {mod, address, _place, :manual} -> {mod, address, :manual}
+      {mod, address, _place, _union_source} -> {mod, address, :union}
+    end)
+  end
+
+  @doc false
+  @spec place_type(place()) :: String.t()
+
+  def place_type({:tagged, tag, _disc}), do: tag
+  def place_type({:inline, {_key, value}}), do: string(value)
+
+  # ---
+
+  defp union_variant!(%{module: mod, address: address, place: place, kind: kind}) do
+    where = "#{@where}: #{inspect(mod)}"
+
+    source =
+      case kind do
+        :prim -> :prim
+        :manual -> :manual
+        :domain -> {:domain, domain_fields!(mod, place, where)}
+      end
+
+    {mod, address, place, source}
+  end
+
+  # Поле-дискриминатор в поля варианта не входит: его значение при загрузке оставляет defstruct, а
+  # при дампе пишет адрес (`Core.Union`).
+  defp domain_fields!(mod, place, where) do
+    fields =
+      if Helper.Module.exports?(mod, :__core_fields__, 0),
+        do: mod.__core_fields__(),
+        else: Helper.Opts.reject!(where, "#{inspect(mod)} не декларативная структура: нет __core_fields__/0")
+
+    case disc(place) do
+      nil -> fields
+      {key, _value} -> Enum.reject(fields, &(&1.name == key))
     end
   end
 
-  defp check_places!(variants) do
-    forms = Enum.map(variants, &elem(elem(&1, 2), 0))
+  defp variant!({mod, address, spec}) when is_atom(mod) and not is_nil(mod) do
+    where = "#{@where}: #{inspect(mod)}"
+    place = address!(address, where)
+    disc = disc(place)
+    Field.struct_module!(mod, where)
+    check_default!(mod, disc, where)
 
-    case Enum.uniq(forms) do
-      [:tagged] ->
-        check_tags!(variants, @where)
+    fields = Field.variant_fields!(mod, spec, List.wrap(disc && elem(disc, 0)), where)
+    check_wire_clash!(Enum.map(fields, & &1.wire), disc, where)
 
-      [:inline] ->
-        check_discs!(variants, @where)
+    {mod, address, place, fields}
+  end
 
-      _mixed ->
-        Helper.Opts.reject!(@where, "адреса одной формы: тегированная или без обёртки, варианты #{names(variants)}")
-    end
+  defp variant!({mod, address}) when is_atom(mod) and not is_nil(mod) do
+    where = "#{@where}: #{inspect(mod)}"
+    place = address!(address, where)
+    Field.struct_module!(mod, where)
+    check_default!(mod, disc(place), where)
+
+    {mod, address, place, :manual}
+  end
+
+  defp variant!(other),
+    do: Helper.Opts.reject!(@where, "ожидается {Тип, адрес, спека} или {Тип, адрес}, получено #{inspect(other)}")
+
+  defp disc!({key, value} = disc, _where)
+       when is_atom(key) and
+              ((is_atom(value) and value not in [nil, true, false]) or (is_binary(value) and value != "")),
+       do: disc
+
+  defp disc!(other, where) do
+    Helper.Opts.reject!(
+      where,
+      "дискриминатор: ожидается ключ-атом и значение атомом или строкой, получено #{inspect(other)}"
+    )
   end
 
   defp check_tags!(variants, where) do
     variants
-    |> Enum.group_by(fn {_mod, _address, {:tagged, tag, _disc}, _fields} -> tag end)
+    |> Enum.group_by(fn {_mod, {:tagged, tag, _disc}} -> tag end)
     |> Enum.each(fn {tag, members} -> check_shared!(tag, members, where) end)
   end
 
   defp check_shared!(_tag, [_single], _where), do: :ok
 
   defp check_shared!(tag, members, where) do
-    if Enum.any?(members, &is_nil(disc(elem(&1, 2)))) do
+    if Enum.any?(members, &is_nil(disc(elem(&1, 1)))) do
       Helper.Opts.reject!(where, "тег #{inspect(tag)} общий у #{names(members)} без дискриминатора у каждого")
     end
 
@@ -218,7 +301,7 @@ defmodule Core.Codec.Plugin.Variants do
   end
 
   defp check_discs!(members, where) do
-    discs = Enum.map(members, &disc(elem(&1, 2)))
+    discs = Enum.map(members, &disc(elem(&1, 1)))
 
     keys = Enum.map(discs, &elem(&1, 0))
 
@@ -239,14 +322,11 @@ defmodule Core.Codec.Plugin.Variants do
 
   defp names(variants), do: Enum.map_join(variants, ", ", &inspect(elem(&1, 0)))
 
-  defp tag_entry([{mod, _address, {:tagged, _tag, nil}, _fields}]), do: mod
+  defp tag_entry([{mod, _address, {:tagged, _tag, nil}, _source}]), do: mod
 
-  defp tag_entry([{_mod, _address, {:tagged, _tag, {key, _value}}, _fields} | _rest] = members) do
-    {key, Map.new(members, fn {mod, _address, {:tagged, _tag, {_key, value}}, _fields} -> {string(value), mod} end)}
+  defp tag_entry([{_mod, _address, {:tagged, _tag, {key, _value}}, _source} | _rest] = members) do
+    {key, Map.new(members, fn {mod, _address, {:tagged, _tag, {_key, value}}, _source} -> {string(value), mod} end)}
   end
-
-  defp type({:tagged, tag, _disc}), do: tag
-  defp type({:inline, {_key, value}}), do: string(value)
 
   # ===== dump =====
 
@@ -256,13 +336,19 @@ defmodule Core.Codec.Plugin.Variants do
   def dump_args({mod, _address, _place, :manual}),
     do: [quote(generated: true, do: %unquote(mod){} = unquote(value_var())), codec_var()]
 
-  def dump_args({mod, _address, _place, fields}), do: Fields.dump_args(mod, fields)
+  def dump_args({mod, _address, _place, :prim}),
+    do: [quote(generated: true, do: %unquote(mod){} = unquote(value_var())), codec_var()]
+
+  def dump_args({mod, _address, _place, fields}) when is_list(fields), do: Fields.dump_args(mod, fields)
+  def dump_args({mod, _address, _place, {:domain, fields}}), do: Fields.dump_args_ir(mod, fields)
 
   @doc false
   @spec dump_guard(variant()) :: Macro.t()
 
   def dump_guard({_mod, _address, _place, :manual}), do: quote(generated: true, do: is_atom(unquote(codec_var())))
-  def dump_guard({_mod, _address, _place, fields}), do: Fields.dump_guard(fields)
+  def dump_guard({_mod, _address, _place, :prim}), do: quote(generated: true, do: is_atom(unquote(codec_var())))
+  def dump_guard({_mod, _address, _place, fields}) when is_list(fields), do: Fields.dump_guard(fields)
+  def dump_guard({_mod, _address, _place, {:domain, fields}}), do: Fields.dump_guard_ir(fields)
 
   @doc false
   @spec dump_body(variant()) :: Macro.t()
@@ -273,8 +359,22 @@ defmodule Core.Codec.Plugin.Variants do
     wrap(place, with_disc(dumped, disc(place)))
   end
 
-  def dump_body({_mod, _address, place, fields}) do
+  # Wire Prim-варианта — его дамп: поля варианта писать некуда, обёртка адреса остаётся одна.
+  # Дамп идёт через Prim-профиль фасада: клоуза `dump/1` этого же варианта ушла бы в рекурсию.
+  def dump_body({_mod, _address, place, :prim}) do
+    dumped = quote(generated: true, do: unquote(codec_var()).__codec_prim__().dump(unquote(value_var())))
+
+    wrap(place, dumped)
+  end
+
+  def dump_body({_mod, _address, place, fields}) when is_list(fields) do
     pairs = Fields.dump_pairs(fields) ++ disc_pairs(disc(place))
+
+    wrap(place, quote(generated: true, do: %{unquote_splicing(pairs)}))
+  end
+
+  def dump_body({_mod, _address, place, {:domain, fields}}) do
+    pairs = Fields.dump_pairs_ir(fields) ++ disc_pairs(disc(place))
 
     wrap(place, quote(generated: true, do: %{unquote_splicing(pairs)}))
   end
@@ -339,7 +439,9 @@ defmodule Core.Codec.Plugin.Variants do
   @spec variant_args(variant()) :: [Macro.t()]
 
   def variant_args({mod, _address, _place, :manual}), do: [mod, wire_var(), codec_var()]
-  def variant_args({mod, _address, _place, _fields}), do: Fields.load_args(mod)
+  def variant_args({mod, _address, _place, :prim}), do: [mod, wire_var(), codec_var()]
+  def variant_args({mod, _address, _place, fields}) when is_list(fields), do: Fields.load_args(mod)
+  def variant_args({mod, _address, _place, {:domain, _fields}}), do: Fields.load_args(mod)
 
   @doc false
   @spec variant_guard(variant()) :: Macro.t()
@@ -347,7 +449,9 @@ defmodule Core.Codec.Plugin.Variants do
   def variant_guard({_mod, _address, _place, :manual}),
     do: quote(generated: true, do: is_map(unquote(wire_var())) and is_atom(unquote(codec_var())))
 
-  def variant_guard(_variant), do: Fields.load_guard()
+  def variant_guard({_mod, _address, _place, :prim}), do: quote(generated: true, do: is_atom(unquote(codec_var())))
+  def variant_guard({_mod, _address, _place, fields}) when is_list(fields), do: Fields.load_guard()
+  def variant_guard({_mod, _address, _place, {:domain, _fields}}), do: Fields.load_guard()
 
   @doc false
   @spec variant_body(variant()) :: Macro.t()
@@ -361,15 +465,27 @@ defmodule Core.Codec.Plugin.Variants do
     end
   end
 
-  def variant_body({mod, _address, _place, fields}), do: Fields.load_body(mod, fields)
+  # Поля варианта-Prim — его wire-значение целиком: дамп пишет его в `fields`, загрузка отдаёт
+  # кодеку Prim как есть.
+  def variant_body({mod, _address, _place, :prim}) do
+    quote generated: true do
+      case unquote(codec_var()).__codec_prim__().load(unquote(mod), unquote(wire_var())) do
+        {:ok, %unquote(mod){} = value} -> {:ok, value}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def variant_body({mod, _address, _place, fields}) when is_list(fields), do: Fields.load_body(mod, fields)
+  def variant_body({mod, _address, _place, {:domain, fields}}), do: Fields.load_body_ir(mod, fields)
 
   @doc false
-  @spec resolve(term(), index(), module()) :: {:ok, module(), map()} | {:error, Error.t()}
+  @spec resolve(term(), index(), module()) :: {:ok, module(), term()} | {:error, Error.t()}
 
   def resolve(wire, {:tagged, by_tag}, family) when is_atom(family) do
     with {:ok, tag, fields} <- unwrap(wire, family) do
       case Map.fetch(by_tag, tag) do
-        {:ok, mod} when is_atom(mod) -> {:ok, mod, fields}
+        {:ok, mod} when is_atom(mod) -> resolve_target(mod, fields, family)
         {:ok, {key, by_value}} -> pick(fields, key, by_value, tag, family)
         :error -> {:error, unknown(family, tag, nil)}
       end
@@ -382,9 +498,17 @@ defmodule Core.Codec.Plugin.Variants do
   def resolve(_wire, {:inline, _key, _by_value}, family) when is_atom(family), do: {:error, invalid(family)}
 
   @doc false
-  @spec address_fields(term(), place(), module()) :: Result.t(map())
+  @spec address_fields(term(), place(), module()) :: Result.t()
 
-  def address_fields(wire, {:tagged, tag, disc}, mod) when is_atom(mod) do
+  def address_fields(wire, place, mod) when is_atom(mod) do
+    if Prim.prim?(mod),
+      do: prim_address_fields(wire, place, mod),
+      else: struct_address_fields(wire, place, mod)
+  end
+
+  # ---
+
+  defp struct_address_fields(wire, {:tagged, tag, disc}, mod) do
     with {:ok, wire_tag, fields} <- unwrap(wire, mod) do
       if wire_tag == tag,
         do: check_disc(fields, disc, tag, mod),
@@ -392,21 +516,42 @@ defmodule Core.Codec.Plugin.Variants do
     end
   end
 
-  def address_fields(wire, {:inline, disc}, mod) when is_map(wire) and is_atom(mod),
+  defp struct_address_fields(wire, {:inline, disc}, mod) when is_map(wire),
     do: check_disc(wire, disc, nil, mod)
 
-  def address_fields(_wire, {:inline, _disc}, mod) when is_atom(mod), do: {:error, invalid(mod)}
+  defp struct_address_fields(_wire, {:inline, _disc}, mod), do: {:error, invalid(mod)}
 
-  # ---
+  defp prim_address_fields(wire, {:tagged, tag, _disc}, mod) when is_map(wire) do
+    case Helper.Map.field(wire, @tag_key) do
+      ^tag -> prim_value(wire, mod)
+      wire_tag when is_binary(wire_tag) -> {:error, unknown(mod, wire_tag, nil)}
+      _broken -> {:error, invalid(mod)}
+    end
+  end
+
+  defp prim_address_fields(_wire, _place, mod), do: {:error, invalid(mod)}
+
+  defp prim_value(wire, mod) do
+    case Helper.Map.key(wire, @fields_key) do
+      {:ok, key} -> {:ok, Map.fetch!(wire, key)}
+      :error -> {:error, invalid(mod)}
+    end
+  end
 
   defp unwrap(wire, module) when is_map(wire) do
-    case {Helper.Map.field(wire, @tag_key), Helper.Map.field(wire, @fields_key)} do
-      {tag, fields} when is_binary(tag) and is_map(fields) -> {:ok, tag, fields}
+    case {Helper.Map.field(wire, @tag_key), Helper.Map.key(wire, @fields_key)} do
+      {tag, {:ok, key}} when is_binary(tag) -> {:ok, tag, Map.fetch!(wire, key)}
       _broken -> {:error, invalid(module)}
     end
   end
 
   defp unwrap(_wire, module), do: {:error, invalid(module)}
+
+  defp resolve_target(mod, fields, _family) when is_map(fields), do: {:ok, mod, fields}
+
+  defp resolve_target(mod, fields, family) do
+    if Prim.prim?(mod), do: {:ok, mod, fields}, else: {:error, invalid(family)}
+  end
 
   defp pick(fields, key, by_value, tag, module) do
     with {:ok, value} <- wire_disc(fields, key, module) do

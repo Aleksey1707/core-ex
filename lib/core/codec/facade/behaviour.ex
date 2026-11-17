@@ -16,4 +16,7 @@ defmodule Core.Codec.Facade.Behaviour do
   @callback load(module(), term()) :: Result.t()
   @callback load!(module(), term()) :: term()
   @callback __codec_redump__(module()) :: Core.Codec.Redump.spec()
+
+  @doc "Prim-профиль фасада: им плагин дампит вариант-Prim в обход своей же клоузы `dump/1`."
+  @callback __codec_prim__() :: module()
 end

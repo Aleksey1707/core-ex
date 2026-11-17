@@ -30,7 +30,6 @@ defmodule Core.Codec.Plugin.Redump do
   """
 
   alias Core.Codec
-  alias Core.Codec.Field
   alias Core.Codec.Plugin.Clauses
   alias Core.Codec.Plugin.Fields
   alias Core.Codec.Plugin.Variants
@@ -48,7 +47,7 @@ defmodule Core.Codec.Plugin.Redump do
     union = Module.get_attribute(plugin, :codec_union)
     {unions, manual_unions} = if variants == [], do: {[], List.wrap(union)}, else: {[union], []}
     field_types = Enum.map(fields, &elem(&1, 0))
-    derived = field_types ++ for({mod, _address, _place, spec} <- variants, spec != :manual, do: mod)
+    derived = field_types ++ for {mod, _address, _place, source} <- variants, source_spec(mod, source) != nil, do: mod
 
     manual =
       (Module.get_attribute(plugin, :codec_types) -- (field_types ++ Enum.map(variants, &elem(&1, 0)))) ++ manual_unions
@@ -103,7 +102,13 @@ defmodule Core.Codec.Plugin.Redump do
   end
 
   defp check_merge!(plugin, variants) do
-    entries = for {mod, _address, place, fields} <- variants, fields != :manual, do: {mod, place, fields_spec(fields)}
+    entries =
+      Enum.flat_map(variants, fn {mod, _address, place, source} ->
+        case source_spec(mod, source) do
+          {:map, _fields} = spec -> [{mod, place, spec}]
+          _other -> []
+        end
+      end)
 
     case family(entries) do
       {:ok, _spec} -> :ok
@@ -121,31 +126,60 @@ defmodule Core.Codec.Plugin.Redump do
       else: {:missing, mod, mod}
   end
 
-  defp variant_redump({mod, _address, place, fields}, _covered?),
-    do: {:spec, mod, Macro.escape(variant_spec(place, fields_spec(fields)))}
+  defp variant_redump({mod, _address, place, source}, _covered?) do
+    case source_spec(mod, source) do
+      nil -> {:missing, mod, mod}
+      spec -> {:spec, mod, Macro.escape(variant_spec(place, spec))}
+    end
+  end
 
   # Семейство с ручным вариантом сливает спеки при исполнении: спеку его полей отдаёт колбэк.
   defp family_redump(union, variants, covered?) do
     manual = for {mod, _address, _place, :manual} <- variants, do: mod
+    uncovered = Enum.reject(manual, covered?)
 
-    case {manual, Enum.reject(manual, covered?)} do
-      {[], []} ->
-        {:ok, spec} = family(for {mod, _address, place, fields} <- variants, do: {mod, place, fields_spec(fields)})
+    underived =
+      for {mod, _address, _place, source} <- variants, source_spec(mod, source) == nil and source != :manual, do: mod
 
-        {:spec, union, Macro.escape(spec)}
+    cond do
+      uncovered != [] ->
+        {:missing, union, hd(uncovered)}
 
-      {_manual, [uncovered | _rest]} ->
-        {:missing, union, uncovered}
+      underived != [] ->
+        {:missing, union, hd(underived)}
 
-      {_manual, []} ->
+      manual == [] ->
+        {:spec, union, Macro.escape(family_spec(variants))}
+
+      true ->
         {:spec, union, quote(do: Core.Codec.Plugin.Redump.family!(__MODULE__, unquote(Enum.map(variants, &entry/1))))}
     end
+  end
+
+  defp family_spec(variants) do
+    entries = Enum.map(variants, fn {mod, _address, place, source} -> {mod, place, source_spec(mod, source)} end)
+    {:ok, spec} = family(entries)
+
+    spec
   end
 
   defp entry({mod, _address, place, :manual}),
     do: quote(do: {unquote(mod), unquote(Macro.escape(place)), redump_spec(unquote(mod))})
 
-  defp entry({mod, _address, place, fields}), do: Macro.escape({mod, place, fields_spec(fields)})
+  defp entry({mod, _address, place, source}), do: Macro.escape({mod, place, source_spec(mod, source)})
+
+  # Спека формы варианта из его источника полей: у варианта-Prim это спека самого Prim, у
+  # декларативной структуры — поля её IR.
+  defp source_spec(_mod, {:domain, fields}), do: fields_spec(fields)
+  defp source_spec(_mod, fields) when is_list(fields), do: fields_spec(fields)
+  defp source_spec(_mod, :manual), do: nil
+
+  defp source_spec(mod, :prim) do
+    case field_spec({:prim, mod}) do
+      spec when is_tuple(spec) -> spec
+      _sensitive_or_missing -> nil
+    end
+  end
 
   defp manual_redump(type, covered?) do
     if covered?.(type),
@@ -162,55 +196,17 @@ defmodule Core.Codec.Plugin.Redump do
   # ===== вывод =====
 
   @doc false
-  @spec fields_spec([Field.t()]) :: Codec.Redump.spec()
+  @spec fields_spec([map()]) :: Codec.Redump.spec()
 
   def fields_spec(fields) do
     specs =
-      for %Field{spec: spec, wire: wire} <- fields,
+      for %{spec: spec, wire: wire} <- fields,
           redump = field_spec(spec),
           redump != nil,
           into: %{},
           do: {Fields.wire_key(wire), redump}
 
     {:map, specs}
-  end
-
-  # ---
-
-  defp field_spec({:prim, mod}) do
-    case Codec.check_readable(mod) do
-      :ok -> {:prim, mod}
-      {:error, :sensitive} -> :sensitive
-      {:error, :not_coercible} -> nil
-    end
-  end
-
-  defp field_spec({kind, _mod}) when kind in ~w(enum type)a, do: nil
-  defp field_spec({kind, mod}) when kind in ~w(entity union)a, do: {:codec, mod}
-
-  defp field_spec({:list, inner}) do
-    case field_spec(inner) do
-      nil -> nil
-      :sensitive -> :sensitive
-      spec -> {:list, spec}
-    end
-  end
-
-  defp field_spec({:set, inner}) do
-    case field_spec(inner) do
-      nil -> nil
-      :sensitive -> :sensitive
-      spec -> {:set, spec}
-    end
-  end
-
-  # Ключ словаря — вид с wire-строкой и не sensitive: его спека — `{:prim, _}` или нет.
-  defp field_spec({:map, key, value}) do
-    case {field_spec(key), field_spec(value)} do
-      {_key, :sensitive} -> :sensitive
-      {nil, nil} -> nil
-      {key, value} -> {:dict, key, value}
-    end
   end
 
   # ===== спека варианта и семейства =====
@@ -291,5 +287,43 @@ defmodule Core.Codec.Plugin.Redump do
 
     "variants: — wire-ключ #{inspect(Atom.to_string(key))} с разной спекой redump у вариантов " <>
       "#{Enum.map_join(mods, ", ", &inspect/1)} #{where}; слитые варианты делят спеку ключа"
+  end
+
+  defp field_spec({:personal, inner}), do: field_spec(inner)
+
+  defp field_spec({:prim, mod}) do
+    case Codec.check_readable(mod) do
+      :ok -> {:prim, mod}
+      {:error, :sensitive} -> :sensitive
+      {:error, :not_coercible} -> nil
+    end
+  end
+
+  defp field_spec({kind, _mod}) when kind in ~w(enum type)a, do: nil
+  defp field_spec({kind, mod}) when kind in ~w(entity union)a, do: {:codec, mod}
+
+  defp field_spec({:list, inner}) do
+    case field_spec(inner) do
+      nil -> nil
+      :sensitive -> :sensitive
+      spec -> {:list, spec}
+    end
+  end
+
+  defp field_spec({:set, inner}) do
+    case field_spec(inner) do
+      nil -> nil
+      :sensitive -> :sensitive
+      spec -> {:set, spec}
+    end
+  end
+
+  # Ключ словаря — вид с wire-строкой и не sensitive: его спека — `{:prim, _}` или нет.
+  defp field_spec({:map, key, value}) do
+    case {field_spec(key), field_spec(value)} do
+      {_key, :sensitive} -> :sensitive
+      {nil, nil} -> nil
+      {key, value} -> {:dict, key, value}
+    end
   end
 end

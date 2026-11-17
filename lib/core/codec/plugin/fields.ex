@@ -74,6 +74,37 @@ defmodule Core.Codec.Plugin.Fields do
   def dump_pairs(fields),
     do: Enum.map(fields, &{&1.wire, Kind.dump(&1, var(&1.name))})
 
+  # Декларативная структура (`Core.Field`) отдаёт поля единым IR: поля, wire-ключи и вид берутся из
+  # `__core_fields__/0`, а `default:` — типизированное значение поля, не wire-литерал.
+  @doc false
+  @spec dump_args_ir(module(), [map()]) :: [Macro.t()]
+
+  def dump_args_ir(type, fields) do
+    pairs = Enum.map(fields, &{&1.name, Kind.pattern(grammar(&1))})
+
+    [quote(generated: true, do: %unquote(type){unquote_splicing(pairs)}), codec_var()]
+  end
+
+  @doc false
+  @spec dump_guard_ir([map()]) :: Macro.t()
+
+  def dump_guard_ir(fields) do
+    guards =
+      Enum.flat_map(fields, fn field ->
+        case Kind.guard(grammar(field)) do
+          true -> []
+          guard -> [guard]
+        end
+      end)
+
+    and_guards([quote(generated: true, do: is_atom(unquote(codec_var()))) | guards])
+  end
+
+  @doc false
+  @spec dump_pairs_ir([map()]) :: [{String.t(), Macro.t()}]
+
+  def dump_pairs_ir(fields), do: Enum.map(fields, &{&1.wire, Kind.dump(grammar(&1), var(&1.name))})
+
   @doc false
   @spec new_args([Field.t()]) :: [Macro.t()]
 
@@ -163,7 +194,40 @@ defmodule Core.Codec.Plugin.Fields do
     {:with, [generated: true], steps ++ [[do: ok, else: error]]}
   end
 
+  @doc false
+  @spec load_body_ir(module(), [map()]) :: Macro.t()
+
+  def load_body_ir(type, fields) do
+    steps = Enum.map(fields, &ir_load_step(type, &1))
+    pairs = Enum.map(fields, fn field -> {field.name, var(field.name)} end)
+
+    ok = quote(generated: true, do: {:ok, %unquote(type){unquote_splicing(pairs)}})
+    error = quote(generated: true, do: ({:error, reason} -> {:error, reason}))
+
+    {:with, [generated: true], steps ++ [[do: ok, else: error]]}
+  end
+
   # ---
+
+  defp ir_load_step(type, %{name: name, wire: wire, default: :none} = field) do
+    raw = quote(generated: true, do: Core.Helper.Map.field(unquote(wire_var()), unquote(wire_key(wire))))
+
+    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(Kind.load(grammar(field), type, raw)))
+  end
+
+  # `default:` декларации — типизированное значение поля: при отсутствующем ключе оно подставляется
+  # как есть, явный `null` его не заменяет и грузится как записанное.
+  defp ir_load_step(type, %{name: name, wire: wire, default: {:default, value}} = field) do
+    raw_var = Macro.var(:ir_raw, __MODULE__)
+
+    quote generated: true do
+      {:ok, unquote(var(name))} <-
+        case Core.Helper.Map.fetch(unquote(wire_var()), unquote(wire_key(wire))) do
+          {:ok, unquote(raw_var)} -> unquote(Kind.load(grammar(field), type, raw_var))
+          :error -> {:ok, unquote(Macro.escape(value))}
+        end
+    end
+  end
 
   defp load_step(type, %Field{name: name, wire: wire, default: default} = field) do
     raw =
@@ -246,4 +310,23 @@ defmodule Core.Codec.Plugin.Fields do
       subject: nil
     }
   end
+
+  # Проекция IR на грамматику спеки: адаптер вида (`Core.Codec.Plugin.Fields.Kind`) знает только
+  # `%Core.Codec.Field{}`, а вложенное ПДн-место (`{:personal, вид}`) wire-форму не меняет.
+  defp grammar(%{name: name, spec: spec, optional?: optional?, wire: wire} = field) do
+    %Field{
+      name: name,
+      spec: grammar_spec(spec),
+      optional?: optional?,
+      wire: wire,
+      default: :none,
+      subject: Map.get(field, :subject),
+      personal: Map.get(field, :personal)
+    }
+  end
+
+  defp grammar_spec({:personal, inner}), do: grammar_spec(inner)
+  defp grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}
+  defp grammar_spec({:map, key, value}), do: {:map, grammar_spec(key), grammar_spec(value)}
+  defp grammar_spec(spec), do: spec
 end

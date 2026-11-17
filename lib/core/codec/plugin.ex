@@ -33,6 +33,11 @@ defmodule Core.Codec.Plugin do
 
   Ручной вариант (`{Type, адрес}`) пишет только поля — колбэками `dump_variant/2` / `load_variant/3`.
 
+  Семейство, объявленное в своём модуле (`use Core.Union`), плагин обслуживает без `variants:`:
+  `union: Shape` берёт состав из `Shape.__core_variants__()`. Поля декларативного варианта — из его
+  `__core_fields__/0`, вариант-Prim дампится и грузится своим кодеком (`"fields"` — дамп Prim), а
+  ручной вариант — колбэками. Явные `variants:` старше реестра семейства.
+
   ## Протокол фасада
 
   Две служебные функции плагина фасад зовёт при своей сборке, и о видах плагинов он не знает:
@@ -179,6 +184,7 @@ defmodule Core.Codec.Plugin do
                           unquote(Keyword.get(opts, :variants)),
                           @codec_union
                         )
+        @codec_variants Core.Codec.Plugin.Variants.union_variants!(@codec_union, @codec_variants)
         @codec_types Core.Codec.Plugin.Opts.all_types!([
                        Core.Codec.Plugin.Opts.types!(unquote(Keyword.get(opts, :types, []))),
                        Enum.map(@codec_fields, &elem(&1, 0)),
