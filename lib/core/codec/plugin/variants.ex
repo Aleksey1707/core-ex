@@ -1,13 +1,11 @@
 defmodule Core.Codec.Plugin.Variants do
   @moduledoc """
-  Варианты семейства Codec-плагина (`use Core.Codec.Plugin, union:, variants:`): проверка адресов и
-  генерация `dump/2` / `load/3` вариантов и загрузки по семейству.
+  Варианты семейства Codec-плагина (`use Core.Codec.Plugin, union:`): состав из реестра семейства
+  (`use Core.Union`) и генерация `dump/2` / `load/3` вариантов и загрузки по семейству.
 
-  Вариант — `{Mod, адрес, спека}` (поля по спеке, как у `fields:`) или `{Mod, адрес}` (поля пишут
-  колбэки `dump_variant/2` / `load_variant/3`). Состав берётся и из модуля семейства
-  (`use Core.Union`): `union: Family` без `variants:` отдаёт `Family.__core_variants__()` — поля
-  декларативного варианта из его `__core_fields__/0`, вариант-Prim грузится и дампится своим
-  кодеком. Адрес:
+  Семейство объявляет состав и адреса в своём модуле; плагин берёт их из `__core_variants__/0`.
+  Поля декларативного варианта — из его `__core_fields__/0`, вариант-Prim грузится и дампится своим
+  кодеком, ручной вариант — колбэками `dump_variant/2` / `load_variant/3`. Адрес:
 
   | Адрес | Wire |
   |---|---|
@@ -21,7 +19,6 @@ defmodule Core.Codec.Plugin.Variants do
   варианта — `:unknown_tag` с `detail: %{tag:, discriminator:}`.
   """
 
-  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Helper
@@ -41,10 +38,10 @@ defmodule Core.Codec.Plugin.Variants do
   @type place :: {:tagged, String.t(), discriminator() | nil} | {:inline, discriminator()}
 
   @typedoc """
-  Источник полей варианта: спека `variants:` плагина, IR декларативной структуры (`:domain`),
-  значение Prim (`:prim`, wire — дамп Prim) или ручные колбэки (`:manual`).
+  Источник полей варианта: IR декларативной структуры (`:domain`), значение Prim (`:prim`, wire —
+  дамп Prim) или ручные колбэки (`:manual`).
   """
-  @type source :: [Field.t()] | {:domain, [map()]} | :prim | :manual
+  @type source :: {:domain, [map()]} | :prim | :manual
 
   @typedoc "Вариант: модуль, адрес как объявлен, нормализованный адрес и источник полей."
   @type variant :: {module(), term(), place(), source()}
@@ -69,23 +66,6 @@ defmodule Core.Codec.Plugin.Variants do
   # ===== спека =====
 
   @doc false
-  @spec variants!(term(), module() | nil) :: [variant()]
-
-  def variants!(nil, _union), do: []
-  def variants!(_variants, nil), do: Helper.Opts.reject!(@where, "требует union: — модуль-семейство")
-
-  def variants!(variants, _union) when is_list(variants) and variants != [] do
-    parsed = Enum.map(variants, &variant!/1)
-    Helper.FieldCheck.unique!(Enum.map(parsed, &elem(&1, 0)), @where)
-    check_places!(Enum.map(parsed, &{elem(&1, 0), elem(&1, 2)}))
-
-    parsed
-  end
-
-  def variants!(other, _union),
-    do: Helper.Opts.reject!(@where, "ожидается непустой список {Тип, адрес, спека}, получено #{inspect(other)}")
-
-  @doc false
   @spec union_variants(module() | nil) :: [variant()]
 
   def union_variants(nil), do: []
@@ -95,15 +75,6 @@ defmodule Core.Codec.Plugin.Variants do
       do: Enum.map(family.__core_variants__(), &union_variant!/1),
       else: []
   end
-
-  @doc false
-  @spec union_variants!(module() | nil, [variant()]) :: [variant()]
-
-  # Состав семейства объявлен в его модуле (`use Core.Union`); явные `variants:` плагина старше —
-  # так старый путь остаётся рабочим, пока его не удалят.
-  def union_variants!(nil, variants), do: variants
-  def union_variants!(_union, variants) when variants != [], do: variants
-  def union_variants!(union, []), do: union_variants(union)
 
   @doc false
   @spec address!(term(), String.t()) :: place()
@@ -202,17 +173,6 @@ defmodule Core.Codec.Plugin.Variants do
   def type_by_mod(variants), do: Map.new(variants, fn {mod, _address, place, _source} -> {mod, place_type(place)} end)
 
   @doc false
-  @spec introspection([variant()]) :: [{module(), term(), [Field.t()] | :manual | :union}]
-
-  def introspection(variants) do
-    Enum.map(variants, fn
-      {mod, address, _place, fields} when is_list(fields) -> {mod, address, fields}
-      {mod, address, _place, :manual} -> {mod, address, :manual}
-      {mod, address, _place, _union_source} -> {mod, address, :union}
-    end)
-  end
-
-  @doc false
   @spec place_type(place()) :: String.t()
 
   def place_type({:tagged, tag, _disc}), do: tag
@@ -246,31 +206,6 @@ defmodule Core.Codec.Plugin.Variants do
       {key, _value} -> Enum.reject(fields, &(&1.name == key))
     end
   end
-
-  defp variant!({mod, address, spec}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@where}: #{inspect(mod)}"
-    place = address!(address, where)
-    disc = disc(place)
-    Field.struct_module!(mod, where)
-    check_default!(mod, disc, where)
-
-    fields = Field.variant_fields!(mod, spec, List.wrap(disc && elem(disc, 0)), where)
-    check_wire_clash!(Enum.map(fields, & &1.wire), disc, where)
-
-    {mod, address, place, fields}
-  end
-
-  defp variant!({mod, address}) when is_atom(mod) and not is_nil(mod) do
-    where = "#{@where}: #{inspect(mod)}"
-    place = address!(address, where)
-    Field.struct_module!(mod, where)
-    check_default!(mod, disc(place), where)
-
-    {mod, address, place, :manual}
-  end
-
-  defp variant!(other),
-    do: Helper.Opts.reject!(@where, "ожидается {Тип, адрес, спека} или {Тип, адрес}, получено #{inspect(other)}")
 
   defp disc!({key, value} = disc, _where)
        when is_atom(key) and
@@ -339,7 +274,6 @@ defmodule Core.Codec.Plugin.Variants do
   def dump_args({mod, _address, _place, :prim}),
     do: [quote(generated: true, do: %unquote(mod){} = unquote(value_var())), codec_var()]
 
-  def dump_args({mod, _address, _place, fields}) when is_list(fields), do: Fields.dump_args(mod, fields)
   def dump_args({mod, _address, _place, {:domain, fields}}), do: Fields.dump_args_ir(mod, fields)
 
   @doc false
@@ -347,7 +281,6 @@ defmodule Core.Codec.Plugin.Variants do
 
   def dump_guard({_mod, _address, _place, :manual}), do: quote(generated: true, do: is_atom(unquote(codec_var())))
   def dump_guard({_mod, _address, _place, :prim}), do: quote(generated: true, do: is_atom(unquote(codec_var())))
-  def dump_guard({_mod, _address, _place, fields}) when is_list(fields), do: Fields.dump_guard(fields)
   def dump_guard({_mod, _address, _place, {:domain, fields}}), do: Fields.dump_guard_ir(fields)
 
   @doc false
@@ -365,12 +298,6 @@ defmodule Core.Codec.Plugin.Variants do
     dumped = quote(generated: true, do: unquote(codec_var()).__codec_prim__().dump(unquote(value_var())))
 
     wrap(place, dumped)
-  end
-
-  def dump_body({_mod, _address, place, fields}) when is_list(fields) do
-    pairs = Fields.dump_pairs(fields) ++ disc_pairs(disc(place))
-
-    wrap(place, quote(generated: true, do: %{unquote_splicing(pairs)}))
   end
 
   def dump_body({_mod, _address, place, {:domain, fields}}) do
@@ -440,7 +367,6 @@ defmodule Core.Codec.Plugin.Variants do
 
   def variant_args({mod, _address, _place, :manual}), do: [mod, wire_var(), codec_var()]
   def variant_args({mod, _address, _place, :prim}), do: [mod, wire_var(), codec_var()]
-  def variant_args({mod, _address, _place, fields}) when is_list(fields), do: Fields.load_args(mod)
   def variant_args({mod, _address, _place, {:domain, _fields}}), do: Fields.load_args(mod)
 
   @doc false
@@ -450,7 +376,6 @@ defmodule Core.Codec.Plugin.Variants do
     do: quote(generated: true, do: is_map(unquote(wire_var())) and is_atom(unquote(codec_var())))
 
   def variant_guard({_mod, _address, _place, :prim}), do: quote(generated: true, do: is_atom(unquote(codec_var())))
-  def variant_guard({_mod, _address, _place, fields}) when is_list(fields), do: Fields.load_guard()
   def variant_guard({_mod, _address, _place, {:domain, _fields}}), do: Fields.load_guard()
 
   @doc false
@@ -476,7 +401,6 @@ defmodule Core.Codec.Plugin.Variants do
     end
   end
 
-  def variant_body({mod, _address, _place, fields}) when is_list(fields), do: Fields.load_body(mod, fields)
   def variant_body({mod, _address, _place, {:domain, fields}}), do: Fields.load_body_ir(mod, fields)
 
   @doc false

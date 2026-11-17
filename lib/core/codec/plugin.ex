@@ -11,32 +11,54 @@ defmodule Core.Codec.Plugin do
   `dump_raw/3` — для плагинов read-моделей: значения во View лежат без Prim-обёртки,
   а формат должен совпадать с Prim-путём (`13-repos.md`).
 
-  ## Семейство типов (`union:`)
+  ## Декларативные типы (`types:`)
+
+  Тип, чья wire-форма повторяет его поля один к одному, объявляется декларацией (`use Core.Struct`,
+  `use Core.Es.Event.Payload`, `use Core.Es.ValueChanged`) и экспортирует `__core_fields__/0`.
+  `types:` только регистрирует такие типы: `dump/2` и `load/3` плагин генерирует по IR
+  (`Core.Codec.Plugin.Fields`) — вид поля, wire-ключ, `optional:` и типизированный `default:`
+  берутся из одной декларации.
+
+  ```elixir
+  defmodule Item do
+    use Core.Struct,
+      fields: [
+        id: [prim: Item.ID],
+        name: [prim: Item.Name, wire: "title"],
+        note: [prim: Item.Note, optional: true],
+        status: [enum: Item.Status, default: :new],
+        tags: [list: [entity: Item.Tag]]
+      ]
+  end
+
+  use Core.Codec.Plugin, types: [Item]
+  ```
+
+  `personal:` и `subject:` декларации на Codec не влияют: значения остаются открытыми, маркеры ПДн
+  ставит нагрузка события. `default:` подставляется только при отсутствующем wire-ключе и уже
+  типизированным значением; явный `null` его не заменяет — у `optional: true` это `nil`, у
+  обязательного поля ошибка загрузки.
+
+  ## Ручные типы
+
+  Тип без декларации требует ручных клауз `dump/2` и (при `loadable: true`) `load/3` — форму wire
+  задаёт автор типа. Если нужна пере-дамп-спека, он же объявляет `redump_spec/1`. Смешанный плагин
+  (часть типов декларативные, часть ручные) допустим. Ручная клауза на декларативный тип — `CompileError`
+  «never match»: её перекрывает сгенерированная.
+
+  ## Семейство вариантов (`union:`)
 
   Полиморфный wire (тег внутри данных) восстанавливается не отдельной функцией фасада,
   а по **модулю-семейству**: `codec.load(<Aggregate>.Event, data)`. Плагин объявляет его
   опцией `union:`, фасад заводит для него клоузу `load/2`, а какой конкретно тип лежит в
-  данных — решает сам плагин. Так у фасада остаётся одна ось диспетчеризации — модуль.
+  данных — решает плагин. Так у фасада остаётся одна ось диспетчеризации — модуль.
 
-  Варианты, которые узнаются по адресу в данных, объявляются `variants:`, и разбор генерирует
-  плагин (`Core.Codec.Plugin.Variants`):
-
-  ```elixir
-  use Core.Codec.Plugin,
-    union: Shape,
-    variants: [
-      {Shape.Circle, "circle", radius: [type: :pos_integer]},
-      {Shape.Rect, {"polygon", kind: :rect}, width: [type: :pos_integer], height: [type: :pos_integer]},
-      {Shape.Blob, "blob"}
-    ]
-  ```
-
-  Ручной вариант (`{Type, адрес}`) пишет только поля — колбэками `dump_variant/2` / `load_variant/3`.
-
-  Семейство, объявленное в своём модуле (`use Core.Union`), плагин обслуживает без `variants:`:
-  `union: Shape` берёт состав из `Shape.__core_variants__()`. Поля декларативного варианта — из его
-  `__core_fields__/0`, вариант-Prim дампится и грузится своим кодеком (`"fields"` — дамп Prim), а
-  ручной вариант — колбэками. Явные `variants:` старше реестра семейства.
+  Состав и адреса вариантов объявляет модуль семейства (`use Core.Union`), плагин читает реестр
+  `__core_variants__/0` и генерирует `dump/2` / `load/3` каждого варианта и загрузку семейства по
+  адресу (`Core.Codec.Plugin.Variants`). Поля декларативного варианта — из его `__core_fields__/0`,
+  вариант-Prim дампится и грузится своим кодеком (`"fields"` — дамп Prim), ручной вариант — колбэками
+  `dump_variant/2` / `load_variant/3`. Семейство без реестра (например, кодек событий) пишет
+  `load/3` семейства само.
 
   ## Протокол фасада
 
@@ -52,60 +74,28 @@ defmodule Core.Codec.Plugin do
 
   ## Спека пере-дампа
 
-  Спеку `Core.Codec.Redump` каждого типа из `fields:`, варианта из `variants:` и семейства с
-  `variants:` плагин выводит сам и отдаёт служебной `__codec_redump__/1` (`Core.Codec.Plugin.Redump`):
-  тип по полям — `{:map, %{wire-ключ => спека}}`, вариант — форма его дампа, семейство — слияние спек
-  вариантов. Ручной тип, ручной вариант (спека его полей) и семейство без `variants:` объявляют спеку
-  колбэком `redump_spec/1`; клауза колбэка на тип с выведенной спекой — `CompileError`.
+  Спеку `Core.Codec.Redump` каждого декларативного типа и варианта семейства плагин выводит сам и
+  отдаёт служебной `__codec_redump__/1` (`Core.Codec.Plugin.Redump`): тип по полям —
+  `{:map, %{wire-ключ => спека}}`, вариант — форма его дампа, семейство — слияние спек вариантов.
+  Ручной тип, ручной вариант (спека его полей) и семейство без реестра объявляют спеку колбэком
+  `redump_spec/1`; клауза колбэка на тип с выведенной спекой — `CompileError`.
   `__codec_redump__/1` генерируется только на типы со спекой, типы без неё отдаёт
   `__codec_redump_missing__/0`, и отказ по ним бросает фасад.
 
-  ## Плагин по полям (`fields:`)
-
-  Тип, чья wire-форма повторяет поля один к одному, объявляется спекой полей, и `dump/2` /
-  `load/3` для него генерируются (`Core.Codec.Plugin.Fields`):
-
-  ```elixir
-  use Core.Codec.Plugin,
-    fields: [
-      {Item,
-       id: [prim: Item.ID],
-       name: [prim: Item.Name, wire: "title"],
-       note: [prim: Item.Note, optional: true],
-       status: [enum: Item.Status, default: "new"],
-       tags: [list: [entity: Item.Tag]]}
-    ]
-  ```
-
-  Поле — ровно один вид: `prim:` (любой Prim), `enum:` (`Core.Enum`), `entity:` (struct фасада),
-  `union:` (вариант семейства: дамп в форме адреса, загрузка `codec.load(Family, raw)`, голова —
-  только `is_struct`), `list:` (спека элемента), `set:` (множество: спека элемента, значение —
-  `MapSet`), `map:` (словарь: `[key: спека, value: спека]`, ключ — вид с wire-строкой), `type:` (как
-  у `Core.View`: скаляр или `:map` — map без спеки ключа и значения); плюс `optional: true`,
-  `wire: "ключ"` (по умолчанию имя поля строкой) и `default:` — wire-литерал вместо отсутствующего
-  ключа или `nil` при загрузке. Форма wire каждого вида, порядок множества, путь ошибки загрузки и
-  ограничение ключа словаря — `Core.Codec.Plugin.Fields`.
-  Ключи спеки сверяются с полями struct без `__struct__` и `events`; расхождение — `CompileError`.
-  У структуры по полям (`use Core.Struct`) сверяются ещё вид поля, включая вложенные `list:` /
-  `set:` / `map:` с видами элемента, ключа и значения, и `optional:`; `wire:` и `default:` — только
-  плагина.
-  `load/3` собирает struct литералом; первая ошибка поля — итог, лишние ключи игнорируются.
-  Дамп — map со строковыми ключами. Ручная клауза на тип из `fields:` и `@spec` у `dump/2` /
-  `load/3` такого плагина — `CompileError`. Тип из `fields:` в `types:` не повторяется: `types:` —
-  только ручные типы.
-
   ## Опции
 
-  `types:` и `variants:` — опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): список
-  вычисляется в теле плагина, поэтому законно `types: Map.keys(@tag_by_mod)` и `variants:` из реестра
-  модуля (`Enum.map(@tag_by_mod, fn {mod, tag} -> {mod, tag, level: [type: :pos_integer]} end)`).
-  Остальные опции — литералы: ключи, `loadable:` и `union:` проверяются при раскрытии `use`, атрибут
-  или вызов функции — `CompileError` «ожидается литерал».
+  - `types:` — опция-выражение (`docs/rules/20-agreements.md`, «Опции `use`»): список вычисляется в
+    теле плагина, поэтому законно `types: Map.keys(@tag_by_mod)`
+  - `loadable:` — `true` (default), если есть `load/3`; `false` — только `dump/2`
+  - `union:` — модуль-семейство вариантов (`use Core.Union`)
 
-  Модули `types:` / `fields:` / `variants:` MAY быть вложены в плагин: проверки по ним (struct, поля,
-  Prim) идут в теле. Вложенный модуль `fields:` / `variants:` MUST быть объявлен выше `use` — ниже он
-  ещё не собран, и сборка падает `CompileError` «недоступен». Модуль `types:` при сборке плагина не
-  проверяется: его может объявлять сам вызывающий (кодек View вложен в своё представление).
+  Ключи, `loadable:` и `union:` проверяются при раскрытии `use`; атрибут или вызов функции в
+  литеральной опции — `CompileError` «ожидается литерал». `fields:` и `variants:` — неизвестные
+  опции: поля и адреса объявляются в декларации типа и в модуле семейства.
+
+  Декларативный тип MUST быть собран выше `use` (в том же модуле или отдельным модулем): плагин
+  читает его `__core_fields__/0` при раскрытии. Модуль `types:` без декларации плагин не проверяет —
+  его обслуживает ручная клауза.
   """
 
   alias Core.Helper
@@ -113,8 +103,8 @@ defmodule Core.Codec.Plugin do
 
   @label "Codec.Plugin"
   @required_keys ~w()a
-  @optional_keys ~w(types loadable union fields variants)a
-  @expression_keys ~w(types variants)a
+  @optional_keys ~w(types loadable union)a
+  @expression_keys ~w(types)a
 
   @typedoc "Модуль entity-фасада (`Core.Codec.Facade.Behaviour`)."
   @type codec :: module()
@@ -131,7 +121,7 @@ defmodule Core.Codec.Plugin do
   @doc "Модуль (тип или семейство) + wire → domain (опционально при `loadable: false`)."
   @callback load(module(), term(), codec()) :: Result.t()
 
-  @doc "Поля ручного варианта (`{Mod, адрес}` в `variants:`) → map; адрес и обёртку пишет плагин."
+  @doc "Поля ручного варианта семейства (`kind: :manual` в `Core.Union`) → map; адрес и обёртку пишет плагин."
   @callback dump_variant(struct(), codec()) :: map()
 
   @doc "Модуль ручного варианта + его поля → вариант; адрес уже сверен плагином."
@@ -139,7 +129,7 @@ defmodule Core.Codec.Plugin do
 
   @doc """
   Спека пере-дампа (`Core.Codec.Redump`) ручного типа, ручного варианта (спека его полей, `{:map, _}`)
-  или семейства `union:` без `variants:`; спеку типов из `fields:` / `variants:` выводит плагин.
+  или семейства `union:` без реестра вариантов; спеку декларативных типов и вариантов выводит плагин.
   """
   @callback redump_spec(module()) :: Core.Codec.Redump.spec()
 
@@ -156,15 +146,15 @@ defmodule Core.Codec.Plugin do
 
   ## Opts
 
-  - `types:` — список модулей struct с ручными `dump/2` / `load/3`
+  - `types:` — список модулей, которые обслуживает плагин. Декларативный тип (экспортирует
+    `__core_fields__/0`) получает `dump/2`/`load/3` и redump-спеку по общей декларации; тип без
+    неё требует ручных клауз `dump/2`/`load/3` (и `redump_spec/1`, если нужна пере-дамп-спека)
   - `loadable:` — `true` (default), если есть `load/3`; `false` — только `dump/2`
-  - `union:` — модуль-семейство типов: фасад отдаёт ему `load/3` с тегом внутри данных
-  - `fields:` — список пар `{Type, spec}`: типы, для которых `dump/2` / `load/3` генерируются
-    по спеке полей
-  - `variants:` — варианты семейства `union:`: `{Type, адрес, spec}` или `{Type, адрес}`
-    (`Core.Codec.Plugin.Variants`)
+  - `union:` — модуль-семейство вариантов: состав берётся из `__core_variants__/0` (`use Core.Union`),
+    фасад отдаёт семейству `load/3` по адресу внутри данных
 
-  Тип объявляется ровно одной из `types:` / `fields:` / `variants:`; хотя бы одна из них обязательна.
+  Поля в плагине не объявляются: их источник — `__core_fields__/0` типа. `fields:` и `variants:` —
+  неизвестные опции (`CompileError`).
   """
   defmacro __using__(opts) do
     opts = Helper.Opts.expand!(opts, __CALLER__, @label)
@@ -179,21 +169,15 @@ defmodule Core.Codec.Plugin do
 
         @codec_loadable unquote(loadable)
         @codec_union unquote(union)
-        @codec_fields Core.Codec.Field.fields!(unquote(Macro.escape(Keyword.get(opts, :fields))), @codec_loadable)
-        @codec_variants Core.Codec.Plugin.Variants.variants!(
-                          unquote(Keyword.get(opts, :variants)),
-                          @codec_union
-                        )
-        @codec_variants Core.Codec.Plugin.Variants.union_variants!(@codec_union, @codec_variants)
+        @codec_declared_types Core.Codec.Plugin.Opts.types!(unquote(Keyword.get(opts, :types, [])))
+        @codec_variants Core.Codec.Plugin.Variants.union_variants(@codec_union)
+        @codec_declared Core.Codec.Plugin.Opts.declared!(@codec_declared_types)
         @codec_types Core.Codec.Plugin.Opts.all_types!([
-                       Core.Codec.Plugin.Opts.types!(unquote(Keyword.get(opts, :types, []))),
-                       Enum.map(@codec_fields, &elem(&1, 0)),
+                       @codec_declared_types,
                        Enum.map(@codec_variants, &elem(&1, 0))
                      ])
       end,
       quote unquote: false do
-        @codec_variants_info Core.Codec.Plugin.Variants.introspection(@codec_variants)
-
         # `@impl` и на колбэках `__codec_*__`, и на сгенерированных клаузах: ручная клауза с `@impl` у
         # смешанного плагина иначе требует его от каждого колбэка из этого `use`.
         @doc false
@@ -212,11 +196,6 @@ defmodule Core.Codec.Plugin do
 
         @impl true
         def __codec_union__, do: @codec_union
-
-        @doc false
-        @spec __codec_variants__() :: [{module(), term(), [Core.Codec.Field.t()] | :manual}]
-
-        def __codec_variants__, do: @codec_variants_info
 
         @doc false
         @spec __codec_pattern__(module()) :: Macro.t()
@@ -243,11 +222,11 @@ defmodule Core.Codec.Plugin do
             load_many: 3
           ]
 
-        for {type, fields} <- @codec_fields do
+        for {type, fields} <- @codec_declared do
           @impl true
-          def dump(unquote_splicing(Core.Codec.Plugin.Fields.dump_args(type, fields)))
-              when unquote(Core.Codec.Plugin.Fields.dump_guard(fields)),
-              do: unquote(Core.Codec.Plugin.Fields.dump_body(fields))
+          def dump(unquote_splicing(Core.Codec.Plugin.Fields.dump_args_ir(type, fields)))
+              when unquote(Core.Codec.Plugin.Fields.dump_guard_ir(fields)),
+              do: unquote(Core.Codec.Plugin.Fields.dump_body_ir(fields))
         end
 
         for variant <- @codec_variants do
@@ -257,11 +236,11 @@ defmodule Core.Codec.Plugin do
               do: unquote(Core.Codec.Plugin.Variants.dump_body(variant))
         end
 
-        for {type, fields} <- @codec_fields, @codec_loadable do
+        for {type, fields} <- @codec_declared, @codec_loadable do
           @impl true
           def load(unquote_splicing(Core.Codec.Plugin.Fields.load_args(type)))
               when unquote(Core.Codec.Plugin.Fields.load_guard()),
-              do: unquote(Core.Codec.Plugin.Fields.load_body(type, fields))
+              do: unquote(Core.Codec.Plugin.Fields.load_body_ir(type, fields))
         end
 
         for {type, _address, _place, _fields} = variant <- @codec_variants do

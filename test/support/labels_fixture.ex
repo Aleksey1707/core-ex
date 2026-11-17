@@ -226,13 +226,14 @@ defmodule Core.LabelsFixture do
   defmodule Address do
     @moduledoc "Адрес — вложенный struct сведений со спекой видимых полей."
 
-    defstruct [:city, :zip, :checksum]
-
-    use Core.Labels.Fields,
+    use Core.Struct,
       fields: [
         city: [prim: Core.LabelsFixture.Name],
-        zip: [type: :string, optional: true]
-      ],
+        zip: [type: :string, optional: true, default: nil],
+        checksum: [type: :string, optional: true, default: nil]
+      ]
+
+    use Core.Labels.Fields,
       labels: [
         city: "Город",
         zip: "Индекс",
@@ -243,13 +244,13 @@ defmodule Core.LabelsFixture do
   defmodule Line do
     @moduledoc "Позиция — элемент списка struct'ов."
 
-    defstruct [:title, :count]
-
-    use Core.Labels.Fields,
+    use Core.Struct,
       fields: [
         title: [prim: Core.LabelsFixture.Name],
         count: [prim: Core.LabelsFixture.Count]
-      ],
+      ]
+
+    use Core.Labels.Fields,
       labels: [
         title: "Наименование",
         count: "Количество"
@@ -279,49 +280,74 @@ defmodule Core.LabelsFixture do
   defmodule Shape do
     @moduledoc "Фигура — семейство вариантов."
 
+    defmodule Kind do
+      @moduledoc """
+      Вид фигуры.
+
+      | Значение | Описание |
+      |---|---|
+      | `:circle` | круг |
+      | `:rect` | прямоугольник |
+      | `:pin` | метка |
+      """
+
+      use Core.Enum,
+        name: "Вид фигуры",
+        values: ~w(circle rect pin)a
+    end
+
     defmodule Circle do
       @moduledoc "Вариант: круг."
 
-      defstruct [:radius, kind: :circle]
+      use Core.Struct,
+        fields: [
+          radius: [type: :pos_integer],
+          kind: [enum: Core.LabelsFixture.Shape.Kind, default: :circle]
+        ]
 
       use Core.Labels.Fields,
-        fields: [radius: [type: :pos_integer]],
         labels: [radius: "Радиус", kind: :hidden]
     end
 
     defmodule Rect do
       @moduledoc "Вариант: прямоугольник."
 
-      defstruct [:width, :height, kind: :rect]
+      use Core.Struct,
+        fields: [
+          width: [type: :pos_integer],
+          height: [type: :pos_integer],
+          kind: [enum: Core.LabelsFixture.Shape.Kind, default: :rect]
+        ]
 
       use Core.Labels.Fields,
-        fields: [width: [type: :pos_integer], height: [type: :pos_integer]],
         labels: [width: "Ширина", height: "Высота", kind: :hidden]
     end
 
     defmodule Pin do
       @moduledoc "Вариант: метка на позиции."
 
-      defstruct [:item, kind: :pin]
+      use Core.Struct,
+        fields: [
+          item: [prim: Core.LabelsFixture.ItemID],
+          kind: [enum: Core.LabelsFixture.Shape.Kind, default: :pin]
+        ]
 
       use Core.Labels.Fields,
-        fields: [item: [prim: Core.LabelsFixture.ItemID]],
         labels: [item: "Позиция", kind: :hidden]
     end
+
+    use Core.Union,
+      variants: [
+        {Core.LabelsFixture.Shape.Circle, [kind: :circle]},
+        {Core.LabelsFixture.Shape.Rect, [kind: :rect]},
+        {Core.LabelsFixture.Shape.Pin, [kind: :pin]}
+      ]
   end
 
   defmodule Shape.Codec do
     @moduledoc "Варианты фигуры: форма без обёртки, дискриминатор `kind`."
 
-    alias Core.LabelsFixture.Shape
-
-    use Core.Codec.Plugin,
-      union: Shape,
-      variants: [
-        {Shape.Circle, [kind: :circle], radius: [type: :pos_integer]},
-        {Shape.Rect, [kind: :rect], width: [type: :pos_integer], height: [type: :pos_integer]},
-        {Shape.Pin, [kind: :pin], item: [prim: Core.LabelsFixture.ItemID]}
-      ]
+    use Core.Codec.Plugin, union: Core.LabelsFixture.Shape
   end
 
   defmodule Seal do
@@ -1227,14 +1253,7 @@ defmodule Core.LabelsFixture do
 
     alias Core.LabelsFixture
 
-    use Core.Codec.Plugin,
-      fields: [
-        {LabelsFixture.Address,
-         city: [prim: LabelsFixture.Name],
-         zip: [type: :string, optional: true],
-         checksum: [type: :string, optional: true]},
-        {LabelsFixture.Line, title: [prim: LabelsFixture.Name], count: [prim: LabelsFixture.Count]}
-      ]
+    use Core.Codec.Plugin, types: [LabelsFixture.Address, LabelsFixture.Line]
   end
 
   defmodule Event.Limited.Codec do

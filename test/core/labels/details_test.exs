@@ -166,7 +166,13 @@ defmodule Core.Labels.DetailsTest do
 
   test "спека fields: и text: — текст функцией, у списка — по элементу; скрытое не выходит" do
     count = Count.new!(2)
-    payload = %Event.Tagged.Payload{origin: %Line{}, tags: ~w(urgent fragile)a, count: count, trace: "t-1"}
+
+    payload = %Event.Tagged.Payload{
+      origin: %Line{title: Name.new!("Болт"), count: Count.new!(4)},
+      tags: ~w(urgent fragile)a,
+      count: count,
+      trace: "t-1"
+    }
 
     assert Details.build(event(Event.Tagged, payload)) ==
              {"Метки расставлены",
@@ -346,7 +352,10 @@ defmodule Core.Labels.DetailsTest do
     end
 
     test "ручной struct с value: [text: …] — текст функцией" do
-      payload = %Event.OriginChanged.Payload{old_value: %Address{}, new_value: %Line{}}
+      payload = %Event.OriginChanged.Payload{
+        old_value: %Address{city: Name.new!("Казань")},
+        new_value: %Line{title: Name.new!("Болт"), count: Count.new!(4)}
+      }
 
       assert Details.build(event(Event.OriginChanged, payload)) ==
                {"Источник изменён",

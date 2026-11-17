@@ -94,38 +94,36 @@ defmodule Core.ViewFixture do
   defmodule Reading do
     @moduledoc false
 
-    defstruct [:measured_at, :weight, :status]
+    use Core.Struct,
+      fields: [
+        measured_at: [prim: Core.ViewFixture.MeasuredAt],
+        weight: [prim: Core.ViewFixture.Weight, wire: "kg"],
+        status: [enum: Core.ViewFixture.Status]
+      ]
   end
 
   defmodule Reading.Codec do
     @moduledoc false
 
-    use Core.Codec.Plugin,
-      fields: [
-        {Core.ViewFixture.Reading,
-         measured_at: [prim: Core.ViewFixture.MeasuredAt],
-         weight: [prim: Core.ViewFixture.Weight, wire: "kg"],
-         status: [enum: Core.ViewFixture.Status]}
-      ]
+    use Core.Codec.Plugin, types: [Core.ViewFixture.Reading]
   end
 
   defmodule Stock do
     @moduledoc false
 
-    defstruct [:ids, :days, :weights, :by_status]
+    use Core.Struct,
+      fields: [
+        ids: [set: [prim: Core.ViewFixture.ID]],
+        days: [set: [prim: Core.ViewFixture.Day]],
+        weights: [map: [key: [prim: Core.ViewFixture.ID], value: [prim: Core.ViewFixture.Weight]]],
+        by_status: [map: [key: [enum: Core.ViewFixture.Status], value: [list: [prim: Core.ViewFixture.CreatedAt]]]]
+      ]
   end
 
   defmodule Stock.Codec do
     @moduledoc false
 
-    use Core.Codec.Plugin,
-      fields: [
-        {Core.ViewFixture.Stock,
-         ids: [set: [prim: Core.ViewFixture.ID]],
-         days: [set: [prim: Core.ViewFixture.Day]],
-         weights: [map: [key: [prim: Core.ViewFixture.ID], value: [prim: Core.ViewFixture.Weight]]],
-         by_status: [map: [key: [enum: Core.ViewFixture.Status], value: [list: [prim: Core.ViewFixture.CreatedAt]]]]}
-      ]
+    use Core.Codec.Plugin, types: [Core.ViewFixture.Stock]
   end
 
   defmodule Nested do

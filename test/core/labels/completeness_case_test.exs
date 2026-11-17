@@ -121,12 +121,6 @@ defmodule Core.Labels.CompletenessCaseTest do
       assert :ok = CompletenessCase.check_variants(@full)
     end
 
-    test "расходящаяся спека — вариант, поле и обе спеки; видимый дискриминатор не сверяется" do
-      assert {:error, %{diverged: diverged}} = CompletenessCase.check_variants(@broken)
-
-      assert diverged == [{LabelsBrokenFixture.Mark.Skewed, :size, {{:type, :integer}, {:type, :pos_integer}}}]
-    end
-
     test "семейство без плагина среди модулей — владелец, поле и семейство" do
       assert {:error, %{unknown_family: [{Marked.Payload, :loose, LabelsBrokenFixture.Loose}]}} =
                CompletenessCase.check_variants(@broken)

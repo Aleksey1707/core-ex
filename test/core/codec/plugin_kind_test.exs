@@ -18,31 +18,29 @@ defmodule Core.Codec.PluginKindTest do
   end
 
   defmodule Item do
-    defstruct [:name]
+    use Core.Struct, fields: [name: [prim: Core.Codec.PluginKindTest.Name]]
   end
 
   defmodule Item.Codec do
-    use Core.Codec.Plugin,
-      fields: [{Core.Codec.PluginKindTest.Item, name: [prim: Core.Codec.PluginKindTest.Name]}]
+    use Core.Codec.Plugin, types: [Core.Codec.PluginKindTest.Item]
   end
 
   defmodule AllKinds do
-    defstruct [:prim, :enum, :entity, :union, :list, :set, :map, :type]
+    use Core.Struct,
+      fields: [
+        prim: [prim: Core.Codec.PluginKindTest.Name],
+        enum: [enum: Core.Codec.PluginKindTest.Status],
+        entity: [entity: Core.Codec.PluginKindTest.Item],
+        union: [union: Core.DerivedFixture.Mark],
+        list: [list: [prim: Core.Codec.PluginKindTest.Name]],
+        set: [set: [prim: Core.Codec.PluginKindTest.Name]],
+        map: [map: [key: [prim: Core.Codec.PluginKindTest.Name], value: [type: :integer]]],
+        type: [type: :pos_integer]
+      ]
   end
 
   defmodule Plugin do
-    use Core.Codec.Plugin,
-      fields: [
-        {Core.Codec.PluginKindTest.AllKinds,
-         prim: [prim: Core.Codec.PluginKindTest.Name],
-         enum: [enum: Core.Codec.PluginKindTest.Status],
-         entity: [entity: Core.Codec.PluginKindTest.Item],
-         union: [union: Core.DerivedFixture.Mark],
-         list: [list: [prim: Core.Codec.PluginKindTest.Name]],
-         set: [set: [prim: Core.Codec.PluginKindTest.Name]],
-         map: [map: [key: [prim: Core.Codec.PluginKindTest.Name], value: [type: :integer]]],
-         type: [type: :pos_integer]}
-      ]
+    use Core.Codec.Plugin, types: [Core.Codec.PluginKindTest.AllKinds]
   end
 
   defmodule Facade do

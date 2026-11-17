@@ -37,8 +37,8 @@ defmodule Core.Es.Event.PayloadPersonalTest do
              ] = Core.EventFixture.Event.ContactSet.Payload.__es_payload_fields__()
     end
 
-    test "плагин сущности subject: не принимает" do
-      assert_raise CompileError, ~r/неизвестные ключи \[:subject\]/, fn ->
+    test "плагин сущности поля не объявляет — fields: неизвестная опция" do
+      assert_raise CompileError, ~r/^Codec\.Plugin: неизвестные опции: \[:fields\]$/, fn ->
         compile(
           quote do
             defmodule Core.Es.Event.PayloadPersonalTest.PluginSubject do

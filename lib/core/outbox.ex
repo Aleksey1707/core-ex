@@ -271,13 +271,11 @@ defmodule Core.Outbox do
     Элемент истории ошибок публикации.
     """
 
-    @enforce_keys ~w(attempt message)a
-    defstruct @enforce_keys
-
-    @type t :: %__MODULE__{
-            attempt: Attempt.t(),
-            message: ErrorMessage.t()
-          }
+    use Core.Struct,
+      fields: [
+        attempt: [prim: Attempt],
+        message: [prim: ErrorMessage]
+      ]
 
     @doc "Создать запись об ошибке."
     @spec new(Attempt.t(), ErrorMessage.t()) :: t()

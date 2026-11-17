@@ -2,7 +2,7 @@ defmodule Core.LabelsBrokenFixture do
   @moduledoc """
   Сломанный набор ратчета полноты подписей (`Core.Labels.CompletenessCase`): событие без названия с
   нагрузкой без решения по полям, Enum без подписей, id без вида, вариант семейства без решения по
-  полям, вариант со спекой `fields:`, расходящейся со спекой плагина, и семейство без плагина; автор
+  полям и семейство без плагина; автор
   без вида id — у событий кодека `Event.Codec`, автор-ссылка на запись и автор только id — по событию
   в своём кодеке.
   """
@@ -31,39 +31,38 @@ defmodule Core.LabelsBrokenFixture do
     defmodule Bare do
       @moduledoc "Вариант без решения по полям."
 
-      defstruct [:note]
+      use Core.Struct, fields: [note: [type: :string]]
     end
 
     defmodule Skewed do
-      @moduledoc "Вариант: спека `size` расходится со спекой плагина, дискриминатор `kind` — видимое поле."
+      @moduledoc "Вариант с решением по полям: дискриминатор `kind` — видимое поле."
 
-      defstruct [:size, :color, kind: :skewed]
-
-      use Core.Labels.Fields,
+      use Core.Struct,
         fields: [
           size: [type: :integer],
           color: [type: :string],
-          kind: [text: &Atom.to_string/1]
-        ],
+          kind: [type: :string, default: "skewed"]
+        ]
+
+      use Core.Labels.Fields,
         labels: [
           size: "Размер",
           color: "Цвет",
           kind: "Вид"
         ]
     end
+
+    use Core.Union,
+      variants: [
+        {Core.LabelsBrokenFixture.Mark.Bare, [kind: :bare]},
+        {Core.LabelsBrokenFixture.Mark.Skewed, [kind: "skewed"]}
+      ]
   end
 
   defmodule Mark.Codec do
     @moduledoc "Варианты метки: форма без обёртки, дискриминатор `kind`."
 
-    alias Core.LabelsBrokenFixture.Mark
-
-    use Core.Codec.Plugin,
-      union: Mark,
-      variants: [
-        {Mark.Bare, [kind: :bare], note: [type: :string]},
-        {Mark.Skewed, [kind: :skewed], size: [type: :pos_integer], color: [type: :string]}
-      ]
+    use Core.Codec.Plugin, union: Core.LabelsBrokenFixture.Mark
   end
 
   defmodule Loose do

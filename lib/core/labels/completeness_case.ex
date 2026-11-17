@@ -52,7 +52,6 @@ defmodule Core.Labels.CompletenessCase do
     `Credo.Check.Refactor.PassAsyncInTestCases`
   """
 
-  alias Core.Codec.Field
   alias Core.Helper
   alias Core.Labels.Fields
   alias Core.Labels.ID
@@ -84,8 +83,8 @@ defmodule Core.Labels.CompletenessCase do
   @type unkinded :: %{unkinded: [place()]}
 
   @typedoc """
-  Варианты, чья спека поля расходится со спекой плагина (`{подписи, плагин}`, `nil` — спеки нет), и
-  семейства без плагина.
+  Варианты, чья спека поля расходится со спекой `__core_fields__/0` (`{подписи, IR}`, `nil` — спеки
+  нет; при одной декларации недостижимо), и семейства без плагина.
   """
   @type variants :: %{
           optional(:diverged) => [{module(), atom(), {Fields.spec() | nil, Fields.spec() | nil}}],
@@ -243,10 +242,11 @@ defmodule Core.Labels.CompletenessCase do
 
     diverged =
       for plugin <- modules,
-          Helper.Module.exports?(plugin, :__codec_variants__, 0),
-          {variant, address, fields} when is_list(fields) <- plugin.__codec_variants__(),
-          Fields.labelled?(variant),
-          gap <- diverged(variant, disc(address), fields),
+          family = union(plugin),
+          variant <- Core.Union.variants(family),
+          variant.kind == :domain,
+          Fields.labelled?(variant.module),
+          gap <- diverged(variant.module, disc(variant.address), variant_fields(variant.module)),
           do: gap
 
     result(diverged: diverged, unknown_family: unknown)
@@ -258,8 +258,17 @@ defmodule Core.Labels.CompletenessCase do
 
   defp unkinded?(module), do: match?({:unkinded, _leaf}, Kind.of(module))
 
+  defp union(plugin) do
+    if Helper.Module.exports?(plugin, :__codec_union__, 0), do: plugin.__codec_union__()
+  end
+
+  defp variant_fields(variant) do
+    for field <- Core.Field.introspect(variant) || [],
+        do: {field.name, Core.Codec.Plugin.Fields.grammar_spec(field.spec)}
+  end
+
   defp diverged(variant, disc, fields) do
-    plugin = Map.new(fields, fn %Field{name: name, spec: spec} -> {name, spec} end)
+    plugin = Map.new(fields)
     labelled = Map.new(Fields.specs(variant))
     hidden = for {name, :hidden} <- Fields.labels(variant), do: name
 

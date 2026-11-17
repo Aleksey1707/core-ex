@@ -2,12 +2,13 @@ defmodule Core.Codec.Plugin.Opts do
   @moduledoc """
   Валидация опций `use Core.Codec.Plugin` и проверка контракта перед сборкой модуля.
 
-  Проверяет форму `types:` и `union:`, что тип объявлен ровно одной из `types:` / `fields:` /
-  `variants:`, и перед сборкой — что каждый ручной тип обслужен `dump/2` (и `load/3` при
-  `loadable: true`, вместе с семейством `union:` без `variants:`) ручной клаузой, а ручной вариант —
-  колбэками `dump_variant/2` / `load_variant/3`. Ручная клауза на сгенерированный тип или семейство и
-  `@spec` у `dump/2` / `load/3` плагина с `fields:` или `variants:` — `CompileError`; цели ручных
-  клауз и сами отказы — `Core.Codec.Plugin.Clauses`.
+  Плагин регистрирует типы (`types:`) и семейство (`union:`). Декларативный тип (экспортирует
+  `__core_fields__/0`) обслуживается сгенерированными клаузами, тип без декларации — ручными
+  клаузами `dump/2` (и `load/3` при `loadable: true`, вместе с семейством `union:` без реестра
+  вариантов), а ручной вариант семейства — колбэками `dump_variant/2` / `load_variant/3`. Ручная
+  клауза на декларативный тип, вариант или семейство с выведенной загрузкой и `@spec` у `dump/2` /
+  `load/3` плагина с декларативными типами или вариантами — `CompileError`; цели ручных клауз и
+  сами отказы — `Core.Codec.Plugin.Clauses`.
   """
 
   alias Core.Codec.Plugin.Clauses
@@ -24,6 +25,13 @@ defmodule Core.Codec.Plugin.Opts do
     end
 
     types
+  end
+
+  @doc false
+  @spec declared!([module()]) :: [{module(), [map()]}]
+
+  def declared!(types) when is_list(types) do
+    for type <- types, fields = Core.Field.introspect(type), do: {type, fields}
   end
 
   @doc false
@@ -44,7 +52,7 @@ defmodule Core.Codec.Plugin.Opts do
 
     case {all, all -- Enum.uniq(all)} do
       {[], _dupes} ->
-        Helper.Opts.reject!(@label, "нет типов — задайте types:, fields: или variants:")
+        Helper.Opts.reject!(@label, "нет типов — задайте types: или union: с составом семейства")
 
       {all, []} ->
         all
@@ -52,7 +60,7 @@ defmodule Core.Codec.Plugin.Opts do
       {_all, dupes} ->
         Helper.Opts.reject!(
           "#{@label}: types",
-          "типы объявлены в нескольких опциях: #{inspect(Enum.uniq(dupes))} — types: только для ручных типов"
+          "тип объявлен и в types:, и вариантом семейства: #{inspect(Enum.uniq(dupes))} — types: только для типов, которые не вариант"
         )
     end
   end
@@ -70,25 +78,37 @@ defmodule Core.Codec.Plugin.Opts do
   @doc false
   defmacro __before_compile__(env) do
     mod = env.module
+    loadable? = Module.get_attribute(mod, :codec_loadable)
     variants = Module.get_attribute(mod, :codec_variants)
     union = Module.get_attribute(mod, :codec_union)
-    dumped = Enum.map(Module.get_attribute(mod, :codec_fields), &elem(&1, 0)) ++ Enum.map(variants, &elem(&1, 0))
-    loaded = if variants == [], do: dumped, else: dumped ++ [union]
-    generated = if Module.get_attribute(mod, :codec_loadable), do: [dump: dumped, load: loaded], else: [dump: dumped]
+    declared = Enum.map(Module.get_attribute(mod, :codec_declared), &elem(&1, 0))
+    variant_types = Enum.map(variants, &elem(&1, 0))
+    dumped = declared ++ variant_types
+    loaded = if loadable?, do: dumped ++ family(union, variants), else: []
+    generated = if loadable?, do: [dump: dumped, load: loaded], else: [dump: dumped]
     funs = Enum.map(generated, fn {name, _types} -> {name, arity(name)} end)
 
     if dumped != [] do
-      Clauses.raise_never_match!(env, never_match(env, generated), "тип сгенерирован по fields: или variants:")
-      Clauses.raise_specs!(env, funs, "у плагина с fields: или variants: контракт задаёт @callback Core.Codec.Plugin")
+      Clauses.raise_never_match!(
+        env,
+        never_match(env, generated),
+        "тип сгенерирован по __core_fields__/0 или варианту семейства union:"
+      )
+
+      Clauses.raise_specs!(
+        env,
+        funs,
+        "у плагина с декларативными типами или семейством контракт задаёт @callback Core.Codec.Plugin"
+      )
     end
 
     # `dump/2` обязателен для каждого типа: фасад уже завёл clause на каждый тип плагина,
     # и без клаузы она упала бы `FunctionClauseError` на первом дампе.
     types = Module.get_attribute(mod, :codec_types)
-    reason = "их нет ни в fields:, ни в variants:, ни в ручных клаузах"
+    reason = "их нет ни в types: с __core_fields__/0, ни в ручных клаузах, ни в реестре семейства union:"
     check_covered!(env, {:dump, 2}, types, dumped, reason)
 
-    if Module.get_attribute(mod, :codec_loadable) do
+    if loadable? do
       check_covered!(env, {:load, 3}, types ++ List.wrap(union), loaded, reason)
     end
 
@@ -101,11 +121,15 @@ defmodule Core.Codec.Plugin.Opts do
 
   # ---
 
+  # Семейство с реестром вариантов плагин грузит сам по адресу; без реестра — ручная клауза.
+  defp family(_union, []), do: []
+  defp family(union, _variants), do: [union]
+
   defp arity(:dump), do: 2
   defp arity(:load), do: 3
 
-  # Клаузы `fields:` и `variants:` встают первыми (их порождает `use`), поэтому ручная клауза на
-  # такой тип недостижима для валидного значения и молча ловила бы только невалидное.
+  # Клаузы декларативных типов и вариантов встают первыми (их порождает `use`), поэтому ручная
+  # клауза на такой тип недостижима для валидного значения и молча ловила бы только невалидное.
   defp never_match(env, generated) do
     for {name, types} <- generated,
         fun = {name, arity(name)},

@@ -19,6 +19,126 @@ defmodule Core.Codec.PluginTest do
     def dump(%B{}, _codec), do: :b
   end
 
+  defmodule DeclaredStatus do
+    use Core.Enum,
+      name: "Статус",
+      values: ~w(new done)a
+  end
+
+  defmodule DeclaredName do
+    use Core.Prim.String,
+      name: "Имя",
+      min_len: 1,
+      max_len: 50
+  end
+
+  defmodule Declared do
+    use Core.Struct,
+      fields: [
+        name: [prim: Core.Codec.PluginTest.DeclaredName, wire: "title"],
+        note: [prim: Core.Codec.PluginTest.DeclaredName, optional: true],
+        status: [enum: Core.Codec.PluginTest.DeclaredStatus, default: :new],
+        tags: [list: [prim: Core.Codec.PluginTest.DeclaredName], default: []],
+        owner: [prim: Core.Codec.PluginTest.DeclaredName]
+      ]
+  end
+
+  defmodule DeclaredPlugin do
+    use Core.Codec.Plugin, types: [Declared]
+  end
+
+  defmodule PersonalPlugin do
+    use Core.Codec.Plugin, types: [Core.StructFixture.Recipient]
+  end
+
+  defmodule DeclaredDumpOnly do
+    use Core.Codec.Plugin,
+      types: [Declared],
+      loadable: false
+  end
+
+  @codec Core.CodecFixture.Prim.Internal
+
+  describe "декларативный тип" do
+    test "dump/2 и load/3 по __core_fields__: wire, optional, typed default" do
+      value = %Declared{
+        name: DeclaredName.new!("Стол"),
+        note: nil,
+        status: :new,
+        tags: [],
+        owner: DeclaredName.new!("Склад")
+      }
+
+      assert DeclaredPlugin.dump(value, @codec) == %{
+               "title" => "Стол",
+               "note" => nil,
+               "status" => :new,
+               "tags" => [],
+               "owner" => "Склад"
+             }
+
+      wire = Map.drop(DeclaredPlugin.dump(value, @codec), ~w(note status tags))
+
+      assert DeclaredPlugin.load(Declared, wire, @codec) ==
+               {:ok, %{value | note: nil, status: :new, tags: []}}
+    end
+
+    test "явный null не заменяется default: у обязательного поля — ошибка загрузки" do
+      wire = %{"title" => "Стол", "status" => nil, "owner" => "Склад"}
+
+      assert {:error, %Core.Error{}} = DeclaredPlugin.load(Declared, wire, @codec)
+    end
+
+    test "personal: на Codec не влияет — значение остаётся открытым" do
+      value = %Core.StructFixture.Recipient{
+        phone: Core.StructFixture.Name.new!("+7 900"),
+        label: Core.StructFixture.Name.new!("дом")
+      }
+
+      assert PersonalPlugin.dump(value, @codec) == %{"phone" => "+7 900", "label" => "дом"}
+
+      assert PersonalPlugin.load(Core.StructFixture.Recipient, %{"phone" => "+7 900", "label" => "дом"}, @codec) ==
+               {:ok, value}
+    end
+
+    test "loadable: false — dump есть, load/3 не порождается" do
+      assert Core.Helper.Module.exports?(DeclaredDumpOnly, :dump, 2)
+      refute Core.Helper.Module.exports?(DeclaredDumpOnly, :load, 3)
+    end
+
+    test "ручная клауза на декларативный тип — CompileError never match" do
+      assert_raise CompileError, ~r/never match — dump\/2 для .*DeadDeclared\.D/, fn ->
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Codec.PluginTest.DeadDeclared do
+              defmodule D do
+                use Core.Struct, fields: [a: [type: :string]]
+              end
+
+              use Core.Codec.Plugin, types: [Core.Codec.PluginTest.DeadDeclared.D]
+
+              @impl true
+              def dump(%Core.Codec.PluginTest.DeadDeclared.D{a: a}, _codec), do: %{"a" => a}
+            end
+          end
+        )
+      end
+    end
+  end
+
+  test "fields: и variants: — неизвестные опции" do
+    for {opts, key} <- [
+          {[types: [Core.Version], fields: []], :fields},
+          {[types: [Core.Version], variants: []], :variants}
+        ] do
+      {:ok, env} = Macro.Env.define_require(__ENV__, [], Core.Codec.Plugin)
+
+      assert_raise CompileError, ~r/^Codec\.Plugin: неизвестные опции: \[#{inspect(key)}\]$/, fn ->
+        Macro.expand(quote(do: Core.Codec.Plugin.__using__(unquote(opts))), env)
+      end
+    end
+  end
+
   defmodule UnionPlugin do
     defmodule Family do
     end
@@ -137,7 +257,7 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "плагин без типов — CompileError" do
-    assert_raise CompileError, ~r/нет типов — задайте types:, fields: или variants:/, fn ->
+    assert_raise CompileError, ~r/нет типов — задайте types: или union: с составом семейства/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.NoTypes do
@@ -175,21 +295,6 @@ defmodule Core.Codec.PluginTest do
   end
 
   test "атрибут в опции-литерале — «ожидается литерал»" do
-    assert_raise CompileError, ~r/^Codec\.Plugin: fields: ожидается литерал, получено @fields$/, fn ->
-      Code.eval_quoted(
-        quote do
-          defmodule Core.Codec.PluginTest.AttrFields do
-            defmodule X do
-              defstruct [:a]
-            end
-
-            @fields [{X, a: [type: :string]}]
-            use Core.Codec.Plugin, fields: @fields
-          end
-        end
-      )
-    end
-
     assert_raise CompileError, ~r/^Codec\.Plugin: union: ожидается литерал, получено @family$/, fn ->
       Code.eval_quoted(
         quote do
@@ -242,82 +347,50 @@ defmodule Core.Codec.PluginTest do
     end
   end
 
-  test "variants: неверное выражение — в теле, с меткой" do
-    assert_raise CompileError,
-                 ~r/^Codec\.Plugin: variants: ожидается непустой список \{Тип, адрес, спека\}, получено :x$/,
-                 fn ->
-                   Code.eval_quoted(
-                     quote do
-                       defmodule Core.Codec.PluginTest.BadExprVariants do
-                         @variants :x
-                         use Core.Codec.Plugin,
-                           union: Core.Codec.PluginTest.BadExprVariants,
-                           variants: @variants
-                       end
-                     end
-                   )
-                 end
+  test "декларативный тип ниже use не виден — требуется ручная клауза dump/2" do
+    assert_raise CompileError, ~r/требуется dump\/2 для \[.*NestedBelow\.X\]/, fn ->
+      Code.eval_quoted(
+        quote do
+          defmodule Core.Codec.PluginTest.NestedBelow do
+            use Core.Codec.Plugin, types: [Core.Codec.PluginTest.NestedBelow.X]
+
+            defmodule X do
+              use Core.Struct, fields: [a: [type: :string]]
+            end
+          end
+        end
+      )
+    end
   end
 
-  test "вложенный модуль ниже use — «недоступен»" do
-    assert_raise CompileError,
-                 ~r/^Codec\.Plugin: fields: .*NestedBelow\.X: .*NestedBelow\.X недоступен/,
-                 fn ->
-                   Code.eval_quoted(
-                     quote do
-                       defmodule Core.Codec.PluginTest.NestedBelow do
-                         use Core.Codec.Plugin, fields: [{Core.Codec.PluginTest.NestedBelow.X, a: [type: :string]}]
-
-                         defmodule X do
-                           defstruct [:a]
-                         end
-                       end
-                     end
-                   )
-                 end
-
-    assert_raise CompileError,
-                 ~r/^Codec\.Plugin: variants: .*NestedVariant\.X: .* недоступен/,
-                 fn ->
-                   Code.eval_quoted(
-                     quote do
-                       defmodule Core.Codec.PluginTest.NestedVariant do
-                         use Core.Codec.Plugin,
-                           union: Core.Codec.PluginTest.NestedVariant,
-                           variants: [{Core.Codec.PluginTest.NestedVariant.X, "x", a: [type: :string]}]
-
-                         defmodule X do
-                           defstruct [:a]
-                         end
-                       end
-                     end
-                   )
-                 end
-  end
-
-  test "вложенный модуль выше use — fields: и variants: собираются" do
+  test "вложенные выше use декларативный тип и семейство собираются" do
     {{:module, mod, _bin, _}, _binding} =
       Code.eval_quoted(
         quote do
           defmodule Core.Codec.PluginTest.NestedAbove do
             defmodule X do
-              defstruct [:a]
+              use Core.Struct, fields: [a: [type: :string]]
             end
 
             defmodule Y do
-              defstruct [:b]
+              use Core.Struct, fields: [b: [type: :string]]
+            end
+
+            defmodule Family do
+              use Core.Union, variants: [{Core.Codec.PluginTest.NestedAbove.Y, "y"}]
             end
 
             use Core.Codec.Plugin,
-              fields: [{Core.Codec.PluginTest.NestedAbove.X, a: [type: :string]}],
-              union: Core.Codec.PluginTest.NestedAbove,
-              variants: [{Core.Codec.PluginTest.NestedAbove.Y, "y", b: [type: :string]}]
+              types: [Core.Codec.PluginTest.NestedAbove.X],
+              union: Core.Codec.PluginTest.NestedAbove.Family
           end
         end
       )
 
+    codec = Core.CodecFixture.Prim.Internal
     y = struct(Module.concat(mod, Y), b: "b")
-    assert mod.dump(struct(Module.concat(mod, X), a: "a"), nil) == %{"a" => "a"}
-    assert {:ok, ^y} = mod.load(mod, mod.dump(y, nil), nil)
+
+    assert mod.dump(struct(Module.concat(mod, X), a: "a"), codec) == %{"a" => "a"}
+    assert {:ok, ^y} = mod.load(Module.concat(mod, Family), mod.dump(y, codec), codec)
   end
 end

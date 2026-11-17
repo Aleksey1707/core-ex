@@ -53,103 +53,121 @@ defmodule Core.Codec.PluginRedumpTest do
       values: ~w(draft active)a
   end
 
+  defmodule Kind do
+    use Core.Enum,
+      name: "Вид",
+      values: ~w(rect square cat t u)a
+  end
+
   defmodule Shape do
     defmodule Circle do
-      defstruct [:radius]
+      use Core.Struct, fields: [radius: [prim: Weight]]
     end
 
     defmodule Rect do
-      defstruct [:width, :at, kind: :rect]
+      use Core.Struct,
+        fields: [
+          width: [prim: Weight],
+          at: [prim: At],
+          kind: [enum: Kind, default: :rect]
+        ]
     end
 
     defmodule Square do
-      defstruct [:side, :day, kind: :square]
+      use Core.Struct,
+        fields: [
+          side: [prim: Weight],
+          day: [prim: Day],
+          kind: [enum: Kind, default: :square]
+        ]
     end
+
+    use Core.Union,
+      variants: [
+        {Core.Codec.PluginRedumpTest.Shape.Circle, "circle"},
+        {Core.Codec.PluginRedumpTest.Shape.Rect, {"polygon", kind: :rect}},
+        {Core.Codec.PluginRedumpTest.Shape.Square, {"polygon", kind: :square}}
+      ]
   end
 
   defmodule Pet do
     defmodule Cat do
-      defstruct [:born, kind: :cat]
+      use Core.Struct,
+        fields: [
+          born: [prim: Day],
+          kind: [enum: Kind, default: :cat]
+        ]
     end
 
     defmodule Dog do
-      defstruct [:id]
+      use Core.Struct, fields: [id: [prim: ID]]
     end
+
+    use Core.Union,
+      variants: [
+        {Core.Codec.PluginRedumpTest.Pet.Cat, [kind: :cat]},
+        {Core.Codec.PluginRedumpTest.Pet.Dog, [kind: "dog"]}
+      ]
   end
 
   defmodule Tag do
-    defstruct [:id, :at]
+    use Core.Struct, fields: [id: [prim: ID], at: [prim: At]]
   end
 
   defmodule Labelled do
-    defstruct [:label, :name]
-  end
-
-  defmodule Contact do
-    defstruct [:phone, :phones]
+    use Core.Struct, fields: [label: [prim: Label], name: [prim: Name]]
   end
 
   defmodule Item do
-    defstruct [:id, :name, :note, :secret, :secrets, :status, :count, :flags, :at, :weights, :tag, :tags, :shape, :pet]
+    use Core.Struct,
+      fields: [
+        id: [prim: ID],
+        name: [prim: Name, wire: "title"],
+        note: [prim: Name, optional: true, default: nil],
+        secret: [prim: Sensitive],
+        secrets: [list: [prim: Sensitive]],
+        status: [enum: Status],
+        count: [type: :integer],
+        flags: [list: [type: :string]],
+        at: [prim: At],
+        weights: [list: [prim: Weight]],
+        tag: [entity: Tag],
+        tags: [list: [entity: Tag]],
+        shape: [list: [union: Shape]],
+        pet: [union: Pet, optional: true, default: nil]
+      ]
   end
 
   defmodule Ledger do
-    defstruct [:name, :codes, :weights, :tags, :secrets]
+    use Core.Struct,
+      fields: [
+        name: [prim: Name],
+        codes: [map: [key: [prim: ID], value: [enum: Status]]],
+        weights: [map: [key: [prim: ID], value: [prim: Weight]]],
+        tags: [map: [key: [type: :string], value: [entity: Tag]]],
+        secrets: [map: [key: [type: :string], value: [list: [prim: Sensitive]]]]
+      ]
   end
 
   defmodule Roster do
-    defstruct [:ids, :ats, :statuses, :tags, :secrets]
+    use Core.Struct,
+      fields: [
+        ids: [set: [prim: ID]],
+        ats: [set: [prim: At]],
+        statuses: [set: [enum: Status]],
+        tags: [set: [entity: Tag]],
+        secrets: [set: [prim: Sensitive]]
+      ]
   end
 
   defmodule Plugin do
     use Core.Codec.Plugin,
-      union: Shape,
-      fields: [
-        {Tag, id: [prim: ID], at: [prim: At]},
-        {Labelled, label: [prim: Label], name: [prim: Name]},
-        {Contact, phone: [prim: Personal], phones: [list: [prim: Personal]]},
-        {Ledger,
-         name: [prim: Name],
-         codes: [map: [key: [prim: ID], value: [enum: Status]]],
-         weights: [map: [key: [prim: ID], value: [prim: Weight]]],
-         tags: [map: [key: [type: :string], value: [entity: Tag]]],
-         secrets: [map: [key: [type: :string], value: [list: [prim: Sensitive]]]]},
-        {Roster,
-         ids: [set: [prim: ID]],
-         ats: [set: [prim: At]],
-         statuses: [set: [enum: Status]],
-         tags: [set: [entity: Tag]],
-         secrets: [set: [prim: Sensitive]]},
-        {Item,
-         id: [prim: ID],
-         name: [prim: Name, wire: "title"],
-         note: [prim: Name, optional: true],
-         secret: [prim: Sensitive],
-         secrets: [list: [prim: Sensitive]],
-         status: [enum: Status],
-         count: [type: :integer],
-         flags: [list: [type: :string]],
-         at: [prim: At],
-         weights: [list: [prim: Weight]],
-         tag: [entity: Tag],
-         tags: [list: [entity: Tag]],
-         shape: [list: [union: Shape]],
-         pet: [union: Pet, optional: true]}
-      ],
-      variants: [
-        {Shape.Circle, "circle", radius: [prim: Weight]},
-        {Shape.Rect, {"polygon", kind: :rect}, width: [prim: Weight], at: [prim: At]},
-        {Shape.Square, {"polygon", kind: :square}, side: [prim: Weight], day: [prim: Day]}
-      ]
+      types: [Tag, Labelled, Core.StructFixture.Contact, Ledger, Roster, Item],
+      union: Shape
   end
 
   defmodule PetPlugin do
-    use Core.Codec.Plugin,
-      union: Pet,
-      variants: [
-        {Pet.Cat, [kind: :cat], born: [prim: Day]},
-        {Pet.Dog, [kind: "dog"], id: [prim: ID]}
-      ]
+    use Core.Codec.Plugin, union: Pet
   end
 
   defmodule Doc do
@@ -158,22 +176,24 @@ defmodule Core.Codec.PluginRedumpTest do
 
   defmodule Step do
     defmodule Weigh do
-      defstruct [:weight]
+      use Core.Struct, fields: [weight: [prim: Weight]]
     end
 
     defmodule Note do
       defstruct [:at]
     end
+
+    use Core.Union,
+      variants: [
+        {Core.Codec.PluginRedumpTest.Step.Weigh, "weigh"},
+        {Core.Codec.PluginRedumpTest.Step.Note, "note"}
+      ]
   end
 
   defmodule ManualPlugin do
     use Core.Codec.Plugin,
       types: [Doc],
-      union: Step,
-      variants: [
-        {Step.Weigh, "weigh", weight: [prim: Weight]},
-        {Step.Note, "note"}
-      ]
+      union: Step
 
     @impl true
     def dump(%Doc{id: id, at: at}, codec), do: %{"id" => codec.dump(id), "at" => codec.dump(at)}
@@ -225,12 +245,12 @@ defmodule Core.Codec.PluginRedumpTest do
     defmodule Dot do
       defstruct [:at]
     end
+
+    use Core.Union, variants: [{Core.Codec.PluginRedumpTest.Cell.Dot, "dot"}]
   end
 
   defmodule NoSpecPlugin do
-    use Core.Codec.Plugin,
-      union: Cell,
-      variants: [{Cell.Dot, "dot"}]
+    use Core.Codec.Plugin, union: Cell
 
     @impl true
     def dump_variant(%Cell.Dot{at: at}, codec), do: %{"at" => codec.dump(at)}
@@ -289,7 +309,7 @@ defmodule Core.Codec.PluginRedumpTest do
     end
 
     test "personal-Prim входит в спеку как обычный" do
-      assert Plugin.__codec_redump__(Contact) ==
+      assert Plugin.__codec_redump__(Core.StructFixture.Contact) ==
                {:map, %{phone: {:prim, Personal}, phones: {:list, {:prim, Personal}}}}
     end
 
@@ -403,20 +423,42 @@ defmodule Core.Codec.PluginRedumpTest do
       assert_raise CompileError,
                    ~r/Clash: variants: — wire-ключ "x" с разной спекой redump у вариантов .*Clash.T, .*Clash.U под тегом "t"/,
                    fn ->
-                     compile(
+                     compile_family(
                        :Clash,
-                       quote(do: [{T, {"t", k: :t}, x: [prim: Name]}, {U, {"t", k: :u}, x: [prim: Day]}])
+                       [k: [enum: Kind, default: :t], x: [prim: Name]],
+                       [k: [enum: Kind, default: :u], x: [prim: Day]],
+                       {"t", [k: :t]},
+                       {"t", [k: :u]}
                      )
                    end
 
       assert_raise CompileError, ~r/wire-ключ "x" .*InlineClash.T, .*InlineClash.U в форме без обёртки/, fn ->
-        compile(:InlineClash, quote(do: [{T, [k: :t], x: [prim: Name]}, {U, [k: :u], x: [list: [prim: Name]]}]))
+        compile_family(
+          :InlineClash,
+          [k: [enum: Kind, default: :t], x: [prim: Name]],
+          [k: [enum: Kind, default: :u], x: [list: [prim: Name]]],
+          [k: :t],
+          k: :u
+        )
       end
     end
 
     test "одноимённый ключ с одной спекой и без спеки — не конфликт" do
-      compile(:NoClash, quote(do: [{T, {"t", k: :t}, x: [prim: Name]}, {U, {"t", k: :u}, x: [prim: Name]}]))
-      compile(:NoSpecClash, quote(do: [{T, [k: :t], x: [type: :string]}, {U, [k: :u], x: [prim: Name]}]))
+      compile_family(
+        :NoClash,
+        [k: [enum: Kind, default: :t], x: [prim: Name]],
+        [k: [enum: Kind, default: :u], x: [prim: Name]],
+        {"t", [k: :t]},
+        {"t", [k: :u]}
+      )
+
+      compile_family(
+        :NoSpecClash,
+        [k: [enum: Kind, default: :t], x: [type: :string]],
+        [k: [enum: Kind, default: :u], x: [prim: Name]],
+        [k: :t],
+        k: :u
+      )
     end
   end
 
@@ -445,15 +487,16 @@ defmodule Core.Codec.PluginRedumpTest do
     end
 
     test "клауза колбэка на тип с выведенной спекой — CompileError never match" do
-      assert_raise CompileError, ~r/never match — redump_spec\/1 для .*Derived.T \(строка \d+\).*выводит плагин/, fn ->
-        compile(:Derived, quote(do: [{T, "t", x: [prim: Name], k: [type: :string]}]),
-          clauses: [quote(do: def(redump_spec(T), do: {:map, %{}}))]
-        )
+      assert_raise CompileError, ~r/never match — redump_spec\/1 для .*Derived\.T \(строка \d+\).*выводит плагин/, fn ->
+        compile_single(:Derived, [a: [prim: Name]], quote(do: def(redump_spec(T), do: {:map, %{}})))
       end
 
-      assert_raise CompileError, ~r/never match — redump_spec\/1 для .*DerivedFamily.Family/, fn ->
-        compile(:DerivedFamily, quote(do: [{T, "t", x: [prim: Name], k: [type: :string]}]),
-          clauses: [quote(do: def(redump_spec(Family), do: {:map, %{}}))]
+      assert_raise CompileError, ~r/never match — redump_spec\/1 для .*DerivedFamily\.Family/, fn ->
+        compile_single(
+          :DerivedFamily,
+          [a: [prim: Name]],
+          quote(do: def(redump_spec(Family), do: {:map, %{}})),
+          family: true
         )
       end
     end
@@ -523,31 +566,62 @@ defmodule Core.Codec.PluginRedumpTest do
   defp cat, do: %Pet.Cat{born: Day.new!(~D[2020-01-01])}
   defp dog, do: %Pet.Dog{id: ID.new!(@uuid)}
 
-  defp compile(name, variants, opts \\ []) do
+  defp compile_family(name, fields_t, fields_u, address_t, address_u) do
     plugin = Module.concat(__MODULE__, name)
-    clauses = Keyword.get(opts, :clauses, [])
 
-    quote do
-      defmodule unquote(plugin) do
-        defmodule T do
-          defstruct [:x, k: :t]
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(plugin) do
+          defmodule T do
+            use Core.Struct, fields: unquote(Macro.escape(fields_t))
+          end
+
+          defmodule U do
+            use Core.Struct, fields: unquote(Macro.escape(fields_u))
+          end
+
+          defmodule Family do
+            use Core.Union,
+              variants: [
+                {unquote(Module.concat(plugin, :T)), unquote(Macro.escape(address_t))},
+                {unquote(Module.concat(plugin, :U)), unquote(Macro.escape(address_u))}
+              ]
+          end
+
+          use Core.Codec.Plugin, union: unquote(Module.concat(plugin, :Family))
         end
-
-        defmodule U do
-          defstruct [:x, k: :u]
-        end
-
-        use Core.Codec.Plugin,
-          union: Family,
-          variants: unquote(variants)
-
-        unquote_splicing(clauses)
       end
-    end
-    |> Macro.prewalk(fn
-      {:__aliases__, _meta, [leaf]} when leaf in ~w(T U Family)a -> Module.concat(plugin, leaf)
-      ast -> ast
-    end)
-    |> Code.eval_quoted()
+    )
+  end
+
+  defp compile_single(name, fields, clause, opts \\ []) do
+    plugin = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(plugin) do
+          defmodule T do
+            use Core.Struct, fields: unquote(Macro.escape(fields))
+          end
+
+          if unquote(Keyword.get(opts, :family, false)) do
+            defmodule Family do
+              use Core.Union,
+                variants: [{unquote(Module.concat(plugin, :T)), "t"}]
+            end
+
+            use Core.Codec.Plugin, union: unquote(Module.concat(plugin, :Family))
+          else
+            use Core.Codec.Plugin, types: [unquote(Module.concat(plugin, :T))]
+          end
+
+          unquote(clause)
+        end
+      end
+      |> Macro.prewalk(fn
+        {:__aliases__, _meta, [leaf]} when leaf in ~w(T Family)a -> Module.concat(plugin, leaf)
+        ast -> ast
+      end)
+    )
   end
 end

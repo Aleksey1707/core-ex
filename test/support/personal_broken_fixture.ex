@@ -12,17 +12,13 @@ defmodule Core.PersonalBrokenFixture do
   defmodule Contact do
     @moduledoc "Контакт — вложенная сущность с персональным Prim."
 
-    @enforce_keys ~w(phone)a
-    defstruct @enforce_keys
-
-    @type t :: %__MODULE__{phone: Core.PrimFixture.Personal.t()}
+    use Core.Struct, fields: [phone: [prim: Core.PrimFixture.Personal]]
   end
 
   defmodule Contact.Codec do
     @moduledoc "Плагин контакта по полям."
 
-    use Core.Codec.Plugin,
-      fields: [{Core.PersonalBrokenFixture.Contact, phone: [prim: Core.PrimFixture.Personal]}]
+    use Core.Codec.Plugin, types: [Core.PersonalBrokenFixture.Contact]
   end
 
   defmodule Event do

@@ -1,10 +1,13 @@
 defmodule Core.Codec.Plugin.Fields do
   @moduledoc """
-  Генерация клауз `dump/2` / `load/3` Codec-плагина по спеке полей (`use Core.Codec.Plugin, fields:`).
+  Генерация клауз `dump/2` / `load/3` Codec-плагина по общей декларации типа (`__core_fields__/0`,
+  `Core.Field`) — и для типов `types:`, и для декларативных вариантов семейства.
 
-  Спеку нормализует `Core.Codec.Field`: поле объявляется keyword-спекой с ровно одним kind-ключом и
-  необязательными `optional: true`, `wire: "ключ"` и `default:`. Ключи спеки сверяются с полями
-  struct типа (без `__struct__` и `events`) — расхождение в любую сторону даёт `CompileError`.
+  Поля приходят единым IR: вид, wire-ключ, `optional:` и типизированный `default:` уже
+  нормализованы. Проекция IR на грамматику `Core.Codec.Field` (`grammar/1`) нужна адаптеру вида
+  (`Core.Codec.Plugin.Fields.Kind`); вложенное ПДн-место (`{:personal, вид}`) wire-форму не меняет.
+  Блоки поштучного значения поля (`dump_value/3`, `load_value/5`, `new_args/1`) переиспользует
+  нагрузка события (`Core.Es.Event.Payload`).
 
   | Вид | Дамп | Загрузка |
   |---|---|---|
@@ -104,6 +107,11 @@ defmodule Core.Codec.Plugin.Fields do
   @spec dump_pairs_ir([map()]) :: [{String.t(), Macro.t()}]
 
   def dump_pairs_ir(fields), do: Enum.map(fields, &{&1.wire, Kind.dump(grammar(&1), var(&1.name))})
+
+  @doc false
+  @spec dump_body_ir([map()]) :: Macro.t()
+
+  def dump_body_ir(fields), do: quote(generated: true, do: %{unquote_splicing(dump_pairs_ir(fields))})
 
   @doc false
   @spec new_args([Field.t()]) :: [Macro.t()]
@@ -297,6 +305,16 @@ defmodule Core.Codec.Plugin.Fields do
 
   def wire_var, do: Macro.var(:wire, __MODULE__)
 
+  # ===== проекция IR =====
+
+  @doc false
+  @spec grammar_spec(Core.Field.spec()) :: Core.Codec.Field.spec()
+
+  def grammar_spec({:personal, inner}), do: grammar_spec(inner)
+  def grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}
+  def grammar_spec({:map, key, value}), do: {:map, grammar_spec(key), grammar_spec(value)}
+  def grammar_spec(spec), do: spec
+
   # ===== общее =====
 
   # Поле-путь для спеки без собственной строки спеки: имя и `optional:` нужны операциям адаптера.
@@ -324,9 +342,4 @@ defmodule Core.Codec.Plugin.Fields do
       personal: Map.get(field, :personal)
     }
   end
-
-  defp grammar_spec({:personal, inner}), do: grammar_spec(inner)
-  defp grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}
-  defp grammar_spec({:map, key, value}), do: {:map, grammar_spec(key), grammar_spec(value)}
-  defp grammar_spec(spec), do: spec
 end

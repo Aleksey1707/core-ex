@@ -88,6 +88,16 @@ defmodule Core.StructFixture do
       ]
   end
 
+  defmodule Contact do
+    @moduledoc false
+
+    use Core.Struct,
+      fields: [
+        phone: [prim: Core.PrimFixture.Personal],
+        phones: [list: [prim: Core.PrimFixture.Personal]]
+      ]
+  end
+
   defmodule Inspectable do
     @moduledoc false
 

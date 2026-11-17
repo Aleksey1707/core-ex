@@ -2,8 +2,7 @@ defmodule Core.Codec.Field do
   @moduledoc """
   Поле спеки полей и её грамматика: нормализатор keyword-спеки и его проверки.
 
-  Спеку говорят Codec-плагин по полям (`use Core.Codec.Plugin, fields:`), варианты семейства,
-  нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged`, подписи
+  Спеку говорят нагрузка события (`Core.Es.Event.Payload`), `Core.Es.ValueChanged`, подписи
   (`Core.Labels.Fields`) и структура по полям (`Core.Struct`). Виды языка — одна таблица
   (`kinds/0`), у каждого хоста свой allowlist; вид вне его — `CompileError` с именем хоста. Поле
   объявляется keyword-спекой с ровно одним kind-ключом из allowlist хоста (`prim:` / `enum:` /

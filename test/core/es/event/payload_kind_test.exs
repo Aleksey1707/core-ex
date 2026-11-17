@@ -24,12 +24,11 @@ defmodule Core.Es.Event.PayloadKindTest do
   end
 
   defmodule Item do
-    defstruct [:name]
+    use Core.Struct, fields: [name: [prim: Core.Es.Event.PayloadKindTest.Name]]
   end
 
   defmodule Item.Codec do
-    use Core.Codec.Plugin,
-      fields: [{Core.Es.Event.PayloadKindTest.Item, name: [prim: Core.Es.Event.PayloadKindTest.Name]}]
+    use Core.Codec.Plugin, types: [Core.Es.Event.PayloadKindTest.Item]
   end
 
   defmodule Kinds do

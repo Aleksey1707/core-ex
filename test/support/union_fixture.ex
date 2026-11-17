@@ -154,7 +154,7 @@ defmodule Core.UnionFixture do
     use Core.Struct,
       fields: [
         shape: [union: Core.UnionFixture.Shape],
-        recipient: [union: Core.UnionFixture.Recipient, optional: true],
+        recipient: [union: Core.UnionFixture.Recipient, optional: true, default: nil],
         drawing: [union: Core.UnionFixture.Drawing]
       ]
   end
@@ -208,13 +208,7 @@ end
 defmodule Core.UnionFixture.CanvasPlugin do
   @moduledoc false
 
-  use Core.Codec.Plugin,
-    fields: [
-      {Core.UnionFixture.Canvas,
-       shape: [union: Core.UnionFixture.Shape],
-       recipient: [union: Core.UnionFixture.Recipient, optional: true],
-       drawing: [union: Core.UnionFixture.Drawing]}
-    ]
+  use Core.Codec.Plugin, types: [Core.UnionFixture.Canvas]
 end
 
 defmodule Core.UnionFixture.Facade do

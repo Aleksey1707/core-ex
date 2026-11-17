@@ -33,11 +33,19 @@ defmodule Core.Codec.PluginFieldsTest do
   end
 
   defmodule Item do
-    defstruct [:id, :name, :owner_id, :secret, :version, :note, events: []]
+    use Core.Struct,
+      fields: [
+        id: [prim: ID],
+        name: [prim: Name, wire: "title"],
+        owner_id: [prim: OwnerID],
+        secret: [prim: PrimFixture.Password],
+        version: [prim: Version],
+        note: [prim: Name, optional: true]
+      ]
   end
 
   defmodule Tag do
-    defstruct [:name]
+    use Core.Struct, fields: [name: [prim: Name]]
   end
 
   defmodule Status do
@@ -50,22 +58,50 @@ defmodule Core.Codec.PluginFieldsTest do
     use Core.Struct,
       fields: [
         name: [prim: Name, wire: "title"],
-        note: [prim: Name, optional: true],
-        status: [enum: Status],
+        note: [prim: Name, optional: true, default: nil],
+        status: [enum: Status, default: :new],
         tags: [list: [prim: Name]]
       ]
   end
 
   defmodule Card do
-    defstruct [:status, :prev_status, :tag, :parent, :tags, :statuses, :grid, :count, :meta, :label, :rank, :flag]
+    use Core.Struct,
+      fields: [
+        status: [enum: Status],
+        prev_status: [enum: Status, optional: true, default: nil],
+        tag: [entity: Tag],
+        parent: [entity: Tag, optional: true],
+        tags: [list: [entity: Tag]],
+        statuses: [list: [enum: Status], optional: true, default: nil],
+        grid: [list: [list: [prim: Name]]],
+        count: [type: :non_neg_integer],
+        meta: [type: :map, optional: true, default: nil],
+        label: [prim: Name, default: Name.new!("без имени")],
+        rank: [enum: Status, default: :new],
+        flag: [type: :boolean, default: true]
+      ]
   end
 
   defmodule Team do
-    defstruct [:roles, :ranks, :tags, :statuses, :levels]
+    use Core.Struct,
+      fields: [
+        roles: [set: [prim: Name]],
+        ranks: [set: [type: :integer], default: MapSet.new()],
+        tags: [set: [entity: Tag]],
+        statuses: [set: [enum: Status], optional: true, default: nil],
+        levels: [set: [set: [prim: Name]]]
+      ]
   end
 
   defmodule Stock do
-    defstruct [:counts, :titles, :tags, :owners, :grid]
+    use Core.Struct,
+      fields: [
+        counts: [map: [key: [prim: Name], value: [type: :integer]]],
+        titles: [map: [key: [enum: Status], value: [prim: Name]], optional: true, default: nil],
+        tags: [map: [key: [prim: ID], value: [entity: Tag]], default: %{}],
+        owners: [map: [key: [prim: OwnerID], value: [set: [prim: Name]]]],
+        grid: [map: [key: [type: :string], value: [map: [key: [prim: Name], value: [list: [enum: Status]]]]]]
+      ]
   end
 
   defmodule Mark do
@@ -73,53 +109,20 @@ defmodule Core.Codec.PluginFieldsTest do
   end
 
   defmodule Pack do
-    defstruct [:marks]
+    use Core.Struct, fields: [marks: [set: [entity: Mark]]]
   end
 
   defmodule Plugin do
     use Core.Codec.Plugin,
-      fields: [
-        {Item,
-         id: [prim: ID],
-         name: [prim: Name, wire: "title"],
-         owner_id: [prim: OwnerID],
-         secret: [prim: PrimFixture.Password],
-         version: [prim: Version],
-         note: [prim: Name, optional: true]},
-        {Tag, name: [prim: Name]},
-        {Badge,
-         name: [prim: Name, wire: "title"],
-         note: [prim: Name, optional: true],
-         status: [enum: Status, default: "new"],
-         tags: [list: [prim: Name]]},
-        {Card,
-         status: [enum: Status],
-         prev_status: [enum: Status, optional: true],
-         tag: [entity: Tag],
-         parent: [entity: Tag, optional: true],
-         tags: [list: [entity: Tag]],
-         statuses: [list: [enum: Status], optional: true],
-         grid: [list: [list: [prim: Name]]],
-         count: [type: :non_neg_integer],
-         meta: [type: :map, optional: true],
-         label: [prim: Name, default: "без имени"],
-         rank: [enum: Status, default: "new"],
-         flag: [type: :boolean, default: true]},
-        {Team,
-         roles: [set: [prim: Name]],
-         ranks: [set: [type: :integer], default: []],
-         tags: [set: [entity: Tag]],
-         statuses: [set: [enum: Status], optional: true],
-         levels: [set: [set: [prim: Name]]]},
-        {Stock,
-         counts: [map: [key: [prim: Name], value: [type: :integer]]],
-         titles: [map: [key: [enum: Status], value: [prim: Name]], optional: true],
-         tags: [map: [key: [prim: ID], value: [entity: Tag]], default: %{}],
-         owners: [map: [key: [prim: OwnerID], value: [set: [prim: Name]]]],
-         grid: [map: [key: [type: :string], value: [map: [key: [prim: Name], value: [list: [enum: Status]]]]]]},
-        {Mark, name: [prim: Name]},
-        {Pack, marks: [set: [entity: Mark]]}
-      ]
+      types: [Item, Tag, Badge, Card, Team, Stock, Mark, Pack]
+
+    @impl true
+    def dump(%Mark{name: name}, codec), do: %{"name" => codec.dump(name)}
+
+    @impl true
+    def load(Mark, wire, codec) do
+      with {:ok, name} <- codec.load(Name, field(wire, :name)), do: {:ok, %Mark{name: name}}
+    end
   end
 
   defmodule Facade do
@@ -129,7 +132,7 @@ defmodule Core.Codec.PluginFieldsTest do
   end
 
   defmodule Label do
-    defstruct [:name]
+    use Core.Struct, fields: [name: [prim: Name]]
   end
 
   defmodule Money do
@@ -137,9 +140,7 @@ defmodule Core.Codec.PluginFieldsTest do
   end
 
   defmodule MixedPlugin do
-    use Core.Codec.Plugin,
-      types: [Money],
-      fields: [{Label, name: [prim: Name]}]
+    use Core.Codec.Plugin, types: [Money, Label]
 
     @impl true
     def dump(%Money{amount: amount, currency: currency}, _codec), do: "#{amount} #{currency}"
@@ -153,17 +154,17 @@ defmodule Core.Codec.PluginFieldsTest do
 
   defmodule DumpOnlyPlugin do
     use Core.Codec.Plugin,
-      loadable: false,
-      fields: [{Label, name: [prim: Name]}]
+      types: [Label],
+      loadable: false
   end
 
   defmodule Shape do
     defmodule Circle do
-      defstruct [:kind, :radius]
+      use Core.Struct, fields: [kind: [type: :string], radius: [type: :pos_integer]]
     end
 
     defmodule Square do
-      defstruct [:kind, :side]
+      use Core.Struct, fields: [kind: [type: :string], side: [type: :pos_integer]]
     end
   end
 
@@ -171,11 +172,8 @@ defmodule Core.Codec.PluginFieldsTest do
     require Error
 
     use Core.Codec.Plugin,
-      union: Shape,
-      fields: [
-        {Shape.Circle, kind: [type: :string], radius: [type: :pos_integer]},
-        {Shape.Square, kind: [type: :string], side: [type: :pos_integer]}
-      ]
+      types: [Shape.Circle, Shape.Square],
+      union: Shape
 
     @impl true
     def load(Shape, wire, codec) when is_map(wire) do
@@ -357,15 +355,13 @@ defmodule Core.Codec.PluginFieldsTest do
                Facade.load(Card, %{Facade.dump(card) | "grid" => ["x"]})
     end
 
-    test "default: — при отсутствии ключа и при nil, загружается как записанное", %{card: card} do
-      wire =
-        card
-        |> Facade.dump()
-        |> Map.drop(~w(label flag))
-        |> Map.put("rank", nil)
+    test "default: — при отсутствии ключа; явный null не заменяется", %{card: card} do
+      wire = Map.drop(Facade.dump(card), ~w(label flag rank))
 
       assert {:ok, %Card{label: label, rank: :new, flag: true}} = Facade.load(Card, wire)
       assert label == Name.new!("без имени")
+
+      assert {:error, %Error{module: Status}} = Facade.load(Card, Map.put(Facade.dump(card), "rank", nil))
     end
 
     test "default: не подменяет записанное значение, в т.ч. false", %{card: card} do
@@ -441,11 +437,13 @@ defmodule Core.Codec.PluginFieldsTest do
       assert ranks == MapSet.new([1, 2])
     end
 
-    test "default: [] — при отсутствии ключа и при nil", %{team: team} do
+    test "default: [] — при отсутствии ключа; явный null не заменяется", %{team: team} do
       empty = MapSet.new()
 
       assert {:ok, %Team{ranks: ^empty}} = Facade.load(Team, Map.delete(Facade.dump(team), "ranks"))
-      assert {:ok, %Team{ranks: ^empty}} = Facade.load(Team, %{Facade.dump(team) | "ranks" => nil})
+
+      assert {:error, %Error{module: Team, detail: %{field: :ranks}}} =
+               Facade.load(Team, %{Facade.dump(team) | "ranks" => nil})
     end
 
     test "не список — ошибка загрузки поля", %{team: team} do
@@ -512,10 +510,12 @@ defmodule Core.Codec.PluginFieldsTest do
       assert Facade.load(Stock, Facade.dump(stock)) == {:ok, stock}
     end
 
-    test "default: %{} — при отсутствии ключа и при nil", %{stock: stock} do
+    test "default: %{} — при отсутствии ключа; явный null не заменяется", %{stock: stock} do
       assert {:ok, %Stock{tags: tags}} = Facade.load(Stock, Map.delete(Facade.dump(stock), "tags"))
       assert tags == %{}
-      assert {:ok, %Stock{tags: ^tags}} = Facade.load(Stock, %{Facade.dump(stock) | "tags" => nil})
+
+      assert {:error, %Error{module: Stock, detail: %{field: :tags}}} =
+               Facade.load(Stock, %{Facade.dump(stock) | "tags" => nil})
     end
 
     test "не объект — ошибка загрузки поля", %{stock: stock} do
@@ -659,16 +659,36 @@ defmodule Core.Codec.PluginFieldsTest do
   end
 
   describe "сборка" do
-    test "тип вне fields: без ручной клаузы dump/2 — CompileError" do
+    test "ручной тип без ручной клаузы dump/2 — CompileError" do
       assert_raise CompileError, ~r/требуется dump\/2 для \[.*Uncovered.U\]/, fn ->
         compile_mixed(:Uncovered, [])
       end
     end
 
-    test "тип вне fields: без ручной клаузы load/3 — CompileError" do
+    test "ручной тип без ручной клаузы load/3 — CompileError" do
       assert_raise CompileError, ~r/требуется load\/3 для \[.*UncoveredLoad.U\]/, fn ->
         compile_mixed(:UncoveredLoad, [quote(do: def(dump(%U{} = u, _codec), do: u.b))])
       end
+    end
+
+    test "декларативный тип в types: без ручных клауз обслуживается" do
+      {{:module, mod, _bytecode, _result}, _binding} =
+        Code.eval_quoted(
+          quote do
+            defmodule Core.Codec.PluginFieldsTest.Declared do
+              defmodule T do
+                use Core.Struct, fields: [a: [prim: Core.Codec.PluginFieldsTest.Name]]
+              end
+
+              use Core.Codec.Plugin, types: [Core.Codec.PluginFieldsTest.Declared.T]
+            end
+          end
+        )
+
+      type = Module.concat(mod, T)
+      value = struct(type, a: Name.new!("a"))
+
+      assert mod.dump(value, Core.CodecFixture.Prim.Internal) == %{"a" => "a"}
     end
 
     test "клауза с типами в guard покрывает только их — CompileError" do
@@ -703,386 +723,6 @@ defmodule Core.Codec.PluginFieldsTest do
         )
       end
     end
-
-    test "поле struct без спеки и поле спеки без struct — CompileError" do
-      assert_raise CompileError, ~r/поля struct без спеки \[:b\], поля спеки без struct \[:c\]/, fn ->
-        compile_plugin(:StructMismatch, a: [prim: Name], c: [prim: Name])
-      end
-    end
-
-    test "вид поля расходится со структурой по полям — CompileError с обоими видами" do
-      message =
-        ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name\], в плагине \[prim: .*\.ID\]/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:StructKind, [a: [prim: Core.Codec.PluginFieldsTest.ID]], struct_fields: [a: [prim: Name]])
-      end
-    end
-
-    test "вид элемента list: расходится со структурой по полям — CompileError" do
-      message =
-        ~r/\.T: a: вид поля расходится со структурой — в структуре \[list: \[prim: .*\.Name\]\], в плагине \[list: \[list:/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:StructList, [a: [list: [list: [prim: Name]]]], struct_fields: [a: [list: [prim: Name]]])
-      end
-    end
-
-    test "set: и вид его элемента расходятся со структурой по полям — CompileError" do
-      message =
-        ~r/\.T: a: вид поля расходится со структурой — в структуре \[set: \[prim: .*\.Name\]\], в плагине \[list:/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:StructSetList, [a: [list: [prim: Name]]], struct_fields: [a: [set: [prim: Name]]])
-      end
-
-      message =
-        ~r/\.T: a: вид поля расходится .* в структуре \[set: \[prim: .*\.Name\]\], в плагине \[set: \[prim: .*\.ID\]\]/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:StructSetItem, [a: [set: [prim: Core.Codec.PluginFieldsTest.ID]]],
-          struct_fields: [a: [set: [prim: Name]]]
-        )
-      end
-    end
-
-    test "map: и виды ключа и значения расходятся со структурой по полям — CompileError" do
-      message =
-        ~r/\.T: a: вид поля расходится .* в структуре \[map: \[key: \[prim: .*\.Name\], value: \[type: :integer\]\]\], в плагине \[type: :map\]/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:StructMapType, [a: [type: :map]],
-          struct_fields: [a: [map: [key: [prim: Name], value: [type: :integer]]]]
-        )
-      end
-
-      for {name, plugin} <- [
-            StructMapKey: [key: [type: :string], value: [type: :integer]],
-            StructMapValue: [key: [prim: Name], value: [type: :string]]
-          ] do
-        message = ~r/\.T: a: вид поля расходится .* в плагине \[map: \[key: #{Regex.escape(inspect(plugin[:key]))}/
-
-        assert_raise CompileError, message, fn ->
-          compile_plugin(name, [a: [map: plugin]],
-            struct_fields: [a: [map: [key: [prim: Name], value: [type: :integer]]]]
-          )
-        end
-      end
-    end
-
-    test "map: совпадает со структурой по полям — собирается" do
-      assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:StructMap, [a: [map: [key: [prim: Name], value: [set: [prim: Name]]], default: %{}]],
-                 struct_fields: [a: [map: [key: [prim: Name], value: [set: [prim: Name]]]]]
-               )
-    end
-
-    test "set: совпадает со структурой по полям — собирается" do
-      assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:StructSet, [a: [set: [prim: Name], default: []]],
-                 struct_fields: [a: [set: [prim: Name]]]
-               )
-    end
-
-    test "optional: внутри set: и не keyword-спека элемента — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: optional: задаётся у самого поля, не в set:/, fn ->
-        compile_plugin(:SetOptional, a: [set: [prim: Name, optional: true]], b: [prim: Name])
-      end
-
-      assert_raise CompileError, ~r/\.T: a: set: ожидается keyword-спека элемента, получено/, fn ->
-        compile_plugin(:SetNotKeyword, a: [set: Name], b: [prim: Name])
-      end
-    end
-
-    test "optional: расходится со структурой по полям — CompileError в обе стороны" do
-      message =
-        ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name, optional: true\], в плагине \[prim: .*\.Name\]/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:StructOptional, [a: [prim: Name]], struct_fields: [a: [prim: Name, optional: true]])
-      end
-
-      message =
-        ~r/\.T: a: вид поля расходится со структурой — в структуре \[prim: .*\.Name\], в плагине \[prim: .*\.Name, optional: true\]/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:PluginOptional, [a: [prim: Name, optional: true]], struct_fields: [a: [prim: Name]])
-      end
-    end
-
-    test "personal: структуры плагин не повторяет — собирается" do
-      assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:StructPersonal, [a: [list: [prim: Name]]],
-                 struct_fields: [a: [list: [prim: Name, personal: true], personal: true]]
-               )
-    end
-
-    test "destroyable: в спеке плагина — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: destroyable: удалён/, fn ->
-        compile_plugin(:PluginDestroyable, a: [prim: Name, destroyable: true], b: [prim: Name])
-      end
-
-      assert_raise CompileError, ~r/\.T: a: destroyable: удалён/, fn ->
-        compile_plugin(:PluginDestroyableItem, a: [list: [prim: Name, destroyable: true]], b: [prim: Name])
-      end
-    end
-
-    test "wire-ключ расходится со структурой — CompileError" do
-      assert_raise CompileError,
-                   ~r/\.T: a: wire-ключ расходится со структурой — в структуре "a", в плагине "b"/,
-                   fn ->
-                     compile_plugin(:StructWireMismatch, [a: [prim: Name, wire: "b"]], struct_fields: [a: [prim: Name]])
-                   end
-    end
-
-    test "wire-ключ структуры совпадает с плагином — собирается" do
-      assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:StructWire, [a: [prim: Name, wire: "b"]], struct_fields: [a: [prim: Name, wire: "b"]])
-    end
-
-    test "ручной struct — сверяются только ключи, вид поля любой" do
-      assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:ManualKinds, a: [prim: Core.Codec.PluginFieldsTest.ID], b: [list: [type: :integer]])
-    end
-
-    test "тип в types: и в fields: — CompileError" do
-      assert_raise CompileError, ~r/типы объявлены в нескольких опциях: \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
-        Code.eval_quoted(
-          quote do
-            defmodule Core.Codec.PluginFieldsTest.Foreign do
-              use Core.Codec.Plugin,
-                types: [Core.Codec.PluginFieldsTest.Tag],
-                fields: [{Core.Codec.PluginFieldsTest.Tag, name: [prim: Core.Codec.PluginFieldsTest.Name]}]
-            end
-          end
-        )
-      end
-    end
-
-    test "тип объявлен дважды — CompileError" do
-      assert_raise CompileError, ~r/^Codec.Plugin: fields: повторяются \[Core.Codec.PluginFieldsTest.Tag\]/, fn ->
-        Code.eval_quoted(
-          quote do
-            defmodule Core.Codec.PluginFieldsTest.Twice do
-              use Core.Codec.Plugin,
-                fields: [
-                  {Core.Codec.PluginFieldsTest.Tag, name: [prim: Core.Codec.PluginFieldsTest.Name]},
-                  {Core.Codec.PluginFieldsTest.Tag, name: [prim: Core.Codec.PluginFieldsTest.Name]}
-                ]
-            end
-          end
-        )
-      end
-    end
-
-    test "не Prim в prim: — CompileError с именем плагина, типа и поля" do
-      message = ~r/Codec.Plugin: fields: .*NotPrim.T: b: .*Tag не Prim/
-
-      assert_raise CompileError, message, fn ->
-        compile_plugin(:NotPrim, a: [prim: Name], b: [prim: Core.Codec.PluginFieldsTest.Tag])
-      end
-    end
-
-    test "повтор поля и повтор wire-ключа — CompileError" do
-      assert_raise CompileError, ~r/: повторяются \[:a\]/, fn ->
-        compile_plugin(:DupField, a: [prim: Name], a: [prim: Name, wire: "b"])
-      end
-
-      assert_raise CompileError, ~r/wire: повторяются \["b"\]/, fn ->
-        compile_plugin(:DupWire, a: [prim: Name, wire: "b"], b: [prim: Name])
-      end
-    end
-
-    test "неизвестный ключ спеки — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: неизвестные ключи \[:default_value\]/, fn ->
-        compile_plugin(:UnknownKey, a: [prim: Name, default_value: 1], b: [prim: Name])
-      end
-    end
-
-    test "не enum в enum: — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: .*Name не Core.Enum/, fn ->
-        compile_plugin(:NotEnum, a: [enum: Name], b: [prim: Name])
-      end
-    end
-
-    test "не struct в entity: — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: .*Status не struct/, fn ->
-        compile_plugin(:NotEntity, a: [entity: Core.Codec.PluginFieldsTest.Status], b: [prim: Name])
-      end
-    end
-
-    test "union: — не модуль, struct или Core.Enum, в том числе в list: — CompileError с подсказкой вида" do
-      assert_raise CompileError, ~r/\.T: a: .*NoSuchFamily недоступен/, fn ->
-        compile_plugin(:UnionMissing, a: [union: Core.Codec.PluginFieldsTest.NoSuchFamily], b: [prim: Name])
-      end
-
-      assert_raise CompileError, ~r/\.T: a: union: .*Tag — struct, а не семейство; нужен entity:/, fn ->
-        compile_plugin(:UnionStruct, a: [union: Core.Codec.PluginFieldsTest.Tag], b: [prim: Name])
-      end
-
-      assert_raise CompileError, ~r/\.T: a: union: .*Name — struct, а не семейство; нужен entity: или prim:/, fn ->
-        compile_plugin(:UnionPrim, a: [union: Core.Codec.PluginFieldsTest.Name], b: [prim: Name])
-      end
-
-      assert_raise CompileError, ~r/\.T: a: union: .*Status — Core.Enum, а не семейство; нужен enum:/, fn ->
-        compile_plugin(:UnionEnum, a: [list: [union: Core.Codec.PluginFieldsTest.Status]], b: [prim: Name])
-      end
-    end
-
-    test "неизвестный type: — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: неизвестный type: :atom/, fn ->
-        compile_plugin(:UnknownType, a: [type: :atom], b: [prim: Name])
-      end
-    end
-
-    test "два вида в поле — CompileError" do
-      assert_raise CompileError,
-                   ~r/\.T: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/set:\/map:\/type:/,
-                   fn ->
-                     compile_plugin(:TwoKinds, a: [prim: Name, type: :string], b: [prim: Name])
-                   end
-    end
-
-    test "optional: внутри list: — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: optional: задаётся у самого поля, не в list:/, fn ->
-        compile_plugin(:ListOptional, a: [list: [prim: Name, optional: true]], b: [prim: Name])
-      end
-    end
-
-    test "default: с optional: true — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: default: и optional: true/, fn ->
-        compile_plugin(:DefaultOptional, a: [prim: Name, optional: true, default: "x"], b: [prim: Name])
-      end
-    end
-
-    test "default: enum: вне значений enum — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: default: "nwe" не загружается .*Status/, fn ->
-        compile_plugin(:DefaultEnum, a: [enum: Core.Codec.PluginFieldsTest.Status, default: "nwe"], b: [prim: Name])
-      end
-    end
-
-    test "default: у set: не wire-список — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: default: у set: — wire-литерал списка, получено MapSet.new\(\[\]\)/, fn ->
-        compile_plugin(:DefaultSet, a: [set: [prim: Name], default: MapSet.new()], b: [prim: Name])
-      end
-    end
-
-    test "default: у map: не wire-объект — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: default: у map: — wire-литерал объекта, получено \[\]/, fn ->
-        compile_plugin(:DefaultMap, a: [map: [key: [prim: Name], value: [prim: Name]], default: []], b: [prim: Name])
-      end
-    end
-
-    test "default: у set: и map: — элементы, ключи и значения литерала по своим видам" do
-      status = Core.Codec.PluginFieldsTest.Status
-
-      for {name, spec, message} <- [
-            {:DefaultSetType, [set: [type: :string], default: ["a", 1]],
-             ~r/\.T: a: default: ожидается string, получено 1$/},
-            {:DefaultSetEnum, [set: [enum: status], default: ["nwe"]],
-             ~r/\.T: a: default: "nwe" не загружается .*Status$/},
-            {:DefaultSetNested, [set: [set: [type: :integer]], default: [[1], 2]],
-             ~r/\.T: a: default: у set: — wire-литерал списка, получено 2$/},
-            {:DefaultMapKey, [map: [key: [prim: Name], value: [type: :integer]], default: %{1 => 1}],
-             ~r/\.T: a: default: ключ: ожидается string, получено 1$/},
-            {:DefaultMapEnumKey, [map: [key: [enum: status], value: [type: :integer]], default: %{"nwe" => 1}],
-             ~r/\.T: a: default: ключ: "nwe" не загружается .*Status$/},
-            {:DefaultMapValue, [map: [key: [type: :string], value: [list: [type: :boolean]]], default: %{"x" => [1]}],
-             ~r/\.T: a: default: ожидается boolean, получено 1$/}
-          ] do
-        assert_raise CompileError, message, fn -> compile_plugin(name, a: spec, b: [prim: Name]) end
-      end
-
-      assert {{:module, _plugin, _bytecode, _result}, []} =
-               compile_plugin(:DefaultSetMapOk,
-                 a: [set: [enum: status], default: ["new", "done"]],
-                 b: [map: [key: [enum: status], value: [set: [prim: Name]]], default: %{"new" => ["x"]}]
-               )
-    end
-
-    test "ключ map: без wire-строки — CompileError с видом ключа" do
-      for {name, key} <- [
-            MapKeyInteger: [prim: Version],
-            MapKeyEntity: [entity: Core.Codec.PluginFieldsTest.Tag],
-            MapKeyList: [list: [prim: Name]],
-            MapKeySet: [set: [prim: Name]],
-            MapKeyMap: [map: [key: [prim: Name], value: [prim: Name]]],
-            MapKeyType: [type: :integer],
-            MapKeyUnion: [union: Core.Codec.PluginFieldsTest.Shape],
-            MapKeyKind: [prim: Core.Codec.PluginFieldsTest.Slug]
-          ] do
-        message =
-          ~r/\.T: a: map: key: ожидается вид с wire-строкой, получено \[#{Regex.escape(inspect(key) |> String.slice(1..-2//1))}\]/
-
-        assert_raise CompileError, message, fn ->
-          compile_plugin(name, a: [map: [key: key, value: [prim: Name]]], b: [prim: Name])
-        end
-      end
-    end
-
-    test "ключ map: со строковой базой — Prim.String, Prim.UUID, Compose над ними, enum:, type: :string" do
-      for {name, key} <- [
-            MapKeyString: [prim: Name],
-            MapKeyUUID: [prim: Core.Codec.PluginFieldsTest.ID],
-            MapKeyCompose: [prim: Core.Codec.PluginFieldsTest.OwnerID],
-            MapKeyEnum: [enum: Core.Codec.PluginFieldsTest.Status],
-            MapKeyText: [type: :string]
-          ] do
-        assert {{:module, _plugin, _bytecode, _result}, []} =
-                 compile_plugin(name, a: [map: [key: key, value: [prim: Name]]], b: [prim: Name])
-      end
-    end
-
-    test "персональный или чувствительный ключ map: — CompileError" do
-      for {name, prim} <- [
-            MapKeyPersonal: PrimFixture.Personal,
-            MapKeyPersonalRef: PrimFixture.PersonalRef,
-            MapKeySensitive: PrimFixture.Sensitive
-          ] do
-        message =
-          ~r/\.T: a: map: key: Prim #{inspect(prim)} с personal: true или sensitive: — ключ лежит в wire открыто/
-
-        assert_raise CompileError, message, fn ->
-          compile_plugin(name, a: [map: [key: [prim: prim], value: [prim: Name]]], b: [prim: Name])
-        end
-      end
-    end
-
-    test "map: без key: или value:, с лишним ключом, не keyword — CompileError с именем поля" do
-      for {name, spec} <- [
-            MapNoKey: [value: [prim: Name]],
-            MapNoValue: [key: [prim: Name]],
-            MapExtra: [key: [prim: Name], value: [prim: Name], default: %{}],
-            MapNotKeyword: Name
-          ] do
-        assert_raise CompileError, ~r/\.T: a: map: ожидается \[key: спека, value: спека\], получено/, fn ->
-          compile_plugin(name, a: [map: spec], b: [prim: Name])
-        end
-      end
-    end
-
-    test "optional: и неизвестный вид в ключе или значении map: — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: optional: задаётся у самого поля, не в map: value:/, fn ->
-        compile_plugin(:MapValueOptional,
-          a: [map: [key: [prim: Name], value: [prim: Name, optional: true]]],
-          b: [prim: Name]
-        )
-      end
-
-      assert_raise CompileError, ~r/\.T: a: map: key: ожидается keyword-спека ключа, получено/, fn ->
-        compile_plugin(:MapKeyNotKeyword, a: [map: [key: Name, value: [prim: Name]]], b: [prim: Name])
-      end
-
-      assert_raise CompileError, ~r/\.T: a: map: value: неизвестные ключи \[:wire\]/, fn ->
-        compile_plugin(:MapValueWire, a: [map: [key: [prim: Name], value: [prim: Name, wire: "x"]]], b: [prim: Name])
-      end
-    end
-
-    test "default: при loadable: false — CompileError" do
-      assert_raise CompileError, ~r/\.T: a: default: при loadable: false/, fn ->
-        compile_plugin(:DefaultDumpOnly, [a: [prim: Name, default: "x"], b: [prim: Name]], loadable: false)
-      end
-    end
   end
 
   # ---
@@ -1094,7 +734,7 @@ defmodule Core.Codec.PluginFieldsTest do
     quote do
       defmodule unquote(plugin) do
         defmodule T do
-          defstruct [:a]
+          use Core.Struct, fields: [a: [prim: Core.Codec.PluginFieldsTest.Name]]
         end
 
         defmodule U do
@@ -1102,10 +742,9 @@ defmodule Core.Codec.PluginFieldsTest do
         end
 
         use Core.Codec.Plugin,
-          types: [U],
+          types: [T, U],
           loadable: unquote(Keyword.get(opts, :loadable, true)),
-          union: unquote(union),
-          fields: [{T, a: [prim: Core.Codec.PluginFieldsTest.Name]}]
+          union: unquote(union)
 
         unquote_splicing(clauses)
       end
@@ -1115,31 +754,5 @@ defmodule Core.Codec.PluginFieldsTest do
       ast -> ast
     end)
     |> Code.eval_quoted()
-  end
-
-  defp compile_plugin(name, spec, opts \\ []) do
-    plugin = Module.concat(__MODULE__, name)
-    type = Module.concat(plugin, T)
-    spec = Macro.escape(spec)
-
-    struct =
-      case Keyword.fetch(opts, :struct_fields) do
-        {:ok, fields} -> quote(do: use(Core.Struct, fields: unquote(Macro.escape(fields))))
-        :error -> quote(do: defstruct([:a, :b]))
-      end
-
-    Code.eval_quoted(
-      quote do
-        defmodule unquote(plugin) do
-          defmodule unquote(type) do
-            unquote(struct)
-          end
-
-          use Core.Codec.Plugin,
-            loadable: unquote(Keyword.get(opts, :loadable, true)),
-            fields: [{unquote(type), unquote(spec)}]
-        end
-      end
-    )
   end
 end

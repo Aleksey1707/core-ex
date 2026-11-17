@@ -2,7 +2,7 @@ defmodule Core.Codec.Plugin.Redump do
   @moduledoc """
   Спека пере-дампа (`Core.Codec.Redump`) типов Codec-плагина и генерация `__codec_redump__/1`.
 
-  Тип из `fields:` даёт `{:map, %{wire-ключ => спека}}`:
+  Декларативный тип (`__core_fields__/0`) даёт `{:map, %{wire-ключ => спека}}`:
 
   | Вид поля | В спеке |
   |---|---|
@@ -22,10 +22,10 @@ defmodule Core.Codec.Plugin.Redump do
   одноимённый ключ с разной спекой — `CompileError` при сборке плагина, а с участием ручного
   варианта — `ArgumentError` при запросе спеки семейства.
 
-  Ручной тип, ручной вариант (спека его полей, `{:map, _}`) и семейство без `variants:` берут спеку
-  у колбэка `redump_spec/1`. Тип без клаузы колбэка клаузы `__codec_redump__/1` не получает: он уходит в
-  `__codec_redump_missing__/0` (`{тип, тип без клаузы}` — у семейства это его ручной вариант), и
-  `ArgumentError` с именами типа и плагина бросает фасад.
+  Ручной тип, ручной вариант (спека его полей, `{:map, _}`) и семейство без реестра вариантов берут
+  спеку у колбэка `redump_spec/1`. Тип без клаузы колбэка клаузы `__codec_redump__/1` не получает: он
+  уходит в `__codec_redump_missing__/0` (`{тип, тип без клаузы}` — у семейства это его ручной вариант),
+  и `ArgumentError` с именами типа и плагина бросает фасад.
   Клауза колбэка на тип с выведенной спекой — `CompileError`.
   """
 
@@ -42,7 +42,7 @@ defmodule Core.Codec.Plugin.Redump do
   @doc false
   defmacro __before_compile__(env) do
     plugin = env.module
-    fields = Module.get_attribute(plugin, :codec_fields)
+    fields = Module.get_attribute(plugin, :codec_declared)
     variants = Module.get_attribute(plugin, :codec_variants)
     union = Module.get_attribute(plugin, :codec_union)
     {unions, manual_unions} = if variants == [], do: {[], List.wrap(union)}, else: {[union], []}
@@ -171,7 +171,6 @@ defmodule Core.Codec.Plugin.Redump do
   # Спека формы варианта из его источника полей: у варианта-Prim это спека самого Prim, у
   # декларативной структуры — поля её IR.
   defp source_spec(_mod, {:domain, fields}), do: fields_spec(fields)
-  defp source_spec(_mod, fields) when is_list(fields), do: fields_spec(fields)
   defp source_spec(_mod, :manual), do: nil
 
   defp source_spec(mod, :prim) do

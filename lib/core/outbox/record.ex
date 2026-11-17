@@ -15,8 +15,23 @@ defmodule Core.Outbox.Record do
   alias Core.Outbox
   alias Core.Result
 
-  @enforce_keys ~w(id topic key name payload status attempts errors created_at)a
-  defstruct @enforce_keys ++ ~w(locked_until lease_id published_at headers updated_at)a
+  use Core.Struct,
+    fields: [
+      id: [prim: Core.Outbox.ID],
+      topic: [prim: Core.Outbox.Topic],
+      key: [prim: Core.Outbox.Key],
+      name: [prim: Core.Outbox.Name],
+      payload: [type: :map],
+      status: [enum: Core.Outbox.Status],
+      attempts: [prim: Core.Outbox.Attempts],
+      locked_until: [prim: Core.Outbox.LockedUntil, optional: true, default: nil],
+      lease_id: [prim: Core.Outbox.LeaseID, optional: true, default: nil],
+      published_at: [prim: Core.Outbox.PublishedAt, optional: true, default: nil],
+      errors: [list: [entity: Core.Outbox.RecordError], default: []],
+      headers: [type: :map, optional: true, default: nil],
+      created_at: [prim: Core.Outbox.CreatedAt],
+      updated_at: [prim: Core.Outbox.UpdatedAt, optional: true, default: nil]
+    ]
 
   @typedoc """
   Тело записи outbox.
@@ -26,23 +41,6 @@ defmodule Core.Outbox.Record do
   """
   @type payload :: map()
   @type headers :: %{optional(String.t()) => String.t()}
-
-  @type t :: %__MODULE__{
-          id: Outbox.ID.t(),
-          topic: Outbox.Topic.t(),
-          key: Outbox.Key.t(),
-          name: Outbox.Name.t(),
-          payload: payload(),
-          status: Outbox.Status.t(),
-          attempts: Outbox.Attempts.t(),
-          locked_until: Outbox.LockedUntil.t() | nil,
-          lease_id: Outbox.LeaseID.t() | nil,
-          published_at: Outbox.PublishedAt.t() | nil,
-          errors: [Outbox.RecordError.t()],
-          headers: headers() | nil,
-          created_at: Outbox.CreatedAt.t(),
-          updated_at: Outbox.UpdatedAt.t() | nil
-        }
 
   @doc """
   Создать новую запись outbox (`status: :new`).

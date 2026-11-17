@@ -39,27 +39,26 @@ defmodule Core.DerivedFixture do
     defmodule Star do
       @moduledoc "Метка: звезда."
 
-      defstruct [:size]
+      use Core.Struct, fields: [size: [type: :pos_integer]]
     end
 
     defmodule Dot do
       @moduledoc "Метка: точка."
 
-      defstruct [:color]
+      use Core.Struct, fields: [color: [type: :string]]
     end
+
+    use Core.Union,
+      variants: [
+        {Core.DerivedFixture.Mark.Star, "star"},
+        {Core.DerivedFixture.Mark.Dot, "dot"}
+      ]
   end
 
   defmodule Mark.Codec do
     @moduledoc "Варианты метки."
 
-    alias Core.DerivedFixture.Mark
-
-    use Core.Codec.Plugin,
-      union: Mark,
-      variants: [
-        {Mark.Star, "star", size: [type: :pos_integer]},
-        {Mark.Dot, "dot", color: [type: :string]}
-      ]
+    use Core.Codec.Plugin, union: Core.DerivedFixture.Mark
   end
 
   defmodule Place do
