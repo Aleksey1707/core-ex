@@ -422,10 +422,10 @@ defmodule Core.Es.Projection do
 
   defp compiled?(mod), do: match?({:module, _}, Code.ensure_compiled(mod))
 
-  # Событие с полем `subject:` несёт ПДн: read-модель либо чистит их по событию уничтожения ключа,
-  # либо объявляет, что ПДн не держит (ADR-0079).
+  # Событие с ПДн-местом (на любой глубине — план кодека) несёт ПДн: read-модель либо чистит их по
+  # событию уничтожения ключа, либо объявляет, что ПДн не держит (ADR-0079).
   defp personal!(pairs, personal) when personal in [nil, false] do
-    subject_events = for {mod, codec} <- pairs, Map.has_key?(codec.__es_subjects__(), mod), do: mod
+    subject_events = for {mod, codec} <- pairs, Map.has_key?(codec.__es_personal__(), mod), do: mod
     personal!(subject_events, List.keymember?(pairs, KeyDestroyed, 0), personal)
   end
 

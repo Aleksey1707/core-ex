@@ -414,6 +414,14 @@ defmodule Core.Es.ProjectionTest do
       compile!(Unpersonal, events: [Account.Event.HolderSet], personal: false)
     end
 
+    test "вложенное ПДн-место без места верхнего уровня — тоже уничтожение или personal: false" do
+      assert_raise CompileError, ~r/ContactAdded.*KeyDestroyed.*personal: false/s, fn ->
+        compile!(UnsignedNested, events: [Core.PersonalBrokenFixture.Event.ContactAdded])
+      end
+
+      compile!(UnpersonalNested, events: [Core.PersonalBrokenFixture.Event.ContactAdded], personal: false)
+    end
+
     test "событие с полем subject: без события уничтожения ключа и personal: false — CompileError" do
       assert_raise CompileError, ~r/HolderSet.*subject:.*KeyDestroyed.*personal: false/s, fn ->
         compile!(Unsigned, events: [Account.Event.Opened, Account.Event.HolderSet])

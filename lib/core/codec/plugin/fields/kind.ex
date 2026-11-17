@@ -99,7 +99,34 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   @doc false
   @spec load(Field.t(), module(), Macro.t()) :: Macro.t()
 
-  def load(%Field{spec: spec, optional?: true} = field, type, raw) do
+  # Уничтоженное значение ставит обход ПДн-мест (`Core.Es.Personal.Plan`) ещё до разбора вида: у
+  # `union:` — до выбора варианта, ручной Codec не вызывается. Здесь оно просто проходит насквозь.
+  def load(field, type, raw) do
+    raw_var = Macro.var(:load_raw, __MODULE__)
+
+    quote generated: true do
+      unquote(raw_var) = unquote(raw)
+
+      case unquote(raw_var) do
+        %Core.Es.Personal.Destroyed{} -> {:ok, unquote(raw_var)}
+        _value -> unquote(load_value(field, type, raw_var))
+      end
+    end
+  end
+
+  @doc false
+  @spec var(atom()) :: Macro.t()
+
+  def var(name) when is_atom(name), do: Macro.var(name, :fields_value)
+
+  @doc false
+  @spec codec_var() :: Macro.t()
+
+  def codec_var, do: Macro.var(:codec, __MODULE__)
+
+  # ---
+
+  defp load_value(%Field{spec: spec, optional?: true} = field, type, raw) do
     case tag(spec, :load) do
       :as_is ->
         quote(generated: true, do: {:ok, unquote(raw)})
@@ -115,19 +142,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  def load(%Field{spec: spec} = field, type, raw), do: load!(tag(spec, :load), field, type, raw)
-
-  @doc false
-  @spec var(atom()) :: Macro.t()
-
-  def var(name) when is_atom(name), do: Macro.var(name, :fields_value)
-
-  @doc false
-  @spec codec_var() :: Macro.t()
-
-  def codec_var, do: Macro.var(:codec, __MODULE__)
-
-  # ---
+  defp load_value(%Field{spec: spec} = field, type, raw), do: load!(tag(spec, :load), field, type, raw)
 
   defp pattern!(:value, _spec, value), do: value
   defp pattern!(:map, _spec, value), do: quote(generated: true, do: %{} = unquote(value))

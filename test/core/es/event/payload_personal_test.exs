@@ -3,6 +3,7 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
   import ExUnit.CaptureIO
 
+  alias Core.Es.Personal.Destroyed
   alias Core.EsFixture.Account
   alias Core.PrimFixture
 
@@ -127,6 +128,60 @@ defmodule Core.Es.Event.PayloadPersonalTest do
       assert_raise ArgumentError, ~r/ПДн-место steps\.each\.recipient: непустое ПДн-значение без субъекта/, fn ->
         Core.Es.Event.PayloadPersonalTest.Steps.new([step])
       end
+    end
+  end
+
+  defmodule Mark do
+    @moduledoc """
+    Семейство вариантов без Codec-плагина в фасаде тестов: поле с `personal: true` не должно до
+    него доходить.
+    """
+
+    defmodule Blob do
+      @moduledoc false
+
+      defstruct [:points]
+    end
+
+    use Core.Union,
+      variants: [{Core.Es.Event.PayloadPersonalTest.Mark.Blob, "blob"}]
+  end
+
+  defmodule Marked.Payload do
+    @moduledoc false
+
+    use Core.Es.Event.Payload,
+      fields: [mark: [union: Core.Es.Event.PayloadPersonalTest.Mark, personal: true]]
+  end
+
+  describe "union: у поля нагрузки" do
+    test "уничтоженное значение возвращается до выбора варианта, Codec варианта не зовётся" do
+      family =
+        Core.EventFixture.family_ast(Core.Es.Event.PayloadPersonalTest.MarkCodec,
+          Marked: Core.Es.Event.PayloadPersonalTest.Marked.Payload
+        )
+
+      {{:module, codec, _binary, _term}, _binding} =
+        Code.eval_quoted(
+          quote do
+            unquote(family)
+
+            defmodule Core.Es.Event.PayloadPersonalTest.MarkCodec do
+              use Core.Es.Event.Codec,
+                family: __MODULE__.Family,
+                type: "local_mark",
+                tags: %{__MODULE__.Marked => "local_mark.marked"}
+            end
+          end
+        )
+
+      wire = put_payload(holder_wire(), %{"mark" => %{"$pd" => nil}})
+      marked = Module.concat(codec, "Marked")
+
+      assert {:ok, %{payload: %{mark: %Destroyed{}}} = event} =
+               codec.load(marked, wire, Core.CodecFixture.Internal)
+
+      assert event.__struct__ == marked
     end
   end
 
@@ -297,6 +352,10 @@ defmodule Core.Es.Event.PayloadPersonalTest do
       end
     )
   end
+
+  defp holder_wire, do: Jason.decode!(File.read!("test/support/fixtures/events/account/account.holder_set.json"))
+
+  defp put_payload(wire, fields), do: Map.update!(wire, "payload", &Map.merge(&1, fields))
 
   defp compile(quoted) do
     Code.eval_quoted(

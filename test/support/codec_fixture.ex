@@ -50,7 +50,8 @@ defmodule Core.CodecFixture do
     Core.PersonalBrokenFixture.Contact.Codec,
     Core.PersonalBrokenFixture.Event.Codec,
     Core.EsFixture.Itinerary.Event.Codec,
-    Core.EsFixture.Itinerary.Step.Codec
+    Core.EsFixture.Itinerary.Step.Codec,
+    Core.StateStoredFixture.Profile.Codec
   ]
 
   @doc "Плагины entity-фасадов."

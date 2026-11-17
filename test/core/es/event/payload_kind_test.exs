@@ -153,6 +153,96 @@ defmodule Core.Es.Event.PayloadKindTest do
     end
   end
 
+  defmodule Escalated do
+    @moduledoc """
+    Эскалация границы: ПДн-лист в `set:` и в ключе `map:` шифрует контейнер целиком; значения
+    `map:` и элементы `list:` — по месту.
+    """
+
+    use Core.Es.Event.Payload,
+      fields: [
+        tags: [set: [prim: Core.PrimFixture.Personal]],
+        by_kind: [
+          map: [key: [type: :string, personal: true], value: [prim: Core.Es.Event.PayloadKindTest.Name]]
+        ],
+        by_value: [map: [key: [type: :string], value: [prim: Core.PrimFixture.Personal]]],
+        phones: [list: [prim: Core.PrimFixture.Personal]]
+      ]
+  end
+
+  defmodule Escalated.Family do
+    use Core.Es.Event.Family,
+      aggregate: Core.EventFixture,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      codec: Core.Es.Event.PayloadKindTest.Escalated.Codec
+
+    @type t :: struct()
+  end
+
+  defmodule Escalated.Event do
+    use Core.Es.Event,
+      family: Core.Es.Event.PayloadKindTest.Escalated.Family,
+      payload: Core.Es.Event.PayloadKindTest.Escalated
+  end
+
+  defmodule Escalated.Codec do
+    use Core.Es.Event.Codec,
+      family: Core.Es.Event.PayloadKindTest.Escalated.Family,
+      type: "payload_escalated",
+      tags: %{Core.Es.Event.PayloadKindTest.Escalated.Event => "payload_escalated.event"}
+  end
+
+  test "set: и ключ map: — маркер на контейнере; значение map: и элемент list: — по месту" do
+    event = escalated_event()
+    subject = InCodec.dump(event.aggregate_id)
+
+    assert %{
+             "tags" => %Marker{subject: ^subject, value: ["+7 900 000-00-01"]},
+             "by_kind" => %Marker{subject: ^subject, value: %{"вид" => "и"}},
+             "by_value" => %{"вид" => %Marker{subject: ^subject, value: "+7 900 000-00-02"}},
+             "phones" => [%Marker{subject: ^subject, value: "+7 900 000-00-03"}]
+           } = Escalated.Codec.dump(event, InCodec)["payload"]
+  end
+
+  test "load: уничтоженный контейнер — %Destroyed{} на месте контейнера, элемент и значение — по месту" do
+    wire = Escalated.Codec.dump(escalated_event(), InCodec) |> destroyed_wire()
+
+    assert {:ok, %Escalated.Event{payload: payload}} = Escalated.Codec.load(Escalated.Event, wire, InCodec)
+
+    assert %Escalated{
+             tags: %Destroyed{},
+             by_kind: %Destroyed{},
+             by_value: %{"вид" => %Destroyed{}},
+             phones: [%Destroyed{}]
+           } = payload
+  end
+
+  # ---
+
+  defp escalated_event do
+    payload =
+      Escalated.new(
+        MapSet.new([Core.PrimFixture.Personal.new!("+7 900 000-00-01")]),
+        %{"вид" => Name.new!("и")},
+        %{"вид" => Core.PrimFixture.Personal.new!("+7 900 000-00-02")},
+        [Core.PrimFixture.Personal.new!("+7 900 000-00-03")]
+      )
+
+    Escalated.Event.new(payload, EventFixture.AggID.new(), Version.new!(1), EventFixture.ActorID.new(), at())
+  end
+
+  # Конверт после расшифровки уничтоженного ключа: маркер любого места — `{"$pd": null}`.
+  defp destroyed_wire(%{"payload" => payload} = wire), do: %{wire | "payload" => destroy_markers(payload)}
+
+  defp destroy_markers(%Marker{}), do: %{"$pd" => nil}
+
+  defp destroy_markers(map) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {key, value} -> {key, destroy_markers(value)} end)
+
+  defp destroy_markers(list) when is_list(list), do: Enum.map(list, &destroy_markers/1)
+  defp destroy_markers(value), do: value
+
   # ---
 
   defp payload_args do

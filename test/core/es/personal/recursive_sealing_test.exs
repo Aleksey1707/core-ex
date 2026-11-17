@@ -10,8 +10,10 @@ defmodule Core.Es.Personal.RecursiveSealingTest do
 
   alias Core.Config
   alias Core.Context
+  alias Core.Error
   alias Core.Es
   alias Core.Es.Personal
+  alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Marker
   alias Core.Es.Store
   alias Core.EsFixture.Itinerary
@@ -79,6 +81,38 @@ defmodule Core.Es.Personal.RecursiveSealingTest do
       assert [%Event.RecipientChanged{payload: recipient}] = Es.Store.Test.events!(Event.Codec, id)
       assert recipient == Itinerary.Recipient.new!("Иван")
     end
+
+    test "тип чтения события допускает %Destroyed{} в нагрузке-Prim" do
+      {:ok, types} = Code.Typespec.fetch_types(Event.RecipientChanged)
+
+      {:type, {:t, {:type, _, :map, entries}, []}} = Enum.find(types, &match?({:type, {:t, _, []}}, &1))
+
+      payload =
+        for {:type, _, :map_field_exact, [{:atom, _, :payload}, value]} <- entries,
+            do: type_to_string(value)
+
+      assert payload == ["Core.EsFixture.Itinerary.Recipient.t() | Core.Es.Personal.Destroyed.t()"]
+    end
+
+    test "после destroy_key/3 — нагрузка-Prim читается уничтоженной" do
+      id = Itinerary.ID.new()
+
+      event =
+        Event.RecipientChanged.new(
+          Itinerary.Recipient.new!("Иван"),
+          id,
+          Version.new(),
+          UserID.new(),
+          Es.Event.At.now!()
+        )
+
+      assert :ok = Itinerary.Repo.Pg.append([event], Context.new())
+      assert %{"$pd" => sealed} = stored_payload(id)
+      assert is_binary(sealed)
+
+      assert :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+      assert [%Event.RecipientChanged{payload: %Destroyed{}}] = Es.Store.Test.events!(Event.Codec, id)
+    end
   end
 
   describe "нагрузка-сущность" do
@@ -138,6 +172,52 @@ defmodule Core.Es.Personal.RecursiveSealingTest do
       assert %{"channel" => "sms", "status" => "pending", "attempts" => 1} = first
       assert %{"recipient" => %{"$pd" => nil}, "content" => %{"$pd" => nil}} = first
       assert %{"channel" => "email", "status" => "sent", "attempts" => 2} = second
+    end
+
+    test "после destroy_key/3 — %Destroyed{} на каждом вложенном месте, открытая часть на месте" do
+      id = Itinerary.ID.new()
+      write!(id, [step("sms", "pending", 1), step("email", "sent", 2)])
+
+      assert :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+
+      assert {:ok, %Itinerary{steps: [first, second]}} = Itinerary.Repo.Pg.get(id, :current, Context.new())
+
+      assert %Itinerary.Step{channel: "sms", status: "pending", attempts: 1} = first
+      assert %Itinerary.Step{channel: "email", status: "sent", attempts: 2} = second
+      assert %Itinerary.Step{recipient: %Destroyed{}, content: %Destroyed{}} = first
+      assert %Itinerary.Step{recipient: %Destroyed{}, content: %Destroyed{}} = second
+
+      assert {:ok, %Pagination.Result{items: [%Planned{payload: %{steps: page_steps}}]}} =
+               Itinerary.Repo.Pg.page_stream(id, Pagination.Limit.new!(10), Pagination.Offset.new!(0), Context.new())
+
+      assert [
+               %Itinerary.Step{channel: "sms", recipient: %Destroyed{}},
+               %Itinerary.Step{channel: "email", recipient: %Destroyed{}}
+             ] = page_steps
+    end
+
+    test "строка, записанная открытой до разметки вложенных мест, читается" do
+      id = Itinerary.ID.new()
+      insert_open_steps!(id)
+
+      assert {:ok, %Itinerary{steps: [step]}} = Itinerary.Repo.Pg.get(id, :current, Context.new())
+      assert %Itinerary.Step{channel: "sms", status: "pending", attempts: 1} = step
+      assert Itinerary.Recipient.value(step.recipient) == "Иван"
+      assert Itinerary.Content.value(step.content) == "Код 1111"
+    end
+
+    test "маркер не на месте внутри шага — :invalid_value с полем объявления" do
+      id = Itinerary.ID.new()
+      write!(id, [step("sms", "pending", 1), step("email", "sent", 2)])
+
+      wire =
+        raw_wire(id)
+        |> Map.update!("payload", fn %{"steps" => [first, second]} ->
+          %{"steps" => [Map.put(first, "channel", %{"$pd" => nil}), second]}
+        end)
+
+      assert {:error, %Error{kind: :domain, ns: :codec, code: :invalid_value, detail: %{field: :steps}}} =
+               Event.Codec.load(Planned, wire, Config.codec())
     end
   end
 
@@ -233,6 +313,38 @@ defmodule Core.Es.Personal.RecursiveSealingTest do
       )
     )
     |> Store.Schema.to_wire()
+  end
+
+  defp insert_open_steps!(id) do
+    row = %{
+      aggregate_type: "itinerary",
+      aggregate_id: Config.codec().dump(id),
+      aggregate_version: 1,
+      event_id: Es.Event.ID.value(Es.Event.ID.new()),
+      tag: "itinerary.planned",
+      payload: %{
+        "steps" => [
+          %{
+            "channel" => "sms",
+            "status" => "pending",
+            "attempts" => 1,
+            "recipient" => "Иван",
+            "content" => "Код 1111"
+          }
+        ]
+      },
+      by_id: UserID.value(UserID.new()),
+      at: DateTime.utc_now(:second)
+    }
+
+    {1, nil} = TestRepo.insert_all(Store.Schema, [row])
+    :ok
+  end
+
+  defp type_to_string(type) do
+    {:"::", _, [_name, quoted]} = Code.Typespec.type_to_quoted({:printed, type, []})
+
+    Macro.to_string(quoted)
   end
 
   defp count_calls(fun) do

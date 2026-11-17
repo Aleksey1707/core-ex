@@ -14,7 +14,13 @@ defmodule Core.Es.Personal.EventsProjectionTest do
   alias Core.Es.Personal.Destroyed
   alias Core.EsFixture.Account
   alias Core.EsFixture.UserID
+  alias Core.EventFixture.ActorID
+  alias Core.EventFixture.AggID
   alias Core.Pagination
+  alias Core.PersonalBrokenFixture.Contact
+  alias Core.PersonalBrokenFixture.Event.ContactAdded
+  alias Core.PrimFixture
+  alias Core.Version
 
   @holder "Иван Петров"
 
@@ -25,6 +31,25 @@ defmodule Core.Es.Personal.EventsProjectionTest do
     use Core.Es.Projection,
       name: "personal_events_holders",
       events: [Core.EsFixture.Account.Event.HolderSet],
+      personal: false
+
+    @impl true
+    def project(event) do
+      send(self(), {:projected, event})
+      :ok
+    end
+
+    @impl true
+    def clear, do: :ok
+  end
+
+  defmodule Nested do
+    @moduledoc false
+
+    # Проекция над событием с вложенным ПДн-местом (`contact.phone`): read-модель ПДн не держит.
+    use Core.Es.Projection,
+      name: "personal_events_nested",
+      events: [Core.PersonalBrokenFixture.Event.ContactAdded],
       personal: false
 
     @impl true
@@ -148,6 +173,33 @@ defmodule Core.Es.Personal.EventsProjectionTest do
 
       assert {:error, %Error{code: :unreadable_personal_value}} = Es.Projection.Test.run_until_idle(Holders)
       refute_received {:projected, _event}
+    end
+
+    test "вложенное ПДн-место: открыто до destroy_key/3, после — %Destroyed{} в том же событии" do
+      id = AggID.new()
+      phone = PrimFixture.Personal.new!("+7 900 000-00-00")
+      contact = %Contact{phone: phone}
+
+      event =
+        ContactAdded.new(
+          ContactAdded.Payload.new(contact),
+          id,
+          Version.new(),
+          ActorID.new(),
+          Es.Event.At.now!()
+        )
+
+      :ok = Es.Store.append(Core.PersonalBrokenFixture.Event.Codec, [event], Context.new(), & &1)
+
+      assert :ok = Es.Projection.Test.run_until_idle(Nested)
+      assert_received {:projected, %ContactAdded{payload: %{contact: ^contact}}}
+
+      :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+      reset_checkpoint!("personal_events_nested")
+
+      assert :ok = Es.Projection.Test.run_until_idle(Nested)
+
+      assert_received {:projected, %ContactAdded{payload: %{contact: %Contact{phone: %Destroyed{}}}}}
     end
 
     test "тег, не объявленный проекцией, не расшифровывается" do

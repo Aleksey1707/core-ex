@@ -13,11 +13,13 @@ defmodule Core.Es.Event.MessageTest do
   alias Core.Es.Personal
   alias Core.Es.Personal.Destroyed
   alias Core.EsFixture.Account
+  alias Core.EsFixture.Itinerary
   alias Core.EsFixture.UserID
   alias Core.Mq
   alias Core.MqFake
   alias Core.Outbox
   alias Core.PubSub.MqSubscriberReliable
+  alias Core.Version
 
   @holder "Иван Петров"
 
@@ -70,6 +72,34 @@ defmodule Core.Es.Event.MessageTest do
 
       assert {:ok, %Account.Event.HolderSet{payload: %{holder: %Destroyed{}}}} =
                Es.Event.Message.load(Account.Event, outbox_message(id, "account.holder_set"))
+    end
+
+    test "после destroy_key/3 — %Destroyed{} на вложенных ПДн-местах нагрузки" do
+      id = Itinerary.ID.new()
+
+      step = %Itinerary.Step{
+        channel: "sms",
+        status: "pending",
+        attempts: 1,
+        recipient: Itinerary.Recipient.new!("Иван"),
+        content: Itinerary.Content.new!("Код 1111")
+      }
+
+      event = Itinerary.Event.StepRecorded.new(step, id, Version.new(), UserID.new(), Es.Event.At.now!())
+
+      :ok = Itinerary.Repo.Pg.append([event], Context.new())
+      :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+
+      assert {:ok,
+              %Itinerary.Event.StepRecorded{
+                payload: %Itinerary.Step{
+                  channel: "sms",
+                  status: "pending",
+                  attempts: 1,
+                  recipient: %Destroyed{},
+                  content: %Destroyed{}
+                }
+              }} = Es.Event.Message.load(Itinerary.Event, itinerary_message(id, "itinerary.step_recorded"))
     end
 
     test "событие без ПДн-полей и старый тег — через апкаст" do
@@ -223,6 +253,24 @@ defmodule Core.Es.Event.MessageTest do
 
     {:ok, message} =
       Mq.Message.new(Mq.Topic.new!(Account.Outbox.topic()), headers, Jason.encode!(payload), Mq.Key.new!(key))
+
+    message
+  end
+
+  # Сообщение маршрута: тело — JSON записи outbox, заголовки и ключ — её.
+  defp itinerary_message(id, name) do
+    key = Config.codec().dump(id)
+
+    %{payload: payload, headers: headers} =
+      TestRepo.one!(
+        from(r in Outbox.Repo.Pg.Schema,
+          where: r.key == ^key and r.name == ^name,
+          select: %{payload: r.payload, headers: r.headers}
+        )
+      )
+
+    {:ok, message} =
+      Mq.Message.new(Mq.Topic.new!(Itinerary.Outbox.topic()), headers, Jason.encode!(payload), Mq.Key.new!(key))
 
     message
   end

@@ -11,6 +11,7 @@ defmodule Core.Es.Event.CodecPersonalTest do
   alias Core.EsFixture.Account
   alias Core.EsFixture.UserID
   alias Core.EventFixture
+  alias Core.PersonalBrokenFixture.Event.ContactAdded
   alias Core.Version
 
   @holder "Иван Петров"
@@ -144,6 +145,20 @@ defmodule Core.Es.Event.CodecPersonalTest do
       assert {:error, %Error{ns: :prim} = error} = InCodec.load(EventFixture.Event, wire)
       refute inspect(error) =~ "заметка"
     end
+
+    test "вложенная сущность: {\"$pd\": null} на месте — %Destroyed{}, не на месте — :invalid_value" do
+      wire = nested_wire()
+
+      destroyed = put_in(wire, ["payload", "contact", "phone"], %{"$pd" => nil})
+
+      assert {:ok, %{payload: %{contact: %{phone: %Destroyed{}}}}} =
+               Core.PersonalBrokenFixture.Event.Codec.load(ContactAdded, destroyed, InCodec)
+
+      misplaced = put_in(wire, ["payload", "contact"], %{"$pd" => nil})
+
+      assert {:error, %Error{kind: :domain, ns: :codec, code: :invalid_value, detail: %{field: :contact}}} =
+               Core.PersonalBrokenFixture.Event.Codec.load(ContactAdded, misplaced, InCodec)
+    end
   end
 
   describe "нагрузка" do
@@ -212,6 +227,24 @@ defmodule Core.Es.Event.CodecPersonalTest do
                InCodec.load(Contacted, only_set)
     end
 
+    test "значение словаря с {\"$pd\": null} — %Destroyed{} на месте значения" do
+      %{destroyed: wire} = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], %{"дом" => "+7 900 000-00-03"}))
+
+      assert {:ok, %Contacted{payload: payload}} = InCodec.load(Contacted, wire)
+      assert %Destroyed{} = payload.contacts
+      assert payload.contact_by_kind == %{"дом" => %Destroyed{}}
+    end
+
+    test "нерасшифрованный шифротекст значения словаря — :sealed_personal_value" do
+      %{destroyed: wire} = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], %{"дом" => "+7 900 000-00-03"}))
+
+      wire = put_payload(wire, %{"contact_by_kind" => %{"дом" => %{"$pd" => "AQID"}}})
+
+      assert {:error,
+              %Error{kind: :domain, ns: :codec, code: :sealed_personal_value, detail: %{field: :contact_by_kind}}} =
+               InCodec.load(Contacted, wire)
+    end
+
     test "detail ошибки элемента и значения словаря редактируется" do
       long = String.duplicate("контакт", 20)
       wire = Personal.Test.fixtures(contacted(["+7 900 000-00-01"], nil)).open
@@ -278,4 +311,17 @@ defmodule Core.Es.Event.CodecPersonalTest do
   defp fixture(path), do: Jason.decode!(File.read!(Path.join("test/support/fixtures/events", path)))
 
   defp put_payload(wire, fields), do: Map.update!(wire, "payload", &Map.merge(&1, fields))
+
+  defp nested_wire do
+    contact = %Core.PersonalBrokenFixture.Contact{phone: Core.PrimFixture.Personal.new!("+7 900 000-00-00")}
+
+    ContactAdded.new(
+      ContactAdded.Payload.new(contact),
+      EventFixture.AggID.new(),
+      Version.new(),
+      EventFixture.ActorID.new(),
+      Es.Event.At.now!()
+    )
+    |> InCodec.dump()
+  end
 end

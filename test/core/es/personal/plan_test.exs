@@ -164,6 +164,23 @@ defmodule Core.Es.Personal.PlanTest do
 
       assert Plan.entries!(fields, @where, uuid_prim: &Payload.uuid_prim?/1) == []
     end
+
+    test "непрозрачный тип в list: без personal: true/false — CompileError" do
+      assert_raise CompileError, ~r/^Es\.Event\.Payload: fields: things: сущность .*Opaque без общей декларации/, fn ->
+        entries!(things: [list: [entity: Opaque]])
+      end
+
+      assert_raise CompileError, ~r/^Es\.Event\.Payload: fields: marks: семейство .*Mark/, fn ->
+        entries!(marks: [list: [union: Core.DerivedFixture.Mark]])
+      end
+    end
+
+    test "personal: true у непрозрачного типа — место без спуска и без отказа" do
+      fields = fields(thing: [entity: Opaque, personal: true])
+
+      assert Plan.entries!(fields, @where, uuid_prim: &Payload.uuid_prim?/1) ==
+               [%{path: [:thing], subject: :aggregate_id}]
+    end
   end
 
   describe "assert_writable!/3" do
@@ -184,6 +201,27 @@ defmodule Core.Es.Personal.PlanTest do
 
       assert_raise ArgumentError, ~r/ПДн-место steps\.each\.recipient: непустое ПДн-значение без субъекта/, fn ->
         Plan.assert_writable!(%{steps: [step]}, entries)
+      end
+    end
+
+    test "dump без известного aggregate_id: локальный субъект проверяется, :aggregate_id — нет" do
+      entries = Plan.runtime_entries(fields(steps: [list: [entity: Step]]))
+
+      step = %Step{owner_id: nil, recipient: Core.PrimFixture.Personal.new!("+7 900 000-00-00"), state: "new"}
+
+      assert_raise ArgumentError, ~r/непустое ПДн-значение без субъекта/, fn ->
+        Plan.assert_writable!(%{steps: [step]}, entries, aggregate_id: nil)
+      end
+
+      aggregate = Plan.runtime_entries(fields(phone: [prim: Core.PrimFixture.Personal]))
+
+      assert :ok =
+               Plan.assert_writable!(%{phone: Core.PrimFixture.Personal.new!("+7 900 000-00-00")}, aggregate)
+
+      assert_raise ArgumentError, ~r/ПДн-место phone: непустое ПДн-значение без субъекта/, fn ->
+        Plan.assert_writable!(%{phone: Core.PrimFixture.Personal.new!("+7 900 000-00-00")}, aggregate,
+          aggregate_id: nil
+        )
       end
     end
 

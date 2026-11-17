@@ -134,6 +134,8 @@ defmodule Core.Es.Event do
       unquote(draft_entries(payload_mod))
       Core.Es.Event.payload!(unquote(Macro.escape(payload_mod)), unquote(aggregate_id_mod))
 
+      @es_personal_payload Core.Es.Event.personal_payload?(unquote(Macro.escape(payload_mod)))
+
       alias Core.Es.Event, as: EsEvent
       alias Core.Version
 
@@ -162,17 +164,9 @@ defmodule Core.Es.Event do
 
       def __es_family__, do: unquote(family_mod)
 
-      @type t :: %__MODULE__{
-              id: EsEvent.ID.t(),
-              payload: unquote(payload.type),
-              aggregate_id: unquote(aggregate_id_mod).t(),
-              aggregate_version: Version.t(),
-              at: EsEvent.At.t(),
-              by: unquote(by_mod).t(),
-              operation_id: EsEvent.OperationID.t() | nil,
-              session_id: EsEvent.SessionID.t() | nil,
-              basis_id: EsEvent.OperationID.t() | nil
-            }
+      @es_read_type {unquote(Macro.escape(payload_mod)), unquote(Macro.escape(aggregate_id_mod)),
+                     unquote(Macro.escape(by_mod))}
+      @before_compile Core.Es.Event
 
       @doc unquote(payload.draft_doc)
       @spec draft(unquote_splicing(payload.specs)) :: unquote(payload.draft_spec)
@@ -216,6 +210,52 @@ defmodule Core.Es.Event do
 
   # ---
 
+  @doc """
+  Тип чтения события: корневое ПДн-место нагрузки-Prim (`personal: true` у Prim) допускает
+  `%Core.Es.Personal.Destroyed{}`; `new/N` остаётся типом записи — уничтоженное собирает загрузка
+  (`build/3`, клауза с уничтоженной нагрузкой).
+
+  Флаг считается в теле модуля события, а не при раскрытии `use`: при раскрытии нагрузка бывает
+  ещё не собрана (`Account → Event.Codec → Event → Account.Holder` — `Code.ensure_compiled` дал бы
+  `:unavailable`).
+  """
+  defmacro __before_compile__(env) do
+    {payload_mod, aggregate_id_mod, by_mod} = Module.get_attribute(env.module, :es_read_type)
+    personal? = Module.get_attribute(env.module, :es_personal_payload) == true
+
+    payload_type =
+      cond do
+        is_nil(payload_mod) -> quote(do: nil)
+        personal? -> quote(do: unquote(payload_mod).t() | Core.Es.Personal.Destroyed.t())
+        true -> quote(do: unquote(payload_mod).t())
+      end
+
+    quote do
+      @type t :: %__MODULE__{
+              id: Core.Es.Event.ID.t(),
+              payload: unquote(payload_type),
+              aggregate_id: unquote(aggregate_id_mod).t(),
+              aggregate_version: Core.Version.t(),
+              at: Core.Es.Event.At.t(),
+              by: unquote(by_mod).t(),
+              operation_id: Core.Es.Event.OperationID.t() | nil,
+              session_id: Core.Es.Event.SessionID.t() | nil,
+              basis_id: Core.Es.Event.OperationID.t() | nil
+            }
+    end
+  end
+
+  @doc false
+  @spec personal_payload?(module() | nil) :: boolean()
+
+  def personal_payload?(nil), do: false
+
+  def personal_payload?(payload_mod) when is_atom(payload_mod) do
+    Helper.Module.exports?(payload_mod, :__domain_personal__, 0) and payload_mod.__domain_personal__()
+  end
+
+  # ---
+
   defp payload_form!(payload) when is_atom(payload), do: payload
 
   defp payload_form!(payload),
@@ -223,7 +263,6 @@ defmodule Core.Es.Event do
 
   defp payload_parts(nil) do
     %{
-      type: nil,
       specs: [],
       args: [],
       heads: [],
@@ -243,7 +282,6 @@ defmodule Core.Es.Event do
       end
 
     %{
-      type: quote(do: unquote(payload_mod).t()),
       specs: [quote(do: unquote(payload_mod).t())],
       args: [quote(do: payload)],
       heads: [quote(do: %unquote(payload_mod){} = payload)],

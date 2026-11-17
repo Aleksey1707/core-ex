@@ -5,10 +5,13 @@ defmodule Core.Es.Personal.Plan do
   # `Core.Field.personal_places/3`: здесь только формы пути (`:wire` для плана события, `:name`
   # для обхода значения), проверки объявления и runtime-отказы записи.
 
+  alias Core.Error
   alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Marker
   alias Core.Field
   alias Core.Helper.Opts
+
+  require Error
 
   @type entry :: Field.place_entry()
   @type value_path :: [atom() | :each]
@@ -52,6 +55,14 @@ defmodule Core.Es.Personal.Plan do
 
   def places_under?(entries, path) when is_list(entries) and is_list(path),
     do: Enum.any?(entries, &List.starts_with?(&1.path, path))
+
+  # Места одного поля: путь от значения поля — без первого шага (wire-ключа объявления).
+  @doc false
+  @spec under([entry()], atom()) :: [entry()]
+
+  def under(entries, step) when is_list(entries) and is_atom(step) do
+    for %{path: [^step | rest]} = entry <- entries, do: %{entry | path: rest}
+  end
 
   # Временный адаптер `__es_subjects__/0`: только места верхнего уровня, субъект — `:aggregate_id`
   # или имя поля нагрузки. Уходит вместе с переездом потребителей (07/08).
@@ -290,6 +301,83 @@ defmodule Core.Es.Personal.Plan do
 
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   defp wire_step(wire) when is_binary(wire), do: String.to_atom(wire)
+
+  # ===== загрузка ПДн-мест =====
+
+  @doc """
+  Wire-значение поля → значение с `%Core.Es.Personal.Destroyed{}` на каждом ПДн-месте.
+
+  `{"$pd": null}` на месте заменяется **до** разбора вида (у `union:` с `personal: true` — до
+  выбора варианта, ручной Codec не вызывается); `nil` необязательного места остаётся `nil`.
+  Оставшийся маркер — отказ: `{"$pd": "<строка>"}` — `:sealed_personal_value`, иное —
+  `:invalid_value` (`ns: :codec`). `entries` — места от значения поля (`under/2`).
+  """
+  @spec load(term(), [entry()], module(), atom()) :: Core.Result.t()
+
+  def load(value, entries, type, field) when is_list(entries) and is_atom(type) and is_atom(field) do
+    loaded = Enum.reduce(entries, value, &destroyed(&2, &1.path))
+
+    case left_marker(loaded) do
+      :none -> {:ok, loaded}
+      {:marker, sealed} -> {:error, marker_error(type, field, sealed)}
+    end
+  end
+
+  @doc false
+  @spec marker_error(module(), atom(), term()) :: Error.t()
+
+  def marker_error(type, name, sealed) when is_atom(type) and is_atom(name) and is_binary(sealed) do
+    Error.domain(type,
+      code: :sealed_personal_value,
+      ns: :codec,
+      message: "#{inspect(type)}: поле #{name} — ПДн-значение не расшифровано",
+      detail: %{field: name}
+    )
+  end
+
+  def marker_error(type, name, _sealed) when is_atom(type) and is_atom(name) do
+    Error.domain(type,
+      code: :invalid_value,
+      ns: :codec,
+      message: "#{inspect(type)}: поле #{name} — маркер ПДн-значения не на месте",
+      detail: %{field: name}
+    )
+  end
+
+  # ---
+
+  defp destroyed(%{"$pd" => nil} = marker, []) when map_size(marker) == 1, do: %Destroyed{}
+  defp destroyed(value, []), do: value
+
+  defp destroyed(list, [:each | rest]) when is_list(list),
+    do: Enum.map(list, &destroyed(&1, rest))
+
+  defp destroyed(map, [:each | rest]) when is_map(map) and not is_struct(map),
+    do: Map.new(map, fn {key, item} -> {key, destroyed(item, rest)} end)
+
+  defp destroyed(map, [step | rest]) when is_map(map) and not is_struct(map) and is_atom(step) do
+    key = Atom.to_string(step)
+
+    case Map.fetch(map, key) do
+      {:ok, item} -> Map.put(map, key, destroyed(item, rest))
+      :error -> map
+    end
+  end
+
+  defp destroyed(value, _path), do: value
+
+  # Маркер вне ПДн-места (или неразобранный шифротекст на месте) — отказ загрузки поля.
+  defp left_marker(%{"$pd" => sealed} = marker) when map_size(marker) == 1, do: {:marker, sealed}
+  defp left_marker(%_{} = _struct), do: :none
+
+  defp left_marker(map) when is_map(map),
+    do: Enum.find_value(map, :none, fn {_key, item} -> found(left_marker(item)) end)
+
+  defp left_marker(list) when is_list(list), do: Enum.find_value(list, :none, &found(left_marker(&1)))
+  defp left_marker(_value), do: :none
+
+  defp found(:none), do: nil
+  defp found(found), do: found
 
   # ===== защита записи =====
 

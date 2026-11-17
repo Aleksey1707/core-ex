@@ -20,6 +20,9 @@ defmodule Core.Es.Personal.EventsTest do
   alias Core.EventFixture.PersonID
   alias Core.Outbox
   alias Core.Pagination
+  alias Core.PersonalBrokenFixture
+  alias Core.PersonalBrokenFixture.Event.ContactAdded
+  alias Core.PrimFixture
   alias Core.StateStoredFixture
   alias Core.Version
 
@@ -187,6 +190,35 @@ defmodule Core.Es.Personal.EventsTest do
 
       assert %Protocol.UndefinedError{} = error
       refute Exception.message(error) =~ @holder
+    end
+  end
+
+  describe "вложенное ПДн-место" do
+    test "в строке — $pd на месте поля сущности; после destroy_key/3 — %Destroyed{} на месте" do
+      id = AggID.new()
+      phone = PrimFixture.Personal.new!("+7 900 000-00-00")
+      contact = %PersonalBrokenFixture.Contact{phone: phone}
+
+      event =
+        ContactAdded.new(ContactAdded.Payload.new(contact), id, Version.new(), ActorID.new(), Es.Event.At.now!())
+
+      :ok = Es.Store.append(PersonalBrokenFixture.Event.Codec, [event], Context.new(), & &1)
+
+      assert %{"contact" => %{"phone" => %{"$pd" => sealed}}} =
+               stored_payload("personal_broken", id, "personal_broken.contact_added")
+
+      assert is_binary(sealed)
+      refute Base.decode64!(sealed) =~ "+7 900"
+
+      codec = PersonalBrokenFixture.Event.Codec
+
+      assert [%ContactAdded{payload: %{contact: %PersonalBrokenFixture.Contact{phone: ^phone}}}] =
+               Es.Store.Test.events!(codec, id)
+
+      assert :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+
+      assert [%ContactAdded{payload: %{contact: %PersonalBrokenFixture.Contact{phone: %Destroyed{}}}}] =
+               Es.Store.Test.events!(codec, id)
     end
   end
 

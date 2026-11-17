@@ -15,6 +15,9 @@ defmodule Core.Es.Personal.SnapshotTest do
   alias Core.EsFixture.Account
   alias Core.EsFixture.UserID
   alias Core.Telemetry
+  alias Core.Version
+
+  require Config
 
   @holder "Иван Петров"
   @repo Account.Repo.Pg.Snapshotted
@@ -217,6 +220,45 @@ defmodule Core.Es.Personal.SnapshotTest do
     end
   end
 
+  describe "вложенные ПДн-места" do
+    @itinerary Config.repo!(Core.EsFixture.Itinerary.Repo.Snapshotted)
+
+    test "после destroy_key/3 — полная свёртка, уничтоженные места вложены, снапшот не перезаписан" do
+      id = Core.EsFixture.Itinerary.ID.new()
+      steps = itinerary_steps()
+      write_itinerary!(@itinerary, id, steps)
+
+      assert {:ok, %Core.EsFixture.Itinerary{steps: ^steps}} = @itinerary.get(id, :current, Context.new())
+      before = itinerary_snapshot!(id)
+      assert %Snapshot.Schema{aggregate_version: 2} = before
+      assert :binary.match(before.state, "Иван") == :nomatch
+
+      assert :ok = Personal.destroy_key(id, UserID.new(), Context.new())
+      attach_telemetry()
+
+      log =
+        capture_debug(fn ->
+          assert {:ok, %Core.EsFixture.Itinerary{steps: [first, second]}} = @itinerary.get(id, :current, Context.new())
+
+          assert %Core.EsFixture.Itinerary.Step{
+                   channel: "sms",
+                   status: "pending",
+                   attempts: 1,
+                   recipient: %Destroyed{},
+                   content: %Destroyed{}
+                 } = first
+
+          assert %Core.EsFixture.Itinerary.Step{channel: "email", status: "sent", recipient: %Destroyed{}} = second
+        end)
+
+      assert log =~ "снапшот агрегата отвергнут"
+      assert log =~ "reason=destroyed"
+      assert_received {:telemetry, [:core, :es, :aggregate, :fold], %{events: 2}, %{snapshot: :rejected}}
+      refute_received {:telemetry, [:core, :es, :snapshot, :write], _measurements, _metadata}
+      assert itinerary_snapshot!(id) == before
+    end
+  end
+
   def handle_telemetry(event, measurements, metadata, test) do
     if self() == test, do: send(test, {:telemetry, event, measurements, metadata})
   end
@@ -244,6 +286,45 @@ defmodule Core.Es.Personal.SnapshotTest do
 
   defp snapshot!(id),
     do: Config.dao().get_by(Snapshot.Schema, aggregate_type: "account", aggregate_id: dump(id))
+
+  defp itinerary_snapshot!(id),
+    do: Config.dao().get_by(Snapshot.Schema, aggregate_type: "itinerary", aggregate_id: dump(id))
+
+  defp itinerary_steps, do: [itinerary_step("sms", "pending", 1), itinerary_step("email", "sent", 2)]
+
+  defp itinerary_step(channel, status, attempts) do
+    %Core.EsFixture.Itinerary.Step{
+      channel: channel,
+      status: status,
+      attempts: attempts,
+      recipient: Core.EsFixture.Itinerary.Recipient.new!("Иван"),
+      content: Core.EsFixture.Itinerary.Content.new!("Код 1111")
+    }
+  end
+
+  defp write_itinerary!(repo, id, steps) do
+    planned =
+      Core.EsFixture.Itinerary.Event.Planned.new(
+        Core.EsFixture.Itinerary.Event.Planned.Payload.new(steps),
+        id,
+        Version.new(),
+        UserID.new(),
+        Es.Event.At.now!()
+      )
+
+    :ok = repo.append([planned], Context.new())
+
+    recorded =
+      Core.EsFixture.Itinerary.Event.StepRecorded.new(
+        hd(steps),
+        id,
+        Version.new!(2),
+        UserID.new(),
+        Es.Event.At.now!()
+      )
+
+    :ok = repo.append([recorded], Context.new())
+  end
 
   defp update_snapshot!(id, set) do
     {1, nil} =

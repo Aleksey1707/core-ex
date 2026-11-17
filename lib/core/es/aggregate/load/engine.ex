@@ -287,17 +287,26 @@ defmodule Core.Es.Aggregate.Load.Engine do
     }
   end
 
-  # `destroyed?` — чтение видело уничтоженный снапшот или ПДн-значение: снапшот потока не пишется.
+  # `destroyed?` — чтение видело уничтоженный снапшот или ПДн-значение на любом месте нагрузки:
+  # снапшот потока не пишется.
   defp destroyed?(%Config{snapshot: %Settings{sealed: true}}, events), do: destroyed_value?(events)
   defp destroyed?(_cfg, _events), do: false
 
-  # Поле с `subject:` — только на верхнем уровне нагрузки.
   defp destroyed_value?(events) do
     Enum.any?(events, fn
-      %{payload: %_{} = payload} -> Enum.any?(Map.from_struct(payload), &match?({_field, %Destroyed{}}, &1))
+      %{payload: payload} -> destroyed_place?(payload)
       _event -> false
     end)
   end
+
+  defp destroyed_place?(%Destroyed{}), do: true
+  defp destroyed_place?(%_{} = struct), do: destroyed_place?(Map.from_struct(struct))
+
+  defp destroyed_place?(map) when is_map(map),
+    do: Enum.any?(map, fn {_key, value} -> destroyed_place?(value) end)
+
+  defp destroyed_place?(list) when is_list(list), do: Enum.any?(list, &destroyed_place?/1)
+  defp destroyed_place?(_value), do: false
 
   # `captures` — состояния на версиях пакета (`%{version => state}`), у обычного чтения пусто.
   defp restored_stream(snapshot, cfg, meta, base, events, destroyed?) do

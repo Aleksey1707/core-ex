@@ -5,14 +5,19 @@ defmodule Core.Repo.Pg.StateStoredTest do
   alias Core.Context
   alias Core.Error
   alias Core.Es
+  alias Core.Es.Personal.Destroyed
   alias Core.EventFixture
   alias Core.EventFixture.AggID
+  alias Core.EventFixture.Contact
+  alias Core.EventFixture.PersonID
   alias Core.Outbox
   alias Core.Pagination
   alias Core.Repo
   alias Core.StateStoredFixture
   alias Core.StateStoredFixture.Child
   alias Core.StateStoredFixture.Entity
+  alias Core.StateStoredFixture.Profile
+  alias Core.Telemetry
   alias Core.Version
 
   require Config
@@ -20,6 +25,7 @@ defmodule Core.Repo.Pg.StateStoredTest do
 
   @codec EventFixture.Event.Codec
   @repo Config.repo!(StateStoredFixture.Repo)
+  @contact "+7 900 000-00-00"
 
   defmodule ReadOnlyBehaviour do
     @moduledoc false
@@ -429,6 +435,47 @@ defmodule Core.Repo.Pg.StateStoredTest do
     end
   end
 
+  describe "ПДн в строке" do
+    test "живое ПДн открыто в строке, уничтоженное — {\"$pd\": null}, чтение без хранилища ключей" do
+      id = AggID.new()
+      profile = %Profile{phone: Contact.new!(@contact)}
+
+      assert {:ok, written} = @repo.insert(%{entity(id, 1, []) | holder: profile}, Context.new())
+      assert written.holder == profile
+      assert stored_holder(id) == %{"phone" => @contact}
+
+      attach_personal_calls()
+      assert {:ok, %Entity{holder: ^profile}} = @repo.get(id, :current, Context.new())
+      refute_received {:personal_call, _op}
+
+      destroyed = %{entity(id, 2, []) | holder: %Profile{phone: %Destroyed{}}}
+      assert {:ok, %Entity{holder: %Profile{phone: %Destroyed{}}}} = @repo.update(destroyed, Context.new())
+      assert stored_holder(id) == %{"phone" => %{"$pd" => nil}}
+
+      assert {:ok, %Entity{holder: %Profile{phone: %Destroyed{}}}} = @repo.get(id, :current, Context.new())
+      refute_received {:personal_call, _op}
+
+      container = %{entity(id, 3, []) | holder: %Destroyed{}}
+      assert {:ok, %Entity{holder: %Destroyed{}}} = @repo.update(container, Context.new())
+      assert stored_holder(id) == %{"$pd" => nil}
+      assert {:ok, %Entity{holder: %Destroyed{}}} = @repo.get(id, :current, Context.new())
+      refute_received {:personal_call, _op}
+    end
+
+    test "новый event с уничтоженным ПДн — запись отказывает, строка не пишется" do
+      id = AggID.new()
+      event = EventFixture.contact_set(PersonID.new(), @contact, "Заметка")
+      payload = %{event.payload | contact: %Destroyed{}}
+      state = entity(id, 1, [%{event | payload: payload}])
+
+      assert_raise ArgumentError, ~r/уничтоженное ПДн-значение не записывается в новое событие/, fn ->
+        @repo.insert(state, Context.new())
+      end
+
+      assert {:error, %Error{code: :not_found}} = @repo.get(id, :current, Context.new())
+    end
+  end
+
   # `prelude` стоит в теле перед `use`: тело раскрывается целиком до вычисления, поэтому ошибка
   # раскрытия приходит раньше, чем `raise` в `prelude`.
   defp compile!(name, overrides, prelude \\ nil) do
@@ -484,6 +531,25 @@ defmodule Core.Repo.Pg.StateStoredTest do
 
   # Операцию записи ставит репозиторий (`Core.Es.Operation`), её проверяет `Core.Es.OperationTest`.
   defp wires(events), do: Enum.map(events, &dump(%{&1 | operation_id: nil}))
+
+  defp stored_holder(id) do
+    TestRepo.one!(from(e in StateStoredFixture.Schema, where: e.id == ^dump(id), select: e.holder))
+  end
+
+  defp attach_personal_calls do
+    test = self()
+    handler = "state-stored-personal-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        Telemetry.event([:es, :personal, :call]),
+        fn _event, _measurements, metadata, _config -> send(test, {:personal_call, metadata.op}) end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+  end
 
   defp dump(value), do: Config.codec().dump(value)
 end

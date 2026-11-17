@@ -8,10 +8,29 @@ defmodule Core.StateStoredFixture do
   проверяет.
   """
 
+  defmodule Profile do
+    @moduledoc "Профиль владельца — вложенное ПДн-место `phone`."
+
+    use Core.Struct, fields: [phone: [prim: Core.EventFixture.Contact]]
+  end
+
+  defmodule Profile.Codec do
+    @moduledoc "Плагин профиля по полям."
+
+    use Core.Codec.Plugin, types: [Core.StateStoredFixture.Profile]
+  end
+
   defmodule Entity do
-    @moduledoc "Агрегат: название, дочерние строки `код => название` и накопленные события."
+    @moduledoc """
+    Агрегат: название, ПДн-профиль владельца (`holder`), дочерние строки `код => название` и
+    накопленные события.
+
+    `holder` — ПДн-место state-stored строки: живое значение лежит открытым (`update`/`delete`
+    стирают его), уничтоженное — `{"$pd": null}` в jsonb-колонке. Шифрования строки нет.
+    """
 
     alias Core.EventFixture
+    alias Core.StateStoredFixture.Profile
     alias Core.Version
 
     use Core.Struct,
@@ -19,6 +38,7 @@ defmodule Core.StateStoredFixture do
         id: [prim: EventFixture.AggID],
         version: [prim: Version],
         name: [type: :string],
+        holder: [entity: Profile, optional: true, default: nil],
         children: [map: [key: [type: :string], value: [type: :string]]]
       ],
       events: EventFixture.Event
@@ -62,10 +82,12 @@ defmodule Core.StateStoredFixture do
 
     alias Core.Config
     alias Core.Es
+    alias Core.Es.Personal.Destroyed
     alias Core.EventFixture.AggID
     alias Core.Result
     alias Core.StateStoredFixture.Child
     alias Core.StateStoredFixture.Entity
+    alias Core.StateStoredFixture.Profile
     alias Core.Version
 
     @primary_key {:id, :binary_id, autogenerate: false}
@@ -73,6 +95,7 @@ defmodule Core.StateStoredFixture do
     schema "fixture_entities" do
       field :name, :string
       field :version, :integer
+      field :holder, :map
 
       has_many :children, Child, foreign_key: :entity_id
     end
@@ -91,12 +114,14 @@ defmodule Core.StateStoredFixture do
 
     def to_entity(%__MODULE__{} = row) do
       with {:ok, id} <- Config.codec().load(AggID, row.id),
-           {:ok, version} <- Version.new(row.version) do
+           {:ok, version} <- Version.new(row.version),
+           {:ok, holder} <- load_holder(row.holder) do
         {:ok,
          %Entity{
            id: id,
            version: version,
            name: row.name,
+           holder: holder,
            children: Map.new(row.children, &{&1.code, &1.name}),
            events: Es.Events.new()
          }}
@@ -107,13 +132,32 @@ defmodule Core.StateStoredFixture do
     @spec to_model(Entity.t()) :: {:ok, map()}
 
     def to_model(%Entity{} = entity) do
-      {:ok, %{id: dump_id(entity.id), name: entity.name, version: Version.value(entity.version)}}
+      {:ok,
+       %{
+         id: dump_id(entity.id),
+         name: entity.name,
+         version: Version.value(entity.version),
+         holder: dump_holder(entity.holder)
+       }}
     end
 
     @doc "Строка + атрибуты → changeset записи."
     @spec changeset(t(), map()) :: Ecto.Changeset.t()
 
-    def changeset(%__MODULE__{} = row, attrs), do: cast(row, attrs, ~w(id name version)a)
+    def changeset(%__MODULE__{} = row, attrs), do: cast(row, attrs, ~w(id name version holder)a)
+
+    # ---
+
+    # Живое ПДн в mutable-строке остаётся открытым wire-значением сущности (плагин его полей);
+    # уничтоженное — `{"$pd": null}` на каждом ПДн-месте, которое читается без хранилища ключей.
+    defp dump_holder(nil), do: nil
+    defp dump_holder(%Destroyed{}), do: %{"$pd" => nil}
+    defp dump_holder(%Profile{phone: %Destroyed{}}), do: %{"phone" => %{"$pd" => nil}}
+    defp dump_holder(%Profile{} = profile), do: Profile.Codec.dump(profile, Config.codec())
+
+    defp load_holder(nil), do: {:ok, nil}
+    defp load_holder(%{"$pd" => nil}), do: {:ok, %Destroyed{}}
+    defp load_holder(wire), do: Profile.Codec.load(Profile, wire, Config.codec())
   end
 
   defmodule Outbox do

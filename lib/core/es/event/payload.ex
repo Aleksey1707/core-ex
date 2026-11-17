@@ -67,8 +67,6 @@ defmodule Core.Es.Event.Payload do
   alias Core.Helper
   alias Core.Prim
 
-  require Error
-
   @label "Es.Event.Payload"
   @required_keys ~w(fields)a
   @optional_keys ~w()a
@@ -421,74 +419,31 @@ defmodule Core.Es.Event.Payload do
 
   # ---
 
-  defp load_step(type, %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire} = field, plan) do
+  defp load_step(type, %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire}, plan) do
     raw = raw_var()
     value = Fields.load_value_ir(type, name, spec, raw, optional?)
-
-    # Маркер этого шага — верхнеуровневое поле с `subject:` (и место верхнего уровня); вложенные
-    # места получат маркер и разбор в 07.
-    place? = not is_nil(field.subject) or Plan.place?(plan, [wire_step(wire)])
-
-    clauses =
-      destroyed_clause(place?) ++
-        quote generated: true do
-          %{"$pd" => sealed} = marker when map_size(marker) == 1 ->
-            {:error, Core.Es.Event.Payload.marker_error(unquote(type), unquote(name), sealed)}
-
-          unquote(raw) ->
-            unquote(redacted(value, place?))
-        end
+    places = Plan.under(plan, wire_step(wire))
 
     raw_field =
       quote(generated: true, do: Core.Helper.Map.field(unquote(Fields.wire_var()), unquote(Fields.wire_key(wire))))
 
-    quote(generated: true, do: {:ok, unquote(Fields.var(name))} <- case(unquote(raw_field), do: unquote(clauses)))
-  end
-
-  defp destroyed_clause(false), do: []
-
-  defp destroyed_clause(true) do
-    quote(
-      generated: true,
-      do: (%{"$pd" => nil} = marker when map_size(marker) == 1 -> {:ok, %Core.Es.Personal.Destroyed{}})
-    )
-  end
-
-  defp redacted(value, false), do: value
-
-  defp redacted(value, true) do
     quote generated: true do
-      case unquote(value) do
-        {:ok, value} -> {:ok, value}
-        {:error, reason} -> {:error, Core.Es.Event.Payload.redact(reason)}
-      end
+      {:ok, unquote(Fields.var(name))} <-
+        with {:ok, unquote(raw)} <-
+               Core.Es.Personal.Plan.load(
+                 unquote(raw_field),
+                 unquote(Macro.escape(places)),
+                 unquote(type),
+                 unquote(name)
+               ) do
+          Core.Es.Event.Payload.redacted_result(unquote(value), unquote(places != []))
+        end
     end
   end
 
   defp raw_var, do: Macro.var(:raw, __MODULE__)
 
   # ===== ПДн-значение при загрузке =====
-
-  @doc false
-  @spec marker_error(module(), atom(), term()) :: Error.t()
-
-  def marker_error(type, name, sealed) when is_atom(type) and is_atom(name) and is_binary(sealed) do
-    Error.domain(type,
-      code: :sealed_personal_value,
-      ns: :codec,
-      message: "#{inspect(type)}: поле #{name} — ПДн-значение не расшифровано",
-      detail: %{field: name}
-    )
-  end
-
-  def marker_error(type, name, _sealed) when is_atom(type) and is_atom(name) do
-    Error.domain(type,
-      code: :invalid_value,
-      ns: :codec,
-      message: "#{inspect(type)}: поле #{name} — маркер ПДн-значения не на месте",
-      detail: %{field: name}
-    )
-  end
 
   # Ошибку загрузки ПДн-места строит Prim, плагин сущности или enum без флага `personal:`, и в её
   # `detail` лежит сырое значение — редактируется цепочка ниже пути ошибки плагина по полям.
@@ -504,6 +459,14 @@ defmodule Core.Es.Event.Payload do
   end
 
   def redact(_reason), do: :redacted
+
+  # Исход загрузки под ПДн-местом: путь ошибки (поле, индекс, ключ) остаётся, значения — нет.
+  @doc false
+  @spec redacted_result(Core.Result.t(), boolean()) :: Core.Result.t()
+
+  def redacted_result({:ok, value}, _personal?), do: {:ok, value}
+  def redacted_result({:error, reason}, true), do: {:error, redact(reason)}
+  def redacted_result({:error, reason}, false), do: {:error, reason}
 
   # ===== общее =====
 

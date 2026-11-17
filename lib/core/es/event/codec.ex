@@ -556,16 +556,36 @@ defmodule Core.Es.Event.Codec do
 
   def load_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, wire, codec} = {var(:payload), var(:wire), var(:codec)}
+    entries = payload_entries(payload, kind)
 
+    # Корневое ПДн-место нагрузки (Prim с `personal: true`) читается `%Destroyed{}` до разбора вида;
+    # вложенные места сущности разбирает её плагин, здесь — замена уничтоженного и оставшиеся маркеры.
     body =
       quote generated: true do
-        case unquote(codec).load(unquote(payload), unquote(wire)) do
-          {:ok, %unquote(payload){} = unquote(value)} -> {:ok, unquote(value)}
-          {:error, reason} -> {:error, reason}
-        end
+        with {:ok, loaded} <-
+               Core.Es.Personal.Plan.load(
+                 unquote(wire),
+                 unquote(Macro.escape(entries)),
+                 unquote(payload),
+                 :payload
+               ),
+             {:ok, unquote(value)} <- Core.Es.Event.Codec.load_loaded_payload(unquote(payload), loaded, unquote(codec)),
+             do: {:ok, unquote(value)}
       end
 
     {[event, wire, codec], quote(generated: true, do: is_atom(unquote(codec))), body}
+  end
+
+  @doc "Разобранная нагрузка-Prim/сущность → событие: уничтоженная нагрузка возвращается как есть."
+  @spec load_loaded_payload(module(), term(), module()) :: Core.Result.t()
+
+  def load_loaded_payload(_payload, %Core.Es.Personal.Destroyed{} = destroyed, _codec), do: {:ok, destroyed}
+
+  def load_loaded_payload(payload, loaded, codec) when is_atom(payload) and is_atom(codec) do
+    case codec.load(payload, loaded) do
+      {:ok, %{__struct__: ^payload} = value} -> {:ok, value}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
@@ -659,6 +679,23 @@ defmodule Core.Es.Event.Codec do
 
   @doc "Модуль события + нагрузка + header → событие."
   @spec build(module(), struct() | nil, header()) :: struct()
+
+  # Уничтоженная нагрузка-Prim: `new/N` — тип записи и уничтоженное значение не принимает, событие
+  # собирается полями.
+  def build(mod, %Core.Es.Personal.Destroyed{} = payload, %{} = header) when is_atom(mod) do
+    %{
+      mod.__struct__()
+      | id: header.id || Core.Es.Event.ID.new(),
+        payload: payload,
+        aggregate_id: header.aggregate_id,
+        aggregate_version: header.version,
+        at: header.at,
+        by: header.by,
+        operation_id: header.operation_id,
+        session_id: header.session_id,
+        basis_id: header.basis_id
+    }
+  end
 
   def build(mod, payload, %{} = header) when is_atom(mod) do
     event =

@@ -258,34 +258,54 @@ defmodule Core.Codec.Plugin.Fields do
   @spec load_body_ir(module(), [map()]) :: Macro.t()
 
   def load_body_ir(type, fields) do
-    steps = Enum.map(fields, &ir_load_step(type, &1))
+    entries = Macro.var(:personal_entries, __MODULE__)
+    steps = Enum.map(fields, &ir_load_step(type, &1, entries))
     pairs = Enum.map(fields, fn field -> {field.name, var(field.name)} end)
 
     ok = quote(generated: true, do: {:ok, %unquote(type){unquote_splicing(pairs)}})
     error = quote(generated: true, do: ({:error, reason} -> {:error, reason}))
+    with_ast = {:with, [generated: true], steps ++ [[do: ok, else: error]]}
 
-    {:with, [generated: true], steps ++ [[do: ok, else: error]]}
+    quote generated: true do
+      unquote(entries) = Core.Es.Personal.Plan.entries(unquote(Macro.escape(fields)))
+      unquote(with_ast)
+    end
   end
 
   # ---
 
-  defp ir_load_step(type, %{name: name, wire: wire, default: :none} = field) do
+  defp ir_load_step(type, %{name: name, wire: wire, default: :none} = field, entries) do
     raw = quote(generated: true, do: Core.Helper.Map.field(unquote(wire_var()), unquote(wire_key(wire))))
 
-    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(Kind.load(grammar(field), type, raw)))
+    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(placed_load(type, field, raw, entries)))
   end
 
   # `default:` декларации — типизированное значение поля: при отсутствующем ключе оно подставляется
   # как есть, явный `null` его не заменяет и грузится как записанное.
-  defp ir_load_step(type, %{name: name, wire: wire, default: {:default, value}} = field) do
+  defp ir_load_step(type, %{name: name, wire: wire, default: {:default, value}} = field, entries) do
     raw_var = Macro.var(:ir_raw, __MODULE__)
 
     quote generated: true do
       {:ok, unquote(var(name))} <-
         case Core.Helper.Map.fetch(unquote(wire_var()), unquote(wire_key(wire))) do
-          {:ok, unquote(raw_var)} -> unquote(Kind.load(grammar(field), type, raw_var))
+          {:ok, unquote(raw_var)} -> unquote(placed_load(type, field, raw_var, entries))
           :error -> {:ok, unquote(Macro.escape(value))}
         end
+    end
+  end
+
+  # Разбор ПДн-мест поля до разбора вида: `{"$pd": null}` на месте → `%Destroyed{}`, оставшийся
+  # маркер — отказ; ошибка под местом редактируется, путь ошибки остаётся.
+  defp placed_load(type, field, raw, entries) do
+    raw_var = Macro.var(:place_raw, __MODULE__)
+
+    quote generated: true do
+      personal = Core.Es.Personal.Plan.under(unquote(entries), unquote(wire_key(field.wire)))
+
+      with {:ok, unquote(raw_var)} <-
+             Core.Es.Personal.Plan.load(unquote(raw), personal, unquote(type), unquote(field.name)) do
+        Core.Es.Event.Payload.redacted_result(unquote(Kind.load(grammar(field), type, raw_var)), personal != [])
+      end
     end
   end
 
