@@ -4,10 +4,10 @@ defmodule Core.Codec.Plugin.Fields do
   `Core.Field`) — и для типов `types:`, и для декларативных вариантов семейства.
 
   Поля приходят единым IR: вид, wire-ключ, `optional:` и типизированный `default:` уже
-  нормализованы. Проекция IR на грамматику `Core.Codec.Field` (`grammar/1`) нужна адаптеру вида
-  (`Core.Codec.Plugin.Fields.Kind`); вложенное ПДн-место (`{:personal, вид}`) wire-форму не меняет.
-  Блоки поштучного значения поля (`dump_value/3`, `load_value/5`, `new_args/1`) переиспользует
-  нагрузка события (`Core.Es.Event.Payload`).
+  нормализованы. Место ПДн (`{:personal, вид}`) wire-форму не меняет — адаптер вида
+  (`Core.Codec.Plugin.Fields.Kind`) видит вид без обёртки. Блоки поштучного значения поля
+  (`dump_value_ir/3`, `load_value_ir/5`, `new_args_ir/1`) переиспользует нагрузка события
+  (`Core.Es.Event.Payload`).
 
   | Вид | Дамп | Загрузка |
   |---|---|---|
@@ -34,67 +34,38 @@ defmodule Core.Codec.Plugin.Fields do
   оборачивает ошибкой поля с `detail: %{field: поле, key: wire-ключ}`; два wire-ключа, которые
   после загрузки дали один ключ (Prim ключа нормализует значение), — такая же ошибка без причины.
 
-  `default:` — wire-литерал, который загрузка подставляет вместо отсутствующего ключа или
-  `nil` и грузит как записанный (у `set:` — `[]`, у `map:` — `%{}`). Голова `dump/2` закрывает
-  Prim, сущность, множество (`%MapSet{}`) и словарь (`%{}`, не struct) поля паттерном, а
-  вариант семейства (`union:`) — только `is_struct`: варианты знает плагин семейства, а не этот
-  (ADR-0058). Загрузка собирает struct литералом после успешной загрузки
-  всех полей; первая ошибка поля — итог, лишние ключи wire игнорируются.
+  `default:` — типизированное значение поля: загрузка подставляет его при отсутствующем wire-ключе
+  как есть, явный `null` его не заменяет (у `optional: true` это `nil`, у обязательного поля —
+  ошибка загрузки). Голова `dump/2` закрывает Prim, сущность, множество (`%MapSet{}`) и словарь
+  (`%{}`, не struct) поля паттерном, а вариант семейства (`union:`) — только `is_struct`: варианты
+  знает плагин семейства, а не этот (ADR-0058). Загрузка собирает struct литералом после успешной
+  загрузки всех полей; первая ошибка поля — итог, лишние ключи wire игнорируются.
 
   Нагрузка события (`Core.Es.Event.Payload`) говорит на той же спеке и собирает свои клаузы из
   поштучных блоков значения поля этого модуля.
   """
 
-  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields.Kind
   alias Core.Error
 
   # ===== dump =====
 
   @doc false
-  @spec dump_args(module(), [Field.t()]) :: [Macro.t()]
-
-  def dump_args(type, fields) do
-    pairs = Enum.map(fields, &dump_pattern/1)
-
-    [quote(generated: true, do: %unquote(type){unquote_splicing(pairs)}), codec_var()]
-  end
-
-  @doc false
-  @spec dump_guard([Field.t()]) :: Macro.t()
-
-  def dump_guard(fields),
-    do: and_guards([quote(generated: true, do: is_atom(unquote(codec_var()))) | field_guards(fields)])
-
-  @doc false
-  @spec dump_body([Field.t()]) :: Macro.t()
-
-  def dump_body(fields), do: quote(generated: true, do: %{unquote_splicing(dump_pairs(fields))})
-
-  @doc false
-  @spec dump_pairs([Field.t()]) :: [{String.t(), Macro.t()}]
-
-  def dump_pairs(fields),
-    do: Enum.map(fields, &{&1.wire, Kind.dump(&1, var(&1.name))})
-
-  # Декларативная структура (`Core.Field`) отдаёт поля единым IR: поля, wire-ключи и вид берутся из
-  # `__core_fields__/0`, а `default:` — типизированное значение поля, не wire-литерал.
-  @doc false
-  @spec dump_args_ir(module(), [map()]) :: [Macro.t()]
+  @spec dump_args_ir(module(), [Core.Field.t()]) :: [Macro.t()]
 
   def dump_args_ir(type, fields) do
-    pairs = Enum.map(fields, &{&1.name, Kind.pattern(grammar(&1))})
+    pairs = Enum.map(fields, &{&1.name, Kind.pattern(&1)})
 
     [quote(generated: true, do: %unquote(type){unquote_splicing(pairs)}), codec_var()]
   end
 
   @doc false
-  @spec dump_guard_ir([map()]) :: Macro.t()
+  @spec dump_guard_ir([Core.Field.t()]) :: Macro.t()
 
   def dump_guard_ir(fields) do
     guards =
       Enum.flat_map(fields, fn field ->
-        case Kind.guard(grammar(field)) do
+        case Kind.guard(field) do
           true -> []
           guard -> [guard]
         end
@@ -104,58 +75,25 @@ defmodule Core.Codec.Plugin.Fields do
   end
 
   @doc false
-  @spec dump_pairs_ir([map()]) :: [{String.t(), Macro.t()}]
+  @spec dump_pairs_ir([Core.Field.t()]) :: [{String.t(), Macro.t()}]
 
-  def dump_pairs_ir(fields), do: Enum.map(fields, &{&1.wire, Kind.dump(grammar(&1), var(&1.name))})
+  def dump_pairs_ir(fields), do: Enum.map(fields, &{&1.wire, Kind.dump(&1, var(&1.name))})
 
   @doc false
-  @spec dump_body_ir([map()]) :: Macro.t()
+  @spec dump_body_ir([Core.Field.t()]) :: Macro.t()
 
   def dump_body_ir(fields), do: quote(generated: true, do: %{unquote_splicing(dump_pairs_ir(fields))})
 
+  # Аргумент `new/N` — шаблон вида поля: голова закрывает Prim, сущность, множество и словарь.
   @doc false
-  @spec new_args([Field.t()]) :: [Macro.t()]
+  @spec new_args_ir([Core.Field.t()]) :: [Macro.t()]
 
-  def new_args(fields), do: Enum.map(fields, &elem(dump_pattern(&1), 1))
-
-  # Аргумент `new/N` — шаблон вида поля: голова закрывает Prim, сущность, множество и словарь, как
-  # у плагина по полям.
-  @doc false
-  @spec new_args_ir([map()]) :: [Macro.t()]
-
-  def new_args_ir(fields), do: Enum.map(fields, &Kind.pattern(grammar(&1)))
+  def new_args_ir(fields), do: Enum.map(fields, &Kind.pattern/1)
 
   @doc false
-  @spec new_guard_ir([map()]) :: Macro.t()
+  @spec new_guard_ir([Core.Field.t()]) :: Macro.t()
 
   def new_guard_ir(fields), do: and_guards(Enum.flat_map(fields, &field_guard_ir/1))
-
-  @doc false
-  @spec new_body_ir(module(), [map()]) :: Macro.t()
-
-  def new_body_ir(type, fields) do
-    pairs = Enum.map(fields, &{&1.name, var(&1.name)})
-
-    quote(generated: true, do: %unquote(type){unquote_splicing(pairs)})
-  end
-
-  @doc false
-  @spec new_guard([Field.t()]) :: Macro.t()
-
-  def new_guard(fields), do: and_guards(field_guards(fields))
-
-  @doc false
-  @spec new_body(module(), [Field.t()]) :: Macro.t()
-
-  def new_body(type, fields) do
-    pairs = Enum.map(fields, fn %Field{name: name} -> {name, var(name)} end)
-
-    quote(generated: true, do: %unquote(type){unquote_splicing(pairs)})
-  end
-
-  # ---
-
-  defp field_guards(fields), do: Enum.flat_map(fields, &field_guard/1)
 
   # ===== блоки дампа значения поля =====
 
@@ -169,29 +107,14 @@ defmodule Core.Codec.Plugin.Fields do
   end
 
   @doc false
-  @spec dump_pattern(Field.t()) :: {atom(), Macro.t()}
+  @spec dump_pattern_ir(Core.Field.t()) :: {atom(), Macro.t()}
 
-  def dump_pattern(%Field{name: name} = field), do: {name, Kind.pattern(field)}
-
-  @doc false
-  @spec dump_pattern_ir(map()) :: {atom(), Macro.t()}
-
-  def dump_pattern_ir(field), do: {field.name, Kind.pattern(grammar(field))}
+  def dump_pattern_ir(field), do: {field.name, Kind.pattern(field)}
 
   @doc false
-  @spec field_guard_ir(map()) :: [Macro.t()]
+  @spec field_guard_ir(Core.Field.t()) :: [Macro.t()]
 
   def field_guard_ir(field) do
-    case Kind.guard(grammar(field)) do
-      true -> []
-      guard -> [guard]
-    end
-  end
-
-  @doc false
-  @spec field_guard(Field.t()) :: [Macro.t()]
-
-  def field_guard(%Field{} = field) do
     case Kind.guard(field) do
       true -> []
       guard -> [guard]
@@ -199,35 +122,19 @@ defmodule Core.Codec.Plugin.Fields do
   end
 
   @doc false
-  @spec value_guard(Field.spec(), Macro.t()) :: Macro.t()
-
-  def value_guard(spec, value), do: Kind.value_guard(spec, value)
-
-  @doc false
-  @spec admits_struct?(Field.spec()) :: boolean()
-
-  def admits_struct?(spec), do: Kind.admits_struct?(spec)
-
-  @doc false
-  @spec dump_value(Field.spec(), Macro.t(), boolean()) :: Macro.t()
-
-  def dump_value(spec, value, optional?), do: Kind.dump(spec_field(spec, optional?), value)
-
-  @doc false
   @spec dump_value_ir(Core.Field.spec(), Macro.t(), boolean()) :: Macro.t()
 
-  def dump_value_ir(spec, value, optional?),
-    do: Kind.dump(spec_field(grammar_spec(spec), optional?), value)
+  def dump_value_ir(spec, value, optional?), do: Kind.dump(spec_field(spec, optional?), value)
 
   @doc false
   @spec value_guard_ir(Core.Field.spec(), Macro.t()) :: Macro.t()
 
-  def value_guard_ir(spec, value), do: Kind.value_guard(grammar_spec(spec), value)
+  def value_guard_ir(spec, value), do: Kind.value_guard(spec, value)
 
   @doc false
   @spec admits_struct_ir(Core.Field.spec()) :: boolean()
 
-  def admits_struct_ir(spec), do: Kind.admits_struct?(grammar_spec(spec))
+  def admits_struct_ir(spec), do: Kind.admits_struct?(spec)
 
   # ===== load =====
 
@@ -242,20 +149,7 @@ defmodule Core.Codec.Plugin.Fields do
   def load_guard, do: quote(generated: true, do: is_map(unquote(wire_var())) and is_atom(unquote(codec_var())))
 
   @doc false
-  @spec load_body(module(), [Field.t()]) :: Macro.t()
-
-  def load_body(type, fields) do
-    steps = Enum.map(fields, &load_step(type, &1))
-    pairs = Enum.map(fields, fn %Field{name: name} -> {name, var(name)} end)
-
-    ok = quote(generated: true, do: {:ok, %unquote(type){unquote_splicing(pairs)}})
-    error = quote(generated: true, do: ({:error, reason} -> {:error, reason}))
-
-    {:with, [generated: true], steps ++ [[do: ok, else: error]]}
-  end
-
-  @doc false
-  @spec load_body_ir(module(), [map()]) :: Macro.t()
+  @spec load_body_ir(module(), [Core.Field.t()]) :: Macro.t()
 
   def load_body_ir(type, fields) do
     entries = Macro.var(:personal_entries, __MODULE__)
@@ -304,28 +198,7 @@ defmodule Core.Codec.Plugin.Fields do
 
       with {:ok, unquote(raw_var)} <-
              Core.Es.Personal.Plan.load(unquote(raw), personal, unquote(type), unquote(field.name)) do
-        Core.Es.Event.Payload.redacted_result(unquote(Kind.load(grammar(field), type, raw_var)), personal != [])
-      end
-    end
-  end
-
-  defp load_step(type, %Field{name: name, wire: wire, default: default} = field) do
-    raw =
-      with_default(
-        quote(generated: true, do: Core.Helper.Map.field(unquote(wire_var()), unquote(wire_key(wire)))),
-        default
-      )
-
-    quote(generated: true, do: {:ok, unquote(var(name))} <- unquote(Kind.load(field, type, raw)))
-  end
-
-  defp with_default(raw, :none), do: raw
-
-  defp with_default(raw, {:default, default}) do
-    quote generated: true do
-      case unquote(raw) do
-        nil -> unquote(Macro.escape(default))
-        raw -> raw
+        Core.Es.Event.Payload.redacted_result(unquote(Kind.load(field, type, raw_var)), personal != [])
       end
     end
   end
@@ -333,15 +206,10 @@ defmodule Core.Codec.Plugin.Fields do
   # ===== блок загрузки значения поля =====
 
   @doc false
-  @spec load_value(module(), atom(), Field.spec(), Macro.t(), boolean()) :: Macro.t()
-
-  def load_value(type, name, spec, raw, optional?), do: Kind.load(spec_field(spec, optional?, name), type, raw)
-
-  @doc false
   @spec load_value_ir(module(), atom(), Core.Field.spec(), Macro.t(), boolean()) :: Macro.t()
 
   def load_value_ir(type, name, spec, raw, optional?),
-    do: Kind.load(spec_field(grammar_spec(spec), optional?, name), type, raw)
+    do: Kind.load(spec_field(spec, optional?, name), type, raw)
 
   # ===== wire-ключ =====
 
@@ -383,51 +251,18 @@ defmodule Core.Codec.Plugin.Fields do
 
   def wire_var, do: Macro.var(:wire, __MODULE__)
 
-  # ===== проекция IR =====
-
-  @doc false
-  @spec grammar_spec(Core.Field.spec()) :: Core.Codec.Field.spec()
-
-  def grammar_spec({:personal, inner}), do: grammar_spec(inner)
-  def grammar_spec({:personal_false, inner}), do: grammar_spec(inner)
-  def grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}
-  def grammar_spec({:map, key, value}), do: {:map, grammar_spec(key), grammar_spec(value)}
-  def grammar_spec(spec), do: spec
-
-  # Проекция IR на грамматику спеки: адаптер вида (`Core.Codec.Plugin.Fields.Kind`) знает только
-  # `%Core.Codec.Field{}`, а вложенное ПДн-место (`{:personal, вид}`) wire-форму не меняет.
-  @doc false
-  @spec to_grammar(map()) :: Field.t()
-
-  def to_grammar(field), do: grammar(field)
-
   # ===== общее =====
 
-  # Поле-путь для спеки без собственной строки спеки: имя и `optional:` нужны операциям адаптера.
+  # Поле-путь для спеки без собственной декларации: имя и `optional:` нужны операциям адаптера.
   defp spec_field(spec, optional?, name \\ :value) do
-    %Field{
+    %Core.Field{
       name: name,
       spec: spec,
       optional?: optional?,
       wire: "",
       default: :none,
-      subject: nil
+      subject: nil,
+      personal: nil
     }
   end
-
-  defp grammar(%{name: name, spec: spec, optional?: optional?, wire: wire} = field) do
-    %Field{
-      name: name,
-      spec: grammar_spec(spec),
-      optional?: optional?,
-      wire: wire,
-      default: :none,
-      subject: legacy_subject(Map.get(field, :subject)),
-      personal: Map.get(field, :personal)
-    }
-  end
-
-  # Форма `%Core.Codec.Field{}` до тикета 10: адрес субъекта — имя поля нагрузки, без тега.
-  defp legacy_subject({_tag, name}), do: name
-  defp legacy_subject(subject), do: subject
 end

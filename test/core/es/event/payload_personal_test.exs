@@ -24,34 +24,34 @@ defmodule Core.Es.Event.PayloadPersonalTest do
   end
 
   describe "subject: у поля нагрузки" do
-    test "спека поля в __es_payload_fields__/0 несёт subject:" do
+    test "IR поля несёт subject:" do
       assert [
-               %Core.Codec.Field{
+               %Core.Field{
                  name: :holder,
                  subject: :aggregate_id
                }
              ] =
-               Account.Event.HolderSet.Payload.__es_payload_fields__()
+               Account.Event.HolderSet.Payload.__core_fields__()
     end
 
     test "поле той же нагрузки — субъект" do
       assert [
-               %Core.Codec.Field{
+               %Core.Field{
                  name: :person_id,
                  optional?: true,
                  subject: nil
                },
-               %Core.Codec.Field{
+               %Core.Field{
                  name: :contact,
                  optional?: true,
-                 subject: :person_id
+                 subject: {:payload, :person_id}
                },
-               %Core.Codec.Field{
+               %Core.Field{
                  name: :note,
                  optional?: false,
                  subject: :aggregate_id
                }
-             ] = Core.EventFixture.Event.ContactSet.Payload.__es_payload_fields__()
+             ] = Core.EventFixture.Event.ContactSet.Payload.__core_fields__()
     end
 
     test "плагин сущности поля не объявляет — fields: неизвестная опция" do

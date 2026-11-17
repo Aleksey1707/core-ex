@@ -59,9 +59,9 @@ defmodule Core.Labels.Details do
   изменения — `%{kind: :destroyed}`: вид задаёт форму `value`, а значения у поля нет.
   """
 
-  alias Core.Codec.Field
   alias Core.Es
   alias Core.Es.Personal.Destroyed
+  alias Core.Field
   alias Core.Helper.FieldCheck
   alias Core.Labels.Kind
   alias Core.Labels.Walk

@@ -1,10 +1,10 @@
 defmodule Core.Labels.KindTableTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field
   alias Core.Context
   alias Core.Es.Event.At
   alias Core.EventFixture.AggID
+  alias Core.Field
   alias Core.Labels.CompletenessCase
   alias Core.Labels.Details
   alias Core.Labels.Refs

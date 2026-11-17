@@ -120,11 +120,11 @@ defmodule Core.Es.Event.Codec do
   `es_dump_payload/2`, `es_load_payload/3`.
   """
 
-  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Es
   alias Core.Es.Event.Payload
+  alias Core.Field
   alias Core.Helper
   alias Core.Prim
   alias Core.Result
@@ -848,9 +848,8 @@ defmodule Core.Es.Event.Codec do
     Helper.Opts.module!([payload: payload], :payload, "#{@label}: tags")
 
     cond do
-      Helper.Module.exports?(payload, :__es_payload_fields__, 0) -> {:fields, Core.Field.introspect(payload)}
-      Helper.Module.exports?(payload, :__es_value_changed__, 0) -> {:fields, Core.Field.introspect(payload)}
       Prim.prim?(payload) -> :prim
+      Payload.wire_payload?(payload) -> {:fields, Field.introspect(payload)}
       true -> :plugin
     end
   end

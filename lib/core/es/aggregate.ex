@@ -96,9 +96,9 @@ defmodule Core.Es.Aggregate do
     репозитория не проверяется.
   """
 
-  alias Core.Codec.Field
   alias Core.Error
   alias Core.Es
+  alias Core.Field
   alias Core.Helper
   alias Core.Result
   alias Core.Version
@@ -223,7 +223,7 @@ defmodule Core.Es.Aggregate do
   end
 
   defp required_state_fields(aggregate) do
-    for %Field{name: name, optional?: false, default: :none} when name != :id <- Field.struct_fields(aggregate) || [],
+    for %Field{name: name, optional?: false, default: :none} when name != :id <- Field.introspect(aggregate) || [],
         do: name
   end
 

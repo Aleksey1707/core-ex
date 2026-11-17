@@ -97,16 +97,16 @@ defmodule Core.Es.Event.DerivedPayloadTest do
 
     test "спека нагрузки — {:union, Family}" do
       assert [
-               %Core.Codec.Field{
+               %Core.Field{
                  name: :mark,
                  spec: {:union, DerivedFixture.Mark}
                },
-               %Core.Codec.Field{
+               %Core.Field{
                  name: :prev,
                  spec: {:union, DerivedFixture.Mark}
                }
              ] =
-               Event.Marked.Payload.__es_payload_fields__()
+               Event.Marked.Payload.__core_fields__()
     end
 
     test "адрес вне семейства — ошибка load" do

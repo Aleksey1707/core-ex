@@ -1,7 +1,6 @@
 defmodule Core.FieldTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field, as: Legacy
   alias Core.Field
   alias Core.PrimFixture.Personal
 
@@ -45,7 +44,7 @@ defmodule Core.FieldTest do
   end
 
   describe "declare!/3" do
-    test "поле структуры — имя, вид, необязательность и default:" do
+    test "поле структуры — имя, вид и необязательность; default: ставит Core.Struct" do
       assert [
                %Field{
                  name: :a,
@@ -56,14 +55,18 @@ defmodule Core.FieldTest do
                  personal: nil,
                  subject: nil
                },
-               %Field{name: :b, optional?: true, default: :none},
-               %Field{name: :c, default: {:default, 3}}
+               %Field{name: :b, optional?: true, default: :none}
              ] =
                Field.declare!(
-                 [a: [prim: Name], b: [prim: Name, optional: true], c: [type: :integer, default: 3]],
+                 [a: [prim: Name], b: [prim: Name, optional: true]],
                  :struct,
                  "Struct: fields"
                )
+
+      assert [%Field{name: :c, default: {:default, 3}}] =
+               [c: [type: :integer]]
+               |> Field.declare!(:struct, "Struct: fields")
+               |> Core.Struct.default!(c: 3)
     end
 
     test "wire-ключ поля нагрузки" do
@@ -141,8 +144,8 @@ defmodule Core.FieldTest do
     end
 
     test "ключ вне роли — CompileError с именем хоста и поля" do
-      assert_raise CompileError, ~r/^Codec.Plugin: fields: a: неизвестные ключи \[:personal\]$/, fn ->
-        Field.declare!([a: [prim: Personal, personal: true]], :plugin, "Codec.Plugin: fields")
+      assert_raise CompileError, ~r/^View: fields: a: personal: у View нет/, fn ->
+        Field.declare!([a: [prim: Name, personal: true]], :view, "View: fields")
       end
 
       assert_raise CompileError, ~r/^Labels.Fields: fields: a: неизвестные ключи \[:default\]$/, fn ->
@@ -174,37 +177,20 @@ defmodule Core.FieldTest do
   end
 
   describe "introspect/1" do
-    test "IR структуры совпадает с __struct_fields__/0" do
-      assert_declared(Field.introspect(Core.StructFixture.Wide), Core.StructFixture.Wide.__struct_fields__())
-      assert_declared(Field.introspect(Step), Step.__struct_fields__())
-    end
-
-    test "IR нагрузки события совпадает с __es_payload_fields__/0" do
-      for payload <- [
-            Core.EsFixture.Catalog.Event.Created.Payload,
-            Core.EventFixture.Event.ContactSet.Payload,
-            Core.EsFixture.PayloadKinds.Payload
-          ] do
-        assert_declared(Field.introspect(payload), payload.__es_payload_fields__())
+    test "IR структуры — поля struct'а в порядке объявления" do
+      for struct <- [Core.StructFixture.Wide, Step] do
+        assert Enum.map(Field.introspect(struct), & &1.name) ==
+                 Enum.map(struct.__info__(:struct), & &1.field) -- [:__struct__]
       end
     end
 
-    test "IR нагрузки «было → стало»" do
+    test "IR нагрузки события «было → стало»" do
       payload = Core.DerivedFixture.Event.Renamed.Payload
 
       assert [
-               %Field{name: :old_value, spec: {:prim, Core.EventFixture.Name}, optional?: false},
-               %Field{name: :new_value, optional?: false}
+               %Field{name: :old_value, spec: {:prim, Core.EventFixture.Name}, optional?: false, personal: nil},
+               %Field{name: :new_value, spec: {:prim, Core.EventFixture.Name}, optional?: false, personal: nil}
              ] = Field.introspect(payload)
-
-      assert_declared(
-        Field.introspect(payload),
-        Legacy.normalize!(
-          [old_value: [prim: Core.EventFixture.Name], new_value: [prim: Core.EventFixture.Name]],
-          :plugin,
-          "P"
-        )
-      )
     end
 
     test "IR не попадает в @type t структуры" do
@@ -391,22 +377,6 @@ defmodule Core.FieldTest do
   end
 
   # ---
-
-  defp assert_declared(ir, legacy) do
-    assert Enum.map(ir, &declared/1) == Enum.map(legacy, &declared/1)
-  end
-
-  defp declared(%Field{} = field),
-    do: {field.name, field.spec, field.optional?, field.wire, field.default, field.personal, field.subject}
-
-  defp declared(%Legacy{} = field) do
-    {field.name, field.spec, field.optional?, field.wire, field.default, field.personal, subject(field.subject)}
-  end
-
-  defp subject(nil), do: nil
-  defp subject(:aggregate_id), do: :aggregate_id
-  defp subject({tag, name}) when tag in ~w(payload local)a, do: {tag, name}
-  defp subject(name) when is_atom(name), do: {:payload, name}
 
   defp type(typespec, name), do: Macro.to_string(Keyword.fetch!(typespec, name))
 end

@@ -12,7 +12,7 @@ defmodule Core.Es.Event.Payload do
           ]
       end
 
-  Спека полей — та же, что у Codec-плагина (`Core.Codec.Field`), без `default:`:
+  Спека полей — та же, что у Codec-плагина (`Core.Field`), без `default:`:
   событие развивается новым тегом и апкастом (ADR-0010, ADR-0020), а не дефолтом —
   `default:` даёт `CompileError`. `fields:` — литерал (`docs/rules/20-agreements.md`, «Опции `use`»):
   атрибут или вызов функции — `CompileError` «ожидается литерал». Модули спеки проверяются в теле
@@ -46,9 +46,7 @@ defmodule Core.Es.Event.Payload do
     `%Core.Es.Personal.Destroyed{}` на любом ПДн-месте и непустое ПДн-значение при `nil` субъекте;
   - `Inspect` при непустом плане: ПДн-место — плейсхолдер `%Core.Es.Personal.Hidden{}`, открытые
     поля и открытая часть списка видны;
-  - `__es_payload_fields__/0` — внутренняя для `Core.Es.Event.Codec` и подписей: поля спеки в
-    грамматике (`Core.Codec.Field`), форма поля — не контракт;
-  - `__core_fields__/0` — внутренняя: тот же состав полей единым IR (`Core.Field`); читает
+  - `__core_fields__/0` — внутренняя: состав полей единым IR (`Core.Field`); читает
     `Core.Field.introspect/1`.
 
   Кодирует такую нагрузку `Core.Es.Event.Codec` клаузами, которые собирает этот модуль из
@@ -56,11 +54,10 @@ defmodule Core.Es.Event.Payload do
   затем по `__es_personal__/0` каждое ПДн-место заменяется `%Core.Es.Personal.Marker{}` с
   субъектом и wire-значением (ADR-0073, ADR-0074). Шифрует маркеры `Core.Es.Personal.Wire`.
 
-  Макрос занимает в модуле имя `@es_payload_fields`: поля спеки нагрузки, которая ещё
-  собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей.
+  Нагрузка по полям — единственная роль, чью wire-форму выводит кодек событий, поэтому её узнаёт
+  `wire_payload?/1` (поле нагрузки плюс `Core.Es.ValueChanged`).
   """
 
-  alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Error
   alias Core.Es.Personal.Plan
@@ -83,7 +80,6 @@ defmodule Core.Es.Event.Payload do
     [
       quote do
         @core_fields Core.Es.Event.Payload.fields!(unquote(Macro.escape(Keyword.fetch!(opts, :fields))))
-        @es_payload_fields Enum.map(@core_fields, &Core.Codec.Plugin.Fields.to_grammar/1)
         @es_payload_inspect_places Core.Field.inspect_places(@core_fields)
       end,
       quote unquote: false do
@@ -106,22 +102,12 @@ defmodule Core.Es.Event.Payload do
 
         def __core_fields__, do: @core_fields
 
-        @doc false
-        @spec __es_payload_fields__() :: [Core.Codec.Field.t()]
-
-        def __es_payload_fields__, do: @es_payload_fields
-
         @before_compile Core.Es.Event.Payload
       end
     ]
   end
 
-  @doc false
-  @spec declared_fields(module()) :: [Field.t()] | nil
-
-  def declared_fields(module) when is_atom(module), do: Module.get_attribute(module, :es_payload_fields)
-
-  # Грамматику проверяет `Core.Codec.Field`, смысл ПДн-плана — `Core.Es.Personal.Plan`: ПДн без
+  # Грамматику проверяет `Core.Field`, смысл ПДн-плана — `Core.Es.Personal.Plan`: ПДн без
   # разметки ушло бы в неизменяемую историю открытым (ADR-0073).
   @doc false
   @spec fields!(term()) :: [Core.Field.t()]
@@ -133,6 +119,21 @@ defmodule Core.Es.Event.Payload do
     Plan.entries!(fields, where, uuid_prim: &uuid_prim?/1)
 
     fields
+  end
+
+  @doc """
+  Модуль — нагрузка, чью wire-форму кодек событий выводит по её декларации: поля нагрузки события
+  и `Core.Es.ValueChanged` несут конструктор `new/N` в размер декларации. Нагрузка-сущность с
+  плагином (`Core.Struct` и ручной struct) узнаётся по отсутствию конструктора: её wire задаёт
+  плагин типа.
+  """
+  @spec wire_payload?(module()) :: boolean()
+
+  def wire_payload?(module) when is_atom(module) do
+    case Core.Field.introspect(module) do
+      nil -> false
+      fields -> Helper.Module.exports?(module, :new, length(fields))
+    end
   end
 
   # ===== Inspect =====

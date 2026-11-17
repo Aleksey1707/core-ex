@@ -58,7 +58,7 @@ defmodule Core.Labels.Fields do
 
   У struct'а без спеки полей — на ручном `defstruct`: нагрузки с ручным плагином кодека, вложенного
   struct'а сведений, варианта семейства — вид видимых полей задаёт `fields:` на языке спеки плагина по
-  полям (`Core.Codec.Field`), её разбирает тот же нормализатор:
+  полям (`Core.Field`), её разбирает тот же нормализатор:
 
       defmodule MyApp.Domain.Sales.Account.Address do
         defstruct [:city, :origin, :tags, :checksum]
@@ -129,7 +129,7 @@ defmodule Core.Labels.Fields do
   Макрос занимает в модуле имена `__label_fields__/0`, `__label_specs__/0` и `__label_change__/0`.
   """
 
-  alias Core.Codec.Field
+  alias Core.Field
   alias Core.Helper
   alias Core.Labels.Check
   alias Core.Struct
@@ -141,7 +141,7 @@ defmodule Core.Labels.Fields do
   @type map_label :: [label: String.t(), key: String.t(), value: String.t()]
 
   @typedoc "Спека значения поля: спека плагина по полям или текст функцией (`text:`)."
-  @type spec :: Field.spec() | {:text, (term() -> String.t())} | {:list, spec()} | {:set, spec()}
+  @type spec :: Core.Field.Spec.spec() | {:text, (term() -> String.t())} | {:list, spec()} | {:set, spec()}
 
   # Объявление модуля под `use`: поля декларативного типа — из общей интроспекции
   # (`Core.Field.introspect/1`), ручной struct — по своему `defstruct` и спеке `fields:`, ничего.
@@ -393,7 +393,7 @@ defmodule Core.Labels.Fields do
     end
   end
 
-  # Спека объявления подписей — прежняя грамматика `Core.Codec.Field`: её читают обходы сведений.
+  # Спека объявления подписей — грамматика `Core.Field`: её читают обходы сведений.
   defp pairs(fields) do
     for %Core.Field{name: name, spec: spec} <- fields, do: {name, grammar_spec(spec)}
   end
@@ -582,7 +582,7 @@ defmodule Core.Labels.Fields do
 
   # ===== общее =====
 
-  # В подписях вид значения — прежняя грамматика `Core.Codec.Field`: снятое место ПДн
+  # В подписях вид значения — грамматика `Core.Field`: снятое место ПДн
   # (`{:personal, вид}`) в неё не входит, значение шифруется целиком.
   defp grammar_spec({:personal, inner}), do: grammar_spec(inner)
   defp grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}

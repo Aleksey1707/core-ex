@@ -9,7 +9,7 @@ defmodule Core.View.Opts do
   """
 
   alias Core.Codec
-  alias Core.Codec.Field
+  alias Core.Field.Spec
   alias Core.Helper
   alias Core.Helper.FieldCheck
   alias Core.Prim
@@ -80,7 +80,7 @@ defmodule Core.View.Opts do
 
     reject_foreign!(opts, path)
 
-    {kind_key, value} = Field.kind_key!(opts, :view, path)
+    {kind_key, value} = Spec.kind_key!(opts, :view, path)
     optional? = Keyword.get(opts, :optional, false)
 
     if not is_boolean(optional?) do
@@ -171,9 +171,9 @@ defmodule Core.View.Opts do
 
   # Ключ — по тому же правилу, что в спеке полей: вид с wire-строкой, не ПДн (ADR-0091).
   defp spec!(:map, inner, name, form_names, path) do
-    {key_opts, value_opts} = Field.map_opts!(inner, path)
+    {key_opts, value_opts} = Spec.map_opts!(inner, path)
     key = element!("map: key", name, key_opts, form_names, path)
-    Field.check_map_key!(field_key(key), key_opts, path)
+    Spec.check_map_key!(field_key(key), key_opts, path)
 
     {:map, key, element!("map: value", name, value_opts, form_names, path)}
   end
@@ -236,5 +236,5 @@ defmodule Core.View.Opts do
   defp prim_label(mod, leaf), do: "#{inspect(mod)} (leaf #{inspect(leaf)})"
 
   defp collect_forms({:form, name}, acc), do: MapSet.put(acc, name)
-  defp collect_forms(spec, acc), do: Enum.reduce(Field.values(spec), acc, &collect_forms/2)
+  defp collect_forms(spec, acc), do: Enum.reduce(Spec.values(spec), acc, &collect_forms/2)
 end

@@ -34,7 +34,7 @@ defmodule Core.Es.Cmd do
   Опций нет.
   """
 
-  alias Core.Codec.Field
+  alias Core.Field
   alias Core.Helper
 
   @label "Es.Cmd"
@@ -94,7 +94,7 @@ defmodule Core.Es.Cmd do
   end
 
   defp stamp_hint(module) do
-    if Field.struct_fields(module), do: "полями без default:", else: "в @enforce_keys"
+    if Field.introspect(module), do: "полями без default:", else: "в @enforce_keys"
   end
 
   defp reject_personal!(env) do

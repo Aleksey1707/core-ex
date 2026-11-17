@@ -2,7 +2,6 @@ defmodule Core.View.Field do
   @moduledoc false
 
   alias Core.Codec
-  alias Core.Codec.Field
   alias Core.Helper
 
   @label "View"
@@ -33,7 +32,7 @@ defmodule Core.View.Field do
   end
 
   # Одна таблица проекций вида: тип, форма, дамп и признаки. Полнота сверяется с allowlist
-  # View из `Core.Codec.Field`; вид без строки здесь — ошибка сборки.
+  # View из `Core.Field.Spec`; вид без строки здесь — ошибка сборки.
   @projections %{
     prim: %{type: :prim, shape?: false, needs_codec?: true, dump: :prim},
     enum: %{type: :enum, shape?: false, needs_codec?: false, dump: :as_is},
@@ -246,14 +245,14 @@ defmodule Core.View.Field do
 
   defp shape?(spec) do
     case projection(spec).shape? do
-      :nested -> Enum.any?(Field.children(spec), &shape?/1)
+      :nested -> Enum.any?(Core.Field.Spec.children(spec), &shape?/1)
       flag -> flag
     end
   end
 
   defp needs_codec?(spec) do
     case projection(spec).needs_codec? do
-      :nested -> Enum.any?(Field.children(spec), &needs_codec?/1)
+      :nested -> Enum.any?(Core.Field.Spec.children(spec), &needs_codec?/1)
       flag -> flag
     end
   end
@@ -277,4 +276,4 @@ end
 
 # Полнота таблицы проверяется на сборке: функцию своего модуля нельзя вызвать в его теле, а
 # отдельная функция нужна тесту и читается как контракт таблицы.
-Core.View.Field.check_kinds!(Core.Codec.Field.kinds(:view))
+Core.View.Field.check_kinds!(Core.Field.Spec.kinds(:view))

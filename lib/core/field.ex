@@ -1,31 +1,21 @@
 defmodule Core.Field do
   @moduledoc false
 
-  alias Core.Codec.Field, as: Grammar
   alias Core.Field.Meta
+  alias Core.Field.Spec
   alias Core.Helper
   alias Core.Helper.Opts
   alias Core.Prim
 
   @typedoc false
-  @type role :: :struct | :payload | :plugin | :view | :labels | :union
+  @type role :: :struct | :payload | :view | :labels | :union
 
   @typedoc false
   @type subject :: :aggregate_id | {:payload, atom()} | {:local, atom()}
 
-  @typedoc false
+  @typedoc "Спека значения поля: вид и вложенные спеки; `personal:` метаданных — обёртка места."
   @type spec ::
-          {:prim, module()}
-          | {:enum, module()}
-          | {:entity, module()}
-          | {:union, module()}
-          | {:list, spec()}
-          | {:set, spec()}
-          | {:map, spec(), spec()}
-          | {:type, atom()}
-          | {:view, module()}
-          | {:form, atom()}
-          | {:jsonb, module() | {module(), atom()}}
+          Spec.spec()
           | {:personal, spec()}
           | {:personal_false, spec()}
 
@@ -55,7 +45,7 @@ defmodule Core.Field do
           subject: subject() | nil
         }
 
-  @declarable ~w(struct payload plugin labels view)a
+  @declarable ~w(struct payload labels)a
   @nested_kinds ~w(list set)a
   @personalable ~w(struct payload labels)a
 
@@ -74,36 +64,39 @@ defmodule Core.Field do
   # нужны.
   def declare!(spec, :view, where, context) when is_binary(where) and is_list(context) do
     forms = Keyword.get(context, :forms, [])
-    normalize!(parse!(spec, :view, where, forms), :view, where)
+    normalize!(parse_view!(spec, where, forms), :view, where)
   end
 
   def declare!(spec, role, where, _context) when role in @declarable and is_binary(where) do
-    {legacy, personal} = split!(spec, role, where)
-    fields = normalize!(legacy, role, where)
-    apply_personal!(fields, personal)
+    {fields, personal} = split!(spec, role, where)
+    apply_personal!(normalize!(fields, role, where), personal)
   end
 
   @doc false
-  @spec split!(term(), role(), String.t()) :: {[Grammar.t()], %{{atom(), [atom()]} => boolean()}}
+  @spec split!(term(), role(), String.t()) :: {[t()], %{{atom(), [atom()]} => boolean()}}
 
-  # Разбор без сборки IR: хосту, который держит и старую спеку полей (`%Core.Codec.Field{}`), и
-  # IR, нужны обе формы из одного прохода (`Core.Struct`).
+  # Разбор без реестра метаданных: хосту, который ставит значения между разбором и нормализацией
+  # (`Core.Struct`: `default:` вычисляется в теле модуля), нужны обе половины одного прохода.
   def split!(spec, role, where) when role in @declarable and is_binary(where) do
     {clean, personal} = split_personal(spec, role, where)
-    fields = parse!(clean, role, where, [])
+    declarations = Spec.parse!(clean, role, where)
+    fields = Enum.map(declarations, &field!/1)
     check_keys!(clean, role, where)
 
     {fields, personal}
   end
 
   @doc false
-  @spec normalize!([Grammar.t()], role(), String.t()) :: [t()]
+  @spec normalize!([t()], role(), String.t()) :: [t()]
 
   def normalize!(fields, role, where) when is_list(fields) and is_binary(where) do
-    seed = Enum.map(fields, &ir(&1, role, where, %{}))
-    by_name = Map.new(seed, &{&1.name, &1})
+    by_name = Map.new(fields, &{&1.name, &1})
 
-    Enum.map(fields, &ir(&1, role, where, by_name))
+    Enum.map(fields, fn %__MODULE__{} = field ->
+      ctx = %{role: role, name: field.name, where: "#{where}: #{field.name}", spec: field.spec, fields: by_name}
+
+      Meta.normalize!(field, ctx)
+    end)
   end
 
   @doc false
@@ -114,26 +107,23 @@ defmodule Core.Field do
 
   # ---
 
-  defp ir(legacy, role, where, fields) do
-    ctx = %{role: role, name: legacy.name, where: "#{where}: #{legacy.name}", spec: legacy.spec, fields: fields}
-
+  defp field!(declaration) when is_map(declaration) do
     %__MODULE__{
-      name: legacy.name,
-      wire: legacy.wire,
-      spec: legacy.spec,
-      optional?: legacy.optional?,
-      default: legacy.default,
-      personal: legacy.personal,
-      subject: legacy.subject
+      name: declaration.name,
+      wire: declaration.wire,
+      spec: declaration.spec,
+      optional?: declaration.optional?,
+      default: declaration.default,
+      personal: declaration.personal,
+      subject: declaration.subject
     }
-    |> Meta.normalize!(legacy, ctx)
   end
 
-  defp parse!(spec, :view, _where, forms) do
+  defp parse_view!(spec, _where, forms) do
     spec
     |> Core.View.Opts.fields!(forms, "fields")
     |> Enum.map(fn %Core.View.Field{name: name, spec: spec, optional?: optional?} ->
-      %Grammar{
+      %__MODULE__{
         name: name,
         spec: view_spec(spec),
         optional?: optional?,
@@ -144,8 +134,6 @@ defmodule Core.Field do
       }
     end)
   end
-
-  defp parse!(spec, role, where, _forms), do: Grammar.normalize!(spec, role, where)
 
   # Вид View хранит kind Prim ради своего типа и дампа; в IR его нет — вид значения задаёт Prim.
   defp view_spec({:prim, mod, _kind}), do: {:prim, mod}
@@ -296,6 +284,70 @@ defmodule Core.Field do
   defp wrap({:map, key, value}, [:map, :value | rest], nested), do: {:map, key, wrap(value, rest, nested)}
   defp wrap(spec, _path, _value), do: spec
 
+  # ===== грамматика =====
+
+  @doc false
+  @spec kinds() :: [atom()]
+
+  def kinds, do: Spec.kinds()
+
+  @doc false
+  @spec kinds(atom()) :: [atom()]
+
+  def kinds(host) when is_atom(host), do: Spec.kinds(host)
+
+  @doc false
+  @spec value_module_kinds() :: [atom()]
+
+  def value_module_kinds, do: Spec.value_module_kinds()
+
+  @doc false
+  @spec group_kinds() :: [atom()]
+
+  def group_kinds, do: Spec.group_kinds()
+
+  @doc false
+  @spec kind_key!(keyword(), atom(), String.t()) :: {atom(), term()}
+
+  def kind_key!(opts, host, where) when is_list(opts) and is_atom(host) and is_binary(where),
+    do: Spec.kind_key!(opts, host, where)
+
+  @doc false
+  @spec struct_module!(module(), String.t()) :: :ok
+
+  def struct_module!(mod, where) when is_atom(mod) and is_binary(where), do: Spec.struct_module!(mod, where)
+
+  @doc false
+  @spec value_spec(module(), String.t()) :: spec()
+
+  def value_spec(mod, where) when is_atom(mod) and is_binary(where), do: Spec.value_spec(mod, where)
+
+  @doc false
+  @spec map_opts!(term(), String.t()) :: {keyword(), keyword()}
+
+  def map_opts!(inner, where) when is_binary(where), do: Spec.map_opts!(inner, where)
+
+  @doc false
+  @spec check_map_key!(term(), keyword(), String.t()) :: :ok
+
+  def check_map_key!(spec, key_opts, where) when is_binary(where), do: Spec.check_map_key!(spec, key_opts, where)
+
+  @doc false
+  @spec union_type([Macro.t()]) :: Macro.t()
+
+  def union_type(types) when is_list(types), do: Spec.union_type(types)
+
+  @doc false
+  @spec wire_spec(spec()) :: Spec.spec()
+
+  # Проекция IR на wire-вид: место ПДн (`personal:`) wire-форму не меняет — значение шифруется
+  # целиком, а вид остаётся видом вложенного значения.
+  def wire_spec({:personal, inner}), do: wire_spec(inner)
+  def wire_spec({:personal_false, inner}), do: wire_spec(inner)
+  def wire_spec({kind, inner}) when kind in @nested_kinds, do: {kind, wire_spec(inner)}
+  def wire_spec({:map, key, value}), do: {:map, wire_spec(key), wire_spec(value)}
+  def wire_spec(spec), do: spec
+
   # ===== интроспекция =====
 
   @doc false
@@ -310,7 +362,11 @@ defmodule Core.Field do
   @doc false
   @spec union_variants(module()) :: [Core.Union.Variant.t()]
 
-  def union_variants(family) when is_atom(family), do: Core.Union.variants(family)
+  # Реестр вариантов читается протоколом, а не модулем `Core.Union`: обратная ссылка замкнула бы
+  # граф сборки (`make xref`).
+  def union_variants(family) when is_atom(family) do
+    if Helper.Module.exports?(family, :__core_variants__, 0), do: family.__core_variants__(), else: []
+  end
 
   # ---
 
@@ -347,7 +403,7 @@ defmodule Core.Field do
   defp typespec(fields, mode) do
     Enum.map(fields, fn %__MODULE__{name: name, spec: spec, optional?: optional?} = field ->
       type = place_type(spec, type_places(field), [], mode)
-      {name, Grammar.union_type([type | if(optional?, do: [nil], else: [])])}
+      {name, Spec.union_type([type | if(optional?, do: [nil], else: [])])}
     end)
   end
 
@@ -360,7 +416,7 @@ defmodule Core.Field do
   defp place_type(spec, places, path, :read) do
     type = spec_type(spec, places, path, :read)
 
-    if path in places, do: Grammar.union_type([type, quote(do: Core.Es.Personal.Destroyed.t())]), else: type
+    if path in places, do: Spec.union_type([type, quote(do: Core.Es.Personal.Destroyed.t())]), else: type
   end
 
   defp place_type(spec, places, path, :write), do: spec_type(spec, places, path, :write)
@@ -420,7 +476,7 @@ defmodule Core.Field do
   defp union_write_type(family) do
     case union_write_variants(family) do
       [] -> quote(do: struct())
-      variants -> Grammar.union_type(Enum.map(variants, &variant_write_type/1))
+      variants -> Spec.union_type(Enum.map(variants, &variant_write_type/1))
     end
   end
 

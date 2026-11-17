@@ -60,13 +60,13 @@ defmodule Core.Field.Meta do
   # ===== сборка поля =====
 
   @doc false
-  @spec normalize!(map(), Core.Codec.Field.t(), ctx()) :: map()
+  @spec normalize!(map(), ctx()) :: map()
 
-  def normalize!(acc, %Core.Codec.Field{} = legacy, ctx) do
-    Enum.reduce(@handlers, acc, fn handler, ir ->
+  def normalize!(field, ctx) when is_map(field) do
+    Enum.reduce(@handlers, field, fn handler, ir ->
       slot = Map.fetch!(@field_keys, handler.key())
 
-      Map.replace!(ir, slot, handler.normalize!(Map.fetch!(legacy, slot), ctx))
+      Map.replace!(ir, slot, handler.normalize!(Map.fetch!(field, slot), ctx))
     end)
   end
 
@@ -79,7 +79,7 @@ defmodule Core.Field.Meta do
     case extras(@handlers, :read_extra, field, ctx) do
       [] -> :none
       [type] -> {:union, type}
-      types -> {:union, Core.Codec.Field.union_type(types)}
+      types -> {:union, Core.Field.Spec.union_type(types)}
     end
   end
 

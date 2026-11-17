@@ -328,7 +328,7 @@ defmodule Core.Es.Event do
   # ---
 
   defp check_subject!(payload, aggregate_id) do
-    with true <- Helper.Module.exports?(payload, :__es_payload_fields__, 0),
+    with true <- Payload.wire_payload?(payload),
          [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
          false <- Payload.uuid_prim?(aggregate_id) do
       Helper.Opts.reject!(

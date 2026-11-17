@@ -48,8 +48,8 @@ defmodule Core.Union do
   struct, вариант-Prim не в тегированной форме.
   """
 
-  alias Core.Codec.Field
   alias Core.Codec.Plugin.Variants
+  alias Core.Field.Spec
   alias Core.Helper
   alias Core.Prim
   alias Core.Union.Variant
@@ -123,7 +123,7 @@ defmodule Core.Union do
   defp variant!({mod, address}) when is_atom(mod) and not is_nil(mod) do
     where = "#{@where}: #{inspect(mod)}"
     place = Variants.address!(address, where)
-    Field.struct_module!(mod, where)
+    Spec.struct_module!(mod, where)
     disc = disc(place)
 
     Variants.check_default!(mod, disc, where)
@@ -165,11 +165,8 @@ defmodule Core.Union do
   # Поле-дискриминатор — само собой место его wire-ключа: проверяется, что ключ не занят другим полем.
   defp wire_keys(mod, :domain, disc), do: Enum.map(drop_disc(mod.__core_fields__(), disc), & &1.wire)
 
-  defp wire_keys(mod, :manual, disc) do
-    if Helper.Module.exports?(mod, :__struct_fields__, 0),
-      do: Enum.map(drop_disc(mod.__struct_fields__(), disc), & &1.wire),
-      else: []
-  end
+  # У ручного варианта декларации полей нет: ключи его wire знает только его плагин.
+  defp wire_keys(_mod, :manual, _disc), do: []
 
   defp drop_disc(fields, {key, _value}), do: Enum.reject(fields, &(&1.name == key))
   defp drop_disc(fields, nil), do: fields

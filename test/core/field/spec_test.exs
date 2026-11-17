@@ -1,7 +1,7 @@
-defmodule Core.Codec.FieldTest do
+defmodule Core.Field.SpecTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field
+  alias Core.Field.Spec
   alias Core.Prim
 
   defmodule Name do
@@ -27,67 +27,32 @@ defmodule Core.Codec.FieldTest do
   @where "W"
 
   describe "форма поля" do
-    test "нормализованное поле — struct с именованными ключами" do
+    test "разобранное поле — имя, вид, wire-ключ и метаданные" do
       assert [
-               %Field{name: :a, spec: {:prim, Name}, optional?: false, wire: "a", default: :none, subject: nil},
-               %Field{name: :b, spec: {:list, {:enum, Status}}, optional?: true, wire: "bee", default: :none},
-               %Field{name: :c, spec: {:entity, Tag}, default: {:default, %{"name" => "x"}}}
+               %{name: :a, spec: {:prim, Name}, optional?: false, wire: "a", default: :none, subject: nil},
+               %{name: :b, spec: {:list, {:enum, Status}}, optional?: true, wire: "bee", default: :none},
+               %{name: :c, spec: {:entity, Tag}, default: :none}
              ] =
-               Field.normalize!(
+               Spec.parse!(
                  [
                    a: [prim: Name],
                    b: [list: [enum: Status], optional: true, wire: "bee"],
-                   c: [entity: Tag, default: %{"name" => "x"}]
+                   c: [entity: Tag]
                  ],
-                 :plugin,
+                 :struct,
                  @where
                )
     end
 
     test "subject: в режиме нагрузки ложится в поле" do
-      assert [%Field{name: :a, subject: :aggregate_id}] =
-               Field.normalize!([a: [prim: Name, subject: :aggregate_id]], :payload, @where)
+      assert [%{name: :a, subject: :aggregate_id}] =
+               Spec.parse!([a: [prim: Name, subject: :aggregate_id]], :payload, @where)
     end
 
     test "value_spec — спека значения по модулю типа" do
-      assert Field.value_spec(Name, @where) == {:prim, Name}
-      assert Field.value_spec(Status, @where) == {:enum, Status}
-      assert Field.value_spec(Tag, @where) == {:entity, Tag}
-    end
-
-    test "subjects — поля с subject: в порядке объявления" do
-      fields =
-        Field.normalize!(
-          [a: [prim: Name, subject: :b], b: [prim: Name], c: [prim: Name, subject: :b]],
-          :payload,
-          @where
-        )
-
-      assert Field.subjects(fields) == [a: :b, c: :b]
-    end
-  end
-
-  describe "спека плагина" do
-    test "пары {Тип, спека} — поля типа" do
-      assert [{Tag, [%Field{name: :name, spec: {:prim, Name}}]}] = Field.fields!([{Tag, name: [prim: Name]}], true)
-    end
-
-    test "тип объявлен дважды" do
-      assert_raise CompileError, ~r/Codec.Plugin: fields: повторяются \[Core.Codec.FieldTest.Tag\]/, fn ->
-        Field.fields!([{Tag, name: [prim: Name]}, {Tag, name: [prim: Name]}], true)
-      end
-    end
-
-    test "не пара {Тип, спека}" do
-      assert_raise CompileError, ~r/Codec.Plugin: fields: ожидается пара \{Тип, спека\}, получено :x/, fn ->
-        Field.fields!([:x], true)
-      end
-    end
-
-    test "спека сверяется с полями struct" do
-      assert_raise CompileError,
-                   ~r/W: спека расходится со struct — поля struct без спеки \[:name\], поля спеки без struct \[:title\]/,
-                   fn -> Field.variant_fields!(Tag, [title: [prim: Name]], [], @where) end
+      assert Spec.value_spec(Name, @where) == {:prim, Name}
+      assert Spec.value_spec(Status, @where) == {:enum, Status}
+      assert Spec.value_spec(Tag, @where) == {:entity, Tag}
     end
   end
 
@@ -96,19 +61,19 @@ defmodule Core.Codec.FieldTest do
       assert_raise CompileError,
                    ~r/W: a: ожидается ровно один из prim:\/enum:\/entity:\/union:\/list:\/set:\/map:\/type:/,
                    fn ->
-                     Field.normalize!([a: [prim: Name, enum: Status]], :plugin, @where)
+                     Spec.parse!([a: [prim: Name, enum: Status]], :struct, @where)
                    end
     end
 
     test "неизвестный ключ" do
       assert_raise CompileError, ~r/W: a: неизвестные ключи \[:default_value\]/, fn ->
-        Field.normalize!([a: [prim: Name, default_value: 1]], :plugin, @where)
+        Spec.parse!([a: [prim: Name, default_value: 1]], :struct, @where)
       end
     end
 
     test "неизвестный type:" do
       assert_raise CompileError, ~r/W: a: неизвестный type: :atom/, fn ->
-        Field.normalize!([a: [type: :atom]], :plugin, @where)
+        Spec.parse!([a: [type: :atom]], :struct, @where)
       end
     end
   end
@@ -116,19 +81,19 @@ defmodule Core.Codec.FieldTest do
   describe "optional: и list:" do
     test "optional: — boolean" do
       assert_raise CompileError, ~r/W: a: optional: ожидается boolean, получено :yes/, fn ->
-        Field.normalize!([a: [prim: Name, optional: :yes]], :plugin, @where)
+        Spec.parse!([a: [prim: Name, optional: :yes]], :struct, @where)
       end
     end
 
     test "optional: не внутри list:" do
       assert_raise CompileError, ~r/W: a: optional: задаётся у самого поля, не в list:/, fn ->
-        Field.normalize!([a: [list: [prim: Name, optional: true]]], :plugin, @where)
+        Spec.parse!([a: [list: [prim: Name, optional: true]]], :struct, @where)
       end
     end
 
     test "list: — keyword-спека элемента без лишних ключей" do
       assert_raise CompileError, ~r/W: a: list: неизвестные ключи \[:wire\]/, fn ->
-        Field.normalize!([a: [list: [prim: Name, wire: "x"]]], :plugin, @where)
+        Spec.parse!([a: [list: [prim: Name, wire: "x"]]], :struct, @where)
       end
     end
   end
@@ -136,13 +101,13 @@ defmodule Core.Codec.FieldTest do
   describe "wire:" do
     test "непустая строка" do
       assert_raise CompileError, ~r/W: a: wire: ожидается непустая строка, получено ""/, fn ->
-        Field.normalize!([a: [prim: Name, wire: ""]], :plugin, @where)
+        Spec.parse!([a: [prim: Name, wire: ""]], :struct, @where)
       end
     end
 
     test "в нагрузке не начинается с $" do
       assert_raise CompileError, ~r/W: a: wire-ключ "\$pd" начинается с \$/, fn ->
-        Field.normalize!([a: [prim: Name, wire: "$pd"]], :payload, @where)
+        Spec.parse!([a: [prim: Name, wire: "$pd"]], :payload, @where)
       end
     end
   end
@@ -150,59 +115,35 @@ defmodule Core.Codec.FieldTest do
   describe "уникальность" do
     test "имён полей" do
       assert_raise CompileError, ~r/W: повторяются \[:a\]/, fn ->
-        Field.normalize!([a: [prim: Name], a: [prim: Name]], :plugin, @where)
+        Spec.parse!([a: [prim: Name], a: [prim: Name]], :struct, @where)
       end
     end
 
     test "wire-ключей" do
       assert_raise CompileError, ~r/W: wire: повторяются \["b"\]/, fn ->
-        Field.normalize!([a: [prim: Name, wire: "b"], b: [prim: Name]], :plugin, @where)
+        Spec.parse!([a: [prim: Name, wire: "b"], b: [prim: Name]], :struct, @where)
       end
     end
   end
 
   describe "default: по режиму" do
-    test "плагин проверяет default: у enum:" do
-      assert_raise CompileError, ~r/W: a: default: "nwe" не загружается .*Status/, fn ->
-        Field.normalize!([a: [enum: Status, default: "nwe"]], :plugin, @where)
-      end
-    end
-
-    test "default: и optional: true" do
-      assert_raise CompileError, ~r/W: a: default: и optional: true/, fn ->
-        Field.normalize!([a: [prim: Name, default: "x", optional: true]], :plugin, @where)
-      end
-    end
-
-    test "плагин без загрузки default: не принимает" do
-      assert_raise CompileError, ~r/W: a: default: при loadable: false/, fn ->
-        Field.normalize!([a: [prim: Name, default: "x"]], :dump_only, @where)
-      end
-    end
-
     test "нагрузка default: не принимает" do
       assert_raise CompileError, ~r/W: default: у нагрузки события нет \(поля \[:a\]\)/, fn ->
-        Field.normalize!([a: [prim: Name, default: "x"]], :payload, @where)
+        Spec.parse!([a: [prim: Name, default: "x"]], :payload, @where)
       end
     end
   end
 
   describe "subject: по режиму" do
-    test "плагин subject: не принимает" do
-      assert_raise CompileError, ~r/W: a: неизвестные ключи \[:subject\]/, fn ->
-        Field.normalize!([a: [prim: Name, subject: :aggregate_id]], :plugin, @where)
-      end
-    end
-
     test "подписи subject: не принимают" do
       assert_raise CompileError, ~r/W: a: неизвестные ключи \[:subject\]/, fn ->
-        Field.normalize!([a: [prim: Name, subject: :aggregate_id]], :labels, @where)
+        Spec.parse!([a: [prim: Name, subject: :aggregate_id]], :labels, @where)
       end
     end
 
     test "в нагрузке subject: — атом" do
       assert_raise CompileError, ~r/W: a: subject: ожидается .*получено "b"/, fn ->
-        Field.normalize!([a: [prim: Name, subject: "b"]], :payload, @where)
+        Spec.parse!([a: [prim: Name, subject: "b"]], :payload, @where)
       end
     end
   end
@@ -211,14 +152,13 @@ defmodule Core.Codec.FieldTest do
     @kinds ~w(prim enum entity union list set map type view form jsonb)a
     @hosts [
       struct: {"структура по полям", ~w(prim enum entity union list set map type)a},
-      plugin: {"Codec-плагин по полям", ~w(prim enum entity union list set map type)a},
       payload: {"нагрузка события", ~w(prim enum entity union list set map type)a},
       labels: {"подписи", ~w(prim enum entity union list set map type)a},
       view: {"View", ~w(prim enum type view form list set map jsonb)a}
     ]
 
-    test "Field.kinds — объединение видов" do
-      assert Enum.sort(Field.kinds()) == Enum.sort(@kinds)
+    test "kinds/0 — объединение видов" do
+      assert Enum.sort(Spec.kinds()) == Enum.sort(@kinds)
     end
 
     test "допустимый вид проходит, чужой — CompileError с хостом и видом" do
@@ -236,8 +176,8 @@ defmodule Core.Codec.FieldTest do
     end
 
     test "вложенный вид проверяется по allowlist того же хоста" do
-      assert_raise CompileError, ~r/W: a: list: вид view: недопустим в хосте «Codec-плагин по полям»/, fn ->
-        Field.normalize!([a: [list: [view: Core.ViewFixture.Nested]]], :plugin, @where)
+      assert_raise CompileError, ~r/W: a: list: вид view: недопустим в хосте «структура по полям»/, fn ->
+        Spec.parse!([a: [list: [view: Core.ViewFixture.Nested]]], :struct, @where)
       end
     end
 
@@ -265,7 +205,7 @@ defmodule Core.Codec.FieldTest do
     end
 
     defp compile(host, kind) do
-      Field.normalize!([a: spec_opts(kind)], host, @where)
+      Spec.parse!([a: spec_opts(kind)], host, @where)
       :ok
     rescue
       error in CompileError -> {:error, error}

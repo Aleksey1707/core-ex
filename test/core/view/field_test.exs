@@ -1,7 +1,7 @@
 defmodule Core.View.FieldTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field
+  alias Core.Field
   alias Core.ViewFixture
   alias Core.ViewFixture.AllKinds
   alias Core.ViewFixture.OutCodec

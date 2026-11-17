@@ -5,9 +5,11 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   # сопоставления, guard, дамп, загрузка), признак «guard вида пропускает любой struct» и
   # признак «дамп не обходит значение»: `true` — значение уходит как есть, `:nested` — как
   # есть, если и элемент тоже, `false` — обход. Полнота сверяется с allowlist плагина из
-  # `Core.Codec.Field` на сборке: вид без строки или без операции — `CompileError`.
+  # `Core.Field.Spec` на сборке: вид без строки или без операции — `CompileError`.
+  #
+  # Вид приходит из общего IR (`Core.Field`); метаданные места ПДн (`{:personal, вид}`) —
+  # свойство нагрузки события, а не wire-формы, и снимаются до операции.
 
-  alias Core.Codec.Field
   alias Core.Codec.Helper
   alias Core.Error
   alias Core.Result
@@ -28,7 +30,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     type: %{pattern: :value, guard: :type, struct: :map_type, dump: :as_is, load: :as_is, as_is: true}
   }
 
-  for kind <- Field.kinds(:plugin) do
+  for kind <- Core.Field.Spec.kinds(:plugin) do
     row = Map.get(@adapters, kind)
 
     unless is_map(row) and Enum.all?(@operations, &is_atom(Map.get(row, &1))) and
@@ -41,39 +43,43 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   # ===== адаптер =====
 
   @doc false
-  @spec pattern(Field.t()) :: Macro.t()
+  @spec pattern(Core.Field.t()) :: Macro.t()
 
-  def pattern(%Field{name: name, spec: spec, optional?: optional?}) do
+  def pattern(%Core.Field{name: name} = field) do
     value = var(name)
+    spec = Core.Field.wire_spec(field.spec)
 
-    if optional?, do: value, else: pattern!(tag(spec, :pattern), spec, value)
+    if field.optional?, do: value, else: pattern!(tag(spec, :pattern), spec, value)
   end
 
   @doc false
-  @spec guard(Field.t()) :: Macro.t() | true
+  @spec guard(Core.Field.t()) :: Macro.t() | true
 
-  def guard(%Field{name: name, spec: spec, optional?: optional?}) do
+  def guard(%Core.Field{name: name} = field) do
     value = var(name)
+    spec = Core.Field.wire_spec(field.spec)
 
     cond do
-      optional? -> quote(generated: true, do: is_nil(unquote(value)) or unquote(value_guard(spec, value)))
+      field.optional? -> quote(generated: true, do: is_nil(unquote(value)) or unquote(value_guard(spec, value)))
       closes?(spec) -> true
       true -> value_guard(spec, value)
     end
   end
 
   @doc false
-  @spec value_guard(Field.spec(), Macro.t()) :: Macro.t()
+  @spec value_guard(Core.Field.spec(), Macro.t()) :: Macro.t()
 
-  def value_guard(spec, value), do: value_guard!(tag(spec, :guard), spec, value)
+  def value_guard(spec, value), do: value_guard!(tag(strip(spec), :guard), strip(spec), value)
 
   # Пропускает ли guard вида любое значение-struct: у `union:` — `is_struct/1`, у `type: :map` —
   # `is_map/1`. Нужен нагрузке события: `%Core.Es.Personal.Destroyed{}` в поле с `subject:` такой
   # guard не ловит.
   @doc false
-  @spec admits_struct?(Field.spec()) :: boolean()
+  @spec admits_struct?(Core.Field.spec()) :: boolean()
 
   def admits_struct?(spec) do
+    spec = strip(spec)
+
     case tag(spec, :struct) do
       :never -> false
       :any -> true
@@ -82,22 +88,24 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   end
 
   @doc false
-  @spec dump(Field.t(), Macro.t()) :: Macro.t()
+  @spec dump(Core.Field.t(), Macro.t()) :: Macro.t()
 
-  def dump(%Field{spec: spec, optional?: optional?} = field, value) do
+  def dump(%Core.Field{} = field, value) do
+    spec = Core.Field.wire_spec(field.spec)
+
     if as_is?(spec) do
       value
     else
-      expr = dump!(tag(spec, :dump), field, value)
+      expr = dump!(tag(spec, :dump), %{field | spec: spec}, value)
 
-      if optional?,
+      if field.optional?,
         do: quote(generated: true, do: if(is_nil(unquote(value)), do: nil, else: unquote(expr))),
         else: expr
     end
   end
 
   @doc false
-  @spec load(Field.t(), module(), Macro.t()) :: Macro.t()
+  @spec load(Core.Field.t(), module(), Macro.t()) :: Macro.t()
 
   # Уничтоженное значение ставит обход ПДн-мест (`Core.Es.Personal.Plan`) ещё до разбора вида: у
   # `union:` — до выбора варианта, ручной Codec не вызывается. Здесь оно просто проходит насквозь.
@@ -126,7 +134,9 @@ defmodule Core.Codec.Plugin.Fields.Kind do
 
   # ---
 
-  defp load_value(%Field{spec: spec, optional?: true} = field, type, raw) do
+  defp load_value(%Core.Field{optional?: true} = field, type, raw) do
+    spec = Core.Field.wire_spec(field.spec)
+
     case tag(spec, :load) do
       :as_is ->
         quote(generated: true, do: {:ok, unquote(raw)})
@@ -142,7 +152,10 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp load_value(%Field{spec: spec} = field, type, raw), do: load!(tag(spec, :load), field, type, raw)
+  defp load_value(%Core.Field{} = field, type, raw) do
+    spec = Core.Field.wire_spec(field.spec)
+    load!(tag(spec, :load), %{field | spec: spec}, type, raw)
+  end
 
   defp pattern!(:value, _spec, value), do: value
   defp pattern!(:map, _spec, value), do: quote(generated: true, do: %{} = unquote(value))
@@ -185,7 +198,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
 
   defp dump!(:codec, _field, value), do: quote(generated: true, do: unquote(codec_var()).dump(unquote(value)))
 
-  defp dump!(:list, %Field{spec: {:list, inner}} = field, value) do
+  defp dump!(:list, %Core.Field{spec: {:list, inner}} = field, value) do
     item = item_var()
 
     quote generated: true do
@@ -193,7 +206,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp dump!(:set, %Field{spec: {:set, inner}} = field, value) do
+  defp dump!(:set, %Core.Field{spec: {:set, inner}} = field, value) do
     item = item_var()
 
     quote generated: true do
@@ -201,7 +214,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp dump!(:map, %Field{spec: {:map, key, inner}} = field, value) do
+  defp dump!(:map, %Core.Field{spec: {:map, key, inner}} = field, value) do
     key_item = key_var()
     item = item_var()
 
@@ -212,7 +225,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp dump_key(%Field{spec: {:enum, _mod}}, key),
+  defp dump_key(%Core.Field{spec: {:enum, _mod}}, key),
     do: quote(generated: true, do: Helper.enum_key(unquote(key)))
 
   defp dump_key(field, key), do: dump(field, key)
@@ -221,20 +234,20 @@ defmodule Core.Codec.Plugin.Fields.Kind do
   # такой. `set` и `map` обходятся всегда: их форма — не список и не map значения поля.
   defp as_is?(spec) do
     case tag(spec, :as_is) do
-      :nested -> Enum.all?(Field.children(spec), &as_is?/1)
+      :nested -> Enum.all?(Core.Field.Spec.children(spec), &as_is?/1)
       flag -> flag
     end
   end
 
   defp load!(:as_is, _field, _type, raw), do: quote(generated: true, do: {:ok, unquote(raw)})
 
-  defp load!(:codec, %Field{spec: {_kind, mod}}, _type, raw),
+  defp load!(:codec, %Core.Field{spec: {_kind, mod}}, _type, raw),
     do: quote(generated: true, do: unquote(codec_var()).load(unquote(mod), unquote(raw)))
 
-  defp load!(:enum, %Field{spec: {_kind, mod}}, _type, raw),
+  defp load!(:enum, %Core.Field{spec: {_kind, mod}}, _type, raw),
     do: quote(generated: true, do: unquote(mod).cast(unquote(raw)))
 
-  defp load!(:list, %Field{spec: {:list, inner}, name: name} = field, type, raw) do
+  defp load!(:list, %Core.Field{spec: {:list, inner}, name: name} = field, type, raw) do
     item = item_var()
 
     quote generated: true do
@@ -247,7 +260,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp load!(:set, %Field{spec: {:set, inner}, name: name} = field, type, raw) do
+  defp load!(:set, %Core.Field{spec: {:set, inner}, name: name} = field, type, raw) do
     item = item_var()
 
     quote generated: true do
@@ -260,7 +273,7 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp load!(:map, %Field{spec: {:map, key, inner}, name: name} = field, type, raw) do
+  defp load!(:map, %Core.Field{spec: {:map, key, inner}, name: name} = field, type, raw) do
     key_item = key_var()
     item = item_var()
 
@@ -297,7 +310,9 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
-  defp nested(field, spec), do: %{field | spec: spec, optional?: false}
+  defp nested(field, spec), do: %{field | spec: strip(spec), optional?: false}
+
+  defp strip(spec), do: Core.Field.wire_spec(spec)
 
   defp item_var, do: Macro.var(:item, __MODULE__)
   defp key_var, do: Macro.var(:key, __MODULE__)

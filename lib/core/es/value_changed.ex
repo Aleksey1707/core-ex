@@ -8,18 +8,13 @@ defmodule Core.Es.ValueChanged do
   Порождаются `@enforce_keys`, `defstruct`, `@type t` и `new/2`, чья голова закрывает вид
   значения: `%Type{}` у Prim и сущности, атом у enum, `nil` при `nilable: true`.
 
-  `__es_value_changed__/0` отдаёт `type:` и `nilable:`: по ним `Core.Es.Event.Codec` выводит
-  клаузы нагрузки события с такой нагрузкой — map
-  `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`). `__core_fields__/0` —
-  та же декларация в едином IR (`Core.Field`), внутренняя.
+  `__core_fields__/0` — декларация `old_value` / `new_value` в едином IR (`Core.Field`), внутренняя:
+  по ней `Core.Es.Event.Codec` выводит клаузы нагрузки события — map
+  `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
 
   ПДн-план применяется к `old_value` и `new_value` независимо: сторона с персональным типом —
   ПДн-место с субъектом `:aggregate_id` (тип чтения допускает `%Core.Es.Personal.Destroyed{}`,
-  `new/2` его не принимает).
-
-  Макрос занимает в модуле имя `@es_value_changed`: `type:` и `nilable:` модуля, который ещё
-  собирается, отдаёт `declared/1` — по нему `use Core.Labels.Fields, change:` ниже берёт вид значения
-  изменения.
+  `new/2` его не принимает). Субъект ПДн-места — `:aggregate_id`.
 
   ## Опции
 
@@ -28,7 +23,6 @@ defmodule Core.Es.ValueChanged do
   и MUST NOT быть вложен в вызывающего.
   """
 
-  alias Core.Codec.Field
   alias Core.Helper
 
   @label "Es.ValueChanged"
@@ -54,14 +48,7 @@ defmodule Core.Es.ValueChanged do
       @enforce_keys ~w(old_value new_value)a
       defstruct @enforce_keys
 
-      @es_value_changed [type: unquote(type_mod), nilable: unquote(nilable?)]
-
       @core_fields unquote(Macro.escape(fields))
-
-      @doc false
-      @spec __es_value_changed__() :: [type: module(), nilable: boolean()]
-
-      def __es_value_changed__, do: @es_value_changed
 
       @type t :: %__MODULE__{unquote_splicing(read_types)}
       @type write_t :: %__MODULE__{unquote_splicing(write_types)}
@@ -89,12 +76,7 @@ defmodule Core.Es.ValueChanged do
     end
   end
 
-  # ===== интроспекция =====
-
-  @doc false
-  @spec declared(module()) :: [type: module(), nilable: boolean()] | nil
-
-  def declared(module) when is_atom(module), do: Module.get_attribute(module, :es_value_changed)
+  # ===== декларация =====
 
   # Синтетическая декларация `old_value` / `new_value` в IR: у нагрузки нет своей спеки полей, вид
   # задаёт `type:`, но обходчику ПДн и типам нужен тот же состав, что у нагрузки события.
@@ -102,7 +84,7 @@ defmodule Core.Es.ValueChanged do
   @spec core_fields(module(), boolean()) :: [Core.Field.t()]
 
   def core_fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
-    fields = Core.Field.normalize!(fields(type, nilable?), :payload, "Es.ValueChanged")
+    fields = fields(type, nilable?)
 
     Core.Es.Personal.Plan.entries!(fields, "Es.ValueChanged", uuid_prim: &Core.Es.Event.Payload.uuid_prim?/1)
 
@@ -113,14 +95,14 @@ defmodule Core.Es.ValueChanged do
   Спека полей `old_value` / `new_value` по типу значения: Prim → `prim:`, `Core.Enum` → `enum:`,
   иначе `entity:`; `nilable: true` → `optional: true`.
   """
-  @spec fields(module(), boolean()) :: [Field.t()]
+  @spec fields(module(), boolean()) :: [Core.Field.t()]
 
   def fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
-    {kind, mod} = Field.value_spec(type, "Es.ValueChanged: type")
+    {kind, mod} = Core.Field.value_spec(type, "Es.ValueChanged: type")
 
-    Field.normalize!(
+    Core.Field.declare!(
       for(name <- ~w(old_value new_value)a, do: {name, [{kind, mod}, optional: nilable?]}),
-      :plugin,
+      :payload,
       "Es.ValueChanged"
     )
   end

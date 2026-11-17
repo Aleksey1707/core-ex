@@ -257,20 +257,7 @@ defmodule Core.UnionTest do
           quote do
             defmodule Core.UnionTest.Clash do
               defmodule Badge do
-                defstruct kind: "badge"
-
-                def __struct_fields__ do
-                  [
-                    %Core.Codec.Field{
-                      name: :j,
-                      spec: {:type, :string},
-                      optional?: false,
-                      wire: "kind",
-                      default: :none,
-                      subject: nil
-                    }
-                  ]
-                end
+                use Core.Struct, fields: [j: [type: :string, wire: "kind"]]
               end
 
               use Core.Union, variants: [{Core.UnionTest.Clash.Badge, [kind: "badge"]}]

@@ -121,8 +121,8 @@ defmodule Core.Repo.Pg.StateStored do
   `persist/2,3` (точка переопределения записи из `Repo.Pg`).
   """
 
-  alias Core.Codec.Field
   alias Core.Es
+  alias Core.Field
   alias Core.Helper
 
   @label "Repo.Pg.StateStored"
@@ -273,7 +273,7 @@ defmodule Core.Repo.Pg.StateStored do
 
   # Структура по полям объявляет поле событий `events:`; ручной `defstruct` не проверяется.
   defp ensure_events_family!(entity, family) do
-    case {Field.struct_fields(entity), Core.Struct.events_family(entity)} do
+    case {Field.introspect(entity), Core.Struct.events_family(entity)} do
       {nil, _events} ->
         :ok
 

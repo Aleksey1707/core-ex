@@ -190,24 +190,17 @@ defmodule Core.Es.Event.PayloadTest do
     end
   end
 
-  describe "declared_fields/1" do
-    test "поля спеки нагрузки, которая ещё собирается; модуль без use — nil" do
+  describe "интроспекция нагрузки" do
+    test "поля нагрузки, которая ещё собирается, читает Core.Field.introspect/1" do
       defmodule DeclaredFields do
         use Core.Es.Event.Payload, fields: [name: [prim: Account.Name]]
 
-        @declared Core.Es.Event.Payload.declared_fields(__MODULE__)
+        @declared Core.Field.introspect(__MODULE__)
 
         def declared, do: @declared
       end
 
-      defmodule UndeclaredFields do
-        @declared Core.Es.Event.Payload.declared_fields(__MODULE__)
-
-        def declared, do: @declared
-      end
-
-      assert [%Core.Codec.Field{name: :name, spec: {:prim, Account.Name}}] = DeclaredFields.declared()
-      assert UndeclaredFields.declared() == nil
+      assert [%Core.Field{name: :name, spec: {:prim, Account.Name}}] = DeclaredFields.declared()
     end
   end
 

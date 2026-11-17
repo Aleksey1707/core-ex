@@ -7,7 +7,7 @@ defmodule Core.Field.Meta.Optional do
   def key, do: :optional
 
   @spec roles() :: [atom()]
-  def roles, do: ~w(struct payload plugin view labels)a
+  def roles, do: ~w(struct payload view labels)a
 
   @spec normalize!(term(), map()) :: term()
   def normalize!(raw, _ctx) when is_boolean(raw), do: raw

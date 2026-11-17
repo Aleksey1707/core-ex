@@ -1,8 +1,8 @@
 defmodule Core.Labels.Walk do
   @moduledoc false
 
-  alias Core.Codec.Field
   alias Core.Es.Personal.Destroyed
+  alias Core.Field
   alias Core.Helper
   alias Core.Labels.Fields
 

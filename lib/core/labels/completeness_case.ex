@@ -37,9 +37,9 @@ defmodule Core.Labels.CompletenessCase do
   5. у каждого Enum, достижимого из нагрузки, подписи значений (`Core.Labels.Values`);
   6. у каждого Prim-идентификатора, достижимого из нагрузки, вид (`Core.Labels.ID`) или текст
      (`Core.Labels.Text`) — свой или базы композита;
-  7. спека видимых полей `fields:` каждого варианта семейства с подписями совпадает со спекой его
-     плагина (`variants:`): иначе подписи варианта разошлись бы с его wire-формой. Поле-дискриминатор
-     в спеку плагина не входит и не сверяется. Семейство поля `union:` без плагина среди модулей
+  7. спека видимых полей каждого варианта семейства с подписями совпадает с его декларацией
+     (`__core_fields__/0`): иначе подписи варианта разошлись бы с его wire-формой. Поле-дискриминатор
+     в wire варианта не входит и не сверяется. Семейство поля `union:` без плагина среди модулей
      `otp_app:` — провал, даже если плагин лежит в другом приложении: его вариантов обход не знает.
 
   Логика теста — функция `check_*` (`:ok | {:error, пробелы}`), сам тест — `assert :ok = …`:
@@ -264,7 +264,7 @@ defmodule Core.Labels.CompletenessCase do
 
   defp variant_fields(variant) do
     for field <- Core.Field.introspect(variant) || [],
-        do: {field.name, Core.Codec.Plugin.Fields.grammar_spec(field.spec)}
+        do: {field.name, Core.Field.wire_spec(field.spec)}
   end
 
   defp diverged(variant, disc, fields) do

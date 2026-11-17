@@ -1,13 +1,13 @@
 defmodule Core.Es.Event.PayloadKindTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field
   alias Core.CodecFixture.Internal, as: InCodec
   alias Core.DerivedFixture
   alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Marker
   alias Core.EsFixture.PayloadKinds
   alias Core.EventFixture
+  alias Core.Field
   alias Core.Version
 
   defmodule Name do
@@ -121,7 +121,7 @@ defmodule Core.Es.Event.PayloadKindTest do
   end
 
   test "вид × операция: голова new/N закрывает вид каждого поля" do
-    fields = Kinds.__es_payload_fields__()
+    fields = Kinds.__core_fields__()
     args = payload_args()
 
     for {kind, bad} <- bad_values() do
@@ -316,7 +316,7 @@ defmodule Core.Es.Event.PayloadKindTest do
     %{dumped | "payload" => payload}
   end
 
-  defp kind_index(kind), do: Enum.find_index(PayloadKinds.Payload.__es_payload_fields__(), &(&1.name == kind))
+  defp kind_index(kind), do: Enum.find_index(PayloadKinds.Payload.__core_fields__(), &(&1.name == kind))
 
   defp put_payload(wire, kind, value),
     do: Map.update!(wire, "payload", &Map.put(&1, Atom.to_string(kind), value))

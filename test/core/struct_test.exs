@@ -551,8 +551,8 @@ defmodule Core.StructTest do
     test "wire: и subject: — часть декларации структуры" do
       mod = define(fields: [name: [prim: Name, wire: "title", subject: :aggregate_id]])
 
-      assert [%Core.Codec.Field{name: :name, wire: "title", subject: :aggregate_id}] =
-               Core.Codec.Field.struct_fields(mod)
+      assert [%Core.Field{name: :name, wire: "title", subject: :aggregate_id}] =
+               Core.Field.introspect(mod)
     end
 
     test "destroyable: удалён — CompileError с указанием на personal: true" do

@@ -1,7 +1,7 @@
 defmodule Core.Struct do
   @moduledoc """
   Структура по полям: `defstruct`, обязательные ключи и `@type t` из одной декларации на языке
-  спеки полей (`Core.Codec.Field`, ADR-0090).
+  спеки полей (`Core.Field`, ADR-0090).
 
       defmodule Rename do
         defmodule Note do
@@ -128,17 +128,15 @@ defmodule Core.Struct do
   - `@type t` — тип чтения по видам полей, `@type write_t` — тип записи, с `events:` — и поле
     `events`;
   - `Inspect` — только если у структуры есть ПДн-места: скрывает их, остальное печатает как обычно;
-  - `__struct_fields__/0` — внутренняя для builder'ов ролей: нормализованные поля спеки, форма — не
-    контракт; у собранного модуля её читает `Core.Codec.Field.struct_fields/1`;
-  - `__core_fields__/0` — внутренняя: тот же состав полей единым IR (`Core.Field`), форма — не
-    контракт; у собранного модуля её читает `Core.Field.introspect/1`;
+  - `__core_fields__/0` — внутренняя: состав полей единым IR (`Core.Field`), форма — не контракт; у
+    собранного модуля её читает `Core.Field.introspect/1`;
   - `__struct_events__/0` — только с `events:`, внутренняя: семейство событий; у собранного модуля
     её читает `Core.Struct.events_family/1` — роли `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate`
     и `Core.Es.Cmd`.
 
-  Макрос занимает в модуле имена `@core_struct_fields` и `@core_struct_events`: поля спеки
-  структуры, которая ещё собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields`
-  ниже берёт вид полей, и подписям хватает `labels:`.
+  Макрос занимает в модуле имя `@core_struct_events`: поля структуры, которая ещё собирается,
+  читает `Core.Field.introspect/1` по её `@core_fields`, поэтому подписям (`use Core.Labels.Fields`
+  ниже) хватает `labels:`.
 
   `fields:`, кроме значений `default:`, — литерал (`docs/rules/20-agreements.md`, «Опции `use`»):
   атрибут или вызов функции — `CompileError` «ожидается литерал». Модули спеки проверяются в теле
@@ -165,7 +163,6 @@ defmodule Core.Struct do
   `Struct: events: …`.
   """
 
-  alias Core.Codec.Field
   alias Core.Helper
   alias Core.Helper.FieldCheck
   alias Core.Prim
@@ -188,25 +185,23 @@ defmodule Core.Struct do
 
     [
       quote do
-        {legacy, personal} = Core.Struct.fields!(unquote(Macro.escape(fields)))
-        @core_struct_fields Core.Struct.default!(legacy, unquote(defaults))
+        {fields, personal} = Core.Struct.fields!(unquote(Macro.escape(fields)))
+        fields = Core.Struct.default!(fields, unquote(defaults))
+
+        @core_fields Core.Field.apply_personal!(
+                       Core.Field.normalize!(fields, :struct, "Struct: fields"),
+                       personal
+                     )
         @core_struct_events unquote(family)
-        @core_fields Core.Field.normalize!(@core_struct_fields, :struct, "Struct: fields")
-        @core_fields Core.Field.apply_personal!(@core_fields, personal)
         @core_inspect_places Core.Field.inspect_places(@core_fields)
       end,
       events_ast(family),
       quote unquote: false do
-        @enforce_keys for %Core.Codec.Field{name: name, default: :none} <- @core_struct_fields, do: name
-        defstruct Enum.map(@core_struct_fields, fn
-                    %Core.Codec.Field{name: name, default: {:default, value}} -> {name, value}
-                    %Core.Codec.Field{name: name, default: :none} -> {name, nil}
+        @enforce_keys for %Core.Field{name: name, default: :none} <- @core_fields, do: name
+        defstruct Enum.map(@core_fields, fn
+                    %Core.Field{name: name, default: {:default, value}} -> {name, value}
+                    %Core.Field{name: name, default: :none} -> {name, nil}
                   end) ++ Core.Struct.events_entries(@core_struct_events)
-
-        @doc false
-        @spec __struct_fields__() :: [Core.Codec.Field.t()]
-
-        def __struct_fields__, do: @core_struct_fields
 
         @before_compile Core.Struct
 
@@ -323,7 +318,7 @@ defmodule Core.Struct do
   # ===== типы =====
 
   @doc false
-  @spec read_type([Field.t()], module() | nil) :: Macro.t()
+  @spec read_type([Core.Field.t()], module() | nil) :: Macro.t()
 
   def read_type(fields, events) do
     entries = Core.Field.read_typespec(fields) ++ events_typespec(events)
@@ -334,7 +329,7 @@ defmodule Core.Struct do
   end
 
   @doc false
-  @spec write_type([Field.t()], module() | nil) :: Macro.t()
+  @spec write_type([Core.Field.t()], module() | nil) :: Macro.t()
 
   def write_type(fields, events) do
     if Core.Field.personal_places?(fields) do
@@ -386,12 +381,7 @@ defmodule Core.Struct do
   # ===== поля =====
 
   @doc false
-  @spec declared_fields(module()) :: [Field.t()] | nil
-
-  def declared_fields(module) when is_atom(module), do: Module.get_attribute(module, :core_struct_fields)
-
-  @doc false
-  @spec fields!(term()) :: {[Field.t()], %{{atom(), [atom()]} => boolean()}}
+  @spec fields!(term()) :: {[Core.Field.t()], %{{atom(), [atom()]} => boolean()}}
 
   def fields!(spec) do
     where = "#{@label}: fields"
@@ -414,10 +404,10 @@ defmodule Core.Struct do
   # ===== default: =====
 
   @doc false
-  @spec default!([Field.t()], keyword()) :: [Field.t()]
+  @spec default!([Core.Field.t()], keyword()) :: [Core.Field.t()]
 
   def default!(fields, values) when is_list(fields) and is_list(values) do
-    Enum.map(fields, fn %Field{name: name} = field ->
+    Enum.map(fields, fn %Core.Field{name: name} = field ->
       case Keyword.fetch(values, name) do
         :error -> field
         {:ok, value} -> %{field | default: {:default, value!(field, value)}}
@@ -427,7 +417,7 @@ defmodule Core.Struct do
 
   # ---
 
-  defp value!(%Field{name: name, spec: spec, optional?: optional?}, value) do
+  defp value!(%Core.Field{name: name, spec: spec, optional?: optional?}, value) do
     where = "#{@label}: fields: #{name}: default"
 
     cond do

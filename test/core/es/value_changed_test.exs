@@ -107,9 +107,16 @@ defmodule Core.Es.ValueChangedTest do
     assert_raise FunctionClauseError, fn -> Sample.new(nil, SampleName.new!("new-name")) end
   end
 
-  test "__es_value_changed__/0 отдаёт type: и nilable:" do
-    assert Sample.__es_value_changed__() == [type: SampleName, nilable: false]
-    assert NilableSample.__es_value_changed__() == [type: SamplePrice, nilable: true]
+  test "__core_fields__/0 — old_value и new_value по типу и nilable:" do
+    assert [
+             %Core.Field{name: :old_value, spec: {:prim, SampleName}, optional?: false},
+             %Core.Field{name: :new_value, spec: {:prim, SampleName}, optional?: false}
+           ] = Sample.__core_fields__()
+
+    assert [
+             %Core.Field{name: :old_value, spec: {:prim, SamplePrice}, optional?: true},
+             %Core.Field{name: :new_value, spec: {:prim, SamplePrice}, optional?: true}
+           ] = NilableSample.__core_fields__()
   end
 
   describe "опции use" do
@@ -160,30 +167,23 @@ defmodule Core.Es.ValueChangedTest do
     end
   end
 
-  describe "declared/1" do
-    test "type: и nilable: модуля, который ещё собирается; модуль без use — nil" do
+  describe "интроспекция изменения" do
+    test "декларация модуля, который ещё собирается, читается Core.Field.introspect/1" do
       defmodule DeclaredChange do
         @moduledoc false
         use Core.Es.ValueChanged,
           type: Core.Es.ValueChangedTest.SampleName,
           nilable: true
 
-        @declared Core.Es.ValueChanged.declared(__MODULE__)
+        @declared Core.Field.introspect(__MODULE__)
 
         def declared, do: @declared
       end
 
-      defmodule UndeclaredChange do
-        @moduledoc false
-        defstruct [:old_value, :new_value]
-
-        @declared Core.Es.ValueChanged.declared(__MODULE__)
-
-        def declared, do: @declared
-      end
-
-      assert DeclaredChange.declared() == [type: SampleName, nilable: true]
-      assert UndeclaredChange.declared() == nil
+      assert [
+               %Core.Field{name: :old_value, spec: {:prim, SampleName}, optional?: true},
+               %Core.Field{name: :new_value, spec: {:prim, SampleName}, optional?: true}
+             ] = DeclaredChange.declared()
     end
   end
 

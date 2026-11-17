@@ -1,8 +1,8 @@
 defmodule Core.Codec.PluginKindTest do
   use ExUnit.Case, async: true
 
-  alias Core.Codec.Field
   alias Core.DerivedFixture
+  alias Core.Field
 
   defmodule Name do
     use Core.Prim.String,
