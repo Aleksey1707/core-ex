@@ -6,6 +6,22 @@ defmodule Core.Es.Event.PayloadPersonalTest do
   alias Core.EsFixture.Account
   alias Core.PrimFixture
 
+  defmodule Steps do
+    @moduledoc false
+
+    defmodule Step do
+      @moduledoc false
+
+      use Core.Struct,
+        fields: [
+          owner_id: [prim: Core.EventFixture.PersonID],
+          recipient: [prim: Core.PrimFixture.Personal, subject: {:local, :owner_id}]
+        ]
+    end
+
+    use Core.Es.Event.Payload, fields: [steps: [list: [entity: Step]]]
+  end
+
   describe "subject: у поля нагрузки" do
     test "спека поля в __es_payload_fields__/0 несёт subject:" do
       assert [
@@ -53,43 +69,68 @@ defmodule Core.Es.Event.PayloadPersonalTest do
     end
   end
 
+  describe "ПДн-план и защита записи" do
+    test "__es_personal__/0 — места с путями и субъектами; __es_subjects__/0 — временный адаптер" do
+      assert Core.PersonalBrokenFixture.Event.Codec.__es_personal__() == %{
+               Core.PersonalBrokenFixture.Event.ContactAdded => [
+                 %{path: [:contact, :phone], subject: :aggregate_id}
+               ],
+               Core.PersonalBrokenFixture.Event.Named => [%{path: [:name], subject: :aggregate_id}]
+             }
+
+      assert Core.PersonalBrokenFixture.Event.Codec.__es_subjects__() == %{
+               Core.PersonalBrokenFixture.Event.Named => [name: :aggregate_id]
+             }
+    end
+
+    test "new/N отвергает уничтоженное значение на вложенном месте" do
+      contact = %Core.PersonalBrokenFixture.Contact{phone: %Core.Es.Personal.Destroyed{}}
+
+      assert_raise ArgumentError, ~r/ПДн-место contact\.phone: уничтоженное/, fn ->
+        Core.PersonalBrokenFixture.Event.ContactAdded.Payload.new(contact)
+      end
+    end
+
+    test "draft/1 отвергает уничтоженное значение на вложенном месте" do
+      contact = %Core.PersonalBrokenFixture.Contact{phone: %Core.Es.Personal.Destroyed{}}
+      payload = %Core.PersonalBrokenFixture.Event.ContactAdded.Payload{contact: contact}
+
+      assert_raise ArgumentError, ~r/ПДн-место contact\.phone: уничтоженное/, fn ->
+        Core.PersonalBrokenFixture.Event.ContactAdded.draft(payload)
+      end
+    end
+
+    test "dump отвергает уничтоженное значение на вложенном месте" do
+      contact = %Core.PersonalBrokenFixture.Contact{phone: %Core.Es.Personal.Destroyed{}}
+      payload = %Core.PersonalBrokenFixture.Event.ContactAdded.Payload{contact: contact}
+
+      event =
+        Core.PersonalBrokenFixture.Event.ContactAdded.new(
+          payload,
+          Core.EventFixture.AggID.new(),
+          Core.Version.new!(1),
+          Core.EventFixture.ActorID.new(),
+          Core.Es.Event.At.now!()
+        )
+
+      assert_raise ArgumentError, ~r/ПДн-место contact\.phone: уничтоженное/, fn ->
+        Core.PersonalBrokenFixture.Event.Codec.dump(event, Core.CodecFixture.Internal)
+      end
+    end
+
+    test "new/N отвергает непустое ПДн-значение при nil локальном субъекте" do
+      step = %Core.Es.Event.PayloadPersonalTest.Steps.Step{
+        owner_id: nil,
+        recipient: PrimFixture.Personal.new!("+7 900 000-00-00")
+      }
+
+      assert_raise ArgumentError, ~r/ПДн-место steps\.each\.recipient: непустое ПДн-значение без субъекта/, fn ->
+        Core.Es.Event.PayloadPersonalTest.Steps.new([step])
+      end
+    end
+  end
+
   describe "CompileError" do
-    test "персональный Prim на прямом поле без subject:" do
-      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: персональный Prim .*Personal без subject:/, fn ->
-        payload(:Bare, phone: [prim: PrimFixture.Personal])
-      end
-    end
-
-    test "персональный Prim элементом list: без subject:" do
-      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phones: персональный Prim .*Personal без subject:/, fn ->
-        payload(:BareList, phones: [list: [prim: PrimFixture.Personal]])
-      end
-    end
-
-    test "персональный Prim элементом set: без subject:" do
-      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phones: персональный Prim .*Personal без subject:/, fn ->
-        payload(:BareSet, phones: [set: [prim: PrimFixture.Personal]])
-      end
-    end
-
-    test "персональный Prim значением map: без subject:" do
-      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phones: персональный Prim .*Personal без subject:/, fn ->
-        payload(:BareMap, phones: [map: [key: [type: :string], value: [list: [prim: PrimFixture.Personal]]]])
-      end
-
-      assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: персональный Prim .*Personal без subject:/, fn ->
-        payload(:BareMapValue, phone: [map: [key: [type: :string], value: [prim: PrimFixture.Personal]]])
-      end
-    end
-
-    test "персональный композит без subject:" do
-      assert_raise CompileError,
-                   ~r/^Es.Event.Payload: fields: phone: персональный Prim .*PersonalRef без subject:/,
-                   fn ->
-                     payload(:BareRef, phone: [prim: PrimFixture.PersonalRef])
-                   end
-    end
-
     test "субъект — не Prim.UUID" do
       assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: субъект name — не Prim.UUID/, fn ->
         payload(:NotUUID,
@@ -163,7 +204,7 @@ defmodule Core.Es.Event.PayloadPersonalTest do
     test "субъект с subject: сам" do
       assert_raise CompileError, ~r/^Es.Event.Payload: fields: phone: субъект person_id сам объявлен с subject:/, fn ->
         payload(:SubjectOfSubject,
-          person_id: [prim: Account.ID, subject: :aggregate_id],
+          person_id: [prim: Account.ID, personal: true, subject: :aggregate_id],
           phone: [prim: PrimFixture.Personal, subject: :person_id]
         )
       end
@@ -229,7 +270,8 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
                          defmodule Core.Es.Event.PayloadPersonalTest.NestedStream.Nested do
                            defmodule Payload do
-                             use Core.Es.Event.Payload, fields: [holder: [prim: Account.Name, subject: :aggregate_id]]
+                             use Core.Es.Event.Payload,
+                               fields: [holder: [prim: Account.Name, personal: true, subject: :aggregate_id]]
                            end
 
                            use Core.Es.Event,

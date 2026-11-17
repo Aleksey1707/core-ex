@@ -37,7 +37,7 @@ defmodule Core.Es.Event.PayloadKindTest do
         prim: [prim: Core.Es.Event.PayloadKindTest.Name],
         enum: [enum: Core.Es.Event.PayloadKindTest.Status],
         entity: [entity: Core.Es.Event.PayloadKindTest.Item],
-        union: [union: Core.DerivedFixture.Mark],
+        union: [union: Core.DerivedFixture.Mark, personal: false],
         list: [list: [prim: Core.Es.Event.PayloadKindTest.Name]],
         set: [set: [prim: Core.Es.Event.PayloadKindTest.Name]],
         map: [map: [key: [prim: Core.Es.Event.PayloadKindTest.Name], value: [type: :integer]]],

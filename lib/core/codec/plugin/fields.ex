@@ -118,6 +118,27 @@ defmodule Core.Codec.Plugin.Fields do
 
   def new_args(fields), do: Enum.map(fields, &elem(dump_pattern(&1), 1))
 
+  # Аргумент `new/N` — шаблон вида поля: голова закрывает Prim, сущность, множество и словарь, как
+  # у плагина по полям.
+  @doc false
+  @spec new_args_ir([map()]) :: [Macro.t()]
+
+  def new_args_ir(fields), do: Enum.map(fields, &Kind.pattern(grammar(&1)))
+
+  @doc false
+  @spec new_guard_ir([map()]) :: Macro.t()
+
+  def new_guard_ir(fields), do: and_guards(Enum.flat_map(fields, &field_guard_ir/1))
+
+  @doc false
+  @spec new_body_ir(module(), [map()]) :: Macro.t()
+
+  def new_body_ir(type, fields) do
+    pairs = Enum.map(fields, &{&1.name, var(&1.name)})
+
+    quote(generated: true, do: %unquote(type){unquote_splicing(pairs)})
+  end
+
   @doc false
   @spec new_guard([Field.t()]) :: Macro.t()
 
@@ -153,6 +174,21 @@ defmodule Core.Codec.Plugin.Fields do
   def dump_pattern(%Field{name: name} = field), do: {name, Kind.pattern(field)}
 
   @doc false
+  @spec dump_pattern_ir(map()) :: {atom(), Macro.t()}
+
+  def dump_pattern_ir(field), do: {field.name, Kind.pattern(grammar(field))}
+
+  @doc false
+  @spec field_guard_ir(map()) :: [Macro.t()]
+
+  def field_guard_ir(field) do
+    case Kind.guard(grammar(field)) do
+      true -> []
+      guard -> [guard]
+    end
+  end
+
+  @doc false
   @spec field_guard(Field.t()) :: [Macro.t()]
 
   def field_guard(%Field{} = field) do
@@ -176,6 +212,22 @@ defmodule Core.Codec.Plugin.Fields do
   @spec dump_value(Field.spec(), Macro.t(), boolean()) :: Macro.t()
 
   def dump_value(spec, value, optional?), do: Kind.dump(spec_field(spec, optional?), value)
+
+  @doc false
+  @spec dump_value_ir(Core.Field.spec(), Macro.t(), boolean()) :: Macro.t()
+
+  def dump_value_ir(spec, value, optional?),
+    do: Kind.dump(spec_field(grammar_spec(spec), optional?), value)
+
+  @doc false
+  @spec value_guard_ir(Core.Field.spec(), Macro.t()) :: Macro.t()
+
+  def value_guard_ir(spec, value), do: Kind.value_guard(grammar_spec(spec), value)
+
+  @doc false
+  @spec admits_struct_ir(Core.Field.spec()) :: boolean()
+
+  def admits_struct_ir(spec), do: Kind.admits_struct?(grammar_spec(spec))
 
   # ===== load =====
 
@@ -265,6 +317,12 @@ defmodule Core.Codec.Plugin.Fields do
 
   def load_value(type, name, spec, raw, optional?), do: Kind.load(spec_field(spec, optional?, name), type, raw)
 
+  @doc false
+  @spec load_value_ir(module(), atom(), Core.Field.spec(), Macro.t(), boolean()) :: Macro.t()
+
+  def load_value_ir(type, name, spec, raw, optional?),
+    do: Kind.load(spec_field(grammar_spec(spec), optional?, name), type, raw)
+
   # ===== wire-ключ =====
 
   # `field/2` читает и атомарный, и строковый ключ, но принимает атом: wire-ключ — литерал
@@ -311,9 +369,17 @@ defmodule Core.Codec.Plugin.Fields do
   @spec grammar_spec(Core.Field.spec()) :: Core.Codec.Field.spec()
 
   def grammar_spec({:personal, inner}), do: grammar_spec(inner)
+  def grammar_spec({:personal_false, inner}), do: grammar_spec(inner)
   def grammar_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, grammar_spec(inner)}
   def grammar_spec({:map, key, value}), do: {:map, grammar_spec(key), grammar_spec(value)}
   def grammar_spec(spec), do: spec
+
+  # Проекция IR на грамматику спеки: адаптер вида (`Core.Codec.Plugin.Fields.Kind`) знает только
+  # `%Core.Codec.Field{}`, а вложенное ПДн-место (`{:personal, вид}`) wire-форму не меняет.
+  @doc false
+  @spec to_grammar(map()) :: Field.t()
+
+  def to_grammar(field), do: grammar(field)
 
   # ===== общее =====
 
@@ -329,8 +395,6 @@ defmodule Core.Codec.Plugin.Fields do
     }
   end
 
-  # Проекция IR на грамматику спеки: адаптер вида (`Core.Codec.Plugin.Fields.Kind`) знает только
-  # `%Core.Codec.Field{}`, а вложенное ПДн-место (`{:personal, вид}`) wire-форму не меняет.
   defp grammar(%{name: name, spec: spec, optional?: optional?, wire: wire} = field) do
     %Field{
       name: name,
@@ -338,8 +402,12 @@ defmodule Core.Codec.Plugin.Fields do
       optional?: optional?,
       wire: wire,
       default: :none,
-      subject: Map.get(field, :subject),
+      subject: legacy_subject(Map.get(field, :subject)),
       personal: Map.get(field, :personal)
     }
   end
+
+  # Форма `%Core.Codec.Field{}` до тикета 10: адрес субъекта — имя поля нагрузки, без тега.
+  defp legacy_subject({_tag, name}), do: name
+  defp legacy_subject(subject), do: subject
 end

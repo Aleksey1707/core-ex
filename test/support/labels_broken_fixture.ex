@@ -138,8 +138,8 @@ defmodule Core.LabelsBrokenFixture do
             refs: [map: [key: [enum: LabelsBrokenFixture.Kind], value: [prim: Core.LabelsFixture.BareID]]],
             ref: [prim: Core.LabelsFixture.BareID],
             item: [prim: Core.LabelsFixture.ItemID],
-            mark: [union: LabelsBrokenFixture.Mark],
-            loose: [union: LabelsBrokenFixture.Loose, optional: true]
+            mark: [union: LabelsBrokenFixture.Mark, personal: false],
+            loose: [union: LabelsBrokenFixture.Loose, personal: false, optional: true]
           ]
 
         use Core.Labels.Fields,

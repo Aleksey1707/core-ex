@@ -27,6 +27,7 @@ defmodule Core.Field do
           | {:form, atom()}
           | {:jsonb, module() | {module(), atom()}}
           | {:personal, spec()}
+          | {:personal_false, spec()}
 
   @typedoc "Значение `default:`: нет или значение по умолчанию."
   @type default :: :none | {:default, term()}
@@ -88,9 +89,11 @@ defmodule Core.Field do
   # Разбор без сборки IR: хосту, который держит и старую спеку полей (`%Core.Codec.Field{}`), и
   # IR, нужны обе формы из одного прохода (`Core.Struct`).
   def split!(spec, role, where) when role in @declarable and is_binary(where) do
-    check_keys!(spec, role, where)
     {clean, personal} = split_personal(spec, role, where)
-    {parse!(clean, role, where, []), personal}
+    fields = parse!(clean, role, where, [])
+    check_keys!(clean, role, where)
+
+    {fields, personal}
   end
 
   @doc false
@@ -152,11 +155,8 @@ defmodule Core.Field do
 
   # Ключ, которого роль не допускает, — тот же отказ, что и неизвестный ключ у грамматики: хост его
   # не знает.
-  defp check_keys!(spec, role, where) when is_list(spec) do
-    if Keyword.keyword?(spec), do: Enum.each(spec, &check_field_keys(&1, role, where))
-  end
-
-  defp check_keys!(_spec, _role, _where), do: :ok
+  defp check_keys!(spec, role, where) when is_list(spec),
+    do: Enum.each(spec, &check_field_keys(&1, role, where))
 
   defp check_field_keys({name, opts}, role, where) when is_atom(name) and is_list(opts) do
     case foreign_keys(opts, role) do
@@ -280,20 +280,21 @@ defmodule Core.Field do
     Enum.map(fields, fn %__MODULE__{name: name, spec: spec} = field ->
       nested =
         personal
-        |> Enum.filter(fn {{field_name, path}, value} -> field_name == name and path != [] and value end)
+        |> Enum.filter(fn {{field_name, path}, _value} -> field_name == name and path != [] end)
         |> Enum.sort_by(fn {{_field_name, path}, _value} -> -length(path) end)
 
-      %{field | spec: Enum.reduce(nested, spec, fn {{_field_name, path}, _value}, spec -> wrap(spec, path) end)}
+      %{field | spec: Enum.reduce(nested, spec, fn {{_field_name, path}, value}, spec -> wrap(spec, path, value) end)}
     end)
   end
 
-  defp wrap(spec, []), do: {:personal, spec}
+  defp wrap(spec, [], true), do: {:personal, spec}
+  defp wrap(spec, [], false), do: {:personal_false, spec}
 
-  defp wrap({kind, inner}, [kind | rest]) when kind in @nested_kinds, do: {kind, wrap(inner, rest)}
+  defp wrap({kind, inner}, [kind | rest], value) when kind in @nested_kinds, do: {kind, wrap(inner, rest, value)}
 
-  defp wrap({:map, key, value}, [:map, :key | rest]), do: {:map, wrap(key, rest), value}
-  defp wrap({:map, key, value}, [:map, :value | rest]), do: {:map, key, wrap(value, rest)}
-  defp wrap(spec, _path), do: spec
+  defp wrap({:map, key, value}, [:map, :key | rest], nested), do: {:map, wrap(key, rest, nested), value}
+  defp wrap({:map, key, value}, [:map, :value | rest], nested), do: {:map, key, wrap(value, rest, nested)}
+  defp wrap(spec, _path, _value), do: spec
 
   # ===== интроспекция =====
 
@@ -367,6 +368,8 @@ defmodule Core.Field do
   # Место целиком (`personal: true` у поля, элемента списка или значения словаря): его вид
   # проецируется без вложенных мест — значение шифруется одним куском.
   defp spec_type({:personal, inner}, _places, _path, mode), do: spec_type(inner, [], [], mode)
+
+  defp spec_type({:personal_false, inner}, places, path, mode), do: spec_type(inner, places, path, mode)
 
   defp spec_type({:prim, mod}, _places, _path, _mode), do: quote(do: unquote(mod).t())
   defp spec_type({:enum, mod}, _places, _path, _mode), do: quote(do: unquote(mod).t())
@@ -457,12 +460,13 @@ defmodule Core.Field do
   # ===== ПДн-места =====
 
   @doc false
-  @spec personal_places([t()], [step()]) :: [place_entry()]
+  @spec personal_places([t()], [step()], keyword()) :: [place_entry()]
 
-  def personal_places(fields, prefix \\ []) when is_list(fields) and is_list(prefix) do
-    by_name = Map.new(fields, &{&1.name, &1})
-
-    Enum.flat_map(fields, fn %__MODULE__{} = field -> field_places(field, prefix, :aggregate_id, by_name) end)
+  # Шаг пути — `:wire` (внешний ключ, форма плана события) или `:name` (имя поля, обход значения
+  # на записи). Один обход на обе формы: второй резолв места разошёлся бы с первым.
+  def personal_places(fields, prefix \\ [], options \\ []) when is_list(fields) and is_list(prefix) do
+    scope = new_scope(fields, options)
+    Enum.flat_map(fields, fn %__MODULE__{} = field -> field_places(field, prefix, :aggregate_id, scope) end)
   end
 
   @doc false
@@ -495,6 +499,12 @@ defmodule Core.Field do
 
   # ---
 
+  defp new_scope(fields, options) do
+    by_name = Map.new(fields, &{&1.name, &1})
+
+    %{by_name: by_name, root: by_name, key: Keyword.get(options, :key, :wire)}
+  end
+
   defp runtime_path?(_spec, []), do: true
   defp runtime_path?({:list, inner}, [:each | rest]), do: runtime_path?(inner, rest)
   defp runtime_path?({:map, _key, value}, [:each | rest]), do: runtime_path?(value, rest)
@@ -518,6 +528,7 @@ defmodule Core.Field do
   def children({kind, inner}) when kind in @nested_kinds, do: [inner]
   def children({:map, key, value}), do: [key, value]
   def children({:personal, inner}), do: [inner]
+  def children({:personal_false, inner}), do: [inner]
   def children(_spec), do: []
 
   @doc false
@@ -537,66 +548,70 @@ defmodule Core.Field do
 
   # ===== общее =====
 
-  # Один обход вида: места плана (путь и субъект) и места типа (путь в грамматике `destroyable:`).
-  # Типы не спускаются в `entity:` — у вложенной структуры свой тип и свои места.
-  defp field_places(%__MODULE__{} = field, prefix, subject, by_name) do
-    path = prefix ++ [step(field.wire)]
-    subject = declared_subject(field.subject, prefix, by_name) || subject
-    extra = Meta.plan(path, field, %{role: nil, name: field.name, where: nil, spec: field.spec, fields: by_name})
+  defp field_places(%__MODULE__{} = field, prefix, subject, scope) do
+    path = prefix ++ [step(field, scope)]
+    subject = declared_subject(field.subject, prefix, scope) || subject
+    extra = Meta.plan(path, field, %{role: nil, name: field.name, where: nil, spec: field.spec, fields: scope.by_name})
 
     case field.personal do
       true ->
         [%{path: path, subject: subject} | extra]
 
       _declared? ->
-        {plan, _places} = walk_places(field.spec, path, [], {subject, by_name})
+        {plan, _places} = walk_places(field.spec, path, [], {subject, scope})
         plan ++ extra
     end
   end
 
   # `subject:` не создаёт места: ближайший перекрывает внешний, корневой — `:aggregate_id`.
-  defp declared_subject(nil, _prefix, _by_name), do: nil
-  defp declared_subject(:aggregate_id, _prefix, _by_name), do: :aggregate_id
-  defp declared_subject({:payload, name}, _prefix, by_name), do: {:path, [wire_step(name, by_name)]}
-  defp declared_subject({:local, name}, prefix, by_name), do: {:path, prefix ++ [wire_step(name, by_name)]}
+  # `{:payload, имя}` — всегда поле корня нагрузки, `{:local, имя}` — соседнее поле той же структуры.
+  defp declared_subject(nil, _prefix, _scope), do: nil
+  defp declared_subject(:aggregate_id, _prefix, _scope), do: :aggregate_id
+  defp declared_subject({:payload, name}, _prefix, scope), do: {:path, [field_step(name, scope.root, scope)]}
+  defp declared_subject({:local, name}, prefix, scope), do: {:path, prefix ++ [field_step(name, scope.by_name, scope)]}
 
-  defp wire_step(name, by_name) do
+  defp field_step(name, by_name, scope) do
     case Map.fetch(by_name, name) do
-      {:ok, %__MODULE__{wire: wire}} -> step(wire)
+      {:ok, %__MODULE__{} = field} -> step(field, scope)
       :error -> name
     end
   end
+
+  defp step(%__MODULE__{name: name}, %{key: :name}), do: name
+  defp step(%__MODULE__{wire: wire}, _scope), do: step(wire)
 
   # Путь плана — атомы wire-ключей объявления, а не внешние данные: таблицу атомов он не засоряет.
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   defp step(wire) when is_binary(wire), do: String.to_atom(wire)
 
-  defp walk_places({:personal, _inner}, path, place, {subject, _by_name}),
+  defp walk_places({:personal, _inner}, path, place, {subject, _scope}),
     do: {[%{path: path, subject: subject}], [place]}
 
-  defp walk_places({:prim, mod}, path, place, {subject, _by_name}) do
+  defp walk_places({:personal_false, inner}, path, place, ctx), do: walk_places(inner, path, place, ctx)
+
+  defp walk_places({:prim, mod}, path, place, {subject, _scope}) do
     if mod.__domain_personal__(),
       do: {[%{path: path, subject: subject}], [place]},
       else: {[], []}
   end
 
-  defp walk_places({:entity, mod}, path, _place, {subject, _by_name}) do
+  defp walk_places({:entity, mod}, path, _place, {subject, scope}) do
     case introspect(mod) do
       nil -> {[], []}
-      fields -> {entity_places(fields, path, subject), []}
+      fields -> {entity_places(fields, path, subject, scope), []}
     end
   end
 
   defp walk_places({:list, inner}, path, place, ctx), do: walk_places(inner, path ++ [:each], place ++ [:list], ctx)
 
-  defp walk_places({:set, inner}, path, place, {subject, _by_name} = ctx) do
+  defp walk_places({:set, inner}, path, place, {subject, _scope} = ctx) do
     case walk_places(inner, path ++ [:each], place ++ [:set], ctx) do
       {[], _places} -> {[], []}
       _personal -> {[%{path: path, subject: subject}], [place]}
     end
   end
 
-  defp walk_places({:map, key, value}, path, place, {subject, _by_name} = ctx) do
+  defp walk_places({:map, key, value}, path, place, {subject, _scope} = ctx) do
     case walk_places(key, path ++ [:each], place ++ [:value], ctx) do
       {[], _places} -> walk_places(value, path ++ [:each], place ++ [:value], ctx)
       _personal -> {[%{path: path, subject: subject}], [place]}
@@ -606,9 +621,9 @@ defmodule Core.Field do
   defp walk_places({kind, _mod}, _path, _place, _ctx) when kind in ~w(enum union view form jsonb)a, do: {[], []}
   defp walk_places({:type, _type}, _path, _place, _ctx), do: {[], []}
 
-  defp entity_places(fields, path, subject) do
-    by_name = Map.new(fields, &{&1.name, &1})
+  defp entity_places(fields, path, subject, scope) do
+    scope = %{scope | by_name: Map.new(fields, &{&1.name, &1})}
 
-    Enum.flat_map(fields, &field_places(&1, path, subject, by_name))
+    Enum.flat_map(fields, &field_places(&1, path, subject, scope))
   end
 end

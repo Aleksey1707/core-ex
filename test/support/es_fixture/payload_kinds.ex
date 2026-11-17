@@ -1,25 +1,29 @@
 defmodule Core.EsFixture.PayloadKinds do
   @moduledoc """
-  Нагрузка события, где каждое поле объявлено своим видом спеки с `subject: :aggregate_id`:
-  таблица «вид × уничтоженное значение» (`Core.Es.Personal.Destroyed`).
+  Нагрузка события, где каждое поле объявлено своим видом спеки и ПДн-местом (`personal: true`)
+  с `subject: :aggregate_id`: таблица «вид × уничтоженное значение» (`Core.Es.Personal.Destroyed`).
 
   Кодек событий не зарегистрирован в фасаде тестов: тест зовёт `Codec.dump/2` и `Codec.load/3`
   напрямую, фасадом для вложенных значений служит `Core.CodecFixture.Internal`.
   """
 
   defmodule Payload do
-    @moduledoc "Каждый вид поля нагрузки с `subject: :aggregate_id`."
+    @moduledoc "Каждый вид поля нагрузки — ПДн-место с `subject: :aggregate_id`."
 
     use Core.Es.Event.Payload,
       fields: [
-        prim: [prim: Core.EventFixture.Name, subject: :aggregate_id],
-        enum: [enum: Core.DerivedFixture.Status, subject: :aggregate_id],
-        entity: [entity: Core.DerivedFixture.Place, subject: :aggregate_id],
-        union: [union: Core.DerivedFixture.Mark, subject: :aggregate_id],
-        list: [list: [prim: Core.EventFixture.Name], subject: :aggregate_id],
-        set: [set: [prim: Core.EventFixture.Name], subject: :aggregate_id],
-        map: [map: [key: [prim: Core.EventFixture.Name], value: [type: :integer]], subject: :aggregate_id],
-        type: [type: :map, subject: :aggregate_id]
+        prim: [prim: Core.EventFixture.Name, personal: true, subject: :aggregate_id],
+        enum: [enum: Core.DerivedFixture.Status, personal: true, subject: :aggregate_id],
+        entity: [entity: Core.DerivedFixture.Place, personal: true, subject: :aggregate_id],
+        union: [union: Core.DerivedFixture.Mark, personal: true, subject: :aggregate_id],
+        list: [list: [prim: Core.EventFixture.Name], personal: true, subject: :aggregate_id],
+        set: [set: [prim: Core.EventFixture.Name], personal: true, subject: :aggregate_id],
+        map: [
+          map: [key: [prim: Core.EventFixture.Name], value: [type: :integer]],
+          personal: true,
+          subject: :aggregate_id
+        ],
+        type: [type: :map, personal: true, subject: :aggregate_id]
       ]
   end
 

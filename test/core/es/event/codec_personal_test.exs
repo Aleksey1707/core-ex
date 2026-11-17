@@ -158,7 +158,7 @@ defmodule Core.Es.Event.CodecPersonalTest do
       assert_raise FunctionClauseError, fn -> EventFixture.Event.ContactSet.Payload.new(nil, contact, note) end
     end
 
-    test "inspect/1 нагрузки не выводит поля с subject:" do
+    test "inspect/1 нагрузки прячет ПДн-места плейсхолдером" do
       payload =
         EventFixture.Event.ContactSet.Payload.new(
           EventFixture.PersonID.new(),
@@ -166,8 +166,9 @@ defmodule Core.Es.Event.CodecPersonalTest do
           EventFixture.Note.new!("Звонить после обеда")
         )
 
-      refute inspect(payload) =~ "contact"
+      refute inspect(payload) =~ @contact
       refute inspect(payload) =~ "Звонить"
+      assert inspect(payload) =~ "%Core.Es.Personal.Hidden{}"
       assert inspect(payload) =~ "person_id"
     end
   end

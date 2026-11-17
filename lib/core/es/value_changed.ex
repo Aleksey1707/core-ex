@@ -13,6 +13,10 @@ defmodule Core.Es.ValueChanged do
   `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`). `__core_fields__/0` —
   та же декларация в едином IR (`Core.Field`), внутренняя.
 
+  ПДн-план применяется к `old_value` и `new_value` независимо: сторона с персональным типом —
+  ПДн-место с субъектом `:aggregate_id` (тип чтения допускает `%Core.Es.Personal.Destroyed{}`,
+  `new/2` его не принимает).
+
   Макрос занимает в модуле имя `@es_value_changed`: `type:` и `nilable:` модуля, который ещё
   собирается, отдаёт `declared/1` — по нему `use Core.Labels.Fields, change:` ниже берёт вид значения
   изменения.
@@ -42,22 +46,25 @@ defmodule Core.Es.ValueChanged do
 
     type_mod = Helper.Opts.module!(opts, :type, @label)
     nilable? = nilable!(opts)
-    fields = fields(type_mod, nilable?)
+    fields = core_fields(type_mod, nilable?)
+    read_types = Core.Field.read_typespec(fields)
+    write_types = Core.Field.write_typespec(fields)
 
     quote do
       @enforce_keys ~w(old_value new_value)a
       defstruct @enforce_keys
 
-      @type t :: %__MODULE__{unquote_splicing(Core.Codec.Field.typespec(fields))}
-
       @es_value_changed [type: unquote(type_mod), nilable: unquote(nilable?)]
+
+      @core_fields unquote(Macro.escape(fields))
 
       @doc false
       @spec __es_value_changed__() :: [type: module(), nilable: boolean()]
 
       def __es_value_changed__, do: @es_value_changed
 
-      @core_fields Core.Es.ValueChanged.core_fields(unquote(type_mod), unquote(nilable?))
+      @type t :: %__MODULE__{unquote_splicing(read_types)}
+      @type write_t :: %__MODULE__{unquote_splicing(write_types)}
 
       @doc false
       @spec __core_fields__() :: [Core.Field.t()]
@@ -65,11 +72,11 @@ defmodule Core.Es.ValueChanged do
       def __core_fields__, do: @core_fields
 
       @doc "Создать запись изменения значения."
-      @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(fields)))) :: t()
+      @spec new(unquote_splicing(Keyword.values(write_types))) :: t()
 
-      def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(fields)))
-          when unquote(Core.Codec.Plugin.Fields.new_guard(fields)),
-          do: unquote(Core.Codec.Plugin.Fields.new_body(__CALLER__.module, fields))
+      def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args_ir(fields)))
+          when unquote(Core.Es.Event.Payload.new_guard(fields)),
+          do: unquote(Core.Es.Event.Payload.new_body(__CALLER__.module, fields))
     end
   end
 
@@ -95,9 +102,11 @@ defmodule Core.Es.ValueChanged do
   @spec core_fields(module(), boolean()) :: [Core.Field.t()]
 
   def core_fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
-    type
-    |> fields(nilable?)
-    |> Core.Field.normalize!(:payload, "Es.ValueChanged")
+    fields = Core.Field.normalize!(fields(type, nilable?), :payload, "Es.ValueChanged")
+
+    Core.Es.Personal.Plan.entries!(fields, "Es.ValueChanged", uuid_prim: &Core.Es.Event.Payload.uuid_prim?/1)
+
+    fields
   end
 
   @doc """

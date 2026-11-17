@@ -56,7 +56,7 @@ defmodule Core.WebEventFixture do
         use Core.Es.Event.Payload,
           fields: [
             first_name: [type: :string],
-            extra_data: [type: :map, optional: true]
+            extra_data: [type: :map, personal: false, optional: true]
           ]
       end
 
@@ -77,7 +77,7 @@ defmodule Core.WebEventFixture do
           fields: [
             person_id: [prim: WebEventFixture.UserID],
             contact_name: [prim: WebEventFixture.ContactName, subject: :person_id],
-            home_address: [type: :map, subject: :aggregate_id, optional: true]
+            home_address: [type: :map, personal: true, subject: :aggregate_id, optional: true]
           ]
       end
 

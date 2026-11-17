@@ -1,6 +1,6 @@
 defmodule Core.Es.Event.Payload do
   @moduledoc """
-  Билдер нагрузки события по полям: struct, позиционный `new`, `@type t` и спека полей
+  Билдер нагрузки события по полям: struct, позиционный `new`, типы чтения и записи и спека полей
   из одной декларации.
 
       defmodule Payload do
@@ -19,46 +19,50 @@ defmodule Core.Es.Event.Payload do
   нагрузки (`fields!/1`), поэтому MAY быть вложены в неё — выше `use`.
 
   Поле-множество `set:` и поле-словарь `map:` — как у плагина: множество в wire — список по
-  JSON-кодировке wire элемента, словарь — объект по wire ключа (ADR-0091). Ключ словаря ПДн не
-  бывает (`CompileError` спеки), поэтому ПДн-значение — элемент множества или значение словаря.
+  JSON-кодировке wire элемента, словарь — объект по wire ключа (ADR-0091).
 
-  `subject:` — субъект ПДн-значения поля (ADR-0073): `:aggregate_id` или имя поля той же нагрузки
-  с `Prim.UUID` / `Prim.Compose` над ним. `CompileError`:
+  ## ПДн-план
 
-  - персональный Prim (`personal: true`) на поле `prim:`, элементом `list:` / `set:` или значением
-    `map:` (на любой глубине) без `subject:`;
-  - субъект — не `Prim.UUID` и не `Prim.Compose` над ним (у `:aggregate_id` проверяет
-    `use Core.Es.Event`), поле с `subject:` в роли субъекта;
-  - обязательное поле при необязательном поле-субъекте;
-  - `subject:` на несуществующее поле или на само себя;
+  `personal: true` у Prim делает ПДн-местом каждое место с этим Prim, у поля — всё его значение;
+  `subject:` выбирает субъект, но ПДн не создаёт: ближайший перекрывает внешний, корневой —
+  `:aggregate_id`. Субъект — `:aggregate_id`, поле нагрузки (`{:payload, поле}` или имя) или
+  соседнее поле той же структуры (`{:local, поле}`): UUID-Prim или `Prim.Compose` над ним, открытое
+  и само не ПДн. `CompileError`:
+
+  - `subject:` в поддереве без ПДн-места и переопределение `subject:` под `personal: true`;
+  - субъект — не UUID-Prim, сам объявлен с `subject:` или сам ПДн; нет такого поля;
+  - обязательное ПДн-место при необязательном субъекте;
+  - непрозрачный тип (`entity:` без `__core_fields__/0`, `union:`, `type: :map`) без
+    `personal: true` / `personal: false`;
   - wire-ключ на `$` у любого поля: форма `{"$pd": …}` зарезервирована.
 
   Порождаются:
 
   - `@enforce_keys` (все поля, кроме `optional: true`) и `defstruct`;
-  - `@type t` по видам полей (`optional:` — `| nil`, `subject:` — `| Core.Es.Personal.Destroyed.t()`);
+  - `@type t` — тип чтения: на каждом ПДн-месте `| Core.Es.Personal.Destroyed.t()`;
+    `@type write_t` — тип записи, без уничтоженного значения;
   - `new/N` — поля позиционно в порядке объявления; голова проверяет вид каждого поля, как
-    `dump/2` плагина по полям (вариант семейства `union:` — только `is_struct`), так что нагрузка
-    не того вида ловится при сборке вызывающего. `%Core.Es.Personal.Destroyed{}` и непустое
-    ПДн-значение при `nil` в поле-субъекте голова не пропускает;
-  - `Inspect` без полей с `subject:`;
-  - `__es_payload_fields__/0` — внутренняя для `Core.Es.Event.Codec`: нормализованные поля спеки
-    (`Core.Codec.Field`), форма поля — не контракт;
+    `dump/2` плагина по полям (вариант семейства `union:` — только `is_struct`), а тело отвергает
+    `%Core.Es.Personal.Destroyed{}` на любом ПДн-месте и непустое ПДн-значение при `nil` субъекте;
+  - `Inspect` при непустом плане: ПДн-место — плейсхолдер `%Core.Es.Personal.Hidden{}`, открытые
+    поля и открытая часть списка видны;
+  - `__es_payload_fields__/0` — внутренняя для `Core.Es.Event.Codec` и подписей: поля спеки в
+    грамматике (`Core.Codec.Field`), форма поля — не контракт;
   - `__core_fields__/0` — внутренняя: тот же состав полей единым IR (`Core.Field`); читает
     `Core.Field.introspect/1`.
 
-  Кодирует такую нагрузку `Core.Es.Event.Codec` события клаузами, которые собирает этот модуль из
+  Кодирует такую нагрузку `Core.Es.Event.Codec` клаузами, которые собирает этот модуль из
   поштучных блоков значения поля `Core.Codec.Plugin.Fields`: на месте поля с `subject:` — маркер
-  `{"$pd": …}` (ADR-0073, ADR-0074). Маркер шифрует wire поля целиком, множество — уже
-  упорядоченным: одно значение даёт один открытый текст. В фасаде нагрузка не регистрируется.
+  `{"$pd": …}` (ADR-0073, ADR-0074). Рекурсивные маркеры и `Personal.Wire` — тикет 07.
 
-  Макрос занимает в модуле нагрузки имя `@es_payload_fields`: поля спеки нагрузки, которая ещё
+  Макрос занимает в модуле имя `@es_payload_fields`: поля спеки нагрузки, которая ещё
   собирается, отдаёт `declared_fields/1` — по нему `use Core.Labels.Fields` ниже берёт вид полей.
   """
 
   alias Core.Codec.Field
   alias Core.Codec.Plugin.Fields
   alias Core.Error
+  alias Core.Es.Personal.Plan
   alias Core.Helper
   alias Core.Prim
 
@@ -79,37 +83,36 @@ defmodule Core.Es.Event.Payload do
 
     [
       quote do
-        @es_payload_fields Core.Es.Event.Payload.fields!(unquote(Macro.escape(Keyword.fetch!(opts, :fields))))
+        @core_fields Core.Es.Event.Payload.fields!(unquote(Macro.escape(Keyword.fetch!(opts, :fields))))
+        @es_payload_fields Enum.map(@core_fields, &Core.Codec.Plugin.Fields.to_grammar/1)
+        @es_payload_inspect_places Core.Field.inspect_places(@core_fields)
       end,
       quote unquote: false do
-        case Keyword.keys(Core.Codec.Field.subjects(@es_payload_fields)) do
-          [] -> :ok
-          hidden -> @derive {Inspect, except: hidden}
-        end
+        @enforce_keys for %Core.Field{name: name, optional?: false} <- @core_fields, do: name
 
-        @enforce_keys for %Core.Codec.Field{name: name, optional?: false} <- @es_payload_fields, do: name
-        defstruct for %Core.Codec.Field{name: name} <- @es_payload_fields, do: name
+        defstruct for %Core.Field{name: name} <- @core_fields, do: name
 
-        @type t :: %__MODULE__{unquote_splicing(Core.Es.Event.Payload.typespec(@es_payload_fields))}
+        @type t :: %__MODULE__{unquote_splicing(Core.Field.read_typespec(@core_fields))}
+        @type write_t :: %__MODULE__{unquote_splicing(Core.Field.write_typespec(@core_fields))}
 
-        @doc false
-        @spec __es_payload_fields__() :: [Core.Codec.Field.t()]
+        @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
+        @spec new(unquote_splicing(Keyword.values(Core.Field.write_typespec(@core_fields)))) :: t()
 
-        def __es_payload_fields__, do: @es_payload_fields
-
-        @core_fields Core.Field.normalize!(@es_payload_fields, :payload, "Es.Event.Payload: fields")
+        def new(unquote_splicing(Fields.new_args_ir(@core_fields)))
+            when unquote(Core.Es.Event.Payload.new_guard(@core_fields)),
+            do: unquote(Core.Es.Event.Payload.new_body(:self, @core_fields))
 
         @doc false
         @spec __core_fields__() :: [Core.Field.t()]
 
         def __core_fields__, do: @core_fields
 
-        @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
-        @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(@es_payload_fields)))) :: t()
+        @doc false
+        @spec __es_payload_fields__() :: [Core.Codec.Field.t()]
 
-        def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args(@es_payload_fields)))
-            when unquote(Core.Es.Event.Payload.new_guard(@es_payload_fields)),
-            do: unquote(Core.Codec.Plugin.Fields.new_body(__MODULE__, @es_payload_fields))
+        def __es_payload_fields__, do: @es_payload_fields
+
+        @before_compile Core.Es.Event.Payload
       end
     ]
   end
@@ -119,84 +122,43 @@ defmodule Core.Es.Event.Payload do
 
   def declared_fields(module) when is_atom(module), do: Module.get_attribute(module, :es_payload_fields)
 
-  # Грамматику проверяет `Core.Codec.Field`, смысл `subject:` — эта функция: ПДн без субъекта ушло бы
-  # в неизменяемую историю открытым (ADR-0073).
+  # Грамматику проверяет `Core.Codec.Field`, смысл ПДн-плана — `Core.Es.Personal.Plan`: ПДн без
+  # разметки ушло бы в неизменяемую историю открытым (ADR-0073).
   @doc false
-  @spec fields!(term()) :: [Field.t()]
+  @spec fields!(term()) :: [Core.Field.t()]
 
   def fields!(spec) do
     where = "#{@label}: fields"
-    fields = Field.normalize!(spec, :payload, where)
-    by_name = Map.new(fields, fn %Field{name: name} = field -> {name, field} end)
+    fields = Core.Field.declare!(spec, :payload, where)
 
-    Enum.each(fields, fn %Field{name: name} = field -> check_subject!(field, by_name, "#{where}: #{name}") end)
+    Plan.entries!(fields, where, uuid_prim: &uuid_prim?/1)
 
     fields
   end
 
-  # ---
+  # ===== Inspect =====
 
-  defp check_subject!(%Field{subject: {:payload, name}} = field, by_name, where),
-    do: check_subject!(%{field | subject: name}, by_name, where)
+  @doc false
+  defmacro __before_compile__(env) do
+    case Module.get_attribute(env.module, :es_payload_inspect_places) do
+      places when is_map(places) and map_size(places) > 0 ->
+        places = Macro.escape(places)
 
-  defp check_subject!(%Field{subject: {:local, name}} = field, by_name, where),
-    do: check_subject!(%{field | subject: name}, by_name, where)
+        quote do
+          defimpl Inspect, for: unquote(env.module) do
+            def inspect(struct, opts), do: Core.Struct.inspect_struct(struct, unquote(places), opts)
+          end
+        end
 
-  defp check_subject!(%Field{spec: spec, subject: nil}, _by_name, where) do
-    case personal_prim(spec) do
-      nil ->
-        :ok
-
-      prim ->
-        Helper.Opts.reject!(
-          where,
-          "персональный Prim #{inspect(prim)} без subject: — объявите субъекта " <>
-            "(subject: :aggregate_id или поле нагрузки)"
-        )
+      _places ->
+        nil
     end
   end
-
-  defp check_subject!(%Field{subject: :aggregate_id}, _by_name, _where), do: :ok
-
-  defp check_subject!(%Field{name: name, subject: name}, _by_name, where) do
-    Helper.Opts.reject!(where, "subject: #{inspect(name)} — поле не бывает своим субъектом")
-  end
-
-  defp check_subject!(%Field{optional?: optional?, subject: subject}, by_name, where) do
-    case Map.fetch(by_name, subject) do
-      :error ->
-        Helper.Opts.reject!(where, "subject: #{inspect(subject)} — нет такого поля нагрузки")
-
-      {:ok, %Field{spec: spec, optional?: subject_optional?, subject: nil}} ->
-        if not uuid_spec?(spec),
-          do: Helper.Opts.reject!(where, "субъект #{subject} — не Prim.UUID и не Prim.Compose над ним")
-
-        check_subject_optional!(optional?, subject_optional?, subject, where)
-
-      {:ok, _outer} ->
-        Helper.Opts.reject!(where, "субъект #{subject} сам объявлен с subject:")
-    end
-  end
-
-  defp uuid_spec?({:prim, mod}), do: uuid_prim?(mod)
-  defp uuid_spec?(_spec), do: false
-
-  defp check_subject_optional!(false, true, subject, where) do
-    Helper.Opts.reject!(
-      where,
-      "обязательное при необязательном субъекте #{subject} — непустое ПДн-значение осталось бы без субъекта"
-    )
-  end
-
-  defp check_subject_optional!(_optional?, _subject_optional?, _subject, _where), do: :ok
-
-  defp personal_prim({:prim, mod}), do: if(mod.__domain_personal__(), do: mod)
-  defp personal_prim(spec), do: Enum.find_value(Field.values(spec), &personal_prim/1)
 
   # ===== Prim субъекта =====
 
-  # Prim — `Prim.UUID` или `Prim.Compose` над ним: только такое значение бывает субъектом ПДн-поля
-  # нагрузки. `kind:` у UUID-Prim бывает свой, поэтому обёртку узнаёт `format/2` — его порождает только
+  # Prim — `Prim.UUID` или `Prim.Compose` над ним: только такое значение бывает субъектом ПДн-места.
+  # `kind:` у UUID-Prim бывает свой, поэтому обёртку узнаёт `format/2` — его порождает только
   # `use Core.Prim.UUID`.
   @doc false
   @spec uuid_prim?(module()) :: boolean()
@@ -207,37 +169,52 @@ defmodule Core.Es.Event.Payload do
 
   defp uuid_leaf?(mod), do: Helper.Module.exports?(mod, :format, 2)
 
-  # ===== тип =====
-
-  # Тип чтения шире типа записи (ADR-0074): после `load` в поле с `subject:` бывает уничтоженное
-  # значение, а `new/N` его не принимает.
-  @doc false
-  @spec typespec([Field.t()]) :: keyword(Macro.t())
-
-  def typespec(fields) when is_list(fields) do
-    hidden = Keyword.keys(Field.subjects(fields))
-
-    for {name, type} <- Field.typespec(fields) do
-      if name in hidden, do: {name, quote(do: unquote(type) | Core.Es.Personal.Destroyed.t())}, else: {name, type}
-    end
-  end
-
   # ===== new =====
 
   @doc """
   Guard `new/N` нагрузки события: вид каждого поля, как у `new/N` плагина по полям, плюс отказ
-  `%Core.Es.Personal.Destroyed{}` в поле, чей вид его пропустил бы (`union:`, `type: :map`), и
-  непустого ПДн-значения при `nil` в поле-субъекте.
+  `%Core.Es.Personal.Destroyed{}` на ПДн-месте, чей вид его пропустил бы (`union:`, `type: :map`),
+  и непустого ПДн-значения при `nil` в поле-субъекте.
   """
-  @spec new_guard([Field.t()]) :: Macro.t()
+  @spec new_guard([Core.Field.t()]) :: Macro.t()
 
   def new_guard(fields) do
-    destroyed =
-      for %Field{name: name, subject: subject, spec: spec} <- fields,
-          not is_nil(subject) and Fields.admits_struct?(spec),
-          do: quote(generated: true, do: not is_struct(unquote(Fields.var(name)), Core.Es.Personal.Destroyed))
+    plan = Plan.entries(fields)
+    destroyed = destroyed_guards(fields, plan)
 
-    Fields.and_guards(Enum.flat_map(fields, &Fields.field_guard/1) ++ destroyed ++ subject_guards(fields))
+    Fields.and_guards(Enum.flat_map(fields, &Fields.field_guard_ir/1) ++ destroyed ++ subject_guards(fields))
+  end
+
+  @doc "Тело `new/N`: struct нагрузки и отказ записи по ПДн-плану."
+  @spec new_body(module(), [Core.Field.t()]) :: Macro.t()
+
+  def new_body(:self, fields), do: new_body(quote(do: __MODULE__), fields)
+
+  def new_body(type, fields) do
+    payload = Macro.var(:payload, __MODULE__)
+    struct = quote(generated: true, do: %unquote(type){unquote_splicing(pairs(fields))})
+
+    case Plan.runtime_entries(fields) do
+      [] ->
+        struct
+
+      entries ->
+        quote generated: true do
+          unquote(payload) = unquote(struct)
+          Core.Es.Personal.Plan.assert_writable!(unquote(payload), unquote(Macro.escape(entries)))
+          unquote(payload)
+        end
+    end
+  end
+
+  # ---
+
+  defp destroyed_guards(fields, plan) do
+    for %Core.Field{name: name, wire: wire, spec: spec} <- fields,
+        Plan.place?(plan, [wire_step(wire)]),
+        Fields.admits_struct_ir(spec) do
+      quote(generated: true, do: not is_struct(unquote(Fields.var(name)), Core.Es.Personal.Destroyed))
+    end
   end
 
   # ===== dump =====
@@ -249,14 +226,19 @@ defmodule Core.Es.Event.Payload do
   `%Core.Es.Personal.Destroyed{}`. `aggregate_id` события связывается, когда он субъект хоть
   одного поля.
   """
-  @spec dump_args(module(), module(), [Field.t()]) :: [Macro.t()]
+  @spec dump_args(module(), module(), [Core.Field.t()]) :: [Macro.t()]
 
   def dump_args(event, type, fields) do
     pairs = Enum.map(fields, &dump_pattern/1)
-    payload = quote(generated: true, do: %unquote(type){unquote_splicing(pairs)})
+    struct = quote(generated: true, do: %unquote(type){unquote_splicing(pairs)})
+
+    payload =
+      if Plan.runtime_entries(fields) == [],
+        do: struct,
+        else: quote(generated: true, do: unquote(struct) = unquote(ir_payload_var()))
 
     event_pairs =
-      if Enum.any?(Field.subjects(fields), &match?({_name, :aggregate_id}, &1)),
+      if aggregate_subject?(fields),
         do: [payload: payload, aggregate_id: aggregate_id_var()],
         else: [payload: payload]
 
@@ -265,53 +247,99 @@ defmodule Core.Es.Event.Payload do
 
   @doc """
   Guard клаузы дампа нагрузки события: вид каждого поля, у поля с `subject:` — ещё
-  `%Core.Es.Personal.Destroyed{}`; непустое ПДн-значение при `nil` в поле-субъекте — мимо клаузы.
+  `%Core.Es.Personal.Destroyed{}`; на прочих ПДн-местах уничтоженное значение — мимо клаузы,
+  непустое ПДн-значение при `nil` в поле-субъекте — тоже.
   """
-  @spec dump_guard([Field.t()]) :: Macro.t()
+  @spec dump_guard([Core.Field.t()]) :: Macro.t()
 
   def dump_guard(fields) do
-    guards = Enum.flat_map(fields, &dump_field_guard/1) ++ subject_guards(fields) ++ aggregate_guards(fields)
+    plan = Plan.entries(fields)
+    guards = Enum.flat_map(fields, &dump_field_guard(&1, plan)) ++ subject_guards(fields) ++ aggregate_guards(fields)
 
     Fields.and_guards([quote(generated: true, do: is_atom(unquote(Fields.codec_var()))) | guards])
   end
 
   @doc "Тело дампа нагрузки события: на месте значения поля с `subject:` — `%Core.Es.Personal.Marker{}`."
-  @spec dump_body([Field.t()]) :: Macro.t()
+  @spec dump_body([Core.Field.t()]) :: Macro.t()
 
   def dump_body(fields) do
     pairs =
       Enum.map(fields, fn
-        %Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: nil} ->
-          {wire, Fields.dump_value(spec, Fields.var(name), optional?)}
+        %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: nil} ->
+          {wire, Fields.dump_value_ir(spec, Fields.var(name), optional?)}
 
-        %Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: subject} ->
+        %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire, subject: subject} ->
           {wire, marker(spec, Fields.var(name), optional?, subject)}
       end)
 
-    quote(generated: true, do: %{unquote_splicing(pairs)})
+    body = quote(generated: true, do: %{unquote_splicing(pairs)})
+
+    case Plan.runtime_entries(fields) do
+      [] ->
+        body
+
+      entries ->
+        allow = for %Core.Field{name: name, subject: subject} <- fields, not is_nil(subject), do: [name]
+        aggregate_id = if aggregate_subject?(fields), do: aggregate_id_var(), else: quote(do: :unknown)
+
+        quote generated: true do
+          Core.Es.Personal.Plan.assert_writable!(
+            unquote(ir_payload_var()),
+            unquote(Macro.escape(entries)),
+            aggregate_id: unquote(aggregate_id),
+            allow: unquote(Macro.escape(allow))
+          )
+
+          unquote(body)
+        end
+    end
   end
 
   # ---
 
-  defp dump_pattern(%Field{subject: nil} = field), do: Fields.dump_pattern(field)
-  defp dump_pattern(%Field{name: name}), do: {name, Fields.var(name)}
+  defp aggregate_subject?(fields),
+    do: Enum.any?(fields, &(subject_name(&1.subject) == :aggregate_id))
 
-  defp dump_field_guard(%Field{subject: nil} = field), do: Fields.field_guard(field)
+  defp dump_pattern(%Core.Field{subject: nil} = field), do: Fields.dump_pattern_ir(field)
+  defp dump_pattern(%Core.Field{name: name}), do: {name, Fields.var(name)}
 
-  defp dump_field_guard(%Field{name: name, spec: spec, optional?: optional?}) do
+  defp dump_field_guard(%Core.Field{subject: nil, wire: wire} = field, plan) do
+    if Plan.place?(plan, [wire_step(wire)]),
+      do: place_guard(field.spec, Fields.var(field.name), field.optional?),
+      else: Fields.field_guard_ir(field)
+  end
+
+  defp dump_field_guard(%Core.Field{name: name, spec: spec, optional?: optional?}, _plan) do
     value = Fields.var(name)
     destroyed = quote(generated: true, do: is_struct(unquote(value), Core.Es.Personal.Destroyed))
-    present = quote(generated: true, do: unquote(destroyed) or unquote(Fields.value_guard(spec, value)))
+    present = quote(generated: true, do: unquote(destroyed) or unquote(Fields.value_guard_ir(spec, value)))
 
     if optional?,
       do: [quote(generated: true, do: is_nil(unquote(value)) or unquote(present))],
       else: [present]
   end
 
+  defp place_guard(spec, value, optional?) do
+    if Fields.admits_struct_ir(spec) do
+      present =
+        quote generated: true do
+          unquote(Fields.value_guard_ir(spec, value)) and
+            not is_struct(unquote(value), Core.Es.Personal.Destroyed)
+        end
+
+      if optional?,
+        do: [quote(generated: true, do: is_nil(unquote(value)) or unquote(present))],
+        else: [present]
+    else
+      []
+    end
+  end
+
   # Событие, собранное литералом мимо `new`, — без идентификатора агрегата: ПДн-значение с субъектом
   # `:aggregate_id` без него не дампится.
   defp aggregate_guards(fields) do
-    for {name, :aggregate_id} <- Field.subjects(fields) do
+    for %Core.Field{name: name, subject: subject} <- fields,
+        subject_name(subject) == :aggregate_id do
       quote(generated: true, do: is_nil(unquote(Fields.var(name))) or not is_nil(unquote(aggregate_id_var())))
     end
   end
@@ -325,7 +353,7 @@ defmodule Core.Es.Event.Payload do
           %Core.Es.Personal.Marker{subject: unquote(subject), destroyed: true}
 
         unquote(value) ->
-          %Core.Es.Personal.Marker{subject: unquote(subject), value: unquote(Fields.dump_value(spec, value, false))}
+          %Core.Es.Personal.Marker{subject: unquote(subject), value: unquote(Fields.dump_value_ir(spec, value, false))}
       end
 
     clauses = if optional?, do: quote(generated: true, do: (nil -> nil)) ++ clauses, else: clauses
@@ -334,28 +362,30 @@ defmodule Core.Es.Event.Payload do
   end
 
   defp subject_var(:aggregate_id), do: aggregate_id_var()
-  defp subject_var(name), do: Fields.var(name)
+  defp subject_var({_tag, name}), do: Fields.var(name)
+  defp subject_var(name) when is_atom(name), do: Fields.var(name)
 
   defp aggregate_id_var, do: Macro.var(:aggregate_id, __MODULE__)
+
+  defp ir_payload_var, do: Macro.var(:ir_payload, __MODULE__)
 
   # ===== load =====
 
   @doc """
   Тело загрузки нагрузки события: перед загрузкой поля — разбор `{"$pd": …}` (ADR-0074).
 
-  - `{"$pd": null}` в поле с `subject:` → `%Core.Es.Personal.Destroyed{}` на месте поля целиком;
-  - `{"$pd": null}` в поле без `subject:` → `:invalid_value`, `{"$pd": "<строка>"}` в любом поле →
+  - `{"$pd": null}` на ПДн-месте → `%Core.Es.Personal.Destroyed{}` на месте поля целиком;
+  - `{"$pd": null}` вне ПДн-места → `:invalid_value`, `{"$pd": "<строка>"}` в любом поле →
     `:sealed_personal_value` (`ns: :codec`);
-  - ошибка загрузки поля с `subject:` — с отредактированным `detail` по цепочке; путь ошибки плагина
-    по полям (`detail: %{field:, index:}` / `%{field:, key:}`) остаётся.
+  - ошибка загрузки ПДн-места — с отредактированным `detail` по цепочке; путь ошибки плагина по
+    полям (`detail: %{field:, index:}` / `%{field:, key:}`) остаётся.
   """
-  @spec load_body(module(), [Field.t()]) :: Macro.t()
+  @spec load_body(module(), [Core.Field.t()]) :: Macro.t()
 
   def load_body(type, fields) do
-    steps = Enum.map(fields, &load_step(type, &1))
-    pairs = Enum.map(fields, fn %Field{name: name} -> {name, Fields.var(name)} end)
-
-    ok = quote(generated: true, do: {:ok, %unquote(type){unquote_splicing(pairs)}})
+    plan = Plan.entries(fields)
+    steps = Enum.map(fields, &load_step(type, &1, plan))
+    ok = quote(generated: true, do: {:ok, %unquote(type){unquote_splicing(pairs(fields))}})
     error = quote(generated: true, do: ({:error, reason} -> {:error, reason}))
 
     {:with, [generated: true], steps ++ [[do: ok, else: error]]}
@@ -363,18 +393,22 @@ defmodule Core.Es.Event.Payload do
 
   # ---
 
-  defp load_step(type, %Field{name: name, spec: spec, optional?: optional?, wire: wire, default: :none} = field) do
+  defp load_step(type, %Core.Field{name: name, spec: spec, optional?: optional?, wire: wire} = field, plan) do
     raw = raw_var()
-    value = Fields.load_value(type, name, spec, raw, optional?)
+    value = Fields.load_value_ir(type, name, spec, raw, optional?)
+
+    # Маркер этого шага — верхнеуровневое поле с `subject:` (и место верхнего уровня); вложенные
+    # места получат маркер и разбор в 07.
+    place? = not is_nil(field.subject) or Plan.place?(plan, [wire_step(wire)])
 
     clauses =
-      destroyed_clause(field) ++
+      destroyed_clause(place?) ++
         quote generated: true do
           %{"$pd" => sealed} = marker when map_size(marker) == 1 ->
             {:error, Core.Es.Event.Payload.marker_error(unquote(type), unquote(name), sealed)}
 
           unquote(raw) ->
-            unquote(redacted(value, field))
+            unquote(redacted(value, place?))
         end
 
     raw_field =
@@ -383,18 +417,18 @@ defmodule Core.Es.Event.Payload do
     quote(generated: true, do: {:ok, unquote(Fields.var(name))} <- case(unquote(raw_field), do: unquote(clauses)))
   end
 
-  defp destroyed_clause(%Field{subject: nil}), do: []
+  defp destroyed_clause(false), do: []
 
-  defp destroyed_clause(%Field{}) do
+  defp destroyed_clause(true) do
     quote(
       generated: true,
       do: (%{"$pd" => nil} = marker when map_size(marker) == 1 -> {:ok, %Core.Es.Personal.Destroyed{}})
     )
   end
 
-  defp redacted(value, %Field{subject: nil}), do: value
+  defp redacted(value, false), do: value
 
-  defp redacted(value, %Field{}) do
+  defp redacted(value, true) do
     quote generated: true do
       case unquote(value) do
         {:ok, value} -> {:ok, value}
@@ -428,8 +462,8 @@ defmodule Core.Es.Event.Payload do
     )
   end
 
-  # Ошибку загрузки поля с `subject:` строит Prim, плагин сущности или enum без флага `personal:`, и
-  # в её `detail` лежит сырое значение — редактируется цепочка ниже пути ошибки плагина по полям.
+  # Ошибку загрузки ПДн-места строит Prim, плагин сущности или enum без флага `personal:`, и в её
+  # `detail` лежит сырое значение — редактируется цепочка ниже пути ошибки плагина по полям.
   @doc false
   @spec redact(term()) :: term()
 
@@ -445,13 +479,24 @@ defmodule Core.Es.Event.Payload do
 
   # ===== общее =====
 
+  defp pairs(fields), do: Enum.map(fields, &{&1.name, Fields.var(&1.name)})
+
   # Субъект — поле той же нагрузки, а оно необязательно: непустое ПДн-значение без субъекта не
   # проходит. Обязательного субъекта при `nil` не пропускает его же guard.
   defp subject_guards(fields) do
-    optional = for %Field{name: name, optional?: true} <- fields, into: MapSet.new(), do: name
+    optional = for %Core.Field{name: name, optional?: true} <- fields, into: MapSet.new(), do: name
 
-    for %Field{name: name, subject: subject} <- fields, MapSet.member?(optional, subject) do
+    for %Core.Field{name: name} = field <- fields,
+        subject = subject_name(field.subject),
+        MapSet.member?(optional, subject) do
       quote(generated: true, do: is_nil(unquote(Fields.var(name))) or not is_nil(unquote(Fields.var(subject))))
     end
   end
+
+  defp subject_name(nil), do: nil
+  defp subject_name(:aggregate_id), do: :aggregate_id
+  defp subject_name({_tag, name}), do: name
+
+  # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
+  defp wire_step(wire) when is_binary(wire), do: String.to_atom(wire)
 end

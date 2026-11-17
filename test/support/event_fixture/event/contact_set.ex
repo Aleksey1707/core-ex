@@ -11,7 +11,7 @@ defmodule Core.EventFixture.Event.ContactSet do
       fields: [
         person_id: [prim: Core.EventFixture.PersonID, optional: true],
         contact: [prim: Core.EventFixture.Contact, subject: :person_id, optional: true],
-        note: [prim: Core.EventFixture.Note, subject: :aggregate_id]
+        note: [prim: Core.EventFixture.Note, personal: true, subject: :aggregate_id]
       ]
   end
 

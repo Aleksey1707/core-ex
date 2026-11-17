@@ -27,18 +27,23 @@ defmodule Core.Es.Event.Codec do
 
   События без нагрузки (`payload: nil` у `use Es.Event`) в конверте несут `nil`.
 
-  ## ПДн-поля нагрузки
+  ## ПДн-план нагрузки
 
-  У поля нагрузки по полям с `subject:` (ADR-0073, ADR-0074):
+  Место ПДн и субъекта в нагрузке по полям находит `Core.Es.Personal.Plan` (рекурсивно:
+  `personal:` у Prim, поля, элемента `list:`/значения `map:`, граница `set:`/ключа `map:`;
+  субъект — ближайший `subject:`, по умолчанию `:aggregate_id`). Кодек отдаёт его
+  `__es_personal__/0`.
 
-  - `dump` кладёт на место значения `%Core.Es.Personal.Marker{}` — дамп субъекта и wire-значение
-    поля; `nil` необязательного поля остаётся `nil`, `%Core.Es.Personal.Destroyed{}` — маркер
-    уничтоженного значения. Непустое значение при `nil` в поле-субъекте голова не пропускает;
-  - `load` превращает `{"$pd": null}` в `%Core.Es.Personal.Destroyed{}` и редактирует `detail`
-    ошибки поля. `{"$pd": null}` в поле без `subject:` — `:invalid_value`, `{"$pd": "<строка>"}`
-    в любом поле — `:sealed_personal_value` (`ns: :codec`).
+  На этом шаге шифрование ещё верхнеуровневое: маркер ставится только на поле с `subject:`
+  (ADR-0073, ADR-0074), рекурсивные маркеры — `Personal.Wire` (тикет 07). Поэтому:
 
-  Поля с `subject:` по событиям — `__es_subjects__/0`.
+  - `dump` кладёт на место значения поля с `subject:` `%Core.Es.Personal.Marker{}` — дамп
+    субъекта и wire-значение поля; `nil` необязательного поля остаётся `nil`,
+    `%Core.Es.Personal.Destroyed{}` — маркер уничтоженного значения. На прочих ПДн-местах
+    уничтоженное значение — отказ записи, непустое значение при `nil` в поле-субъекте — тоже;
+  - `load` превращает `{"$pd": null}` на ПДн-месте шага в `%Core.Es.Personal.Destroyed{}` и
+    редактирует `detail` ошибки поля. `{"$pd": null}` вне ПДн-места — `:invalid_value`,
+    `{"$pd": "<строка>"}` в любом поле — `:sealed_personal_value` (`ns: :codec`).
 
   `dump_payload/2` или `load_payload/3` в модуле кодека — `CompileError`: нестандартная
   wire-форма нагрузки живёт в плагине её типа, а не в кодеке событий (ADR-0060).
@@ -115,7 +120,7 @@ defmodule Core.Es.Event.Codec do
   - `codec:` семейства — не этот кодек: `family: семейство <F> объявляет codec: <C>, а не <кодек>`.
 
   Макрос занимает в вызывающем модуле имена `@es_family`, `@es_type`, `@es_aggregate_id`, `@es_by`,
-  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless`, `@es_subjects` и приватные
+  `@es_tag_by_mod`, `@es_mod_by_tag`, `@es_upcasts`, `@es_derived`, `@es_payloadless` и приватные
   `es_dump_payload/2`, `es_load_payload/3`.
   """
 
@@ -317,15 +322,26 @@ defmodule Core.Es.Event.Codec do
 
       @es_derived Core.Es.Event.Codec.derived(@es_tag_by_mod)
       @es_payloadless Core.Es.Event.Codec.payloadless(@es_tag_by_mod)
-      @es_subjects Core.Es.Event.Codec.subjects(@es_derived)
+      # План считается при вызове, а не при сборке модуля: обход декларации касается модулей типов
+      # нагрузки, а они в том же файле могут быть ещё не собраны (объявление нагрузки — ниже
+      # `use Core.Es.Aggregate`).
 
       @doc """
-      Поля нагрузки с `subject:` по модулю события: `[{поле, субъект}]`, субъект — `:aggregate_id`
-      или поле той же нагрузки. События без таких полей в карте нет.
+      ПДн-план кодека: `%{Событие => [%{path: путь, subject: субъект}]}`. Путь — атомы wire-ключей
+      объявления и `:each` для элемента `list:`/значения `map:`; субъект — `:aggregate_id` или
+      `{:path, путь}` от корня нагрузки. События без ПДн-мест в карте нет.
+      """
+      @spec __es_personal__() :: %{optional(module()) => [Core.Es.Personal.Plan.entry()]}
+
+      def __es_personal__, do: Core.Es.Event.Codec.personal(@es_derived)
+
+      @doc """
+      Временный адаптер до переезда потребителей: только ПДн-места верхнего уровня, субъект —
+      `:aggregate_id` или имя поля нагрузки. Заменяется `__es_personal__/0`.
       """
       @spec __es_subjects__() :: %{optional(module()) => [{atom(), atom()}, ...]}
 
-      def __es_subjects__, do: @es_subjects
+      def __es_subjects__, do: Core.Es.Event.Codec.subjects(@es_derived)
 
       unquote(derived_clauses())
 
@@ -407,11 +423,26 @@ defmodule Core.Es.Event.Codec do
   end
 
   @doc false
-  @spec subjects([{module(), module(), derivation()}]) :: %{optional(module()) => [{atom(), atom()}, ...]}
+  @spec personal([{module(), module(), derivation()}]) :: %{
+          optional(module()) => [Core.Es.Personal.Plan.entry()]
+        }
+
+  def personal(derived) when is_list(derived) do
+    for {event, _payload, {:fields, fields}} <- derived,
+        entries = Core.Es.Personal.Plan.entries(fields),
+        entries != [],
+        into: %{},
+        do: {event, entries}
+  end
+
+  # Временный адаптер `__es_subjects__/0`: потребители (снапшоты, проекции, процесс агрегата,
+  # case-модули) переезжают на `__es_personal__/0` в 07/08.
+  @doc false
+  @spec subjects([{module(), module(), derivation()}]) :: %{optional(module()) => [{atom(), atom()}]}
 
   def subjects(derived) when is_list(derived) do
     for {event, _payload, {:fields, fields}} <- derived,
-        pairs = Field.subjects(fields),
+        pairs = Core.Es.Personal.Plan.subjects(fields),
         pairs != [],
         into: %{},
         do: {event, pairs}
@@ -757,16 +788,11 @@ defmodule Core.Es.Event.Codec do
     Helper.Opts.module!([payload: payload], :payload, "#{@label}: tags")
 
     cond do
-      Helper.Module.exports?(payload, :__es_payload_fields__, 0) -> {:fields, payload.__es_payload_fields__()}
-      Helper.Module.exports?(payload, :__es_value_changed__, 0) -> {:fields, value_changed_fields(payload)}
+      Helper.Module.exports?(payload, :__es_payload_fields__, 0) -> {:fields, Core.Field.introspect(payload)}
+      Helper.Module.exports?(payload, :__es_value_changed__, 0) -> {:fields, Core.Field.introspect(payload)}
       Prim.prim?(payload) -> :prim
       true -> :plugin
     end
-  end
-
-  defp value_changed_fields(payload) do
-    [type: type, nilable: nilable?] = payload.__es_value_changed__()
-    Es.ValueChanged.fields(type, nilable?)
   end
 
   defp var(name), do: Macro.var(name, __MODULE__)

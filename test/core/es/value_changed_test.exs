@@ -45,6 +45,41 @@ defmodule Core.Es.ValueChangedTest do
       nilable: true
   end
 
+  defmodule PersonalChange do
+    @moduledoc false
+
+    use Core.Es.ValueChanged, type: Core.PrimFixture.Personal
+  end
+
+  defmodule ChangeFamily do
+    @moduledoc false
+
+    use Core.Es.Event.Family,
+      aggregate: Core.Es.Personal,
+      aggregate_id: Core.EventFixture.AggID,
+      by: Core.EventFixture.ActorID,
+      codec: __MODULE__.Codec
+
+    @type t :: struct()
+  end
+
+  defmodule PersonalChangeEvent do
+    @moduledoc false
+
+    use Core.Es.Event,
+      family: ChangeFamily,
+      payload: PersonalChange
+  end
+
+  defmodule ChangeFamily.Codec do
+    @moduledoc false
+
+    use Core.Es.Event.Codec,
+      family: ChangeFamily,
+      type: "value_changed_plan",
+      tags: %{PersonalChangeEvent => "value_changed_plan.changed"}
+  end
+
   test "new/2 с обязательным type" do
     old = SampleName.new!("old-name")
     new = SampleName.new!("new-name")
@@ -149,6 +184,53 @@ defmodule Core.Es.ValueChangedTest do
 
       assert DeclaredChange.declared() == [type: SampleName, nilable: true]
       assert UndeclaredChange.declared() == nil
+    end
+  end
+
+  describe "ПДн-план" do
+    test "old_value и new_value — места плана с субъектом :aggregate_id" do
+      assert Core.Es.Personal.Plan.entries(PersonalChange.__core_fields__()) == [
+               %{path: [:old_value], subject: :aggregate_id},
+               %{path: [:new_value], subject: :aggregate_id}
+             ]
+
+      assert ChangeFamily.Codec.__es_personal__() == %{
+               PersonalChangeEvent => [
+                 %{path: [:old_value], subject: :aggregate_id},
+                 %{path: [:new_value], subject: :aggregate_id}
+               ]
+             }
+    end
+
+    test "new/2 не принимает уничтоженное значение" do
+      assert_raise FunctionClauseError, fn -> PersonalChange.new(%Core.Es.Personal.Destroyed{}, nil) end
+    end
+
+    test "load: {\"$pd\": null} на old_value и new_value — %Destroyed{} независимо" do
+      old = Core.PrimFixture.Personal.new!("+7 900 000-00-01")
+      new = Core.PrimFixture.Personal.new!("+7 900 000-00-02")
+
+      event =
+        PersonalChangeEvent.new(
+          PersonalChange.new(old, new),
+          Core.EventFixture.AggID.new(),
+          Core.Version.new!(1),
+          Core.EventFixture.ActorID.new(),
+          Core.Es.Event.At.now!()
+        )
+
+      wire = ChangeFamily.Codec.dump(event, Core.CodecFixture.Internal)
+      payload = Map.new(wire["payload"], fn {key, _value} -> {key, %{"$pd" => nil}} end)
+      wire = %{wire | "payload" => payload}
+
+      assert {:ok,
+              %PersonalChangeEvent{
+                payload: %PersonalChange{
+                  old_value: %Core.Es.Personal.Destroyed{},
+                  new_value: %Core.Es.Personal.Destroyed{}
+                }
+              }} =
+               ChangeFamily.Codec.load(PersonalChangeEvent, wire, Core.CodecFixture.Internal)
     end
   end
 end

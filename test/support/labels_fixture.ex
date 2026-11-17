@@ -587,7 +587,7 @@ defmodule Core.LabelsFixture do
             backup: [entity: LabelsFixture.Address, optional: true],
             lines: [list: [entity: LabelsFixture.Line]],
             counts: [list: [prim: LabelsFixture.Count]],
-            shape: [union: LabelsFixture.Shape],
+            shape: [union: LabelsFixture.Shape, personal: false],
             title: [prim: LabelsFixture.Title]
           ]
 
@@ -755,7 +755,7 @@ defmodule Core.LabelsFixture do
             snapshot: [prim: LabelsFixture.SnapshotID],
             unit: [prim: LabelsFixture.Unit],
             base_unit: [prim: LabelsFixture.BaseUnit],
-            limits: [type: :map, optional: true]
+            limits: [type: :map, personal: false, optional: true]
           ]
 
         use Core.Labels.Fields,
@@ -790,7 +790,7 @@ defmodule Core.LabelsFixture do
         use Core.Es.Event.Payload,
           fields: [
             assignee: [prim: LabelsFixture.UserID],
-            shape: [union: LabelsFixture.Shape],
+            shape: [union: LabelsFixture.Shape, personal: false],
             amount: [prim: LabelsFixture.Amount],
             day: [prim: LabelsFixture.Day],
             moment: [prim: LabelsFixture.Moment]
@@ -826,10 +826,10 @@ defmodule Core.LabelsFixture do
             item: [prim: LabelsFixture.ItemID],
             origin: [prim: LabelsFixture.ItemID],
             approver: [prim: LabelsFixture.UserID],
-            seal: [entity: LabelsFixture.Seal],
-            mark: [union: LabelsFixture.Mark],
-            limits: [type: :map],
-            extra: [type: :map]
+            seal: [entity: LabelsFixture.Seal, personal: false],
+            mark: [union: LabelsFixture.Mark, personal: false],
+            limits: [type: :map, personal: false],
+            extra: [type: :map, personal: false]
           ]
 
         use Core.Labels.Fields,
@@ -989,10 +989,10 @@ defmodule Core.LabelsFixture do
         use Core.Es.Event.Payload,
           fields: [
             holder: [prim: LabelsFixture.Holder, subject: :aggregate_id],
-            address: [entity: LabelsFixture.Address, subject: :aggregate_id],
+            address: [entity: LabelsFixture.Address, personal: true, subject: :aggregate_id],
             aliases: [list: [prim: LabelsFixture.Holder], subject: :aggregate_id],
-            owner: [prim: LabelsFixture.UserID, subject: :aggregate_id],
-            limits: [type: :map, subject: :aggregate_id, optional: true]
+            owner: [prim: LabelsFixture.UserID, personal: true, subject: :aggregate_id],
+            limits: [type: :map, personal: true, subject: :aggregate_id, optional: true]
           ]
 
         use Core.Labels.Fields,
@@ -1100,8 +1100,8 @@ defmodule Core.LabelsFixture do
           fields: [
             prim: [prim: LabelsFixture.ItemID],
             enum: [enum: LabelsFixture.Status],
-            entity: [entity: LabelsFixture.Seal],
-            union: [union: LabelsFixture.Shape],
+            entity: [entity: LabelsFixture.Seal, personal: false],
+            union: [union: LabelsFixture.Shape, personal: false],
             list: [list: [prim: LabelsFixture.ItemID]],
             set: [set: [prim: LabelsFixture.ItemID]],
             map: [map: [key: [prim: LabelsFixture.ItemID], value: [enum: LabelsFixture.Status]]],
@@ -1152,14 +1152,14 @@ defmodule Core.LabelsFixture do
         use Core.Es.Event.Payload,
           fields: [
             item: [prim: LabelsFixture.ItemID],
-            shape: [union: LabelsFixture.Shape],
+            shape: [union: LabelsFixture.Shape, personal: false],
             tags: [set: [prim: LabelsFixture.ItemID]],
             limits: [map: [key: [prim: LabelsFixture.ItemID], value: [prim: LabelsFixture.Count]]],
-            quote: [entity: LabelsFixture.Quote],
+            quote: [entity: LabelsFixture.Quote, personal: false],
             secret: [prim: LabelsFixture.ItemID],
             digest: [prim: LabelsFixture.BareID],
             kind: [enum: LabelsFixture.BareKind],
-            ghost: [entity: LabelsFixture.Ghost]
+            ghost: [entity: LabelsFixture.Ghost, personal: false]
           ]
 
         use Core.Labels.Fields,

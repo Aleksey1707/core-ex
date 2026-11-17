@@ -48,7 +48,6 @@ defmodule Core.Es.Event do
 
   import Core.Helper.String, only: [first_line: 1]
 
-  alias Core.Codec.Field
   alias Core.Es.Event.Payload
   alias Core.Helper
   alias Core.Helper.FieldCheck
@@ -132,6 +131,7 @@ defmodule Core.Es.Event do
     payload = payload_parts(payload_mod)
 
     quote do
+      unquote(draft_entries(payload_mod))
       Core.Es.Event.payload!(unquote(Macro.escape(payload_mod)), unquote(aggregate_id_mod))
 
       alias Core.Es.Event, as: EsEvent
@@ -236,6 +236,12 @@ defmodule Core.Es.Event do
   end
 
   defp payload_parts(payload_mod) do
+    draft =
+      quote generated: true do
+        Core.Es.Personal.Plan.assert_writable!(payload, @es_draft_entries)
+        {__MODULE__, payload}
+      end
+
     %{
       type: quote(do: unquote(payload_mod).t()),
       specs: [quote(do: unquote(payload_mod).t())],
@@ -243,10 +249,20 @@ defmodule Core.Es.Event do
       heads: [quote(do: %unquote(payload_mod){} = payload)],
       value: quote(do: payload),
       draft_spec: quote(do: {__MODULE__, unquote(payload_mod).t()}),
-      draft: quote(do: {__MODULE__, payload}),
+      draft: draft,
       draft_doc: "Черновик события с нагрузкой — элемент результата `decide/2` агрегата.",
       new_doc: "Создать событие. Опциональный `id` — для восстановления из хранилища."
     }
+  end
+
+  # План записи — в теле модуля, а не при раскрытии `use`: вложенная нагрузка объявлена выше, но
+  # тело раскрывается целиком до исполнения, и `__core_fields__/0` у неё ещё нет.
+  defp draft_entries(nil), do: nil
+
+  defp draft_entries(payload_mod) do
+    quote generated: true do
+      @es_draft_entries Core.Es.Personal.Plan.runtime_entries(List.wrap(Core.Field.introspect(unquote(payload_mod))))
+    end
   end
 
   # ===== проверки сборки =====
@@ -287,6 +303,9 @@ defmodule Core.Es.Event do
     :ok
   end
 
-  defp aggregate_subjects(payload),
-    do: Enum.filter(Field.subjects(payload.__es_payload_fields__()), &match?({_name, :aggregate_id}, &1))
+  defp aggregate_subjects(payload) do
+    for %{path: path, subject: :aggregate_id} <- Core.Es.Personal.Plan.entries(Core.Field.introspect(payload)) do
+      {List.last(path), :aggregate_id}
+    end
+  end
 end

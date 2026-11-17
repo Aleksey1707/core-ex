@@ -981,7 +981,7 @@ defmodule Core.Labels.FieldsTest do
           use Core.Es.Event.Payload,
             fields: [
               name: [prim: Core.LabelsFixture.Name],
-              note: [type: unquote(note_type), optional: true]
+              note: [type: unquote(note_type), personal: false, optional: true]
             ]
 
           use Core.Labels.Fields, unquote(opts)

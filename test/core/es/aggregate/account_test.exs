@@ -91,7 +91,7 @@ defmodule Core.Es.Aggregate.AccountTest do
 
     test "указать владельца после уничтожения ключа счёта — holder_destroyed", ctx do
       payload = Personal.Test.destroyed(Event.HolderSet.Payload.new(holder("Иван Петров")))
-      state = given(opened(ctx), [Event.HolderSet.draft(payload)], by: ctx.by, at: @at)
+      state = given(opened(ctx), [{Event.HolderSet, payload}], by: ctx.by, at: @at)
 
       assert {:error, %Error{kind: :domain, code: :holder_destroyed}} =
                Account.decide(%Cmd.SetHolder{holder: holder("Пётр Иванов"), by: ctx.by, at: @at}, state)

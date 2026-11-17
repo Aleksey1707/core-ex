@@ -50,7 +50,7 @@ defmodule Core.EventFixture do
       personal: true
   end
 
-  # Не персональный Prim под `subject:`: единица шифротекста — поле, а не флаг Prim.
+  # Не персональный Prim на ПДн-месте: `personal: true` у поля шифрует значение целиком.
   defmodule Note do
     @moduledoc "Заметка о лице."
 

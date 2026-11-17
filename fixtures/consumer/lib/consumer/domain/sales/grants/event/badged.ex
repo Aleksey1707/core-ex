@@ -5,8 +5,8 @@ defmodule Consumer.Domain.Sales.Grants.Event.Badged do
   defmodule Payload do
     use Core.Es.Event.Payload,
       fields: [
-        badge: [union: Account.Profile.Badge],
-        channel: [union: Account.Profile.Channel, optional: true]
+        badge: [union: Account.Profile.Badge, personal: false],
+        channel: [union: Account.Profile.Channel, personal: false, optional: true]
       ]
   end
 

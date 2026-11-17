@@ -178,8 +178,8 @@ defmodule Core.DerivedFixture do
 
       use Core.Es.Event.Payload,
         fields: [
-          mark: [union: Core.DerivedFixture.Mark],
-          prev: [union: Core.DerivedFixture.Mark, optional: true]
+          mark: [union: Core.DerivedFixture.Mark, personal: false],
+          prev: [union: Core.DerivedFixture.Mark, personal: false, optional: true]
         ]
     end
 

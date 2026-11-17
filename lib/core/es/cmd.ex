@@ -129,6 +129,7 @@ defmodule Core.Es.Cmd do
   end
 
   defp nested_personal(owner, {:personal, _inner}, path), do: {owner, path}
+  defp nested_personal(owner, {:personal_false, inner}, path), do: nested_personal(owner, inner, path)
 
   defp nested_personal(_owner, {:entity, module}, path) do
     case Core.Field.introspect(module) do

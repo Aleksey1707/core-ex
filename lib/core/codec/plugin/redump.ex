@@ -289,6 +289,7 @@ defmodule Core.Codec.Plugin.Redump do
   end
 
   defp field_spec({:personal, inner}), do: field_spec(inner)
+  defp field_spec({:personal_false, inner}), do: field_spec(inner)
 
   defp field_spec({:prim, mod}) do
     case Codec.check_readable(mod) do
