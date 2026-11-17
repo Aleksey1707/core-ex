@@ -9,8 +9,9 @@ defmodule Core.Codec.Field do
   объявляется keyword-спекой с ровно одним kind-ключом из allowlist хоста (`prim:` / `enum:` /
   `entity:` / `union:` / `list:` / `set:` / `map:` / `type:`, у View ещё `view:` / `form:` /
   `jsonb:`) и ключами `optional: true` и `wire: "ключ"`; режимные ключи — `default:` у плагина,
-  `subject:` у нагрузки (ADR-0056, ADR-0073), `destroyable: true` у структуры — и у её элемента
-  `list:` и значения `map:` (ADR-0092). У структуры `wire:` и `subject:` нет: кодека у неё нет;
+  `personal: true` у нагрузки и структуры (ПДн-место), `subject:` у нагрузки — `:aggregate_id`,
+  `{:payload, поле}` или `{:local, поле}` (ADR-0056, ADR-0073), `destroyable: true` у структуры — и у
+  её элемента `list:` и значения `map:` (ADR-0092). У структуры `wire:` и `subject:` нет: кодека у неё нет;
   `default:` у неё — выражение значения поля, а не wire-литерал: его снимает со спеки и ставит в поле
   `Core.Struct` (ADR-0090).
 
@@ -67,7 +68,7 @@ defmodule Core.Codec.Field do
   @checked_defaults ~w(enum set map)a
 
   @enforce_keys ~w(name spec optional? wire default subject destroyable)a
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [personal: nil]
 
   @typedoc "Нормализованная спека значения поля."
   @type spec ::
@@ -87,10 +88,11 @@ defmodule Core.Codec.Field do
   @type default :: :none | {:default, term()}
 
   @typedoc """
-  Субъект ПДн-поля нагрузки события (`subject:`): `:aggregate_id` или имя поля той же нагрузки;
-  `nil` — поле без `subject:`. У плагина всегда `nil`.
+  Субъект ПДн-поля нагрузки события (`subject:`): `:aggregate_id`, имя поля той же нагрузки,
+  `{:payload, поле}` — поле нагрузки верхнего уровня — или `{:local, поле}` — соседнее поле той же
+  структуры; `nil` — поле без `subject:`. У плагина всегда `nil`.
   """
-  @type subject :: atom() | nil
+  @type subject :: atom() | {:payload, atom()} | {:local, atom()} | nil
 
   @typedoc """
   Режим нормализации: `:plugin` — плагин с загрузкой (`default:` разрешён), `:dump_only` — плагин
@@ -107,8 +109,9 @@ defmodule Core.Codec.Field do
   @type place :: [:list | :value]
 
   @typedoc """
-  Нормализованное поле: имя, спека значения, необязательность, wire-ключ, `default:`, субъект и
-  места с `destroyable: true` (только у структуры; пусто — поле не уничтожаемо).
+  Нормализованное поле: имя, спека значения, необязательность, wire-ключ, `default:`, субъект,
+  `personal:` (объявленный флаг ПДн-места) и места с `destroyable: true` (только у структуры; пусто —
+  поле не уничтожаемо).
   """
   @type t :: %__MODULE__{
           name: atom(),
@@ -117,6 +120,7 @@ defmodule Core.Codec.Field do
           wire: String.t(),
           default: default(),
           subject: subject(),
+          personal: boolean() | nil,
           destroyable: [place()]
         }
 
@@ -364,7 +368,7 @@ defmodule Core.Codec.Field do
     {opts, places} = pop_destroyable!(opts, mode, where)
     if mode == :struct, do: check_struct_keys!(opts, where)
 
-    extra = @extra_keys ++ if(mode == :payload, do: [:subject], else: [])
+    extra = @extra_keys ++ if(mode == :payload, do: [:subject], else: []) ++ personal_keys(mode)
 
     case Keyword.keys(opts) -- (@kinds ++ extra) do
       [] -> :ok
@@ -381,6 +385,7 @@ defmodule Core.Codec.Field do
       wire: wire!(name, opts, where),
       default: default!(opts, spec, optional?, mode != :dump_only, where),
       subject: subject!(opts, where),
+      personal: personal!(opts, where),
       destroyable: places
     }
   end
@@ -565,6 +570,20 @@ defmodule Core.Codec.Field do
     end
   end
 
+  # `personal:` — объявленный флаг ПДн-места поля: метаданные разбирает `Core.Field.Meta`, грамматика
+  # принимает ключ в ролях, которым он доступен. У плагина флага нет: шифрование — свойство нагрузки
+  # события и структуры, а не wire-формы.
+  defp personal_keys(mode) when mode in ~w(struct payload labels)a, do: [:personal]
+  defp personal_keys(_mode), do: []
+
+  defp personal!(opts, where) do
+    case Keyword.fetch(opts, :personal) do
+      :error -> nil
+      {:ok, personal?} when is_boolean(personal?) -> personal?
+      {:ok, other} -> Helper.Opts.reject!(where, "personal: ожидается boolean, получено #{inspect(other)}")
+    end
+  end
+
   defp wire!(name, opts, where) do
     case Keyword.fetch(opts, :wire) do
       :error -> Atom.to_string(name)
@@ -598,8 +617,15 @@ defmodule Core.Codec.Field do
       {:ok, subject} when is_atom(subject) and subject not in ~w(nil true false)a ->
         subject
 
+      {:ok, {tag, name}} when tag in ~w(payload local)a and is_atom(name) and name not in ~w(nil true false)a ->
+        {tag, name}
+
       {:ok, other} ->
-        Helper.Opts.reject!(where, "subject: ожидается :aggregate_id или имя поля нагрузки, получено #{inspect(other)}")
+        Helper.Opts.reject!(
+          where,
+          "subject: ожидается :aggregate_id или имя поля нагрузки; вложенный адрес субъекта — " <>
+            "{:payload, поле} или {:local, поле}; получено #{inspect(other)}"
+        )
     end
   end
 
@@ -776,19 +802,22 @@ defmodule Core.Codec.Field do
     end)
   end
 
+  @doc false
+  @spec union_type([Macro.t()]) :: Macro.t()
+
+  # Объединение справа (`A | (B | nil)`): так `Macro.to_string/1` печатает тип плоско.
+  def union_type(types) do
+    [last | rest] = Enum.reverse(Enum.flat_map(types, &alternatives/1))
+
+    Enum.reduce(rest, last, &quote(do: unquote(&1) | unquote(&2)))
+  end
+
   # ---
 
   defp place_type(spec, places, place) do
     type = spec_type(spec, places, place)
 
     if place in places, do: union_type([type, quote(do: Core.Es.Personal.Destroyed.t())]), else: type
-  end
-
-  # Объединение справа (`A | (B | nil)`): так `Macro.to_string/1` печатает тип плоско.
-  defp union_type(types) do
-    [last | rest] = Enum.reverse(Enum.flat_map(types, &alternatives/1))
-
-    Enum.reduce(rest, last, &quote(do: unquote(&1) | unquote(&2)))
   end
 
   defp alternatives({:|, _meta, [left, right]}), do: [left | alternatives(right)]

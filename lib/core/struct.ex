@@ -123,6 +123,8 @@ defmodule Core.Struct do
   - `@type t` по видам полей, с `events:` — и поле `events`;
   - `__struct_fields__/0` — внутренняя для builder'ов ролей: нормализованные поля спеки, форма — не
     контракт; у собранного модуля её читает `Core.Codec.Field.struct_fields/1`;
+  - `__core_fields__/0` — внутренняя: тот же состав полей единым IR (`Core.Field`), форма — не
+    контракт; у собранного модуля её читает `Core.Field.introspect/1`;
   - `__struct_events__/0` — только с `events:`, внутренняя: семейство событий; у собранного модуля
     её читает `Core.Struct.events_family/1` — роли `Core.Repo.Pg.StateStored`, `Core.Es.Aggregate`
     и `Core.Es.Cmd`.
@@ -199,6 +201,13 @@ defmodule Core.Struct do
         @spec __struct_fields__() :: [Core.Codec.Field.t()]
 
         def __struct_fields__, do: @core_struct_fields
+
+        @core_fields Core.Field.normalize!(@core_struct_fields, :struct, "Struct: fields")
+
+        @doc false
+        @spec __core_fields__() :: [Core.Field.t()]
+
+        def __core_fields__, do: @core_fields
       end
     ]
   end

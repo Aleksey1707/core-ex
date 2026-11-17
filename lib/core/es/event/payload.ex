@@ -43,7 +43,9 @@ defmodule Core.Es.Event.Payload do
     ПДн-значение при `nil` в поле-субъекте голова не пропускает;
   - `Inspect` без полей с `subject:`;
   - `__es_payload_fields__/0` — внутренняя для `Core.Es.Event.Codec`: нормализованные поля спеки
-    (`Core.Codec.Field`), форма поля — не контракт.
+    (`Core.Codec.Field`), форма поля — не контракт;
+  - `__core_fields__/0` — внутренняя: тот же состав полей единым IR (`Core.Field`); читает
+    `Core.Field.introspect/1`.
 
   Кодирует такую нагрузку `Core.Es.Event.Codec` события клаузами, которые собирает этот модуль из
   поштучных блоков значения поля `Core.Codec.Plugin.Fields`: на месте поля с `subject:` — маркер
@@ -95,6 +97,13 @@ defmodule Core.Es.Event.Payload do
 
         def __es_payload_fields__, do: @es_payload_fields
 
+        @core_fields Core.Field.normalize!(@es_payload_fields, :payload, "Es.Event.Payload: fields")
+
+        @doc false
+        @spec __core_fields__() :: [Core.Field.t()]
+
+        def __core_fields__, do: @core_fields
+
         @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
         @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(@es_payload_fields)))) :: t()
 
@@ -126,6 +135,12 @@ defmodule Core.Es.Event.Payload do
   end
 
   # ---
+
+  defp check_subject!(%Field{subject: {:payload, name}} = field, by_name, where),
+    do: check_subject!(%{field | subject: name}, by_name, where)
+
+  defp check_subject!(%Field{subject: {:local, name}} = field, by_name, where),
+    do: check_subject!(%{field | subject: name}, by_name, where)
 
   defp check_subject!(%Field{spec: spec, subject: nil}, _by_name, where) do
     case personal_prim(spec) do

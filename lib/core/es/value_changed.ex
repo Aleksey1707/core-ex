@@ -10,7 +10,8 @@ defmodule Core.Es.ValueChanged do
 
   `__es_value_changed__/0` отдаёт `type:` и `nilable:`: по ним `Core.Es.Event.Codec` выводит
   клаузы нагрузки события с такой нагрузкой — map
-  `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
+  `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`). `__core_fields__/0` —
+  та же декларация в едином IR (`Core.Field`), внутренняя.
 
   Макрос занимает в модуле имя `@es_value_changed`: `type:` и `nilable:` модуля, который ещё
   собирается, отдаёт `declared/1` — по нему `use Core.Labels.Fields, change:` ниже берёт вид значения
@@ -56,6 +57,13 @@ defmodule Core.Es.ValueChanged do
 
       def __es_value_changed__, do: @es_value_changed
 
+      @core_fields Core.Es.ValueChanged.core_fields(unquote(type_mod), unquote(nilable?))
+
+      @doc false
+      @spec __core_fields__() :: [Core.Field.t()]
+
+      def __core_fields__, do: @core_fields
+
       @doc "Создать запись изменения значения."
       @spec new(unquote_splicing(Keyword.values(Core.Codec.Field.typespec(fields)))) :: t()
 
@@ -80,6 +88,17 @@ defmodule Core.Es.ValueChanged do
   @spec declared(module()) :: [type: module(), nilable: boolean()] | nil
 
   def declared(module) when is_atom(module), do: Module.get_attribute(module, :es_value_changed)
+
+  # Синтетическая декларация `old_value` / `new_value` в IR: у нагрузки нет своей спеки полей, вид
+  # задаёт `type:`, но обходчику ПДн и типам нужен тот же состав, что у нагрузки события.
+  @doc false
+  @spec core_fields(module(), boolean()) :: [Core.Field.t()]
+
+  def core_fields(type, nilable?) when is_atom(type) and is_boolean(nilable?) do
+    type
+    |> fields(nilable?)
+    |> Core.Field.normalize!(:payload, "Es.ValueChanged")
+  end
 
   @doc """
   Спека полей `old_value` / `new_value` по типу значения: Prim → `prim:`, `Core.Enum` → `enum:`,
