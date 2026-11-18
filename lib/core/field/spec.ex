@@ -95,6 +95,24 @@ defmodule Core.Field.Spec do
   def kinds(host) when is_atom(host), do: kinds!(host)
 
   @doc false
+  @spec check_kinds!(atom(), [atom()], [atom()], String.t()) :: :ok
+
+  # Набор, который свитч обязан обработать: allowlist хоста плюс явные host-extra виды.
+  # Сравнение в обе стороны: пропущенный вид — ошибка сборки, лишний — мёртвая клауза.
+  def check_kinds!(host, handled, extras, where)
+      when is_atom(host) and is_list(handled) and is_list(extras) and is_binary(where) do
+    expected = Enum.uniq(kinds!(host) ++ extras)
+    handled = Enum.uniq(handled)
+    missing = Enum.sort(expected -- handled)
+    extra = Enum.sort(handled -- expected)
+
+    case {missing, extra} do
+      {[], []} -> :ok
+      {missing, extra} -> Helper.Opts.reject!(where, gaps_text(missing, extra))
+    end
+  end
+
+  @doc false
   @spec value_module_kinds() :: [atom()]
 
   def value_module_kinds, do: @value_module_kinds
@@ -118,6 +136,15 @@ defmodule Core.Field.Spec do
   end
 
   # ---
+
+  defp gaps_text(missing, extra) do
+    [
+      if(missing != [], do: "нет обработки для видов #{inspect(missing)}"),
+      if(extra != [], do: "виды вне allowlist: #{inspect(extra)}")
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("; ")
+  end
 
   defp kinds_text(allowed, other),
     do: "ожидается ровно один из #{Enum.map_join(allowed, "/", &"#{&1}:")}, получено #{inspect(other)}"

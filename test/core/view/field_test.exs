@@ -40,6 +40,25 @@ defmodule Core.View.FieldTest do
     end
   end
 
+  describe "форма значения" do
+    test "shape_kinds: каждый вид с формой приводит значение" do
+      cases = %{
+        prim: {{:prim, ViewFixture.ID, :uuid}, @hex, @uuid},
+        enum: {{:enum, ViewFixture.Status}, "new", :new},
+        list: {{:list, {:prim, ViewFixture.ID, :uuid}}, [@hex], [@uuid]},
+        set: {{:set, {:prim, ViewFixture.ID, :uuid}}, [@hex], MapSet.new([@uuid])},
+        map: {{:map, {:prim, ViewFixture.ID, :uuid}, {:enum, ViewFixture.Status}}, %{@hex => "new"}, %{@uuid => :new}}
+      }
+
+      assert Enum.sort(Map.keys(cases)) == Enum.sort(Core.View.Field.shape_kinds())
+
+      for kind <- Core.View.Field.shape_kinds() do
+        {spec, value, expected} = Map.fetch!(cases, kind)
+        assert Core.View.shape(spec, value) == expected, "shape: #{kind}"
+      end
+    end
+  end
+
   # ---
 
   defp types do

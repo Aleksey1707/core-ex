@@ -48,6 +48,7 @@ defmodule Core.Field do
   @declarable ~w(struct payload labels)a
   @nested_kinds ~w(list set)a
   @personalable ~w(struct payload labels)a
+  @typespec_kinds ~w(prim enum entity union list set map type)a
 
   # ===== декларация =====
 
@@ -688,4 +689,8 @@ defmodule Core.Field do
         false
     end)
   end
+
+  # Новый базовый вид без проекции `spec_type/4` иначе падал бы `FunctionClauseError` в чужом
+  # модуле; набор тот же у структуры, нагрузки события и `ValueChanged`.
+  Core.Field.Spec.check_kinds!(:struct, @typespec_kinds, [], "Core.Field: spec_type")
 end

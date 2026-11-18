@@ -36,6 +36,7 @@ defmodule Core.Codec.Plugin.Redump do
 
   @label "Codec.Plugin"
   @callback_fun {:redump_spec, 1}
+  @field_spec_kinds ~w(prim enum entity union list set map type)a
 
   # ===== генерация =====
 
@@ -326,4 +327,8 @@ defmodule Core.Codec.Plugin.Redump do
       {key, value} -> {:dict, key, value}
     end
   end
+
+  # Новый вид плагина без проекции redump иначе падал бы `FunctionClauseError` при сборке
+  # плагина; вид без redump-спеки всё равно обязан иметь клаузу, возвращающую `nil`.
+  Core.Field.Spec.check_kinds!(:plugin, @field_spec_kinds, [], @label)
 end

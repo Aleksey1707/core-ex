@@ -148,6 +148,31 @@ defmodule Core.Field.SpecTest do
     end
   end
 
+  describe "полнота видов хоста" do
+    test "набор обработанных видов совпадает с allowlist" do
+      assert Spec.check_kinds!(:view, Spec.kinds(:view), [], "View") == :ok
+      assert Spec.check_kinds!(:struct, Spec.kinds(:struct), [], "Struct") == :ok
+    end
+
+    test "пропущенный вид" do
+      handled = Spec.kinds(:view) -- [:jsonb]
+
+      assert_raise CompileError, ~r/^View: нет обработки для видов \[:jsonb\]$/, fn ->
+        Spec.check_kinds!(:view, handled, [], "View")
+      end
+    end
+
+    test "вид вне allowlist" do
+      assert_raise CompileError, ~r/^View: виды вне allowlist: \[:text\]$/, fn ->
+        Spec.check_kinds!(:view, Spec.kinds(:view) ++ [:text], [], "View")
+      end
+    end
+
+    test "extras допускают вид хоста" do
+      assert Spec.check_kinds!(:labels, Spec.kinds(:labels) ++ [:text], [:text], "Labels") == :ok
+    end
+  end
+
   describe "вид × хост" do
     @kinds ~w(prim enum entity union list set map type view form jsonb)a
     @hosts [

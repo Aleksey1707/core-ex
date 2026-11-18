@@ -40,6 +40,9 @@ defmodule Core.Codec.Plugin.Fields.Kind do
     end
   end
 
+  # Строка адаптера вне allowlist плагина — мёртвая клауза; ловим на сборке.
+  Core.Field.Spec.check_kinds!(:plugin, Map.keys(@adapters), [], @label)
+
   # ===== адаптер =====
 
   @doc false

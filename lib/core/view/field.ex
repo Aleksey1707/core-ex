@@ -45,6 +45,11 @@ defmodule Core.View.Field do
     jsonb: %{type: :jsonb, shape?: false, needs_codec?: true, dump: :jsonb}
   }
 
+  # Виды, для которых `Core.View.shape/2` обязан иметь клаузу: листья внутри контейнеров —
+  # `prim`/`enum`, контейнеры — `list`/`set`/`map`. Сборка сверяет этот список с флагами
+  # `shape?`; наличие самих клауз проверяет табличный тест.
+  @shape_kinds ~w(prim enum list set map)a
+
   @enforce_keys ~w(name spec optional? type_ast shape_ast dump_ast shape? needs_codec?)a
   defstruct @enforce_keys
 
@@ -82,19 +87,18 @@ defmodule Core.View.Field do
   @spec check_kinds!([atom()]) :: :ok
 
   def check_kinds!(kinds) when is_list(kinds) do
-    Enum.each(kinds, fn kind ->
-      case Map.get(@projections, kind) do
-        %{type: type, dump: dump, shape?: shape?, needs_codec?: codec?}
-        when is_atom(type) and is_atom(dump) and shape? in [true, false, :nested] and
-               codec? in [true, false, :nested] ->
-          :ok
+    check_projections!(kinds)
+    check_shape!(kinds)
 
-        _ ->
-          raise CompileError,
-            description: "#{@label}: вид #{kind}: нет всех проекций (тип, форма, дамп, признаки)"
-      end
-    end)
+    # Строки проекций проверены выше: helper добирает только виды вне allowlist, сохраняя
+    # прежний текст для отсутствующего вида.
+    Core.Field.Spec.check_kinds!(:view, Map.keys(@projections), [], @label)
   end
+
+  @doc false
+  @spec shape_kinds() :: [atom()]
+
+  def shape_kinds, do: @shape_kinds
 
   @doc false
   @spec build(atom(), spec(), boolean()) :: t()
@@ -132,6 +136,33 @@ defmodule Core.View.Field do
   def bind_dump(ast, value, codec), do: subst(ast, %{@dump_value_var => value, @dump_codec_var => codec})
 
   # ---
+
+  defp check_projections!(kinds) do
+    Enum.each(kinds, fn kind ->
+      case Map.get(@projections, kind) do
+        %{type: type, dump: dump, shape?: shape?, needs_codec?: codec?}
+        when is_atom(type) and is_atom(dump) and shape? in [true, false, :nested] and
+               codec? in [true, false, :nested] ->
+          :ok
+
+        _ ->
+          raise CompileError,
+            description: "#{@label}: вид #{kind}: нет всех проекций (тип, форма, дамп, признаки)"
+      end
+    end)
+  end
+
+  defp check_shape!(kinds) do
+    for kind <- @shape_kinds, kind not in kinds do
+      raise CompileError, description: "#{@label}: вид #{kind}: клауза формы вне allowlist"
+    end
+
+    for {kind, %{shape?: shape?}} <- @projections, shape? != false, kind not in @shape_kinds do
+      raise CompileError, description: "#{@label}: вид #{kind}: форма без клаузы View.shape/2"
+    end
+
+    :ok
+  end
 
   defp subst(ast, bindings) do
     Macro.prewalk(ast, fn
