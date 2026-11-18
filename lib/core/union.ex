@@ -68,7 +68,7 @@ defmodule Core.Union do
     variants = Keyword.fetch!(opts, :variants)
 
     quote do
-      @core_variants Core.Union.variants!(unquote(variants), __MODULE__)
+      @core_variants Core.Union.variants!(unquote(variants))
       @core_variant_index Map.new(@core_variants, &{&1.module, &1})
 
       @doc false
@@ -105,9 +105,9 @@ defmodule Core.Union do
   end
 
   @doc false
-  @spec variants!(term(), module()) :: [Variant.t()]
+  @spec variants!(term()) :: [Variant.t()]
 
-  def variants!(variants, _union) when is_list(variants) and variants != [] do
+  def variants!(variants) when is_list(variants) and variants != [] do
     parsed = Enum.map(variants, &variant!/1)
     Helper.FieldCheck.unique!(Enum.map(parsed, & &1.module), @where)
     Variants.check_places!(Enum.map(parsed, &{&1.module, &1.place}), @where)
@@ -115,7 +115,7 @@ defmodule Core.Union do
     parsed
   end
 
-  def variants!(other, _union),
+  def variants!(other),
     do: Helper.Opts.reject!(@where, "ожидается непустой список {Тип, адрес}, получено #{inspect(other)}")
 
   # ---

@@ -504,10 +504,7 @@ defmodule Core.Web.Event do
   defp dump_place(_spec, nil, _codec), do: nil
   defp dump_place(spec, value, codec), do: dump_plain(spec, value, codec)
 
-  defp dump_open({:personal, inner}, value, places, path, codec),
-    do: dump_value(inner, value, places, path, codec)
-
-  defp dump_open({:personal_false, inner}, value, places, path, codec),
+  defp dump_open({tag, inner}, value, places, path, codec) when tag in [:personal, :personal_false],
     do: dump_value(inner, value, places, path, codec)
 
   defp dump_open({:entity, mod}, value, places, path, codec) do
@@ -532,8 +529,10 @@ defmodule Core.Web.Event do
   defp dump_open(spec, value, _places, _path, codec), do: dump_plain(spec, value, codec)
 
   defp dump_plain(_spec, nil, _codec), do: nil
-  defp dump_plain({:personal, inner}, value, codec), do: dump_plain(inner, value, codec)
-  defp dump_plain({:personal_false, inner}, value, codec), do: dump_plain(inner, value, codec)
+
+  defp dump_plain({tag, inner}, value, codec) when tag in [:personal, :personal_false],
+    do: dump_plain(inner, value, codec)
+
   defp dump_plain({:prim, _mod}, value, codec), do: codec.dump(value)
   defp dump_plain({:entity, _mod}, value, codec), do: codec.dump(value)
   defp dump_plain({:union, _family}, value, codec), do: codec.dump(value)

@@ -301,7 +301,8 @@ defmodule Core.Es.EventCompatCase do
   end
 
   defp personal_paths(%mod{payload: payload} = event, _event_codec) do
-    hidden = hide_places(payload, Core.Es.Personal.Plan.runtime_places(mod.__es_payload__()))
+    entries = Core.Es.Personal.Plan.runtime_places(mod.__es_payload__())
+    hidden = Core.Field.hide_personal(payload, Enum.map(entries, & &1.path))
 
     event
     |> Map.from_struct()
@@ -309,25 +310,6 @@ defmodule Core.Es.EventCompatCase do
     |> personal_values([])
     |> Enum.sort()
   end
-
-  # Значение-место плана скрывается целиком: открытая фикстура несёт ПДн только там.
-  defp hide_places(value, entries), do: Enum.reduce(entries, value, &hide_at(&2, &1.path))
-
-  defp hide_at(_value, []), do: nil
-
-  defp hide_at(list, [:each | rest]) when is_list(list),
-    do: Enum.map(list, &hide_at(&1, rest))
-
-  defp hide_at(map, [:each | rest]) when is_map(map) and not is_struct(map),
-    do: Map.new(map, fn {key, value} -> {key, hide_at(value, rest)} end)
-
-  defp hide_at(%_{} = struct, [step | rest]) when is_atom(step),
-    do: Map.put(struct, step, hide_at(Map.fetch!(struct, step), rest))
-
-  defp hide_at(map, [step | rest]) when is_map(map) and is_atom(step),
-    do: Map.put(map, step, hide_at(Map.fetch!(map, step), rest))
-
-  defp hide_at(value, _path), do: value
 
   defp personal_values(%mod{} = value, path) do
     cond do

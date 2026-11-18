@@ -491,6 +491,7 @@ defmodule Core.Es.Event.Codec do
   def dump_payload_clause(event, payload, kind) when kind in [:prim, :plugin] do
     {value, codec} = {var(:payload), var(:codec)}
     entries = payload_entries(payload, kind)
+    runtime = Core.Es.Personal.Plan.runtime_places(payload)
     aggregate? = Enum.any?(entries, &(&1.subject == :aggregate_id))
     aggregate_id = var(:aggregate_id)
 
@@ -511,16 +512,33 @@ defmodule Core.Es.Event.Codec do
         unquote(codec).dump(unquote(value))
       end
 
+    # Отказ записи — по плану значения: guard `dump` места-сущности/`union:`/`type: :map`
+    # пропускает struct, и уничтоженное значение иначе ушло бы маркером с телом `{}`.
+    checked =
+      quote generated: true do
+        Core.Es.Personal.Plan.assert_writable!(
+          unquote(value),
+          unquote(Macro.escape(runtime)),
+          aggregate_id: unquote(if aggregate?, do: aggregate_id, else: :unknown)
+        )
+
+        unquote(dumped)
+      end
+
     body =
       case entries do
         [] ->
-          dumped
+          checked
 
         entries ->
           quoted = Macro.escape(entries)
 
           quote generated: true do
-            Core.Es.Event.Payload.mark_payload(unquote(dumped), unquote(quoted), unquote(aggregate_id_wire(aggregate?)))
+            Core.Es.Event.Payload.mark_payload(
+              unquote(checked),
+              unquote(quoted),
+              unquote(aggregate_id_wire(aggregate?))
+            )
           end
       end
 

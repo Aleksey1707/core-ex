@@ -311,6 +311,7 @@ defmodule Core.Es.Personal.Plan do
     end
   end
 
+  # Wire-ключи объявления, а не внешние данные: таблицу атомов путь плана не засоряет.
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   defp wire_step(wire) when is_binary(wire), do: String.to_atom(wire)
 

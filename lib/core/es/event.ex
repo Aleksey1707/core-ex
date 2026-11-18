@@ -169,20 +169,9 @@ defmodule Core.Es.Event do
       @before_compile Core.Es.Event
 
       @doc unquote(payload.draft_doc)
-      @spec draft(unquote_splicing(payload.specs)) :: unquote(payload.draft_spec)
-
       def draft(unquote_splicing(payload.heads)), do: unquote(payload.draft)
 
       @doc unquote(payload.new_doc)
-      @spec new(
-              unquote_splicing(payload.specs),
-              unquote(aggregate_id_mod).t(),
-              Version.t(),
-              unquote(by_mod).t(),
-              EsEvent.At.t(),
-              EsEvent.ID.t() | nil
-            ) :: t()
-
       def new(unquote_splicing(payload.args), aggregate_id, aggregate_version, by, at, id \\ nil)
 
       def new(
@@ -222,6 +211,7 @@ defmodule Core.Es.Event do
   defmacro __before_compile__(env) do
     {payload_mod, aggregate_id_mod, by_mod} = Module.get_attribute(env.module, :es_read_type)
     personal? = Module.get_attribute(env.module, :es_personal_payload) == true
+    {draft_args, draft_ret, new_args} = payload_specs(payload_mod, aggregate_id_mod, by_mod)
 
     payload_type =
       cond do
@@ -231,6 +221,9 @@ defmodule Core.Es.Event do
       end
 
     quote do
+      @spec draft(unquote_splicing(draft_args)) :: unquote(draft_ret)
+      @spec new(unquote_splicing(new_args)) :: t()
+
       @type t :: %__MODULE__{
               id: Core.Es.Event.ID.t(),
               payload: unquote(payload_type),
@@ -261,13 +254,35 @@ defmodule Core.Es.Event do
   defp payload_form!(payload),
     do: Helper.Opts.reject!(@payload_where, "ожидается модуль или nil, получено #{inspect(payload)}")
 
+  # Типы `draft`/`new` — проекция записи нагрузки (`write_t()`, если он есть); выбор отложен до
+  # `__before_compile__`: при раскрытии `use` нагрузка бывает ещё не собрана.
+  defp payload_specs(nil, aggregate_id_mod, by_mod) do
+    args = tail_specs(aggregate_id_mod, by_mod)
+
+    {[], quote(do: __MODULE__), args}
+  end
+
+  defp payload_specs(payload_mod, aggregate_id_mod, by_mod) do
+    write = Core.Field.write_type(payload_mod)
+
+    {[write], quote(do: {__MODULE__, unquote(write)}), [write | tail_specs(aggregate_id_mod, by_mod)]}
+  end
+
+  defp tail_specs(aggregate_id_mod, by_mod) do
+    [
+      quote(do: unquote(aggregate_id_mod).t()),
+      quote(do: Core.Version.t()),
+      quote(do: unquote(by_mod).t()),
+      quote(do: Core.Es.Event.At.t()),
+      quote(do: Core.Es.Event.ID.t() | nil)
+    ]
+  end
+
   defp payload_parts(nil) do
     %{
-      specs: [],
       args: [],
       heads: [],
       value: nil,
-      draft_spec: quote(do: __MODULE__),
       draft: quote(do: __MODULE__),
       draft_doc: "Черновик события без нагрузки — элемент результата `decide/2` агрегата.",
       new_doc: "Создать событие без нагрузки. Опциональный `id` — для восстановления из хранилища."
@@ -282,11 +297,9 @@ defmodule Core.Es.Event do
       end
 
     %{
-      specs: [quote(do: unquote(payload_mod).t())],
       args: [quote(do: payload)],
       heads: [quote(do: %unquote(payload_mod){} = payload)],
       value: quote(do: payload),
-      draft_spec: quote(do: {__MODULE__, unquote(payload_mod).t()}),
       draft: draft,
       draft_doc: "Черновик события с нагрузкой — элемент результата `decide/2` агрегата.",
       new_doc: "Создать событие. Опциональный `id` — для восстановления из хранилища."

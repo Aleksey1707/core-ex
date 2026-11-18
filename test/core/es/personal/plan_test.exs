@@ -2,6 +2,7 @@ defmodule Core.Es.Personal.PlanTest do
   use ExUnit.Case, async: true
 
   alias Core.Es.Event.Payload
+  alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Plan
 
   defmodule Name do
@@ -35,6 +36,18 @@ defmodule Core.Es.Personal.PlanTest do
     @moduledoc false
 
     defstruct [:value]
+  end
+
+  defmodule UnionMember do
+    @moduledoc false
+
+    use Core.Struct, fields: [phone: [prim: Core.PrimFixture.Personal]]
+  end
+
+  defmodule UnionPersonal do
+    @moduledoc false
+
+    use Core.Union, variants: [{UnionMember, "member"}]
   end
 
   @where "Es.Event.Payload: fields"
@@ -181,6 +194,20 @@ defmodule Core.Es.Personal.PlanTest do
       assert Plan.entries!(fields, @where, uuid_prim: &Payload.uuid_prim?/1) ==
                [%{path: [:thing], subject: :aggregate_id}]
     end
+
+    test "ПДн в декларативном варианте union: — только personal: true" do
+      assert_raise CompileError,
+                   ~r/^ПДн-место в вариантах семейства .*UnionPersonal: поле mark — укажите personal: true$/,
+                   fn -> entries!(mark: [union: UnionPersonal]) end
+
+      assert_raise CompileError, ~r/ПДн-место в вариантах семейства .*UnionPersonal: поле mark/, fn ->
+        entries!(mark: [union: UnionPersonal, personal: false])
+      end
+
+      assert entries!(mark: [union: UnionPersonal, personal: true]) == [
+               %{path: [:mark], subject: :aggregate_id}
+             ]
+    end
   end
 
   describe "assert_writable!/3" do
@@ -191,6 +218,19 @@ defmodule Core.Es.Personal.PlanTest do
 
       assert_raise ArgumentError, ~r/ПДн-место steps\.each\.recipient: уничтоженное/, fn ->
         Plan.assert_writable!(%{steps: [step]}, entries)
+      end
+    end
+
+    test "уничтоженное значение на месте union: и type: :map — отказ" do
+      entries =
+        Plan.runtime_entries(fields(mark: [union: UnionPersonal, personal: true], extra: [type: :map, personal: true]))
+
+      assert_raise ArgumentError, ~r/ПДн-место mark: уничтоженное/, fn ->
+        Plan.assert_writable!(%{mark: %Destroyed{}, extra: %{}}, entries)
+      end
+
+      assert_raise ArgumentError, ~r/ПДн-место extra: уничтоженное/, fn ->
+        Plan.assert_writable!(%{mark: nil, extra: %Destroyed{}}, entries)
       end
     end
 

@@ -74,9 +74,10 @@ use Core.Prim.String,
 - `personal: true` у спеки элемента (`list: [prim: X, personal: true]`) — место элемента или
   значения;
 - Prim с `personal: true` — место-лист на каждом своём месте, включая поля вложенной сущности;
-- `entity:` с общей декларацией — спуск в её поля; непрозрачный тип (`entity:` без
-  `__core_fields__/0`, `union:`, `type: :map`) требует явного `personal: true` (шифруется всё
-  значение) или `personal: false` (ПДн внутри нет);
+- `entity:` с общей декларацией — спуск в её поля; `union:` с ПДн в декларативных вариантах —
+  только `personal: true` (шифруется всё значение варианта; `personal: false` — `CompileError` с
+  путём), `union:` без ПДн в вариантах и `type: :map` требуют явного `personal: true` (шифруется
+  всё значение) или `personal: false` (ПДн внутри нет); `entity:` без `__core_fields__/0` — так же;
 - `list:` — место на каждом элементе, значения `map:` — на каждом значении; `set:` и ключ `map:`
   с ПДн-листом поднимают границу до контейнера — шифруется весь `set:`/`map:`;
 - `enum:` и `type:` сами ПДн не бывают.
@@ -328,6 +329,12 @@ def upcast("order.created.v1", %{"payload" => %{"full_name" => %{"$pd" => nil} =
   исключения в `decide` / `evolve` (команда, состояние) печатают отчёт процесса, отчёт супервизора
   и exit вызывающего, и ПДн в них остаются под `Inspect` Prim (`21-observability.md`,
   «Персональные данные в выводе»).
+
+В state-stored строке живое ПДн остаётся открытым (таблица выше), а `%Destroyed{}` хранится как
+`{"$pd": null}` на любой глубине: маппинг — `Core.Es.Personal.State.dump/1` / `load/1`, хранилище
+ключей не зовётся, ключ `$pd` в такой строке зарезервирован. Проверяется:
+`test/core/es/personal/state_test.exs`; `test/core/repo/pg/state_stored_test.exs`, describe
+«ПДн-значение в строке».
 
 Проверяется: `test/core/es/aggregate/process/server_test.exs`, describe «stale?/3» и
 «stale_in/3»; `test/core/es/aggregate/process_test.exs`, тесты «состояние старше state_max_age:

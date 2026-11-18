@@ -23,6 +23,18 @@ defmodule Core.Es.Event.PayloadPersonalTest do
     use Core.Es.Event.Payload, fields: [steps: [list: [entity: Step]]]
   end
 
+  defmodule Receiver do
+    @moduledoc false
+
+    use Core.Struct, fields: [phone: [prim: Core.PrimFixture.Personal]]
+  end
+
+  defmodule Receivers do
+    @moduledoc false
+
+    use Core.Union, variants: [{Receiver, "receiver"}]
+  end
+
   describe "subject: у поля нагрузки" do
     test "IR поля несёт subject:" do
       assert [
@@ -112,6 +124,29 @@ defmodule Core.Es.Event.PayloadPersonalTest do
 
       assert_raise ArgumentError, ~r/ПДн-место contact\.phone: уничтоженное/, fn ->
         Core.PersonalBrokenFixture.Event.Codec.dump(event, Core.CodecFixture.Internal)
+      end
+    end
+
+    test "нагрузка-сущность: dump отвергает уничтоженное ПДн-место" do
+      step = %Core.EsFixture.Itinerary.Step{
+        channel: "sms",
+        status: "new",
+        attempts: 0,
+        recipient: %Destroyed{},
+        content: Core.EsFixture.Itinerary.Content.new!("текст")
+      }
+
+      event =
+        Core.EsFixture.Itinerary.Event.StepRecorded.new(
+          step,
+          Core.EsFixture.Itinerary.ID.new(),
+          Core.Version.new!(1),
+          Core.EsFixture.UserID.new(),
+          Core.Es.Event.At.now!()
+        )
+
+      assert_raise ArgumentError, ~r/ПДн-место recipient: уничтоженное/, fn ->
+        Core.CodecFixture.Internal.dump(event)
       end
     end
 
@@ -332,6 +367,25 @@ defmodule Core.Es.Event.PayloadPersonalTest do
                        end
                      )
                    end
+    end
+
+    test "ПДн в декларативном варианте union: без personal: true — CompileError" do
+      assert_raise CompileError,
+                   ~r/^ПДн-место в вариантах семейства .*Receivers: поле mark — укажите personal: true$/,
+                   fn -> payload(:UnionPersonal, mark: [union: Receivers]) end
+    end
+
+    test "personal: false над вариантами с ПДн — CompileError" do
+      assert_raise CompileError, ~r/ПДн-место в вариантах семейства .*Receivers: поле mark/, fn ->
+        payload(:UnionPersonalFalse, mark: [union: Receivers, personal: false])
+      end
+    end
+
+    test "personal: true у union: — место без спуска" do
+      {{:module, payload, _binary, _term}, _binding} =
+        payload(:UnionSealed, mark: [union: Receivers, personal: true])
+
+      assert [%{path: [:mark], subject: :aggregate_id}] = Core.Es.Personal.Plan.entries(payload.__core_fields__())
     end
   end
 

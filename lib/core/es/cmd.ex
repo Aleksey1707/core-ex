@@ -118,31 +118,65 @@ defmodule Core.Es.Cmd do
     end
   end
 
-  defp personal_path(owner, fields), do: personal_path(owner, fields, [])
-
-  defp personal_path(owner, fields, prefix) do
-    Enum.find_value(fields, fn %Core.Field{name: name, personal: personal?, spec: spec} ->
-      path = prefix ++ [Atom.to_string(name)]
-
-      if personal? == true, do: {owner, path}, else: nested_personal(owner, spec, path)
-    end)
-  end
-
-  defp nested_personal(owner, {:personal, _inner}, path), do: {owner, path}
-  defp nested_personal(owner, {:personal_false, inner}, path), do: nested_personal(owner, inner, path)
-
-  defp nested_personal(_owner, {:entity, module}, path) do
-    case Core.Field.introspect(module) do
+  defp personal_path(module, fields) do
+    case Enum.find(Core.Field.personal_places(fields, [], key: :name), &explicit_place?(fields, &1.path)) do
       nil -> nil
-      fields -> personal_path(module, fields, path)
+      %{path: path} -> place(module, fields, path, [])
     end
   end
 
-  defp nested_personal(owner, {kind, inner}, path) when kind in ~w(list set)a,
-    do: nested_personal(owner, inner, path ++ [Atom.to_string(kind)])
+  # Команда отвергает явную ПДн-границу (`personal: true` у поля или вложенного вида), а не Prim,
+  # который персональный сам по себе: его значение в команде читается открытым.
+  defp explicit_place?(fields, [name | rest]) do
+    case Enum.find(fields, &(&1.name == name)) do
+      %Core.Field{personal: true} -> true
+      %Core.Field{spec: spec} -> spec_place?(spec, rest)
+    end
+  end
 
-  defp nested_personal(owner, {:map, _key, value}, path), do: nested_personal(owner, value, path ++ ["map: value"])
-  defp nested_personal(_owner, _spec, _path), do: nil
+  defp spec_place?({:personal, _inner}, _rest), do: true
+  defp spec_place?({:personal_false, inner}, rest), do: spec_place?(inner, rest)
+  defp spec_place?({kind, inner}, [:each | rest]) when kind in ~w(list set)a, do: spec_place?(inner, rest)
+
+  defp spec_place?({:entity, module}, rest) do
+    case Core.Field.introspect(module) do
+      nil -> false
+      fields -> explicit_place?(fields, rest)
+    end
+  end
+
+  defp spec_place?({:map, _key, value}, [:each | rest]), do: spec_place?(value, rest)
+  defp spec_place?(_spec, _rest), do: false
+
+  # Владелец места — модуль, в чьей декларации поле стало ПДн-местом; путь — имена полей, а
+  # контейнер назван видом (`list`, `set`, `map: value`).
+  defp place(module, _fields, [], text), do: {module, Enum.reverse(text)}
+
+  defp place(module, fields, [name | rest], text) when is_atom(name) and name != :each do
+    %Core.Field{spec: spec} = Enum.find(fields, &(&1.name == name))
+    text = [Atom.to_string(name) | text]
+
+    if rest == [], do: {module, Enum.reverse(text)}, else: place_in(module, spec, rest, text)
+  end
+
+  defp place_in(module, {:entity, _entity}, [], text), do: {module, Enum.reverse(text)}
+  defp place_in(_module, {:entity, entity}, rest, text), do: place(entity, Core.Field.introspect(entity), rest, text)
+  defp place_in(module, {:personal_false, inner}, rest, text), do: place_in(module, inner, rest, text)
+  defp place_in(module, {:personal, inner}, rest, text), do: place_in(module, inner, rest, text)
+
+  defp place_in(module, {kind, _inner}, [:each], text) when kind in ~w(list set)a,
+    do: {module, Enum.reverse([kind | text])}
+
+  defp place_in(module, {:list, inner}, [:each | rest], text), do: place_in(module, inner, rest, ["list" | text])
+  defp place_in(module, {:set, inner}, [:each | rest], text), do: place_in(module, inner, rest, ["set" | text])
+
+  defp place_in(module, {:map, _key, _value}, [:each], text),
+    do: {module, Enum.reverse(["map: value" | text])}
+
+  defp place_in(module, {:map, _key, value}, [:each | rest], text),
+    do: place_in(module, value, rest, ["map: value" | text])
+
+  defp place_in(module, _spec, _rest, text), do: {module, Enum.reverse(text)}
 
   defp owner_text(module, module), do: "у команды"
   defp owner_text(_module, owner), do: "у сущности #{inspect(owner)} в команде"

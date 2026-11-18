@@ -36,10 +36,11 @@ defmodule Core.Es.ProjectionCase do
 
   ### Уничтоженное ПДн-значение
 
-  На каждой фикстуре события с ПДн-местами плана (`__es_personal__/0`), в том числе вложенными —
-  `project/1` на её уничтоженном варианте (`Core.Es.Personal.Test.destroyed/2`), затем на открытой,
-  каждый в savepoint с откатом. Открытый прошёл, а уничтоженный дал исключение или `{:error, _}` —
-  провал с путём фикстуры и причиной.
+  комплекс, в том числе вложенными — `project/1` на её уничтоженном варианте
+  (`Core.Es.Personal.Test.destroyed/2`), затем на открытой, каждый в savepoint с откатом.
+  Открытый прошёл, а уничтоженный дал исключение или `{:error, _}` — провал с путём фикстуры и
+  причиной. Оставшееся в результате `%Destroyed{}` — тоже провал: проекция не преобразовала место
+  (`{:destroyed_left, путь}`).
 
   ### ПДн после уничтожения ключа
 
@@ -69,6 +70,7 @@ defmodule Core.Es.ProjectionCase do
 
   alias Core.Es.Personal
   alias Core.Es.Personal.ActorID
+  alias Core.Es.Personal.Destroyed
   alias Core.Es.Personal.Event.KeyDestroyed
   alias Core.Es.Personal.Marker
   alias Core.Es.Personal.SubjectID
@@ -108,7 +110,10 @@ defmodule Core.Es.ProjectionCase do
           | %{tables: []}
           | %{not_cleared: [{String.t(), pos_integer()}]}
 
-  @typedoc "Фикстуры, на уничтоженном варианте которых `project/1` отказал, с причиной."
+  @typedoc """
+  Фикстуры, на уничтоженном варианте которых `project/1` отказал или оставил `%Destroyed{}`:
+  путь и причина (для оставшегося значения — `{:destroyed_left, путь в результате}`).
+  """
   @type destroyed_failed :: %{destroyed_failed: [{Path.t(), term()}]}
 
   @typedoc """
@@ -251,16 +256,48 @@ defmodule Core.Es.ProjectionCase do
   # ---
 
   # Уничтоженный вариант — в savepoint перед открытым: отказ открытого значит, что фикстуре нужны
-  # события до неё, и сравнивать нечего.
+  # события до неё, и сравнивать нечего. Оставшееся в результате `%Destroyed{}` — забытая
+  # обработка: read-модель, вернувшая его, не преобразовала место.
   defp destroyed_failure(projection, dao, {path, event, _values}) do
     destroyed = rolled_back_savepoint(dao, fn -> project_or_error(projection, Personal.Test.destroyed(event)) end)
     open = rolled_back_savepoint(dao, fn -> project_or_error(projection, event) end)
 
     case {open, destroyed} do
-      {:ok, {:error, reason}} -> [{path, reason}]
-      {_open, _destroyed} -> []
+      {{:error, _reason}, _destroyed} ->
+        []
+
+      {_open, {:error, reason}} ->
+        [{path, reason}]
+
+      {_open, result} ->
+        case destroyed_place(result, []) do
+          nil -> []
+          place -> [{path, {:destroyed_left, place}}]
+        end
     end
   end
+
+  defp destroyed_place(%Destroyed{}, path), do: Enum.reverse(path)
+  defp destroyed_place(%_{} = struct, path), do: destroyed_place(Map.from_struct(struct), path)
+
+  defp destroyed_place(map, path) when is_map(map),
+    do: Enum.find_value(map, fn {key, value} -> destroyed_place(value, [key | path]) end)
+
+  defp destroyed_place(list, path) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.find_value(fn {item, index} -> destroyed_place(item, [index | path]) end)
+  end
+
+  defp destroyed_place({:ok, value}, path), do: destroyed_place(value, path)
+
+  defp destroyed_place(tuple, path) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> destroyed_place(path)
+  end
+
+  defp destroyed_place(_value, _path), do: nil
 
   defp destroyed_result([]), do: :ok
   defp destroyed_result(failed), do: {:error, %{destroyed_failed: failed}}

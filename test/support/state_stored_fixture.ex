@@ -149,15 +149,28 @@ defmodule Core.StateStoredFixture do
     # ---
 
     # Живое ПДн в mutable-строке остаётся открытым wire-значением сущности (плагин его полей);
-    # уничтоженное — `{"$pd": null}` на каждом ПДн-месте, которое читается без хранилища ключей.
+    # уничтоженное — `{"$pd": null}` на каждом ПДн-месте (`Core.Es.Personal.State`), которое
+    # читается без хранилища ключей.
     defp dump_holder(nil), do: nil
-    defp dump_holder(%Destroyed{}), do: %{"$pd" => nil}
-    defp dump_holder(%Profile{phone: %Destroyed{}}), do: %{"phone" => %{"$pd" => nil}}
-    defp dump_holder(%Profile{} = profile), do: Profile.Codec.dump(profile, Config.codec())
+
+    defp dump_holder(holder) do
+      holder
+      |> Core.Es.Personal.State.dump()
+      |> dump_wire()
+    end
+
+    defp dump_wire(%{"$pd" => nil} = marker), do: marker
+    defp dump_wire(%Profile{phone: phone}), do: %{"phone" => dump_wire(phone)}
+    defp dump_wire(value), do: Config.codec().dump(value)
 
     defp load_holder(nil), do: {:ok, nil}
-    defp load_holder(%{"$pd" => nil}), do: {:ok, %Destroyed{}}
-    defp load_holder(wire), do: Profile.Codec.load(Profile, wire, Config.codec())
+
+    defp load_holder(wire) do
+      case Core.Es.Personal.State.load(wire) do
+        %Destroyed{} = destroyed -> {:ok, destroyed}
+        loaded -> Profile.Codec.load(Profile, loaded, Config.codec())
+      end
+    end
   end
 
   defmodule Outbox do

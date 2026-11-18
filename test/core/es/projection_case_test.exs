@@ -133,9 +133,57 @@ defmodule Core.Es.ProjectionCaseTest do
     def clear, do: :ok
   end
 
+  defmodule ReadModel do
+    @moduledoc false
+
+    # Read-модель возвращается результатом: уничтоженное место маскируется.
+    use Core.Es.Projection,
+      name: "projection_case_read_model",
+      events: [Account.Event.HolderSet],
+      personal: false
+
+    @impl true
+    def project(%Account.Event.HolderSet{payload: %Account.Event.HolderSet.Payload{holder: holder}}),
+      do: {:ok, %{holder: handle(holder)}}
+
+    @impl true
+    def clear, do: :ok
+
+    defp handle(%Core.Es.Personal.Destroyed{}), do: "маскировано"
+    defp handle(value), do: value
+  end
+
+  defmodule ReadModelLeft do
+    @moduledoc false
+
+    # Read-модель оставляет `%Destroyed{}` в результате — забытая обработка места.
+    use Core.Es.Projection,
+      name: "projection_case_read_model_left",
+      events: [Account.Event.HolderSet],
+      personal: false
+
+    @impl true
+    def project(%Account.Event.HolderSet{payload: %Account.Event.HolderSet.Payload{holder: holder}}),
+      do: {:ok, %{holder: holder}}
+
+    @impl true
+    def clear, do: :ok
+  end
+
   describe "check_destroyed/2" do
     test "проекция принимает уничтоженное значение — :ok" do
       assert :ok = ProjectionCase.check_destroyed(EsFixture.Projection, @fixtures)
+    end
+
+    test "read-модель обработала место (nil, маскирование, удаление) — :ok" do
+      assert :ok = ProjectionCase.check_destroyed(ReadModel, @fixtures)
+    end
+
+    test "read-модель оставила %Destroyed{} в результате — путь и место" do
+      path = Path.join(@fixtures, "account/account.holder_set.json")
+
+      assert {:error, %{destroyed_failed: [{^path, {:destroyed_left, [:holder]}}]}} =
+               ProjectionCase.check_destroyed(ReadModelLeft, @fixtures)
     end
 
     test "открытый вариант прошёл, уничтоженный упал — путь и причина" do

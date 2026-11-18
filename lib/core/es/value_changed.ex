@@ -59,7 +59,7 @@ defmodule Core.Es.ValueChanged do
       def __core_fields__, do: @core_fields
 
       @doc "Создать запись изменения значения."
-      @spec new(unquote_splicing(Keyword.values(write_types))) :: t()
+      @spec new(unquote_splicing(Keyword.values(write_types))) :: write_t()
 
       def new(unquote_splicing(Core.Codec.Plugin.Fields.new_args_ir(fields)))
           when unquote(Core.Es.Event.Payload.new_guard(fields)),

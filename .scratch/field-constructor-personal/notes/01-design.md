@@ -1,8 +1,8 @@
 # Field constructor + recursive personal places — shared design notes
 
-Speс: `/home/aleksey/Projects/core-ex/.scratch/field-constructor-personal/spec.md`
-Tickets: `/home/aleksey/Projects/core-ex/.scratch/field-constructor-personal/issues/`
-Codebase map: `/home/aleksey/Projects/core-ex/.scratch/field-constructor-personal/notes/00-codebase-map.md`
+Speс: `.scratch/field-constructor-personal/spec.md`
+Tickets: `.scratch/field-constructor-personal/issues/`
+Codebase map: `.scratch/field-constructor-personal/notes/00-codebase-map.md`
 Per-ticket notes: `.scratch/field-constructor-personal/notes/NN.md` (committed with the ticket)
 
 These notes pin the cross-ticket decisions. Follow them; they exist so that eleven separate

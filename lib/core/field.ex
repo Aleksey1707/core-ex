@@ -392,6 +392,16 @@ defmodule Core.Field do
   def write_typespec(fields) when is_list(fields), do: typespec(fields, :write)
 
   @doc false
+  @spec write_type(module()) :: Macro.t()
+
+  # Проекция записи модуля: `write_t()` есть у декларативной структуры, иначе остаётся `t()`.
+  def write_type(module) when is_atom(module) do
+    if write_type?(module),
+      do: quote(do: unquote(module).write_t()),
+      else: quote(do: unquote(module).t())
+  end
+
+  @doc false
   @spec personal_places?([t()]) :: boolean()
 
   def personal_places?(fields) when is_list(fields), do: personal_places(fields) != []
@@ -451,11 +461,7 @@ defmodule Core.Field do
   defp spec_type({:type, :string}, _places, _path, _mode), do: quote(do: String.t())
   defp spec_type({:type, scalar}, _places, _path, _mode), do: quote(do: unquote(scalar)())
 
-  defp entity_write_type(mod) do
-    if write_type?(mod),
-      do: quote(do: unquote(mod).write_t()),
-      else: quote(do: unquote(mod).t())
-  end
+  defp entity_write_type(mod), do: write_type(mod)
 
   # Декларативная структура порождает `write_t()` вместе с `__core_fields__/0`; у собранного
   # вручную модуля тип ищем в байткоде (в сборке того же файла его ещё нет).
@@ -574,6 +580,9 @@ defmodule Core.Field do
   defp hide_place(map, [:each | rest]) when is_map(map) and not is_struct(map),
     do: Map.new(map, fn {key, value} -> {key, hide_place(value, rest)} end)
 
+  defp hide_place(%_{} = struct, [step | rest]) when is_atom(step),
+    do: Map.put(struct, step, hide_place(Map.fetch!(struct, step), rest))
+
   defp hide_place(value, _path), do: value
 
   # ===== обход вида =====
@@ -674,12 +683,39 @@ defmodule Core.Field do
     end
   end
 
-  defp walk_places({kind, _mod}, _path, _place, _ctx) when kind in ~w(enum union view form jsonb)a, do: {[], []}
+  defp walk_places({:union, family}, path, _place, _ctx) do
+    if union_personal?(family) do
+      raise CompileError,
+        description:
+          "ПДн-место в вариантах семейства #{inspect(family)}: поле #{Enum.map_join(path, ".", &Atom.to_string/1)} — " <>
+            "укажите personal: true"
+    end
+
+    {[], []}
+  end
+
+  defp walk_places({kind, _mod}, _path, _place, _ctx) when kind in ~w(enum view form jsonb)a, do: {[], []}
   defp walk_places({:type, _type}, _path, _place, _ctx), do: {[], []}
 
   defp entity_places(fields, path, subject, scope) do
     scope = %{scope | by_name: Map.new(fields, &{&1.name, &1})}
 
     Enum.flat_map(fields, &field_places(&1, path, subject, scope))
+  end
+
+  # ПДн в декларативном варианте: место не находится спуском, пока `personal:` не выставлен явно;
+  # `personal: false` над таким семейством оставило бы ПДн открытым, поэтому — отказ. Семейство без
+  # реестра `Core.Union` (`types/0`) непрозрачно: состава вариантов обходчик не знает.
+  defp union_personal?(family) do
+    Enum.any?(union_variants(family), fn
+      %Core.Union.Variant{kind: :prim, module: mod} ->
+        mod.__domain_personal__()
+
+      %Core.Union.Variant{kind: :domain, module: mod} ->
+        if fields = introspect(mod), do: personal_places?(fields), else: false
+
+      _variant ->
+        false
+    end)
   end
 end

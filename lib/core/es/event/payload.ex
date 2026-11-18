@@ -91,7 +91,7 @@ defmodule Core.Es.Event.Payload do
         @type write_t :: %__MODULE__{unquote_splicing(Core.Field.write_typespec(@core_fields))}
 
         @doc "Собрать нагрузку: поля позиционно, в порядке объявления."
-        @spec new(unquote_splicing(Keyword.values(Core.Field.write_typespec(@core_fields)))) :: t()
+        @spec new(unquote_splicing(Keyword.values(Core.Field.write_typespec(@core_fields)))) :: write_t()
 
         def new(unquote_splicing(Fields.new_args_ir(@core_fields)))
             when unquote(Core.Es.Event.Payload.new_guard(@core_fields)),
@@ -489,6 +489,7 @@ defmodule Core.Es.Event.Payload do
   defp subject_name(:aggregate_id), do: :aggregate_id
   defp subject_name({_tag, name}), do: name
 
+  # Wire-ключи объявления, а не внешние данные: таблицу атомов путь плана не засоряет.
   # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
   defp wire_step(wire) when is_binary(wire), do: String.to_atom(wire)
 end
