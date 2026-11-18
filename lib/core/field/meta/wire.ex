@@ -7,7 +7,7 @@ defmodule Core.Field.Meta.Wire do
   def key, do: :wire
 
   @spec roles() :: [atom()]
-  def roles, do: ~w(struct payload view labels)a
+  def roles, do: ~w(struct payload labels)a
 
   @spec normalize!(term(), map()) :: term()
   def normalize!(raw, _ctx) when is_binary(raw) and raw != "", do: raw

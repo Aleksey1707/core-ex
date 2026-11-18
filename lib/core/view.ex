@@ -95,8 +95,8 @@ defmodule Core.View do
     opts = Helper.Opts.literal!(opts, @expression_keys, @label)
 
     forms = Opts.forms!(Keyword.get(opts, :forms, []))
-    fields = Core.Field.declare!(Keyword.fetch!(opts, :fields), :view, "#{@label}: fields", forms: Keyword.keys(forms))
-    views = view_fields(fields)
+    views = Opts.fields!(Keyword.fetch!(opts, :fields), Keyword.keys(forms))
+    fields = core_fields(views)
     check_forms_used!(views, forms)
 
     quote do
@@ -160,17 +160,26 @@ defmodule Core.View do
 
   # ---
 
-  defp view_fields(fields) do
-    Enum.map(fields, fn %Core.Field{name: name, spec: spec, optional?: optional?} ->
-      Field.build(name, view_spec(spec), optional?)
+  # `__core_fields__/0` — проекция IR View на общий IR: вид Prim без своего kind, метаданные
+  # read-пути постоянны (wire — имя поля, `default`/`subject`/`personal` отсутствуют).
+  defp core_fields(views) do
+    Enum.map(views, fn %Field{name: name, spec: spec, optional?: optional?} ->
+      %Core.Field{
+        name: name,
+        wire: Atom.to_string(name),
+        spec: core_spec(spec),
+        optional?: optional?,
+        default: :none,
+        subject: nil,
+        personal: nil
+      }
     end)
   end
 
-  # IR вида не держит kind Prim: его знает сам Prim, а нужен он типу и таблице проекций.
-  defp view_spec({:prim, mod}), do: {:prim, mod, Core.Prim.leaf(mod).__domain_kind__()}
-  defp view_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, view_spec(inner)}
-  defp view_spec({:map, key, value}), do: {:map, view_spec(key), view_spec(value)}
-  defp view_spec(spec), do: spec
+  defp core_spec({:prim, mod, _kind}), do: {:prim, mod}
+  defp core_spec({kind, inner}) when kind in ~w(list set)a, do: {kind, core_spec(inner)}
+  defp core_spec({:map, key, value}), do: {:map, core_spec(key), core_spec(value)}
+  defp core_spec(spec), do: spec
 
   defp check_forms_used!(fields, forms) do
     used = reachable_forms(Opts.used_forms(fields), forms)

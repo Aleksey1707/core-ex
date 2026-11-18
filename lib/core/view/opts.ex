@@ -25,11 +25,6 @@ defmodule Core.View.Opts do
   @typedoc false
   @type field :: ViewField.t()
 
-  @doc "Typespec значения поля `prim:` по kind его Prim."
-  @spec prim_type_ast(atom()) :: Macro.t()
-
-  def prim_type_ast(kind) when is_atom(kind), do: ViewField.prim_type_ast(kind)
-
   @doc false
   @spec forms!(term()) :: [{atom(), [field()]}]
 

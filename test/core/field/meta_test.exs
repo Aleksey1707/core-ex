@@ -3,7 +3,7 @@ defmodule Core.Field.MetaTest do
 
   alias Core.Field.Meta
 
-  @roles ~w(struct payload view labels union)a
+  @roles ~w(struct payload labels union)a
 
   describe "реестр" do
     test "обработчик на ключ в порядке объявления" do
@@ -33,9 +33,9 @@ defmodule Core.Field.MetaTest do
 
   describe "матрица ролей" do
     @matrix %{
-      optional: ~w(struct payload view labels)a,
-      wire: ~w(struct payload view labels)a,
-      default: ~w(struct view)a,
+      optional: ~w(struct payload labels)a,
+      wire: ~w(struct payload labels)a,
+      default: ~w(struct)a,
       personal: ~w(struct payload labels)a,
       subject: ~w(struct payload)a
     }
@@ -49,6 +49,10 @@ defmodule Core.Field.MetaTest do
 
     test "у семейства вариантов ключей поля нет" do
       for key <- Meta.keys(), do: refute(Meta.allowed?(key, :union))
+    end
+
+    test "у View нет метаданных: их проверяет его парсер" do
+      for key <- Meta.keys(), do: refute(Meta.allowed?(key, :view))
     end
   end
 

@@ -7,7 +7,7 @@ defmodule Core.Field.Meta.Default do
   def key, do: :default
 
   @spec roles() :: [atom()]
-  def roles, do: ~w(struct view)a
+  def roles, do: ~w(struct)a
 
   @spec normalize!(term(), map()) :: term()
   def normalize!(:none, _ctx), do: :none

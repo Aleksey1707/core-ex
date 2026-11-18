@@ -144,10 +144,6 @@ defmodule Core.FieldTest do
     end
 
     test "ключ вне роли — CompileError с именем хоста и поля" do
-      assert_raise CompileError, ~r/^View: fields: a: personal: у View нет/, fn ->
-        Field.declare!([a: [prim: Name, personal: true]], :view, "View: fields")
-      end
-
       assert_raise CompileError, ~r/^Labels.Fields: fields: a: неизвестные ключи \[:default\]$/, fn ->
         Field.declare!([a: [prim: Name, default: "x"]], :labels, "Labels.Fields: fields")
       end
@@ -155,18 +151,6 @@ defmodule Core.FieldTest do
       assert_raise CompileError, ~r/^Labels.Fields: fields: a: неизвестные ключи \[:subject\]$/, fn ->
         Field.declare!([a: [prim: Name, subject: :aggregate_id]], :labels, "Labels.Fields: fields")
       end
-    end
-
-    test "вид View: kind Prim в IR не входит" do
-      assert [
-               %Field{name: :id, spec: {:prim, Core.StructFixture.Name}, wire: "id"},
-               %Field{name: :title, spec: {:type, :string}}
-             ] =
-               Field.declare!(
-                 [id: [prim: Core.StructFixture.Name], title: [type: :string]],
-                 :view,
-                 "View: fields"
-               )
     end
 
     test "семейство вариантов полей не объявляет" do

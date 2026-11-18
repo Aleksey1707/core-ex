@@ -8,7 +8,7 @@ defmodule Core.Field do
   alias Core.Prim
 
   @typedoc false
-  @type role :: :struct | :payload | :view | :labels | :union
+  @type role :: :struct | :payload | :labels | :union
 
   @typedoc false
   @type subject :: :aggregate_id | {:payload, atom()} | {:local, atom()}
@@ -58,14 +58,6 @@ defmodule Core.Field do
 
   def declare!(_spec, :union, where, _context) when is_binary(where),
     do: Opts.reject!(where, "у семейства вариантов полей нет")
-
-  # View разбирает спека своего хоста: он знает виды `view:` / `form:` / `jsonb:` и сам отвергает
-  # `personal:` / `subject:` текстами роли, поэтому общий `check_keys!` и снятие мест ПДн ему не
-  # нужны.
-  def declare!(spec, :view, where, context) when is_binary(where) and is_list(context) do
-    forms = Keyword.get(context, :forms, [])
-    normalize!(parse_view!(spec, where, forms), :view, where)
-  end
 
   def declare!(spec, role, where, _context) when role in @declarable and is_binary(where) do
     {fields, personal} = split!(spec, role, where)
@@ -118,28 +110,6 @@ defmodule Core.Field do
       subject: declaration.subject
     }
   end
-
-  defp parse_view!(spec, _where, forms) do
-    spec
-    |> Core.View.Opts.fields!(forms, "fields")
-    |> Enum.map(fn %Core.View.Field{name: name, spec: spec, optional?: optional?} ->
-      %__MODULE__{
-        name: name,
-        spec: view_spec(spec),
-        optional?: optional?,
-        wire: Atom.to_string(name),
-        default: :none,
-        subject: nil,
-        personal: nil
-      }
-    end)
-  end
-
-  # Вид View хранит kind Prim ради своего типа и дампа; в IR его нет — вид значения задаёт Prim.
-  defp view_spec({:prim, mod, _kind}), do: {:prim, mod}
-  defp view_spec({kind, inner}) when kind in @nested_kinds, do: {kind, view_spec(inner)}
-  defp view_spec({:map, key, value}), do: {:map, view_spec(key), view_spec(value)}
-  defp view_spec(spec), do: spec
 
   # Ключ, которого роль не допускает, — тот же отказ, что и неизвестный ключ у грамматики: хост его
   # не знает.
