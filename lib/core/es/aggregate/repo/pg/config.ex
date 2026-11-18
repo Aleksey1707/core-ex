@@ -41,7 +41,7 @@ defmodule Core.Es.Aggregate.Repo.Pg.Config do
           errors: module(),
           outbox: module(),
           snapshot: Settings.t() | nil,
-          key_reservations: [module()],
+          key_reservations: [Core.Es.KeyReservation.declaration()],
           dao: module() | nil,
           codec: module() | nil,
           source: module() | nil

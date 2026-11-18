@@ -292,6 +292,13 @@ defmodule Core.Es.KeyReservationTest do
         compile_repo!(SameScope, [Account.NameKey, Module.concat(__MODULE__, SameScopeKey)])
       end
     end
+
+    test "тип key_reservations — тип builder'а" do
+      config_type = map_field_type(Core.Es.Aggregate.Repo.Pg.Config, :key_reservations)
+
+      assert config_type == map_field_type(Es.Store.Write.Plan, :key_reservations)
+      assert config_type == return_type(Es.KeyReservation, :declarations!, 4)
+    end
   end
 
   defp unique_name, do: "Счёт #{System.unique_integer([:positive])}"
@@ -357,5 +364,54 @@ defmodule Core.Es.KeyReservationTest do
         end
       end
     )
+  end
+
+  defp map_field_type(module, field) do
+    {:ok, types} = Code.Typespec.fetch_types(module)
+
+    {:type, {:t, {:type, _, :map, entries}, []}} =
+      Enum.find(types, &match?({:type, {:t, _, []}}, &1))
+
+    {:type, _, :map_field_exact, [{:atom, _, ^field}, type]} =
+      Enum.find(entries, &match?({:type, _, :map_field_exact, [{:atom, _, ^field}, _]}, &1))
+
+    Macro.to_string(quoted(type))
+  end
+
+  defp return_type(module, fun, arity) do
+    {:ok, specs} = Code.Typespec.fetch_specs(module)
+
+    {{^fun, ^arity}, [spec]} = Enum.find(specs, &match?({{^fun, ^arity}, _}, &1))
+
+    {:type, _, :fun, [_args, result]} = spec
+
+    result
+    |> quoted()
+    |> qualify(module, local_types(module))
+    |> Macro.to_string()
+  end
+
+  defp quoted(type) do
+    {:"::", _, [_name, ast]} = Code.Typespec.type_to_quoted({:printed, type, []})
+    ast
+  end
+
+  defp local_types(module) do
+    {:ok, types} = Code.Typespec.fetch_types(module)
+
+    Enum.map(types, fn
+      {:type, {name, _, _}} -> name
+      {:opaque, {name, _, _}} -> name
+    end)
+  end
+
+  defp qualify(quoted, module, local) do
+    Macro.prewalk(quoted, fn
+      {name, meta, []} = node when is_atom(name) ->
+        if name in local, do: {{:., meta, [module, name]}, meta, []}, else: node
+
+      node ->
+        node
+    end)
   end
 end
