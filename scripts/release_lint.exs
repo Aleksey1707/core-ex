@@ -5,8 +5,9 @@
 #
 # Пока выпуска нет, верхний заголовок CHANGELOG — «Не выпущено», а `mix.exs` и `README.md`
 # называют прошлый выпуск: это штатное состояние ветки, и оно нарушением не считается. Тег на
-# таком коммите — нарушение: под ним уедет версия прошлого выпуска. Проверка читает файлы из
-# коммита тега (`git show`), а без тега — из рабочего дерева.
+# таком коммите — нарушение: под ним уедет версия прошлого выпуска. У пререлиза (`vX.Y.Z-rc.N`)
+# CHANGELOG остаётся «Не выпущено»: состав пререлиза — это и есть невыпущенные записи.
+# Проверка читает файлы из коммита тега (`git show`), а без тега — из рабочего дерева.
 
 defmodule ReleaseLint do
   @moduledoc false
@@ -16,10 +17,9 @@ defmodule ReleaseLint do
   @changelog "CHANGELOG.md"
   @unreleased "Не выпущено"
 
-  @mix_re ~r/@version "(\d+\.\d+\.\d+)"/
-  @readme_re ~r/tag: "v(\d+\.\d+\.\d+)"/
+  @mix_re ~r/@version "([^"]+)"/
+  @readme_re ~r/tag: "v([^"]+)"/
   @heading_re ~r/^## (.+)$/m
-  @tag_re ~r/^v(\d+\.\d+\.\d+)$/
 
   @spec run() :: :ok
 
@@ -43,10 +43,19 @@ defmodule ReleaseLint do
 
   defp errors(tag, versions) do
     List.flatten([
+      format_errors(versions),
       readme_error(versions),
       changelog_error(versions),
       tag_errors(tag, versions)
     ])
+  end
+
+  defp format_errors(%{mix: mix, readme: readme}) do
+    Enum.flat_map([{@mix, mix}, {@readme, readme}], fn {path, version} ->
+      if valid_version?(version),
+        do: [],
+        else: ["#{path}: версия «#{version}» — не X.Y.Z и не X.Y.Z-пререлиз"]
+    end)
   end
 
   defp readme_error(%{mix: mix, readme: readme}) when mix != readme do
@@ -68,12 +77,25 @@ defmodule ReleaseLint do
   defp tag_errors(tag, %{mix: mix, changelog: changelog}) do
     [
       if(tag != mix, do: "тег v#{tag} стоит на коммите с версией #{mix} в #{@mix}", else: []),
-      if(changelog == @unreleased,
-        do: "тег v#{tag} стоит на коммите с разделом «#{@unreleased}» в #{@changelog}",
-        else: []
-      )
+      changelog_tag_error(tag, changelog)
     ]
   end
+
+  defp changelog_tag_error(tag, @unreleased) do
+    if prerelease?(tag),
+      do: [],
+      else: "тег v#{tag} стоит на коммите с разделом «#{@unreleased}» в #{@changelog}"
+  end
+
+  defp changelog_tag_error(tag, _heading) do
+    if prerelease?(tag),
+      do: "тег v#{tag} — пререлиз, а в #{@changelog} нет раздела «#{@unreleased}»",
+      else: []
+  end
+
+  defp prerelease?(version), do: match?({:ok, %Version{pre: [_ | _]}}, Version.parse(version))
+
+  defp valid_version?(version), do: match?({:ok, %Version{build: nil}}, Version.parse(version))
 
   defp report(nil, %{mix: mix, changelog: @unreleased}),
     do: "release-check: не выпущено, последний выпуск — #{mix}"
@@ -91,9 +113,9 @@ defmodule ReleaseLint do
   end
 
   defp version_of(tag) do
-    case Regex.run(@tag_re, String.trim(tag)) do
-      [_match, version] -> version
-      nil -> nil
+    case String.trim(tag) do
+      "v" <> version -> if valid_version?(version), do: version, else: nil
+      _tag -> nil
     end
   end
 

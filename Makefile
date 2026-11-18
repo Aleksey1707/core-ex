@@ -26,12 +26,14 @@ spec-check:
 	elixir scripts/spec_lint.exs
 
 # Сведение версии выпуска: `mix.exs`, `README.md` и верхний раздел `CHANGELOG.md` — одна версия,
-# и та же, что у тега на коммите. Вне выпуска («Не выпущено» в CHANGELOG) — всегда зелёный.
+# и та же, что у тега на коммите. У пререлиза (`X.Y.Z-rc.N`) CHANGELOG остаётся «Не выпущено».
+# Вне выпуска («Не выпущено» в CHANGELOG) — всегда зелёный.
 .PHONY: release-check
 release-check:
 	elixir scripts/release_lint.exs
 
-# Свести версию в трёх местах разом: make release VERSION=X.Y.Z. Коммит и тег — за оператором.
+# Свести версию: make release VERSION=X.Y.Z (три файла) или VERSION=X.Y.Z-rc.N (mix.exs и README.md).
+# Коммит и тег — за оператором.
 .PHONY: release
 release:
 	elixir scripts/release.exs $(VERSION)

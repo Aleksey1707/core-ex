@@ -107,19 +107,28 @@ optional-клиентов брокеров — `docs/rules/10-architecture.md`. 
 
 ## Выпуск
 
-Версия живёт в трёх местах: `mix.exs` (`@version`), `README.md` (`tag:` в примере подключения)
-и верхний заголовок `CHANGELOG.md`. Выпуск сводит их разом и ставит тег на коммит сведения:
+Финальный выпуск сводит версию в трёх местах: `mix.exs` (`@version`), `README.md` (`tag:` в примере
+подключения) и верхний заголовок `CHANGELOG.md`. Пререлиз (`X.Y.Z-rc.N` или другой semver-суффикс)
+сводит первые два: «Не выпущено» остаётся на месте — состав пререлиза и есть невыпущенные записи,
+а финальный выпуск идёт обычным путём.
 
 ```bash
-make release VERSION=0.3.4   # три файла: «Не выпущено» → ## 0.3.4
+make release VERSION=0.3.4-rc.1   # mix.exs и README.md; CHANGELOG — «Не выпущено»
+git add mix.exs README.md && git commit -m "version up"
+git tag v0.3.4-rc.1 && git push origin HEAD v0.3.4-rc.1
+
+make release VERSION=0.3.4        # три файла: «Не выпущено» → ## 0.3.4
 git add mix.exs README.md CHANGELOG.md && git commit -m "version up"
 git tag v0.3.4 && git push origin HEAD v0.3.4
 ```
 
-Тег ставится на коммит сведения, а не на последнюю правку: иначе под `vX.Y.Z` уедет версия
-прошлого выпуска. Проверяет `make release-check` (`scripts/release_lint.exs`), он же хук
-`pre-push`: на коммите с тегом требует, чтобы все три места называли версию тега, вне выпуска
-(«Не выпущено» в CHANGELOG) — пропускает. Хук ставится `pre-commit install --hook-type pre-push`.
+Порядок версий — semver: `0.3.4-rc.1 < 0.3.4-rc.2 < 0.3.4`, поэтому `make release` принимает
+следующий rc и финал после rc как обычное повышение. Тег ставится на коммит сведения, а не на
+последнюю правку: иначе под `vX.Y.Z` уедет версия прошлого выпуска. Проверяет `make release-check`
+(`scripts/release_lint.exs`), он же хук `pre-push`: на коммите с финальным тегом требует, чтобы
+все три места называли версию тега, на коммите с пререлизным — `mix.exs` и `README.md`, а в
+CHANGELOG остаётся «Не выпущено»; вне выпуска — пропускает. Хук ставится
+`pre-commit install --hook-type pre-push`.
 
 ## Команды
 
@@ -131,8 +140,8 @@ make layout-check        # разделители внутри модуля: # -
 make spec-check          # форма результата в типах — через Core.Result
 make compile-no-optional # сборка без optional-клиентов брокеров (как у потребителя без них)
 make consumer-check      # фикстура-потребитель: раскладка под boundary_lint --consumer, spec_lint и храповик вывода типов
-make release-check       # версия сведена в mix.exs, README.md и CHANGELOG.md (и с тегом на коммите)
-make release VERSION=X.Y.Z # свести версию в трёх местах: «Не выпущено» → ## X.Y.Z
+make release-check       # версия сведена в mix.exs и README.md (+ CHANGELOG у финала), как и тег на коммите
+make release VERSION=X.Y.Z # свести версию: у финала — три файла («Не выпущено» → ## X.Y.Z), у X.Y.Z-rc.N — два
 make infra-up            # Postgres + RabbitMQ + Kafka (podman compose, deploy/infra)
 make infra-down
 mix test                 # :rabbit_stream и :kafka исключены по умолчанию
