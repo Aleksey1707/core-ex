@@ -8,8 +8,9 @@ defmodule Core.CodecFixture do
   `Outbox.Repo.Pg.Schema` не смог бы писать и читать записи очереди, и кодеки событий
   агрегатов тестов: `Core.EventFixture.Event.Codec`, `Core.EsFixture.Account.Event.Codec`,
   `Core.DerivedFixture.Event.Codec`, `Core.WebEventFixture.Event.Codec` и `Core.LabelsFixture.Event.Codec`
-  с плагинами нагрузки `Core.LabelsFixture.Shape.Codec`, `Core.LabelsFixture.Codec` и
-  `Core.LabelsFixture.Event.Limited.Codec`, сломанный агрегат проверок ПДн `Core.PersonalBrokenFixture.Event.Codec`
+  с плагинами нагрузки `Core.LabelsFixture.Shape.Codec`, `Core.LabelsFixture.Contact.Codec`,
+  `Core.LabelsFixture.Codec` и `Core.LabelsFixture.Event.Limited.Codec`, `Core.LabelsFixture.Event.ContactFamily.Codec`,
+  сломанный агрегат проверок ПДн `Core.PersonalBrokenFixture.Event.Codec`
   с плагином `Core.PersonalBrokenFixture.Contact.Codec`.
   """
 
@@ -44,7 +45,9 @@ defmodule Core.CodecFixture do
     Core.DerivedFixture.Place.Codec,
     Core.WebEventFixture.Event.Codec,
     Core.LabelsFixture.Event.Codec,
+    Core.LabelsFixture.Event.ContactFamily.Codec,
     Core.LabelsFixture.Shape.Codec,
+    Core.LabelsFixture.Contact.Codec,
     Core.LabelsFixture.Codec,
     Core.LabelsFixture.Event.Limited.Codec,
     Core.PersonalBrokenFixture.Contact.Codec,

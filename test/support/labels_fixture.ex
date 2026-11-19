@@ -12,14 +12,16 @@ defmodule Core.LabelsFixture do
   ПДн-значении; нагрузка с полями-множествами и полями-словарями; событие страницы событий со
   сведениями (`Core.Web.Event`, `labels: true`).
 
-  Плагин семейства `Core.LabelsFixture.Shape.Codec` и кодеки `Core.LabelsFixture.Event.Codec` и
+  Плагины семейств `Core.LabelsFixture.Shape.Codec` и `Core.LabelsFixture.Contact.Codec` и кодеки
+  `Core.LabelsFixture.Event.Codec`, `Core.LabelsFixture.Event.ContactFamily.Codec` и
   `Core.LabelsFixture.Event.ManualFamily.Codec` — полный набор ратчета полноты: в кодеки не входят
   событие с id без вида, событие другого агрегата, событие со скрытыми id (у его семейства
   `Core.LabelsFixture.Mark` плагина нет), изменение на id и события с id под `text:`. Нагрузку событий
-  `Core.LabelsFixture.Event.Codec` дампят фасады: он, плагин семейства, плагин вложенных struct'ов
-  `Core.LabelsFixture.Codec` и ручной плагин нагрузки `Core.LabelsFixture.Event.Limited.Codec`
-  зарегистрированы в `Core.CodecFixture.plugins/0`. События с нагрузкой без плагина и с вложенной
-  структурой по полям без плагина — в семействе `ManualFamily`, его кодек в фасад не входит.
+  `Core.LabelsFixture.Event.Codec` и `Core.LabelsFixture.Event.ContactFamily.Codec` дампят фасады:
+  кодеки, плагины семейств, плагин вложенных struct'ов `Core.LabelsFixture.Codec` и ручной плагин
+  нагрузки `Core.LabelsFixture.Event.Limited.Codec` зарегистрированы в `Core.CodecFixture.plugins/0`.
+  События с нагрузкой без плагина и с вложенной структурой по полям без плагина — в семействе
+  `ManualFamily`, его кодек в фасад не входит.
   """
 
   alias Core.EventFixture.AggID
@@ -367,7 +369,7 @@ defmodule Core.LabelsFixture do
   end
 
   defmodule Contact do
-    @moduledoc "Способ связи — семейство с вариантами-Prim: текст, plain, id каждого вида и композит."
+    @moduledoc "Способ связи — семейство с вариантами-Prim: текст, plain-виды, id каждого вида и композит."
 
     defmodule Phone do
       @moduledoc "Вариант: телефон, который человек читает текстом функции."
@@ -386,6 +388,27 @@ defmodule Core.LabelsFixture do
       use Core.Prim.Integer,
         name: "Код",
         min: 0
+    end
+
+    defmodule Note do
+      @moduledoc "Вариант: заметка без объявления вида — plain-вид текста."
+
+      use Core.Prim.String,
+        name: "Заметка",
+        min_len: 1,
+        max_len: 64
+    end
+
+    defmodule Due do
+      @moduledoc "Вариант: срок без объявления вида — plain-вид даты."
+
+      use Core.Prim.Date, name: "Срок"
+    end
+
+    defmodule Seen do
+      @moduledoc "Вариант: отметка времени без объявления вида — plain-вид дата-времени."
+
+      use Core.Prim.DateTime, name: "Отметка"
     end
 
     defmodule Item do
@@ -435,6 +458,9 @@ defmodule Core.LabelsFixture do
       variants: [
         {Core.LabelsFixture.Contact.Phone, "phone"},
         {Core.LabelsFixture.Contact.Code, "code"},
+        {Core.LabelsFixture.Contact.Note, "note"},
+        {Core.LabelsFixture.Contact.Due, "due"},
+        {Core.LabelsFixture.Contact.Seen, "seen"},
         {Core.LabelsFixture.Contact.Item, "item"},
         {Core.LabelsFixture.Contact.User, "user"},
         {Core.LabelsFixture.Contact.Snapshot, "snapshot"},
@@ -517,6 +543,12 @@ defmodule Core.LabelsFixture do
 
   defmodule Ghost do
     @moduledoc "Struct без объявления полей: достижим только скрытым полем."
+
+    defstruct [:note]
+  end
+
+  defmodule Raw do
+    @moduledoc "Значение-семейство без объявления полей и не Prim."
 
     defstruct [:note]
   end
@@ -834,6 +866,54 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Метки изменены"
+    end
+
+    defmodule Carried do
+      @moduledoc "Событие с ручной нагрузкой: список, множество и словарь вариантов семейства — без плагина."
+
+      defmodule Payload do
+        @moduledoc "Нагрузка: контейнеры над семейством Prim-вариантов."
+
+        defstruct [:contacts, :reached, :reached_by]
+
+        use Core.Labels.Fields,
+          fields: [
+            contacts: [list: [union: Core.LabelsFixture.Contact]],
+            reached: [set: [union: Core.LabelsFixture.Contact]],
+            reached_by: [map: [key: [type: :string], value: [union: Core.LabelsFixture.Contact]]]
+          ],
+          labels: [
+            contacts: "Способы связи",
+            reached: "Достигнутые",
+            reached_by: "Достигнутые по источнику"
+          ]
+      end
+
+      use Core.Es.Event,
+        family: ManualFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Связь подтверждена"
+    end
+
+    defmodule ContactChanged do
+      @moduledoc "Событие с ручным struct'ом изменения: значение — вариант семейства Prim-вариантов."
+
+      defmodule Payload do
+        @moduledoc "Изменение способа связи: значение — вариант семейства."
+
+        defstruct [:old_value, :new_value]
+
+        use Core.Labels.Fields,
+          change: "Способ связи",
+          value: [union: Core.LabelsFixture.Contact]
+      end
+
+      use Core.Es.Event,
+        family: ManualFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Способ связи изменён"
     end
 
     defmodule Linked do
@@ -1248,6 +1328,27 @@ defmodule Core.LabelsFixture do
       use Core.Labels.Event, title: "Способ связи указан"
     end
 
+    defmodule Reached do
+      @moduledoc "Событие с видимым семейством Prim-вариантов без ПДн: круг wire через фасад."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка: способ связи — вариант семейства."
+
+        use Core.Es.Event.Payload,
+          fields: [contact: [union: LabelsFixture.Contact, personal: false]]
+
+        use Core.Labels.Fields, labels: [contact: "Способ связи"]
+      end
+
+      use Core.Es.Event,
+        family: ContactFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Способ связи получен"
+    end
+
     defmodule Closed do
       @moduledoc "Событие без нагрузки."
 
@@ -1372,6 +1473,8 @@ defmodule Core.LabelsFixture do
       Event.Packed => "labels_manual.packed",
       Event.OriginChanged => "labels_manual.origin_changed",
       Event.TagsChanged => "labels_manual.tags_changed",
+      Event.Carried => "labels_manual.carried",
+      Event.ContactChanged => "labels_manual.contact_changed",
       Event.Blended => "labels_manual.blended",
       Event.Shifted => "labels_manual.shifted"
     }
@@ -1390,7 +1493,10 @@ defmodule Core.LabelsFixture do
     use Core.Es.Event.Codec,
       family: Event.ContactFamily,
       type: "labels_contact",
-      tags: %{Event.Reachable => "labels_contact.reachable"}
+      tags: %{
+        Event.Reachable => "labels_contact.reachable",
+        Event.Reached => "labels_contact.reached"
+      }
   end
 
   defmodule Codec do

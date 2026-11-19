@@ -8,6 +8,7 @@ defmodule Core.Labels.KindTableTest do
   alias Core.Labels.CompletenessCase
   alias Core.Labels.Details
   alias Core.Labels.Refs
+  alias Core.LabelsFixture.Contact
   alias Core.LabelsFixture.Event
   alias Core.LabelsFixture.Event.Kinds
   alias Core.LabelsFixture.ItemID
@@ -76,6 +77,37 @@ defmodule Core.Labels.KindTableTest do
       end
 
       assert Enum.sort(Map.keys(found)) == Enum.sort([ids.by | Enum.concat(Map.values(refs))])
+    end
+
+    # Ось «`union:` с Prim-вариантом» отдельным тестом: семейство не входит в `Field.kinds(:labels)`.
+    test "union: с Prim-вариантом — лист по варианту, id варианта в словаре, полнота проходит" do
+      item = Contact.Item.new()
+      user = UserID.new()
+
+      event =
+        Event.Reachable.new(
+          Event.Reachable.Payload.new(item),
+          AggID.new(),
+          Version.new(),
+          user,
+          At.now!()
+        )
+
+      assert {_title, [%{label: "Способ связи", kind: :ref, entity: :stock_item, value: ^item}]} =
+               Details.build(event)
+
+      names = %{item => "Имя", user => "Автор"}
+      assert {:ok, found} = Refs.get(event, Context.new(%{names: names}))
+      assert found[item] == "Имя"
+
+      modules = [Event.ContactFamily.Codec, Contact.Codec]
+
+      assert :ok = CompletenessCase.check_found(modules)
+      assert :ok = CompletenessCase.check_titles(modules)
+      assert :ok = CompletenessCase.check_fields(modules)
+      assert :ok = CompletenessCase.check_values(modules)
+      assert :ok = CompletenessCase.check_ids(modules)
+      assert :ok = CompletenessCase.check_variants(modules)
     end
 
     test "полнота обходит каждый вид" do

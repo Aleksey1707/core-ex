@@ -78,10 +78,10 @@ defmodule Core.Labels.Walk do
   defp variant_spec({:union, _family} = spec, %Destroyed{}), do: spec
 
   defp variant_spec({:union, _family} = spec, %variant{}) do
-    cond do
-      Core.Prim.prim?(variant) -> {:prim, variant}
-      Fields.labelled?(variant) -> spec
-      true -> raise ArgumentError, "#{inspect(variant)}: вариант семейства — не Prim и без `use Core.Labels.Fields`"
+    case variant_kind(variant) do
+      :prim -> {:prim, variant}
+      :struct -> spec
+      :unknown -> raise ArgumentError, "#{inspect(variant)}: вариант семейства — не Prim и без `use Core.Labels.Fields`"
     end
   end
 
@@ -185,7 +185,7 @@ defmodule Core.Labels.Walk do
       {:ok, plugins} ->
         plugins
         |> Enum.flat_map(& &1.__codec_types__())
-        |> Enum.reduce(acc, &variant(owner, field, &1, &2, families))
+        |> Enum.reduce(acc, &visit_variant(owner, field, &1, &2, families))
 
       :error ->
         place(acc, {:family, owner, field, family})
@@ -195,10 +195,10 @@ defmodule Core.Labels.Walk do
   defp visit(owner, field, spec, acc, families),
     do: Enum.reduce(Field.children(spec), acc, &visit(owner, field, &1, &2, families))
 
-  # Вариант семейства объявляет себя по-своему: Prim — видом (или текстом) значения на месте
-  # `prim:`, struct — решением по полям на месте `struct:`.
-  defp variant(owner, field, module, acc, families) when is_atom(module) do
-    if Core.Prim.prim?(module),
+  # Вариант объявляет себя по своему виду: Prim — видом (или текстом) значения на месте `prim:`,
+  # struct — решением по полям на месте `struct:`.
+  defp visit_variant(owner, field, module, acc, families) do
+    if variant_kind(module) == :prim,
       do: place(acc, {:prim, owner, field, module}),
       else: visit(owner, field, {:entity, module}, acc, families)
   end
@@ -214,6 +214,18 @@ defmodule Core.Labels.Walk do
       |> Enum.reduce({places, MapSet.put(seen, module)}, fn {name, spec}, acc ->
         visit(module, name, spec, acc, families)
       end)
+    end
+  end
+
+  # ===== общее =====
+
+  # Вариант семейства объявляет себя по своему виду: Prim — видом (или текстом) значения, struct —
+  # объявлением полей; прочий вид в сведениях и ратчете неподдерживаем.
+  defp variant_kind(module) do
+    cond do
+      Core.Prim.prim?(module) -> :prim
+      Fields.labelled?(module) -> :struct
+      true -> :unknown
     end
   end
 end

@@ -1,12 +1,7 @@
-defmodule Core.Labels.DetailsTest.Raw do
-  @moduledoc "Значение-семейство без объявления полей и не Prim."
-
-  defstruct [:note]
-end
-
 defmodule Core.Labels.DetailsTest do
   use ExUnit.Case, async: true
 
+  alias Core.CodecFixture.Internal, as: InCodec
   alias Core.Es.Event.At
   alias Core.Es.Personal
   alias Core.EsFixture.Itinerary
@@ -30,6 +25,7 @@ defmodule Core.Labels.DetailsTest do
   alias Core.LabelsFixture.Name
   alias Core.LabelsFixture.Parcel
   alias Core.LabelsFixture.Quote
+  alias Core.LabelsFixture.Raw
   alias Core.LabelsFixture.Shape
   alias Core.LabelsFixture.Shift
   alias Core.LabelsFixture.SnapshotID
@@ -175,9 +171,12 @@ defmodule Core.Labels.DetailsTest do
   end
 
   describe "семейство Prim-вариантов" do
-    test "лист по варианту: текст, plain-вид, ссылка, учётная запись и id; композит — вид базы" do
+    test "лист по варианту: текст, plain-виды, ссылка, учётная запись и id; композит — вид базы" do
       phone = Contact.Phone.new!("+7 900")
       code = Contact.Code.new!(42)
+      note = Contact.Note.new!("позвонить")
+      due = Contact.Due.new!(~D[2026-10-20])
+      seen = Contact.Seen.new!(~U[2026-10-20 09:30:00.000000Z])
       item = ItemID.new()
       owner = UserID.new()
       snapshot = SnapshotID.new()
@@ -187,6 +186,15 @@ defmodule Core.Labels.DetailsTest do
 
       assert contact_details(code) ==
                {"Способ связи указан", [%{label: "Способ связи", kind: :number, value: code}]}
+
+      assert contact_details(note) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :text, value: note}]}
+
+      assert contact_details(due) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :date, value: due}]}
+
+      assert contact_details(seen) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :datetime, value: seen}]}
 
       assert contact_details(item) ==
                {"Способ связи указан", [%{label: "Способ связи", kind: :ref, entity: :stock_item, value: item}]}
@@ -212,13 +220,60 @@ defmodule Core.Labels.DetailsTest do
     end
 
     test "неподдерживаемый вариант и Prim с custom-видом — ArgumentError с именем модуля" do
-      assert_raise ArgumentError, ~r/Core\.Labels\.DetailsTest\.Raw: /, fn ->
-        contact_details(%Core.Labels.DetailsTest.Raw{note: "сырой"})
+      assert_raise ArgumentError, ~r/Core\.LabelsFixture\.Raw: /, fn ->
+        contact_details(%Raw{note: "сырой"})
       end
 
       assert_raise ArgumentError, ~r/Core\.PrimFixture\.SensitiveLabel: /, fn ->
         contact_details(SensitiveLabel.new())
       end
+    end
+
+    test "элементы контейнеров и сторона изменения — лист по варианту" do
+      phone = Contact.Phone.new!("+7 900")
+      code = Contact.Code.new!(7)
+      note = Contact.Note.new!("позвонить")
+
+      carried = %Event.Carried.Payload{
+        contacts: [phone, code],
+        reached: MapSet.new([note]),
+        reached_by: %{"код" => code}
+      }
+
+      assert Details.build(event(Event.Carried, carried)) ==
+               {"Связь подтверждена",
+                [
+                  %{
+                    label: "Способы связи",
+                    kind: :list,
+                    value: [%{kind: :text, value: "Тел. +7 900"}, %{kind: :number, value: code}]
+                  },
+                  %{label: "Достигнутые", kind: :set, value: [%{kind: :text, value: note}]},
+                  %{
+                    label: "Достигнутые по источнику",
+                    kind: :map,
+                    value: [%{key: %{kind: :text, value: "код"}, value: %{kind: :number, value: code}}]
+                  }
+                ]}
+
+      changed = %Event.ContactChanged.Payload{old_value: phone, new_value: code}
+
+      assert Details.build(event(Event.ContactChanged, changed)) ==
+               {"Способ связи изменён",
+                [
+                  %{
+                    label: "Способ связи",
+                    kind: :change,
+                    old: %{kind: :text, value: "Тел. +7 900"},
+                    new: %{kind: :number, value: code}
+                  }
+                ]}
+    end
+
+    test "фасад: wire события с видимым union: из Prim-вариантов не меняется — dump → load" do
+      event = event(Event.Reached, Event.Reached.Payload.new(Contact.Item.new()))
+
+      assert {:ok, ^event} = InCodec.load(Event.ContactFamily, InCodec.dump(event))
     end
   end
 

@@ -232,7 +232,7 @@ defmodule Core.Labels.CompletenessCase do
   def check_ids(modules) when is_list(modules) do
     unkinded =
       for {:prim, owner, field, module} <- Walk.declarations(modules).places,
-          unkinded?(module),
+          missing_kind?(module),
           do: {owner, field, module}
 
     result(unkinded: unkinded)
@@ -260,7 +260,7 @@ defmodule Core.Labels.CompletenessCase do
 
   defp user?(module), do: match?(%{kind: :user}, ID.find(module))
 
-  defp unkinded?(module) do
+  defp missing_kind?(module) do
     case Kind.of(module) do
       {:unkinded, _leaf} -> true
       {:custom, _leaf} -> true
