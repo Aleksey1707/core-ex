@@ -325,8 +325,9 @@ defmodule Core.Es.Event do
 
   # Модуль нагрузки MAY быть вложен в событие: при раскрытии `use` он ещё не собран, поэтому проверки по
   # нему — в теле, и несобранный модуль — отказ, а не тихий пропуск. `subject: :aggregate_id` у поля
-  # нагрузки по полям требует UUID-Prim агрегата: идентификатор субъекта — UUID (ADR-0073). Нагрузку
-  # другого вида проверять нечем.
+  # нагрузки требует UUID-Prim агрегата: идентификатор субъекта — UUID (ADR-0073). Проверка идёт по
+  # декларации нагрузки, а не по её роли: структура по полям с ручным `new/N` и нагрузка-сущность
+  # тоже её проходят. Без декларации (Prim) проверять нечем.
   @doc false
   @spec payload!(module() | nil, module()) :: module() | nil
 
@@ -341,8 +342,8 @@ defmodule Core.Es.Event do
   # ---
 
   defp check_subject!(payload, aggregate_id) do
-    with true <- Payload.wire_payload?(payload),
-         [{name, :aggregate_id} | _rest] <- aggregate_subjects(payload),
+    with fields when is_list(fields) <- Core.Field.introspect(payload),
+         [{name, :aggregate_id} | _rest] <- aggregate_subjects(fields),
          false <- Payload.uuid_prim?(aggregate_id) do
       Helper.Opts.reject!(
         @payload_where,
@@ -354,8 +355,8 @@ defmodule Core.Es.Event do
     :ok
   end
 
-  defp aggregate_subjects(payload) do
-    for %{path: path, subject: :aggregate_id} <- Core.Es.Personal.Plan.entries(Core.Field.introspect(payload)) do
+  defp aggregate_subjects(fields) do
+    for %{path: path, subject: :aggregate_id} <- Core.Es.Personal.Plan.entries(fields) do
       {List.last(path), :aggregate_id}
     end
   end

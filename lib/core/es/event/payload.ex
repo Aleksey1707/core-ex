@@ -47,15 +47,18 @@ defmodule Core.Es.Event.Payload do
   - `Inspect` при непустом плане: ПДн-место — плейсхолдер `%Core.Es.Personal.Hidden{}`, открытые
     поля и открытая часть списка видны;
   - `__core_fields__/0` — внутренняя: состав полей единым IR (`Core.Field`); читает
-    `Core.Field.introspect/1`.
+    `Core.Field.introspect/1`;
+  - `__core_payload_role__/0` — внутренняя: роль нагрузки (`:fields`), которую объявляет этот
+    builder, а не конструктор; читает `wire_payload?/1`.
 
   Кодирует такую нагрузку `Core.Es.Event.Codec` клаузами, которые собирает этот модуль из
   поштучных блоков значения поля `Core.Codec.Plugin.Fields`: дамп оставляет значения открытыми,
   затем по `__es_personal__/0` каждое ПДн-место заменяется `%Core.Es.Personal.Marker{}` с
   субъектом и wire-значением (ADR-0073, ADR-0074). Шифрует маркеры `Core.Es.Personal.Wire`.
 
-  Нагрузка по полям — единственная роль, чью wire-форму выводит кодек событий, поэтому её узнаёт
-  `wire_payload?/1` (поле нагрузки плюс `Core.Es.ValueChanged`).
+  Роль нагрузки объявляет builder: `:fields` у нагрузки по полям и у `Core.Es.ValueChanged`.
+  По роли `wire_payload?/1` узнаёт нагрузку, чью wire-форму выводит кодек событий; конструктор
+  `new/N` роли не объявляет.
   """
 
   alias Core.Codec.Plugin.Fields
@@ -80,6 +83,7 @@ defmodule Core.Es.Event.Payload do
     [
       quote do
         @core_fields Core.Es.Event.Payload.fields!(unquote(Macro.escape(Keyword.fetch!(opts, :fields))))
+        @core_payload_role :fields
         @es_payload_inspect_places Core.Field.inspect_places(@core_fields)
       end,
       quote unquote: false do
@@ -102,6 +106,11 @@ defmodule Core.Es.Event.Payload do
 
         def __core_fields__, do: @core_fields
 
+        @doc false
+        @spec __core_payload_role__() :: :fields
+
+        def __core_payload_role__, do: @core_payload_role
+
         @before_compile Core.Es.Event.Payload
       end
     ]
@@ -122,18 +131,29 @@ defmodule Core.Es.Event.Payload do
   end
 
   @doc """
-  Модуль — нагрузка, чью wire-форму кодек событий выводит по её декларации: поля нагрузки события
-  и `Core.Es.ValueChanged` несут конструктор `new/N` в размер декларации. Нагрузка-сущность с
-  плагином (`Core.Struct` и ручной struct) узнаётся по отсутствию конструктора: её wire задаёт
-  плагин типа.
+  Модуль — нагрузка, чью wire-форму кодек событий выводит по её декларации (`:fields`): роль
+  объявляет builder нагрузки, а не конструктор. Нагрузка-сущность с плагином (`Core.Struct` и
+  ручной struct), в том числе с ручным `new/N` в размер декларации, и однополевое представление
+  (`new/1` у `Core.View`) роль не объявляют: их wire задаёт плагин типа.
   """
   @spec wire_payload?(module()) :: boolean()
 
-  def wire_payload?(module) when is_atom(module) do
-    case Core.Field.introspect(module) do
-      nil -> false
-      fields -> Helper.Module.exports?(module, :new, length(fields))
-    end
+  def wire_payload?(module) when is_atom(module), do: payload_role(module) == :fields
+
+  # ---
+
+  # Роль читают на сборке, когда нагрузка MAY быть вложена в событие и ещё открыта. Чтение
+  # зеркалит `Core.Field.introspect/1`: собранная функция, иначе атрибут собирающегося модуля.
+  defp payload_role(module) do
+    if Helper.Module.exports?(module, :__core_payload_role__, 0),
+      do: module.__core_payload_role__(),
+      else: under_compilation(module)
+  end
+
+  defp under_compilation(module) do
+    if Module.open?(module), do: Module.get_attribute(module, :core_payload_role)
+  rescue
+    ArgumentError -> nil
   end
 
   # ===== Inspect =====

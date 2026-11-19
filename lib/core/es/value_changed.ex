@@ -11,6 +11,8 @@ defmodule Core.Es.ValueChanged do
   `__core_fields__/0` — декларация `old_value` / `new_value` в едином IR (`Core.Field`), внутренняя:
   по ней `Core.Es.Event.Codec` выводит клаузы нагрузки события — map
   `%{"old_value" => …, "new_value" => …}`, значения по виду типа (`fields/2`).
+  `__core_payload_role__/0` — роль нагрузки (`:fields`): builder объявляет её, чтобы кодек выводил
+  wire по декларации, а не по конструктору.
 
   ПДн-план применяется к `old_value` и `new_value` независимо: сторона с персональным типом —
   ПДн-место с субъектом `:aggregate_id` (тип чтения допускает `%Core.Es.Personal.Destroyed{}`,
@@ -49,6 +51,7 @@ defmodule Core.Es.ValueChanged do
       defstruct @enforce_keys
 
       @core_fields unquote(Macro.escape(fields))
+      @core_payload_role :fields
 
       @type t :: %__MODULE__{unquote_splicing(read_types)}
       @type write_t :: %__MODULE__{unquote_splicing(write_types)}
@@ -57,6 +60,11 @@ defmodule Core.Es.ValueChanged do
       @spec __core_fields__() :: [Core.Field.t()]
 
       def __core_fields__, do: @core_fields
+
+      @doc false
+      @spec __core_payload_role__() :: :fields
+
+      def __core_payload_role__, do: @core_payload_role
 
       @doc "Создать запись изменения значения."
       @spec new(unquote_splicing(Keyword.values(write_types))) :: write_t()
