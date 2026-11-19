@@ -184,19 +184,26 @@ defmodule Core.Labels.Walk do
     do: descend(place(acc, {:struct, owner, field, module}), module, families)
 
   defp visit(owner, field, {:union, family}, acc, families) do
-    case Map.fetch(families, family) do
-      {:ok, plugins} ->
-        plugins
-        |> Enum.flat_map(& &1.__codec_types__())
-        |> Enum.reduce(acc, &visit_variant(owner, field, &1, &2, families))
+    acc = place(acc, {:family, owner, field, family})
 
-      :error ->
-        place(acc, {:family, owner, field, family})
+    case Core.Field.union_variants(family) do
+      [_ | _] = variants -> Enum.reduce(variants, acc, &visit_variant(owner, field, &1.module, &2, families))
+      [] -> plugin_variants(owner, field, family, acc, families)
     end
   end
 
   defp visit(owner, field, spec, acc, families),
     do: Enum.reduce(Field.children(spec), acc, &visit(owner, field, &1, &2, families))
+
+  # Семейство без реестра: состав знает только его Codec-плагин. Нет и плагина — место семейства
+  # остаётся единственным следом, ратчет считает его неизвестным.
+  defp plugin_variants(owner, field, family, acc, families) do
+    for plugin <- Map.get(families, family, []),
+        type <- plugin.__codec_types__(),
+        reduce: acc do
+      acc -> visit_variant(owner, field, type, acc, families)
+    end
+  end
 
   # Вариант объявляет себя по своему виду: Prim — видом (или текстом) значения на месте `prim:`,
   # struct — решением по полям на месте `struct:`.

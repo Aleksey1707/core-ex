@@ -31,12 +31,6 @@ defmodule Core.FieldTest do
       ]
   end
 
-  defmodule UnionFixture do
-    @moduledoc false
-
-    def types, do: [Core.StructFixture.Point, Personal]
-  end
-
   defmodule Raw do
     @moduledoc false
 
@@ -231,12 +225,19 @@ defmodule Core.FieldTest do
     end
 
     test "union: — тип записи из вариантов семейства, тип чтения — struct()" do
-      fields = Field.declare!([shape: [union: UnionFixture]], :struct, "S")
+      fields = Field.declare!([shape: [union: Core.UnionFixture.Shape]], :struct, "S")
 
       assert type(Field.read_typespec(fields), :shape) == "struct()"
 
       assert type(Field.write_typespec(fields), :shape) ==
-               "Core.StructFixture.Point.write_t() | Core.PrimFixture.Personal.t()"
+               "Core.UnionFixture.Circle.write_t() | Core.UnionFixture.Square.write_t()"
+    end
+
+    test "union: без реестра — тип записи struct(), плагин семейства его не расширяет" do
+      fields = Field.declare!([legacy: [union: Core.LabelsFamilyFixture.Legacy]], :struct, "S")
+
+      assert type(Field.read_typespec(fields), :legacy) == "struct()"
+      assert type(Field.write_typespec(fields), :legacy) == "struct()"
     end
 
     test "ПДн-лист set: и ключа map: поднимает Destroyed к контейнеру" do

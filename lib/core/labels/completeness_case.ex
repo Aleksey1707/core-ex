@@ -15,12 +15,15 @@ defmodule Core.Labels.CompletenessCase do
   полнота держится тестом на всё дерево, а не сборкой.
 
   Модули приложения перечисляет `:application.get_key/2`. Кодеки — модули, которые
-  `Core.Es.Event.Codec.codec?/1` признаёт кодеком событий, семейства — плагины с `__codec_union__/0`
-  (`use Core.Codec.Plugin, union:`). Перечня нет: новый кодек попадает под проверку сам, без новой
-  строки теста. Обход идёт от событий кодеков по спеке нагрузки (`Core.Labels.Fields`): во вложенные
-  struct'ы, списки, множества, ключи и значения словарей (`map:`) и варианты семейства. Вариант
-  семейства объявляет себя по своему виду: Prim — как Prim (вид или текст значения), struct — как
-  struct (решение по полям); скрытое поле-семейство не проверяется. Автор события
+  `Core.Es.Event.Codec.codec?/1` признаёт кодеком событий. Состав семейства обход читает из его
+  реестра (`use Core.Union`, `__core_variants__/0`); у семейства без реестра — из типов его
+  Codec-плагина (`__codec_union__/0`, `use Core.Codec.Plugin, union:`), как и прежде. Перечня нет:
+  новый кодек попадает под проверку сам, без новой строки теста. Обход идёт от событий кодеков по
+  спеке нагрузки (`Core.Labels.Fields`): во вложенные struct'ы, списки, множества, ключи и значения
+  словарей (`map:`) и варианты семейства. Вариант семейства объявляет себя по своему виду: Prim — как
+  Prim (вид или текст значения), struct — как struct (решение по полям); скрытое поле-семейство не
+  проверяется. Чужие декларативные типы смешанного плагина (`types:` рядом с `union:`) вариантами не
+  становятся: пробел типа атрибутируется полю, где он объявлен. Автор события
   (`by`) в сведения не выходит, но событие страницы событий с подписями (`Core.Web.Event`,
   `labels: true` требует `user_ref:`) дампит его ссылкой на учётную запись с именем из словаря ссылок,
   а словарь находит только id с резолвером — иначе `ArgumentError` на первом событии. Ключи и
@@ -43,8 +46,9 @@ defmodule Core.Labels.CompletenessCase do
      id без вида: в сведениях вида у него нет;
   7. спека видимых полей каждого варианта семейства с подписями совпадает с его декларацией
      (`__core_fields__/0`): иначе подписи варианта разошлись бы с его wire-формой. Поле-дискриминатор
-     в wire варианта не входит и не сверяется. Семейство поля `union:` без плагина среди модулей
-     `otp_app:` — провал, даже если плагин лежит в другом приложении: его вариантов обход не знает.
+     в wire варианта не входит и не сверяется. Варианты берутся из реестра семейства, поэтому
+     семейство с реестром проверяется и когда его плагин лежит в другом приложении; провал
+     «семейство неизвестно» — только когда нет ни реестра, ни плагина среди модулей `otp_app:`.
 
   Логика теста — функция `check_*` (`:ok | {:error, пробелы}`), сам тест — `assert :ok = …`:
   провал перечисляет все пробелы разом, с модулем-владельцем, полем и модулем без объявления.
@@ -88,7 +92,7 @@ defmodule Core.Labels.CompletenessCase do
 
   @typedoc """
   Варианты, чья спека поля расходится со спекой `__core_fields__/0` (`{подписи, IR}`, `nil` — спеки
-  нет; при одной декларации недостижимо), и семейства без плагина.
+  нет; при одной декларации недостижимо), и семейства без реестра и плагина.
   """
   @type variants :: %{
           optional(:diverged) => [{module(), atom(), {Fields.spec() | nil, Fields.spec() | nil}}],
@@ -242,12 +246,19 @@ defmodule Core.Labels.CompletenessCase do
   @spec check_variants([module()]) :: Result.unit(variants())
 
   def check_variants(modules) when is_list(modules) do
-    unknown = for {:family, owner, field, family} <- Walk.declarations(modules).places, do: {owner, field, family}
+    places = Walk.declarations(modules).places
+    reached = for {:family, _owner, _field, family} <- places, uniq: true, do: family
+    plugin_families = for plugin <- modules, family = union(plugin), do: family
+
+    unknown =
+      for {:family, owner, field, family} <- places,
+          Core.Field.union_variants(family) == [],
+          family not in plugin_families,
+          do: {owner, field, family}
 
     diverged =
-      for plugin <- modules,
-          family = union(plugin),
-          variant <- Core.Union.variants(family),
+      for family <- reached,
+          variant <- Core.Field.union_variants(family),
           variant.kind == :domain,
           Fields.labelled?(variant.module),
           gap <- diverged(variant.module, disc(variant.address), variant_fields(variant.module)),
