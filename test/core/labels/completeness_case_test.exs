@@ -12,8 +12,14 @@ defmodule Core.Labels.CompletenessCaseTest do
 
   # Полный набор: кодеки событий с подписями и плагин семейства их нагрузки. Сломанный — кодек и
   # плагин `Core.LabelsBrokenFixture`: в нём по пробелу каждого вида.
-  @full [LabelsFixture.Event.Codec, LabelsFixture.Event.ManualFamily.Codec, LabelsFixture.Shape.Codec]
-  @broken [LabelsBrokenFixture.Event.Codec, LabelsBrokenFixture.Mark.Codec]
+  @full [
+    LabelsFixture.Event.Codec,
+    LabelsFixture.Event.ContactFamily.Codec,
+    LabelsFixture.Event.ManualFamily.Codec,
+    LabelsFixture.Shape.Codec,
+    LabelsFixture.Contact.Codec
+  ]
+  @broken [LabelsBrokenFixture.Event.Codec, LabelsBrokenFixture.Mark.Codec, LabelsBrokenFixture.Contact.Codec]
   @blended [LabelsFixture.Event.ManualFamily.Codec, LabelsFixture.Shape.Codec]
 
   describe "check_found/1" do
@@ -44,6 +50,10 @@ defmodule Core.Labels.CompletenessCaseTest do
 
     test "скрытое поле не даёт пробела: struct без объявления полей не обходится" do
       assert :ok = CompletenessCase.check_fields(@blended)
+    end
+
+    test "Prim-вариант семейства не даёт ложного пробела: проверяется как Prim" do
+      assert :ok = CompletenessCase.check_fields([LabelsFixture.Event.ContactFamily.Codec, LabelsFixture.Contact.Codec])
     end
 
     test "нагрузка и вариант семейства без решения — владелец, поле и struct" do
@@ -86,10 +96,15 @@ defmodule Core.Labels.CompletenessCaseTest do
       assert :ok = CompletenessCase.check_ids(@blended)
     end
 
-    test "id без вида — владелец, поле и Prim; и в значении словаря" do
+    test "Prim-вариант без вида и со своим видом — владелец, поле и Prim; скрытое не проверяется" do
       assert {:error, %{unkinded: unkinded}} = CompletenessCase.check_ids(@broken)
 
-      assert unkinded == [{Marked.Payload, :ref, LabelsFixture.BareID}, {Marked.Payload, :refs, LabelsFixture.BareID}]
+      assert unkinded == [
+               {Marked.Payload, :contact, LabelsBrokenFixture.Contact.Own},
+               {Marked.Payload, :contact, LabelsBrokenFixture.Contact.Silent},
+               {Marked.Payload, :ref, LabelsFixture.BareID},
+               {Marked.Payload, :refs, LabelsFixture.BareID}
+             ]
     end
   end
 

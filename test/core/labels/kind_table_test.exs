@@ -79,7 +79,13 @@ defmodule Core.Labels.KindTableTest do
     end
 
     test "полнота обходит каждый вид" do
-      modules = [Event.Codec, Shape.Codec, Core.LabelsFixture.Codec]
+      modules = [
+        Event.Codec,
+        Event.ContactFamily.Codec,
+        Shape.Codec,
+        Core.LabelsFixture.Codec,
+        Core.LabelsFixture.Contact.Codec
+      ]
 
       assert :ok = CompletenessCase.check_found(modules)
       assert :ok = CompletenessCase.check_titles(modules)
@@ -92,13 +98,19 @@ defmodule Core.Labels.KindTableTest do
     # Пробелы листовых видов с модулем видны полноте на любой глубине: Prim — поле и значение
     # словаря, Enum — поле, список, множество и ключ словаря.
     test "полнота находит Prim и Enum на любой глубине" do
-      modules = [Core.LabelsBrokenFixture.Event.Codec, Core.LabelsBrokenFixture.Mark.Codec]
+      modules = [
+        Core.LabelsBrokenFixture.Event.Codec,
+        Core.LabelsBrokenFixture.Mark.Codec,
+        Core.LabelsBrokenFixture.Contact.Codec
+      ]
 
       assert {:error, %{unkinded: unkinded}} = CompletenessCase.check_ids(modules)
       assert {:error, %{unlabelled: unlabelled}} = CompletenessCase.check_values(modules)
 
       assert Enum.sort(unkinded) ==
                Enum.sort([
+                 {Core.LabelsBrokenFixture.Event.Marked.Payload, :contact, Core.LabelsBrokenFixture.Contact.Own},
+                 {Core.LabelsBrokenFixture.Event.Marked.Payload, :contact, Core.LabelsBrokenFixture.Contact.Silent},
                  {Core.LabelsBrokenFixture.Event.Marked.Payload, :ref, Core.LabelsFixture.BareID},
                  {Core.LabelsBrokenFixture.Event.Marked.Payload, :refs, Core.LabelsFixture.BareID}
                ])

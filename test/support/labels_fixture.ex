@@ -581,7 +581,7 @@ defmodule Core.LabelsFixture do
     end
 
     defmodule ContactFamily do
-      @moduledoc "Семейство события с видимым семейством Prim-вариантов: в набор ратчета пока не входит."
+      @moduledoc "Семейство события с видимым семейством Prim-вариантов."
 
       use Core.Es.Event.Family,
         aggregate: Core.LabelsFixture,
@@ -1383,7 +1383,7 @@ defmodule Core.LabelsFixture do
   end
 
   defmodule Event.ContactFamily.Codec do
-    @moduledoc "Кодек события со способом связи: в полный набор ратчета полноты не входит."
+    @moduledoc "Кодек события со способом связи: входит в полный набор ратчета полноты."
 
     alias Core.LabelsFixture.Event
 

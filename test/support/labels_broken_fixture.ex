@@ -2,9 +2,9 @@ defmodule Core.LabelsBrokenFixture do
   @moduledoc """
   Сломанный набор ратчета полноты подписей (`Core.Labels.CompletenessCase`): событие без названия с
   нагрузкой без решения по полям, Enum без подписей, id без вида, вариант семейства без решения по
-  полям и семейство без плагина; автор
-  без вида id — у событий кодека `Event.Codec`, автор-ссылка на запись и автор только id — по событию
-  в своём кодеке.
+  полям, Prim-вариант без вида и со своим видом, скрытое поле-семейство и семейство без плагина;
+  автор без вида id — у событий кодека `Event.Codec`, автор-ссылка на запись и автор только id — по
+  событию в своём кодеке.
   """
 
   alias Core.EventFixture.ActorID
@@ -63,6 +63,40 @@ defmodule Core.LabelsBrokenFixture do
     @moduledoc "Варианты метки: форма без обёртки, дискриминатор `kind`."
 
     use Core.Codec.Plugin, union: Core.LabelsBrokenFixture.Mark
+  end
+
+  defmodule Contact do
+    @moduledoc "Семейство Prim-вариантов: у одного вида нет, у другого он свой."
+
+    defmodule Silent do
+      @moduledoc "Вариант-Prim без вида: UUID без `Core.Labels.ID` и `Core.Labels.Text`."
+
+      use Core.Prim.UUID,
+        name: "Тихий",
+        version: 7
+    end
+
+    defmodule Own do
+      @moduledoc "Вариант-Prim со своим видом: в сведениях вида у него нет."
+
+      use Core.Prim.String,
+        name: "Свой",
+        min_len: 1,
+        max_len: 8,
+        kind: :label
+    end
+
+    use Core.Union,
+      variants: [
+        {Core.LabelsBrokenFixture.Contact.Silent, "silent"},
+        {Core.LabelsBrokenFixture.Contact.Own, "own"}
+      ]
+  end
+
+  defmodule Contact.Codec do
+    @moduledoc "Варианты способа связи: форма без обёртки, тег адреса."
+
+    use Core.Codec.Plugin, union: Core.LabelsBrokenFixture.Contact
   end
 
   defmodule Loose do
@@ -139,6 +173,8 @@ defmodule Core.LabelsBrokenFixture do
             ref: [prim: Core.LabelsFixture.BareID],
             item: [prim: Core.LabelsFixture.ItemID],
             mark: [union: LabelsBrokenFixture.Mark, personal: false],
+            contact: [union: LabelsBrokenFixture.Contact, personal: false, optional: true],
+            hidden_contact: [union: LabelsBrokenFixture.Contact, personal: false, optional: true],
             loose: [union: LabelsBrokenFixture.Loose, personal: false, optional: true]
           ]
 
@@ -151,6 +187,8 @@ defmodule Core.LabelsBrokenFixture do
             ref: "Ссылка",
             item: "Позиция",
             mark: "Метка",
+            contact: "Связь",
+            hidden_contact: :hidden,
             loose: "Свободное"
           ]
       end

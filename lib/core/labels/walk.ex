@@ -185,7 +185,7 @@ defmodule Core.Labels.Walk do
       {:ok, plugins} ->
         plugins
         |> Enum.flat_map(& &1.__codec_types__())
-        |> Enum.reduce(acc, &visit(owner, field, {:entity, &1}, &2, families))
+        |> Enum.reduce(acc, &variant(owner, field, &1, &2, families))
 
       :error ->
         place(acc, {:family, owner, field, family})
@@ -194,6 +194,14 @@ defmodule Core.Labels.Walk do
 
   defp visit(owner, field, spec, acc, families),
     do: Enum.reduce(Field.children(spec), acc, &visit(owner, field, &1, &2, families))
+
+  # Вариант семейства объявляет себя по-своему: Prim — видом (или текстом) значения на месте
+  # `prim:`, struct — решением по полям на месте `struct:`.
+  defp variant(owner, field, module, acc, families) when is_atom(module) do
+    if Core.Prim.prim?(module),
+      do: place(acc, {:prim, owner, field, module}),
+      else: visit(owner, field, {:entity, module}, acc, families)
+  end
 
   defp place({places, seen}, place), do: {[place | places], seen}
 

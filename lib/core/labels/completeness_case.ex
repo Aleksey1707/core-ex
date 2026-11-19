@@ -18,7 +18,9 @@ defmodule Core.Labels.CompletenessCase do
   `Core.Es.Event.Codec.codec?/1` признаёт кодеком событий, семейства — плагины с `__codec_union__/0`
   (`use Core.Codec.Plugin, union:`). Перечня нет: новый кодек попадает под проверку сам, без новой
   строки теста. Обход идёт от событий кодеков по спеке нагрузки (`Core.Labels.Fields`): во вложенные
-  struct'ы, списки, множества, ключи и значения словарей (`map:`) и варианты семейства. Автор события
+  struct'ы, списки, множества, ключи и значения словарей (`map:`) и варианты семейства. Вариант
+  семейства объявляет себя по своему виду: Prim — как Prim (вид или текст значения), struct — как
+  struct (решение по полям); скрытое поле-семейство не проверяется. Автор события
   (`by`) в сведения не выходит, но событие страницы событий с подписями (`Core.Web.Event`,
   `labels: true` требует `user_ref:`) дампит его ссылкой на учётную запись с именем из словаря ссылок,
   а словарь находит только id с резолвером — иначе `ArgumentError` на первом событии. Ключи и
@@ -33,10 +35,12 @@ defmodule Core.Labels.CompletenessCase do
   3. автор каждого события (`__es_by__/0`) — Prim с `use Core.Labels.ID, kind: :user` и `resolver:`;
      пробел — `{событие, :by, Prim автора}`;
   4. у каждого struct'а, достижимого из нагрузки, — нагрузки, вложенного struct'а, варианта
-     семейства — решение по полям (`Core.Labels.Fields`);
+     семейства — решение по полям (`Core.Labels.Fields`); вариант-Prim проверяется как Prim (п. 6);
   5. у каждого Enum, достижимого из нагрузки, подписи значений (`Core.Labels.Values`);
-  6. у каждого Prim-идентификатора, достижимого из нагрузки, вид (`Core.Labels.ID`) или текст
-     (`Core.Labels.Text`) — свой или базы композита;
+  6. у каждого Prim-идентификатора, достижимого из нагрузки, — поля, значения словаря, варианта
+     видимого семейства `union:` — вид (`Core.Labels.ID`) или текст (`Core.Labels.Text`): свой или
+     базы композита. Prim со своим kind (`Core.Labels.Kind.of/1` — `{:custom, _}`) — пробел, как и
+     id без вида: в сведениях вида у него нет;
   7. спека видимых полей каждого варианта семейства с подписями совпадает с его декларацией
      (`__core_fields__/0`): иначе подписи варианта разошлись бы с его wire-формой. Поле-дискриминатор
      в wire варианта не входит и не сверяется. Семейство поля `union:` без плагина среди модулей
@@ -79,7 +83,7 @@ defmodule Core.Labels.CompletenessCase do
   @typedoc "Enum без подписей значений."
   @type unlabelled :: %{unlabelled: [place()]}
 
-  @typedoc "Prim-идентификаторы без вида."
+  @typedoc "Prim-идентификаторы без вида: `Kind.of/1` — `:unkinded` или `{:custom, _}`."
   @type unkinded :: %{unkinded: [place()]}
 
   @typedoc """
@@ -256,7 +260,13 @@ defmodule Core.Labels.CompletenessCase do
 
   defp user?(module), do: match?(%{kind: :user}, ID.find(module))
 
-  defp unkinded?(module), do: match?({:unkinded, _leaf}, Kind.of(module))
+  defp unkinded?(module) do
+    case Kind.of(module) do
+      {:unkinded, _leaf} -> true
+      {:custom, _leaf} -> true
+      _declared -> false
+    end
+  end
 
   defp union(plugin) do
     if Helper.Module.exports?(plugin, :__codec_union__, 0), do: plugin.__codec_union__()
