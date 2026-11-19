@@ -45,10 +45,15 @@ defmodule Core.Labels.Fields do
           ]
       end
 
-  Поля декларативного типа — структуры по полям, нагрузки события и изменения
-  (`Core.Es.ValueChanged`) — подписи читают из общей декларации `__core_fields__/0`
+  Поля декларативного типа — структуры по полям, нагрузки события, изменения
+  (`Core.Es.ValueChanged`) и View — подписи читают из общей декларации `__core_fields__/0`
   (`Core.Field.introspect/1`), а не из своего объявления: `fields:` рядом с ней и `value:` рядом с
   `change:` у такого типа — `CompileError`.
+
+  Виды View (`view:`, `form:`, `jsonb:`) подписи не интерпретируют: видимое поле декларативного
+  хоста с таким видом (на любой глубине) — `CompileError` при `use` с именем хоста, поля и вида.
+  Скрытое поле (`:hidden`) в обход не попадает и законно; View с полями общих видов подписывается
+  как любой другой декларативный хост.
 
   Поле событий `events`, порождённое `use Core.Struct, events:`, вне спеки структуры: решение о нём
   не объявляется, подпись на нём — `CompileError`.
@@ -102,7 +107,8 @@ defmodule Core.Labels.Fields do
   `[label:, key:, value:]`, вложенный struct (`entity:`) без `use Core.Labels.Fields`; у нагрузки и
   структуры по полям — `fields:`; у структуры по полям с `events:` — подпись поля `events`; у
   struct'а без спеки полей — отсутствие `fields:`, видимое поле без спеки, спека скрытого поля или
-  поля вне struct'а, `text:` не захватом функции арности 1.
+  поля вне struct'а, `text:` не захватом функции арности 1; у декларативного хоста — видимое поле
+  вида, который сведения не интерпретируют (`view:`, `form:`, `jsonb:`).
 
   Нагрузка «было → стало» объявляет вместо `labels:` одну подпись изменения `change:` — ровно одна из
   двух опций. Вид значения у `Core.Es.ValueChanged` берётся из его `type:`, у структуры по полям — из
@@ -467,9 +473,24 @@ defmodule Core.Labels.Fields do
     ensure_none!(env, labelled -- fields, "подписи полей вне struct'а")
 
     case host(module) do
-      {:declared, _fields} -> :ok
+      {:declared, _fields} -> ensure_kinds!(module)
       _manual -> ensure_specs!(env, module.__label_specs__(), labels, fields)
     end
+  end
+
+  # Вид поля, который сведения не интерпретируют (`view:`, `form:`, `jsonb:`), — отказ при сборке:
+  # объявление подписей на таком хосте собиралось бы, а страница событий падала `FunctionClauseError`
+  # на первом значении. Allowlist — грамматика подписей плюс `text:`; отказ поднимает `kind_key!`,
+  # чтобы текст совпал с ручным `fields:`. Скрытое поле в обход не попадает — скрытие остаётся
+  # законным обходным путём.
+  defp ensure_kinds!(module) do
+    allowed = Core.Field.kinds(:labels) ++ [:text]
+
+    for {name, spec} <- specs(module), foreign = foreign_kind(spec, allowed), not is_nil(foreign) do
+      Core.Field.kind_key!([foreign], :labels, "#{@label} #{inspect(module)}: поле #{name}")
+    end
+
+    :ok
   end
 
   defp ensure_specs!(env, specs, labels, fields) do
@@ -506,6 +527,19 @@ defmodule Core.Labels.Fields do
 
   defp unlabelled?({:entity, mod}), do: not labelled?(mod)
   defp unlabelled?(spec), do: Enum.any?(Field.values(spec), &unlabelled?/1)
+
+  # Вид значения вне allowlist подписей: у View он свой (`view:`, `form:`, `jsonb:`), и сведения его
+  # не интерпретируют. Место ПДн (`{:personal, вид}`) в спеке подписей снято, но прозрачно.
+  defp foreign_kind({:personal, inner}, allowed), do: foreign_kind(inner, allowed)
+  defp foreign_kind({:personal_false, inner}, allowed), do: foreign_kind(inner, allowed)
+
+  defp foreign_kind({kind, inner}, allowed) when kind in ~w(list set)a, do: foreign_kind(inner, allowed)
+  defp foreign_kind({:map, key, value}, allowed), do: foreign_kind(key, allowed) || foreign_kind(value, allowed)
+
+  defp foreign_kind({kind, value}, allowed) when is_atom(kind),
+    do: if(kind in allowed, do: nil, else: {kind, value})
+
+  defp foreign_kind(_spec, _allowed), do: nil
 
   defp ensure_none!(_env, [], _message), do: :ok
   defp ensure_none!(env, fields, message), do: fail!(env, "#{message}: #{inspect(fields)}")

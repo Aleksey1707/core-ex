@@ -707,6 +707,68 @@ defmodule Core.Labels.FieldsTest do
     end
   end
 
+  describe "вид поля вне allowlist подписей" do
+    test "view:, form:, jsonb: у декларативного хоста — CompileError: хост, поле и вид" do
+      mark = [mark: [at: [type: :string]]]
+
+      cases = [
+        {:ViewKind, :view, [view: Core.ViewFixture.Nested], []},
+        {:FormKind, :form, [form: :mark], mark},
+        {:JsonbKind, :jsonb, [jsonb: {Core.ViewFixture.Specs, :payload_spec}], []}
+      ]
+
+      for {name, kind, spec, forms} <- cases do
+        message = "Labels.Fields Core.Labels.FieldsTest.#{name}: поле shown: вид #{kind}: недопустим в хосте «подписи»"
+
+        assert_raise CompileError, ~r/#{Regex.escape(message)}/, fn ->
+          compile_labels_view(name, [shown: spec], [labels: [shown: "Показано"]], forms)
+        end
+      end
+    end
+
+    test "вложенный вид вне allowlist — CompileError с полем, где вид объявлен" do
+      spec = [list: [jsonb: {Core.ViewFixture.Specs, :payload_spec}]]
+
+      assert_raise CompileError,
+                   ~r/Labels\.Fields Core\.Labels\.FieldsTest\.LabelsNested: поле shown: вид jsonb: недопустим/,
+                   fn -> compile_labels_view(:LabelsNested, [shown: spec], labels: [shown: "Показано"]) end
+    end
+
+    test "скрытое поле с видом вне allowlist сборку не ломает" do
+      {{:module, module, _bytecode, _result}, _binding} =
+        compile_labels_view(
+          :LabelsHidden,
+          [shown: [view: Core.ViewFixture.Nested], other: [type: :string]],
+          labels: [shown: :hidden, other: "Прочее"]
+        )
+
+      assert Fields.specs(module) == [other: {:type, :string}]
+    end
+
+    test "View с полями общих видов подписи подписывается законно" do
+      {{:module, module, _bytecode, _result}, _binding} =
+        compile_labels_view(
+          :LabelsViewCommon,
+          [shown: [prim: Core.LabelsFixture.Name], other: [type: :string]],
+          labels: [shown: "Показано", other: "Прочее"]
+        )
+
+      assert Fields.specs(module) == [shown: {:prim, Core.LabelsFixture.Name}, other: {:type, :string}]
+      assert Fields.paths(module) == [{[:shown], "Показано"}, {[:other], "Прочее"}]
+    end
+
+    test "ручной путь fields: даёт тот же отказ" do
+      assert_raise CompileError,
+                   ~r/^Labels.Fields: fields: zip: вид view: недопустим в хосте «подписи»/,
+                   fn ->
+                     compile_struct(:ManualView,
+                       fields: [city: [prim: Core.LabelsFixture.Name], zip: [view: Core.ViewFixture.Nested]],
+                       labels: [city: "Город", zip: "Индекс"]
+                     )
+                   end
+    end
+  end
+
   test "map'а с подписями ключа и значения собирается; спека — map" do
     {{:module, module, _bytecode, _result}, _binding} =
       compile_payload(
@@ -889,6 +951,22 @@ defmodule Core.Labels.FieldsTest do
       quote do
         defmodule unquote(module) do
           defstruct [:city, :zip]
+
+          use Core.Labels.Fields, unquote(opts)
+        end
+      end
+    )
+  end
+
+  defp compile_labels_view(name, fields, opts, forms \\ []) do
+    module = Module.concat(__MODULE__, name)
+
+    Code.eval_quoted(
+      quote do
+        defmodule unquote(module) do
+          use Core.View,
+            fields: unquote(fields),
+            forms: unquote(forms)
 
           use Core.Labels.Fields, unquote(opts)
         end

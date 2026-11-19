@@ -95,6 +95,13 @@ defmodule Core.ViewTest do
       assert {:type, {:t, _, []}} = Enum.find(types, &match?({:type, {:t, _, []}}, &1))
       refute inspect(types) =~ "Destroyed"
     end
+
+    test "тип записи write_t равен типу чтения t" do
+      {:ok, types} = Code.Typespec.fetch_types(ViewFixture.Sample)
+
+      assert {:type, {:write_t, {:user_type, _meta, :t, []}, []}} =
+               Enum.find(types, &match?({:type, {:write_t, _, []}}, &1))
+    end
   end
 
   describe "кодек представления" do

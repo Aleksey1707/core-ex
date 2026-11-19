@@ -220,6 +220,16 @@ defmodule Core.FieldTest do
       assert type(Field.write_typespec(fields), :point) == "Core.StructFixture.Point.write_t()"
     end
 
+    test "entity: View — тип записи ссылается на существующий write_t() представления" do
+      fields = Field.declare!([row: [entity: Core.ViewFixture.Nested]], :struct, "S")
+
+      assert type(Field.read_typespec(fields), :row) == "Core.ViewFixture.Nested.t()"
+      assert type(Field.write_typespec(fields), :row) == "Core.ViewFixture.Nested.write_t()"
+
+      assert {:ok, types} = Code.Typespec.fetch_types(Core.ViewFixture.Nested)
+      assert Enum.any?(types, &match?({:type, {:write_t, _, []}}, &1))
+    end
+
     test "union: — тип записи из вариантов семейства, тип чтения — struct()" do
       fields = Field.declare!([shape: [union: UnionFixture]], :struct, "S")
 

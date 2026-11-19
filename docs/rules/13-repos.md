@@ -183,7 +183,8 @@ JSON-кодировке wire элемента), `map:` (словарь `[key:, v
   Собирать агрегат из View запрещено — он не проходил доменной валидации и не знает инвариантов.
 - Имя модуля View и его файл — `deps/core/docs/rules/app/13-repos.md`, «Раскладка».
 - Генерируются `@enforce_keys`, `defstruct`, `@type t` (точный: `String.t()`, `DateTime.t()`,
-  `Decimal.t()`, `pos_integer()`, `<Enum>.t()`), именованные `@type` форм, `new/1` (keyword),
+  `Decimal.t()`, `pos_integer()`, `<Enum>.t()`), `@type write_t` (равен `t()`: ПДн-мест у View нет),
+  именованные `@type` форм, `new/1` (keyword),
   маркер `__view__/0` и вложенный `<Aggregate>.View.Codec` — dump-only плагин (`loadable: false`),
   который регистрируется в реестре плагинов фасада. Презентер зовёт `OutCodec.dump(view)`
   (`deps/core/docs/rules/app/15-web-api.md`).

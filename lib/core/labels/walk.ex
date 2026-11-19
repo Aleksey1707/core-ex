@@ -39,6 +39,9 @@ defmodule Core.Labels.Walk do
   # Виды с модулем значения, которые обход объявлений не раскрывает: Prim и Enum.
   @leaf_kinds Field.value_module_kinds() -- @group_kinds
 
+  # Виды спеки подписей, которые обход значений раскрывает клаузами `data/3`; `:text` — extra подписей.
+  @data_kinds ~w(prim enum entity union list set map type text)a
+
   # ===== обход значений =====
 
   @doc "Видимая форма struct'а: поля в порядке спеки или одна запись изменения."
@@ -228,4 +231,8 @@ defmodule Core.Labels.Walk do
       true -> :unknown
     end
   end
+
+  # Ратчет полноты: новый вид подписей без клаузы `data/3` иначе падал бы `FunctionClauseError`
+  # в сведениях чужого модуля.
+  Core.Field.Spec.check_kinds!(:labels, @data_kinds, [:text], "Core.Labels.Walk")
 end

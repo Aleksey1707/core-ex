@@ -103,6 +103,9 @@ defmodule Core.Labels.Details do
   # Виды, значение которых раскрывается сведениями полей struct'а.
   @group_kinds Field.group_kinds()
 
+  # Виды спеки подписей, которым сведения дают вид клаузами `shape/1`; `:text` — extra подписей.
+  @shape_kinds ~w(prim enum entity union list set map type text)a
+
   # Свободная map'а выходит подписями ключа и значения, а не видом `type:`: вида у неё нет, но ответ на неё дан.
   @type_kinds [
     string: :text,
@@ -244,4 +247,8 @@ defmodule Core.Labels.Details do
 
   defp before?(%module{} = left, %module{} = right) when module in @comparable, do: module.compare(left, right) != :gt
   defp before?(left, right), do: left <= right
+
+  # Ратчет полноты: новый вид подписей без клаузы `shape/1` иначе падал бы `FunctionClauseError`
+  # в сведениях события, которое собралось.
+  Core.Field.Spec.check_kinds!(:labels, @shape_kinds, [:text], "Core.Labels.Details")
 end

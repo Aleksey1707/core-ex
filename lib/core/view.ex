@@ -42,13 +42,17 @@ defmodule Core.View do
   `forms:` объявляет именованные map-формы вложенных значений (`stage`, `item_progress`):
   у них появляется свой `@type`, на который могут ссылаться read-схемы.
 
-  Генерируются `@enforce_keys`, `defstruct`, `@type t`, `new/1` (keyword), маркер
-  `__view__/0`, общая декларация полей `__core_fields__/0` (`Core.Field`, внутренняя) и вложенный
-  `Codec` — dump-only плагин фасада (`loadable: false`), который регистрируется в `Codec.plugins()`
+  Генерируются `@enforce_keys`, `defstruct`, `@type t`, `@type write_t` (равен `t()`), `new/1`
+  (keyword), маркер `__view__/0`, общая декларация полей `__core_fields__/0` (`Core.Field`,
+  внутренняя; её читает `Core.Field.introspect/1` — и у собранного модуля, и у собирающегося
+  через атрибут `@core_fields`, поэтому подписям хватает `labels:`) и вложенный `Codec` —
+  dump-only плагин фасада (`loadable: false`), который регистрируется в `Codec.plugins()`
   наравне с остальными.
 
   `personal:` и `subject:` у View нет — ПДн-место задают структура по полям и нагрузка события, а
-  уничтоженное значение в представление не попадает: его преобразует проекция. Ключи — `CompileError`.
+  уничтоженное значение в представление не попадает: его преобразует проекция. Поэтому тип записи
+  `write_t()` равен типу чтения `t()`: поле `entity: View` в спеке полей ссылается на него. Ключи —
+  `CompileError`.
 
   `jsonb: Type` ссылается на спеку типа плагина (`{:codec, Type}`): её выводит плагин по декларации
   типа и реестру вариантов или объявляет колбэк `redump_spec/1`, разрешает фасад при исполнении. Prim, `Core.Enum` и
@@ -105,8 +109,8 @@ defmodule Core.View do
       unquote(forms_types_ast(forms))
       unquote(type_t_ast(views))
       unquote(new_ast(views))
-      unquote(core_fields_ast(fields))
       unquote(Dumper.codec_ast(view, views, forms))
+      unquote(core_fields_ast(fields))
     end
   end
 
@@ -217,10 +221,16 @@ defmodule Core.View do
 
   defp core_fields_ast(fields) do
     quote do
+      # Атрибут, а не только функция: подписи (`use Core.Labels.Fields`) читают декларацию через
+      # `Core.Field.introspect/1` ещё в теле модуля, пока функция `__core_fields__/0` недоступна.
+      # Ставится после вложенного `Codec`: его плагин обязан видеть тип ручным, иначе сгенерирует
+      # свои клаузы рядом с дампером представления (`never match`).
+      @core_fields unquote(Macro.escape(fields))
+
       @doc false
       @spec __core_fields__() :: [Core.Field.t()]
 
-      def __core_fields__, do: unquote(Macro.escape(fields))
+      def __core_fields__, do: @core_fields
     end
   end
 
@@ -247,6 +257,9 @@ defmodule Core.View do
     quote do
       @typedoc "Представление read-пути."
       @type t :: %__MODULE__{unquote_splicing(type_pairs(fields))}
+
+      @typedoc "Тип записи представления: равен типу чтения — ПДн-мест у View нет."
+      @type write_t :: t()
     end
   end
 
