@@ -16,8 +16,9 @@ defmodule Core.Labels.Refs do
   (`aggregate_id`, `id`) в сведения не выходят и не обходятся.
 
   Объявленная нагрузка — те же узлы, что у сведений (`Core.Labels.Walk.values/2`), и та же их
-  интерпретация: id берутся с описанных узлов (`Core.Labels.Description`), вид и значение которых
-  посчитаны тем же проходом. Скрытое поле в описание не попадает, и резолвер его не получает.
+  интерпретация: id берутся с описанных узлов (`Core.Labels.Description`), вид и ссылки которых
+  посчитаны тем же проходом; презентационное значение листа (`text:`, подпись Enum) сбор ссылок не
+  вычисляет. Скрытое поле в описание не попадает, и резолвер его не получает.
   `text:` выходит листом: id в нём ссылкой не выходит.
 
   Словарь не шире сведений для объявленной части — это свойство конструкции: обе проекции идут по
@@ -86,9 +87,10 @@ defmodule Core.Labels.Refs do
   defp raw(list, groups) when is_list(list), do: Enum.reduce(list, groups, &raw/2)
   defp raw(_term, groups), do: groups
 
-  # Ссылки описанных узлов: вид и ссылка посчитаны одним проходом описания значения.
+  # Ссылки описанных узлов: вид и ссылка посчитаны одним проходом описания значения, без
+  # презентационного значения листа.
   defp described(values, groups) do
-    Enum.reduce(Description.describe(values), groups, fn node, groups -> refs(node.refs, groups) end)
+    Enum.reduce(Description.describe(values, :refs), groups, fn node, groups -> refs(node.refs, groups) end)
   end
 
   defp refs(list, groups), do: Enum.reduce(list, groups, fn {resolver, id}, groups -> group(groups, resolver, id) end)

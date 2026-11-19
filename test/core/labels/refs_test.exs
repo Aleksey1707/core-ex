@@ -146,6 +146,33 @@ defmodule Core.Labels.RefsTest do
     assert_received {:get_names, ItemQuery, [^item]}
   end
 
+  describe "презентационное значение листа" do
+    test "сбор ссылок `text:` не зовёт, сведения зовут" do
+      [origin, item] = for _ <- 1..2, do: ItemID.new()
+      by = UserID.new()
+      payload = %Event.Raising.Payload{origin: origin, item: item}
+      event = Event.Raising.new(payload, AggID.new(), Version.new(), by, At.now!())
+
+      assert Refs.get(event, context(%{by => "Автор", item => "Позиция"})) ==
+               {:ok, %{by => "Автор", item => "Позиция"}}
+
+      assert_raise RuntimeError, ~r/text: не вычисляется сбором ссылок/, fn -> Details.build(event) end
+    end
+
+    test "не-Prim struct в свободной map'е не роняет словарь и ссылок из него не даёт" do
+      [item, nested] = for _ <- 1..2, do: ItemID.new()
+      owner = UserID.new()
+      event = linked(item, owner, limits: %{item => %Plain{item: nested}})
+
+      assert Refs.get(event, context(%{item => "Позиция", owner => "Владелец"})) ==
+               {:ok, %{item => "Позиция", owner => "Владелец"}}
+
+      assert_received {:get_names, ItemQuery, [^item]}
+      assert_received {:get_names, UserQuery, [^owner]}
+      refute_received {:get_names, _resolver, _ids}
+    end
+  end
+
   test "id только под `text:` резолвер не получает: поле, список, множество, значение изменения и список значений" do
     by = UserID.new()
     names = %{by => "Автор"}

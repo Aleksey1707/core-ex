@@ -48,6 +48,19 @@ defmodule Core.PayloadRoleFixture do
     use Core.View, fields: [status: [enum: Core.DerivedFixture.Status]]
   end
 
+  defmodule OpenRole do
+    @moduledoc "Роль, прочитанная в теле модуля: собранной интроспекции ещё нет, читается атрибут."
+
+    use Core.Es.Event.Payload, fields: [name: [prim: Core.EventFixture.Name]]
+
+    @open_role Core.Es.Event.Payload.wire_payload?(__MODULE__)
+
+    @doc "Роль нагрузки, прочитанная до сборки модуля."
+    @spec open_role() :: boolean()
+
+    def open_role, do: @open_role
+  end
+
   defmodule Event do
     @moduledoc "События с нагрузками, чья роль объявлена builder'ом."
 

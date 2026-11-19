@@ -522,6 +522,11 @@ defmodule Core.LabelsFixture do
     @spec ref(Core.LabelsFixture.ItemID.t()) :: String.t()
 
     def ref(%Core.LabelsFixture.ItemID{}), do: "Позиция"
+
+    @doc "Текст, падающий при вызове: словарь ссылок презентационное значение не считает."
+    @spec raise_text(Core.LabelsFixture.ItemID.t()) :: no_return()
+
+    def raise_text(_value), do: raise("text: не вычисляется сбором ссылок")
   end
 
   defmodule Quote do
@@ -769,6 +774,32 @@ defmodule Core.LabelsFixture do
         payload: Payload
 
       use Core.Labels.Event, title: "Метки расставлены"
+    end
+
+    defmodule Raising do
+      @moduledoc "Событие с падающим `text:`: значение считают только сведения, словарь — нет."
+
+      defmodule Payload do
+        @moduledoc "Нагрузка без спеки полей: `text:` падает при вызове, id рядом выходит ссылкой."
+
+        defstruct [:origin, :item]
+
+        use Core.Labels.Fields,
+          fields: [
+            origin: [text: &Core.LabelsFixture.Texts.raise_text/1],
+            item: [prim: Core.LabelsFixture.ItemID]
+          ],
+          labels: [
+            origin: "Источник",
+            item: "Позиция"
+          ]
+      end
+
+      use Core.Es.Event,
+        family: ManualFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Источник не прочитан"
     end
 
     defmodule Packed do

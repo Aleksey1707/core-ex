@@ -37,6 +37,9 @@ defmodule Core.Labels.Description do
           refs: [ref()]
         }
 
+  @typedoc "Режим описания: `:details` — с презентационным значением, `:refs` — только вид и ссылки."
+  @type mode :: :details | :refs
+
   # Значения, чей порядок задаёт `compare/2` модуля, а не порядок термов.
   @comparable Kind.scalars()
 
@@ -58,106 +61,124 @@ defmodule Core.Labels.Description do
 
   # ===== описание =====
 
-  @doc "Описать видимую форму struct'а: поля в порядке спеки или одна запись изменения."
-  @spec describe(Walk.values()) :: [described()]
+  @doc "Описать видимую форму struct'а в режиме: `:refs` не считает презентационное значение листа."
+  @spec describe(Walk.values(), mode()) :: [described()]
 
-  def describe({:fields, entries}), do: Enum.map(entries, &described/1)
-  def describe({:change, entry}), do: [described(entry)]
+  def describe({:fields, entries}, mode), do: Enum.map(entries, &node(&1, mode))
+  def describe({:change, entry}, mode), do: [node(entry, mode)]
 
   @doc "Описать значение поля с подписью и спекой."
   @spec entry(Walk.label(), Fields.spec(), term()) :: described()
 
-  def entry(label, spec, value), do: described(Walk.entry(label, spec, value))
+  def entry(label, spec, value), do: node(Walk.entry(label, spec, value), :details)
 
   # ---
 
-  defp described(%{data: {:change, old, new}} = entry) do
-    old = described(old)
-    new = described(new)
+  defp node(%{data: {:change, old, new}} = entry, mode) do
+    old = node(old, mode)
+    new = node(new, mode)
 
     %{
       label: entry.label,
       kind: :change,
       entity: nil,
-      value: %{old: detail(old), new: detail(new)},
+      value: change_value(mode, old, new),
       refs: old.refs ++ new.refs
     }
   end
 
-  defp described(%{data: :leaf} = entry), do: leaf(entry)
-  defp described(%{data: {:group, entries}} = entry), do: container(entry, :group, entries)
-  defp described(%{data: {:list, entries}} = entry), do: container(entry, :list, entries)
+  defp node(%{data: :leaf} = entry, mode), do: leaf(entry, mode)
+  defp node(%{data: {:group, entries}} = entry, mode), do: container(entry, :group, entries, mode)
+  defp node(%{data: {:list, entries}} = entry, mode), do: container(entry, :list, entries, mode)
 
-  defp described(%{data: {:set, entries}} = entry),
-    do: container(entry, :set, Enum.sort_by(entries, &order(&1.spec, &1.value), &before?/2))
+  defp node(%{data: {:set, entries}} = entry, mode),
+    do: container(entry, :set, Enum.sort_by(entries, &order(&1.spec, &1.value), &before?/2), mode)
 
-  defp described(%{data: {:map, pairs}, spec: {:type, :map}} = entry),
-    do: grouped(entry, :list, Enum.map(pairs, &free_pair/1))
+  defp node(%{data: {:map, pairs}, spec: {:type, :map}} = entry, mode),
+    do: grouped(entry, :list, Enum.map(pairs, &free_pair(&1, mode)), mode)
 
-  defp described(%{data: {:map, pairs}} = entry) do
+  defp node(%{data: {:map, pairs}} = entry, mode) do
     pairs =
       for %{key: key, value: value} <- Enum.sort_by(pairs, &order(&1.key.spec, &1.key.value), &before?/2),
-          do: {described(key), described(value)}
+          do: {node(key, mode), node(value, mode)}
 
     %{
       label: entry.label,
       kind: :map,
       entity: nil,
-      value: Enum.map(pairs, fn {key, value} -> %{key: detail(key), value: detail(value)} end),
+      value: map_value(mode, pairs),
       refs: Enum.flat_map(pairs, fn {key, value} -> key.refs ++ value.refs end)
     }
   end
 
-  defp container(entry, kind, entries), do: grouped(entry, kind, Enum.map(entries, &described/1))
+  defp container(entry, kind, entries, mode), do: grouped(entry, kind, Enum.map(entries, &node(&1, mode)), mode)
 
-  defp grouped(entry, kind, nodes) do
+  defp grouped(entry, kind, nodes, mode) do
     %{
       label: entry.label,
       kind: kind,
       entity: nil,
-      value: Enum.map(nodes, &detail/1),
+      value: list_value(mode, nodes),
       refs: Enum.flat_map(nodes, & &1.refs)
     }
   end
 
-  defp free_pair(%{key: key, value: value}) do
-    key = described(key)
-    value = described(value)
+  defp free_pair(%{key: key, value: value}, mode) do
+    key = node(key, mode)
+    value = node(value, mode)
 
     %{
       label: nil,
       kind: :group,
       entity: nil,
-      value: [detail(key), detail(value)],
+      value: list_value(mode, [key, value]),
       refs: key.refs ++ value.refs
     }
   end
 
+  # ---
+
+  defp change_value(:details, old, new), do: %{old: detail(old), new: detail(new)}
+  defp change_value(:refs, _old, _new), do: nil
+
+  defp map_value(:details, pairs), do: Enum.map(pairs, fn {key, value} -> %{key: detail(key), value: detail(value)} end)
+  defp map_value(:refs, _pairs), do: nil
+
+  defp list_value(:details, nodes), do: Enum.map(nodes, &detail/1)
+  defp list_value(:refs, _nodes), do: nil
+
+  # ---
+
   # Уничтоженное ПДн-значение значения не имеет: правило вида Prim к нему не применяется.
-  defp leaf(%{value: %Destroyed{}} = entry),
+  defp leaf(%{value: %Destroyed{}} = entry, _mode),
     do: %{label: entry.label, kind: :destroyed, entity: nil, value: nil, refs: []}
 
-  defp leaf(%{spec: nil, value: value} = entry), do: inferred(entry, value)
-  defp leaf(%{spec: {:prim, module}, value: value} = entry), do: prim(entry, module, value)
-  defp leaf(%{spec: spec, value: value} = entry), do: plain(entry, kind(spec), plain_value(spec, value))
+  defp leaf(%{spec: nil, value: value} = entry, mode), do: inferred(entry, value, mode)
+  defp leaf(%{spec: {:prim, module}, value: value} = entry, mode), do: prim(entry, module, value, mode)
+  defp leaf(%{spec: spec, value: value} = entry, mode), do: plain(entry, kind(spec), plain_value(mode, spec, value))
 
-  defp inferred(entry, %module{} = value), do: prim(entry, module, value)
-  defp inferred(entry, nil), do: plain(entry, :text, nil)
-  defp inferred(entry, flag) when is_boolean(flag), do: plain(entry, :text, boolean(flag))
-  defp inferred(entry, number) when is_number(number), do: plain(entry, :number, number)
-  defp inferred(entry, text) when is_binary(text), do: plain(entry, :text, text)
+  defp inferred(entry, nil, _mode), do: plain(entry, :text, nil)
+  defp inferred(entry, flag, _mode) when is_boolean(flag), do: plain(entry, :text, boolean(flag))
+  defp inferred(entry, number, _mode) when is_number(number), do: plain(entry, :number, number)
+  defp inferred(entry, text, _mode) when is_binary(text), do: plain(entry, :text, text)
+  defp inferred(entry, %module{} = value, :details), do: prim(entry, module, value, :details)
+
+  # Не-Prim struct — не лист для словаря ссылок: значение и правило вида Prim не считаются.
+  defp inferred(entry, %module{} = value, :refs) do
+    if Core.Prim.prim?(module), do: prim(entry, module, value, :refs), else: plain(entry, :text, nil)
+  end
 
   defp plain(entry, kind, value), do: %{label: entry.label, kind: kind, entity: nil, value: value, refs: []}
 
   # Правило вида Prim — один вызов `Kind.of/1` на лист: из его ответа выходят вид, значение и ссылка.
-  defp prim(entry, module, value) do
+  defp prim(entry, module, value, mode) do
     rule = Kind.of(module)
 
     %{
       label: entry.label,
       kind: prim_kind(rule),
       entity: prim_entity(rule),
-      value: prim_value(rule, value),
+      value: prim_value(mode, rule, value),
       refs: prim_refs(rule, value)
     }
   end
@@ -186,6 +207,9 @@ defmodule Core.Labels.Description do
     defp type_kind(unquote(type)), do: unquote(kind)
   end
 
+  defp plain_value(:details, spec, value), do: plain_value(spec, value)
+  defp plain_value(:refs, _spec, _value), do: nil
+
   defp plain_value(_spec, nil), do: nil
   defp plain_value({:type, :boolean}, true), do: "Да"
   defp plain_value({:type, :boolean}, false), do: "Нет"
@@ -195,6 +219,9 @@ defmodule Core.Labels.Description do
 
   defp boolean(true), do: "Да"
   defp boolean(false), do: "Нет"
+
+  defp prim_value(:details, rule, prim), do: prim_value(rule, prim)
+  defp prim_value(:refs, _rule, _prim), do: nil
 
   defp prim_value(_rule, nil), do: nil
   defp prim_value({:plain, _kind}, prim), do: prim

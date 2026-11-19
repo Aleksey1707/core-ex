@@ -248,7 +248,7 @@ defmodule Core.Labels.CompletenessCase do
   def check_variants(modules) when is_list(modules) do
     places = Walk.declarations(modules).places
     reached = for {:family, _owner, _field, family} <- places, uniq: true, do: family
-    plugin_families = for plugin <- modules, family = union(plugin), do: family
+    plugin_families = for plugin <- modules, family = union(plugin), not is_nil(family), do: family
 
     unknown =
       for {:family, owner, field, family} <- places,

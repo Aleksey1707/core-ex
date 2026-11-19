@@ -118,7 +118,7 @@ defmodule Core.Labels.Details do
   defp struct_details(%module{} = struct) do
     module
     |> Walk.values(struct)
-    |> Description.describe()
+    |> Description.describe(:details)
     |> Enum.map(&Description.detail/1)
   end
 end

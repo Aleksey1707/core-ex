@@ -532,7 +532,6 @@ defmodule Core.Labels.Fields do
   # не интерпретируют. Место ПДн (`{:personal, вид}`) в спеке подписей снято, но прозрачно.
   defp foreign_kind({:personal, inner}, allowed), do: foreign_kind(inner, allowed)
   defp foreign_kind({:personal_false, inner}, allowed), do: foreign_kind(inner, allowed)
-
   defp foreign_kind({kind, inner}, allowed) when kind in ~w(list set)a, do: foreign_kind(inner, allowed)
   defp foreign_kind({:map, key, value}, allowed), do: foreign_kind(key, allowed) || foreign_kind(value, allowed)
 
