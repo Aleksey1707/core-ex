@@ -8,6 +8,11 @@ defmodule Core.Labels.Details do
   список сведений из Prim-значений. Дампа и имён нет: значения — Prim как есть, в JSON их переводит
   wire, а имя по id ставит словарь ссылок.
 
+  Сведения — проекция описания значения (`Core.Labels.Description`): объявленная видимая форма
+  обходится один раз, её узел несёт подпись, вид, значение и ссылки; сведения берут узел без
+  ссылок, словарь ссылок (`Core.Labels.Refs`) — ссылки тех же узлов. Вид и правило вида Prim
+  считаются один раз на лист.
+
   Сведение — `%{label, kind, value}`. Вид — по спеке поля (`Core.Labels.Fields.specs/1`):
 
   | `kind` | Спека поля → `value` |
@@ -66,10 +71,7 @@ defmodule Core.Labels.Details do
   """
 
   alias Core.Es
-  alias Core.Es.Personal.Destroyed
-  alias Core.Field
-  alias Core.Helper.FieldCheck
-  alias Core.Labels.Kind
+  alias Core.Labels.Description
   alias Core.Labels.Walk
 
   @typedoc "Вид значения сведения."
@@ -97,25 +99,6 @@ defmodule Core.Labels.Details do
   @typedoc "Пара словаря: ключ и значение своих видов; подписаны, если у поля подписи ключа и значения."
   @type pair :: %{key: item() | t(), value: item() | t()}
 
-  # Значения, чей порядок задаёт `compare/2` модуля, а не порядок термов.
-  @comparable Kind.scalars()
-
-  # Виды, значение которых раскрывается сведениями полей struct'а.
-  @group_kinds Field.group_kinds()
-
-  # Виды спеки подписей, которым сведения дают вид клаузами `shape/1`; `:text` — extra подписей.
-  @shape_kinds ~w(prim enum entity union list set map type text)a
-
-  # Свободная map'а выходит подписями ключа и значения, а не видом `type:`: вида у неё нет, но ответ на неё дан.
-  @type_kinds [
-    string: :text,
-    boolean: :text,
-    integer: :number,
-    pos_integer: :number,
-    non_neg_integer: :number,
-    map: nil
-  ]
-
   @doc "Название и сведения события."
   @spec build(Es.Event.t()) :: {String.t(), [t()]}
 
@@ -128,127 +111,14 @@ defmodule Core.Labels.Details do
   defp details(event, payload) do
     case event.__label_payload__() do
       nil -> struct_details(payload)
-      label -> [describe(Walk.entry(label, {:prim, event.__es_payload__()}, payload))]
+      label -> [Description.entry(label, {:prim, event.__es_payload__()}, payload) |> Description.detail()]
     end
   end
 
   defp struct_details(%module{} = struct) do
-    case Walk.values(module, struct) do
-      {:fields, nodes} -> Enum.map(nodes, &describe/1)
-      {:change, node} -> [describe(node)]
-    end
+    module
+    |> Walk.values(struct)
+    |> Description.describe()
+    |> Enum.map(&Description.detail/1)
   end
-
-  defp describe(%{data: {:change, old, new}} = node),
-    do: %{label: node.label, kind: :change, old: item(old), new: item(new)}
-
-  defp describe(node), do: item(node)
-
-  defp item(%{data: :leaf} = node), do: labelled(leaf(node), node.label)
-
-  defp item(%{data: {:group, nodes}} = node),
-    do: labelled(%{kind: :group, value: Enum.map(nodes, &describe/1)}, node.label)
-
-  defp item(%{data: {:list, nodes}} = node), do: labelled(%{kind: :list, value: Enum.map(nodes, &item/1)}, node.label)
-
-  defp item(%{data: {:set, nodes}} = node),
-    do: labelled(%{kind: :set, value: Enum.map(sorted(nodes), &item/1)}, node.label)
-
-  defp item(%{data: {:map, pairs}, spec: {:type, :map}} = node),
-    do: labelled(%{kind: :list, value: Enum.map(pairs, &free_pair/1)}, node.label)
-
-  defp item(%{data: {:map, pairs}} = node),
-    do: labelled(%{kind: :map, value: Enum.map(sorted_pairs(pairs), &pair/1)}, node.label)
-
-  defp labelled(item, nil), do: item
-  defp labelled(item, label), do: Map.put(item, :label, label)
-
-  defp leaf(%{value: %Destroyed{}}), do: %{kind: :destroyed}
-
-  defp leaf(%{spec: spec, value: value}),
-    do: Map.put(shape_of(spec, value), :value, leaf_value(spec, value))
-
-  defp pair(%{key: key, value: value}), do: %{key: item(key), value: item(value)}
-
-  defp free_pair(%{key: key, value: value}), do: %{kind: :group, value: [describe(key), describe(value)]}
-
-  defp shape_of({:type, :map}, _value), do: %{kind: :list}
-  defp shape_of(nil, value), do: shape(inferred(value))
-  defp shape_of(spec, _value), do: shape(spec)
-
-  defp shape({:prim, module}), do: prim_shape(module)
-  defp shape({:enum, _module}), do: %{kind: :text}
-  defp shape({:text, _fun}), do: %{kind: :text}
-  defp shape({kind, _module}) when kind in @group_kinds, do: %{kind: :group}
-  defp shape({:list, _inner}), do: %{kind: :list}
-  defp shape({:set, _inner}), do: %{kind: :set}
-  defp shape({:map, _key, _value}), do: %{kind: :map}
-  defp shape({:type, type}), do: %{kind: type_kind(type)}
-
-  defp prim_shape(module) do
-    case Kind.of(module) do
-      {:plain, kind} ->
-        %{kind: kind}
-
-      {:declared, _owner, {:text, _fun}} ->
-        %{kind: :text}
-
-      {:declared, _owner, %{kind: :id}} ->
-        %{kind: :text}
-
-      {:declared, _owner, %{kind: :user}} ->
-        %{kind: :user}
-
-      {:declared, _owner, %{kind: :ref, entity: entity}} ->
-        %{kind: :ref, entity: entity}
-
-      {:unkinded, leaf} ->
-        raise ArgumentError,
-              "#{inspect(leaf)}: id без вида в сведениях — `use Core.Labels.ID` после `use Core.Prim.UUID`"
-
-      {:custom, leaf} ->
-        raise ArgumentError,
-              "#{inspect(leaf)}: свой вид Prim в сведениях не выходит — `use Core.Labels.ID` или `use Core.Labels.Text`"
-    end
-  end
-
-  for type <- FieldCheck.type_values(), kind = Keyword.fetch!(@type_kinds, type), not is_nil(kind) do
-    defp type_kind(unquote(type)), do: unquote(kind)
-  end
-
-  defp leaf_value(_spec, nil), do: nil
-  defp leaf_value({:type, :boolean}, true), do: "Да"
-  defp leaf_value({:type, :boolean}, false), do: "Нет"
-  defp leaf_value({:enum, module}, value), do: module.label(value)
-  defp leaf_value({:text, fun}, value), do: fun.(value)
-  defp leaf_value({:prim, module}, prim), do: prim_value(module, prim)
-  defp leaf_value(nil, value), do: leaf_value(inferred(value), value)
-  defp leaf_value(_spec, value), do: value
-
-  defp inferred(%module{}), do: {:prim, module}
-  defp inferred(flag) when is_boolean(flag), do: {:type, :boolean}
-  defp inferred(number) when is_number(number), do: {:type, :integer}
-  defp inferred(text) when is_binary(text) or is_nil(text), do: {:type, :string}
-
-  defp prim_value(module, prim) do
-    case Kind.of(module) do
-      {:plain, _kind} -> prim
-      {:declared, owner, {:text, fun}} -> fun.(Kind.owned(prim, owner))
-      {:declared, owner, _id} -> Kind.owned(prim, owner)
-    end
-  end
-
-  defp sorted(nodes), do: Enum.sort_by(nodes, &order(&1.spec, &1.value), &before?/2)
-
-  defp sorted_pairs(pairs), do: Enum.sort_by(pairs, &order(&1.key.spec, &1.key.value), &before?/2)
-
-  defp order({:prim, _module}, prim), do: Core.Prim.unwrap(prim)
-  defp order(_spec, value), do: value
-
-  defp before?(%module{} = left, %module{} = right) when module in @comparable, do: module.compare(left, right) != :gt
-  defp before?(left, right), do: left <= right
-
-  # Ратчет полноты: новый вид подписей без клаузы `shape/1` иначе падал бы `FunctionClauseError`
-  # в сведениях события, которое собралось.
-  Core.Field.Spec.check_kinds!(:labels, @shape_kinds, [:text], "Core.Labels.Details")
 end

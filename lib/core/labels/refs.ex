@@ -15,14 +15,17 @@ defmodule Core.Labels.Refs do
   словаря, списках, множествах, нагрузке-семействе, Prim-композите. Остальные поля события
   (`aggregate_id`, `id`) в сведения не выходят и не обходятся.
 
-  Обход нагрузки — общий со сведениями (`Core.Labels.Walk.values/2`): видимые поля по объявлению
-  (`Core.Labels.Fields`), у варианта семейства — его поля, у struct'а изменения — стороны `old_value`
-  и `new_value`, у контейнеров — элементы и пары своих видов. Скрытое поле в обход не попадает, и
-  резолвер его не получает. `text:` выходит листом: id в нём ссылкой не выходит. Struct без
-  объявления полей обходится целиком.
+  Объявленная нагрузка — те же узлы, что у сведений (`Core.Labels.Walk.values/2`), и та же их
+  интерпретация: id берутся с описанных узлов (`Core.Labels.Description`), вид и значение которых
+  посчитаны тем же проходом. Скрытое поле в описание не попадает, и резолвер его не получает.
+  `text:` выходит листом: id в нём ссылкой не выходит.
 
-  Словарь не шире сведений: каждый его id, кроме автора события, есть в сведениях. В `Date`,
-  `DateTime`, `NaiveDateTime`, `Time`, `Decimal`, Prim без вида id, id `kind: :id` и Prim с
+  Словарь не шире сведений для объявленной части — это свойство конструкции: обе проекции идут по
+  одному описанию значения. Суперсет словаря защитный и осознанный: struct без объявления полей
+  обходится целиком, и автор события (`by`) собирается отдельно. На необъявленном struct'е сведения
+  падают — это поведение ратчета полноты подписей, а не дефект словаря.
+
+  В `Date`, `DateTime`, `NaiveDateTime`, `Time`, `Decimal`, Prim без вида id, id `kind: :id` и Prim с
   `Core.Labels.Text` ссылки нет: id там нет или он не выходит ссылкой.
 
   Id группируются по резолверу, и резолвер (`Core.Labels.Resolver`) вызывается один раз на группу
@@ -32,7 +35,7 @@ defmodule Core.Labels.Refs do
 
   alias Core.Context
   alias Core.Es
-  alias Core.Es.Personal.Destroyed
+  alias Core.Labels.Description
   alias Core.Labels.Fields
   alias Core.Labels.Kind
   alias Core.Labels.Walk
@@ -66,7 +69,7 @@ defmodule Core.Labels.Refs do
     cond do
       Core.Prim.prim?(module) -> prim(module, value, groups)
       module in Kind.scalars() -> groups
-      Fields.labelled?(module) -> walk(Walk.values(module, value), groups)
+      Fields.labelled?(module) -> described(Walk.values(module, value), groups)
       true -> raw(Map.from_struct(value), groups)
     end
   end
@@ -83,31 +86,14 @@ defmodule Core.Labels.Refs do
   defp raw(list, groups) when is_list(list), do: Enum.reduce(list, groups, &raw/2)
   defp raw(_term, groups), do: groups
 
-  defp walk({:fields, nodes}, groups), do: Enum.reduce(nodes, groups, &entry/2)
-  defp walk({:change, node}, groups), do: entry(node, groups)
-
-  defp entry(%{data: :leaf} = node, groups), do: leaf(node, groups)
-  defp entry(%{data: {:group, nodes}}, groups), do: Enum.reduce(nodes, groups, &entry/2)
-  defp entry(%{data: {:list, nodes}}, groups), do: Enum.reduce(nodes, groups, &entry/2)
-  defp entry(%{data: {:set, nodes}}, groups), do: Enum.reduce(nodes, groups, &entry/2)
-
-  defp entry(%{data: {:map, pairs}}, groups),
-    do: Enum.reduce(pairs, groups, fn %{key: key, value: value}, acc -> entry(value, entry(key, acc)) end)
-
-  defp entry(%{data: {:change, old, new}}, groups), do: entry(new, entry(old, groups))
-
-  # Уничтоженное ПДн-значение ссылкой не выходит: id в нём не осталось.
-  defp leaf(%{value: %Destroyed{}}, groups), do: groups
-
-  defp leaf(%{spec: {:prim, module}, value: %_{} = value}, groups), do: prim(module, value, groups)
-
-  # Значение свободной map'ы: вида у него нет, вид — по самому значению.
-  defp leaf(%{spec: nil, value: %module{} = value}, groups) do
-    if Core.Prim.prim?(module), do: prim(module, value, groups), else: groups
+  # Ссылки описанных узлов: вид и ссылка посчитаны одним проходом описания значения.
+  defp described(values, groups) do
+    Enum.reduce(Description.describe(values), groups, fn node, groups -> refs(node.refs, groups) end)
   end
 
-  defp leaf(_node, groups), do: groups
+  defp refs(list, groups), do: Enum.reduce(list, groups, fn {resolver, id}, groups -> group(groups, resolver, id) end)
 
+  # Prim вне описания: нагрузка-Prim и автор события собираются отдельным путём словаря.
   defp prim(module, value, groups) do
     case Kind.of(module) do
       {:declared, _owner, %{resolver: nil}} -> groups
