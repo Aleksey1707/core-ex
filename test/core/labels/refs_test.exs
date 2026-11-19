@@ -16,6 +16,7 @@ defmodule Core.Labels.RefsTest do
   alias Core.Context
   alias Core.Error
   alias Core.Es.Event.At
+  alias Core.Es.Personal
   alias Core.EventFixture
   alias Core.EventFixture.AggID
   alias Core.Labels.Details
@@ -27,6 +28,7 @@ defmodule Core.Labels.RefsTest do
   alias Core.LabelsFixture.AuthorID
   alias Core.LabelsFixture.BareID
   alias Core.LabelsFixture.BaseUnit
+  alias Core.LabelsFixture.Contact
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
@@ -83,6 +85,43 @@ defmodule Core.Labels.RefsTest do
     names = %{by => "Автор", assignee => "Исполнитель", item => "Позиция"}
 
     assert Refs.get(assigned(by, assignee, item), context(names)) == {:ok, names}
+  end
+
+  test "id варианта-Prim семейства резолвится пачкой: `ref` и `user`" do
+    by = UserID.new()
+    item = Contact.Item.new()
+    owner = Contact.User.new()
+    names = %{by => "Автор", item => "Позиция", owner => "Владелец"}
+
+    events = [reachable(by, item), reachable(by, owner)]
+
+    assert Refs.get(events, context(names)) == {:ok, names}
+    assert_received {:get_names, ItemQuery, [^item]}
+    assert_received {:get_names, UserQuery, users}
+    assert Enum.sort(users) == Enum.sort([by, owner])
+  end
+
+  test "text:, id и уничтоженное значение варианта-Prim в словарь ссылок не попадают" do
+    by = UserID.new()
+    phone = Contact.Phone.new!("+7 900")
+
+    for contact <- [
+          nil,
+          phone,
+          Contact.Code.new!(1),
+          Contact.Snapshot.new(),
+          Contact.Alias.new!(phone)
+        ] do
+      assert Refs.get(reachable(by, contact), context(%{by => "Автор"})) == {:ok, %{by => "Автор"}}
+      assert_received {:get_names, UserQuery, [^by]}
+      refute_received {:get_names, _resolver, _ids}
+    end
+
+    destroyed = Personal.Test.destroyed(reachable(by, Contact.Item.new()))
+
+    assert Refs.get(destroyed, context(%{by => "Автор"})) == {:ok, %{by => "Автор"}}
+    assert_received {:get_names, UserQuery, [^by]}
+    refute_received {:get_names, _resolver, _ids}
   end
 
   test "id только в скрытых полях резолвер не получает: нагрузка, вложенный struct, вариант, map'а" do
@@ -379,6 +418,10 @@ defmodule Core.Labels.RefsTest do
   end
 
   defp closed(by), do: Event.Closed.new(AggID.new(), Version.new(), by, At.now!())
+
+  defp reachable(by, contact) do
+    Event.Reachable.new(Event.Reachable.Payload.new(contact), AggID.new(), Version.new(), by, At.now!())
+  end
 
   # Id с резолвером в сведениях: значение-Prim с объявлением вида `:ref` / `:user`.
   defp detail_ids(%module{} = prim) do

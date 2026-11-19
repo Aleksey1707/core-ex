@@ -1,3 +1,9 @@
+defmodule Core.Labels.DetailsTest.Raw do
+  @moduledoc "Значение-семейство без объявления полей и не Prim."
+
+  defstruct [:note]
+end
+
 defmodule Core.Labels.DetailsTest do
   use ExUnit.Case, async: true
 
@@ -12,6 +18,7 @@ defmodule Core.Labels.DetailsTest do
   alias Core.LabelsFixture.AuthorID
   alias Core.LabelsFixture.BareID
   alias Core.LabelsFixture.BaseUnit
+  alias Core.LabelsFixture.Contact
   alias Core.LabelsFixture.Count
   alias Core.LabelsFixture.Day
   alias Core.LabelsFixture.Event
@@ -29,6 +36,7 @@ defmodule Core.Labels.DetailsTest do
   alias Core.LabelsFixture.Title
   alias Core.LabelsFixture.Unit
   alias Core.LabelsFixture.UserID
+  alias Core.PrimFixture.SensitiveLabel
   alias Core.Version
 
   describe "нагрузка по полям" do
@@ -163,6 +171,54 @@ defmodule Core.Labels.DetailsTest do
                Enum.find(details, &(&1.label == "Фигура"))
 
       assert %{label: "Позиции", kind: :list, value: []} in details
+    end
+  end
+
+  describe "семейство Prim-вариантов" do
+    test "лист по варианту: текст, plain-вид, ссылка, учётная запись и id; композит — вид базы" do
+      phone = Contact.Phone.new!("+7 900")
+      code = Contact.Code.new!(42)
+      item = ItemID.new()
+      owner = UserID.new()
+      snapshot = SnapshotID.new()
+
+      assert contact_details(phone) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :text, value: "Тел. +7 900"}]}
+
+      assert contact_details(code) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :number, value: code}]}
+
+      assert contact_details(item) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :ref, entity: :stock_item, value: item}]}
+
+      assert contact_details(owner) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :user, value: owner}]}
+
+      assert contact_details(snapshot) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :text, value: snapshot}]}
+
+      assert contact_details(Contact.Alias.new!(phone)) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :text, value: "Тел. +7 900"}]}
+    end
+
+    test "уничтоженное значение — destroyed без value; поле без значения — группа с value: nil" do
+      event = event(Event.Reachable, Event.Reachable.Payload.new(Contact.Item.new()))
+
+      assert Details.build(Personal.Test.destroyed(event)) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :destroyed}]}
+
+      assert contact_details(nil) ==
+               {"Способ связи указан", [%{label: "Способ связи", kind: :group, value: nil}]}
+    end
+
+    test "неподдерживаемый вариант и Prim с custom-видом — ArgumentError с именем модуля" do
+      assert_raise ArgumentError, ~r/Core\.Labels\.DetailsTest\.Raw: /, fn ->
+        contact_details(%Core.Labels.DetailsTest.Raw{note: "сырой"})
+      end
+
+      assert_raise ArgumentError, ~r/Core\.PrimFixture\.SensitiveLabel: /, fn ->
+        contact_details(SensitiveLabel.new())
+      end
     end
   end
 
@@ -641,4 +697,6 @@ defmodule Core.Labels.DetailsTest do
   # ---
 
   defp event(module, payload), do: module.new(payload, AggID.new(), Version.new(), UserID.new(), At.now!())
+
+  defp contact_details(contact), do: Details.build(event(Event.Reachable, Event.Reachable.Payload.new(contact)))
 end

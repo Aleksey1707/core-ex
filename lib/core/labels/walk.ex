@@ -68,8 +68,24 @@ defmodule Core.Labels.Walk do
     %{label: label, spec: spec, value: nil, data: {:change, node(nil, spec, old), node(nil, spec, new)}}
   end
 
-  defp node(decision, spec, value),
-    do: %{label: label(decision), spec: spec, value: value, data: data(decision, spec, value)}
+  defp node(decision, spec, value) do
+    spec = variant_spec(spec, value)
+    %{label: label(decision), spec: spec, value: value, data: data(decision, spec, value)}
+  end
+
+  # Видимое семейство выводится по значению варианта: Prim — листом своей спеки (его вид и текст
+  # действуют на значение), struct с объявлением полей — группой; прочее — ошибка программиста.
+  defp variant_spec({:union, _family} = spec, %Destroyed{}), do: spec
+
+  defp variant_spec({:union, _family} = spec, %variant{}) do
+    cond do
+      Core.Prim.prim?(variant) -> {:prim, variant}
+      Fields.labelled?(variant) -> spec
+      true -> raise ArgumentError, "#{inspect(variant)}: вариант семейства — не Prim и без `use Core.Labels.Fields`"
+    end
+  end
+
+  defp variant_spec(spec, _value), do: spec
 
   defp data(_decision, _spec, %Destroyed{}), do: :leaf
   defp data(_decision, _spec, nil), do: :leaf

@@ -18,7 +18,7 @@ defmodule Core.Labels.Details do
   | `:date`, `:datetime` | Prim `kind: :date`, `kind: :datetime` → как есть |
   | `:user` | id `kind: :user` → id |
   | `:ref` | id `kind: :ref` → id; рядом `entity` — вид записи |
-  | `:group` | `entity:`, `union:` → сведения полей struct'а; у варианта — по его `Core.Labels.Fields` |
+  | `:group` | `entity:` → сведения полей struct'а; `union:` → группа варианта-struct по его `Core.Labels.Fields` или лист варианта-Prim по его спеке |
   | `:list` | `list:` → элементы `%{kind, value}` вида спеки элемента, без подписи |
   | `:set` | `set:` → элементы `%{kind, value}` вида спеки элемента, без подписи, в каноническом порядке |
   | `:map` | `map:` → пары `%{key, value}`: ключ и значение — `%{kind, value}` своих видов; с подписями `[label:, key:, value:]` — с подписью стороны |
@@ -34,6 +34,12 @@ defmodule Core.Labels.Details do
   Prim-композит (`Core.Prim.Compose`) выходит видом своего базового Prim, значение — композит как есть.
   Объявление вида id или текста у базы композита действует и на композит: значение — база с
   объявлением, текст — функция от неё.
+
+  Видимое семейство (`union:`) выводится по значению варианта: вариант-Prim — листом по своей спеке
+  (объявления вида и текста действуют на вариант, включая цепочку композита), вариант-struct с
+  `Core.Labels.Fields` — группой его видимых полей. Неподдерживаемый вариант (struct без
+  `Core.Labels.Fields`, не Prim) и Prim со своим видом (`kind:` без `Core.Labels.ID` и
+  `Core.Labels.Text`) — `ArgumentError` с именем модуля.
 
   Map'а с id в ключах выходит списком групп, по группе на пару: ключ с подписью `key:`, значение с
   подписью `value:`; вид каждого — по самому значению (Prim, строка, число, `boolean`, `nil`). Ключи
@@ -196,6 +202,10 @@ defmodule Core.Labels.Details do
       {:unkinded, leaf} ->
         raise ArgumentError,
               "#{inspect(leaf)}: id без вида в сведениях — `use Core.Labels.ID` после `use Core.Prim.UUID`"
+
+      {:custom, leaf} ->
+        raise ArgumentError,
+              "#{inspect(leaf)}: свой вид Prim в сведениях не выходит — `use Core.Labels.ID` или `use Core.Labels.Text`"
     end
   end
 

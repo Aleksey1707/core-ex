@@ -7,6 +7,7 @@ defmodule Core.Labels.FieldsTest do
   alias Core.LabelsFixture.Event.Linked
   alias Core.LabelsFixture.Event.NameChanged
   alias Core.LabelsFixture.Event.OriginChanged
+  alias Core.LabelsFixture.Event.Reachable
   alias Core.LabelsFixture.Event.Shipped
   alias Core.LabelsFixture.Event.Tagged
   alias Core.LabelsFixture.Event.Updated
@@ -77,6 +78,10 @@ defmodule Core.Labels.FieldsTest do
 
     test "map'а с id в ключах — подпись поля" do
       assert {[:limits], "Лимиты"} in Fields.paths(Linked.Payload)
+    end
+
+    test "поле-семейство — только своя подпись: варианты-Prim по типу не известны" do
+      assert Fields.paths(Reachable.Payload) == [{[:contact], "Способ связи"}]
     end
 
     test "значение словаря struct'ов — под путём словаря; скрытый словарь путей не даёт" do

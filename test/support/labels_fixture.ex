@@ -366,6 +366,88 @@ defmodule Core.LabelsFixture do
     use Core.Codec.Plugin, union: Core.LabelsFixture.Shape
   end
 
+  defmodule Contact do
+    @moduledoc "Способ связи — семейство с вариантами-Prim: текст, plain, id каждого вида и композит."
+
+    defmodule Phone do
+      @moduledoc "Вариант: телефон, который человек читает текстом функции."
+
+      use Core.Prim.String,
+        name: "Телефон",
+        min_len: 5,
+        max_len: 32
+
+      use Core.Labels.Text, with: &Core.LabelsFixture.Texts.phone/1
+    end
+
+    defmodule Code do
+      @moduledoc "Вариант: код без объявления вида — plain-вид Prim."
+
+      use Core.Prim.Integer,
+        name: "Код",
+        min: 0
+    end
+
+    defmodule Item do
+      @moduledoc "Вариант: позиция — ссылка на запись."
+
+      use Core.Prim.UUID,
+        name: "Позиция",
+        version: 7
+
+      use Core.Labels.ID,
+        kind: :ref,
+        entity: :stock_item,
+        resolver: Core.LabelsFixture.ItemQuery
+    end
+
+    defmodule User do
+      @moduledoc "Вариант: учётная запись — ссылка на учётную запись."
+
+      use Core.Prim.UUID,
+        name: "Пользователь",
+        version: 7
+
+      use Core.Labels.ID,
+        kind: :user,
+        resolver: Core.LabelsFixture.UserQuery
+    end
+
+    defmodule Snapshot do
+      @moduledoc "Вариант: снимок — только id."
+
+      use Core.Prim.UUID,
+        name: "Снимок",
+        version: 7
+
+      use Core.Labels.ID, kind: :id
+    end
+
+    defmodule Alias do
+      @moduledoc "Вариант: Prim-композит над телефоном — вид базы."
+
+      use Core.Prim.Compose,
+        name: "Псевдоним телефона",
+        of: Core.LabelsFixture.Contact.Phone
+    end
+
+    use Core.Union,
+      variants: [
+        {Core.LabelsFixture.Contact.Phone, "phone"},
+        {Core.LabelsFixture.Contact.Code, "code"},
+        {Core.LabelsFixture.Contact.Item, "item"},
+        {Core.LabelsFixture.Contact.User, "user"},
+        {Core.LabelsFixture.Contact.Snapshot, "snapshot"},
+        {Core.LabelsFixture.Contact.Alias, "alias"}
+      ]
+  end
+
+  defmodule Contact.Codec do
+    @moduledoc "Варианты способа связи: форма без обёртки, тег адреса."
+
+    use Core.Codec.Plugin, union: Core.LabelsFixture.Contact
+  end
+
   defmodule Seal do
     @moduledoc "Пломба — вложенный struct сведений со скрытым id."
 
@@ -404,6 +486,11 @@ defmodule Core.LabelsFixture do
 
     def unit(%Core.LabelsFixture.Unit{value: "kg"}), do: "Килограмм"
     def unit(%Core.LabelsFixture.Unit{value: "pc"}), do: "Штука"
+
+    @doc "Телефон текстом функции."
+    @spec phone(Core.LabelsFixture.Contact.Phone.t()) :: String.t()
+
+    def phone(%Core.LabelsFixture.Contact.Phone{value: value}), do: "Тел. " <> value
 
     @doc "Позиция без имени: id выходит текстом, а не ссылкой."
     @spec ref(Core.LabelsFixture.ItemID.t()) :: String.t()
@@ -491,6 +578,18 @@ defmodule Core.LabelsFixture do
         codec: Core.LabelsFixture.Event.ItemFamily.Codec
 
       @type t :: Core.LabelsFixture.Event.Assigned.t()
+    end
+
+    defmodule ContactFamily do
+      @moduledoc "Семейство события с видимым семейством Prim-вариантов: в набор ратчета пока не входит."
+
+      use Core.Es.Event.Family,
+        aggregate: Core.LabelsFixture,
+        aggregate_id: AggID,
+        by: UserID,
+        codec: Core.LabelsFixture.Event.ContactFamily.Codec
+
+      @type t :: Core.LabelsFixture.Event.Reachable.t()
     end
 
     defmodule ManualFamily do
@@ -1128,6 +1227,27 @@ defmodule Core.LabelsFixture do
       use Core.Labels.Event, title: "Все виды полей"
     end
 
+    defmodule Reachable do
+      @moduledoc "Событие с видимым семейством Prim-вариантов: способ связи выходит листом по варианту."
+
+      alias Core.LabelsFixture
+
+      defmodule Payload do
+        @moduledoc "Нагрузка: способ связи — вариант семейства, необязательный и ПДн-место."
+
+        use Core.Es.Event.Payload,
+          fields: [contact: [union: LabelsFixture.Contact, personal: true, optional: true]]
+
+        use Core.Labels.Fields, labels: [contact: "Способ связи"]
+      end
+
+      use Core.Es.Event,
+        family: ContactFamily,
+        payload: Payload
+
+      use Core.Labels.Event, title: "Способ связи указан"
+    end
+
     defmodule Closed do
       @moduledoc "Событие без нагрузки."
 
@@ -1260,6 +1380,17 @@ defmodule Core.LabelsFixture do
       family: Event.ManualFamily,
       type: "labels_manual",
       tags: @tag_by_mod
+  end
+
+  defmodule Event.ContactFamily.Codec do
+    @moduledoc "Кодек события со способом связи: в полный набор ратчета полноты не входит."
+
+    alias Core.LabelsFixture.Event
+
+    use Core.Es.Event.Codec,
+      family: Event.ContactFamily,
+      type: "labels_contact",
+      tags: %{Event.Reachable => "labels_contact.reachable"}
   end
 
   defmodule Codec do
