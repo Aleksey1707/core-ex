@@ -1,7 +1,7 @@
 defmodule Core.MixProject do
   use Mix.Project
 
-  @version "0.19.0-rc.2"
+  @version "0.19.0-rc.3"
 
   def project do
     [
