@@ -2,7 +2,7 @@ defmodule Core.Outbox.Poller do
   @moduledoc """
   Polling delivery worker: reserve → publish_many → save_results.
 
-  Один sequential publisher: порядок в брокере = `order_by: created_at` reserve.
+  Один sequential publisher: порядок в брокере = `order_by: [created_at, id]` reserve.
   При ошибке в середине батча — fail-stop (хвост `requeue` без attempts).
 
   После `:processed` — drain (`schedule(0)`). При `:retry` (хоть одна запись пачки не

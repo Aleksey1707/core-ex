@@ -264,7 +264,7 @@ defmodule Core.Outbox.Repo.Pg do
 
   # Термовое сравнение `%DateTime{}` идёт по структуре, а не по времени, — порядок пачки
   # задаётся `DateTime.compare/2`; при равенстве микросекунды tiebreaker — UUIDv7 `id`
-  # (его текстовая форма сортируется так же, как `uuid` в Postgres).
+  # (монотонен в пределах ноды; его текстовая форма сортируется так же, как `uuid` в Postgres).
   defp candidate_before?(a, b) do
     case DateTime.compare(a.created_at, b.created_at) do
       :lt -> true

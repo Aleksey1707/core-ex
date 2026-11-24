@@ -237,13 +237,17 @@
 - **State-stored строка хранит `%Destroyed{}` как `{"$pd": null}`** и читает его без обращения к
   хранилищу ключей; живое ПДн в mutable-строке остаётся открытым. Маппинг на любой глубине —
   `Core.Es.Personal.State.dump/1` / `load/1`; ключ `$pd` в такой строке зарезервирован.
-- **Пакет UUIDv7 сменился: `uuidv7` 1.0 → `uuid_v7` 0.6.** `UUIDv7` больше не реализует
-  `Ecto.Type` — Ecto-тип нового пакета `UUIDv7.Type`: было `@primary_key {:id, UUIDv7,
-  autogenerate: true}` → стало `@primary_key {:id, UUIDv7.Type, autogenerate: true}` (и то же для
-  `@foreign_key_type`). `UUIDv7.timestamp/1` → `UUIDv7.extract_timestamp/1`; timestamp-формы
-  `UUIDv7.generate/1` и `UUIDv7.bingenerate/1` удалены — остались нуль-арные `generate/0` и
-  `bingenerate/0`, UUID от заданной метки реализуется на месте вызова. Правка нужна только тем, кто
-  обращался к `UUIDv7` напрямую: `Core.Prim.UUID` и все v7-Prim переходят без правок кода.
+- **Пакет UUIDv7 сменился: `uuidv7` 1.0 → `uuid_v7` 0.6.** Старый `uuidv7` 1.0 внутри
+  миллисекунды выдаёт случайный порядок битов; `uuid_v7` ведёт строго возрастающий ns-счётчик,
+  поэтому v7-Prim монотонны. `UUIDv7` больше не реализует `Ecto.Type` — Ecto-тип нового пакета
+  `UUIDv7.Type`: было `@primary_key {:id, UUIDv7, autogenerate: true}` → стало
+  `@primary_key {:id, UUIDv7.Type, autogenerate: true}` (и то же для `@foreign_key_type`).
+  `UUIDv7.Type` компилируется только при доступном `Ecto.Type`; core приносит Ecto через
+  `ecto_sql`, поэтому у потребителя модуль есть — отдельная зависимость не нужна.
+  `UUIDv7.timestamp/1` → `UUIDv7.extract_timestamp/1`; timestamp-формы `UUIDv7.generate/1` и
+  `UUIDv7.bingenerate/1` удалены — остались нуль-арные `generate/0` и `bingenerate/0`, UUID
+  от заданной метки реализуется на месте вызова. Правка нужна только тем, кто обращался
+  к `UUIDv7` напрямую: `Core.Prim.UUID` и все v7-Prim переходят без правок кода.
 
 ### Новое
 

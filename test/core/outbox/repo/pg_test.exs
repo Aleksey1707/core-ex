@@ -496,16 +496,18 @@ defmodule Core.Outbox.Repo.PgTest do
   test "fetch_and_reserve возвращает записи с равным created_at в порядке вставки",
        %{context: context} do
     created_at = Outbox.CreatedAt.new!(DateTime.utc_now())
-    records = Enum.map(1..100, fn i -> build_record("same_#{i}", created_at) end)
+    size = 100
+    records = Enum.map(1..size, fn i -> build_record("same_#{i}", created_at) end)
     assert :ok = @repo.append(records, context)
 
     batch =
       @repo.fetch_and_reserve(
-        Outbox.BatchSize.new!(100),
+        Outbox.BatchSize.new!(size),
         Outbox.LockDuration.new!(30),
         context
       )
 
+    assert length(batch) == size
     assert Enum.map(batch, &dump_id/1) == Enum.map(records, &dump_id/1)
   end
 
