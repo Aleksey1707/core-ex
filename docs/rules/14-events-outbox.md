@@ -361,10 +361,21 @@ ADR-0002.
 ### Порядок доставки
 
 - Один Poller + один `Stream.Writer`; concurrency > 1 запрещён (порядок в stream).
-- Порядок publish = `order_by: created_at` при `fetch_and_reserve`.
+- Порядок publish = `order_by: [created_at, id]` при `fetch_and_reserve`.
 - Ошибка на index `i` в батче — fail-stop: `0..i-1` published, `i` failure/retry, `i+1..` →
   `Record.requeue` (`:new`, без инкремента attempts, токен аренды сохраняется).
 - `Mq.Writer.put_many/2` / `Delivery.publish_many/2` — sequential publish в одном call.
+
+Генератор v7-id, которым пользуется `Core.Outbox.ID`, MUST строго возрастать в пределах ноды:
+каждый следующий вызов возвращает большее значение, в том числе внутри одной миллисекунды и
+после отката системных часов. Tiebreaker `id` действителен только при этом условии: тогда при
+равном `created_at` порядок `id` — это порядок вставки, а генератор без счётчика внутри
+миллисекунды даёт случайный порядок битов. Замена генератора обязана условие сохранить.
+
+`created_at` остаётся первичным ключом сортировки и ставится из wall clock. Откат NTP между
+вставками с разными отметками инвертирует порядок независимо от монотонности `id` — остаточный
+риск, принятый вместе с парой `(created_at, id)`. Монотонности между нодами нет: генератор живёт
+в Erlang VM, поэтому порядок записей разных нод задаёт только `created_at` с тем же риском часов.
 
 `Outbox.Repo` API: `append`, `fetch_and_reserve`, `save_results`, `release`,
 `delete_published_before` (возвращает `non_neg_integer()` — число удалённых), `requeue_failed`,
@@ -395,7 +406,7 @@ ADR-0002.
   с `OR` MUST NOT: `LIMIT` применяется после сортировки всего подходящего множества.
 - Порядок при слиянии MUST задавать `DateTime.compare/2`. Термовое сравнение `%DateTime{}`
   идёт по ключам структуры (`:day` раньше `:month`) — 1 февраля оказалось бы «раньше»
-  31 января. Tiebreaker — `id`.
+  31 января. Tiebreaker — `id` (условие его действительности — «Порядок доставки»).
 - `queue_counts/0` MUST считать только `:new` / `:in_work` / `:failed` — статусы, ограниченные
   по природе и покрытые частичными индексами. `:published` MUST NOT: он растёт неограниченно,
   и точный счёт по нему стоит скана всей таблицы на каждый опрос метрик.
@@ -427,10 +438,11 @@ nullable-колонка, новый индекс `concurrently`; переиме�
 структуры для неё нет, и `:failed` она получает SQL-инкрементом.
 
 **Порядок внутри пачки** — `order_by: [created_at, id]`: `created_at` ставится на каждое событие
-отдельно и может совпасть в микросекунде, `id` (UUIDv7) даёт tiebreaker. Часть ошибок — `Error.app`
-+ `raise Exc`. Persist `Record` в Schema — через `Outbox.Codec` / `InCodec.load`/`dump` (remap JSON
-errors string↔atom keys). `append` чанкует `insert_all` (лимит параметров PostgreSQL при
-больших batch).
+отдельно и может совпасть в микросекунде, `id` (UUIDv7 от монотонного в пределах ноды генератора)
+даёт tiebreaker — порядок вставки при условии MUST из «Порядок доставки». Часть ошибок —
+`Error.app` + `raise Exc`. Persist `Record` в Schema — через `Outbox.Codec` / `InCodec.load`/`dump`
+(remap JSON errors string↔atom keys). `append` чанкует `insert_all` (лимит параметров PostgreSQL
+при больших batch).
 
 ### Единственность поллера
 
