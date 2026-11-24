@@ -75,6 +75,12 @@ defmodule Core.Es.EventTest do
     assert %EventWithPayload{id: ^id, payload: ^payload} = event
   end
 
+  test "ID.new/0 строго возрастает: 10 000 значений монотонны" do
+    ids = for _ <- 1..10_000, do: Event.ID.value(Event.ID.new())
+
+    assert Enum.all?(Enum.zip(ids, tl(ids)), fn {prev, next} -> prev < next end)
+  end
+
   test "draft/1 — черновик события с нагрузкой: модуль события и нагрузка" do
     payload = ValuePayload.new(:ok)
 

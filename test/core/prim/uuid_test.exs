@@ -147,6 +147,13 @@ defmodule Core.Prim.UUIDTest do
     assert Keyword.get(info, :version) == 7
   end
 
+  test "new/0 v7 строго возрастает: 10 000 значений монотонны и уникальны" do
+    values = for _ <- 1..10_000, do: IdV7.value(IdV7.new())
+
+    assert Enum.all?(Enum.zip(values, tl(values)), fn {prev, next} -> prev < next end)
+    assert length(Enum.uniq(values)) == 10_000
+  end
+
   test "custom kind сохраняется" do
     assert Ref.__domain_kind__() == :ref
     assert {:ok, %Ref{value: @uuid4}} = Ref.new(@uuid4)

@@ -38,7 +38,7 @@ defmodule Core.MixProject do
       {:decimal, "~> 2.0 or ~> 3.0"},
       {:jason, "~> 1.2"},
       {:uuid, "~> 1.1"},
-      {:uuidv7, "~> 1.0"},
+      {:uuid_v7, "~> 0.6.0"},
       # Владение остановленным временем теста потребителя (`Core.Clock.Test`, ADR-0083)
       {:nimble_ownership, "~> 1.0"},
       # Схема опций функции (`Core.Options`, ADR-0086)
