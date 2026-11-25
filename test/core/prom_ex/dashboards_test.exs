@@ -46,6 +46,12 @@ defmodule Core.PromEx.DashboardsTest do
       assert dashboard["uid"] == default["uid"]
     end
 
+    test "refresh — умолчание 15s, переопределяется dashboard_assigns/0" do
+      assert Jason.decode!(Dashboards.render(PromExFixture.Outbox, :outbox))["refresh"] == "15s"
+      assert Jason.decode!(Dashboards.render(PromExFixture.Tuned, :outbox))["refresh"] == "30s"
+      assert Jason.decode!(Dashboards.render(PromExFixture.Standard, :beam))["refresh"] == "15s"
+    end
+
     test "префикс и единица длительности — из опций плагина в plugins/0" do
       dashboard = Jason.decode!(Dashboards.render(PromExFixture.Custom, :outbox))
       exprs = exprs(dashboard)
@@ -194,17 +200,30 @@ defmodule Core.PromEx.DashboardsTest do
       custom = Jason.decode!(Dashboards.render(PromExFixture.Custom, :outbox))
       assert Dashboards.assert_form!(PromExFixture.Custom, {"outbox.json", custom}) == :ok
     end
+
+    test "id панелей уникальны внутри дашборда" do
+      for name <- Dashboards.names() do
+        ids = for panel <- panels(Jason.decode!(Dashboards.render(PromExFixture.Outbox, name))), do: panel["id"]
+
+        assert ids == Enum.uniq(ids), "#{name}: id панелей повторяются"
+      end
+    end
   end
 
   describe "defaults/1" do
     test "дашборд подсистемы входит, если в plugins/0 есть её плагин" do
-      assert Dashboards.defaults(PromExFixture.Outbox) == [:outbox]
+      assert Dashboards.defaults(PromExFixture.Outbox) == [:outbox, :beam]
       assert Dashboards.defaults(PromExFixture.Tuned) == [:outbox]
       assert Dashboards.defaults(PromExFixture.Runtime) == [:workers, :external]
     end
 
-    test "без плагина подсистемы её дашборда нет" do
-      assert Dashboards.defaults(PromExFixture.Bare) == []
+    test "без плагина подсистемы её дашборда нет, штатный beam — по плагину" do
+      assert Dashboards.defaults(PromExFixture.Bare) == [:beam]
+    end
+
+    test "штатные дашборды PromEx — по наличию их плагинов" do
+      assert Dashboards.defaults(PromExFixture.Standard) == [:application, :beam, :phoenix, :ecto, :oban]
+      assert Dashboards.standard() == [:application, :beam, :phoenix, :ecto, :oban]
     end
 
     test "mq — при stream_readers: у Core.Mq.PromEx, kafka — при kafka_readers:" do
@@ -467,11 +486,17 @@ defmodule Core.PromEx.DashboardsTest do
       end
     end
 
-    test "доменные и штатные дашборды не проверяются", %{tmp_dir: dir} do
-      File.write!(Path.join(dir, "beam.json"), ~s({"title": "MyApp - BEAM"}))
+    test "штатные выгрузки проверяются, доменные — нет", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "beam.json"), Dashboards.render(PromExFixture.Outbox, :beam))
       File.write!(Path.join(dir, "orders.json"), "{")
 
       assert Dashboards.stale(PromExFixture.Outbox, dir) == []
+
+      File.write!(Path.join(dir, "beam.json"), ~s({"title": "MyApp - BEAM"}))
+
+      assert Dashboards.stale(PromExFixture.Outbox, dir) == [
+               %{file: Path.join(dir, "beam.json"), dashboard: :beam}
+             ]
     end
   end
 
@@ -495,6 +520,60 @@ defmodule Core.PromEx.DashboardsTest do
     end
   end
 
+  describe "surplus/2" do
+    @describetag :tmp_dir
+
+    test "выгрузка вне набора — лишняя", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "outbox.json"), Dashboards.render(PromExFixture.Outbox, :outbox))
+      File.write!(Path.join(dir, "beam.json"), Dashboards.render(PromExFixture.Outbox, :beam))
+      File.write!(Path.join(dir, "kafka.json"), "{}")
+
+      assert Dashboards.surplus(PromExFixture.Outbox, dir) == [
+               %{file: Path.join(dir, "kafka.json"), dashboard: :kafka}
+             ]
+    end
+
+    test "выгрузка штатного дашборда без плагина — лишняя", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "ecto.json"), "{}")
+
+      assert Dashboards.surplus(PromExFixture.Outbox, dir) == [
+               %{file: Path.join(dir, "ecto.json"), dashboard: :ecto}
+             ]
+    end
+
+    test "доменный файл и дашборд из набора без файла — не лишние", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "orders.json"), "{}")
+
+      assert Dashboards.surplus(PromExFixture.Outbox, dir) == []
+    end
+
+    test "каталога нет — ArgumentError", %{tmp_dir: dir} do
+      assert_raise ArgumentError, ~r/^Core.PromEx.Dashboards.surplus\/2: каталог дашбордов не найден: /, fn ->
+        Dashboards.surplus(PromExFixture.Outbox, Path.join(dir, "missing"))
+      end
+    end
+  end
+
+  describe "assert_no_surplus!/2" do
+    @describetag :tmp_dir
+
+    test "норма — :ok", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "outbox.json"), Dashboards.render(PromExFixture.Outbox, :outbox))
+
+      assert Dashboards.assert_no_surplus!(PromExFixture.Outbox, dir) == :ok
+    end
+
+    test "лишняя выгрузка — Surplus с файлом и дашбордом", %{tmp_dir: dir} do
+      file = Path.join(dir, "kafka.json")
+      File.write!(file, "{}")
+
+      error = assert_raise Dashboards.Surplus, fn -> Dashboards.assert_no_surplus!(PromExFixture.Outbox, dir) end
+
+      assert error.message =~ file
+      assert error.message =~ "kafka"
+    end
+  end
+
   describe "render/2 — workers" do
     test "процессы, сбои сбора всех плагинов и память контейнера" do
       dashboard = Dashboards.render(PromExFixture.Outbox, :workers) |> Jason.decode!()
@@ -503,18 +582,54 @@ defmodule Core.PromEx.DashboardsTest do
       assert dashboard["title"] == "MyApp - Workers"
       assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_workers_up{"))
       assert Enum.any?(exprs, &(&1 =~ ~s({__name__=~"my_app_prom_ex_.+_collect_errors_total")))
-      assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_memory_current_bytes{"))
-      assert thresholds(dashboard, "Container memory") == [500_000_000, 1_000_000_000]
+      assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_memory_anon_bytes{"))
+      assert thresholds(dashboard, "Container memory (anon)") == [500_000_000, 1_000_000_000]
     end
 
     test "пороги памяти, шаблон сбоев сбора и префикс cgroup — из dashboard_assigns/0 и plugins/0" do
       dashboard = Dashboards.render(PromExFixture.Runtime, :workers) |> Jason.decode!()
       exprs = exprs(dashboard)
 
-      assert thresholds(dashboard, "Container memory") == [2_000_000_000, 4_000_000_000]
+      assert thresholds(dashboard, "Container memory (anon)") == [2_000_000_000, 4_000_000_000]
       assert Enum.any?(exprs, &(&1 =~ ~s({__name__=~"legacy_.+_collect_errors_total")))
-      assert Enum.any?(exprs, &(&1 =~ "custom_cgroup_memory_current_bytes{"))
+      assert Enum.any?(exprs, &(&1 =~ "custom_cgroup_memory_anon_bytes{"))
       refute Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_"))
+    end
+  end
+
+  describe "render/2 — mq" do
+    test "возраст неподтверждённого сообщения — панель на reader_pending_age_seconds" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :mq) |> Jason.decode!()
+      panel = Enum.find(dashboard["panels"], &(&1["title"] == "Reader pending age"))
+      [target] = panel["targets"]
+
+      assert panel["type"] == "timeseries"
+      assert panel["fieldConfig"]["defaults"]["unit"] == "s"
+      assert target["expr"] =~ "max by (component, topic) (my_app_prom_ex_mq_reader_pending_age_seconds{"
+      assert target["expr"] =~ ~s(component=~"$component")
+      assert target["expr"] =~ ~s(topic=~"$topic")
+    end
+  end
+
+  describe "render/2 — es: Personal" do
+    test "секция Personal — вызовы хранилища, исходы расшифровки и p95" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :es) |> Jason.decode!()
+      exprs = exprs(dashboard)
+
+      assert Enum.any?(exprs, &(&1 =~ "sum by (op, result) (rate(my_app_prom_ex_es_personal_call_total{"))
+      assert Enum.any?(exprs, &(&1 =~ "sum by (outcome) (rate(my_app_prom_ex_es_personal_open_total{"))
+
+      assert Enum.any?(
+               exprs,
+               &(&1 =~
+                   "histogram_quantile(0.95, sum by (le, op) (rate(" <>
+                     "my_app_prom_ex_es_personal_call_duration_milliseconds_bucket{")
+             )
+
+      assert unit(dashboard, "Key store call duration p95") == "ms"
+
+      panel = Enum.find(dashboard["panels"], &(&1["title"] == "Key store call duration p95"))
+      assert Enum.map(panel["targets"], & &1["legendFormat"]) == ["{{op}}"]
     end
   end
 
@@ -604,6 +719,8 @@ defmodule Core.PromEx.DashboardsTest do
   end
 
   defp exported_names(%{name: name}), do: [Enum.join(name, "_")]
+
+  defp panels(dashboard), do: Enum.flat_map(dashboard["panels"], &[&1 | Map.get(&1, "panels", [])])
 
   defp exprs(dashboard) do
     for panel <- dashboard["panels"], target <- Map.get(panel, "targets", []), do: target["expr"]

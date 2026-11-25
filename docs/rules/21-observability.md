@@ -568,6 +568,29 @@ tests:
           - exp_labels: {topic: bills, dlq_topic: bills.dlq}
 ```
 
+## Дашборды PromEx
+
+`Core.PromEx.Dashboards` выгружает оба набора — дашборды подсистем библиотеки и штатные дашборды
+PromEx — одной задачей `mix core.dashboards.export`.
+
+- Штатный набор — `standard/0`: `application`, `beam`, `phoenix`, `ecto`, `oban`.
+  `defaults/1` включает дашборд по наличию его плагина в `plugins/0`; набор подсистем — по
+  плагинам `Core.*.PromEx` и их опциям (ADR-0089, ADR-0099).
+- Штатный дашборд рендерится из шаблона `:prom_ex` тем же `PromEx.DashboardRenderer`, что и
+  собственный экспорт PromEx: `otp_app`, `title`, `uid` и `datasource` — от модуля PromEx
+  приложения. `uid` — от `otp_app` и имени, не от `title` и имени модуля PromEx.
+- Панели `graph` шаблонов PromEx 1.12 мигрируют в `timeseries` (`migrate_graph_panels/1`):
+  единица оси — из `yaxes[0].format`, `lineWidth` / `fillOpacity` / `drawStyle` / `showPoints` — из
+  angular-полей, легенда — таблица справа, подсказка — `multi`; мёртвые аннотации и демо-значения
+  переменных снимаются. Pipeline ключуется по заголовкам и expr панелей PromEx; дрейф при
+  обновлении prom_ex ловят golden-выгрузки теста библиотеки.
+- `dashboard_refresh` в `dashboard_assigns/0` — интервал обновления, умолчание `"15s"`.
+- `stale/2` / `assert_fresh!/2` покрывают оба набора; `surplus/2` / `assert_no_surplus!/2` —
+  выгрузки вне `defaults/1` (файл остался после смены `plugins/0`). Нормы потребителя —
+  `deps/core/docs/rules/app/21-observability.md`.
+- `migrate_graph_panels/1` публичная: приложение MAY применить её к своему legacy-дашборду;
+  на мигрированном дашборде повторный вызов ничего не меняет.
+
 ## Связанные правила
 
 - Цепочка outbox и её спаны — `14-events-outbox.md`

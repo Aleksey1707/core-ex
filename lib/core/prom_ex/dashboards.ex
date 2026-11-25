@@ -1,7 +1,7 @@
 defmodule Core.PromEx.Dashboards do
   @moduledoc """
-  Дашборды подсистем библиотеки: рендер шаблонов `priv/dashboards/*.json.eex` для модуля PromEx
-  приложения (ADR-0089).
+  Дашборды подсистем библиотеки и штатные дашборды PromEx: рендер шаблонов `priv/dashboards/*.json.eex`
+  и `:prom_ex` для модуля PromEx приложения (ADR-0089, ADR-0099).
 
   Рендер идёт через `PromEx.DashboardRenderer`, как у штатных дашбордов PromEx. Параметры шаблона
   собираются по возрастанию приоритета:
@@ -31,6 +31,7 @@ defmodule Core.PromEx.Dashboards do
 
   | Дашборд | Плагин | Параметр | Умолчание |
   |---|---|---|---|
+  | все | — | `dashboard_refresh` | `"15s"` — интервал обновления дашборда в Grafana |
   | `outbox` | `Core.Outbox.PromEx` | `outbox_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_outbox"` |
   | | | `outbox_duration_unit` | `duration_unit:` плагина (мн. ч.) или `"milliseconds"` |
   | | | `outbox_duration_axis_unit` | единица оси Grafana по `duration_unit:` плагина, `"ms"` |
@@ -65,9 +66,17 @@ defmodule Core.PromEx.Dashboards do
   `Core.*.PromEx`: плагин со своим `metric_prefix:` вне `<otp_app>_prom_ex_` требует своей
   регулярки. Система внешнего вызова у дашборда `external` — переменная `system`.
 
+  Штатные дашборды PromEx (`standard/0`) — `application`, `beam`, `phoenix`, `ecto`, `oban` — core
+  рендерит из шаблонов `:prom_ex` с assigns приложения и приводит к Grafana 11: панели `graph`
+  мигрируют в `timeseries` (`migrate_graph_panels/1`), снимаются мёртвые аннотации и демо-значения
+  переменных, `refresh` берётся из `dashboard_refresh`. Штатный дашборд входит в `defaults/1` по
+  наличию его плагина в `plugins/0`. `uid` штатного дашборда — как у подсистемного: от `otp_app` и
+  имени, а не от `title` и имени модуля PromEx.
+
   Выгрузку в каталог дашбордов приложения делает `mix core.dashboards.export`; совпадение выгрузок
   с текущим рендером проверяют `stale/2` и вариант для теста `assert_fresh!/2`, форму панелей всех
-  дашбордов каталога — `form_violations/3` и `assert_form!/3`.
+  дашбордов каталога — `form_violations/3` и `assert_form!/3`, выгрузку вне набора `defaults/1`
+  (файл остался после смены `plugins/0`) — `surplus/2` и `assert_no_surplus!/2`.
   """
 
   use Core.Options
@@ -75,7 +84,7 @@ defmodule Core.PromEx.Dashboards do
   alias PromEx.DashboardRenderer
 
   defmodule Stale do
-    @moduledoc "Выгрузка дашборда подсистемы библиотеки разошлась с рендером (`assert_fresh!/2`)."
+    @moduledoc "Выгрузка дашборда разошлась с рендером (`assert_fresh!/2`)."
 
     defexception [:message]
   end
@@ -89,11 +98,29 @@ defmodule Core.PromEx.Dashboards do
     defexception message: "форма панелей нарушена", violations: []
   end
 
+  defmodule Surplus do
+    @moduledoc "Выгрузка дашборда вне набора `defaults/1` (`assert_no_surplus!/2`)."
+
+    defexception [:message]
+  end
+
   @typedoc "Имя дашборда подсистемы библиотеки; файл выгрузки — `<имя>.json`."
   @type name :: :outbox | :mq | :kafka | :es | :cache | :workers | :external
 
+  @typedoc "Имя штатного дашборда PromEx; файл выгрузки — `<имя>.json`."
+  @type standard_name :: :application | :beam | :phoenix | :ecto | :oban
+
+  @typedoc "Имя любого дашборда, который выгружает core."
+  @type dashboard_name :: name() | standard_name()
+
+  @typedoc "Выгрузка `file` дашборда `dashboard`."
+  @type dashboard_export :: %{file: Path.t(), dashboard: dashboard_name()}
+
   @typedoc "Выгрузка `file` дашборда `dashboard`, разошедшаяся с рендером."
-  @type stale_export :: %{file: Path.t(), dashboard: name()}
+  @type stale_export :: dashboard_export()
+
+  @typedoc "Выгрузка `file` дашборда `dashboard`, которого нет в наборе `defaults/1`."
+  @type surplus_export :: dashboard_export()
 
   @typedoc "Правило формы панелей; таблица — `form_violations/3`."
   @type form_rule :: :summary_legend | :state_timeline | :timeseries_legend | :state_legend | :variable_filter
@@ -162,6 +189,15 @@ defmodule Core.PromEx.Dashboards do
     }
   ]
   @names Keyword.keys(@dashboards)
+  @standard [
+    application: %{plugin: PromEx.Plugins.Application, label: "PromEx Application Dashboard"},
+    beam: %{plugin: PromEx.Plugins.Beam, label: "PromEx Beam Dashboard"},
+    phoenix: %{plugin: PromEx.Plugins.Phoenix, label: "PromEx Phoenix Dashboard"},
+    ecto: %{plugin: PromEx.Plugins.Ecto, label: "PromEx Ecto Dashboard"},
+    oban: %{plugin: PromEx.Plugins.Oban, label: "PromEx Oban Dashboard"}
+  ]
+  @standard_names Keyword.keys(@standard)
+  @all_names @names ++ @standard_names
   @assign_keys for prefix <- [:cgroup | for({_name, %{prefix: prefix}} <- @dashboards, do: prefix)],
                    kind <- ~w(metric_prefix duration_unit duration_axis_unit)a,
                    into: %{},
@@ -174,23 +210,40 @@ defmodule Core.PromEx.Dashboards do
 
   def names, do: @names
 
+  @doc "Все штатные дашборды PromEx, которые выгружает core."
+  @spec standard() :: [standard_name()]
+
+  def standard, do: @standard_names
+
   @doc """
   Набор дашбордов по умолчанию для модуля PromEx приложения — по его `plugins/0`.
 
-  Дашборд входит в набор, если в `plugins/0` есть плагин его подсистемы. Дашборды `Core.Mq.PromEx`
-  требуют ещё и опции плагина: `mq` — `stream_readers:`, `kafka` — `kafka_readers:`; иначе в
-  Grafana лёг бы дашборд транспорта, которого у приложения нет. Старый ключ `readers:` плагин не
-  читает, и `mq` по нему не входит.
+  Дашборд подсистемы входит в набор, если в `plugins/0` есть плагин его подсистемы. Дашборды
+  `Core.Mq.PromEx` требуют ещё и опции плагина: `mq` — `stream_readers:`, `kafka` — `kafka_readers:`;
+  иначе в Grafana лёг бы дашборд транспорта, которого у приложения нет. Старый ключ `readers:` плагин
+  не читает, и `mq` по нему не входит.
+
+  Штатный дашборд PromEx входит по наличию своего плагина: `PromEx.Plugins.Application`, `Beam`,
+  `Phoenix`, `Ecto`, `Oban`.
   """
-  @spec defaults(module()) :: [name()]
+  @spec defaults(module()) :: [dashboard_name()]
 
   def defaults(prom_ex) when is_atom(prom_ex) do
     plugins = plugins(prom_ex)
+    subsystem_defaults(plugins) ++ standard_defaults(plugins)
+  end
 
+  # ---
+
+  defp subsystem_defaults(plugins) do
     for {name, %{plugin: plugin} = dashboard} <- @dashboards,
         plugin_opts = Map.get(plugins, plugin),
         is_list(plugin_opts) and options_given?(dashboard, plugin_opts),
         do: name
+  end
+
+  defp standard_defaults(plugins) do
+    for {name, %{plugin: plugin}} <- @standard, Map.has_key?(plugins, plugin), do: name
   end
 
   # ---
@@ -201,14 +254,24 @@ defmodule Core.PromEx.Dashboards do
   # ===== рендер =====
 
   @doc """
-  Отрендерить дашборд `name` для модуля PromEx приложения — JSON выгрузки.
+  Отрендерить дашборд `name` — подсистемы библиотеки или штатный PromEx — для модуля PromEx
+  приложения; JSON выгрузки.
 
-  `ArgumentError` — в `dashboard_assigns/0` нет `datasource_id`, `app_title` не непустая строка или
-  параметры дали невалидный JSON.
+  Штатный дашборд рендерится из шаблона `:prom_ex` и приводится к Grafana 11: панели `graph`
+  мигрируют в `timeseries`, снимаются мёртвые аннотации, `refresh` берётся из `dashboard_refresh`.
+
+  `ArgumentError` — в `dashboard_assigns/0` нет `datasource_id`, `app_title` не непустая строка,
+  параметры дали невалидный JSON или шаблона PromEx нет.
   """
-  @spec render(module(), name()) :: String.t()
+  @spec render(module(), dashboard_name()) :: String.t()
 
-  def render(prom_ex, name) when is_atom(prom_ex) and name in @names do
+  def render(prom_ex, name) when is_atom(prom_ex) and (name in @names or name in @standard_names) do
+    if name in @standard_names, do: render_standard(prom_ex, name), else: render_subsystem(prom_ex, name)
+  end
+
+  # ---
+
+  defp render_subsystem(prom_ex, name) do
     otp_app = prom_ex.__otp_app__()
     %{label: label} = dashboard = Keyword.fetch!(@dashboards, name)
     plugins = plugins(prom_ex)
@@ -217,6 +280,7 @@ defmodule Core.PromEx.Dashboards do
     |> DashboardRenderer.build("dashboards/#{name}.json", otp_app)
     |> DashboardRenderer.merge_assigns(library_assigns(dashboard, otp_app, plugins))
     |> DashboardRenderer.merge_assigns(neighbour_assigns(name, otp_app, plugins))
+    |> DashboardRenderer.merge_assigns(dashboard_refresh())
     |> DashboardRenderer.merge_assigns(prom_ex.dashboard_assigns())
     |> merge_identity(prom_ex, name, label)
     |> check_datasource!(prom_ex)
@@ -224,6 +288,38 @@ defmodule Core.PromEx.Dashboards do
     |> DashboardRenderer.decode_dashboard()
     |> rendered!(prom_ex, name)
   end
+
+  defp render_standard(prom_ex, name) do
+    otp_app = prom_ex.__otp_app__()
+    %{label: label} = Keyword.fetch!(@standard, name)
+
+    dashboard =
+      :prom_ex
+      |> DashboardRenderer.build("#{name}.json", otp_app)
+      |> template!(prom_ex, name)
+      |> DashboardRenderer.merge_assigns(dashboard_refresh())
+      |> DashboardRenderer.merge_assigns(prom_ex.dashboard_assigns())
+      |> merge_identity(prom_ex, name, label)
+      |> check_datasource!(prom_ex)
+      |> render_template()
+      |> DashboardRenderer.decode_dashboard()
+
+    dashboard
+    |> decoded!(prom_ex, name)
+    |> migrate_graph_panels()
+    |> standard_fixes(name, dashboard.assigns)
+    |> Jason.encode!()
+  end
+
+  defp dashboard_refresh, do: [dashboard_refresh: "15s"]
+
+  defp template!(%DashboardRenderer{valid_file?: false, error: error}, prom_ex, name) do
+    raise ArgumentError,
+          "Core.PromEx.Dashboards.render/2: шаблон штатного дашборда #{name} для #{inspect(prom_ex)} " <>
+            "не найден: #{inspect(error)}"
+  end
+
+  defp template!(%DashboardRenderer{} = dashboard, _prom_ex, _name), do: dashboard
 
   # ---
 
@@ -316,22 +412,239 @@ defmodule Core.PromEx.Dashboards do
   defp render_template(%DashboardRenderer{file_type: :eex, file_contents: contents, assigns: assigns} = dashboard),
     do: %{dashboard | rendered_file: EEx.eval_string(contents, assigns: assigns)}
 
-  defp rendered!(%DashboardRenderer{valid_json?: true, rendered_file: json}, _prom_ex, _name), do: json
+  defp rendered!(%DashboardRenderer{valid_json?: true, rendered_file: json}, _prom_ex, _name)
+       when is_binary(json),
+       do: json
 
-  defp rendered!(%DashboardRenderer{error: error}, prom_ex, name) do
+  defp rendered!(%DashboardRenderer{error: error}, prom_ex, name), do: render_error!(error, prom_ex, name)
+
+  defp decoded!(%DashboardRenderer{valid_json?: true, decoded_dashboard: decoded}, _prom_ex, _name),
+    do: decoded
+
+  defp decoded!(%DashboardRenderer{error: error}, prom_ex, name), do: render_error!(error, prom_ex, name)
+
+  defp render_error!(error, prom_ex, name) do
     raise ArgumentError,
           "Core.PromEx.Dashboards.render/2: дашборд #{name} для #{inspect(prom_ex)} не отрендерился: " <>
             inspect(error)
   end
 
+  defp standard_fixes(dashboard, name, assigns) do
+    dashboard
+    |> fix_panels(name)
+    |> drop_tag_annotations()
+    |> Map.put("refresh", Keyword.fetch!(assigns, :dashboard_refresh))
+  end
+
+  defp fix_panels(dashboard, :beam), do: update_panels(dashboard, &fix_beam_panel/1)
+  defp fix_panels(dashboard, :phoenix), do: update_panels(dashboard, &fix_phoenix_panel/1)
+
+  defp fix_panels(dashboard, :oban) do
+    dashboard
+    |> update_panels(&fix_oban_panel/1)
+    |> blank_oban_variables()
+  end
+
+  defp fix_panels(dashboard, _name), do: dashboard
+
+  defp update_panels(%{"panels" => panels} = dashboard, fun) when is_list(panels),
+    do: %{dashboard | "panels" => Enum.map(panels, &update_panel(&1, fun))}
+
+  defp update_panels(dashboard, _fun), do: dashboard
+
+  defp update_panel(panel, fun) do
+    panel = fun.(panel)
+
+    case panel do
+      %{"panels" => panels} when is_list(panels) ->
+        %{panel | "panels" => Enum.map(panels, &update_panel(&1, fun))}
+
+      panel ->
+        panel
+    end
+  end
+
+  @otp_version_panel "OTP Major Version"
+  @phoenix_http_panels ["Average HTTP Request Time", "Average HTTP Response Size"]
+  @oban_poll_interval "_init_poll_interval_milliseconds"
+
+  defp fix_beam_panel(%{"title" => @otp_version_panel, "type" => "stat"} = panel) do
+    Map.put(panel, "transformations", [
+      %{"id" => "labelsToFields", "options" => %{}},
+      %{"id" => "filterFieldsByName", "options" => %{"include" => %{"pattern" => "/^version$/"}}}
+    ])
+  end
+
+  defp fix_beam_panel(panel), do: panel
+
+  defp fix_phoenix_panel(%{"title" => title, "targets" => targets} = panel) when title in @phoenix_http_panels do
+    targets =
+      Enum.map(targets, fn
+        %{"expr" => expr} = target ->
+          %{target | "expr" => String.replace(expr, "by(path, status)", "by(method, path, status)")}
+
+        target ->
+          target
+      end)
+
+    %{panel | "targets" => targets}
+  end
+
+  defp fix_phoenix_panel(panel), do: panel
+
+  defp fix_oban_panel(%{"title" => "Oban Time Limit Settings"} = panel) do
+    panel
+    |> update_in(["fieldConfig", "overrides"], &drop_poll_interval_mapping/1)
+    |> update_in(["targets"], &drop_poll_interval_expr/1)
+  end
+
+  defp fix_oban_panel(panel), do: panel
+
+  defp drop_poll_interval_mapping(overrides) when is_list(overrides) do
+    Enum.map(overrides, &drop_poll_interval_property/1)
+  end
+
+  defp drop_poll_interval_mapping(overrides), do: overrides
+
+  defp drop_poll_interval_property(override) do
+    update_in(override, ["properties"], fn properties ->
+      Enum.map(properties, &drop_poll_interval_mappings/1)
+    end)
+  end
+
+  defp drop_poll_interval_mappings(%{"id" => "mappings", "value" => mappings} = property)
+       when is_list(mappings),
+       do: Map.put(property, "value", Enum.reject(mappings, &poll_interval_mapping?/1))
+
+  defp drop_poll_interval_mappings(property), do: property
+
+  defp drop_poll_interval_expr(targets) when is_list(targets) do
+    Enum.map(targets, fn
+      %{"expr" => expr} = target ->
+        Map.put(target, "expr", Regex.replace(~r/\|[\w]+#{@oban_poll_interval}/, expr, ""))
+
+      target ->
+        target
+    end)
+  end
+
+  defp drop_poll_interval_expr(targets), do: targets
+
+  defp poll_interval_mapping?(%{"value" => value}) when is_binary(value),
+    do: String.ends_with?(value, @oban_poll_interval)
+
+  defp poll_interval_mapping?(_mapping), do: false
+
+  defp blank_oban_variables(%{"templating" => %{"list" => variables}} = dashboard) when is_list(variables) do
+    variables =
+      Enum.map(variables, fn
+        %{"name" => name} = variable when name in ["job", "instance"] -> Map.put(variable, "current", %{})
+        variable -> variable
+      end)
+
+    put_in(dashboard, ["templating", "list"], variables)
+  end
+
+  defp blank_oban_variables(dashboard), do: dashboard
+
+  defp drop_tag_annotations(%{"annotations" => %{"list" => list}} = dashboard) when is_list(list) do
+    put_in(dashboard, ["annotations", "list"], Enum.reject(list, &(&1["type"] == "tags")))
+  end
+
+  defp drop_tag_annotations(dashboard), do: dashboard
+
+  # ===== миграция панелей =====
+
+  @legacy_graph_keys ~w(aliasColors bars dashLength dashes fill fillGradient hiddenSeries legend
+                        lines linewidth nullPointMode percentage pluginVersion pointradius points
+                        renderer seriesOverrides spaceLength stack steppedLine thresholds timeFrom
+                        timeRegions timeShift tooltip xaxis yaxes yaxis)
+
+  @graph_legend %{
+    "showLegend" => true,
+    "displayMode" => "table",
+    "placement" => "right",
+    "calcs" => ~w(lastNotNull max),
+    "sortBy" => "Max",
+    "sortDesc" => true
+  }
+
+  @doc """
+  Мигрировать панели `graph` дашборда в `timeseries` Grafana 11 — декодированный JSON дашборда.
+
+  Панель `graph` теряет angular-ключи (`yaxes`, `xaxis`, `legend`, `tooltip`, `lines`, `fill`,
+  `points`, `bars`, `thresholds` и др.); единица оси (`yaxes[0].format`) переносится в
+  `fieldConfig.defaults.unit`, `lineWidth`, `fillOpacity`, `drawStyle` и `showPoints` — в
+  `fieldConfig.defaults.custom`, легенда становится таблицей справа (`lastNotNull`, `max`,
+  сортировка по `max` desc), подсказка — `multi`. Панели других типов не меняются; повторный вызов
+  на мигрированном дашборде ничего не меняет.
+  """
+  @spec migrate_graph_panels(map()) :: map()
+
+  def migrate_graph_panels(%{"panels" => panels} = dashboard) when is_list(panels) do
+    %{dashboard | "panels" => Enum.map(panels, &migrate_panel/1)}
+  end
+
+  def migrate_graph_panels(dashboard), do: dashboard
+
+  # ---
+
+  defp migrate_panel(%{"type" => "graph"} = panel) do
+    panel
+    |> put_timeseries_field_config()
+    |> Map.drop(@legacy_graph_keys)
+    |> Map.put("type", "timeseries")
+    |> put_timeseries_options()
+  end
+
+  defp migrate_panel(%{"panels" => panels} = panel) when is_list(panels) do
+    %{panel | "panels" => Enum.map(panels, &migrate_panel/1)}
+  end
+
+  defp migrate_panel(panel), do: panel
+
+  defp put_timeseries_field_config(panel) do
+    axis = List.first(Map.get(panel, "yaxes", [])) || %{}
+    field_config = Map.get(panel, "fieldConfig") || %{}
+    defaults = Map.get(field_config, "defaults") || %{}
+    custom = Map.get(defaults, "custom") || %{}
+
+    defaults =
+      defaults
+      |> Map.put("unit", Map.get(axis, "format", "short"))
+      |> Map.put("custom", Map.merge(custom, timeseries_custom(panel)))
+
+    Map.put(panel, "fieldConfig", Map.put(field_config, "defaults", defaults))
+  end
+
+  defp timeseries_custom(panel) do
+    %{
+      "lineWidth" => Map.get(panel, "linewidth", 1),
+      "fillOpacity" => Map.get(panel, "fill", 0) * 10,
+      "drawStyle" => if(Map.get(panel, "bars", false), do: "bars", else: "line"),
+      "showPoints" => if(Map.get(panel, "points", false), do: "always", else: "never")
+    }
+  end
+
+  defp put_timeseries_options(panel) do
+    options =
+      panel
+      |> Map.get("options", %{})
+      |> Map.drop(["alertThreshold"])
+      |> Map.put("legend", @graph_legend)
+      |> Map.put("tooltip", %{"mode" => "multi"})
+
+    Map.put(panel, "options", options)
+  end
+
   # ===== свежесть выгрузок =====
 
   @doc """
-  Выгрузки дашбордов подсистем библиотеки в каталоге `dir`, разошедшиеся с текущим рендером для
-  модуля PromEx приложения; пустой список — все выгрузки свежие.
+  Выгрузки дашбордов подсистем библиотеки и штатных дашбордов PromEx в каталоге `dir`, разошедшиеся
+  с текущим рендером для модуля PromEx приложения; пустой список — все выгрузки свежие.
 
-  Выгрузка узнаётся по имени файла: `<имя>.json` для каждого имени из `names/0` — так её называет
-  `mix core.dashboards.export`. Другие файлы каталога — доменные и штатные дашборды — не
+  Выгрузка узнаётся по имени файла: `<имя>.json` для каждого имени из `names/0` и `standard/0` — так
+  её называет `mix core.dashboards.export`. Другие файлы каталога — доменные дашборды — не
   проверяются; дашборд, которого в каталоге нет, нарушением не считается. Файл сравнивается с
   рендером как JSON: форматирование и перевод строки в конце не важны, ручная правка, старый
   порог, выгрузка другого `otp_app`, невалидный JSON или нечитаемый файл — расхождение.
@@ -343,7 +656,7 @@ defmodule Core.PromEx.Dashboards do
   def stale(prom_ex, dir) when is_atom(prom_ex) and is_binary(dir) do
     dir!(dir, "stale/2")
 
-    for name <- @names,
+    for name <- @all_names,
         file = Path.join(dir, "#{name}.json"),
         File.regular?(file),
         decode_file(file) != Jason.decode(render(prom_ex, name)),
@@ -379,6 +692,57 @@ defmodule Core.PromEx.Dashboards do
       [
         "Core.PromEx.Dashboards.assert_fresh!/2: выгрузки разошлись с рендером для #{inspect(prom_ex)} — " <>
           "выгрузить заново, руками не править:"
+        | lines
+      ],
+      "\n"
+    )
+  end
+
+  # ===== лишние выгрузки =====
+
+  @doc """
+  Выгрузки каталога `dir` с именем дашборда из `names/0` или `standard/0`, которых нет в наборе
+  `defaults/1` модуля PromEx приложения; пустой список — лишних выгрузок нет.
+
+  Класс ошибки — файл остался после смены `plugins/0`: выключили плагин подсистемы, сняли опцию
+  читателей или убрали штатный плагин PromEx, а выгрузка в каталоге осталась. Дашборд из набора, но
+  отсутствующий в каталоге, лишним не считается. `ArgumentError` — каталога `dir` нет.
+  """
+  @spec surplus(module(), Path.t()) :: [surplus_export()]
+
+  def surplus(prom_ex, dir) when is_atom(prom_ex) and is_binary(dir) do
+    dir!(dir, "surplus/2")
+    defaults = defaults(prom_ex)
+
+    for name <- @all_names,
+        name not in defaults,
+        file = Path.join(dir, "#{name}.json"),
+        File.regular?(file),
+        do: %{file: file, dashboard: name}
+  end
+
+  @doc """
+  Вариант `surplus/2` для теста приложения: `:ok` или `Core.PromEx.Dashboards.Surplus` с перечнем
+  выгрузок вне набора.
+  """
+  @spec assert_no_surplus!(module(), Path.t()) :: :ok
+
+  def assert_no_surplus!(prom_ex, dir) when is_atom(prom_ex) and is_binary(dir) do
+    case surplus(prom_ex, dir) do
+      [] -> :ok
+      exports -> raise Surplus, surplus_message(exports, prom_ex)
+    end
+  end
+
+  # ---
+
+  defp surplus_message(exports, prom_ex) do
+    lines = for %{file: file, dashboard: name} <- exports, do: "  #{file}: дашборд #{name} вне набора"
+
+    Enum.join(
+      [
+        "Core.PromEx.Dashboards.assert_no_surplus!/2: выгрузки дашбордов, которых нет в наборе " <>
+          "#{inspect(prom_ex)} — удалить файл или вернуть плагин и его опции в plugins/0:"
         | lines
       ],
       "\n"
@@ -422,9 +786,9 @@ defmodule Core.PromEx.Dashboards do
   `source` — каталог дашбордов (`*.json`, имя дашборда в нарушении — имя файла) либо один дашборд
   `{имя, декодированный JSON}`. Каталога нет — `ArgumentError`: проверка пустоты прошла бы
   вхолостую. Файл каталога с именем шаблона PromEx (`beam.json`, `application.json`, …) —
-  выгрузка штатного дашборда, его форму задаёт PromEx, и проверка его пропускает; доменный
-  дашборд с таким именем выпал бы из проверки вместе с ним, поэтому имя шаблона PromEx ему не
-  дают.
+  выгрузка штатного дашборда, её форму задаёт PromEx и миграция legacy-панелей core, и проверка его
+  пропускает; доменный дашборд с таким именем выпал бы из проверки вместе с ним, поэтому имя шаблона
+  PromEx ему не дают.
 
   Проверяются запросы панелей (и панелей свёрнутых рядов) с метриками плагинов модуля PromEx:
   префикс `<otp_app>_prom_ex_` (умолчание `PromEx.metric_prefix/2` у каждого плагина) и

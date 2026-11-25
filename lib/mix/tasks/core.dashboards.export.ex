@@ -1,9 +1,9 @@
 defmodule Mix.Tasks.Core.Dashboards.Export do
-  @shortdoc "Выгрузить дашборды подсистем библиотеки в каталог дашбордов приложения"
+  @shortdoc "Выгрузить дашборды подсистем библиотеки и штатные PromEx"
 
   @moduledoc """
-  Рендер дашбордов подсистем библиотеки (`Core.PromEx.Dashboards`) для модуля PromEx приложения
-  в каталог дашбордов Grafana (ADR-0089).
+  Рендер дашбордов подсистем библиотеки и штатных дашбордов PromEx (`Core.PromEx.Dashboards`) для
+  модуля PromEx приложения в каталог дашбордов Grafana (ADR-0089, ADR-0099).
 
       mix core.dashboards.export --module MyAppApp.PromEx
       mix core.dashboards.export --module MyAppApp.PromEx --dashboard outbox --out priv/grafana
@@ -12,10 +12,11 @@ defmodule Mix.Tasks.Core.Dashboards.Export do
   - `--dashboard` — имя дашборда, повторяется; без него — набор по умолчанию по `plugins/0` модуля;
   - `--out` — каталог выгрузки, по умолчанию `deploy/monitoring/grafana/dashboards`.
 
-  Файл выгрузки — `<имя дашборда>.json`, существующий перезаписывается. Выгрузку руками не правят:
-  пороги и datasource задаёт `dashboard_assigns/0` модуля PromEx, после обновления core дашборды
-  выгружаются заново. Задача загружает конфигурацию приложения (`app.config`) и запускается из его
-  корня; приложение не стартует.
+  Файл выгрузки — `<имя дашборда>.json`, существующий перезаписывается. Штатные дашборды PromEx
+  рендерятся из шаблонов `:prom_ex` с миграцией legacy-панелей (`graph` → `timeseries`). Выгрузку
+  руками не правят: пороги и datasource задаёт `dashboard_assigns/0` модуля PromEx, после обновления
+  core дашборды выгружаются заново. Задача загружает конфигурацию приложения (`app.config`) и
+  запускается из его корня; приложение не стартует.
   """
 
   use Mix.Task
@@ -41,8 +42,8 @@ defmodule Mix.Tasks.Core.Dashboards.Export do
     case dashboards!(Keyword.get_values(switches, :dashboard), prom_ex) do
       [] ->
         Mix.shell().info(
-          "Для #{inspect(prom_ex)} нет дашбордов подсистем библиотеки: " <>
-            "в plugins/0 нет их плагинов или опций, которых они требуют"
+          "Для #{inspect(prom_ex)} нет дашбордов: в plugins/0 нет плагинов подсистемы библиотеки " <>
+            "или штатных PromEx и опций, которых они требуют"
         )
 
       names ->
@@ -71,7 +72,7 @@ defmodule Mix.Tasks.Core.Dashboards.Export do
   defp dashboards!(raw_names, _prom_ex), do: Enum.map(Enum.uniq(raw_names), &dashboard!/1)
 
   defp dashboard!(raw) do
-    names = Dashboards.names()
+    names = Dashboards.names() ++ Dashboards.standard()
 
     Enum.find(names, &(Atom.to_string(&1) == raw)) ||
       Mix.raise("--dashboard #{raw}: нет такого дашборда, есть #{Enum.join(names, ", ")}")

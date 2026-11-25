@@ -280,26 +280,27 @@ config :my_app, MyAppApp.ObanDashboard,
 ### Выгрузки дашбордов
 
 Дашборды каталога `deploy/monitoring/grafana/dashboards` — трёх видов: штатные дашборды PromEx,
-дашборды подсистем библиотеки (`Core.PromEx.Dashboards`, ADR-0089) и доменные. Первые два —
-выгрузки: их источник — шаблон зависимости, а не файл в репозитории.
+дашборды подсистем библиотеки (`Core.PromEx.Dashboards`, ADR-0089, ADR-0099) и доменные. Первые
+два — выгрузки: их источник — шаблон зависимости, а не файл в репозитории.
 
-- Штатный дашборд MUST быть выгрузкой `mix prom_ex.dashboard.export` без ручных правок:
-  повторный экспорт стирает правку молча.
-- Дашборд подсистемы библиотеки MUST быть выгрузкой `mix core.dashboards.export --module
-  MyAppApp.PromEx` без ручных правок. Пороги панелей, datasource и имя приложения в заголовке
-  (`app_title`) задаёт `dashboard_assigns/0` модуля PromEx; после обновления core выгрузки MUST
-  выгружаться заново.
-- Имя приложения в заголовках трёх видов SHOULD быть одним — `app_title` из
-  `dashboard_assigns/0`. У штатного дашборда его задаёт
-  `--assign title="<app_title> - PromEx <Name> Dashboard"` при экспорте, по одному дашборду
-  (`<Name>` — имя файла через `Macro.camelize`, как в заголовке по умолчанию): ключ `title:` в
-  `dashboard_assigns/0` штатный экспорт дал бы всем штатным дашбордам разом. `uid` штатного
-  дашборда зависит от `title`: выгрузка с новым заголовком заводит в Grafana второй дашборд.
-  `uid` дашборда подсистемы библиотеки от `app_title` не зависит.
+- Штатный дашборд и дашборд подсистемы библиотеки MUST быть выгрузкой
+  `mix core.dashboards.export --module MyAppApp.PromEx` без ручных правок: повторный экспорт
+  стирает правку молча. `mix prom_ex.dashboard.export` для штатных дашбордов MUST NOT: core
+  рендерит шаблоны PromEx и применяет миграцию legacy-панелей (`graph` → `timeseries`) и общие
+  исправления, локальная копия их теряет.
+- Пороги панелей, datasource и имя приложения в заголовке (`app_title`) задаёт
+  `dashboard_assigns/0` модуля PromEx, интервал обновления — `dashboard_refresh` (умолчание 15s).
+  После обновления core выгрузки MUST выгружаться заново.
+- `uid` штатного дашборда и дашборда подсистемы — от `otp_app` и имени файла, от `title` не
+  зависит. Выгрузка штатного дашборда, сделанная до перехода на `mix core.dashboards.export`,
+  имеет другой `uid`: после переэкспорта старую плитку в Grafana MUST удалить, иначе их две.
 - Доработка выгрузки — своя панель, порог в разметке, серия — MUST жить отдельной панелью
   в доменном дашборде приложения. Точки расширения у выгрузки нет.
 - Доменный дашборд под именем выгрузки библиотеки (`<имя>.json` из
-  `Core.PromEx.Dashboards.names/0`) MUST NOT: проверка свежести примет его за выгрузку.
+  `Core.PromEx.Dashboards.names/0` и `standard/0`) MUST NOT: проверка свежести примет его за
+  выгрузку.
+- Выгрузка, оставшаяся после смены `plugins/0` (сняли плагин подсистемы или его опцию, убрали
+  штатный плагин PromEx), MUST быть удалена: её ловит `Core.PromEx.Dashboards.assert_no_surplus!/2`.
 - `dashboards/0` модуля PromEx свод не регулирует: его читает только загрузка дашбордов по API
   Grafana, а она не используется.
 
@@ -309,22 +310,23 @@ config :my_app, MyAppApp.ObanDashboard,
 ```bash
 # плохо — панель памяти контейнера дописана руками в выгрузку beam.json: следующий экспорт её сотрёт
 # хорошо — выгрузки как их выдал экспорт, своя панель — в доменном дашборде
-mix prom_ex.dashboard.export --module MyAppApp.PromEx --dashboard beam.json \
-  --assign title="Мой сервис - PromEx Beam Dashboard" \
-  --file_path deploy/monitoring/grafana/dashboards/beam.json
 mix core.dashboards.export --module MyAppApp.PromEx
 ```
 
 ```elixir
-# хорошо — тест приложения: выгрузка, разошедшаяся с текущим рендером, валит сборку
-test "выгрузки дашбордов подсистем библиотеки совпадают с рендером" do
-  Core.PromEx.Dashboards.assert_fresh!(MyAppApp.PromEx, "deploy/monitoring/grafana/dashboards")
+# хорошо — тест приложения: выгрузка, разошедшаяся с рендером, валит сборку
+test "выгрузки дашбордов совпадают с рендером" do
+  dir = "deploy/monitoring/grafana/dashboards"
+
+  Core.PromEx.Dashboards.assert_fresh!(MyAppApp.PromEx, dir)
+  Core.PromEx.Dashboards.assert_no_surplus!(MyAppApp.PromEx, dir)
 end
 ```
 
-Проверяется: `Core.PromEx.Dashboards.assert_fresh!/2` в тесте приложения — для дашбордов
-подсистем библиотеки: ручная правка, старый порог и выгрузка до обновления core дают нарушение с
-именем файла. Штатные дашборды проверкой не покрыты.
+Проверяется: `Core.PromEx.Dashboards.assert_fresh!/2` в тесте приложения — для штатных дашбордов
+и дашбордов подсистем библиотеки: ручная правка, старый порог и выгрузка до обновления core дают
+нарушение с именем файла. `Core.PromEx.Dashboards.assert_no_surplus!/2` — файл, оставшийся после
+смены `plugins/0`.
 
 ### Форма панелей
 
@@ -360,8 +362,9 @@ end
 `metric_prefix:` из `plugins/0` — во всех дашбордах каталога — доменных и выгрузках
 `mix core.dashboards.export`. Метки экспортёров (`datname`, `mountpoint`) задаёт
 окружение, и под норму они не подпадают; выгрузки штатных дашбордов PromEx (файлы с именем его
-шаблона: `beam.json`, `application.json`, …) — тоже: их форму задаёт PromEx. Доменный дашборд
-под именем шаблона PromEx MUST NOT: проверка формы примет его за штатную выгрузку и пропустит.
+шаблона: `beam.json`, `application.json`, …) — тоже: их форму задаёт PromEx и миграция core.
+Доменный дашборд под именем шаблона PromEx MUST NOT: проверка формы примет его за штатную
+выгрузку и пропустит.
 
 ```elixir
 # хорошо — тест приложения: панель, нарушившая форму, валит сборку

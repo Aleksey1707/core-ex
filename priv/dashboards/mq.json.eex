@@ -384,9 +384,56 @@
       ],
       "title": "Reader buffer / chunk / pending",
       "type": "timeseries"
+    },
+    {
+      "datasource": "<%= @datasource_id %>",
+      "description": "Age of the pending stream message (read, not yet committed), seconds (Core.Mq.PromEx)",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (component, topic) (<%= @mq_metric_prefix %>_reader_pending_age_seconds{job=\"$job\", instance=\"$instance\", component=~\"$component\", topic=~\"$topic\"})",
+          "legendFormat": "pending age {{component}} {{topic}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reader pending age",
+      "type": "timeseries"
     }
   ],
-  "refresh": "5s",
+  "refresh": "<%= @dashboard_refresh %>",
   "schemaVersion": 26,
   "style": "dark",
   "tags": [

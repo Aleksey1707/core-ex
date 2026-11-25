@@ -306,7 +306,7 @@
     },
     {
       "datasource": "<%= @datasource_id %>",
-      "description": "cgroup memory.current: container RAM as the OS sees it, page cache included (Core.Cgroup.PromEx)",
+      "description": "cgroup memory.stat anon: the application's own memory, page cache excluded (Core.Cgroup.PromEx)",
       "fieldConfig": {
         "defaults": {
           "mappings": [],
@@ -355,12 +355,12 @@
       "pluginVersion": "7.1.3",
       "targets": [
         {
-          "expr": "<%= @cgroup_metric_prefix %>_memory_current_bytes{job=\"$job\", instance=\"$instance\"}",
-          "legendFormat": "container",
+          "expr": "<%= @cgroup_metric_prefix %>_memory_anon_bytes{job=\"$job\", instance=\"$instance\"}",
+          "legendFormat": "anon",
           "refId": "A"
         }
       ],
-      "title": "Container memory",
+      "title": "Container memory (anon)",
       "type": "stat"
     },
     {
@@ -468,7 +468,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "5s",
+  "refresh": "<%= @dashboard_refresh %>",
   "schemaVersion": 26,
   "style": "dark",
   "tags": [

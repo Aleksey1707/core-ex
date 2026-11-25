@@ -69,7 +69,7 @@ defmodule Core.PromExFixture do
   end
 
   defmodule Tuned do
-    @moduledoc "Плагин outbox без опций, пороги и префикс outbox — из `dashboard_assigns/0`."
+    @moduledoc "Плагин outbox без опций, пороги, префикс и `refresh` — из `dashboard_assigns/0`."
 
     use PromEx, otp_app: :other_app
 
@@ -83,9 +83,30 @@ defmodule Core.PromExFixture do
         outbox_metric_prefix: "legacy_outbox",
         outbox_queue_warning: 7,
         outbox_queue_critical: 70,
+        dashboard_refresh: "30s",
         title: "чужой заголовок"
       ]
     end
+  end
+
+  defmodule Standard do
+    @moduledoc "Штатные плагины PromEx: application, beam, phoenix, ecto, oban."
+
+    use PromEx, otp_app: :my_app
+
+    @impl true
+    def plugins do
+      [
+        PromEx.Plugins.Application,
+        PromEx.Plugins.Beam,
+        PromEx.Plugins.Phoenix,
+        PromEx.Plugins.Ecto,
+        PromEx.Plugins.Oban
+      ]
+    end
+
+    @impl true
+    def dashboard_assigns, do: [datasource_id: "prometheus", default_selected_interval: "30s"]
   end
 
   defmodule Custom do

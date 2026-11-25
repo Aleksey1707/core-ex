@@ -4,6 +4,18 @@
 
 ### Ломающие изменения контракта
 
+- **Штатные дашборды PromEx выгружает core с миграцией legacy-панелей.** `mix core.dashboards.export`
+  выгружает и штатные дашборды (`application`, `beam`, `phoenix`, `ecto`, `oban` — по наличию
+  плагина в `plugins/0`), `Core.PromEx.Dashboards.defaults/1` включает их, а `stale/2` /
+  `assert_fresh!/2` покрывают их наравне с подсистемными. Панели `graph` мигрируют в `timeseries`
+  Grafana 11, снимаются мёртвые аннотации и демо-значения переменных. Было: штатный дашборд —
+  выгрузка `mix prom_ex.dashboard.export` (или вендоренная копия), проверкой свежести не покрыт →
+  стало: выгрузка `mix core.dashboards.export`, `mix prom_ex.dashboard.export` для штатных
+  дашбордов больше не используется. Правка потребителя: переэкспортировать каталог
+  `mix core.dashboards.export --module MyAppApp.PromEx`; `uid` штатных дашбордов теперь от `otp_app`
+  и имени файла, а не от `title` и имени модуля PromEx, — старые плитки в Grafana удалить.
+  Проверки свежести начнут падать до переэкспорта — это ожидаемо.
+
 - Подписи (`use Core.Labels.Fields`) у `Core.View` читают декларацию представления: достаточно
   `labels:`, а `fields:` рядом с `use Core.View` — `CompileError` «спека поля и у декларативного
   типа». Раньше единственным способом подписать View был `fields:` со спекой каждого видимого
@@ -251,6 +263,14 @@
 
 ### Новое
 
+- **Дашборды: штатный набор, `dashboard_refresh` и `surplus/2`.** `Core.PromEx.Dashboards.standard/0`
+  и `standard?/1` называют штатные дашборды PromEx; `migrate_graph_panels/1` — публичная миграция
+  панелей `graph` в `timeseries` для legacy-дашборда. `dashboard_refresh` в `dashboard_assigns/0`
+  задаёт `refresh` всех дашбордов (умолчание `"15s"` вместо `"5s"`). `surplus/2` /
+  `assert_no_surplus!/2` находят выгрузку, оставшуюся после смены `plugins/0`. В дашбордах
+  подсистем: панель `Reader pending age` (`mq`), stat «Container memory (anon)» на
+  `memory_anon_bytes` (`workers`), секция Personal — вызовы хранилища ключей, исходы расшифровки и
+  p95 (`es`).
 - `Core.View` порождает `@type write_t :: t()`: тип записи read-модели совпадает с типом чтения —
   ПДн-мест у View нет. Поле `entity: View` в спеке полей получает тип записи
   `View.write_t()`, а не ссылку на несуществующий тип.

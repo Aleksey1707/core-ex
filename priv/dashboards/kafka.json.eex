@@ -867,7 +867,7 @@
       "type": "table"
     }
   ],
-  "refresh": "5s",
+  "refresh": "<%= @dashboard_refresh %>",
   "schemaVersion": 26,
   "style": "dark",
   "tags": [
