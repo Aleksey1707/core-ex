@@ -4,6 +4,15 @@
 
 ### Ломающие изменения контракта
 
+- **Точная длина и точное значение Prim вместо вырожденных границ.** `min_len == max_len`
+  у `Prim.String` и `min == max` у `Prim.Integer` / `Core.Prim.Decimal` — `CompileError`:
+  вырожденный диапазон больше не задаёт точное значение. Было:
+  `use Core.Prim.String, name: …, min_len: 3, max_len: 3` → стало:
+  `use Core.Prim.String, name: …, len: 3`; было: `min: 5, max: 5` → стало: `exact: 5`.
+  `len:` требует целое ≥ 1, `exact:` допускает 0. `__domain_type_opts__/0` по-прежнему отдаёт
+  `min_len` / `max_len` и `min` / `max` — сахар раскрывается на компиляции. Правка потребителя:
+  заменить пару одинаковых границ на `len:` / `exact:` во всех Prim.
+
 - **Штатные дашборды PromEx выгружает core с миграцией legacy-панелей.** `mix core.dashboards.export`
   выгружает и штатные дашборды (`application`, `beam`, `phoenix`, `ecto`, `oban` — по наличию
   плагина в `plugins/0`), `Core.PromEx.Dashboards.defaults/1` включает их, `standard/0` — единственный
@@ -283,6 +292,11 @@
   к `UUIDv7` напрямую: `Core.Prim.UUID` и все v7-Prim переходят без правок кода.
 
 ### Новое
+
+- **`len:` у `Core.Prim.String` и `exact:` у `Core.Prim.Integer` / `Core.Prim.Decimal`.**
+  Опции точной длины строки и точного значения числа: литерал или выражение (`len: @len`,
+  `exact: @value`), не сочетаются с явными границами. У `Decimal` `exact:` проверяется на
+  конечность и укладывание в `scale:`.
 
 - **Дашборды: штатный набор, `dashboard_refresh` и `surplus/2`.** `Core.PromEx.Dashboards.standard/0`
   называет штатные дашборды PromEx; `migrate_graph_panels/1` — публичная миграция

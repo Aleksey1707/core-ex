@@ -24,6 +24,12 @@ defmodule Core.Prim.IntegerTest do
       validate: &Core.Prim.IntegerTest.even/1
   end
 
+  defmodule Exact do
+    use Core.Prim.Integer,
+      name: "Код",
+      exact: 5
+  end
+
   def clamp(value), do: min(value, 100)
 
   def even(value) when rem(value, 2) == 0, do: :ok
@@ -47,6 +53,33 @@ defmodule Core.Prim.IntegerTest do
   test "validates max" do
     assert {:error, %Core.Error{kind: :domain, message: "Возраст: от 0 до 120"}} =
              Age.new(121)
+  end
+
+  test "validates exact value" do
+    assert {:ok, %Exact{value: 5}} = Exact.new(5)
+    assert {:ok, %Exact{value: 5}} = Exact.new("5")
+
+    assert {:error, %Core.Error{kind: :domain, code: :bounds, message: "Код: ровно 5"}} =
+             Exact.new(4)
+  end
+
+  test "__domain_type_opts__/0 раскрывает exact" do
+    opts = Exact.__domain_type_opts__()
+
+    assert Enum.sort(Keyword.keys(opts)) == ~w(max min)a
+    assert Keyword.fetch!(opts, :min) == 5
+    assert Keyword.fetch!(opts, :max) == 5
+  end
+
+  test "exact: 0 разрешён" do
+    mod = compile_integer(name: "Zero", exact: 0)
+
+    assert {:ok, _prim} = mod.new(0)
+    assert {:error, %Core.Error{message: "Zero: ровно 0"}} = mod.new(1)
+  end
+
+  test "sec_max_len выводится из exact" do
+    assert Core.Prim.Integer.sec_max_len(min: 120, max: 120) == 7
   end
 
   test "new!/1 and value/1" do
@@ -132,6 +165,20 @@ defmodule Core.Prim.IntegerTest do
     end
   end
 
+  test "rejects degenerate min == max at compile time" do
+    assert_raise CompileError, ~r/min и max равны \(5\) — точное значение задаёт exact: 5/, fn ->
+      compile_integer(name: "X", min: 5, max: 5)
+    end
+  end
+
+  test "rejects exact together with min or max at compile time" do
+    for own <- [[exact: 5, min: 1], [exact: 5, max: 9]] do
+      assert_raise CompileError, ~r/exact: не сочетается с (min|max)/, fn ->
+        compile_integer([name: "X"] ++ own)
+      end
+    end
+  end
+
   test "rejects non-integer bound at compile time" do
     assert_raise CompileError, ~r/max: ожидается целое/, fn ->
       Code.eval_quoted(
@@ -144,5 +191,22 @@ defmodule Core.Prim.IntegerTest do
         end
       )
     end
+  end
+
+  # ---
+
+  defp compile_integer(opts) do
+    name = Module.concat(__MODULE__, "M#{System.unique_integer([:positive])}")
+
+    {{:module, mod, _bin, _}, _binding} =
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(name) do
+            use Core.Prim.Integer, unquote(opts)
+          end
+        end
+      )
+
+    mod
   end
 end

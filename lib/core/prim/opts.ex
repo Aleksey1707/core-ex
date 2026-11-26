@@ -60,6 +60,51 @@ defmodule Core.Prim.Opts do
     each_given(opts, keys, label, "целое ≥ 0", &(is_integer(&1) and &1 >= 0))
   end
 
+  @doc "Проверить целые положительные опции."
+  @spec pos_integer!(keyword(), [atom()], String.t()) :: :ok
+
+  def pos_integer!(opts, keys, label) do
+    each_given(opts, keys, label, "целое ≥ 1", &(is_integer(&1) and &1 >= 1))
+  end
+
+  @doc "Проверить целые опции."
+  @spec integer!(keyword(), [atom()], String.t()) :: :ok
+
+  def integer!(opts, keys, label) do
+    each_given(opts, keys, label, "целое", &is_integer/1)
+  end
+
+  @doc "Проверить, что опция не задана вместе с другими."
+  @spec exclusive!(keyword(), atom(), [atom()], String.t()) :: :ok
+
+  def exclusive!(opts, key, keys, label) do
+    if Keyword.has_key?(opts, key) do
+      case Enum.filter(keys, &Keyword.has_key?(opts, &1)) do
+        [] -> :ok
+        others -> Helper.Opts.reject!("#{label}: #{key}", "не сочетается с #{Enum.join(others, " / ")}")
+      end
+    end
+
+    :ok
+  end
+
+  @doc "Раскрыть точную границу `key:` в пару `min_key` / `max_key`."
+  @spec expand_bound!(keyword(), atom(), atom(), atom(), (term() -> term())) :: keyword()
+
+  def expand_bound!(opts, key, min_key, max_key, transform \\ & &1) do
+    case Keyword.pop(opts, key) do
+      {nil, opts} ->
+        opts
+
+      {value, opts} ->
+        value = transform.(value)
+
+        opts
+        |> Keyword.put(min_key, value)
+        |> Keyword.put(max_key, value)
+    end
+  end
+
   @doc "Проверить непустые строковые опции."
   @spec non_empty_string!(keyword(), [atom()], String.t()) :: :ok
 
@@ -112,8 +157,15 @@ defmodule Core.Prim.Opts do
   @spec decimal_bounds!(keyword(), atom(), atom(), String.t()) :: :ok
 
   def decimal_bounds!(opts, min_key, max_key, label) do
-    each_given(opts, [min_key, max_key], label, "число, строку или %Decimal{}", &decimal?/1)
+    decimal!(opts, [min_key, max_key], label)
     order!(opts, min_key, max_key, label, &compare_decimal/2)
+  end
+
+  @doc "Проверить значения `Decimal` (число, строку или `%Decimal{}`)."
+  @spec decimal!(keyword(), [atom()], String.t()) :: :ok
+
+  def decimal!(opts, keys, label) do
+    each_given(opts, keys, label, "число, строку или %Decimal{}", &decimal?/1)
   end
 
   @doc """

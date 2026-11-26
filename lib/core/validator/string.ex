@@ -15,14 +15,21 @@ defmodule Core.Validator.String do
 
   # ---
 
-  defp check_bounds(value, min_len, max_len)
-       when is_integer(min_len) and is_integer(max_len) do
+  defp check_bounds(value, min_len, max_len) when is_integer(min_len) and is_integer(max_len) do
     length = String.length(value)
 
-    if length >= min_len and length <= max_len do
-      :ok
-    else
-      {:error, {:bounds, "от #{min_len} до #{max_len} символа(ов)"}}
+    cond do
+      min_len == max_len and length == min_len ->
+        :ok
+
+      min_len == max_len ->
+        {:error, {:bounds, "ровно #{with_symbols(min_len)}"}}
+
+      length >= min_len and length <= max_len ->
+        :ok
+
+      true ->
+        {:error, {:bounds, "от #{min_len} до #{max_len} #{range_symbols(max_len)}"}}
     end
   end
 
@@ -30,7 +37,7 @@ defmodule Core.Validator.String do
     if String.length(value) >= min_len do
       :ok
     else
-      {:error, {:min_len, "минимум #{min_len} символа(ов)"}}
+      {:error, {:min_len, "минимум #{with_symbols(min_len)}"}}
     end
   end
 
@@ -38,7 +45,7 @@ defmodule Core.Validator.String do
     if String.length(value) <= max_len do
       :ok
     else
-      {:error, {:max_len, "максимум #{max_len} символа(ов)"}}
+      {:error, {:max_len, "максимум #{with_symbols(max_len)}"}}
     end
   end
 
@@ -53,4 +60,14 @@ defmodule Core.Validator.String do
       {:error, {:re, "неверный формат"}}
     end
   end
+
+  defp with_symbols(count), do: "#{count} #{symbols(count)}"
+
+  defp symbols(count) when rem(count, 10) == 1 and rem(count, 100) != 11, do: "символ"
+  defp symbols(count) when rem(count, 10) in 2..4 and rem(count, 100) not in 12..14, do: "символа"
+  defp symbols(_count), do: "символов"
+
+  # После «до» numeral стоит в родительном падеже: «до двух символов», «до одного символа».
+  defp range_symbols(count) when rem(count, 10) == 1 and rem(count, 100) != 11, do: "символа"
+  defp range_symbols(_count), do: "символов"
 end

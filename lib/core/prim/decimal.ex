@@ -2,10 +2,13 @@ defmodule Core.Prim.Decimal do
   @moduledoc """
   Билдер decimal-Prim поверх `Decimal`.
 
-  Опции: `name:` (обязательна), `kind:`, `min:`, `max:`, `scale:`, `sec_max_len:`,
+  Опции: `name:` (обязательна), `kind:`, `min:`, `max:`, `exact:`, `scale:`, `sec_max_len:`,
   `mutate:` / `validate:`, `sensitive:`, `personal:`. Не-финитные значения (`NaN`, `Infinity`)
   отбраковываются на `cast`: сравнения над ними поднимают `Decimal.Error` мимо
   контракта `new/1`.
+
+  `exact:` — точное значение: раскрывается в `min: n, max: n` и не сочетается с ними;
+  вырожденные `min == max` — `CompileError`. Значение обязано укладываться в `scale:`.
 
   `sec_max_len` — граница **в байтах** для строкового ввода, отсекающая его до
   `Decimal.new/1`: разбор строит коэффициент по всей длине строки, то есть время
@@ -14,7 +17,7 @@ defmodule Core.Prim.Decimal do
   и `scale:`, а без `max:` — 64 байта.
 
   Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:`,
-  `min:`, `max:` (`Decimal.new/1`) — проверяются в теле модуля;
+  `min:`, `max:`, `exact:` (`Decimal.new/1`) — проверяются в теле модуля;
   остальные опции — литералы.
   """
 
@@ -25,17 +28,17 @@ defmodule Core.Prim.Decimal do
   use Core.Prim.Wrapper,
     label: "Prim.Decimal",
     native_kind: :decimal,
-    optional: ~w(min max scale sec_max_len)a,
-    expression: ~w(min max)a
+    optional: ~w(min max exact scale sec_max_len)a,
+    expression: ~w(min max exact)a
 
   # запас на знак, точку, ведущие нули и экспоненциальную запись
   @sec_max_len_slack 8
   @default_sec_max_len 64
 
-  @doc "Объявить decimal-Prim (`name:` + опции min/max/scale)."
+  @doc "Объявить decimal-Prim (`name:` + опции min/max/exact/scale)."
   defmacro __using__(opts) do
     opts = Prim.Opts.prepare!(opts, __CALLER__, __MODULE__)
-    type_opts = Prim.Opts.quoted(Keyword.take(opts, ~w(min max scale)a), expression_keys())
+    type_opts = Prim.Opts.quoted(Keyword.take(opts, ~w(min max exact scale)a), expression_keys())
     sec_max_len = Keyword.take(opts, [:sec_max_len])
 
     base_opts =
@@ -61,14 +64,19 @@ defmodule Core.Prim.Decimal do
 
   def validate_opts!(opts) do
     Prim.Opts.non_neg_integer!(opts, ~w(scale sec_max_len)a, label())
+    Prim.Opts.exclusive!(opts, :exact, ~w(min max)a, label())
   end
 
   @doc false
   @spec type_opts!(keyword(), keyword()) :: keyword()
 
-  # Опции типа с вычисленными опциями-выражениями `min:` / `max:` — проверка в теле модуля.
+  # Опции типа с вычисленными опциями-выражениями `min:` / `max:` / `exact:` — проверка в теле модуля.
   def type_opts!(type_opts, sec_max_len) do
     Prim.Opts.decimal_bounds!(type_opts, :min, :max, label())
+    Prim.Opts.decimal!(type_opts, ~w(exact)a, label())
+    check_exact!(type_opts)
+    reject_degenerate!(type_opts)
+    type_opts = Prim.Opts.expand_bound!(type_opts, :exact, :min, :max, &Prim.Opts.to_decimal/1)
     fits_bounds!(sec_max_len ++ type_opts)
 
     type_opts
@@ -118,6 +126,51 @@ defmodule Core.Prim.Decimal do
   end
 
   defp invalid, do: {:error, {:invalid_decimal, "невалидное значение"}}
+
+  defp check_exact!(opts) do
+    case Keyword.get(opts, :exact) do
+      nil -> :ok
+      raw -> check_exact_scale!(Prim.Opts.to_decimal(raw), Keyword.get(opts, :scale))
+    end
+  end
+
+  defp check_exact_scale!(_value, nil), do: :ok
+
+  defp check_exact_scale!(value, scale) do
+    if Decimal.eq?(value, Decimal.round(value, scale)) do
+      :ok
+    else
+      Helper.Opts.reject!(
+        label(),
+        "exact (#{Decimal.to_string(value)}) не укладывается в scale (#{scale})"
+      )
+    end
+  end
+
+  defp reject_degenerate!(opts) do
+    case {Keyword.get(opts, :min), Keyword.get(opts, :max)} do
+      {nil, _} ->
+        :ok
+
+      {_, nil} ->
+        :ok
+
+      {min, max} ->
+        min = Prim.Opts.to_decimal(min)
+        max = Prim.Opts.to_decimal(max)
+
+        if Decimal.compare(min, max) == :eq do
+          value = Decimal.to_string(min)
+
+          Helper.Opts.reject!(
+            label(),
+            "min и max равны (#{value}) — точное значение задаёт exact: #{value}"
+          )
+        end
+
+        :ok
+    end
+  end
 
   # Явная граница, в которую не влезает собственный `max:`, отвергает валидные значения.
   defp fits_bounds!(opts) do

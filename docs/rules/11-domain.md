@@ -129,6 +129,15 @@ use Core.Prim,
 Явный `sec_max_len:`, в который не влезает собственный `max:`, — `CompileError`.
 Ввод, уже разобранный вызывающим (`integer()`, `%Decimal{}`), границей не ограничен.
 
+Точная длина строки и точное значение числа — явные опции: `len:` у `Prim.String` (целое ≥ 1) и
+`exact:` у `Prim.Integer` / `Prim.Decimal`; обе — опции-выражения (ADR-0100). На компиляции они
+раскрываются в `min_len == max_len` / `min == max` в `__domain_type_opts__/0` и не сочетаются
+с явными границами. Вырожденные границы, заданные парой, — `CompileError` с подсказкой
+`len:` / `exact:`; `len:` требует целое ≥ 1, `exact: 0` разрешён.
+
+Проверяется: `test/core/prim/string_test.exs`, `test/core/prim/integer_test.exs`,
+`test/core/prim/decimal_test.exs`.
+
 `Prim.UUID` дополнительно: `new/0` (генерация в версии `version:` — 1 / 4 / 7, default 4; у
 версии 5 и `:external` `new/0` нет), `format/2` (`:full` / `:hex` / `:urn` — для логов и ключей,
 wire-форму задаёт профиль кодека); `check_version: false` снимает проверку версии на разборе,
@@ -1443,8 +1452,7 @@ use Core.Labels.ID,
 ```elixir
 use Core.Prim.String,
   name: "Валюта",
-  min_len: 3,
-  max_len: 3
+  len: 3
 
 use Core.Labels.Text, with: &Agg.Currency.title/1
 ```

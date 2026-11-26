@@ -45,6 +45,37 @@ defmodule Core.Prim.StringTest do
       kind: :slug
   end
 
+  defmodule Exact do
+    use Core.Prim.String,
+      name: "Код валюты",
+      len: 3
+  end
+
+  defmodule One do
+    use Core.Prim.String,
+      name: "Один",
+      len: 1
+  end
+
+  defmodule Five do
+    use Core.Prim.String,
+      name: "Пять",
+      len: 5
+  end
+
+  defmodule MinOnly do
+    use Core.Prim.String,
+      name: "Минимум",
+      min_len: 1,
+      sec_max_len: 50
+  end
+
+  defmodule MaxOnly do
+    use Core.Prim.String,
+      name: "Максимум",
+      max_len: 2
+  end
+
   def only_a("AA"), do: :ok
   def only_a(_), do: {:error, {:only_a, "только AA"}}
 
@@ -71,7 +102,7 @@ defmodule Core.Prim.StringTest do
             }} = Name.new(too_long)
 
     # многобайтные символы укладываются в байтовую границу и доходят до max_len
-    assert {:error, %Core.Error{message: "Наименование: от 3 до 10 символа(ов)"}} =
+    assert {:error, %Core.Error{message: "Наименование: от 3 до 10 символов"}} =
              Name.new(String.duplicate("я", 11))
   end
 
@@ -87,7 +118,7 @@ defmodule Core.Prim.StringTest do
     assert {:error,
             %Core.Error{
               kind: :domain,
-              message: "Наименование: от 3 до 10 символа(ов)"
+              message: "Наименование: от 3 до 10 символов"
             }} = Name.new("Ab")
   end
 
@@ -95,13 +126,54 @@ defmodule Core.Prim.StringTest do
     assert {:error,
             %Core.Error{
               kind: :domain,
-              message: "Наименование: от 3 до 10 символа(ов)"
+              message: "Наименование: от 3 до 10 символов"
             }} = Name.new("Abcdefghijk")
   end
 
   test "validates re" do
     assert {:error, %Core.Error{kind: :domain, message: "Наименование: неверный формат"}} =
              Name.new("Al1ce")
+  end
+
+  test "validates exact length" do
+    assert {:ok, %Exact{value: "RUB"}} = Exact.new("RUB")
+
+    assert {:error, %Core.Error{kind: :domain, code: :bounds, message: "Код валюты: ровно 3 символа"}} =
+             Exact.new("RU")
+  end
+
+  test "склоняет сообщения о длине" do
+    assert {:error, %Core.Error{message: "Один: ровно 1 символ"}} = One.new("")
+    assert {:error, %Core.Error{message: "Пять: ровно 5 символов"}} = Five.new("abcd")
+    assert {:error, %Core.Error{message: "Минимум: минимум 1 символ"}} = MinOnly.new("")
+    assert {:error, %Core.Error{message: "Максимум: максимум 2 символа"}} = MaxOnly.new("abc")
+  end
+
+  test "склоняет 11 и 21" do
+    eleven = compile_string(name: "Одиннадцать", len: 11)
+    assert {:error, %Core.Error{message: "Одиннадцать: ровно 11 символов"}} = eleven.new("")
+
+    twenty_one = compile_string(name: "Двадцать один", len: 21)
+    assert {:error, %Core.Error{message: "Двадцать один: ровно 21 символ"}} = twenty_one.new("")
+  end
+
+  test "склоняет верхнюю границу диапазона" do
+    range21 = compile_string(name: "До 21", min_len: 20, max_len: 21)
+
+    assert {:error, %Core.Error{message: "До 21: от 20 до 21 символа"}} =
+             range21.new(String.duplicate("a", 19))
+
+    range11 = compile_string(name: "До 11", min_len: 5, max_len: 11)
+    assert {:error, %Core.Error{message: "До 11: от 5 до 11 символов"}} = range11.new("abcd")
+  end
+
+  test "len задаёт байтовую границу" do
+    assert Core.Prim.String.sec_max_len(Exact.__domain_type_opts__()) == 3 * 4 + 50
+
+    value = String.duplicate("👨‍👩‍👧‍👦", 3)
+    assert String.length(value) == 3
+    assert byte_size(value) > 62
+    assert {:error, %Core.Error{message: "Код валюты: невалидное значение"}} = Exact.new(value)
   end
 
   test "custom mutate and validate" do
@@ -144,8 +216,16 @@ defmodule Core.Prim.StringTest do
     assert {:ok, %Slug{value: "abc"}} = Slug.new("abc")
   end
 
+  test "__domain_type_opts__/0 раскрывает len" do
+    opts = Exact.__domain_type_opts__()
+
+    assert Enum.sort(Keyword.keys(opts)) == ~w(max_len min_len)a
+    assert Keyword.fetch!(opts, :min_len) == 3
+    assert Keyword.fetch!(opts, :max_len) == 3
+  end
+
   test "требует max_len или sec_max_len at compile time" do
-    assert_raise CompileError, ~r/нужен max_len или sec_max_len/, fn ->
+    assert_raise CompileError, ~r/нужен max_len, len или sec_max_len/, fn ->
       Code.eval_quoted(
         quote do
           defmodule Core.Prim.StringTest.NoLimit do
@@ -170,6 +250,30 @@ defmodule Core.Prim.StringTest do
           end
         end
       )
+    end
+  end
+
+  test "rejects degenerate min_len == max_len at compile time" do
+    assert_raise CompileError, ~r/min_len и max_len равны \(3\) — точную длину задаёт len: 3/, fn ->
+      compile_string(name: "X", min_len: 3, max_len: 3)
+    end
+  end
+
+  test "rejects zero exact length at compile time" do
+    assert_raise CompileError, ~r/нулевая длина недопустима — len требует целое ≥ 1/, fn ->
+      compile_string(name: "X", min_len: 0, max_len: 0)
+    end
+
+    assert_raise CompileError, ~r/len: ожидается целое ≥ 1, получено 0/, fn ->
+      compile_string(name: "X", len: 0)
+    end
+  end
+
+  test "rejects len together with min_len or max_len at compile time" do
+    for own <- [[len: 3, min_len: 1], [len: 3, max_len: 5]] do
+      assert_raise CompileError, ~r/len: не сочетается с (min_len|max_len)/, fn ->
+        compile_string([name: "X"] ++ own)
+      end
     end
   end
 
@@ -200,5 +304,22 @@ defmodule Core.Prim.StringTest do
         end
       )
     end
+  end
+
+  # ---
+
+  defp compile_string(opts) do
+    name = Module.concat(__MODULE__, "M#{System.unique_integer([:positive])}")
+
+    {{:module, mod, _bin, _}, _binding} =
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(name) do
+            use Core.Prim.String, unquote(opts)
+          end
+        end
+      )
+
+    mod
   end
 end

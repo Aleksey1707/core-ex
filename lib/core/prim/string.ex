@@ -2,16 +2,19 @@ defmodule Core.Prim.String do
   @moduledoc """
   Билдер string-Prim: `cast` (байтовый лимит + UTF-8) → `mutate` (trim) → `Validator.String`.
 
-  Опции: `name:` (обязательна), `kind:`, `min_len:`, `max_len:`, `sec_max_len:`, `re:`,
+  Опции: `name:` (обязательна), `kind:`, `min_len:`, `max_len:`, `len:`, `sec_max_len:`, `re:`,
   `trim:` (default `true`), `mutate:` / `validate:` (кастомные шаги), `sensitive:`, `personal:`.
+
+  `len:` — точная длина в графемах (целое ≥ 1): раскрывается в `min_len: n, max_len: n` и не
+  сочетается с ними; вырожденные `min_len == max_len` — `CompileError`.
 
   `sec_max_len` — граница **в байтах**, отсекающая заведомо огромный ввод до любой
   посимвольной работы; default — `max_len * 4 + 50` (4 байта на кодовую точку UTF-8 +
-  запас). Prim без `max_len` обязан задать её сам: без верхней границы примитив
+  запас). Prim без `max_len` / `len` обязан задать её сам: без верхней границы примитив
   принимает ввод любого размера, а по одному `min_len` / `re` вывести её не из чего.
 
   Опции-выражения (`docs/rules/20-agreements.md`, «Опции `use`»): `name:`, `mutate:`, `validate:`,
-  `max_len:`, `re:` — проверяются в теле модуля;
+  `max_len:`, `re:`, `len:` — проверяются в теле модуля;
   остальные опции — литералы.
   """
 
@@ -24,12 +27,12 @@ defmodule Core.Prim.String do
   use Core.Prim.Wrapper,
     label: "Prim.String",
     native_kind: :string,
-    optional: ~w(min_len max_len sec_max_len re trim)a,
-    expression: ~w(max_len re)a
+    optional: ~w(min_len max_len len sec_max_len re trim)a,
+    expression: ~w(max_len re len)a
 
   @sec_max_len_slack 50
   @max_utf8_bytes_per_char 4
-  @type_keys ~w(min_len max_len re)a
+  @type_keys ~w(min_len max_len len re)a
 
   @doc "Объявить string-Prim (`name:` + опции длины/regex)."
   defmacro __using__(opts) do
@@ -67,6 +70,7 @@ defmodule Core.Prim.String do
 
   def validate_opts!(opts) do
     Prim.Opts.non_neg_integer!(opts, ~w(min_len sec_max_len)a, label())
+    Prim.Opts.exclusive!(opts, :len, ~w(min_len max_len)a, label())
     Prim.Opts.boolean!(opts, ~w(trim)a, label())
     require_byte_limit!(opts)
   end
@@ -74,10 +78,13 @@ defmodule Core.Prim.String do
   @doc false
   @spec type_opts!(keyword()) :: keyword()
 
-  # Опции типа с вычисленными опциями-выражениями `max_len:` / `re:` — проверка в теле модуля.
+  # Опции типа с вычисленными опциями-выражениями `max_len:` / `len:` / `re:` — проверка в теле модуля.
   def type_opts!(type_opts) do
     Prim.Opts.non_neg_integer!(type_opts, ~w(max_len)a, label())
+    Prim.Opts.pos_integer!(type_opts, ~w(len)a, label())
     Prim.Opts.int_bounds!(type_opts, :min_len, :max_len, label())
+    reject_degenerate!(type_opts)
+    type_opts = Prim.Opts.expand_bound!(type_opts, :len, :min_len, :max_len)
     Prim.Opts.regex!(type_opts, :re, label())
 
     type_opts
@@ -117,14 +124,27 @@ defmodule Core.Prim.String do
   # ---
 
   defp require_byte_limit!(opts) do
-    if is_nil(Keyword.get(opts, :max_len)) and is_nil(Keyword.get(opts, :sec_max_len)) do
+    if Enum.all?(~w(max_len len sec_max_len)a, &is_nil(Keyword.get(opts, &1))) do
       Helper.Opts.reject!(
         label(),
-        "нужен max_len или sec_max_len — без верхней границы Prim принимает строку любого размера"
+        "нужен max_len, len или sec_max_len — без верхней границы Prim принимает строку любого размера"
       )
     end
 
     :ok
+  end
+
+  defp reject_degenerate!(opts) do
+    case {Keyword.get(opts, :min_len), Keyword.get(opts, :max_len)} do
+      {0, 0} ->
+        Helper.Opts.reject!(label(), "нулевая длина недопустима — len требует целое ≥ 1")
+
+      {n, n} when is_integer(n) ->
+        Helper.Opts.reject!(label(), "min_len и max_len равны (#{n}) — точную длину задаёт len: #{n}")
+
+      _ ->
+        :ok
+    end
   end
 
   defp trim(value, true), do: String.trim(value)

@@ -14,10 +14,18 @@ defmodule Core.Validator.Integer do
   # ---
 
   defp check_bounds(value, min, max) when is_integer(min) and is_integer(max) do
-    if value >= min and value <= max do
-      :ok
-    else
-      {:error, {:bounds, "от #{min} до #{max}"}}
+    cond do
+      min == max and value == min ->
+        :ok
+
+      min == max ->
+        {:error, {:bounds, "ровно #{min}"}}
+
+      value >= min and value <= max ->
+        :ok
+
+      true ->
+        {:error, {:bounds, "от #{min} до #{max}"}}
     end
   end
 

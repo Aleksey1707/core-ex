@@ -43,6 +43,13 @@ defmodule Core.Prim.DecimalTest do
       validate: &Core.Prim.DecimalTest.not_zero/1
   end
 
+  defmodule Exact do
+    use Core.Prim.Decimal,
+      name: "Точная сумма",
+      exact: "10.50",
+      scale: 2
+  end
+
   def not_zero(value) do
     if Decimal.eq?(value, 0),
       do: {:error, {:zero, "не может быть нулём"}},
@@ -69,6 +76,34 @@ defmodule Core.Prim.DecimalTest do
   test "validates max" do
     assert {:error, %Core.Error{kind: :domain, message: "Сумма: от 0 до 100"}} =
              Amount.new("101")
+  end
+
+  test "validates exact value" do
+    assert {:ok, %Exact{}} = Exact.new("10.50")
+    assert {:ok, %Exact{}} = Exact.new("10.5")
+
+    assert {:error, %Core.Error{kind: :domain, code: :bounds, message: "Точная сумма: ровно 10.50"}} =
+             Exact.new("10.51")
+  end
+
+  test "__domain_type_opts__/0 раскрывает exact" do
+    opts = Exact.__domain_type_opts__()
+
+    assert Enum.sort(Keyword.keys(opts)) == ~w(max min scale)a
+    assert Decimal.eq?(Keyword.fetch!(opts, :min), Decimal.new("10.50"))
+    assert Decimal.eq?(Keyword.fetch!(opts, :max), Decimal.new("10.50"))
+    assert Keyword.fetch!(opts, :scale) == 2
+  end
+
+  test "exact: 0 разрешён" do
+    mod = compile_decimal(name: "Zero", exact: 0)
+
+    assert {:ok, _prim} = mod.new(0)
+    assert {:error, %Core.Error{message: "Zero: ровно 0"}} = mod.new(1)
+  end
+
+  test "sec_max_len выводится из exact и scale" do
+    assert Core.Prim.Decimal.sec_max_len(min: Decimal.new("100"), max: Decimal.new("100"), scale: 2) == 13
   end
 
   test "validates scale" do
@@ -223,5 +258,48 @@ defmodule Core.Prim.DecimalTest do
         end
       )
     end
+  end
+
+  test "rejects degenerate min == max at compile time" do
+    assert_raise CompileError, ~r/min и max равны \(0\.50\) — точное значение задаёт exact: 0\.50/, fn ->
+      compile_decimal(name: "X", min: "0.50", max: 0.5)
+    end
+  end
+
+  test "rejects exact together with min or max at compile time" do
+    for own <- [[exact: "1.5", min: 0], [exact: "1.5", max: 2]] do
+      assert_raise CompileError, ~r/exact: не сочетается с (min|max)/, fn ->
+        compile_decimal([name: "X"] ++ own)
+      end
+    end
+  end
+
+  test "rejects exact outside scale at compile time" do
+    assert_raise CompileError, ~r/exact \(1\.555\) не укладывается в scale \(2\)/, fn ->
+      compile_decimal(name: "X", exact: "1.555", scale: 2)
+    end
+  end
+
+  test "rejects non-finite exact at compile time" do
+    assert_raise CompileError, ~r/exact: ожидается число, строку или %Decimal\{\}/, fn ->
+      compile_decimal(name: "X", exact: "NaN")
+    end
+  end
+
+  # ---
+
+  defp compile_decimal(opts) do
+    name = Module.concat(__MODULE__, "M#{System.unique_integer([:positive])}")
+
+    {{:module, mod, _bin, _}, _binding} =
+      Code.eval_quoted(
+        quote do
+          defmodule unquote(name) do
+            use Core.Prim.Decimal, unquote(opts)
+          end
+        end
+      )
+
+    mod
   end
 end

@@ -183,6 +183,48 @@ defmodule Core.Prim.UseOptsTest do
       end
     end
 
+    test "Prim.String: len: — выражение, проверка в теле" do
+      mod = compile(quote(do: @len(3)), Core.Prim.String, name: "X", len: quote(do: @len))
+
+      assert {:ok, _prim} = mod.new("abc")
+      assert {:error, %Core.Error{message: "X: ровно 3 символа"}} = mod.new("ab")
+
+      opts = [name: "X", len: quote(do: @n)]
+      expand(Core.Prim.String, opts)
+
+      assert_raise CompileError, ~r/^Prim.String: len: ожидается целое ≥ 1, получено 0$/, fn ->
+        compile(quote(do: @n(0)), Core.Prim.String, opts)
+      end
+    end
+
+    test "Prim.Integer: exact: — выражение, проверка в теле" do
+      mod = compile(quote(do: @exact(5)), Core.Prim.Integer, name: "X", exact: quote(do: @exact))
+
+      assert {:ok, _prim} = mod.new(5)
+      assert {:error, %Core.Error{message: "X: ровно 5"}} = mod.new(4)
+
+      opts = [name: "X", exact: quote(do: @n)]
+      expand(Core.Prim.Integer, opts)
+
+      assert_raise CompileError, ~r/^Prim.Integer: exact: ожидается целое, получено "x"$/, fn ->
+        compile(quote(do: @n("x")), Core.Prim.Integer, opts)
+      end
+    end
+
+    test "Prim.Decimal: exact: — выражение, проверка в теле" do
+      mod = compile(quote(do: @exact("1.50")), Core.Prim.Decimal, name: "X", exact: quote(do: @exact), scale: 2)
+
+      assert {:ok, _prim} = mod.new("1.5")
+      assert {:error, %Core.Error{message: "X: ровно 1.50"}} = mod.new("1.51")
+
+      opts = [name: "X", exact: quote(do: @n), scale: 2]
+      expand(Core.Prim.Decimal, opts)
+
+      assert_raise CompileError, ~r/exact \(1\.555\) не укладывается в scale \(2\)/, fn ->
+        compile(quote(do: @n("1.555")), Core.Prim.Decimal, opts)
+      end
+    end
+
     test "Prim.UUID: namespace: — выражение, проверка в теле" do
       opts = [name: "X", version: 5, namespace: quote(do: @n), scope: "s"]
       expand(Core.Prim.UUID, opts)

@@ -8,8 +8,7 @@ defmodule Core.Labels.Text do
       defmodule MyApp.Domain.Sales.Account.Currency do
         use Core.Prim.String,
           name: "Валюта",
-          min_len: 3,
-          max_len: 3
+          len: 3
 
         use Core.Labels.Text, with: &MyApp.Domain.Sales.Account.Currency.title/1
       end

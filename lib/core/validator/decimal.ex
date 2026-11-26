@@ -40,10 +40,22 @@ defmodule Core.Validator.Decimal do
     min = to_decimal(min)
     max = to_decimal(max)
 
-    if Decimal.lt?(value, min) or Decimal.gt?(value, max),
-      do: {:error, {:bounds, "от #{Decimal.to_string(min)} до #{Decimal.to_string(max)}"}},
-      else: :ok
+    cond do
+      same?(min, max) ->
+        if same?(value, min),
+          do: :ok,
+          else: {:error, {:bounds, "ровно #{Decimal.to_string(min)}"}}
+
+      Decimal.lt?(value, min) or Decimal.gt?(value, max) ->
+        {:error, {:bounds, "от #{Decimal.to_string(min)} до #{Decimal.to_string(max)}"}}
+
+      true ->
+        :ok
+    end
   end
+
+  # NaN-безопасное равенство: `Decimal.eq?/2` на не-финитном поднимает `Decimal.Error`.
+  defp same?(left, right), do: not Decimal.lt?(left, right) and not Decimal.gt?(left, right)
 
   defp check_scale(_value, nil), do: :ok
 
