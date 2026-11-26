@@ -31,11 +31,22 @@ defmodule Core.PromEx.DashboardsTest do
       dashboard = Dashboards.render(PromExFixture.Tuned, :outbox) |> Jason.decode!()
 
       assert thresholds(dashboard, "Queue depth by status") == [7, 70]
-      assert thresholds(dashboard, "Oldest new age") == [30, 120]
+      assert thresholds(dashboard, "Oldest new age") == [30, 60]
       assert Enum.all?(exprs(dashboard), &(&1 =~ "legacy_outbox_"))
       assert Enum.all?(datasources(dashboard), &(&1 == "metrics"))
       assert dashboard["title"] == "OtherApp - Outbox"
       assert dashboard["tags"] == ["PromEx", "Outbox", "other_app"]
+    end
+
+    test "нестандартный outbox_oldest_age_critical — один критический порог у графика и stat" do
+      dashboard = Dashboards.render(PromExFixture.Tuned, :outbox) |> Jason.decode!()
+
+      stat = thresholds(dashboard, "Oldest new age")
+      series = thresholds(dashboard, "Oldest new age", "timeseries")
+
+      assert stat == [30, 60]
+      assert series == [60]
+      assert List.last(stat) == List.last(series)
     end
 
     test "app_title в dashboard_assigns/0 — имя приложения в заголовке, uid прежний" do
@@ -838,9 +849,9 @@ defmodule Core.PromEx.DashboardsTest do
     for panel <- dashboard["panels"], target <- Map.get(panel, "targets", []), do: target["expr"]
   end
 
-  defp thresholds(dashboard, title) do
+  defp thresholds(dashboard, title, type \\ "stat") do
     %{"fieldConfig" => %{"defaults" => %{"thresholds" => %{"steps" => steps}}}} =
-      Enum.find(dashboard["panels"], &(&1["title"] == title and &1["type"] == "stat"))
+      Enum.find(dashboard["panels"], &(&1["title"] == title and &1["type"] == type))
 
     for %{"value" => value} <- steps, value != nil, do: value
   end

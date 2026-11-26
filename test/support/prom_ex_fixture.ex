@@ -83,6 +83,7 @@ defmodule Core.PromExFixture do
         outbox_metric_prefix: "legacy_outbox",
         outbox_queue_warning: 7,
         outbox_queue_critical: 70,
+        outbox_oldest_age_critical: 60,
         dashboard_refresh: "30s",
         title: "чужой заголовок"
       ]
@@ -210,6 +211,9 @@ defmodule Core.PromExFixture do
 
     @impl true
     def dashboard_assigns, do: [datasource_id: "prometheus"]
+
+    @doc false
+    def readers, do: [%{component: "orders", name: :missing_reader}]
   end
 
   defmodule MqReaders do
@@ -234,6 +238,9 @@ defmodule Core.PromExFixture do
 
     @impl true
     def dashboard_assigns, do: [datasource_id: "prometheus", kafka_backlog_critical: 5000]
+
+    @doc false
+    def readers, do: [%{component: "orders", name: :missing_reader}]
   end
 
   defmodule MqBare do

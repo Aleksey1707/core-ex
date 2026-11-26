@@ -8,10 +8,10 @@
 
 **Blocked by:** 01 — только из-за общего файла тестов дашбордов; логической зависимости нет.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Критический порог графика «Oldest new age» — `outbox_oldest_age_critical`; шаг warning на график не добавлен
-- [ ] Тест с нестандартным `outbox_oldest_age_critical` подтверждает совпадение графика и stat
-- [ ] `readers/0` существует у `MqStream` и `MqKafka`; мёртвой ссылки на провайдер нет
-- [ ] CHANGELOG не трогаем: существующий пункт уже говорит, что пороги берутся из `dashboard_assigns/0`
-- [ ] `make` зелёный
+- [x] Критический порог графика «Oldest new age» — `outbox_oldest_age_critical`; шаг warning на график не добавлен
+- [x] Тест с нестандартным `outbox_oldest_age_critical` подтверждает совпадение графика и stat
+- [x] `readers/0` существует у `MqStream` и `MqKafka`; мёртвой ссылки на провайдер нет
+- [x] CHANGELOG не трогаем: существующий пункт уже говорит, что пороги берутся из `dashboard_assigns/0`
+- [x] `make` зелёный

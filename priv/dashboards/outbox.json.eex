@@ -269,7 +269,7 @@
               },
               {
                 "color": "red",
-                "value": 120
+                "value": <%= @outbox_oldest_age_critical %>
               }
             ]
           },
