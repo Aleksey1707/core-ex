@@ -500,7 +500,7 @@ end
    чекпоинтов. `processes:` — список модулей процесса агрегата, тот же
    `MyAppApp.Application.processes/0`, что у дерева.
 
-7. **Дашборды подсистем библиотеки** выгружаются задачей в каталог provisioning Grafana:
+7. **Дашборды подсистем библиотеки и штатные PromEx** выгружаются задачей в каталог provisioning Grafana:
 
    ```bash
    mix core.dashboards.export --module MyAppApp.PromEx
@@ -518,10 +518,18 @@ end
    | `workers` | при `Core.Workers.PromEx` |
    | `container` | при `Core.Cgroup.PromEx` — память контейнера |
    | `external` | при `Core.External.PromEx` |
+   | `application`, `beam`, `phoenix`, `ecto`, `oban` | штатные PromEx — при наличии плагина в `plugins/0` |
+
+   Штатные дашборды PromEx выгружает та же задача: core рендерит шаблоны `:prom_ex` и приводит
+   панели `graph` к `timeseries` Grafana 11, поэтому `mix prom_ex.dashboard.export` для них больше
+   не используется. `uid` у подсистемных и штатных дашбордов считается одинаково — от `otp_app` и
+   имени файла, а не от `title` и имени модуля PromEx. Выгрузка штатного дашборда, сделанная PromEx
+   до перехода на `mix core.dashboards.export`, имеет другой `uid`: после переэкспорта старую
+   плитку в Grafana удалить, иначе их две. `stale/2` и `assert_fresh!/2` покрывают и подсистемные,
+   и штатные выгрузки.
 
    Один дашборд — `--dashboard outbox`, другой каталог — `--out` (по умолчанию
-   `deploy/monitoring/grafana/dashboards`). Префикс метрик — от `otp_app` и опций плагина, `uid` —
-   от `otp_app` и имени дашборда: переименование модуля PromEx не плодит в Grafana второй дашборд.
+   `deploy/monitoring/grafana/dashboards`). Префикс метрик — от `otp_app` и опций плагина.
    `title` — `"<имя приложения> - <подпись дашборда>"`. Datasource, имя приложения и пороги панелей —
    из `dashboard_assigns/0`: ключ `datasource_id` (uid datasource Prometheus в Grafana) обязателен,
    `app_title` по умолчанию — `Macro.camelize(otp_app)`, пороги и их умолчания — в

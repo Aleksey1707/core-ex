@@ -36,7 +36,7 @@
 - `Core.PromEx.Dashboards.standard/0` — `application`, `beam`, `phoenix`, `ecto`, `oban`;
   `defaults/1` включает дашборд по наличию его плагина в `plugins/0`.
 - Рендер — `DashboardRenderer.build(:prom_ex, "<имя>.json", otp_app)`, assigns — умолчания
-  рендерера и `dashboard_assigns/0` приложения. `title` и `uuid` — по схеме core: от `otp_app` и
+  рендерера и `dashboard_assigns/0` приложения. `title` и `uid` — по схеме core: от `otp_app` и
   имени, не от `title` и имени модуля PromEx.
 - Pipeline: `migrate_graph_panels/1` (`graph` → `timeseries`, публичная и идемпотентная), снятие
   мёртвых аннотаций и демо-значений переменных, точечные исправления по заголовкам и expr панелей,

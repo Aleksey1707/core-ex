@@ -8,12 +8,12 @@ PromEx-дашбордами в scope. README объясняет миграцию
 
 **Blocked by:** 01, 02 — документы описывают уже реализованное поведение.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] CHANGELOG: убран `standard?/1`; убран `--assign title=`; `uid` описан одной схемой для подсистемных и штатных дашбордов; `stale/2`/`surplus/2` упоминают `standard/0`; старый пункт про память в `workers` и `workers_container_memory_*` исправлен на `container` и `container_memory_*`
-- [ ] Правки CHANGELOG дополняют существующие пункты «Не выпущено», новых дублей нет
-- [ ] ADR-0099: `uuid` → `uid`
-- [ ] README: штатные `application`/`beam`/`phoenix`/`ecto`/`oban`, миграция `graph` → `timeseries`, смена `uid`, удаление старых плиток
-- [ ] `.scratch/consumer-tooling/spec.md`: US 18 и список шаблонов — память на `container`; Testing Decisions — `stale/2`/`surplus/2` проверяют `standard/0`
-- [ ] Тикеты consumer-tooling 04 и 07 не противоречат `container` и штатным выгрузкам
-- [ ] `make rules-check` и `make` зелёные
+- [x] CHANGELOG: убран `standard?/1`; убран `--assign title=`; `uid` описан одной схемой для подсистемных и штатных дашбордов; `stale/2`/`surplus/2` упоминают `standard/0`; старый пункт про память в `workers` и `workers_container_memory_*` исправлен на `container` и `container_memory_*`
+- [x] Правки CHANGELOG дополняют существующие пункты «Не выпущено», новых дублей нет
+- [x] ADR-0099: `uuid` → `uid`
+- [x] README: штатные `application`/`beam`/`phoenix`/`ecto`/`oban`, миграция `graph` → `timeseries`, смена `uid`, удаление старых плиток
+- [x] `.scratch/consumer-tooling/spec.md`: US 18 и список шаблонов — память на `container`; Testing Decisions — `stale/2`/`surplus/2` проверяют `standard/0`
+- [x] Тикеты consumer-tooling 04 и 07 не противоречат `container` и штатным выгрузкам
+- [x] `make rules-check` и `make` зелёные
