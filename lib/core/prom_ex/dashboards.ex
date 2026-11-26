@@ -757,15 +757,19 @@ defmodule Core.PromEx.Dashboards do
 
   # ===== форма панелей =====
 
-  @fixed_labels ~w(result outcome status error op operation channel kind collector reason)
+  @fixed_labels ~w(result outcome status error op channel kind collector reason)
+  @conditional_fixed_labels ~w(operation)
+  @ignored_labels ~w(le job instance quantile)
+  @aggregation_ops ~w(sum min max avg count group stddev stdvar count_values quantile)
+  @aggregation ~r/\b(#{Enum.join(@aggregation_ops, "|")})\s*(?:(by|without)\s*\(([^)]*)\))?\s*\(/
   @summaries ~w(stat gauge bargauge)
-  @unfiltered ["table", "state-timeline" | @summaries]
   @form_rules [
-    summary_legend: "сводка без legendFormat или с растущей меткой в нём",
+    summary_legend: "сводка без legendFormat (в том числе null) или с растущей меткой в нём",
     state_timeline: "state-timeline с растущей меткой",
     timeseries_legend: "легенда графика — не таблица справа: lastNotNull, max, сортировка по max desc",
     state_legend: "состояние «1 = проблема»: легенда не список справа без calcs или подсказка не multi с hideZeros",
-    variable_filter: ~s(нет фильтра переменной дашборда: label=~"$label", multi, All, allValue ".*")
+    variable_filter:
+      ~s(график с растущей меткой без фильтра переменной дашборда: label=~"$label", multi, All, allValue ".*")
   ]
   @form_norm "`deps/core/docs/rules/app/21-observability.md`, «Форма панелей»"
   @table_legend %{
@@ -799,20 +803,22 @@ defmodule Core.PromEx.Dashboards do
   Проверяются запросы панелей (и панелей свёрнутых рядов) с метриками плагинов модуля PromEx:
   префикс `<otp_app>_prom_ex_` (умолчание `PromEx.metric_prefix/2` у каждого плагина) и
   `metric_prefix:` плагинов из `plugins/0`. Метки экспортёров (`datname`, `mountpoint`) задаёт
-  окружение, их запросы вне охвата. Метки панели берутся из `legendFormat` запроса; растущая —
-  любая вне закрытого списка фиксированных `#{Enum.join(@fixed_labels, ", ")}` и
-  `fixed_labels:`.
+  окружение, их запросы вне охвата. Метки панели берутся из `legendFormat` и `by (...)` запроса;
+  явный `legendFormat: null` — та же пустая легенда. Растущая — любая вне закрытого списка
+  фиксированных `#{Enum.join(@fixed_labels, ", ")}` и `fixed_labels:`; `operation` фиксирована, только
+  если запрос задаёт `system` матчером (`=`, `!=`, `=~`, `!~`); `le`, `job`, `instance` и `quantile`
+  — метки гистограмм и окружения — растущими не считаются. `without` и `on` не разбираются.
 
   | Правило | Нарушение |
   |---|---|
-  | `:summary_legend` | `stat` / `gauge` / `bargauge` без `legendFormat` или с растущей меткой в нём |
+  | `:summary_legend` | `stat` / `gauge` / `bargauge` без `legendFormat` (в том числе `null`) или с растущей меткой в нём |
   | `:state_timeline` | `state-timeline` с растущей меткой |
   | `:timeseries_legend` | `timeseries` с растущей меткой: легенда не таблица справа (`lastNotNull`, `max`, `Max`↓) |
   | `:state_legend` | состояние `1 - …`: легенда не список справа без `calcs`, подсказка не `multi` + `hideZeros` |
-  | `:variable_filter` | растущая метка без `<метка>=~"$<метка>"` и переменной `multi`, All, `allValue: ".*"` |
+  | `:variable_filter` | `timeseries` с растущей меткой без `<метка>=~"$<метка>"` и переменной `multi`, All, `allValue: ".*"` |
 
-  `:variable_filter` не проверяется у `table` (прокручивает строки) и у сводки и `state-timeline`: растущая
-  метка там уже нарушение.
+  `:variable_filter` проверяется только у `timeseries`: `table` прокручивает строки, у сводки и
+  `state-timeline` растущая метка — уже нарушение их правила, остальные типы фильтра не требуют.
 
   ## Опции
 
@@ -896,21 +902,83 @@ defmodule Core.PromEx.Dashboards do
     for panel <- form_panels(dashboard),
         %{"expr" => expr} = target <- Map.get(panel, "targets", []),
         String.contains?(expr, prefixes) do
-      format = Map.get(target, "legendFormat", "")
-      %{dashboard: dashboard, panel: panel, expr: expr, legend_format: format, growing: growing(format, fixed)}
+      format = Map.get(target, "legendFormat") || ""
+      %{dashboard: dashboard, panel: panel, expr: expr, legend_format: format, growing: growing(expr, format, fixed)}
     end
   end
 
   defp form_panels(dashboard),
     do: Enum.flat_map(Map.get(dashboard, "panels", []), &[&1 | Map.get(&1, "panels", [])])
 
-  defp growing(format, fixed) do
+  defp growing(expr, format, fixed) do
+    fixed = if system?(expr), do: fixed ++ @conditional_fixed_labels, else: fixed
+
+    (legend_labels(format) ++ group_labels(expr))
+    |> Enum.uniq()
+    |> Kernel.--(fixed)
+    |> Kernel.--(@ignored_labels)
+  end
+
+  defp legend_labels(format) do
     ~r/\{\{\s*(\w+)\s*\}\}/
     |> Regex.scan(format, capture: :all_but_first)
     |> List.flatten()
-    |> Enum.uniq()
-    |> Kernel.--(fixed)
   end
+
+  defp group_labels(expr) do
+    aggregations = aggregations(expr)
+
+    for [{start, _len}, {labels_start, labels_len}] <-
+          Regex.scan(~r/\bby\s*\(([^)]*)\)/, expr, return: :index),
+        not overridden?(aggregations, start),
+        label <- split_labels(binary_part(expr, labels_start, labels_len)),
+        do: label
+  end
+
+  # В `count(max by (component, topic) (…))` и `sum by (topic) (max by (…) (…))` итоговые метки
+  # задаёт внешняя агрегация: без `by` она их снимает, с `by` — заменяет своими.
+  defp overridden?(aggregations, pos) do
+    Enum.any?(aggregations, fn %{open: open, close: close, grouping: grouping} ->
+      open < pos and pos < close and grouping != :without
+    end)
+  end
+
+  defp aggregations(expr) do
+    for [{start, len}, _op | rest] <- Regex.scan(@aggregation, expr, return: :index) do
+      open = start + len - 1
+
+      %{open: open, grouping: grouping(expr, rest), close: close_paren(expr, open)}
+    end
+  end
+
+  defp grouping(_expr, []), do: nil
+
+  defp grouping(expr, [{start, len} | _]),
+    do: if(binary_part(expr, start, len) == "without", do: :without, else: :by)
+
+  defp close_paren(expr, open) do
+    expr
+    |> :binary.bin_to_list()
+    |> Enum.with_index()
+    |> Enum.reduce_while(0, fn {byte, pos}, depth ->
+      cond do
+        pos <= open -> {:cont, depth}
+        byte == ?( -> {:cont, depth + 1}
+        byte == ?) and depth == 0 -> {:halt, pos}
+        byte == ?) -> {:cont, depth - 1}
+        true -> {:cont, depth}
+      end
+    end)
+  end
+
+  defp split_labels(labels) do
+    labels
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp system?(expr), do: Regex.match?(~r/\bsystem\s*(?:=~|!~|!=|=)\s*/, expr)
 
   defp target_violations(%{panel: panel} = target) do
     title = Map.get(panel, "title", "")
@@ -935,10 +1003,13 @@ defmodule Core.PromEx.Dashboards do
     offending(growing != [] and state?(expr) and not shaped?, growing)
   end
 
-  defp offending_labels(:variable_filter, %{dashboard: dashboard, panel: panel, expr: expr, growing: growing}) do
-    if Map.get(panel, "type") in @unfiltered,
-      do: [],
-      else: for(label <- growing, not filtered?(dashboard, expr, label), do: [label])
+  defp offending_labels(:variable_filter, %{
+         dashboard: dashboard,
+         panel: %{"type" => "timeseries"},
+         expr: expr,
+         growing: growing
+       }) do
+    for label <- growing, not filtered?(dashboard, expr, label), do: [label]
   end
 
   defp offending_labels(_rule, _target), do: []

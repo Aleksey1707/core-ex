@@ -284,6 +284,28 @@ defmodule Core.PromEx.DashboardsTest do
              ]
     end
 
+    test "явный legendFormat: null — нарушение :summary_legend, а не падение" do
+      summary = panel("stat", "Queue", [%{"expr" => "max(my_app_prom_ex_outbox_queue_count)", "legendFormat" => nil}])
+
+      assert violations(dashboard([summary])) == [violation("Queue", :summary_legend, [])]
+    end
+
+    test "operation фиксирована только при system в запросе" do
+      for matcher <- ~w(= != =~ !~) do
+        expr = ~s|sum by (operation) (rate(my_app_prom_ex_external_call_total{system#{matcher}"$system"}[5m]))|
+        fixed = panel("stat", "By operation", [target(expr, "{{operation}}")])
+
+        assert violations(dashboard([fixed])) == [], "system#{matcher} должен фиксировать operation"
+      end
+
+      growing =
+        panel("stat", "By operation", [
+          target("sum by (operation) (rate(my_app_prom_ex_external_call_total[5m]))", "{{operation}}")
+        ])
+
+      assert violations(dashboard([growing])) == [violation("By operation", :summary_legend, ["operation"])]
+    end
+
     test "state-timeline с фиксированной меткой — норма, с растущей — нарушение" do
       fixed = panel("state-timeline", "Cycles", [target("my_app_prom_ex_outbox_poller_cycles_total", "{{result}}")])
       growing = panel("state-timeline", "Up", [target("my_app_prom_ex_workers_up", "{{component}}")])
@@ -316,6 +338,78 @@ defmodule Core.PromEx.DashboardsTest do
 
       assert violations(dashboard([filtered])) == [violation("Lag 2", :variable_filter, ["projection"])]
       assert violations(dashboard([filtered], [single])) == [violation("Lag 2", :variable_filter, ["projection"])]
+    end
+
+    test "barchart и piechart с растущей меткой — без :variable_filter" do
+      expr = "sum by (projection) (rate(my_app_prom_ex_es_projection_cycles_total[5m]))"
+      bar = panel("barchart", "Lag by projection", [target(expr, "{{projection}}")])
+      pie = panel("piechart", "Lag share", [target(expr, "{{projection}}")])
+
+      assert violations(dashboard([bar, pie])) == []
+    end
+
+    test "растущая метка из by (...) запроса ловится и без неё в легенде" do
+      unfiltered =
+        panel("timeseries", "Lag", [
+          target("sum by (projection) (rate(my_app_prom_ex_es_projection_cycles_total[5m]))", "cycles")
+        ])
+
+      filtered_expr =
+        ~s|sum by (projection) (rate(my_app_prom_ex_es_projection_cycles_total{projection=~"$projection"}[5m]))|
+
+      filtered = panel("timeseries", "Cycles", [target(filtered_expr, "cycles")], %{"legend" => @table_legend})
+
+      assert violations(dashboard([unfiltered])) == [
+               violation("Lag", :timeseries_legend, ["projection"]),
+               violation("Lag", :variable_filter, ["projection"])
+             ]
+
+      assert violations(dashboard([filtered], [variable("projection")])) == []
+    end
+
+    test "итоговые метки задаёт внешняя агрегация" do
+      collapsed =
+        panel("stat", "Topics without lease", [
+          target("count(max by (component, topic) (my_app_prom_ex_workers_up))", "no lease")
+        ])
+
+      grouped =
+        panel("stat", "By topic", [
+          target("sum by (topic) (max by (component, topic) (my_app_prom_ex_workers_up))", "{{topic}}")
+        ])
+
+      assert violations(dashboard([collapsed])) == []
+      assert violations(dashboard([grouped])) == [violation("By topic", :summary_legend, ["topic"])]
+    end
+
+    test "le и метки окружения в by (...) не считаются растущими" do
+      hist =
+        panel("stat", "P95", [
+          target("histogram_quantile(0.95, sum by (le, projection) (my_app_prom_ex_es_projection_lag_seconds))", "p95")
+        ])
+
+      env = panel("stat", "Up", [target("sum by (job, instance, component) (my_app_prom_ex_workers_up)", "up")])
+      quantile = panel("stat", "Size", [target("sum by (quantile, cache) (my_app_prom_ex_cache_size)", "size")])
+
+      assert violations(dashboard([hist, env, quantile])) == [
+               violation("P95", :summary_legend, ["projection"]),
+               violation("Up", :summary_legend, ["component"]),
+               violation("Size", :summary_legend, ["cache"])
+             ]
+    end
+
+    test "without и on не разбираются" do
+      without = panel("stat", "Up", [target("sum without (component) (my_app_prom_ex_workers_up)", "up")])
+
+      on =
+        panel("stat", "Lag", [
+          target(
+            "max(my_app_prom_ex_es_projection_lag_seconds) and on (projection) my_app_prom_ex_es_projection_rebuilding",
+            "lag"
+          )
+        ])
+
+      assert violations(dashboard([without, on])) == []
     end
 
     test "состояние «1 = проблема»: легенда-список без calcs и подсказка multi с hideZeros — норма" do
