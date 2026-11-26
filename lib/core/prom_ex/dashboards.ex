@@ -761,7 +761,7 @@ defmodule Core.PromEx.Dashboards do
   @conditional_fixed_labels ~w(operation)
   @ignored_labels ~w(le job instance quantile)
   @aggregation_ops ~w(sum min max avg count group stddev stdvar count_values quantile)
-  @aggregation ~r/\b(#{Enum.join(@aggregation_ops, "|")})\s*(?:(by|without)\s*\(([^)]*)\))?\s*\(/
+  @aggregation ~r/\b(#{Enum.join(@aggregation_ops, "|")})\s*(?:(?:by|without)\s*\([^)]*\))?\s*\(/
   @summaries ~w(stat gauge bargauge)
   @form_rules [
     summary_legend: "сводка без legendFormat (в том числе null) или с растущей меткой в нём",
@@ -804,10 +804,12 @@ defmodule Core.PromEx.Dashboards do
   префикс `<otp_app>_prom_ex_` (умолчание `PromEx.metric_prefix/2` у каждого плагина) и
   `metric_prefix:` плагинов из `plugins/0`. Метки экспортёров (`datname`, `mountpoint`) задаёт
   окружение, их запросы вне охвата. Метки панели берутся из `legendFormat` и `by (...)` запроса;
-  явный `legendFormat: null` — та же пустая легенда. Растущая — любая вне закрытого списка
-  фиксированных `#{Enum.join(@fixed_labels, ", ")}` и `fixed_labels:`; `operation` фиксирована, только
-  если запрос задаёт `system` матчером (`=`, `!=`, `=~`, `!~`); `le`, `job`, `instance` и `quantile`
-  — метки гистограмм и окружения — растущими не считаются. `without` и `on` не разбираются.
+  явный `legendFormat: null` — та же пустая легенда. Растущая — любая метка вне закрытого списка
+  фиксированных `#{Enum.join(@fixed_labels, ", ")}` и `fixed_labels:`, кроме `le` и `quantile`
+  (контракт гистограммы) и `job`, `instance` (окружение): `fixed_labels:` для них не нужен.
+  `operation` фиксирована, только если запрос задаёт `system` матчером (`=`, `!=`, `=~`, `!~`);
+  `without` и `on` не разбираются. Строковые литералы запроса не разбираются: `system=` и
+  `by (...)` внутри кавычек не задают матчер и группировку, а `)` не ломает вложенность агрегаций.
 
   | Правило | Нарушение |
   |---|---|
@@ -900,10 +902,19 @@ defmodule Core.PromEx.Dashboards do
 
   defp form_targets(dashboard, prefixes, fixed) do
     for panel <- form_panels(dashboard),
-        %{"expr" => expr} = target <- Map.get(panel, "targets", []),
+        %{"expr" => raw_expr} = target <- Map.get(panel, "targets", []),
+        expr = unquoted(raw_expr),
         String.contains?(expr, prefixes) do
       format = Map.get(target, "legendFormat") || ""
-      %{dashboard: dashboard, panel: panel, expr: expr, legend_format: format, growing: growing(expr, format, fixed)}
+
+      %{
+        dashboard: dashboard,
+        panel: panel,
+        expr: expr,
+        raw_expr: raw_expr,
+        legend_format: format,
+        growing: growing(expr, format, fixed)
+      }
     end
   end
 
@@ -938,23 +949,38 @@ defmodule Core.PromEx.Dashboards do
   # В `count(max by (component, topic) (…))` и `sum by (topic) (max by (…) (…))` итоговые метки
   # задаёт внешняя агрегация: без `by` она их снимает, с `by` — заменяет своими.
   defp overridden?(aggregations, pos) do
-    Enum.any?(aggregations, fn %{open: open, close: close, grouping: grouping} ->
-      open < pos and pos < close and grouping != :without
-    end)
+    Enum.any?(aggregations, fn %{open: open, close: close} -> open < pos and pos < close end)
   end
 
   defp aggregations(expr) do
-    for [{start, len}, _op | rest] <- Regex.scan(@aggregation, expr, return: :index) do
+    for [{start, len} | _] <- Regex.scan(@aggregation, expr, return: :index) do
       open = start + len - 1
 
-      %{open: open, grouping: grouping(expr, rest), close: close_paren(expr, open)}
+      %{open: open, close: close_paren(expr, open)}
     end
   end
 
-  defp grouping(_expr, []), do: nil
+  # Содержимое строковых литералов `"…"`, `'…'` и `` `…` `` заменяется пробелами той же байтовой
+  # длины: `system=` и `by (...)` в значении метки — не матчер и не группировка, а `)` не закрывает
+  # агрегацию. В двойных и одинарных кавычках экранирование `\` учитывается, backtick — raw.
+  defp unquoted(expr), do: unquoted(expr, :code, [])
 
-  defp grouping(expr, [{start, len} | _]),
-    do: if(binary_part(expr, start, len) == "without", do: :without, else: :by)
+  defp unquoted(<<>>, _state, acc), do: Enum.reverse(acc) |> IO.iodata_to_binary()
+
+  defp unquoted(<<?\\, _byte, rest::binary>>, state, acc) when state in [:double, :single],
+    do: unquoted(rest, state, [<<"  ">> | acc])
+
+  defp unquoted(<<?", rest::binary>>, :code, acc), do: unquoted(rest, :double, [<<"\"">> | acc])
+  defp unquoted(<<?", rest::binary>>, :double, acc), do: unquoted(rest, :code, [<<"\"">> | acc])
+  defp unquoted(<<?', rest::binary>>, :code, acc), do: unquoted(rest, :single, [<<"'">> | acc])
+  defp unquoted(<<?', rest::binary>>, :single, acc), do: unquoted(rest, :code, [<<"'">> | acc])
+  defp unquoted(<<?`, rest::binary>>, :code, acc), do: unquoted(rest, :raw, [<<"`">> | acc])
+  defp unquoted(<<?`, rest::binary>>, :raw, acc), do: unquoted(rest, :code, [<<"`">> | acc])
+
+  defp unquoted(<<_byte, rest::binary>>, state, acc) when state in [:double, :single, :raw],
+    do: unquoted(rest, state, [<<" ">> | acc])
+
+  defp unquoted(<<byte, rest::binary>>, :code, acc), do: unquoted(rest, :code, [<<byte>> | acc])
 
   defp close_paren(expr, open) do
     expr
@@ -1003,13 +1029,15 @@ defmodule Core.PromEx.Dashboards do
     offending(growing != [] and state?(expr) and not shaped?, growing)
   end
 
-  defp offending_labels(:variable_filter, %{
-         dashboard: dashboard,
-         panel: %{"type" => "timeseries"},
-         expr: expr,
-         growing: growing
-       }) do
-    for label <- growing, not filtered?(dashboard, expr, label), do: [label]
+  defp offending_labels(
+         :variable_filter,
+         %{
+           dashboard: dashboard,
+           panel: %{"type" => "timeseries"},
+           growing: growing
+         } = target
+       ) do
+    for label <- growing, not filtered?(dashboard, target, label), do: [label]
   end
 
   defp offending_labels(_rule, _target), do: []
@@ -1024,11 +1052,25 @@ defmodule Core.PromEx.Dashboards do
     Map.take(options, Map.keys(shape)) == shape
   end
 
-  defp filtered?(dashboard, expr, label) do
+  defp filtered?(dashboard, %{expr: expr, raw_expr: raw_expr}, label) do
     variables = get_in(dashboard, ["templating", "list"]) || []
 
-    String.contains?(expr, ~s(#{label}=~"$#{label}")) and
+    matcher?(raw_expr, expr, label) and
       Enum.any?(variables, &(&1["name"] == label and Map.take(&1, Map.keys(@variable)) == @variable))
+  end
+
+  # Позиция матчера ищется по очищенному выражению — внутри литерала его нет, — а значение
+  # проверяется по исходному: строка-значение матчера должна быть ровно `$<метка>`.
+  defp matcher?(raw_expr, expr, label) do
+    matcher = ~s(#{label}=~"$#{label}")
+
+    size = byte_size(matcher)
+
+    expr
+    |> :binary.matches(~s(#{label}=~"))
+    |> Enum.any?(fn {start, _len} ->
+      start + size <= byte_size(raw_expr) and binary_part(raw_expr, start, size) == matcher
+    end)
   end
 
   # ===== общее =====

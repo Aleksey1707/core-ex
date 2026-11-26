@@ -6,15 +6,17 @@
 
 - **Штатные дашборды PromEx выгружает core с миграцией legacy-панелей.** `mix core.dashboards.export`
   выгружает и штатные дашборды (`application`, `beam`, `phoenix`, `ecto`, `oban` — по наличию
-  плагина в `plugins/0`), `Core.PromEx.Dashboards.defaults/1` включает их, а `stale/2` /
-  `assert_fresh!/2` покрывают их наравне с подсистемными. Панели `graph` мигрируют в `timeseries`
+  плагина в `plugins/0`), `Core.PromEx.Dashboards.defaults/1` включает их, `standard/0` — единственный
+  API имён штатных дашбордов (`standard?/1` нет), а `stale/2` / `assert_fresh!/2` покрывают их
+  наравне с подсистемными. Панели `graph` мигрируют в `timeseries`
   Grafana 11, снимаются мёртвые аннотации и демо-значения переменных. Было: штатный дашборд —
   выгрузка `mix prom_ex.dashboard.export` (или вендоренная копия), проверкой свежести не покрыт →
   стало: выгрузка `mix core.dashboards.export`, `mix prom_ex.dashboard.export` для штатных
   дашбордов больше не используется. Правка потребителя: переэкспортировать каталог
   `mix core.dashboards.export --module MyAppApp.PromEx`; `uid` штатных дашбордов теперь от `otp_app`
-  и имени файла, а не от `title` и имени модуля PromEx, — старые плитки в Grafana удалить.
-  Проверки свежести начнут падать до переэкспорта — это ожидаемо.
+  и имени файла, а не от `title` и имени модуля PromEx, — старые плитки в Grafana удалить; заголовок
+  задаёт `app_title` в `dashboard_assigns/0`, точечной подмены `title` нет, а доменный дашборд под
+  именем штатного — переименовать. Проверки свежести начнут падать до переэкспорта — это ожидаемо.
 
 - **Память контейнера переехала из дашборда `workers` в новый дашборд `container`.** Панели
   «Container memory (anon)» и «Container memory over time» на метриках `Core.Cgroup.PromEx` ушли
@@ -25,6 +27,15 @@
   500 МБ / 1 ГБ). Правка потребителя: переименовать два ключа в `dashboard_assigns/0` и
   переэкспортировать каталог — `workers.json` больше не содержит панелей памяти контейнера,
   появился `container.json`. Без `Core.Cgroup.PromEx` в `plugins/0` панелей памяти контейнера нет.
+
+- **Проверка формы панелей стала строже: `legendFormat`, `operation`, `by (...)`.** Проверка
+  `Core.PromEx.Dashboards.form_violations/3` и `assert_form!/3` (норма —
+  `docs/rules/app/21-observability.md`, «Форма панелей»): явный
+  `legendFormat: null` — нарушение `:summary_legend`, а не исключение; `operation` фиксирована только
+  в запросе, задающем `system`; `:variable_filter` проверяется только у `timeseries`; растущие метки
+  берутся из `legendFormat` и `by (...)` запроса, а `le`, `quantile`, `job` и `instance` растущими не
+  считаются; `without` и `on` не разбираются. Правка потребителя: перезапустить `assert_form!`;
+  новые нарушения — по норме.
 
 - Подписи (`use Core.Labels.Fields`) у `Core.View` читают декларацию представления: достаточно
   `labels:`, а `fields:` рядом с `use Core.View` — `CompileError` «спека поля и у декларативного
@@ -274,11 +285,10 @@
 ### Новое
 
 - **Дашборды: штатный набор, `dashboard_refresh` и `surplus/2`.** `Core.PromEx.Dashboards.standard/0`
-  называет штатные дашборды PromEx; `migrate_graph_panels/1` — публичная миграция панелей `graph`
-  в `timeseries` для legacy-дашборда. `dashboard_refresh` в `dashboard_assigns/0` задаёт `refresh`
-  всех дашбордов (умолчание `"15s"` вместо `"5s"`). `stale/2` и `surplus/2` проверяют выгрузки
-  `names/0` и `standard/0`: первая — расхождение с рендером, вторая — файл, оставшийся после смены
-  `plugins/0`; `assert_fresh!/2` и `assert_no_surplus!/2` — варианты для теста. В дашбордах
+  называет штатные дашборды PromEx; `migrate_graph_panels/1` — публичная миграция
+  панелей `graph` в `timeseries` для legacy-дашборда. `dashboard_refresh` в `dashboard_assigns/0`
+  задаёт `refresh` всех дашбордов (умолчание `"15s"` вместо `"5s"`). `surplus/2` /
+  `assert_no_surplus!/2` находят выгрузку, оставшуюся после смены `plugins/0`. В дашбордах
   подсистем: панель `Reader pending age` (`mq`), stat «Container memory (anon)» на
   `memory_anon_bytes` (`container`), секция Personal — вызовы хранилища ключей, исходы расшифровки и
   p95 (`es`).
@@ -963,9 +973,9 @@
   `"<имя приложения> - <подпись дашборда>"`, где имя приложения — ключ `app_title` в
   `dashboard_assigns/0` (по умолчанию `Macro.camelize(otp_app)`: для `:my_app` — «MyApp», а не
   аббревиатура или имя продукта); полный `title` ключом не задаётся, он у каждого дашборда свой.
-  `uid` — MD5 от `otp_app` и имени дашборда, без имени модуля PromEx: у подсистемных и штатных
-  дашбордов схема одна, переименование модуля не плодит в Grafana второй дашборд. Префикс метрик
-  и единица длительности — от `otp_app` и опций плагина в `plugins/0`. Datasource —
+  `uid` — MD5 от `otp_app` и имени дашборда, без имени модуля PromEx (в отличие от штатных
+  дашбордов): переименование модуля не плодит в Grafana второй дашборд. Префикс метрик и единица длительности
+  — от `otp_app` и опций плагина в `plugins/0`. Datasource —
   ключ `datasource_id` в `dashboard_assigns/0`, обязателен; пороги стат-панелей — параметры
   шаблона с умолчаниями библиотеки, перекрываются там же (таблица — `Core.PromEx.Dashboards`).
   Набор по умолчанию — по `plugins/0`, флаги — `@moduledoc` задачи. Дашборды `Core.Mq.PromEx`
@@ -973,15 +983,13 @@
   (старый ключ `readers:` плагин не читает, и `mq` по нему не входит), `kafka` (читатели Kafka и
   DLQ в Postgres) — при `kafka_readers:`; DLQ-панели
   `kafka` строятся на `dlq_repo:`, без него пусты. Свежесть выгрузок проверяет
-  `Core.PromEx.Dashboards.stale/2`: выгрузки каталога (`<имя>.json` из `names/0` и `standard/0`),
-  разошедшиеся как JSON с текущим рендером для модуля PromEx; остальные файлы каталога не
-  проверяются.
+  `Core.PromEx.Dashboards.stale/2`: выгрузки каталога (`<имя>.json` из `names/0`), разошедшиеся
+  как JSON с текущим рендером для модуля PromEx; остальные файлы каталога не проверяются.
   `assert_fresh!/2` — вариант для теста: исключение `Core.PromEx.Dashboards.Stale` с файлом и
   командой переэкспорта. Правка потребителя: свои копии дашбордов outbox, MQ и Kafka →
   `mix core.dashboards.export --module MyAppApp.PromEx`, свои пороги и имя приложения в заголовке
-  (`app_title`) — в `dashboard_assigns/0`; точечной подмены `title` нет, а доменный дашборд под
-  именем штатного — переименовать (норма — пункт о выгрузках дашбордов ниже); у `Core.Mq.PromEx` с
-  читателями Kafka — `dlq_repo:`;
+  (`app_title`) — в `dashboard_assigns/0`, штатные дашборды с тем же именем — `--assign title=` при
+  экспорте (норма — пункт о выгрузках дашбордов ниже); у `Core.Mq.PromEx` с читателями Kafka — `dlq_repo:`;
   панель собственного плагина приложения из копии MQ → доменный дашборд.
   Дашборды `es` (`Core.Es.PromEx`) и `cache` (`Core.Cache.PromEx`) поставляются так же и входят в
   набор по умолчанию по своему плагину; имена проекций, агрегатов и кешей — переменные дашборда
@@ -990,18 +998,17 @@
   проверка свежести принимает файлы с этими именами за выгрузки. Правка потребителя: свои копии →
   `mix core.dashboards.export --module MyAppApp.PromEx`; свой доменный дашборд с именем `es.json`
   или `cache.json` → переименовать.
-  Дашборд `workers` (при `Core.Workers.PromEx`): наблюдаемые процессы и сбои сбора всех плагинов
+  Дашборд `workers` (при `Core.Workers.PromEx`): наблюдаемые процессы, память контейнера
+  `Core.Cgroup.PromEx` с порогами-параметрами `workers_container_memory_warning` /
+  `workers_container_memory_critical` (умолчания 500 МБ / 1 ГБ) и сбои сбора всех плагинов
   `Core.PromEx.Safe` по регулярке `__name__` (`workers_collect_errors_pattern`, умолчание
-  `"<otp_app>_prom_ex_.+_collect_errors_total"`). Дашборд `container` (при `Core.Cgroup.PromEx`):
-  память контейнера с порогами-параметрами `container_memory_warning` /
-  `container_memory_critical` (умолчания 500 МБ / 1 ГБ). Дашборд `external` (при
-  `Core.External.PromEx`): частота, доля отказов и p95 внешних вызовов, система — переменная
-  `system`, а не литерал
-  `system="…"`. Правка потребителя: своя копия дашборда процессов, памяти контейнера или внешних
-  вызовов → выгрузка, свои панели (доменные счётчики, панели одной системы) — доменный дашборд;
-  доработка штатного `beam` панелью памяти контейнера → выгрузка `container`, порог памяти — в
-  `dashboard_assigns/0`; свой доменный дашборд с именем `workers.json`, `container.json` или
-  `external.json` → переименовать.
+  `"<otp_app>_prom_ex_.+_collect_errors_total"`). Дашборд `external` (при `Core.External.PromEx`):
+  частота, доля отказов и p95 внешних вызовов, система — переменная `system`, а не литерал
+  `system="…"`. Правка потребителя: своя копия дашборда процессов или внешних вызовов →
+  выгрузка, свои панели (доменные счётчики, панели одной системы) — доменный дашборд; доработка
+  штатного `beam` панелью памяти контейнера → выгрузка `workers`, порог памяти — в
+  `dashboard_assigns/0`; свой доменный дашборд с именем `workers.json` или `external.json` →
+  переименовать.
 
 - **Проверка формы панелей: `Core.PromEx.Dashboards.form_violations/3` и `assert_form!/3`** (норма —
   `docs/rules/app/21-observability.md`, «Форма панелей»). Панель с растущей меткой (`component`,
@@ -1015,10 +1022,7 @@
   штатных дашбордов PromEx не проверяются. Шаблоны
   библиотеки проходят ту же проверку в её тесте. Правка потребителя: своя проверка формы →
   `Core.PromEx.Dashboards.assert_form!(MyAppApp.PromEx, "deploy/monitoring/grafana/dashboards")` в тесте,
-  свои фиксированные метки — в `fixed_labels:`. Проверка читает явный `legendFormat: null` как пустую
-  легенду и нарушение `:summary_legend`, считает `operation` фиксированной только при заданном в запросе
-  `system`, требует фильтр переменной только у `timeseries` и берёт растущие метки ещё и из `by (...)`
-  запроса, кроме `le` и меток окружения.
+  свои фиксированные метки — в `fixed_labels:`.
 
 - **Механизм ради скорости вводится по замеру benchee, а не по предположению** (норма —
   `docs/rules/app/20-agreements.md`, «Решения о производительности»; `docs/rules/app/13-repos.md`,

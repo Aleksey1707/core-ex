@@ -8,6 +8,9 @@ defmodule Core.PromExFixture do
   порогами; с `Core.Mq.PromEx` и разными наборами опций читателей.
   """
 
+  @doc false
+  def readers, do: []
+
   defmodule Outbox do
     @moduledoc "Плагин outbox, пороги по умолчанию."
 
@@ -205,15 +208,12 @@ defmodule Core.PromExFixture do
     def plugins do
       [
         {Core.Mq.PromEx,
-         stream_readers: {__MODULE__, :readers, []}, metric_prefix: [:custom, :mq], duration_unit: :second}
+         stream_readers: {Core.PromExFixture, :readers, []}, metric_prefix: [:custom, :mq], duration_unit: :second}
       ]
     end
 
     @impl true
     def dashboard_assigns, do: [datasource_id: "prometheus"]
-
-    @doc false
-    def readers, do: [%{component: "orders", name: :missing_reader}]
   end
 
   defmodule MqReaders do
@@ -222,7 +222,7 @@ defmodule Core.PromExFixture do
     use PromEx, otp_app: :my_app
 
     @impl true
-    def plugins, do: [{Core.Mq.PromEx, readers: {__MODULE__, :readers, []}}]
+    def plugins, do: [{Core.Mq.PromEx, readers: {Core.PromExFixture, :readers, []}}]
 
     @impl true
     def dashboard_assigns, do: [datasource_id: "prometheus"]
@@ -234,13 +234,10 @@ defmodule Core.PromExFixture do
     use PromEx, otp_app: :my_app
 
     @impl true
-    def plugins, do: [{Core.Mq.PromEx, kafka_readers: {__MODULE__, :readers, []}, dlq_repo: Core.TestRepo}]
+    def plugins, do: [{Core.Mq.PromEx, kafka_readers: {Core.PromExFixture, :readers, []}, dlq_repo: Core.TestRepo}]
 
     @impl true
     def dashboard_assigns, do: [datasource_id: "prometheus", kafka_backlog_critical: 5000]
-
-    @doc false
-    def readers, do: [%{component: "orders", name: :missing_reader}]
   end
 
   defmodule MqBare do

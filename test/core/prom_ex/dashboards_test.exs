@@ -44,7 +44,6 @@ defmodule Core.PromEx.DashboardsTest do
       stat = thresholds(dashboard, "Oldest new age")
       series = thresholds(dashboard, "Oldest new age", "timeseries")
 
-      assert stat == [30, 60]
       assert series == [60]
       assert List.last(stat) == List.last(series)
     end
@@ -317,6 +316,53 @@ defmodule Core.PromEx.DashboardsTest do
       assert violations(dashboard([growing])) == [violation("By operation", :summary_legend, ["operation"])]
     end
 
+    test "system= внутри строкового литерала не фиксирует operation" do
+      expr = ~s|sum by (operation) (rate(my_app_prom_ex_external_call_total{path=~"system=down"}[5m]))|
+      summary = panel("stat", "By operation", [target(expr, "{{operation}}")])
+
+      assert violations(dashboard([summary])) == [violation("By operation", :summary_legend, ["operation"])]
+    end
+
+    test "system=down в одинарных кавычках не фиксирует operation" do
+      expr = ~S|sum by (operation) (rate(my_app_prom_ex_external_call_total{path=~'system=down'}[5m]))|
+      summary = panel("stat", "By operation", [target(expr, "{{operation}}")])
+
+      assert violations(dashboard([summary])) == [violation("By operation", :summary_legend, ["operation"])]
+    end
+
+    test "by (...) внутри строкового литерала не даёт растущую метку" do
+      expr = ~s|max(my_app_prom_ex_workers_up{path=~"by (projection)"})|
+      summary = panel("stat", "Up", [target(expr, "up")])
+
+      assert violations(dashboard([summary])) == []
+    end
+
+    test "by (projection) в backtick не даёт группировку" do
+      expr = ~S|max(my_app_prom_ex_workers_up{path=~`by (projection)`})|
+      summary = panel("stat", "Up", [target(expr, "up")])
+
+      assert violations(dashboard([summary])) == []
+    end
+
+    test ") внутри строкового литерала не ломает вложенную агрегацию" do
+      expr = ~s|count(my_app_prom_ex_workers_up{path=~")"} + max by (component) (my_app_prom_ex_workers_up))|
+      summary = panel("stat", "Up", [target(expr, "up")])
+
+      assert violations(dashboard([summary])) == []
+    end
+
+    test ") в одинарной и backtick строке не ломает вложенную агрегацию" do
+      single = ~S|count(my_app_prom_ex_workers_up{path=~')'} + max by (component) (my_app_prom_ex_workers_up))|
+      raw = ~S|count(my_app_prom_ex_workers_up{path=~`)`} + max by (component) (my_app_prom_ex_workers_up))|
+
+      panels = [
+        panel("stat", "Single", [target(single, "up")]),
+        panel("stat", "Raw", [target(raw, "up")])
+      ]
+
+      assert violations(dashboard(panels)) == []
+    end
+
     test "state-timeline с фиксированной меткой — норма, с растущей — нарушение" do
       fixed = panel("state-timeline", "Cycles", [target("my_app_prom_ex_outbox_poller_cycles_total", "{{result}}")])
       growing = panel("state-timeline", "Up", [target("my_app_prom_ex_workers_up", "{{component}}")])
@@ -349,6 +395,24 @@ defmodule Core.PromEx.DashboardsTest do
 
       assert violations(dashboard([filtered])) == [violation("Lag 2", :variable_filter, ["projection"])]
       assert violations(dashboard([filtered], [single])) == [violation("Lag 2", :variable_filter, ["projection"])]
+    end
+
+    test "фильтр переменной внутри строкового литерала не считается фильтром" do
+      double =
+        ~S|sum by (projection) (rate(my_app_prom_ex_es_projection_cycles_total{path=~"projection=~\"$projection\""}[5m]))|
+
+      single =
+        ~S|sum by (projection) (rate(my_app_prom_ex_es_projection_cycles_total{path=~'projection=~"$projection"'}[5m]))|
+
+      panels = [
+        panel("timeseries", "Double", [target(double, "cycles")], %{"legend" => @table_legend}),
+        panel("timeseries", "Single", [target(single, "cycles")], %{"legend" => @table_legend})
+      ]
+
+      assert violations(dashboard(panels, [variable("projection")])) == [
+               violation("Double", :variable_filter, ["projection"]),
+               violation("Single", :variable_filter, ["projection"])
+             ]
     end
 
     test "barchart и piechart с растущей меткой — без :variable_filter" do

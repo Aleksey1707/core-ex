@@ -10,8 +10,8 @@ PromEx-дашбордами в scope. README объясняет миграцию
 
 **Status:** resolved
 
-- [x] CHANGELOG: убран `standard?/1`; убран `--assign title=`; `uid` описан одной схемой для подсистемных и штатных дашбордов; `stale/2`/`surplus/2` упоминают `standard/0`; старый пункт про память в `workers` и `workers_container_memory_*` исправлен на `container` и `container_memory_*`
-- [x] Правки CHANGELOG дополняют существующие пункты «Не выпущено», новых дублей нет
+- [x] CHANGELOG: в «Не выпущено» `standard/0` — единственный API имён штатных дашбордов (упоминание `standard?/1` убрано); заголовок — `app_title`, точечной подмены `title` нет; `stale/2`/`surplus/2` покрывают `standard/0`; память контейнера — в пункте `container`
+- [x] Правки CHANGELOG — в «Не выпущено»; выпущенный 0.17.0 не переписан
 - [x] ADR-0099: `uuid` → `uid`
 - [x] README: штатные `application`/`beam`/`phoenix`/`ecto`/`oban`, миграция `graph` → `timeseries`, смена `uid`, удаление старых плиток
 - [x] `.scratch/consumer-tooling/spec.md`: US 18 и список шаблонов — память на `container`; Testing Decisions — `stale/2`/`surplus/2` проверяют `standard/0`
