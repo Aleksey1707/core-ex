@@ -16,6 +16,16 @@
   и имени файла, а не от `title` и имени модуля PromEx, — старые плитки в Grafana удалить.
   Проверки свежести начнут падать до переэкспорта — это ожидаемо.
 
+- **Память контейнера переехала из дашборда `workers` в новый дашборд `container`.** Панели
+  «Container memory (anon)» и «Container memory over time» на метриках `Core.Cgroup.PromEx` ушли
+  из `workers` в `container`; в набор `defaults/1` дашборд `container` входит по `Core.Cgroup.PromEx`,
+  а не по `Core.Workers.PromEx`. Пороги переименованы: было
+  `workers_container_memory_warning` / `workers_container_memory_critical` → стало
+  `container_memory_warning` / `container_memory_critical` (умолчания те же,
+  500 МБ / 1 ГБ). Правка потребителя: переименовать два ключа в `dashboard_assigns/0` и
+  переэкспортировать каталог — `workers.json` больше не содержит панелей памяти контейнера,
+  появился `container.json`. Без `Core.Cgroup.PromEx` в `plugins/0` панелей памяти контейнера нет.
+
 - Подписи (`use Core.Labels.Fields`) у `Core.View` читают декларацию представления: достаточно
   `labels:`, а `fields:` рядом с `use Core.View` — `CompileError` «спека поля и у декларативного
   типа». Раньше единственным способом подписать View был `fields:` со спекой каждого видимого
@@ -269,7 +279,7 @@
   задаёт `refresh` всех дашбордов (умолчание `"15s"` вместо `"5s"`). `surplus/2` /
   `assert_no_surplus!/2` находят выгрузку, оставшуюся после смены `plugins/0`. В дашбордах
   подсистем: панель `Reader pending age` (`mq`), stat «Container memory (anon)» на
-  `memory_anon_bytes` (`workers`), секция Personal — вызовы хранилища ключей, исходы расшифровки и
+  `memory_anon_bytes` (`container`), секция Personal — вызовы хранилища ключей, исходы расшифровки и
   p95 (`es`).
 - `Core.View` порождает `@type write_t :: t()`: тип записи read-модели совпадает с типом чтения —
   ПДн-мест у View нет. Поле `entity: View` в спеке полей получает тип записи

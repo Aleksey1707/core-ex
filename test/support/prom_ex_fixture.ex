@@ -188,8 +188,8 @@ defmodule Core.PromExFixture do
     def dashboard_assigns do
       [
         datasource_id: "prometheus",
-        workers_container_memory_warning: 2_000_000_000,
-        workers_container_memory_critical: 4_000_000_000,
+        container_memory_warning: 2_000_000_000,
+        container_memory_critical: 4_000_000_000,
         workers_collect_errors_pattern: "legacy_.+_collect_errors_total"
       ]
     end

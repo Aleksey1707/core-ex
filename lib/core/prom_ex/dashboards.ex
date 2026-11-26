@@ -50,9 +50,9 @@ defmodule Core.PromEx.Dashboards do
   | `cache` | `Core.Cache.PromEx` | `cache_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_cache"` |
   | | | `cache_hit_ratio_warning` / `cache_hit_ratio_critical` | `0.9` / `0.5` — ниже доли попаданий |
   | `workers` | `Core.Workers.PromEx` | `workers_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_workers"` |
-  | | `Core.Cgroup.PromEx` | `cgroup_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_cgroup"` |
-  | | | `workers_container_memory_warning` / `workers_container_memory_critical` | `500_000_000` / `1_000_000_000` байт |
   | | `Core.PromEx.Safe` | `workers_collect_errors_pattern` | `"<otp_app>_prom_ex_.+_collect_errors_total"` |
+  | `container` | `Core.Cgroup.PromEx` | `cgroup_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_cgroup"` |
+  | | | `container_memory_warning` / `container_memory_critical` | `500_000_000` / `1_000_000_000` байт |
   | `external` | `Core.External.PromEx` | `external_metric_prefix` | `metric_prefix:` плагина, `"<otp_app>_prom_ex_external"` |
   | | | `external_duration_unit` | `duration_unit:` плагина (мн. ч.) или `"milliseconds"` |
   | | | `external_duration_axis_unit` | единица оси Grafana по `duration_unit:` плагина, `"ms"` |
@@ -60,8 +60,8 @@ defmodule Core.PromEx.Dashboards do
   Имена проекций, агрегатов и кешей шаблоны не несут: их дают переменные дашборда `projection`,
   `type` и `cache` по меткам метрик.
 
-  Дашборд `workers` входит в набор по `Core.Workers.PromEx`; без `Core.Cgroup.PromEx` в `plugins/0`
-  панели памяти контейнера пусты. `workers_collect_errors_pattern` — регулярка PromQL по
+  Дашборд `workers` входит в набор по `Core.Workers.PromEx`, `container` — по `Core.Cgroup.PromEx`
+  (память контейнера). `workers_collect_errors_pattern` — регулярка PromQL по
   `__name__` счётчиков сбоев сбора `<префикс плагина>_collect_errors_total` всех плагинов
   `Core.*.PromEx`: плагин со своим `metric_prefix:` вне `<otp_app>_prom_ex_` требует своей
   регулярки. Система внешнего вызова у дашборда `external` — переменная `system`.
@@ -105,7 +105,7 @@ defmodule Core.PromEx.Dashboards do
   end
 
   @typedoc "Имя дашборда подсистемы библиотеки; файл выгрузки — `<имя>.json`."
-  @type name :: :outbox | :mq | :kafka | :es | :cache | :workers | :external
+  @type name :: :outbox | :mq | :kafka | :es | :cache | :workers | :container | :external
 
   @typedoc "Имя штатного дашборда PromEx; файл выгрузки — `<имя>.json`."
   @type standard_name :: :application | :beam | :phoenix | :ecto | :oban
@@ -178,7 +178,14 @@ defmodule Core.PromEx.Dashboards do
       label: "Workers",
       prefix: :workers,
       duration?: false,
-      thresholds: [workers_container_memory_warning: 500_000_000, workers_container_memory_critical: 1_000_000_000]
+      thresholds: []
+    },
+    container: %{
+      plugin: Core.Cgroup.PromEx,
+      label: "Container",
+      prefix: :cgroup,
+      duration?: false,
+      thresholds: [container_memory_warning: 500_000_000, container_memory_critical: 1_000_000_000]
     },
     external: %{
       plugin: Core.External.PromEx,
@@ -198,7 +205,7 @@ defmodule Core.PromEx.Dashboards do
   ]
   @standard_names Keyword.keys(@standard)
   @all_names @names ++ @standard_names
-  @assign_keys for prefix <- [:cgroup | for({_name, %{prefix: prefix}} <- @dashboards, do: prefix)],
+  @assign_keys for {_name, %{prefix: prefix}} <- @dashboards,
                    kind <- ~w(metric_prefix duration_unit duration_axis_unit)a,
                    into: %{},
                    do: {{prefix, kind}, :"#{prefix}_#{kind}"}
@@ -340,10 +347,9 @@ defmodule Core.PromEx.Dashboards do
     ]
   end
 
-  # Параметры панелей дашборда на метриках соседних плагинов — по опциям этих плагинов в `plugins/0`.
-  defp neighbour_assigns(:workers, otp_app, plugins) do
-    prefix_assigns(:cgroup, Map.get(plugins, Core.Cgroup.PromEx, []), otp_app) ++
-      [workers_collect_errors_pattern: "#{otp_app}_prom_ex_.+_collect_errors_total"]
+  # Параметры дашборда, не выводимые из плагина подсистемы: регулярка счётчиков сбоев сбора.
+  defp neighbour_assigns(:workers, otp_app, _plugins) do
+    [workers_collect_errors_pattern: "#{otp_app}_prom_ex_.+_collect_errors_total"]
   end
 
   defp neighbour_assigns(_name, _otp_app, _plugins), do: []

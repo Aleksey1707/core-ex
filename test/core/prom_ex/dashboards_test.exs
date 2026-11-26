@@ -214,7 +214,7 @@ defmodule Core.PromEx.DashboardsTest do
     test "дашборд подсистемы входит, если в plugins/0 есть её плагин" do
       assert Dashboards.defaults(PromExFixture.Outbox) == [:outbox, :beam]
       assert Dashboards.defaults(PromExFixture.Tuned) == [:outbox]
-      assert Dashboards.defaults(PromExFixture.Runtime) == [:workers, :external]
+      assert Dashboards.defaults(PromExFixture.Runtime) == [:workers, :container, :external]
     end
 
     test "без плагина подсистемы её дашборда нет, штатный beam — по плагину" do
@@ -575,23 +575,41 @@ defmodule Core.PromEx.DashboardsTest do
   end
 
   describe "render/2 — workers" do
-    test "процессы, сбои сбора всех плагинов и память контейнера" do
+    test "процессы и сбои сбора всех плагинов, памяти контейнера нет" do
       dashboard = Dashboards.render(PromExFixture.Outbox, :workers) |> Jason.decode!()
       exprs = exprs(dashboard)
 
       assert dashboard["title"] == "MyApp - Workers"
       assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_workers_up{"))
       assert Enum.any?(exprs, &(&1 =~ ~s({__name__=~"my_app_prom_ex_.+_collect_errors_total")))
-      assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_memory_anon_bytes{"))
-      assert thresholds(dashboard, "Container memory (anon)") == [500_000_000, 1_000_000_000]
+      refute Enum.any?(exprs, &(&1 =~ "cgroup_memory_"))
+      assert Enum.find(dashboard["panels"], &(&1["title"] == "Container memory (anon)")) == nil
     end
 
-    test "пороги памяти, шаблон сбоев сбора и префикс cgroup — из dashboard_assigns/0 и plugins/0" do
+    test "шаблон сбоев сбора — из dashboard_assigns/0" do
       dashboard = Dashboards.render(PromExFixture.Runtime, :workers) |> Jason.decode!()
+
+      assert Enum.any?(exprs(dashboard), &(&1 =~ ~s({__name__=~"legacy_.+_collect_errors_total")))
+    end
+  end
+
+  describe "render/2 — container" do
+    test "память контейнера — stat anon с порогами и график current/anon/limit" do
+      dashboard = Dashboards.render(PromExFixture.Outbox, :container) |> Jason.decode!()
+      exprs = exprs(dashboard)
+
+      assert dashboard["title"] == "MyApp - Container"
+      assert dashboard["tags"] == ["PromEx", "Container", "my_app"]
+      assert Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_memory_anon_bytes{"))
+      assert thresholds(dashboard, "Container memory (anon)") == [500_000_000, 1_000_000_000]
+      assert variable_names(dashboard) == ~w(job instance)
+    end
+
+    test "пороги памяти и префикс cgroup — из dashboard_assigns/0 и plugins/0" do
+      dashboard = Dashboards.render(PromExFixture.Runtime, :container) |> Jason.decode!()
       exprs = exprs(dashboard)
 
       assert thresholds(dashboard, "Container memory (anon)") == [2_000_000_000, 4_000_000_000]
-      assert Enum.any?(exprs, &(&1 =~ ~s({__name__=~"legacy_.+_collect_errors_total")))
       assert Enum.any?(exprs, &(&1 =~ "custom_cgroup_memory_anon_bytes{"))
       refute Enum.any?(exprs, &(&1 =~ "my_app_prom_ex_cgroup_"))
     end

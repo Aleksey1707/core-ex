@@ -515,7 +515,8 @@ end
    | `kafka` | при `kafka_readers:` у `Core.Mq.PromEx`; DLQ-панели пусты без `dlq_repo:` — репозитория с таблицей `Core.Mq.Dlq.Migration` |
    | `es` | при `Core.Es.PromEx` |
    | `cache` | при `Core.Cache.PromEx` |
-   | `workers` | при `Core.Workers.PromEx`; панели памяти контейнера пусты без `Core.Cgroup.PromEx` |
+   | `workers` | при `Core.Workers.PromEx` |
+   | `container` | при `Core.Cgroup.PromEx` — память контейнера |
    | `external` | при `Core.External.PromEx` |
 
    Один дашборд — `--dashboard outbox`, другой каталог — `--out` (по умолчанию
